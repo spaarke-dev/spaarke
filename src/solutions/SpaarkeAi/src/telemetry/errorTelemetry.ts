@@ -57,8 +57,8 @@ export const TELEMETRY_FILE_EXTRACTION_FAILURE =
  * Emitted when the HistoryOverlay session-list fetch fails. Consumed by
  * task 022 (HistoryOverlay component + wiring).
  */
-export const TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE =
-  "spaarke-ai-error.history-overlay.load-failure";
+export const TELEMETRY_HISTORY_LOAD_FAILURE =
+  "spaarke-ai-error.history.load-failure";
 
 /**
  * Emitted when GET /api/ai/chat/sessions/{sessionId}/tabs fails on

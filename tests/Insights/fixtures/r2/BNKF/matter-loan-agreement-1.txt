@@ -1,0 +1,155 @@
+CREDIT AND SECURITY AGREEMENT
+
+This Credit and Security Agreement (this "Agreement") is dated as of February
+27, 2026 (the "Closing Date"), among:
+
+  BORROWER: Mariner Logistics Group LLC, a Delaware limited liability company
+            ("Borrower"), with its principal place of business at 4400 Harbor
+            Way, Norfolk, VA 23510;
+
+  GUARANTORS: Mariner Holdings, Inc., a Delaware corporation, and Mariner
+              Coastal Operations LLC, a Virginia limited liability company
+              (each a "Guarantor" and collectively the "Guarantors");
+
+  ADMINISTRATIVE AGENT: Linden Trust National Bank, N.A., a national banking
+                       association, in its capacity as administrative agent
+                       for the Lenders ("Administrative Agent"); and
+
+  LENDERS: The lenders party hereto from time to time (each a "Lender" and
+           collectively the "Lenders").
+
+RECITALS
+
+WHEREAS, Borrower has requested that the Lenders make available to Borrower a
+senior secured term loan facility in the original principal amount of EIGHTY
+MILLION DOLLARS ($80,000,000) (the "Term Loan") and a revolving credit
+facility in the maximum aggregate commitment amount of TWENTY-FIVE MILLION
+DOLLARS ($25,000,000) (the "Revolving Facility");
+
+WHEREAS, the Lenders are willing to make the Term Loan and the Revolving
+Facility available to Borrower on the terms and subject to the conditions set
+forth herein;
+
+NOW, THEREFORE, in consideration of the mutual covenants set forth herein, the
+parties agree as follows:
+
+ARTICLE 1 — THE TERM LOAN
+
+1.1 Term Loan Commitment. Subject to the terms and conditions set forth
+    herein, each Lender severally agrees to make to Borrower on the Closing
+    Date a term loan in the principal amount set forth opposite such Lender's
+    name on Schedule 1.1 (its "Term Loan Commitment"). The aggregate principal
+    amount of the Term Loan made by all Lenders shall be EIGHTY MILLION
+    DOLLARS ($80,000,000).
+
+1.2 Maturity Date. The "Term Loan Maturity Date" shall mean February 27, 2031,
+    being five (5) years following the Closing Date.
+
+1.3 Amortization. The Term Loan shall amortize in equal quarterly installments
+    in an amount equal to 1.25% of the original principal amount of the Term
+    Loan (i.e., $1,000,000 per quarter), commencing on June 30, 2026, with the
+    balance due at the Term Loan Maturity Date.
+
+1.4 Interest Rate. The Term Loan shall bear interest at a rate per annum equal
+    to, at Borrower's election: (a) the Alternate Base Rate plus 2.25%, or
+    (b) the Adjusted Term SOFR Rate plus 3.25%. Interest shall be payable
+    quarterly in arrears on each Interest Payment Date.
+
+1.5 Default Rate. Upon and during the continuance of an Event of Default, all
+    outstanding Obligations shall bear interest at the otherwise applicable
+    rate plus 2.00% (the "Default Rate").
+
+ARTICLE 2 — THE REVOLVING FACILITY
+
+2.1 Revolving Commitments. Each Lender severally agrees to make Revolving
+    Loans to Borrower at any time and from time to time during the Revolving
+    Availability Period in an aggregate principal amount not to exceed such
+    Lender's Revolving Commitment.
+
+2.2 Revolving Availability Period. The "Revolving Availability Period" shall
+    commence on the Closing Date and terminate on February 27, 2030.
+
+2.3 Letters of Credit. Borrower may request the Issuing Lender to issue
+    Letters of Credit, provided that the aggregate undrawn face amount of all
+    Letters of Credit plus all unreimbursed drawings shall not at any time
+    exceed FIVE MILLION DOLLARS ($5,000,000).
+
+ARTICLE 3 — COLLATERAL AND SECURITY
+
+3.1 Grant of Security Interest. As security for the prompt and complete payment
+    and performance of the Obligations, Borrower and each Guarantor hereby
+    grant to Administrative Agent, for the ratable benefit of the Lenders, a
+    continuing first-priority security interest in all of their respective
+    right, title, and interest in and to the Collateral, including without
+    limitation: (a) all Accounts, (b) all Inventory, (c) all Equipment, (d)
+    all General Intangibles, (e) all Deposit Accounts and Securities Accounts,
+    (f) all Investment Property, and (g) all Proceeds and products of any of
+    the foregoing.
+
+3.2 Mortgage on Norfolk Real Property. Borrower shall execute and deliver to
+    Administrative Agent a Mortgage encumbering the Norfolk Facility located
+    at 4400 Harbor Way, Norfolk, VA, securing the Obligations.
+
+ARTICLE 4 — CONDITIONS PRECEDENT TO CLOSING (summary)
+
+Customary closing conditions including: legal opinion from Borrower's counsel
+(Holwell, Strand & Adichie LLP); insurance certificates with Administrative
+Agent as additional insured and loss payee; payoff letters for all Existing
+Indebtedness; UCC financing statements filed in all applicable jurisdictions;
+delivery of audited 2024 and 2025 financial statements of Borrower; closing
+certificate of Borrower's Chief Financial Officer; and a corporate compliance
+certificate from each Guarantor.
+
+ARTICLE 5 — FINANCIAL COVENANTS
+
+5.1 Maximum Total Leverage Ratio. Borrower shall maintain a Total Leverage
+    Ratio, tested quarterly, of not greater than:
+       4.25:1.00  for the period through December 31, 2026
+       4.00:1.00  for the period through December 31, 2027
+       3.75:1.00  thereafter
+
+5.2 Minimum Fixed Charge Coverage Ratio. Borrower shall maintain a Fixed
+    Charge Coverage Ratio, tested quarterly, of not less than 1.20:1.00.
+
+5.3 Minimum Liquidity. Borrower shall maintain Liquidity (defined as
+    unrestricted cash plus undrawn Revolving Commitments) of at least
+    Eight Million Dollars ($8,000,000) at all times.
+
+ARTICLE 6 — REPRESENTATIONS AND WARRANTIES (summary)
+
+Customary representations regarding organization, authority, no-conflict,
+compliance with laws (including OFAC and Anti-Corruption Laws), absence of
+litigation other than that disclosed on Schedule 6.7, environmental compliance,
+ERISA matters, and the security interest priority described in Article 3.
+
+ARTICLE 7 — EVENTS OF DEFAULT
+
+The following constitute Events of Default: (a) non-payment of principal when
+due, with no cure period; (b) non-payment of interest when due, subject to a
+five (5) Business Day cure period; (c) breach of any financial covenant in
+Article 5; (d) breach of any other covenant uncured for thirty (30) days after
+written notice; (e) bankruptcy or insolvency events; (f) cross-default to
+Material Indebtedness in excess of Three Million Dollars ($3,000,000); and
+(g) change of control as defined in Schedule 7(g).
+
+ARTICLE 8 — GOVERNING LAW; JURISDICTION
+
+8.1 Governing Law. This Agreement and the other Loan Documents shall be
+    governed by, and construed in accordance with, the laws of the State of
+    New York, without regard to its conflict-of-laws principles.
+
+8.2 Venue. The parties consent to the exclusive jurisdiction of the courts of
+    the State of New York sitting in New York County and the federal courts
+    of the United States for the Southern District of New York.
+
+IN WITNESS WHEREOF, the parties hereto have caused this Agreement to be duly
+executed as of the date first written above.
+
+BORROWER:                                  ADMINISTRATIVE AGENT:
+MARINER LOGISTICS GROUP LLC                LINDEN TRUST NATIONAL BANK, N.A.
+
+By: ___________________________            By: ___________________________
+   Name: Imani Okafor                          Name: Hiroshi Brenner
+   Title: Chief Executive Officer              Title: Senior Vice President
+
+[Signatures of Guarantors and individual Lenders appear on Annex S]

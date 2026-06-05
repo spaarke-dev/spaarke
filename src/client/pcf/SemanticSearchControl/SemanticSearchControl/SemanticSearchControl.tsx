@@ -894,7 +894,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           const filter = batch.join(' or ');
           const resp = await context.webAPI.retrieveMultipleRecords(
             'sprk_document',
-            `?$select=sprk_documentid,sprk_inworkspace&$filter=(${filter}) and sprk_inworkspace eq true`
+            `?$select=sprk_documentid,sprk_workspaceflag&$filter=(${filter}) and sprk_workspaceflag eq true`
           );
           for (const entity of resp.entities || []) {
             const docId = entity.sprk_documentid as string;
@@ -910,7 +910,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     void loadWorkspaceFlags();
   }, [results, context.webAPI]);
 
-  // Handle Toggle Workspace — toggles the sprk_inworkspace flag on the document.
+  // Handle Toggle Workspace — toggles the sprk_workspaceflag column on the document.
   // Uses functional setState to avoid stale-closure issues with workspaceSet.
   const handleToggleWorkspace = useCallback(
     (result: SearchResult) => {
@@ -926,7 +926,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         // Update Dataverse (fire-and-forget with revert on failure)
         context.webAPI
           .updateRecord('sprk_document', result.documentId, {
-            sprk_inworkspace: newFlag,
+            sprk_workspaceflag: newFlag,
           })
           .catch((err: unknown) => {
             console.error('[SemanticSearchControl] Failed to toggle workspace flag:', err);
@@ -1752,7 +1752,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.71 • Built 2026-05-30</Text>
+        <Text size={100}>v1.1.72 • Built 2026-06-01</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

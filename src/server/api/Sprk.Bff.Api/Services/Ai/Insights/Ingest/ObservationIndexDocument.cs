@@ -83,6 +83,19 @@ internal sealed record ObservationIndexDocument
 
     [JsonPropertyName("status")]
     public string Status { get; init; } = "produced";
+
+    /// <summary>
+    /// Wave D6 (task 035) — top-level scope ComplexType per design-a6 §4. Hybrid
+    /// backward-compat: <see cref="ScopeIndexEntry.MatterId"/> is dual-written for matter
+    /// subjects to preserve NFR-08 (Phase 1 RAG queries that filter by
+    /// <c>scope/matterId</c> keep working); <see cref="ScopeIndexEntry.EntityType"/> +
+    /// <see cref="ScopeIndexEntry.EntityId"/> are the canonical generalized fields.
+    /// Optional (nullable) — Observations written before Wave D6 omit this property; the
+    /// reader's OR-filter (<c>scope/matterId eq … OR (scope/entityType eq 'matter' and
+    /// scope/entityId eq …)</c>) keeps them findable.
+    /// </summary>
+    [JsonPropertyName("scope")]
+    public ScopeIndexEntry? Scope { get; init; }
 }
 
 /// <summary>
@@ -99,4 +112,33 @@ internal sealed record EvidenceIndexEntry
 
     [JsonPropertyName("quote")]
     public string? Quote { get; init; }
+}
+
+/// <summary>
+/// Wave D6 (task 035) — projection of <see cref="Models.Insights.Scope"/> onto the index
+/// schema's top-level <c>scope</c> ComplexType. Mirrors the fields defined in
+/// <c>infra/insights/schemas/spaarke-insights-index.index.json</c>. All fields are
+/// nullable strings; the writer populates them per design-a6 §4.4:
+/// <list type="bullet">
+///   <item>matter subjects: matterId + entityType="matter" + entityId=&lt;guid&gt; (dual-write per <see cref="AiSearchOptions.DualWriteScopeMatterId"/>)</item>
+///   <item>project subjects: entityType="project" + entityId=&lt;guid&gt; (matterId null)</item>
+///   <item>invoice subjects: entityType="invoice" + entityId=&lt;guid&gt; (matterId null)</item>
+/// </list>
+/// </summary>
+internal sealed record ScopeIndexEntry
+{
+    [JsonPropertyName("matterId")]
+    public string? MatterId { get; init; }
+
+    [JsonPropertyName("entityType")]
+    public string? EntityType { get; init; }
+
+    [JsonPropertyName("entityId")]
+    public string? EntityId { get; init; }
+
+    [JsonPropertyName("tenantId")]
+    public string? TenantId { get; init; }
+
+    [JsonPropertyName("practiceArea")]
+    public string? PracticeArea { get; init; }
 }

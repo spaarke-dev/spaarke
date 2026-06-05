@@ -20,21 +20,18 @@
 import * as React from "react";
 import { FluentProvider } from "@fluentui/react-components";
 import { tokens, Text, Button } from "@fluentui/react-components";
+import { CheckmarkCircle24Regular, DeleteRegular } from "@fluentui/react-icons";
 import {
-  CheckmarkCircle24Regular,
-  CheckmarkCircleRegular,
-  RocketRegular,
-  DataBarVerticalRegular,
-  ClockRegular,
-  DocumentRegular,
-  DeleteRegular,
-} from "@fluentui/react-icons";
-import { WizardShell, getLayoutTemplate } from "@spaarke/ui-components";
+  WizardShell,
+  getLayoutTemplate,
+  SECTION_METADATA_CATALOG,
+} from "@spaarke/ui-components";
 import type {
   IWizardStepConfig,
   IWizardShellHandle,
   IWizardSuccessConfig,
   LayoutTemplateId,
+  SectionMetadata,
 } from "@spaarke/ui-components";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { TemplateStep, SectionStep, ArrangeStep, buildInitialAssignments } from "./steps";
@@ -81,51 +78,40 @@ interface AppProps {
 }
 
 // ---------------------------------------------------------------------------
-// Section catalog — inline constant matching the 5 registered sections.
-// In a production build this would be fetched from GET /api/workspace/sections.
+// Section catalog — DERIVED from `SECTION_METADATA_CATALOG` (shared single
+// source of truth in `@spaarke/ui-components`).
+//
+// R4 W-3 (task 040, 2026-05-26): replaced a hardcoded 5-entry array that had
+// drifted from the dashboard's `SECTION_REGISTRY` (Calendar + Daily Briefing
+// were missing). The wizard now picks up new registrations automatically as
+// long as a matching metadata entry exists in `sectionMetadataCatalog.ts`.
+//
+// The shape conversion is a near-identity: `SectionMetadata` IS a strict
+// subset of `SectionCatalogItem`. Only the `category` field requires the
+// shared `SectionCategory` union to align — which it does, both shapes
+// reference the same type from `@spaarke/ui-components`.
 // ---------------------------------------------------------------------------
 
-const SECTION_CATALOG: SectionCatalogItem[] = [
-  {
-    id: "get-started",
-    label: "Get Started",
-    description: "Quick-action cards for common workflows",
-    category: "overview",
-    icon: RocketRegular,
-  },
-  {
-    id: "quick-summary",
-    label: "Quick Summary",
-    description: "Key metrics at a glance",
-    category: "overview",
-    icon: DataBarVerticalRegular,
-  },
-  {
-    id: "latest-updates",
-    label: "Latest Updates",
-    description: "Recent activity feed with flagging",
-    category: "data",
-    icon: ClockRegular,
-    defaultHeight: "325px",
-  },
-  {
-    id: "todo",
-    label: "My To Do List",
-    description: "Embedded smart to-do list with flag sync",
-    category: "productivity",
-    icon: CheckmarkCircleRegular,
-    defaultHeight: "560px",
-  },
-  {
-    id: "documents",
-    label: "My Documents",
-    description: "Recent documents with quick actions",
-    category: "data",
-    icon: DocumentRegular,
-  },
-];
+const SECTION_CATALOG: SectionCatalogItem[] = SECTION_METADATA_CATALOG.map(
+  (meta: SectionMetadata): SectionCatalogItem => ({
+    id: meta.id,
+    label: meta.label,
+    description: meta.description,
+    category: meta.category,
+    icon: meta.icon,
+    defaultHeight: meta.defaultHeight,
+  }),
+);
 
-/** Default section IDs — all 5 sections selected by default. */
+/**
+ * Default section IDs — all registered sections selected by default.
+ *
+ * NOTE: pre-R4 this set was hardcoded to 5 IDs and was used as the initial
+ * `selectedSectionIds` state for the create flow. With 7 sections now in the
+ * catalog, the wizard's small-template flows may select MORE than the
+ * available slots; the existing `selectedCount > slotCount` warning in
+ * `SectionStep` already covers that UX. No additional change needed.
+ */
 const DEFAULT_SECTION_IDS = new Set(SECTION_CATALOG.map((s) => s.id));
 
 // ---------------------------------------------------------------------------
@@ -396,7 +382,40 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   // onFinish: Save the wizard state to the BFF API.
   // - Create / SaveAs -> POST /api/workspace/layouts
   // - Edit -> PUT /api/workspace/layouts/{layoutId}
+  //
+  // R4 task 054 (B-5 / FR-08): on edit, attach an If-Match header derived from
+  // the layout's current `modifiedOn` so two concurrent wizards can't silently
+  // clobber each other. We re-fetch the layout right before the PUT to obtain
+  // a fresh `modifiedOn` — this is a read-then-write pattern; the small
+  // race window is fine because: (a) two concurrent edits that both re-fetch
+  // BEFORE either writes will still see the same `modifiedOn`, so one will
+  // win and the other will get 412 on its If-Match; (b) the alternative
+  // (adding modifiedOn as a wizard prop) requires changing the popup-launch
+  // dialog API contract — out of scope.
   // ---------------------------------------------------------------------------
+
+  /** Reads the layout's current modifiedOn and builds the If-Match header. */
+  async function getIfMatchForLayout(id: string): Promise<string | null> {
+    try {
+      const res = await authenticatedFetch(
+        `/api/workspace/layouts/${encodeURIComponent(id)}`,
+      );
+      if (!res.ok) return null;
+      // Prefer the ETag header (server-emitted, exact); fall back to
+      // computing from modifiedOn if the header isn't present.
+      const etag = res.headers.get("ETag");
+      if (etag) return etag;
+      const dto = (await res.json()) as { modifiedOn?: string };
+      if (!dto?.modifiedOn) return null;
+      if (dto.modifiedOn.startsWith("1970-01-01")) return 'W/"0"';
+      const ms = Date.parse(dto.modifiedOn);
+      if (Number.isNaN(ms)) return null;
+      const ticks = BigInt(ms) * 10000n + 621355968000000000n;
+      return `W/"${ticks.toString()}"`;
+    } catch {
+      return null;
+    }
+  }
 
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig | void> => {
     if (!selectedTemplateId) {
@@ -417,11 +436,28 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
     const method = isEdit ? "PUT" : "POST";
 
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      // R4 task 054 (B-5): only on EDIT (POST creates have no concurrency
+      // semantics — they're new records).
+      if (isEdit && layoutId) {
+        const ifMatch = await getIfMatchForLayout(layoutId);
+        if (ifMatch) headers["If-Match"] = ifMatch;
+      }
+
       const response = await authenticatedFetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(body),
       });
+
+      // R4 task 054 (B-5): 412 = concurrent edit — bubble a clear error.
+      if (response.status === 412) {
+        throw new Error(
+          "This workspace was edited in another tab or session since you opened the wizard. Close this dialog, reopen Manage Workspaces to refresh, then retry your edits.",
+        );
+      }
 
       // Parse the created/updated layout to extract the ID
       const savedLayout = await response.json();

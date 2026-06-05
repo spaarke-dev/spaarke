@@ -78,6 +78,15 @@ function makeFile(name: string, type: string, body: string | ArrayBuffer = '', s
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
+  // Task 071: `jest.clearAllMocks()` only clears CALL HISTORY, not mock
+  // implementations. Earlier tests' `mockExtractRawText.mockRejectedValue(...)`
+  // / `mockGetDocumentPromise.mockRejectedValue(...)` calls persisted across
+  // tests and corrupted later `addFiles` calls (rendering the hook null).
+  // Reset both implementations AND history explicitly.
+  mockGetTextContent.mockReset();
+  mockGetPage.mockReset();
+  mockGetDocumentPromise.mockReset();
+  mockExtractRawText.mockReset();
   jest.clearAllMocks();
 });
 
@@ -114,7 +123,7 @@ describe('useChatFileAttachment', () => {
       expect(tooMany[0].message).toMatch(/Maximum 5/);
     });
 
-    it('rejects a >10 MB file with too-large error', async () => {
+    it('rejects a >25 MB file with too-large error (R4 A-4: raised from 10 MB)', async () => {
       const { result } = renderHook(() => useChatFileAttachment());
 
       const oversize = makeFile('huge.txt', 'text/plain', 'tiny', MAX_FILE_BYTES + 1);
@@ -127,6 +136,55 @@ describe('useChatFileAttachment', () => {
       const tooLarge = result.current.errors.filter(e => e.reason === 'too-large');
       expect(tooLarge).toHaveLength(1);
       expect(tooLarge[0].filename).toBe('huge.txt');
+      // Error message must reference the 25 MB limit
+      expect(tooLarge[0].message).toMatch(/25 MB/);
+    });
+
+    it('locks MAX_FILE_BYTES at 25 MB (R4 A-4 acceptance criterion)', () => {
+      // Lock the constant value. A change here is a breaking change for the
+      // attachment-policy contract; the test must be updated alongside any
+      // policy doc revision.
+      expect(MAX_FILE_BYTES).toBe(25 * 1024 * 1024);
+    });
+
+    describe('R4 A-4 boundary cases (FR-04 acceptance — 1 / 10 / 24 / 25 / 26 MB)', () => {
+      const ONE_MB = 1 * 1024 * 1024;
+      const TEN_MB = 10 * 1024 * 1024;
+      const TWENTYFOUR_MB = 24 * 1024 * 1024;
+      const TWENTYFIVE_MB = 25 * 1024 * 1024;
+      const TWENTYSIX_MB = 26 * 1024 * 1024;
+
+      it.each([
+        ['1 MB', ONE_MB],
+        ['10 MB', TEN_MB],
+        ['24 MB', TWENTYFOUR_MB],
+        ['25 MB (boundary == cap)', TWENTYFIVE_MB],
+      ])('accepts a %s file (under or at cap)', async (_label, sizeBytes) => {
+        const { result } = renderHook(() => useChatFileAttachment());
+        const file = makeFile('within-cap.txt', 'text/plain', 'content', sizeBytes);
+
+        await act(async () => {
+          await result.current.addFiles([file]);
+        });
+
+        expect(result.current.errors.filter(e => e.reason === 'too-large')).toHaveLength(0);
+        // Chip should be accepted (status ready after text extraction)
+        expect(result.current.files).toHaveLength(1);
+      });
+
+      it('rejects a 26 MB file (just over cap) with clear error', async () => {
+        const { result } = renderHook(() => useChatFileAttachment());
+        const file = makeFile('over-cap.txt', 'text/plain', 'content', TWENTYSIX_MB);
+
+        await act(async () => {
+          await result.current.addFiles([file]);
+        });
+
+        expect(result.current.files).toHaveLength(0);
+        const tooLarge = result.current.errors.filter(e => e.reason === 'too-large');
+        expect(tooLarge).toHaveLength(1);
+        expect(tooLarge[0].message).toMatch(/25 MB/);
+      });
     });
 
     it('rejects unsupported MIME types', async () => {
@@ -217,7 +275,6 @@ describe('useChatFileAttachment', () => {
 
       // Ensure the pdfjs-dist `getDocument` was invoked (proves the dynamic
       // import resolved through the mock, not via a static import).
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const pdfjsMock = require('pdfjs-dist');
       expect(pdfjsMock.getDocument).toHaveBeenCalled();
       expect(mockGetPage).toHaveBeenCalledWith(1);
@@ -289,12 +346,23 @@ describe('useChatFileAttachment', () => {
         new ArrayBuffer(1024)
       );
 
-      // Should NOT propagate the telemetry exception
-      await expect(
-        act(async () => {
-          await result.current.addFiles([docx]);
-        })
-      ).resolves.not.toThrow();
+      // Task 077: Previously wrapped this in `await expect(act(...)).resolves.not.toThrow()`
+      // — that pattern consumes the awaited promise BEFORE `act` flushes async microtasks,
+      // so the hook's catch handler never runs and `onExtractionError` is called 0 times.
+      // Additionally, the un-flushed effects leak into subsequent tests and corrupt
+      // `renderHook(...).result.current` (returns null).
+      //
+      // The plain `await act(async () => { ... })` already verifies "does not throw":
+      // if the hook propagated a telemetry exception, this await would reject and Jest
+      // would fail the test. No `expect.resolves.not.toThrow()` wrapper is needed.
+      //
+      // Reusable pattern for future SprkChat tests: when asserting "async work does not
+      // throw under jsdom + React 19 + RTL v16", prefer the bare `await act(...)` form.
+      // The `expect.resolves` wrapper has well-known interaction issues with `act`'s
+      // microtask scheduling and should be avoided for `act` results.
+      await act(async () => {
+        await result.current.addFiles([docx]);
+      });
 
       expect(onExtractionError).toHaveBeenCalledTimes(1);
       expect(result.current.errors.filter(e => e.reason === 'extraction-failed')).toHaveLength(1);
@@ -354,9 +422,7 @@ describe('useChatFileAttachment', () => {
       // `from 'pdfjs-dist'` or `from 'mammoth'` import line exists. This
       // is the load-bearing check for the bundle-budget constraint —
       // task 061 also verifies via bundle-analyzer output.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
       const fs = require('fs');
-      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
       const path = require('path');
       const source = fs.readFileSync(path.resolve(__dirname, '..', 'hooks', 'useChatFileAttachment.ts'), 'utf-8');
 

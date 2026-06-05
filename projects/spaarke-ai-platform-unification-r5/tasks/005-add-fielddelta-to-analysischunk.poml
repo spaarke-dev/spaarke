@@ -1,0 +1,388 @@
+<task id="005" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D1-05 Add `FieldDelta` variant to `AnalysisChunk` (additive SSE event type)</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>2 hours</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 1 — Platform Extensions</phase>
+    <wave>P1-G3 (parallel-safe with 004; on critical path; blocks 006)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <tags>bff, sse, streaming</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extend `AnalysisChunk` (the canonical SSE envelope for BFF AI streaming output) with a
+    new additive `FieldDelta` variant. The variant introduces a single new event type
+    (`Type = "delta"`) and a new `FieldDelta` record (`Path`, `Content`, `Sequence`) that
+    will carry JSON-path-tagged token chunks for structured-field streaming. This is the
+    SSE-side primitive R5's "Summarize a Document" vertical slice relies on for ChatGPT-style
+    progressive rendering in `StructuredOutputStreamWidget` (D2-07) and is consumed by the
+    incremental JSON parser in D1-06 (which depends on this task).
+
+    **Critical-path significance**: This task is item #2 on the R5 critical path
+    (`001 → 005 → 006 → 010 → 012 → 014 → 017 → 020 → 031 → 040 → 043 → 044 → 090`).
+    Task 006 (D1-06) — switching Summarize playbook execution to Azure OpenAI Structured
+    Outputs + incremental JSON parser — cannot start until this variant lands.
+
+    **Strict additive contract** (R5 reuse mandate §3.1 — "Specifically prohibited"):
+    R5 MUST NOT introduce a parallel SSE envelope. R5 EXTENDS `AnalysisChunk` with a new
+    nullable `Delta` property and a new discriminant value (`"delta"`); ALL existing
+    properties, serialization shapes, factory methods, and consumer behaviour are
+    preserved. Existing wizard consumers — specifically
+    `src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts`
+    `streamSummarize()` — already filter on known discriminants (`progress`/`result`/
+    `error`/`done`); the new `"delta"` event will be silently ignored by them, which is
+    the back-compat contract per NFR-10.
+
+    R5 is configuration-first: this task ships a model edit + serialization tests + a
+    documented back-compat verification. No DI changes. No endpoint changes. BFF
+    publish-size delta MUST be measured and reported per CLAUDE.md §10 / R5 §3.6
+    (target ≈ 0 MB; ceiling ≤ +0.5 MB single-task).
+  </prompt>
+
+  <role>
+    Senior .NET developer with deep familiarity with `System.Text.Json` source-gen + record
+    types, additive contract evolution, and SSE event-stream protocols. Comfortable
+    reasoning about back-compat of polymorphic-by-discriminant envelopes and writing
+    serialization round-trip + consumer-behaviour tests.
+  </role>
+
+  <goal>
+    `AnalysisChunk` exposes a new additive `FieldDelta` variant: a new `Delta` property of
+    type `FieldDelta?` (nullable, JSON-serialized as `"delta"` when present and omitted
+    when null), a new `FieldDelta` record (`Path`, `Content`, `Sequence`), and a new
+    factory `AnalysisChunk.FromDelta(path, content, sequence)` that produces an instance
+    with `Type = "delta"`, `Done = false`, and the `Delta` property set. The record
+    compiles, round-trips through `JsonSerializer.Serialize` + `JsonSerializer.Deserialize`
+    with no data loss, and a wizard-consumer parity test confirms that existing
+    `streamSummarize()`-style parsing logic (filtering on known discriminants) treats
+    `"delta"` events as no-ops without breaking the stream. BFF publish-size delta is
+    measured and reported. All acceptance criteria below are green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="model-to-edit">src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs</file>
+    <file purpose="wizard-consumer-reference">src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts</file>
+    <file purpose="test-pattern-reference">tests/unit/Sprk.Bff.Api.Tests/Models/Ai/BuilderSseEventsTests.cs</file>
+    <file purpose="ai-architecture">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-extensions-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 reuse mandate (CLAUDE.md §3.1 — Specifically prohibited)">MUST EXTEND `AnalysisChunk` with the new `FieldDelta` variant. MUST NOT introduce a parallel SSE envelope, a new chunk type alongside `AnalysisChunk`, or a duplicate `FieldDelta`-bearing record. The new variant is an additive property + a new discriminant value on the existing envelope.</constraint>
+    <constraint source="spec NFR-10 (back-compat)">Existing wizard consumers (LegalWorkspace `SummarizeFilesDialog` via `streamSummarize()`) MUST continue to function unchanged. Existing discriminant values (`text`, `progress`, `result`, `complete`, `error`) and their serialization shapes MUST round-trip byte-identically before and after this change. New consumers ignore the `"delta"` discriminant by default.</constraint>
+    <constraint source="spec FR-02">The `FieldDelta` record carries `Path` (JSON path, e.g., `"tldr"`, `"fileHighlights[0].summary"`), `Content` (token chunk for the field), and `Sequence` (int — ordering correctness if deltas are reordered downstream).</constraint>
+    <constraint source="design §4.3">`AnalysisChunk` gains a `FieldDelta? Delta` property (nullable). When `Delta` is null the JSON property MUST be omitted (use `JsonIgnoreCondition.WhenWritingNull`) so existing serialized payloads are byte-identical. New event type discriminant: `"delta"`.</constraint>
+    <constraint source="R5 §3.2 (no new feature flags per ADR-018)">No new feature flag introduced by this task. The new variant is unconditional on the model side; downstream emitters (D1-06 Structured Outputs path) emit `"delta"` events only when that code path runs.</constraint>
+    <constraint source="ADR-010 / R5 §3.3">No new DI registrations. No new top-level `Program.cs` lines. This task edits a single model file plus tests.</constraint>
+    <constraint source="ADR-013 / R5 §3.5">`AnalysisChunk` lives in `Sprk.Bff.Api.Models.Ai`. No new injection of AI-internal types into CRUD code. No facade boundary impact.</constraint>
+    <constraint source="ADR-029 / R5 §3.6 / CLAUDE.md §10">BFF publish-size MUST be measured. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure compressed output, and record absolute size + delta vs prior baseline (~45.65 MB) in task notes. Target ≈ 0 MB delta; ceiling ≤ +0.5 MB single-task; HARD STOP at 60 MB absolute.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Single-file model edit; no new endpoints, no new services, no new packages. Placement justification: trivial — `AnalysisChunk` already lives in `Sprk.Bff.Api.Models.Ai`; the new variant + record sit alongside it.</constraint>
+    <constraint source="CLAUDE.md §10 F-test-update / R5 §3.7">PRs modifying `src/server/api/Sprk.Bff.Api/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`. New tests REQUIRED for: (a) `FromDelta` factory; (b) serialization round-trip for delta and for non-delta variants; (c) `Delta = null` produces no `delta` JSON property (existing-payload byte-identity); (d) wizard-consumer parity (a representative `streamSummarize()`-style parser ignores the `"delta"` discriminant and continues to function).</constraint>
+    <constraint source="design §4.3">`FieldDelta` semantics: `Path` is a JSON-pointer-style or dotted/array-indexed path identifying which field in the streaming JSON the chunk belongs to (e.g., `tldr`, `fileHighlights[0].summary`). The model does NOT validate the path syntax — that is the producer (D1-06 incremental parser) + consumer (D2-07 widget) contract. `Sequence` is a monotonic int from the producer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>sse/structured-field-deltas</topic>
+    <topic>model-evolution/additive-record-extension</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs</file>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Models/Ai/BuilderSseEventsTests.cs</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture-bff-only.md</file>
+      <file>.claude/adr/ADR-018-feature-flag-scope-discipline.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing `AnalysisChunk` record + factories" location="src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs">
+        Read the file FIRST. The record is a positional `record` with
+        `[property: JsonPropertyName(...)]` attributes on each parameter and four static
+        factory methods (`FromContent`, `Completed(string)`, `Completed(DocumentAnalysisResult)`,
+        `FromError`). Extend by: (a) appending a new parameter `FieldDelta? Delta`
+        with `[property: JsonPropertyName("delta")]` + `[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`
+        (default value `= null` to preserve back-compat call sites); (b) adding a new
+        nested or sibling `record FieldDelta(string Path, string Content, int Sequence)`
+        in the same file with `[property: JsonPropertyName(...)]` on each parameter; (c)
+        adding a new static factory `AnalysisChunk.FromDelta(string path, string content, int sequence)`
+        returning a `new AnalysisChunk(Type: "delta", Content: string.Empty, Done: false, Delta: new FieldDelta(path, content, sequence))`.
+        Preserve XML doc comments and update the `&lt;summary&gt;` to mention the `"delta"` event type.
+      </pattern>
+      <pattern name="Wizard consumer back-compat shape" location="src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts">
+        Lines ~80–100 contain the discriminant filter: `if (chunk.type === 'progress')`,
+        `else if (chunk.type === 'result')`, `else if (chunk.type === 'error')`,
+        `else if (chunk.done)`. An unknown discriminant (`"delta"`) falls through every
+        branch and the loop continues — this is the back-compat contract. Mirror this
+        parser shape in the wizard-consumer-parity test (in C# or pseudo-form) to lock
+        in the expected behavior.
+      </pattern>
+      <pattern name="Serialization round-trip test style" location="tests/unit/Sprk.Bff.Api.Tests/Models/Ai/BuilderSseEventsTests.cs">
+        Existing tests in this folder use `System.Text.Json.JsonSerializer` with
+        `PropertyNamingPolicy = JsonNamingPolicy.CamelCase`, `FluentAssertions` for
+        assertions, and `Xunit` `[Fact]`s. Follow the same conventions for the new
+        `AnalysisChunkTests` (or `AnalysisChunkFieldDeltaTests`) file: cover
+        (a) `FromDelta` factory output; (b) serialize→deserialize→re-serialize byte-equality
+        for both delta and non-delta variants; (c) `Delta = null` produces JSON without
+        a `"delta"` property.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. The Workspace tab
+      hosts a new `StructuredOutputStreamWidget` (task 017) that renders structured AI
+      output progressively as Azure OpenAI Structured Outputs emits JSON tokens. The
+      BFF side (task 006) runs an incremental JSON parser over the streaming completion
+      and emits one SSE event per JSON-path-tagged token chunk. The carrier for those
+      chunks is the new `FieldDelta` variant on `AnalysisChunk` — the canonical SSE
+      envelope already used by Summarize, Builder, Insights, and Playbook flows.
+
+      Choosing to EXTEND `AnalysisChunk` (vs introducing a parallel envelope) was an
+      explicit R5 design decision per design.md §4.3 and is enforced by R5 §3.1's
+      "Specifically prohibited" list. The variant is additive: existing serialized
+      payloads remain byte-identical (the new `Delta` property is `null` and omitted),
+      existing factory methods preserve their output shapes, and unknown discriminants
+      are already ignored by the LegalWorkspace `streamSummarize()` parser. NFR-10
+      makes this back-compat contract binding.
+
+      The task is small (single-file model edit + tests + size verification) but it is
+      load-bearing — task 006 (Structured Outputs + incremental parser) is the next
+      critical-path task and depends on the variant shape this task ships.
+    </background>
+    <dependencies></dependencies>
+    <related-work>
+      <item>**Task 006 (D1-06)** — Switches Summarize playbook execution to Azure OpenAI
+        Structured Outputs and implements the incremental JSON parser that emits
+        `FieldDelta` events. Depends DIRECTLY on this task's variant shape. Critical-path
+        successor.</item>
+      <item>**Task 016 (D2-06)** — Adds the FRONTEND counterpart additive event types
+        on `PaneEventBus` (`workspace.streaming_started`, `workspace.field_delta`,
+        `workspace.streaming_complete`, `context.files_staged`, `context.file_selected`)
+        within existing channels per ADR-030. `FieldDelta` is the SSE-side primitive
+        whose payload feeds the `workspace.field_delta` PaneEventBus event. Both are
+        additive-only per spec NFR-09 + NFR-10.</item>
+      <item>**Task 017 (D2-07)** — `StructuredOutputStreamWidget` (Workspace; schema-driven)
+        — subscribes to `workspace.field_delta` PaneEventBus events whose payload originates
+        from `FieldDelta` SSE chunks emitted by this task's variant.</item>
+      <item>**Task 004 (D1-04)** — Peer in P1-G3; extends `ChatSession` model with
+        `UploadedFiles[]`. Different model file (`ChatSession.cs` vs `AnalysisChunk.cs`);
+        parallel-safe.</item>
+      <item>**Insights coordination**: per `notes/insights-r2-coordination.md` §4.4, R5
+        owns the `FieldDelta` protocol design. Insights E3 may adopt `FieldDelta` for
+        progressive rendering of `InsightArtifact` if Wave F upgrades to SSE per v1.1
+        request. Variant design SHOULD be reviewable by Insights team before merge
+        (light coordination — not a blocker).</item>
+      <item>**Existing wizard consumer**: `src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts`
+        is the canonical back-compat reference. Its discriminant filter (`progress`/`result`/
+        `error`/`done`) MUST continue to function unchanged when the BFF emits `"delta"`
+        events alongside the existing event types.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage per CLAUDE.md §5. If &gt; 70%, create handoff summary and request
+      `/compact`. Output the MANDATORY rigor declaration per CLAUDE.md §8 and R5 §4.1:
+      `🔒 RIGOR LEVEL: FULL · 📋 REASON: BFF model edit + SSE protocol extension on
+      critical path; tag `bff` triggers FULL; downstream blocker for task 006 ·
+      📖 PROTOCOL STEPS TO EXECUTE: 1-10 per this POML.` Proceed to Step 1.
+    </step>
+    <step order="1" name="Review Progress">
+      Read `projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md` and confirm
+      task 005 status is 🔲, dependencies are empty, parallel-safe = true, wave is P1-G3.
+      Read `current-task.md` to confirm no prior R5 task is in flight blocking this work
+      (peer task 004 may run alongside; that is fine — different file). Read R5 README
+      and `CLAUDE.md` (project) for current project status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract:
+      (a) the EXACT current `AnalysisChunk` record + factory shape from the model file;
+      (b) the wizard consumer discriminant-filter shape from `summarizeService.ts` lines
+      ~80–100; (c) the existing serialization test conventions from `BuilderSseEventsTests.cs`;
+      (d) the design.md §4.3 schema for `FieldDelta` (`Path` string, `Content` string,
+      `Sequence` int) and the new discriminant value (`"delta"`); (e) NFR-10 back-compat
+      requirement from spec.md.
+    </step>
+    <step order="3" name="Plan the Edit">
+      Draft the edit list in task notes BEFORE touching code: (i) `AnalysisChunk.cs` —
+      add `FieldDelta?` parameter (last position; default `null`); add
+      `[property: JsonPropertyName("delta")]` + `[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`;
+      add new `record FieldDelta(string Path, string Content, int Sequence)` with
+      `[property: JsonPropertyName(...)]` on each parameter; add `AnalysisChunk.FromDelta`
+      static factory; update XML doc comments. (ii) NEW test file
+      `tests/unit/Sprk.Bff.Api.Tests/Models/Ai/AnalysisChunkFieldDeltaTests.cs` with the
+      four test categories enumerated in &lt;constraints&gt; (`FromDelta` factory,
+      serialization round-trip for both variants, `Delta = null` omission, wizard
+      consumer parity). ✅ Checkpoint after planning (per CLAUDE.md §5 — proactive).
+    </step>
+    <step order="4" name="Implement Model Extension">
+      Edit `src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs` per the planned edit:
+      (a) append `FieldDelta? Delta = null` parameter with the two JSON attributes;
+      (b) add `record FieldDelta(...)` immediately above or below the `AnalysisChunk`
+      record (same file); (c) add the `FromDelta` static factory method; (d) update the
+      `&lt;summary&gt;` XML doc on `AnalysisChunk` to mention `"delta"` and reference the
+      new factory. Compile-check: `dotnet build src/server/api/Sprk.Bff.Api/`. ZERO new
+      warnings.
+    </step>
+    <step order="5" name="Implement Serialization + Back-Compat Tests">
+      Create `tests/unit/Sprk.Bff.Api.Tests/Models/Ai/AnalysisChunkFieldDeltaTests.cs`
+      using `Xunit` + `FluentAssertions` + `System.Text.Json` per the
+      `BuilderSseEventsTests.cs` convention. Tests REQUIRED:
+      (a) `FromDelta_SetsCorrectTypeAndDelta` — factory returns instance with
+         `Type == "delta"`, `Done == false`, `Content == string.Empty`, `Delta.Path`,
+         `Delta.Content`, `Delta.Sequence` set correctly;
+      (b) `FromDelta_SerializesAndDeserializes_RoundTrip` — serialize → deserialize →
+         re-serialize produces byte-identical JSON, `Delta` survives;
+      (c) `FromContent_SerializesWithoutDeltaProperty` — non-delta chunk serializes
+         WITHOUT a `"delta"` property in the JSON (existing payload byte-identity);
+      (d) `Completed_SerializesWithoutDeltaProperty` — same check for the `Completed`
+         factory;
+      (e) `FromError_SerializesWithoutDeltaProperty` — same check for the `FromError`
+         factory;
+      (f) `WizardConsumer_IgnoresDeltaDiscriminant` — a small parser that mimics the
+         `streamSummarize()` discriminant filter (`progress`/`result`/`error`/`done`)
+         processes a sequence containing `"delta"` events and a final `"result"`
+         event without throwing, without consuming the delta payloads, and surfaces
+         the result correctly.
+      Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` and confirm all new tests pass +
+      no existing test regresses. ✅ Checkpoint after step 5 (3 steps completed).
+    </step>
+    <step order="6" name="Verify Back-Compat Against Real Wizard Consumer (Visual)">
+      Open `src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts`
+      and visually confirm: the discriminant-filter chain at lines ~80–100 has NO
+      branch for `"delta"`; an unknown discriminant falls through without throwing and
+      the `while (true) reader.read()` loop continues. Document this confirmation in
+      task notes (literal line ranges + quoted branches). NO CODE CHANGE in this file —
+      this step is read-only verification that the JS consumer matches the C# wizard-
+      parity test in step 5(f).
+    </step>
+    <step order="7" name="Measure BFF Publish-Size">
+      Per CLAUDE.md §10 + R5 §3.6:
+      (a) Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`;
+      (b) Compress the output (`Compress-Archive` or equivalent) and measure absolute
+          MB;
+      (c) Compare to baseline ~45.65 MB; record absolute size + delta in task notes;
+      (d) Verify ceiling: ≤60 MB absolute (NFR-01); single-task delta should be
+          essentially 0 MB for this edit (target) and MUST be ≤ +0.5 MB (R5 budget per
+          §3.6). If delta exceeds expectations, investigate before proceeding.
+    </step>
+    <step order="8" name="Conflict + Build Sanity">
+      Run `/conflict-check` (per spec §3.1 reuse mandate). Run a full
+      `dotnet build` of the BFF + tests projects (`dotnet build src/server/api/Sprk.Bff.Api/`
+      and `dotnet build tests/unit/Sprk.Bff.Api.Tests/`). ZERO new warnings; ZERO errors.
+      ✅ Checkpoint after step 8 (3 steps completed since last checkpoint).
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is testable +
+      passing. Record evidence per criterion in task notes (test method name +
+      result line, file path + diff hunk, publish-size measurement, etc.).
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor — MANDATORY)">
+      Per R5 §4.2 + CLAUDE.md §8: Run `code-review` skill against the diff
+      (`AnalysisChunk.cs` + new test file). Run `adr-check` skill against the diff;
+      verify: ADR-013 (BFF-only AI; facade boundary respected — N/A internal model;
+      confirmed), ADR-018 (no new feature flags — confirmed), ADR-010 (no new DI
+      registrations — confirmed), ADR-029 (publish-size measured — confirmed at step 7),
+      and the R5 reuse mandate from CLAUDE.md §3.1 ("MUST extend, MUST NOT introduce
+      parallel envelope" — confirmed). Both gates MUST pass before marking the task
+      complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update this task POML's `&lt;status&gt;` to `complete` and set `&lt;completed&gt;` to
+      today's date. Update `TASK-INDEX.md`: 005 🔲 → ✅ and update the wave-G3 group
+      status if peer task 004 is also done. Reset `current-task.md` per CLAUDE.md §7 to
+      point at the next pending task (likely 006 — the immediate critical-path successor
+      that depends on this variant). Append a record to task notes
+      (`projects/spaarke-ai-platform-unification-r5/notes/task-005-implementation-evidence.md`)
+      capturing: diff summary, test names + results, publish-size measurement + delta,
+      back-compat verification evidence, quality-gate outcomes. Report task completion
+      per the task-execute Step 6 template.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test the BFF project; `dotnet publish` for size measurement</tool>
+    <tool name="git">Stage + commit the model edit + new test file on the R5 branch (commit only when wave instructs; main session handles wave-level commits)</tool>
+    <tool name="conflict-check">Skill — runs at step 8 per spec §3.1</tool>
+    <tool name="code-review">Skill — runs at step 9.5 (FULL rigor mandatory gate)</tool>
+    <tool name="adr-check">Skill — runs at step 9.5 (FULL rigor mandatory gate)</tool>
+    <tool name="context-handoff">Skill — proactive checkpointing per CLAUDE.md §5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs (MODIFIED — adds `FieldDelta?` parameter + `record FieldDelta` + `FromDelta` factory + XML doc updates)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Models/Ai/AnalysisChunkFieldDeltaTests.cs (NEW — six [Fact] tests covering factory, round-trip, byte-identity for non-delta variants, and wizard-consumer parity)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/005-add-fielddelta-to-analysischunk.poml (status: not-started → complete)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 005 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task — likely 006)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-005-implementation-evidence.md (diff summary, test results, publish-size delta, back-compat evidence, quality-gate results)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="Additive record-extension on `AnalysisChunk` (reference: design.md §4.3)" location="projects/spaarke-ai-platform-unification-r5/design.md">
+      design.md §4.3 (lines ~297–315) shows the target shape:
+      ```
+      record AnalysisChunk(
+        string Type,        // existing + NEW: "delta"
+        string? Content,
+        bool Done,
+        string? Summary,
+        DocumentAnalysisResult? Result,
+        string? Error,
+        FieldDelta? Delta); // NEW (nullable)
+
+      record FieldDelta(
+        string Path,        // JSON path, e.g., "tldr", "fileHighlights[0].summary"
+        string Content,     // token chunk for this field
+        int Sequence);      // for ordering correctness
+      ```
+      Adapt to match the actual current `AnalysisChunk.cs` shape (positional record with
+      `[property: JsonPropertyName(...)]` attributes — see &lt;knowledge&gt; pattern 1).
+    </example>
+    <example name="Wizard consumer discriminant filter (back-compat reference)" location="src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts">
+      Lines ~80–100 — the `for (const event of events)` loop's discriminant chain.
+      `if (chunk.type === 'progress')` / `else if (chunk.type === 'result')` /
+      `else if (chunk.type === 'error')` / `else if (chunk.done)` / [implicit no-op
+      for unknown]. An unknown `"delta"` discriminant falls through without action,
+      and `reader.read()` continues — this IS the NFR-10 back-compat contract.
+    </example>
+    <example name="Test conventions for SSE event records" location="tests/unit/Sprk.Bff.Api.Tests/Models/Ai/BuilderSseEventsTests.cs">
+      Lines 1–60 show the canonical convention: `using System.Text.Json` +
+      `using FluentAssertions` + `using Xunit`, `JsonSerializerOptions` with
+      `PropertyNamingPolicy = JsonNamingPolicy.CamelCase`, `[Fact]` methods with
+      `.Should().Be(...)` and `.Should().Contain("\"type\":\"...\"")`. Mirror this in
+      the new `AnalysisChunkFieldDeltaTests.cs`.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">`AnalysisChunk` record exposes a new `FieldDelta? Delta` property with `[property: JsonPropertyName("delta")]` + `[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`; default value `null` so existing call sites compile unchanged.</criterion>
+    <criterion testable="true">New `record FieldDelta(string Path, string Content, int Sequence)` exists in `AnalysisChunk.cs` with `[property: JsonPropertyName(...)]` on each parameter (`"path"`, `"content"`, `"sequence"`).</criterion>
+    <criterion testable="true">New static factory `AnalysisChunk.FromDelta(string path, string content, int sequence)` returns an instance with `Type == "delta"`, `Done == false`, `Content == string.Empty`, and `Delta` populated.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with ZERO new warnings and ZERO errors.</criterion>
+    <criterion testable="true">`dotnet test tests/unit/Sprk.Bff.Api.Tests/` — all NEW tests in `AnalysisChunkFieldDeltaTests.cs` pass, and NO existing test regresses.</criterion>
+    <criterion testable="true">JSON serialization round-trip: `AnalysisChunk.FromDelta("tldr", "Hello", 0)` serialized → deserialized → re-serialized produces byte-identical JSON; the deserialized instance has the same `Path`, `Content`, `Sequence` values.</criterion>
+    <criterion testable="true">Non-delta variants (`FromContent`, `Completed`, `FromError`) serialize WITHOUT a `"delta"` property in the JSON (existing-payload byte-identity contract per NFR-10).</criterion>
+    <criterion testable="true">Wizard-consumer parity test: a parser mimicking `streamSummarize()`'s discriminant filter (`progress`/`result`/`error`/`done`) processes a sequence including `"delta"` events plus a final `"result"` event without throwing, ignoring the delta payloads, and surfaces the result correctly — proving NFR-10 back-compat.</criterion>
+    <criterion testable="true">Visual confirmation recorded in task notes: `src/solutions/LegalWorkspace/src/components/SummarizeFiles/summarizeService.ts` lines ~80–100 have NO branch for `"delta"`; an unknown discriminant is a no-op and the SSE read loop continues.</criterion>
+    <criterion testable="true">BFF publish-size measured and recorded: absolute size + delta vs ~45.65 MB baseline reported in task notes; delta ≤ +0.5 MB (R5 §3.6 budget); absolute ≤ 60 MB (NFR-01 ceiling).</criterion>
+    <criterion testable="true">`/conflict-check` reports no overlap with peer task 004 (different model file) or other in-flight branches.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 — confirming ADR-013 (BFF-only), ADR-018 (no new flags), ADR-010 (no new DI registrations), ADR-029 (publish-size measured), and R5 §3.1 reuse mandate (extends `AnalysisChunk`, does NOT introduce parallel envelope).</criterion>
+    <criterion testable="true">`TASK-INDEX.md` updated (005 🔲 → ✅); `current-task.md` reset to the next pending task (likely 006 — the immediate critical-path successor); task POML `&lt;status&gt;` set to `complete`.</criterion>
+  </acceptance-criteria>
+</task>

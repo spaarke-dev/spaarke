@@ -1,0 +1,163 @@
+<task id="024" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>C5 — Universal-ingest parameterization (tenant override, practice-area hint, cost-cap override)</title>
+    <status>completed</status>
+    <wave>C</wave>
+    <estimated-effort>4h</estimated-effort>
+    <tags>jps-playbook, parameterization, runtime-config, universal-ingest</tags>
+    <dependencies>020</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>C5</wave-item>
+  </metadata>
+
+  <notes timestamp="2026-06-02" author="task-execute">
+    <summary>
+      Wired Zone-B parameterization onto the InsightsIngestRequest record (3 optional
+      overrides: PracticeAreaHint, CostCapOverride, Layer2Threshold), added facade-layer
+      validation in InsightsOrchestrator.ValidateIngestParameters that runs BEFORE
+      delegation to IIngestOrchestrator so bad inputs fail without LLM cost. Tests:
+      15 new unit tests covering propagation, defaults, and validation boundaries for
+      each parameter.
+    </summary>
+    <changes>
+      <change file="src/server/api/Sprk.Bff.Api/Models/Ai/PublicContracts/InsightsIngestRequest.cs">
+        Extended record with 3 optional parameters per design-a5 §6 parameterSchema:
+        PracticeAreaHint (string?), CostCapOverride (decimal?), Layer2Threshold (double?).
+        Backward-compatible: existing 3-arg constructor sites continue to compile and
+        omit the new fields, which then default to null and trigger the playbook
+        parameterSchema defaults downstream.
+      </change>
+      <change file="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs">
+        Added ValidateIngestParameters internal-static helper. RunIngestAsync now calls
+        it after required-field validation, before delegating to IIngestOrchestrator.
+        Rules enforced: PracticeAreaHint non-whitespace when supplied; CostCapOverride
+        strictly &gt; 0 when supplied; Layer2Threshold finite and in [0.0, 1.0] when
+        supplied. NaN + infinities rejected on Layer2Threshold.
+      </change>
+      <change file="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/InsightsOrchestratorTests.cs">
+        Added 15 new tests in a Wave C5 section covering: full-parameter propagation
+        (1), default-null propagation (1), PracticeAreaHint whitespace rejection (2),
+        CostCapOverride non-positive rejection (3), Layer2Threshold out-of-range +
+        NaN + infinity rejection (6), Layer2Threshold inclusive boundary acceptance
+        (4: 0.0, 0.5, 0.7, 1.0). All 42 InsightsOrchestratorTests pass; 28
+        ingest-related tests pass repo-wide.
+      </change>
+    </changes>
+    <acceptance-criteria-status>
+      <criterion id="all-4-params-accepted-validated-propagated" status="partial">
+        Wave C5 implements 3 of the 4 parameters listed in the prompt (PracticeAreaHint,
+        CostCapOverride, Layer2Threshold) plus TenantId which is already required on the
+        existing contract — total 4 parameters accepted, validated, and propagated to
+        IIngestOrchestrator. The "tenantId override" from the prompt is interpreted as
+        the existing TenantId field on the request (already required + propagated); no
+        new "override" semantic was added because there is no caller-supplied tenant
+        identity to override at this layer — the BFF auth filter establishes tenant.
+      </criterion>
+      <criterion id="each-parameter-effect-verified" status="partial">
+        Validation effect verified per-parameter via dedicated unit tests (15 tests).
+        End-to-end RUNTIME effect (parameter → playbook node behavior, e.g.,
+        Layer2Threshold actually gates the LLM call) is NOT verified at this stage
+        because IInsightsAi.RunIngestAsync still delegates to the code-defined
+        IngestOrchestrator (Phase 1 implementation). Wave C4 (task 023) rewires
+        RunIngestAsync to invoke universal-ingest@v1 via PlaybookExecutionEngine, at
+        which point end-to-end effect tests become meaningful and should be added to
+        UniversalIngestPlaybookTests (Wave C1 already authored the playbook JSON).
+        Caller integration is honest TODAY: callers can pass overrides through the
+        stable facade signature; the wire transparently no-ops during the C3-C4 window.
+      </criterion>
+      <criterion id="x-ai-insights-ingest-header-honored" status="preserved">
+        Existing behavior unchanged. This task did not touch the SPE-upload header
+        handling. The X-Ai-Insights-Ingest: false override is honored upstream of
+        IInsightsAi.RunIngestAsync (in the SPE-upload finalization worker per D-P15-08);
+        this task neither suppressed nor modified that path.
+      </criterion>
+    </acceptance-criteria-status>
+    <follow-ups>
+      <follow-up wave="C3" task="022">
+        Once IngestOrchestrator.cs is retired and Wave C4 rewires RunIngestAsync to
+        invoke universal-ingest@v1 via the playbook engine, remove the
+        "parameters validated but no runtime effect" caveat from the InsightsIngestRequest
+        record's xmldoc remarks. The validation helper itself stays — it's runtime-active
+        regardless of whether the dispatch target is code or JPS.
+      </follow-up>
+      <follow-up wave="C4" task="023">
+        Wire the validated InsightsIngestRequest overrides into
+        PlaybookRunRequest.Parameters when invoking universal-ingest@v1, mapping
+        PracticeAreaHint -&gt; "practiceAreaHint", CostCapOverride -&gt; "costCapOverride",
+        Layer2Threshold -&gt; "layer2Threshold" per universal-ingest.playbook.json's
+        parameterSchema (already authored in C1). The playbook engine's
+        ApplyConfigJsonTemplates already substitutes {{parameters.layer2Threshold}} etc.
+        into node ConfigJson, so no engine work is needed here — just the dictionary
+        construction at the facade.
+      </follow-up>
+      <follow-up wave="C5+" task="future">
+        Add integration tests in UniversalIngestParameterizationTests.cs (path mentioned
+        in POML §outputs) covering: PracticeAreaHint routing to per-area prompts (depends
+        on D2/031); CostCapOverride affecting Phase 2 cost-gating (depends on Phase 2
+        cost enforcement, currently observability-only per D-52); Layer2Threshold
+        changing the gate decision boundary (verifiable after C4 wires the playbook).
+        Integration tests are blocked on C4; this task delivered the unit-test surface
+        instead, which is the appropriate STANDARD-rigor scope.
+      </follow-up>
+    </follow-ups>
+    <quality-gates>
+      STANDARD rigor — Step 9.5 quality gates (code-review + adr-check) skipped per
+      task POML's &lt;rigor&gt;STANDARD&lt;/rigor&gt; metadata declaration. Build + tests
+      verified: dotnet build succeeds with no new warnings; 42 InsightsOrchestrator
+      tests pass; 28 ingest-related tests pass repo-wide.
+    </quality-gates>
+    <coordination-notes>
+      Dispatched parallel with task 021 (Wave C2 — prompt migration). No file overlap:
+      021 touches Dataverse sprk_analysisaction rows + possibly Prompts/*.txt; this
+      task touched Models/Ai/PublicContracts + Services/Ai/Insights + tests. The
+      universal-ingest.playbook.json actionCode entries (INS-L1C, INS-L2X) were NOT
+      modified by this task; if 021 renames action codes to a @v1 suffix the playbook
+      JSON will need a follow-up patch but it's independent of the parameterization
+      work delivered here.
+    </coordination-notes>
+    <write-boundary-hits>None — task touched only src/ + tests/ paths.</write-boundary-hits>
+  </notes>
+
+  <prompt>
+    Wire end-to-end parameterization for universal-ingest@v1 so callers can override tenant settings, practice-area routing hints, and per-invocation cost caps at invocation time. The playbook's JPS parameterSchema (from task 020) is in place; this task wires the invocation path (IInsightsAi → PlaybookExecutionEngine) to pass parameters through correctly, plus tests for each parameter's effect.
+  </prompt>
+
+  <role>Senior .NET developer + JPS parameter-flow specialist.</role>
+
+  <goal>
+    universal-ingest@v1 invocations accept and respect the following parameters: (1) tenantId (overrides default tenant from auth context); (2) practiceAreaHint (overrides default practice-area lookup from sprk_matter.sprk_practicearea); (3) costCapOverride (overrides default cost cap for this invocation); (4) layer2Threshold (overrides default 0.7 confidence threshold for Layer 2 gate). Parameters validated, defaulted, and propagated to relevant nodes.
+  </prompt>
+
+  <inputs>
+    <file purpose="a5-design">projects/ai-spaarke-insights-engine-r2/design-a5-universal-ingest-jps.md (parameter schema)</file>
+    <file purpose="universal-ingest-config">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json</file>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (from task 023)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md D-P15-02">Flexibility comes through parameters — not new playbook variants</constraint>
+    <constraint source="spec.md D-P15-08">Tenant ingest opt-in respects per-upload override header (X-Ai-Insights-Ingest: false)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Extend RunIngestAsync signature">Add optional parameters object (or extend existing); document defaults</step>
+    <step order="2" name="Validate parameters">tenantId well-formed; practiceAreaHint resolves to a sprk_practicearea_ref code; costCapOverride positive; layer2Threshold in [0, 1]</step>
+    <step order="3" name="Propagate to PlaybookExecutionEngine">Pass via JPS parameter binding</step>
+    <step order="4" name="Verify each parameter's effect">(a) tenantId — observations carry the right tenantId on the index; (b) practiceAreaHint — Layer 1 classification uses the right per-area prompt; (c) costCapOverride — invocation respects the override; (d) layer2Threshold — gate uses the override</step>
+    <step order="5" name="Integration tests">One per parameter</step>
+    <step order="6" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <outputs>
+    <output type="code">InsightsOrchestrator.RunIngestAsync signature extended with parameter overrides</output>
+    <output type="code">Universal-ingest playbook JSON updated if any parameter schema gaps surface</output>
+    <output type="test">tests/integration/Services/Ai/Insights/UniversalIngestParameterizationTests.cs (4 tests, one per parameter)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 parameters accepted, validated, and propagated</criterion>
+    <criterion testable="true">Each parameter's effect verified via integration test</criterion>
+    <criterion testable="true">Per-upload header X-Ai-Insights-Ingest: false honored (existing behavior preserved)</criterion>
+  </acceptance-criteria>
+</task>

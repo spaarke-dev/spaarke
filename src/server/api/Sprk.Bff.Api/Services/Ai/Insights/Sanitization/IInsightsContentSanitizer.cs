@@ -21,9 +21,10 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Sanitization;
 /// metadata) so the swap is a DI re-registration.
 /// </para>
 /// <para>
-/// <b>Zone A placement</b>: lives under <c>Services/Ai/Insights/Sanitization/</c>. Phase 1
-/// consumers: <see cref="IIngestOrchestrator"/> (task 040). Phase 1.5+: extended Layers
-/// (entity extraction, deal-terms extraction) as they come online.
+/// <b>Zone A placement</b>: lives under <c>Services/Ai/Insights/Sanitization/</c>.
+/// Consumed by <c>SanitizerNodeExecutor</c> inside the universal-ingest@v1 JPS playbook
+/// (Wave C1 task 020). Phase 1.5+: extended Layers (entity extraction, deal-terms
+/// extraction) as they come online.
 /// </para>
 /// </remarks>
 public interface IInsightsContentSanitizer

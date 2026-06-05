@@ -29,9 +29,23 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// <see cref="NodeOutput.GetData{T}"/>.
 /// </para>
 /// <para>
+/// <b>r2 Wave D5 (task 034) — multi-entity dispatch</b>: per design-a6 §3.5 + A6-D1, this
+/// node now dispatches to one of three per-entity <see cref="ILiveFactResolver"/>
+/// implementations (matter, project, invoice) via
+/// <c>IReadOnlyDictionary&lt;string, ILiveFactResolver&gt;</c> keyed by entity-type name.
+/// Subject is parsed via <see cref="ISubjectParser"/> first; the parsed entity type is
+/// used as the dictionary key. Unknown schemes surface as <c>InvalidConfiguration</c>.
+/// </para>
+/// <para>
+/// <b>Backward compatibility</b>: existing <c>matter:&lt;guid&gt;</c> subjects continue to
+/// resolve identically (the matter resolver is now <see cref="MatterLiveFactResolver"/>
+/// with behavior preserved 1:1 from r1's <c>DataverseLiveFactResolver</c>). The Phase 1
+/// <c>predict-matter-cost</c> playbook works without playbook-side changes.
+/// </para>
+/// <para>
 /// <b>Zone A</b> per SPEC §3.5 — lives under <c>Services/Ai/Nodes/</c> alongside the other
-/// platform node executors. The Zone B <see cref="ILiveFactResolver"/> is injected as a
-/// dependency.
+/// platform node executors. The Zone B <see cref="ILiveFactResolver"/> implementations are
+/// injected as a registry.
 /// </para>
 /// <para>
 /// <b>Confidence</b> on the returned Fact is always 1.0 per design.md §2.1; the executor
@@ -46,13 +60,18 @@ public sealed class LiveFactNode : INodeExecutor
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly ILiveFactResolver _resolver;
+    private readonly IReadOnlyDictionary<string, ILiveFactResolver> _resolvers;
+    private readonly ISubjectParser _subjectParser;
     private readonly ILogger<LiveFactNode> _logger;
 
-    public LiveFactNode(ILiveFactResolver resolver, ILogger<LiveFactNode> logger)
+    public LiveFactNode(
+        IReadOnlyDictionary<string, ILiveFactResolver> resolvers,
+        ISubjectParser subjectParser,
+        ILogger<LiveFactNode> logger)
     {
-        _resolver = resolver;
-        _logger = logger;
+        _resolvers = resolvers ?? throw new ArgumentNullException(nameof(resolvers));
+        _subjectParser = subjectParser ?? throw new ArgumentNullException(nameof(subjectParser));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <inheritdoc />
@@ -100,13 +119,48 @@ public sealed class LiveFactNode : INodeExecutor
 
         var config = ParseConfig(context.Node.ConfigJson)!;
 
+        // Parse the subject to extract the entity-type used for resolver dispatch
+        // (r2 Wave D5 / design-a6 §3.5). Unknown schemes surface as InvalidConfiguration
+        // so playbook authoring errors are loud, not silent.
+        if (!_subjectParser.TryParse(config.Subject!, out var parsedSubject, out var parseError))
+        {
+            _logger.LogWarning(
+                "LiveFactNode {NodeId}: subject parse failed: subject={Subject} error={Error}",
+                context.Node.Id, config.Subject, parseError);
+            return NodeOutput.Error(
+                context.Node.Id,
+                context.Node.OutputVariable,
+                parseError,
+                NodeErrorCodes.InvalidConfiguration,
+                NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+        }
+
+        // Dispatch by entity-type to the per-entity resolver. The dictionary uses
+        // case-insensitive lookup (registered with StringComparer.OrdinalIgnoreCase in
+        // InsightsModule per design-a6 §3.4).
+        if (!_resolvers.TryGetValue(parsedSubject.EntityType, out var resolver))
+        {
+            var msg = $"No ILiveFactResolver registered for subject entity-type '{parsedSubject.EntityType}'. " +
+                      $"Register an implementation in InsightsModule and add the scheme to " +
+                      $"Insights:Subject:Schemes[] (per design-a6 §3.4).";
+            _logger.LogWarning(
+                "LiveFactNode {NodeId}: no resolver for entity-type {EntityType} (subject={Subject})",
+                context.Node.Id, parsedSubject.EntityType, config.Subject);
+            return NodeOutput.Error(
+                context.Node.Id,
+                context.Node.OutputVariable,
+                msg,
+                NodeErrorCodes.InvalidConfiguration,
+                NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+        }
+
         try
         {
             _logger.LogDebug(
-                "LiveFactNode {NodeId}: resolving subject={Subject} predicate={Predicate}",
-                context.Node.Id, config.Subject, config.Predicate);
+                "LiveFactNode {NodeId}: resolving entityType={EntityType} subject={Subject} predicate={Predicate}",
+                context.Node.Id, parsedSubject.EntityType, config.Subject, config.Predicate);
 
-            var fact = await _resolver.ResolveAsync(
+            var fact = await resolver.ResolveAsync(
                 config.Subject!,
                 config.Predicate!,
                 context.TenantId,

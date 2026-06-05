@@ -69,7 +69,11 @@ public sealed class IndexRetrieveNode : INodeExecutor
     private static readonly string[] SelectFields =
     {
         "id", "tenantId", "artifactType", "subject", "predicate",
-        "valueJson", "confidence", "evidence", "asOf", "producedBy", "status"
+        "valueJson", "confidence", "evidence", "asOf", "producedBy", "status",
+        // Wave D6 (task 035) — hybrid scope shape per design-a6 §4. Selecting the scope
+        // ComplexType so downstream consumers (Wave E1 RAG retriever) can project entityType
+        // + entityId without re-parsing the subject.
+        "scope"
     };
 
     private readonly SearchIndexClient _searchIndexClient;
@@ -103,16 +107,18 @@ public sealed class IndexRetrieveNode : INodeExecutor
 
         // Require at least one narrowing dimension beyond the implicit tenant filter to prevent
         // accidental full-index scans against multi-tenant indexes.
+        // Wave D6 (task 035): subjectScope also counts as a narrowing dimension (matter:/project:/invoice:).
         var hasNarrowing =
             !string.IsNullOrWhiteSpace(config.ArtifactType) ||
             !string.IsNullOrWhiteSpace(config.Predicate) ||
             !string.IsNullOrWhiteSpace(config.Filter) ||
-            !string.IsNullOrWhiteSpace(config.VectorQuery);
+            !string.IsNullOrWhiteSpace(config.VectorQuery) ||
+            !string.IsNullOrWhiteSpace(config.SubjectScope);
 
         return hasNarrowing
             ? NodeValidationResult.Success()
             : NodeValidationResult.Failure(
-                "IndexRetrieve config requires at least one of: artifactType, predicate, filter, vectorQuery.");
+                "IndexRetrieve config requires at least one of: artifactType, predicate, filter, vectorQuery, subjectScope.");
     }
 
     /// <inheritdoc />
@@ -285,7 +291,18 @@ public sealed class IndexRetrieveNode : INodeExecutor
     /// <summary>
     /// Builds the OData filter combining the tenant guard with config-supplied narrowing.
     /// </summary>
-    private static string BuildFilter(string tenantId, IndexRetrieveNodeConfig config)
+    /// <remarks>
+    /// Wave D6 (task 035) — when <see cref="IndexRetrieveNodeConfig.SubjectScope"/> is set,
+    /// emits the hybrid dual-read OR-filter per design-a6 §4.5:
+    /// <list type="bullet">
+    ///   <item>matter:&lt;guid&gt; → <c>(scope/matterId eq '&lt;guid&gt;' or (scope/entityType eq 'matter' and scope/entityId eq '&lt;guid&gt;'))</c></item>
+    ///   <item>project:&lt;guid&gt; → <c>(scope/entityType eq 'project' and scope/entityId eq '&lt;guid&gt;')</c></item>
+    ///   <item>invoice:&lt;guid&gt; → <c>(scope/entityType eq 'invoice' and scope/entityId eq '&lt;guid&gt;')</c></item>
+    /// </list>
+    /// This preserves NFR-08 — Phase 1 Observations carrying only <c>scope.matterId</c>
+    /// (no <c>scope.entityType</c>) remain findable for matter-subject queries.
+    /// </remarks>
+    internal static string BuildFilter(string tenantId, IndexRetrieveNodeConfig config)
     {
         var parts = new List<string>
         {
@@ -298,10 +315,52 @@ public sealed class IndexRetrieveNode : INodeExecutor
         if (!string.IsNullOrWhiteSpace(config.Predicate))
             parts.Add($"predicate eq '{EscapeODataValue(config.Predicate!)}'");
 
+        if (!string.IsNullOrWhiteSpace(config.SubjectScope))
+        {
+            var scopeFilter = BuildSubjectScopeFilter(config.SubjectScope!);
+            if (scopeFilter is not null)
+                parts.Add(scopeFilter);
+        }
+
         if (!string.IsNullOrWhiteSpace(config.Filter))
             parts.Add($"({config.Filter})");
 
         return string.Join(" and ", parts);
+    }
+
+    /// <summary>
+    /// Wave D6 (task 035) — builds the hybrid dual-read OR-filter for a subject of shape
+    /// <c>&lt;scheme&gt;:&lt;entityId&gt;</c>. Returns null when the subject is malformed (caller falls
+    /// back to other narrowing dimensions or the validator rejects).
+    /// </summary>
+    internal static string? BuildSubjectScopeFilter(string subjectScope)
+    {
+        var colonIdx = subjectScope.IndexOf(':');
+        if (colonIdx <= 0 || colonIdx >= subjectScope.Length - 1)
+        {
+            return null;
+        }
+
+        var scheme = subjectScope[..colonIdx].Trim().ToLowerInvariant();
+        var entityId = subjectScope[(colonIdx + 1)..].Trim();
+        if (string.IsNullOrWhiteSpace(scheme) || string.IsNullOrWhiteSpace(entityId))
+        {
+            return null;
+        }
+
+        var escapedId = EscapeODataValue(entityId);
+        var escapedScheme = EscapeODataValue(scheme);
+
+        // Matter subjects: dual-read OR-filter per design-a6 §4.5 — covers Phase 1
+        // Observations carrying only scope.matterId AND Phase 1.5 Observations carrying both.
+        if (string.Equals(scheme, "matter", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"(scope/matterId eq '{escapedId}' or " +
+                   $"(scope/entityType eq 'matter' and scope/entityId eq '{escapedId}'))";
+        }
+
+        // All other schemes: canonical (entityType, entityId) filter only.
+        return $"(scope/entityType eq '{escapedScheme}' and scope/entityId eq '{escapedId}')";
     }
 
     private static string EscapeODataValue(string value) =>
@@ -314,6 +373,22 @@ public sealed class IndexRetrieveNode : INodeExecutor
     {
         var doc = hit.Document;
         string? GetString(string key) => doc.TryGetValue(key, out var v) ? v?.ToString() : null;
+
+        // Wave D6 (task 035) — project the top-level scope ComplexType so downstream
+        // consumers (Wave E1 RAG retriever) can read entityType + entityId without re-parsing
+        // the subject.
+        InsightRowScope? scope = null;
+        if (doc.TryGetValue("scope", out var scopeObj) && scopeObj is IDictionary<string, object?> scopeDict)
+        {
+            scope = new InsightRowScope
+            {
+                MatterId = scopeDict.TryGetValue("matterId", out var mid) ? mid?.ToString() : null,
+                EntityType = scopeDict.TryGetValue("entityType", out var et) ? et?.ToString() : null,
+                EntityId = scopeDict.TryGetValue("entityId", out var eid) ? eid?.ToString() : null,
+                TenantId = scopeDict.TryGetValue("tenantId", out var tid) ? tid?.ToString() : null,
+                PracticeArea = scopeDict.TryGetValue("practiceArea", out var pa) ? pa?.ToString() : null
+            };
+        }
 
         return new InsightRowProjection
         {
@@ -331,7 +406,8 @@ public sealed class IndexRetrieveNode : INodeExecutor
             AsOf = doc.TryGetValue("asOf", out var ts) && ts is DateTimeOffset dto
                 ? dto
                 : (DateTimeOffset?)null,
-            Score = hit.Score
+            Score = hit.Score,
+            Scope = scope
         };
     }
 }
@@ -370,6 +446,18 @@ internal sealed record IndexRetrieveNodeConfig
 
     [JsonPropertyName("requireEvidence")]
     public bool? RequireEvidence { get; init; }
+
+    /// <summary>
+    /// Wave D6 (task 035) — optional subject scope filter of shape <c>&lt;scheme&gt;:&lt;entityId&gt;</c>
+    /// (e.g., <c>"matter:M-2024-0341"</c>, <c>"project:p-abc"</c>, <c>"invoice:i-xyz"</c>).
+    /// When set, the node emits the hybrid dual-read OR-filter per design-a6 §4.5 — for
+    /// matter subjects this is <c>(scope/matterId eq … or (scope/entityType eq 'matter' and
+    /// scope/entityId eq …))</c>, preserving NFR-08 backward-compat with Phase 1 Observations
+    /// that carry only <c>scope.matterId</c>. For non-matter schemes the filter narrows by
+    /// <c>scope/entityType</c> + <c>scope/entityId</c> only.
+    /// </summary>
+    [JsonPropertyName("subjectScope")]
+    public string? SubjectScope { get; init; }
 }
 
 /// <summary>
@@ -401,4 +489,26 @@ public sealed record InsightRowProjection
     public string? Status { get; init; }
     public DateTimeOffset? AsOf { get; init; }
     public double? Score { get; init; }
+
+    /// <summary>
+    /// Wave D6 (task 035) — projection of the index's top-level <c>scope</c> ComplexType per
+    /// design-a6 §4. Null for Phase 1 Observations written before Wave D6 migration; populated
+    /// for Phase 1.5+ Observations.
+    /// </summary>
+    public InsightRowScope? Scope { get; init; }
+}
+
+/// <summary>
+/// Wave D6 (task 035) — flattened projection of the <c>scope</c> ComplexType fields per
+/// design-a6 §4. Mirrors <see cref="Sprk.Bff.Api.Services.Ai.Insights.Ingest.ScopeIndexEntry"/>
+/// (which is internal to the Ingest namespace); this Zone A public shape is consumed by
+/// downstream nodes + Wave E1 RAG retriever.
+/// </summary>
+public sealed record InsightRowScope
+{
+    public string? MatterId { get; init; }
+    public string? EntityType { get; init; }
+    public string? EntityId { get; init; }
+    public string? TenantId { get; init; }
+    public string? PracticeArea { get; init; }
 }

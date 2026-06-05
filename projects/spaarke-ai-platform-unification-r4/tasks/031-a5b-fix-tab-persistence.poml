@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>A-5b Fix tab persistence (FR-05 remediation phase)</title>
+    <phase>Phase 3: UQ-03 verify + fix</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, frontend, react, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api` and `frontend`; modifies code; 11+ steps; depends on verification gate 030. code-review + adr-check required at Step 9.5.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 030 verification result — fix path is unknown until 030 publishes.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the tab-persistence remediation defined by task 030's verification memo (FR-05 fix phase). Fix path is one of three, chosen by 030's "actually-broken gap" recommendation: (a) sessionStorage → localStorage migration for browser-close survival; (b) BFF-side persistence layer change (session-id stability across browser-close); (c) default-active-tab logic correction. Implement only the recommended path, write tests, deploy, and obtain operator confirmation. If the fix lands in BFF code, CLAUDE.md §10 Placement Justification is REQUIRED in the implementation notes.
+  </prompt>
+
+  <role>
+    Full-stack engineer comfortable with React 19 + TypeScript (frontend persistence) AND .NET 8 Minimal API + Cosmos persistence (BFF route). Strong on ADR-028 function-based auth — no token snapshots regardless of path. Honors scope ceiling: implements ONLY what 030 recommended.
+  </role>
+
+  <goal>
+    The verified-broken gap from 030 is closed: (a) production code change shipped per 030's recommendation; (b) unit + e2e tests cover the regression; (c) operator-observable smoke confirms refresh + close/reopen match FR-05 expectation; (d) `projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-fix-2026-05.md` documents decision + Placement Justification (if BFF) + smoke evidence; (e) FR-05 acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      Task 030 verified current state and identified the actually-broken gap. Three possible paths: (a) sessionStorage → localStorage migration if `chatSessionId` is in sessionStorage and lost on browser-close (risk: localStorage persists indefinitely; needs clear-on-logout per ADR-028); (b) BFF persistence-layer change if BFF session lookup key is unstable across browser-close — introduce stable user/workspace-scoped lookup in `SessionPersistenceService` (requires Placement Justification per CLAUDE.md §10); (c) default-active-tab logic correction if tabs DO persist but active-tab default is wrong — small change in `WorkspaceTabManager.restoreFromPersistence()` or `WorkspacePane.tsx` mount effect. Path chosen in 030 — this task implements it. Multi-file work: serialize BFF schema → frontend consumer.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-verification-2026-05.md (REQUIRED — drives scope)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs (if BFF path)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs (if schema change)</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-fix-2026-05.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Function-based auth: `authenticatedFetch` from `@spaarke/auth` for every BFF call. NO token snapshots. If localStorage migration chosen, migrated key MUST NOT contain auth tokens.</constraint>
+    <constraint source="ADR-013">If BFF touched: stay within `Sprk.Bff.Api`; no new service; consume AI via `PublicContracts/` facade only.</constraint>
+    <constraint source="ADR-010">No new BFF DI feature modules. Extend existing modules.</constraint>
+    <constraint source="ADR-022">React 19 only — no React 16 fallbacks.</constraint>
+    <constraint source="root-CLAUDE.md §10">If any code lands in `Sprk.Bff.Api/`: Placement Justification REQUIRED in fix memo; verify publish size ≤60 MB compressed (NFR-01); cite `.claude/constraints/bff-extensions.md`.</constraint>
+    <constraint source="spec">FR-05 — operator-confirmed end-to-end behavior, not just unit-test green.</constraint>
+    <constraint source="project">Scope ceiling: implement ONLY 030's recommended path. No "while I'm here" expansion. If 030's scope feels wrong, raise with operator.</constraint>
+    <constraint source="project">If localStorage introduced (path a): explicit clear-on-logout + NO PII/auth tokens (opaque ids only).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-verification-2026-05.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="R3 task 065 baseline" location="src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx">Debounced PATCH write-through + GET on mount. Most fix paths extend this rather than replacing it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load 030 memo + confirm fix path">Read the verification memo end-to-end. Confirm the actually-broken gap is well-defined and the recommended path is one of (a/b/c). If unresolved questions remain, STOP and escalate per CLAUDE.md §6.</step>
+    <step order="2" name="Design + Placement Justification">Sketch the minimal change (files, API contract, storage keys, or state-machine changes). Write design as opening section of `tab-persistence-fix-2026-05.md`. Include Placement Justification (REQUIRED if BFF) citing `bff-extensions.md` criteria.</step>
+    <step order="3" name="Implement frontend (path a or c)">If (a): migrate storage key, add clear-on-logout, ensure no PII/tokens. If (c): modify `restoreFromPersistence()` or WorkspacePane mount effect for spec-correct default. JSDoc references FR-05. Do NOT mix paths.</step>
+    <step order="4" name="Implement BFF (path b)">Modify `SessionPersistenceService` (+`StoredSession.cs` if schema change) for stable user/workspace-scoped lookup. Extend tabs[] schema additively. Update PATCH/GET routes preserving the endpoint filter chain (ADR-008). Register new DI in existing module (ADR-010).</step>
+    <step order="5" name="Update frontend consumer (path b)">If path (b) shifted contract, update `WorkspacePane.tsx` to the new lookup key. Continue with `authenticatedFetch` (ADR-028). No token snapshots.</step>
+    <step order="6" name="Write unit tests">Frontend: add cases to `__tests__/WorkspaceTabManager.test.ts`. BFF: add cases to `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/` covering new behavior + backwards-compat with existing Cosmos docs.</step>
+    <step order="7" name="Build + test + publish-size">Run `dotnet build src/server/api/Sprk.Bff.Api/` (0 errors), `npm run build` in `src/solutions/SpaarkeAi/`, `dotnet test`, `npm run test`. If BFF touched: `dotnet publish -c Release` and verify compressed size ≤60 MB (NFR-01); document delta in fix memo. If regressed, STOP and re-evaluate.</step>
+    <step order="8" name="Operator smoke">Via `ui-test` skill or operator-driven, execute both acceptance scenarios: (A) refresh — 3 tabs restored + correct active tab; (B) close/reopen — behavior matches spec expectation per 030 memo. Document evidence in fix memo.</step>
+    <step order="9" name="Quality gates (FULL rigor Step 9.5)">Invoke `/code-review` and `/adr-check` on changed files. Address HIGH-severity findings. Document gate output in fix memo.</step>
+    <step order="10" name="Finalize fix memo">Complete the memo with: design decision (path + rationale + scope honored); Placement Justification (if BFF); files modified; test coverage; build + publish-size evidence; operator smoke; gate output; known limitations (no scope expansion).</step>
+    <step order="11" name="Update TASK-INDEX + document deviations">Update TASK-INDEX.md row 031 → ✅ completed. Mark FR-05 satisfied if smoke confirmed, else `in-progress (awaiting operator smoke)`. If any deviation from 030's recommendation, document + escalate before merging.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">030 memo + persistence-stack source files</tool>
+    <tool name="Grep">Locate storage call sites + consumer code</tool>
+    <tool name="Edit">Modify source files per chosen path</tool>
+    <tool name="Write">Fix memo + new tests</tool>
+    <tool name="dotnet">Build BFF + run unit tests + publish-size verification</tool>
+    <tool name="npm">Build frontend + run unit tests</tool>
+    <tool name="terminal">Shell commands for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">[Path depends on 030's recommendation — frontend: WorkspaceTabManager.ts / WorkspacePane.tsx; BFF: SessionPersistenceService.cs / StoredSession.cs / ChatEndpoints.cs]</output>
+    <output type="test">[Test files added/modified — frontend __tests__ and/or tests/unit/Sprk.Bff.Api.Tests/]</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/tab-persistence-fix-2026-05.md (NEW)</output>
+    <output type="report">Completion report with fix-path decision, files changed, build + smoke evidence, FR-05 satisfaction status</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Tab persistence across browser refresh (FR-05 / R3 NFR-09 regression)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Sign in and navigate to SpaarkeAi; open 3 non-Home tabs via Context wizards (e.g., Create Matter, Create Project, Find Similar)</step>
+        <step>Confirm Home + 3 non-Home tabs (4 total); note the active tab</step>
+        <step>Press Ctrl+R / Cmd+R; wait for SpaarkeAi to fully load</step>
+        <step>Verify all 3 non-Home tabs restored in same order; previously-active tab is still active</step>
+        <step>Check browser console for telemetry errors (TELEMETRY_TAB_RESTORE_LOAD_FAILURE etc.)</step>
+      </steps>
+      <expected>All 3 non-Home tabs restored; active tab matches pre-refresh; no console errors.</expected>
+    </test>
+
+    <test name="Tab persistence across browser close/reopen (FR-05 / OC-R4-02 newly-uncovered scenario)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Sign in, navigate to SpaarkeAi, open 3 non-Home tabs; note the active tab</step>
+        <step>CLOSE the entire browser application (full window/process, not just the SpaarkeAi tab)</step>
+        <step>Reopen the browser and navigate back to SpaarkeAi (may require re-auth); wait for full load</step>
+        <step>Observe tab state vs spec expectation from 030 memo: if "tabs restored" → verify all 3 return; if "Home default" → verify only Home</step>
+        <step>Check browser console for telemetry errors</step>
+      </steps>
+      <expected>Behavior matches the spec expectation documented in 030's verification memo.</expected>
+    </test>
+
+    <test name="ADR-028 compliance (no token snapshots — regression guard)">
+      <steps>
+        <step>Open DevTools → Application → Storage; inspect sessionStorage + localStorage for keys matching `*token*` / `*bearer*` / `*spaarke*token*`</step>
+        <step>Inspect React props in React DevTools for `accessToken` props on any component</step>
+      </steps>
+      <expected>No auth tokens in browser storage; no `accessToken` props (ADR-028 INV-3/INV-4).</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">030's memo exists and recommends a specific fix path; this task implements ONLY that path. Production code change shipped (minimal, focused diff) in `src/solutions/SpaarkeAi/` and/or `src/server/api/Sprk.Bff.Api/`.</criterion>
+    <criterion testable="true">Unit tests added covering the behavior change. `dotnet build src/server/api/Sprk.Bff.Api/` and `npm run build` in `src/solutions/SpaarkeAi/` succeed with 0 errors and no new warnings.</criterion>
+    <criterion testable="true">If BFF touched: `dotnet publish` compressed size ≤60 MB (NFR-01); Placement Justification documented citing `bff-extensions.md` criteria; no new direct `IOpenAiClient` / `IPlaybookService` injections outside `Services/Ai/` (F-2 baseline preserved).</criterion>
+    <criterion testable="true">ADR-028 invariants preserved: no `accessToken` props/state; all BFF calls use `authenticatedFetch`; no auth tokens in sessionStorage/localStorage.</criterion>
+    <criterion testable="true">Operator smoke confirms refresh + close/reopen match FR-05 spec expectation (evidence in fix memo). `/code-review` + `/adr-check` quality gates run; HIGH-severity findings addressed.</criterion>
+    <criterion testable="true">`tab-persistence-fix-2026-05.md` documents decision, Placement Justification (if BFF), files modified, test coverage, smoke evidence, gate output. TASK-INDEX.md row 031 → ✅ completed; FR-05 marked satisfied (or `in-progress` pending operator smoke).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Scope ceiling is load-bearing. R3 task 065 was a large multi-file rewrite; A-5b is a focused fix on the specific gap 030 identifies. Resist "while I'm here" expansion — broader refactors are R5 candidates. 030's memo IS the design doc; if unclear, escalate before writing code. Effort range by path: (c) ~2-3h frontend-only; (a) ~3-4h frontend + clear-on-logout; (b) ~5-8h BFF + frontend + Placement Justification + publish-size check. The 6h estimate covers the median. If path (b), serialize BFF→frontend per multi-file decomposition guidance — don't parallelize the halves.
+  </notes>
+
+  <execution>
+    Execute via `task-execute` skill. FULL rigor — `/code-review` + `/adr-check` quality gates at Step 9.5 are mandatory. Multi-file change — Step 8.0 decomposition applies (path b: serialize BFF→frontend). Pre-execution requirement: 030 memo MUST exist and recommend a specific path. If 030 incomplete, STOP and run 030 first.
+  </execution>
+</task>

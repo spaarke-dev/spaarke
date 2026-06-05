@@ -3,7 +3,7 @@
 > **Created**: 2026-05-27
 > **Source**: R4 task 043 (W-5) discovery + operator decision 2026-05-27
 > **Status**: Design (pre-planning)
-> **Predecessor**: R4 task 043 (W-5) discovery; initial finding was captured in `notes/context-workspace-mount-pattern.md` in the R4 worktree (work-in-progress notes not merged to master). The [`spaarke-ai-platform-unification-r4`](../spaarke-ai-platform-unification-r4/) project root remains the historical reference. This document is the comprehensive write-up.
+> **Predecessor**: R4 [`notes/context-workspace-mount-pattern.md`](../spaarke-ai-platform-unification-r4/notes/context-workspace-mount-pattern.md) captured the initial finding; this document is the comprehensive write-up.
 
 ---
 

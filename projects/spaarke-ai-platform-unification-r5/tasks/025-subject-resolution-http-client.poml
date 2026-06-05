@@ -1,0 +1,875 @@
+<task id="025" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-15 Subject resolution from chat context + frontend HTTP client (`insights.query` consumption via `@spaarke/auth`)</title>
+    <status>complete</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>~2 hours (sub-agent code authoring; main session owns commit + quality gates + test execution)</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G6 (parallel-safe; sibling of 024, 026, 027, 028; dep 023)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>023 (R5 lead contract review + sign-off on `design-e3-tool-call-contract.md` v1.0 §10 — BLOCKING gate)</dependencies>
+    <tags>frontend, auth, http-client, insights, ai</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Build the frontend module that the SpaarkeAi shell uses to invoke the Insights
+    Assistant `POST /api/insights/assistant/query` endpoint on behalf of the chat
+    agent. Two responsibilities, intentionally co-located in one small module:
+
+    1. **Subject resolution from chat context** — read the SpaarkeAi shell's active
+       entity (matter / project / invoice) from URL params + `ThreePaneShell`
+       props (entityLogicalName + entityId set during launch; see
+       `src/solutions/SpaarkeAi/src/utils/launch-resolver.ts` for the canonical
+       inbound contract — `entityLogicalName` is the Dataverse logical name like
+       `sprk_matter` / `sprk_project` / `sprk_invoice`, `entityId` is the GUID with
+       braces stripped). Map the logical name to the contract v1.0 scheme token
+       (`matter` / `project` / `invoice`) and emit the binding `subject` string in
+       the format `&lt;scheme&gt;:&lt;guid&gt;` per integration brief §3 (request
+       schema). When no entity is in context, return a typed "no-subject" sentinel
+       so callers (slash command path task 019 + LLM tool-call path) can surface a
+       contract-shaped 400 `subject.required` -equivalent client-side error WITHOUT
+       a wasted BFF round-trip.
+
+    2. **HTTP client wiring** — POST the `{ query, subject, forceMode? }` payload
+       to the BFF endpoint via the **existing** `@spaarke/auth` `useAuth()` hook
+       and `authenticatedFetch` function (per R5 CLAUDE.md §3.1 reuse mandate +
+       ADR-028 auth architecture). Generate a per-call `x-correlation-id` request
+       header (FR-17 / SC-16) and surface it in the client-side log + return shape
+       so the renderer (task 026) can include it in error UX per integration brief
+       §5.1. Opt into **v1.1 SSE** by sending `Accept: text/event-stream` on the
+       request; if the server returns **406 Not Acceptable** (v1.0-only deployment),
+       fall back to parsing JSON per the contract v1.0 envelope (graceful
+       degradation per spec NFR-11). The fallback is binding regardless of Wave F
+       deploy timing.
+
+    R5 is configuration-first + reuse-first: this task adds ZERO new auth
+    primitives, ZERO new feature flags, ZERO BFF code changes. It introduces ONE
+    small frontend module (the subject-resolver + HTTP-client wrapper) that the
+    LegalWorkspace / SpaarkeAi shell dispatches when the chat agent calls
+    `insights.query` (BFF-side handler from task 024 is the actual tool function;
+    THIS task is the client side that originates the HTTP — the BFF tool handler
+    runs server-side and is wired separately; this module is the SHELL-side
+    dispatcher that the slash command path task 019 + chat-pane orchestration
+    invoke to call the BFF directly when the slash command bypasses the
+    chat-agent path, AND the shared client primitive used by the response
+    renderer task 026 for client-initiated retries).
+
+    Note: there are two HTTP-client surfaces in R5 for `/api/insights/assistant/
+    query`: (a) the BFF-side typed-client in task 024 used inside the chat-agent
+    tool function; (b) THIS task's frontend client used when the slash command
+    path / direct-renderer-retry path needs to call the endpoint without
+    round-tripping through the chat agent. The contract is the same v1.0/v1.1
+    shape. The two clients MUST stay aligned on subject formatting + correlation-
+    id semantics — the BFF-side client owns auth via the existing OBO flow;
+    THIS frontend client owns auth via `@spaarke/auth`'s `authenticatedFetch`
+    (BrowserMsal strategy in code-page contexts, OfficeNaa strategy in Office
+    Add-in contexts — both already configured at app boot via `initAuth(...)`).
+  </prompt>
+
+  <role>
+    Senior frontend developer fluent in the Spaarke `@spaarke/auth` library
+    (`useAuth()` + `authenticatedFetch` + `BrowserMsalStrategy` + `OfficeNaaStrategy`),
+    the SpaarkeAi three-pane shell launch contract (`launch-resolver.ts`,
+    `ThreePaneShell` props, `useShellStage()` per ADR-031), the Spaarke Insights
+    Assistant integration brief v1.0 (request/response schemas, 12 error codes),
+    SSE streaming consumption patterns (existing `summarizeService.ts` reference),
+    and ProblemDetails error parsing per ADR-019. Deep familiarity with R5
+    CLAUDE.md §3.1 reuse mandate, §3.5 Insights governance, §10 no-token-snapshot
+    rule, and ADR-028 Spaarke Auth v2 architecture (BrowserMsal + OfficeNaa
+    strategies, fresh-token-per-call discipline).
+  </role>
+
+  <goal>
+    A small, testable frontend module — `src/solutions/SpaarkeAi/src/services/
+    insightsQueryClient.ts` (or the equivalent shared-library location if
+    cohesion warrants relocation to `@spaarke/auth`-adjacent shared code; decided
+    at Step 3) — exports two public symbols:
+
+    1. **`resolveSubject(): { subject: string; scheme: 'matter' | 'project' |
+       'invoice'; entityId: string } | { kind: 'no-subject' }`** — reads the
+       active entity from the SpaarkeAi shell's launch params (URL + `App.tsx`
+       props) and emits the contract-shaped `&lt;scheme&gt;:&lt;guid&gt;`
+       string. Maps `sprk_matter` → `matter`, `sprk_project` → `project`,
+       `sprk_invoice` → `invoice`; any other logical name returns `no-subject`.
+
+    2. **`callInsightsQuery({ query, subject, forceMode?, signal? }): Promise&lt;
+       InsightsQueryResult&gt;`** — POSTs to `/api/insights/assistant/query`
+       via `authenticatedFetch` (relative URL — the auth library resolves the
+       BFF base URL per `IAuthConfig`). Generates a fresh `x-correlation-id`
+       per call via `crypto.randomUUID()`. Sends `Accept: text/event-stream`
+       to opt into v1.1 SSE. On 406 falls back to a second call with
+       `Accept: application/json` and parses the v1.0 single-shot envelope.
+       On 200 + `Content-Type: text/event-stream` parses incremental SSE
+       events via the existing `summarizeService.ts` SSE-parse pattern (or
+       the shared SSE parser if already extracted). On 200 + `Content-Type:
+       application/json` parses the v1.0 envelope directly. On non-2xx
+       parses `application/problem+json` per ADR-019, preserves all 5
+       extension fields (`errorCode`, `correlationId`, `status`, `title`,
+       `detail`) per integration brief §5.1, and rejects the promise with a
+       typed `InsightsQueryError` carrying these fields. Returns a discriminated
+       union: `{ kind: 'playbook'; ...envelope }` | `{ kind: 'rag'; ...envelope
+       }` (forwarded unchanged so the renderer task 026 maps per-path UX) plus
+       the captured `correlationId` for ops debugging.
+
+    The module is verified by unit tests covering: subject resolution mapping
+    (matter / project / invoice / no-subject); auth header set with fresh token
+    per call (NOT snapshotted — Test 4 simulates token rotation); correlation-id
+    header propagated end-to-end on every outbound request and returned to the
+    caller; SSE opt-in succeeds when the server returns 200 + `text/event-stream`
+    and the consumer receives incremental events; 406 fallback to JSON path
+    succeeds when the server is v1.0; all 12 contract error codes surface
+    structurally; v1.1 forward-compat preserves unknown response fields
+    (e.g., `citations[].href` per task 027).
+
+    Quality gates (`code-review` + `adr-check`) pass at Step 9.5. BFF publish-
+    size delta is 0 MB (no BFF code changed — pure frontend).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="binding-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="v1.1-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="dependency-task-023">projects/spaarke-ai-platform-unification-r5/tasks/023-r5-lead-contract-review-signoff.poml</file>
+    <file purpose="sibling-task-024-bff-client">projects/spaarke-ai-platform-unification-r5/tasks/024-insights-query-tool-handler.poml</file>
+    <file purpose="auth-library-index">src/client/shared/Spaarke.Auth/src/index.ts</file>
+    <file purpose="auth-useAuth">src/client/shared/Spaarke.Auth/src/useAuth.ts</file>
+    <file purpose="auth-authenticatedFetch">src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</file>
+    <file purpose="auth-types">src/client/shared/Spaarke.Auth/src/types.ts</file>
+    <file purpose="auth-errors">src/client/shared/Spaarke.Auth/src/errors.ts</file>
+    <file purpose="launch-resolver">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+    <file purpose="shell-stage-context">src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+    <file purpose="app-props">src/solutions/SpaarkeAi/src/App.tsx</file>
+    <file purpose="services-folder-convention">src/solutions/SpaarkeAi/src/services/notificationContextLoader.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1 / reuse mandate">MUST use the EXISTING `@spaarke/auth` `useAuth()` hook + `authenticatedFetch` function for ALL outbound HTTP. MUST NOT introduce a parallel auth client, a parallel token-acquisition path, a parallel BFF base-URL resolver, a parallel Bearer-header injector, or a new `fetch` wrapper. The auth library already handles: Bearer-header attachment, BFF base-URL resolution, 401 retry with exponential backoff, RFC 7807 ProblemDetails parsing, and broadcast-channel logout coordination. Reuse all of it.</constraint>
+    <constraint source="ADR-028 / R5 CLAUDE.md §10 no-token-snapshot">MUST NOT snapshot tokens. `useAuth()` returns a `getAccessToken: () =&gt; Promise&lt;string&gt;` and an `authenticatedFetch` function — both re-acquire fresh tokens from the provider's cache on every call (per `useAuth.ts` comment lines 35–46). The Insights client wrapper MUST call `authenticatedFetch` directly per request (or call `getAccessToken()` per request for SSE — the narrow escape hatch documented in `useAuth.ts` for `ReadableStream` lifecycle). MUST NOT cache the token in a closure, module-level variable, React state, or any other persistent surface. Verified by Test 4 (simulated token rotation mid-call sequence).</constraint>
+    <constraint source="R5 CLAUDE.md §3.5 / ADR-013 §3.5 Zone B boundary">R5 is a Zone B consumer of the Insights HTTP contract. This task is purely Zone B (frontend consumption). MUST NOT import any types from `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/` or `src/server/api/Sprk.Bff.Api/Models/Insights/` — these are server-internal. Define local TypeScript types (request/response DTOs) that mirror the contract v1.0 shape per integration brief §3 + §4. Use `[key: string]: unknown` index signatures or `Record&lt;string, unknown&gt;` passthrough on response DTOs for v1.1 forward-compat (`citations[].href`, additional SSE fields).</constraint>
+    <constraint source="contract v1.0 §3 (subject format)">Subject string format is `&lt;scheme&gt;:&lt;guid&gt;` where scheme is exactly `matter` / `project` / `invoice` (lowercase). GUID is the entity record ID with braces stripped (`launch-resolver.ts` already strips braces on inbound — preserve that discipline). Logical-name mapping is one-way: `sprk_matter` → `matter`, `sprk_project` → `project`, `sprk_invoice` → `invoice`. Any other logical name (or no entity in context) → `no-subject` sentinel. MUST NOT silently coerce or default to `matter` — that hides bugs.</constraint>
+    <constraint source="contract v1.0 §3.1 (query length)">Tool accepts `query` parameter (required, 1..500 chars). Client does NOT pre-truncate or pre-validate — the BFF returns 400 `query.required` for empty/whitespace and rejects oversize via ProblemDetails. Pass through unchanged.</constraint>
+    <constraint source="spec FR-17 / SC-16 (correlation-id propagation)">MUST generate a unique `x-correlation-id` per outbound call using `crypto.randomUUID()`. MUST set it as an HTTP request header on the call. MUST return it on the success result + on the typed error so the caller (chat-pane orchestration / renderer task 026) can surface it in UX + log it for App Insights / Kusto end-to-end correlation. Verified by Test 5.</constraint>
+    <constraint source="spec FR-16 (12 error codes) / ADR-019 (ProblemDetails parsing)">MUST parse non-2xx responses as `application/problem+json` per RFC 7807 + ADR-019 — `authenticatedFetch` already throws `ApiError` carrying `problemDetails`; extract the contract's 5 fields (`errorCode`, `correlationId`, `status`, `title`, `detail`) and re-throw a typed `InsightsQueryError`. Preserve all 12 contract error codes (integration brief §5.1): `query.required`, `subject.required`, `subject.invalid`, `forceMode.invalid`, `conversationContext.invalid`, `ai.insights.disabled`, `ai.rag.disabled`, `ai.intent-classification.disabled`, `ai.assistant-default-playbook.unconfigured`, `INSIGHTS_ASSISTANT_INTERNAL_ERROR`, plus `auth.401` (synthetic) + `rate-limit.429` (synthetic with Retry-After).</constraint>
+    <constraint source="spec NFR-11 / contract v1.1 forward-compat (SSE + 406 fallback)">MUST send `Accept: text/event-stream` to opt into v1.1 SSE. If server returns 406 (v1.0-only deployment), fall back to a second request with `Accept: application/json` and parse the v1.0 single-shot envelope. The fallback is BINDING regardless of Wave F deploy timing — Wave F may slip, may revert, or may co-deploy with R5 Phase 2 at any timing. The graceful-fallback behavior MUST work on day 1 of Phase 2.</constraint>
+    <constraint source="spec FR-12 / SC-17 (forceMode semantics)">Client accepts optional `forceMode: 'playbook' | 'rag'` parameter. Forwards unchanged to the BFF (or omits when undefined). MUST NOT default `forceMode` itself — the slash command path (task 019) sets it explicitly; the LLM tool-call path leaves it absent. Invalid values surface as the contract's 400 `forceMode.invalid` from the BFF.</constraint>
+    <constraint source="ADR-016 (rate-limit honoring)">On 429, surface the structured error (with `Retry-After` value extracted from response headers if present) — do NOT auto-retry in this client. The chat-agent orchestration (task 029) owns retry policy across the broader Insights surface.</constraint>
+    <constraint source="spec NFR-12 / ADR-019 (no content leakage in errors)">Errors NEVER include document content, prompt text, LLM raw output, or stack traces in the structured error returned to the caller. The 5 ProblemDetails fields are the ONLY information surfaced. `console.error` logging is allowed and includes correlationId for ops debugging.</constraint>
+    <constraint source="ADR-029 / R5 CLAUDE.md §3.6">BFF publish-size delta = 0 MB (no BFF code changed by this task). Confirm in task notes.</constraint>
+    <constraint source="CLAUDE.md §10 / project test obligation">PRs creating new frontend modules MUST add unit tests. Test paths follow `__tests__/` colocated convention used elsewhere in the SpaarkeAi project (e.g., `src/solutions/SpaarkeAi/src/components/context/__tests__/ContextPaneController.test.tsx`).</constraint>
+    <constraint source="ADR-031 / R5 §3 (shell stage context)">Subject resolution reads from the SpaarkeAi launch params (URL + `App.tsx` `entityLogicalName` / `entityId` / `matterId` props per `launch-resolver.ts`). MAY also consult `useShellStage()` for stage-aware behavior (e.g., emit `no-subject` during `welcome` stage). Do NOT re-derive entity context from a parallel source — the launch-resolver contract is the canonical inbound entry per spec §8.</constraint>
+    <constraint source="R5 CLAUDE.md §3.4 (PaneEventBus discipline)">This task does NOT add new PaneEventBus channels and does NOT add new event types beyond those already declared in §3.4 (additive event types only). Subject resolution is a synchronous read of mount-time launch params — no event-driven coupling needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/auth-library-consumption + frontend/zone-b-http-consumption</topic>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/index.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/useAuth.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/types.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/errors.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/buildBffApiUrl.ts</file>
+      <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file>src/solutions/SpaarkeAi/src/App.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-019-error-handling.md</file>
+      <file>.claude/adr/ADR-031-shell-stage-context.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+    <patterns>
+      <pattern name="`useAuth()` consumption (canonical reference)" location="src/client/shared/Spaarke.Auth/src/useAuth.ts">
+        Inside a React component, call `const { authenticatedFetch, getAccessToken } = useAuth();`. Call `authenticatedFetch(url, init)` per HTTP request — it returns the raw Response on 2xx and throws `ApiError` (with `.problemDetails`) on non-2xx or `AuthError` on auth failure after retries. Bearer header + 401 retry + ProblemDetails parsing are already handled. Use `getAccessToken()` directly only when `authenticatedFetch` cannot wrap (SSE `ReadableStream` lifecycle — but `authenticatedFetch` actually CAN handle SSE since it returns a `Response` whose body is a `ReadableStream`; verify at Step 4).
+      </pattern>
+      <pattern name="Relative URL → BFF base URL resolution" location="src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts (lines 28–31, 88–94)">
+        Pass a relative URL like `/api/insights/assistant/query`; `authenticatedFetch` resolves it against `provider.getConfig().bffBaseUrl` via `buildBffApiUrl`. Do NOT hand-concatenate the BFF base URL or duplicate the `/api/` prefix.
+      </pattern>
+      <pattern name="ProblemDetails extraction from `ApiError`" location="src/client/shared/Spaarke.Auth/src/errors.ts + authenticatedFetch.ts">
+        `ApiError` constructor receives `(message, status, problemDetails)`. In the `catch` block of the Insights client, narrow to `ApiError` (e.g., `if (err instanceof ApiError)`), extract `err.problemDetails`, then read `errorCode` (extension), `correlationId` (extension), `status`, `title`, `detail`. Re-throw a typed `InsightsQueryError` so callers can `instanceof`-check.
+      </pattern>
+      <pattern name="SpaarkeAi launch params → entity context" location="src/solutions/SpaarkeAi/src/utils/launch-resolver.ts + src/solutions/SpaarkeAi/src/App.tsx">
+        `App.tsx` receives `entityLogicalName` + `entityId` + `matterId` from URL params via `launch-resolver.ts`. Read these via either the props down-flow (preferred — cleaner contract) or via the same URL-param parsing used by `main.tsx`. For R5 the simplest pattern is: accept the entity context as a parameter passed in by the caller (chat-pane orchestration / slash command handler) rather than re-querying URL params inside the resolver — keeps the module pure + unit-testable.
+      </pattern>
+      <pattern name="Logical-name → contract scheme mapping" location="(new — defined inside this task's module)">
+        Hardcode the mapping table inside this module:
+        `const SCHEME_BY_LOGICAL_NAME: Record&lt;string, 'matter' | 'project' | 'invoice'&gt; = { 'sprk_matter': 'matter', 'sprk_project': 'project', 'sprk_invoice': 'invoice' };`
+        Any other logical name → return `{ kind: 'no-subject' }`. Validate with a unit test covering all three known names + an unknown name + missing context.
+      </pattern>
+      <pattern name="SSE consumption with content-type discrimination" location="(repo-wide SSE consumption precedent — search `summarizeService.ts` or equivalent if extracted)">
+        After `authenticatedFetch` returns, inspect `response.headers.get('content-type')`. If it starts with `text/event-stream`, consume `response.body` as a `ReadableStream`, parse line-buffered SSE events (`event: ...`, `data: ...`, blank line terminator) per WHATWG EventSource spec. If `application/json`, call `response.json()` and parse the v1.0 envelope. Either path yields the same discriminated-union result type.
+      </pattern>
+      <pattern name="406 fallback semantics" location="(spec NFR-11)">
+        If `authenticatedFetch` throws `ApiError` with `status === 406`, retry the call once with `Accept: application/json` instead of `Accept: text/event-stream`. Treat any other non-2xx as a non-retryable error path. Keep the fallback path local — do NOT retry indefinitely (one retry only).
+      </pattern>
+      <pattern name="v1.1 forward-compat passthrough" location="(integration brief §4 + v1.1 spec)">
+        Define response DTOs with `[key: string]: unknown` index signature OR use `unknown` for the entire structured-result envelope shape and let the renderer (task 026) project the typed fields. The forward-compat goal: a v1.1 server that adds `citations[].href` does NOT require any changes in this task. Test 7 asserts unknown fields survive the round-trip.
+      </pattern>
+      <pattern name="Test colocation convention" location="src/solutions/SpaarkeAi/src/components/context/__tests__/ContextPaneController.test.tsx">
+        Place unit tests under `__tests__/` adjacent to the module. Use the same Vitest / Jest test runner already configured in `src/solutions/SpaarkeAi/package.json`. Mock `authenticatedFetch` and `useAuth` at the module boundary; do NOT mock `provider.getAccessToken` internally — keep the test surface at the public auth API.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice AND the
+      Insights tool integration (`insights.query`) through the SpaarkeAi
+      three-pane shell. The Insights endpoint `POST /api/insights/assistant/
+      query` is consumed from two distinct surfaces: (a) BFF-side, from inside
+      the `InsightsQueryToolHandler` chat-agent tool function (task 024 —
+      uses `IHttpClientFactory` typed-client + OBO from `HttpContext`); (b)
+      Frontend-side, from the SpaarkeAi shell when the slash command path
+      (`/ask-insights ...`, task 019) bypasses the chat-agent and dispatches
+      directly to the endpoint, AND when the response renderer (task 026)
+      needs to issue a client-initiated retry. This task (D2-15) ships
+      surface (b).
+
+      Both surfaces share the same v1.0/v1.1 contract (integration brief
+      `notes/insights-engine-assistant-integration-brief.md` §3–§5 + v1.1
+      negotiation `notes/insights-engine-contract-v1.1-request.md`). The
+      contract is binding at v1.0; v1.1 (SSE for RAG-path `answer` streaming +
+      clickable `citations[].href`) is Wave F deliverable currently in-flight
+      via Claude Code on the Insights team branch (`work/ai-spaarke-insights-
+      engine-r2-wave-f`). R5 ships with graceful v1.0 fallback per spec
+      NFR-11 — this task's 406 fallback semantics are the binding mechanism
+      for that contract.
+
+      Subject resolution: the SpaarkeAi shell launches with an entity context
+      (matter / project / invoice) carried in URL params per `launch-resolver
+      .ts`. The launch contract is canonical — `entityLogicalName` is the
+      Dataverse logical name (e.g., `sprk_matter`), `entityId` is the GUID
+      with braces stripped. This task maps `sprk_matter` / `sprk_project` /
+      `sprk_invoice` to the contract's scheme tokens (`matter` / `project` /
+      `invoice`) and emits the binding `&lt;scheme&gt;:&lt;guid&gt;` string
+      per integration brief §3. The mapping is one-way and exhaustive — no
+      other logical names map to subjects. When no entity is in context
+      (e.g., welcome stage before launch), the resolver returns a typed
+      `no-subject` sentinel so the caller can surface a contract-shaped
+      error WITHOUT a wasted BFF round-trip (avoids the 400 `subject.required`
+      hit cycle).
+
+      Auth: `@spaarke/auth` is the existing Spaarke Auth v2 library shipped
+      across all frontend surfaces (Code Pages, PCF, Office Add-ins per
+      ADR-028). `useAuth()` returns a function-based API (`getAccessToken`,
+      `authenticatedFetch`) — intentionally NOT a token snapshot. The
+      provider's in-memory cache returns fresh tokens per call; reactive
+      updates are NOT a feature (see `useAuth.ts` line 36–46 comment). R5
+      consumes the existing API exactly as documented; introduces ZERO new
+      auth primitives.
+
+      v1.1 SSE opt-in: the contract permits the server to choose response
+      shape based on `Accept` header. Sending `Accept: text/event-stream`
+      requests v1.1 SSE; server returns 200 + `Content-Type: text/event-
+      stream` when v1.1 is deployed, or 406 Not Acceptable when only v1.0 is
+      deployed. The client retries the 406 with `Accept: application/json`
+      and parses the v1.0 envelope. The two response shapes are forwarded to
+      the caller as a discriminated union (`{ kind: 'playbook'; envelope }`
+      | `{ kind: 'rag'; envelope }`) — the SSE branch progressively yields
+      `delta` events that the renderer (task 026) renders incrementally; the
+      JSON branch yields a single resolved envelope.
+
+      Correlation-id (FR-17 / SC-16): every Assistant turn carries a unique
+      `x-correlation-id` end-to-end (client → BFF → Insights → AI services →
+      back). This client generates the ID via `crypto.randomUUID()` for
+      client-initiated calls (slash command path, direct retry); the BFF-side
+      tool handler in task 024 generates its own when the call originates
+      from the chat-agent tool function. Both surfaces forward the ID via the
+      `x-correlation-id` HTTP header. App Insights / Kusto traces correlate
+      end-to-end via the ID.
+
+      Reuse mandate: R5 CLAUDE.md §3.1 + spec §2.11 prohibit parallel auth
+      clients, parallel HTTP wrappers, parallel BFF base-URL resolvers. The
+      `@spaarke/auth` library provides every primitive this task needs;
+      ADD ZERO new auth code.
+    </background>
+    <dependencies>
+      <dependency task="023" status="required-blocking">
+        D2-13 — R5 lead contract review + sign-off on `design-e3-tool-call-
+        contract.md` v1.0 §10. This task is gated on operator-led sign-off +
+        the 6 contract-review decisions (D1–D6 per spec.md §8.2) being
+        recorded. Task 025 MUST NOT begin until task 023 is ✅. Specific
+        decisions consumed: D1 SSE deferral, D4 citation display-name
+        fallback shape (informs forward-compat behavior in this task).
+      </dependency>
+      <dependency task="024" status="parallel-sibling">
+        D2-14 — `InsightsQueryToolHandler` BFF-side tool handler (server-side
+        consumer of the same endpoint). This task (025) is the FRONTEND
+        consumer; task 024 is the BFF-side consumer. Both share the contract;
+        the subject format + correlation-id semantics MUST stay aligned.
+        Tasks 024 and 025 can run in parallel within P2-G6.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 019 (D2-09) — Slash command `/ask-insights` semantic
+        extension. Sets `forceMode` for unambiguous invocation per spec
+        FR-12 / SC-17. The slash command path is the primary client-side
+        invoker of `callInsightsQuery` (this task) outside of the chat-agent
+        tool function path.</item>
+      <item>Task 026 (D2-16) — `InsightsResponseRenderer` two-path React
+        component. Consumes the discriminated-union result type returned by
+        `callInsightsQuery`. Issues client-initiated retries on transient
+        errors via the same client.</item>
+      <item>Task 027 (D2-17) — Clickable citations (v1.1 `citations[].href`).
+        The forward-compat passthrough in this task ensures `href` survives
+        the response parsing; task 027 consumes it in the renderer.</item>
+      <item>Task 028 (D2-18) — Confidence floor badge (`&lt;0.6` threshold).
+        Reads `confidence` from the structured envelope; this task's loose
+        deserialization ensures it survives.</item>
+      <item>Task 029 (D2-19) — 12 Insights error codes + correlation
+        propagation + retry logic. This task surfaces ALL 12 error codes
+        structurally; task 029 layers retry policy + telemetry instrumentation
+        atop. Both must agree on the `InsightsQueryError` shape.</item>
+      <item>Task 030 (D2-20) — Insights tool smoke tests (synthetic GUIDs +
+        SME walkthrough). Validates this client end-to-end against Spaarke
+        Dev.</item>
+      <item>`@spaarke/auth` library — the existing Spaarke Auth v2 surface.
+        ADR-028 binds. This task consumes the library exactly as documented
+        in `index.ts` exports; introduces ZERO new primitives.</item>
+      <item>Existing `summarizeService.ts` SSE-parse pattern (cited in spec
+        §6 — Reuse). If this file does not exist in the repo, the SSE-parse
+        logic in this task can serve as a future shared primitive — but keep
+        it inline for now per YAGNI.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request
+      `/compact`. Declare RIGOR LEVEL explicitly per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend code change in auth-adjacent module (`@spaarke/auth`
+                 consumption) + Zone B HTTP consumption (Insights contract) +
+                 SSE consumption + correlation-id propagation (FR-17) + 12
+                 error codes (FR-16). Tags: frontend + auth + http-client +
+                 insights + ai. Qualifies for FULL per task-execute decision
+                 tree (modifies `.ts` files; new auth-adjacent module).
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 with Step 9.5 quality gates.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`. Confirm task 025 status is 🔲, dependency
+      023 is ✅ (BLOCKING gate — if 023 is 🔲, STOP and report; do not begin
+      Insights consumer work without contract sign-off), parallel-safe = true
+      (P2-G6), sibling 024 (parallel) + 026/027/028 (downstream consumers).
+      Read `current-task.md` to verify no conflicting R5 task is in flight.
+      Read project README for project status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      (a) Read `notes/insights-engine-assistant-integration-brief.md` in full —
+          BINDING contract v1.0. Internalize §3 (request schema with `query`,
+          `subject`, `forceMode`, `conversationContext`), §4 (response schema
+          both paths — playbook structured envelope vs RAG citation prose), §5
+          (12 error codes + per-code recommended action — column 4 drives
+          renderer UX in task 026).
+      (b) Read `notes/insights-engine-contract-v1.1-request.md` — confirm v1.1
+          shape: SSE event stream for RAG-path `answer` field; `citations[].
+          href` clickable-citation passthrough. v1.1 is forward-compat with
+          v1.0 — same envelope shape with additional fields.
+      (c) Read task 023's POML to confirm D1–D6 decisions (D1 = SSE deferral
+          decision drives whether v1.1 is in scope NOW vs Wave F coordination;
+          D4 = citation display-name fallback shape).
+      (d) Read task 024's POML to confirm shared semantics: subject format
+          (`&lt;scheme&gt;:&lt;guid&gt;`), correlation-id header name
+          (`x-correlation-id`), error-code preservation, v1.1 forward-compat
+          discipline. THIS task's frontend client MUST align with task 024's
+          BFF client.
+      (e) Read `useAuth.ts` + `authenticatedFetch.ts` + `types.ts` + `errors.
+          ts` end-to-end. Internalize: `useAuth()` returns `{ isAuthenticated,
+          getAccessToken, authenticatedFetch, tenantId, logout }`; tokens are
+          NOT snapshotted (line 36–46 comment); `authenticatedFetch` resolves
+          relative URLs against BFF base; 401 retries with backoff; non-2xx
+          throws `ApiError` with `.problemDetails`.
+      (f) Read `launch-resolver.ts` end-to-end. Confirm: `entityLogicalName`
+          + `entityId` shape, braces-stripping behavior, `matterId` alias
+          handling.
+      (g) Read `App.tsx` (lines 60–110 range) to confirm how
+          `entityLogicalName` / `entityId` flow as React props to the shell.
+      (h) Read ADR-028 (Auth v2), ADR-019 (ProblemDetails), ADR-031 (Shell
+          Stage Context) in full.
+    </step>
+    <step order="3" name="Module placement decision + interface design">
+      Decide module placement. Two candidates:
+
+      - **Candidate A**: `src/solutions/SpaarkeAi/src/services/insightsQuery
+        Client.ts` (alongside existing services like `notificationContextLoader.
+        ts`). Pros: localized to the SpaarkeAi shell where the only consumer
+        lives today; matches existing services folder convention. Cons:
+        future Office Add-in reuse would require extraction.
+      - **Candidate B**: `src/client/shared/Spaarke.AI.Insights.Client/src/
+        insightsQueryClient.ts` (or adjacent to `@spaarke/auth` as a new
+        shared module). Pros: future Office Add-in / PCF reuse without
+        re-extraction. Cons: more upfront scaffolding (new package, build
+        config) for a single consumer.
+
+      **Default decision**: Candidate A. Per YAGNI + R5 CLAUDE.md §3.1 reuse
+      mandate, do NOT create new shared-library packages without an existing
+      multi-consumer need. Record the decision in task notes
+      `notes/task-025-evidence.md`. If task 026's renderer would benefit from
+      the client being importable from `@spaarke/ai-widgets`, revisit at
+      task 026 time and migrate then.
+
+      Define the public interface (TypeScript types) inside the module:
+
+      ```ts
+      export type SubjectScheme = 'matter' | 'project' | 'invoice';
+
+      export interface ResolvedSubject {
+        kind: 'subject';
+        subject: string;        // `${scheme}:${entityId}` (canonical contract format)
+        scheme: SubjectScheme;
+        entityId: string;       // GUID without braces
+      }
+
+      export interface NoSubject {
+        kind: 'no-subject';
+      }
+
+      export interface InsightsQueryRequest {
+        query: string;          // 1..500 chars per contract §3.1
+        subject: string;        // canonical `&lt;scheme&gt;:&lt;guid&gt;` format
+        forceMode?: 'playbook' | 'rag';  // optional per FR-12 / SC-17
+        // conversationContext intentionally omitted from v1.0 — server tolerates absence
+      }
+
+      export interface InsightsQueryPlaybookResult {
+        kind: 'playbook';
+        correlationId: string;
+        envelope: Record&lt;string, unknown&gt;;  // structured envelope per integration brief §4.6
+      }
+
+      export interface InsightsQueryRagResult {
+        kind: 'rag';
+        correlationId: string;
+        envelope: Record&lt;string, unknown&gt;;  // citation-grounded envelope per integration brief §4.6
+      }
+
+      export type InsightsQueryResult = InsightsQueryPlaybookResult | InsightsQueryRagResult;
+
+      export class InsightsQueryError extends Error {
+        constructor(
+          public readonly errorCode: string,
+          public readonly correlationId: string,
+          public readonly status: number,
+          public readonly title: string,
+          public readonly detail: string,
+          public readonly retryAfterSeconds?: number
+        ) { super(`[${errorCode}] ${title}: ${detail}`); }
+      }
+      ```
+
+      Record interface in task notes for cross-reference by task 026.
+    </step>
+    <step order="4" name="Implement `resolveSubject` + `callInsightsQuery`">
+      Create `src/solutions/SpaarkeAi/src/services/insightsQueryClient.ts`.
+
+      **`resolveSubject(entityLogicalName?: string, entityId?: string):
+      ResolvedSubject | NoSubject`** — accept the entity context as parameters
+      (keeps the module pure + unit-testable; caller passes from
+      `App.tsx`/`ThreePaneShell` props). Implementation:
+
+      ```ts
+      const SCHEME_BY_LOGICAL_NAME: Record&lt;string, SubjectScheme&gt; = {
+        sprk_matter: 'matter',
+        sprk_project: 'project',
+        sprk_invoice: 'invoice',
+      };
+
+      export function resolveSubject(
+        entityLogicalName?: string,
+        entityId?: string,
+      ): ResolvedSubject | NoSubject {
+        if (!entityLogicalName || !entityId) return { kind: 'no-subject' };
+        const scheme = SCHEME_BY_LOGICAL_NAME[entityLogicalName];
+        if (!scheme) return { kind: 'no-subject' };
+        // Strip braces defensively (launch-resolver already does this, but be safe)
+        const cleanId = entityId.replace(/^\{|\}$/g, '');
+        if (!cleanId) return { kind: 'no-subject' };
+        return { kind: 'subject', subject: `${scheme}:${cleanId}`, scheme, entityId: cleanId };
+      }
+      ```
+
+      **`callInsightsQuery({ query, subject, forceMode, signal }, fetch?:
+      AuthenticatedFetchFn): Promise&lt;InsightsQueryResult&gt;`** —
+      Implementation outline:
+
+      1. Generate correlation ID: `const correlationId = crypto.randomUUID();`.
+      2. Build the request body: `{ query, subject, ...(forceMode &amp;&amp;
+         { forceMode }) }`. Do NOT include `forceMode` field when undefined
+         (lets the server distinguish "not specified" from "specified as
+         null").
+      3. First attempt — opt into v1.1 SSE:
+         ```ts
+         const response = await (fetch ?? authenticatedFetch)(
+           '/api/insights/assistant/query',
+           {
+             method: 'POST',
+             headers: {
+               'Content-Type': 'application/json',
+               'Accept': 'text/event-stream',
+               'x-correlation-id': correlationId,
+             },
+             body: JSON.stringify(body),
+             signal,
+           },
+         );
+         ```
+         (Note: `authenticatedFetch` injects `Authorization: Bearer ...` on
+         every call — fresh token per request per ADR-028.)
+      4. If `authenticatedFetch` throws `ApiError` with `status === 406` —
+         fallback path: retry once with `Accept: application/json` (same
+         body, same correlation-id, same other headers). If the fallback
+         path also fails, propagate.
+      5. On success — inspect `response.headers.get('content-type')`:
+         - If `text/event-stream` → consume SSE stream via `response.body`
+           reader; parse line-buffered events; collate `delta` events into
+           the envelope; on `complete` event emit the final result. (Detailed
+           SSE-parse implementation: lines below.)
+         - If `application/json` → `await response.json()` and parse the
+           envelope; emit single-shot result.
+      6. Discriminate result `kind`: read the `path` field from the response
+         envelope (`"playbook"` or `"rag"` per integration brief §4) and
+         return the appropriate discriminated-union shape with
+         `correlationId` attached.
+      7. On `ApiError` with non-406 status — extract `problemDetails`, throw
+         a new `InsightsQueryError` preserving `errorCode`, `correlationId`
+         (prefer the `correlationId` from `problemDetails` if present;
+         fallback to the client-generated `correlationId`), `status`,
+         `title`, `detail`, `retryAfterSeconds` (parsed from `Retry-After`
+         response header on 429 if present).
+      8. On `ApiError` with `status === 401` — server's 401 retry policy
+         already runs inside `authenticatedFetch`; if we still got 401 here,
+         it means auth is exhausted. Throw `InsightsQueryError` with
+         synthetic `errorCode = 'auth.401'`.
+      9. On `ApiError` with `status === 429` — extract `Retry-After`; throw
+         `InsightsQueryError` with synthetic `errorCode = 'rate-limit.429'`
+         + `retryAfterSeconds`.
+
+      **SSE parsing detail** (inside `callInsightsQuery`):
+
+      ```ts
+      async function parseSseResponse(response: Response): Promise&lt;Record&lt;string, unknown&gt;&gt; {
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let path: 'playbook' | 'rag' | null = null;
+        const envelope: Record&lt;string, unknown&gt; = {};
+        const deltaAccumulator: string[] = [];
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split(/\n\n/);
+          buffer = events.pop() ?? '';
+          for (const ev of events) {
+            const lines = ev.split(/\n/);
+            const eventType = lines.find(l =&gt; l.startsWith('event: '))?.slice(7);
+            const dataLine = lines.find(l =&gt; l.startsWith('data: '))?.slice(6);
+            if (!dataLine) continue;
+            const data = JSON.parse(dataLine) as Record&lt;string, unknown&gt;;
+            if (eventType === 'delta') {
+              deltaAccumulator.push(String(data.text ?? ''));
+            } else if (eventType === 'complete') {
+              Object.assign(envelope, data);
+              path = (data.path as 'playbook' | 'rag') ?? path;
+            } else if (eventType === 'metadata') {
+              Object.assign(envelope, data);
+              path = (data.path as 'playbook' | 'rag') ?? path;
+            }
+          }
+        }
+        if (deltaAccumulator.length &gt; 0 &amp;&amp; envelope.answer === undefined) {
+          envelope.answer = deltaAccumulator.join('');
+        }
+        return envelope;
+      }
+      ```
+
+      Use this consumer-mode SSE parser for the simple R5 dispatch case. For
+      progressive rendering (task 026's renderer needs incremental events),
+      task 026 may switch to a generator/observer-based variant; this client
+      provides the resolved-envelope variant as the baseline.
+
+      Add `getAccessToken` as an optional second parameter signature for
+      callers that need SSE with a different lifecycle (per `useAuth.ts`
+      line 9–11 SSE-escape-hatch comment) — but document that
+      `authenticatedFetch` is the canonical path and `getAccessToken` direct
+      use is reserved for non-fetch network primitives (none exist in R5
+      scope).
+
+      Document the public API in JSDoc on each exported symbol so VS Code
+      hover surfaces the contract semantics + ADR-028/FR-17/FR-16 references.
+
+      Verify Zone B boundary by grep — the new file MUST NOT import any
+      types from `src/server/api/...` paths.
+    </step>
+    <step order="5" name="Wire the client into the slash command path (touchpoint validation)">
+      The slash command path (`/ask-insights`, task 019) is the primary
+      client-side invoker. Task 019 produces the slash command handler; this
+      task's responsibility is to expose a clean `callInsightsQuery` API +
+      verify it is consumable from the slash command handler shape.
+
+      Document the integration contract in `notes/task-025-evidence.md`:
+      - Slash command handler reads the current entity context from
+        `App.tsx` props (`entityLogicalName` + `entityId`); calls
+        `resolveSubject(entityLogicalName, entityId)`; if `kind === 'no-
+        subject'` surfaces a client-side `subject.required`-shaped error to
+        the user (chat-pane orchestration handles UX); otherwise calls
+        `callInsightsQuery({ query, subject, forceMode })` where `forceMode`
+        is set by the slash sub-command (`/ask-insights playbook ...` →
+        `forceMode: 'playbook'`; `/ask-insights rag ...` → `forceMode:
+        'rag'`; bare `/ask-insights ...` → `forceMode: undefined`).
+      - The renderer (task 026) reads the result and dispatches to playbook
+        vs RAG view per `result.kind`. Errors surface via `InsightsQueryError`
+        → per-code UX (integration brief §5.1 column 4).
+
+      Do NOT modify slash command code in this task (that is task 019's
+      surface); just verify the integration contract is consumable. Cross-
+      reference the typeshape with task 019's POML when authoring.
+    </step>
+    <step order="6" name="Author tests (subject resolution, fresh-token-per-call, correlation-id, SSE, 406 fallback, error codes, forward-compat)">
+      Create `src/solutions/SpaarkeAi/src/services/__tests__/insightsQuery
+      Client.test.ts` with the project's existing test runner (Vitest per
+      SpaarkeAi convention).
+
+      - **Test 1 (subject resolution — happy paths)**: `resolveSubject('sprk_
+        matter', 'abc-123')` → `{ kind: 'subject', subject: 'matter:abc-123',
+        scheme: 'matter', entityId: 'abc-123' }`. Repeat for `sprk_project` →
+        `project` and `sprk_invoice` → `invoice`.
+      - **Test 2 (subject resolution — no-subject paths)**: `resolveSubject(
+        undefined, undefined)` → `{ kind: 'no-subject' }`. `resolveSubject(
+        'sprk_matter', undefined)` → `{ kind: 'no-subject' }`. `resolveSubject(
+        'sprk_account', 'abc-123')` → `{ kind: 'no-subject' }` (unmapped
+        logical name). `resolveSubject('sprk_matter', '{abc-123}')` →
+        braces stripped → `'matter:abc-123'`.
+      - **Test 3 (callInsightsQuery — v1.1 SSE happy path)**: Mock
+        `authenticatedFetch` to return a `Response` with `Content-Type:
+        text/event-stream` + a stub `ReadableStream` body emitting:
+        `event: metadata\ndata: {"path":"rag","correlationId":"abc"}\n\n`,
+        `event: delta\ndata: {"text":"Hello "}\n\n`, `event: delta\ndata:
+        {"text":"World"}\n\n`, `event: complete\ndata: {"answer":"Hello
+        World","citations":[]}\n\n`. Assert: returned `{ kind: 'rag',
+        correlationId: '&lt;client-generated&gt;', envelope: { path: 'rag',
+        correlationId: 'abc', answer: 'Hello World', citations: [] } }`.
+        Assert the request was sent with `Accept: text/event-stream` and
+        `x-correlation-id: &lt;uuid&gt;`.
+      - **Test 4 (no-token-snapshot — fresh token per call)**: Mock
+        `authenticatedFetch` to record the call sequence. Issue two
+        sequential `callInsightsQuery` invocations; mock `getAccessToken`
+        (via the mock `authenticatedFetch` indirection) to return distinct
+        tokens (`tokenA` first call, `tokenB` second call — simulates
+        rotation). Assert each outbound `Request` carries the
+        correctly-rotated token (or, equivalently, that
+        `authenticatedFetch` is called twice — once per invocation — and
+        the wrapper does NOT close over a cached token from the first
+        call). This validates the §10 / ADR-028 no-token-snapshot rule.
+      - **Test 5 (correlation-id propagation)**: Assert each call generates
+        a unique `crypto.randomUUID()` value, sets it as `x-correlation-id`
+        request header, and returns it as `result.correlationId`. Two
+        successive calls produce two distinct IDs.
+      - **Test 6 (v1.0 JSON path — direct, no fallback)**: Mock returns 200 +
+        `Content-Type: application/json` with a v1.0 envelope `{path:
+        "playbook", structuredResult: {...}, correlationId: "xyz"}`. Assert
+        returned `{ kind: 'playbook', correlationId: '&lt;client-generated&gt;',
+        envelope: {...} }`.
+      - **Test 7 (406 fallback to JSON)**: Mock first call (with `Accept:
+        text/event-stream`) returns 406; mock second call (with `Accept:
+        application/json`) returns 200 + JSON v1.0 envelope. Assert: two
+        outbound calls were made, second with `Accept: application/json`,
+        result correctly populated. Correlation-id is reused across the
+        two calls (same client-generated value).
+      - **Test 8 (12 error codes mapping)**: For each of the 12 contract
+        error codes (integration brief §5.1), mock `authenticatedFetch` to
+        throw `ApiError` with the appropriate ProblemDetails payload.
+        Assert `callInsightsQuery` throws `InsightsQueryError` preserving
+        `errorCode`, `correlationId` (from problemDetails), `status`,
+        `title`, `detail`. Codes: `query.required`, `subject.required`,
+        `subject.invalid`, `forceMode.invalid`, `conversationContext.
+        invalid`, `auth.401` (synthetic), `rate-limit.429` (synthetic with
+        retryAfterSeconds extracted), `ai.insights.disabled`, `ai.rag.
+        disabled`, `ai.intent-classification.disabled`, `ai.assistant-
+        default-playbook.unconfigured`, `INSIGHTS_ASSISTANT_INTERNAL_ERROR`.
+      - **Test 9 (forceMode semantics)**: `forceMode: undefined` → field
+        omitted from request body; `forceMode: 'playbook'` → field set in
+        request body; `forceMode: 'rag'` → field set; client does NOT
+        pre-validate values (a hypothetical `'garbage'` would be forwarded
+        — but TypeScript type narrows to `'playbook' | 'rag'` so this is a
+        compile-time guard, not a runtime one — document this).
+      - **Test 10 (v1.1 forward-compat)**: Mock returns 200 with extra
+        unknown fields (`citations[0].href = 'https://...'`, top-level
+        `streaming: true`, `confidence: 0.42`). Assert all unknown fields
+        survive in `result.envelope` unchanged (`Record&lt;string,
+        unknown&gt;` index-signature pass-through).
+      - **Test 11 (Zone B boundary grep)**: Programmatic test reading the
+        module source file content; assert no `import ... from 'src/server/
+        api/...'` or `../server/...` strings appear. Implement via Node's
+        `fs.readFileSync` on the source path or via an import-graph
+        analysis if a repo convention test exists.
+      - **Test 12 (Cancellation via AbortSignal)**: Pass an `AbortController.
+        signal` to `callInsightsQuery`; abort mid-call; assert the call
+        rejects with a typed cancellation error (DOMException `AbortError`
+        passthrough is acceptable — does NOT need to be wrapped in
+        `InsightsQueryError`).
+
+      Run `npm test` (or whichever Vitest invocation matches the SpaarkeAi
+      project's `package.json` `scripts.test`); all 12 tests MUST pass.
+    </step>
+    <step order="7" name="Smoke test against Spaarke Dev (sibling task 030 will exercise end-to-end)">
+      End-to-end smoke testing is the responsibility of task 030 (D2-20
+      Insights tool smoke tests with synthetic GUIDs + SME walkthrough). For
+      this task: confirm the module is consumable via TypeScript compilation
+      from a known consumer surface — open `App.tsx` (or another consumer
+      file that already imports from `src/solutions/SpaarkeAi/src/services/`)
+      in the IDE / via `tsc --noEmit` and verify the module's exports type-
+      check correctly. Capture the `tsc --noEmit` output in task notes.
+
+      Optionally: if Spaarke Dev BFF is reachable and an Insights endpoint is
+      available, run a quick manual cURL test through the BFF as a smoke
+      validation — but this is OPTIONAL since task 030 owns full end-to-end.
+    </step>
+    <step order="8" name="Update slash command path consumer signature (informational only — no code change)">
+      This task does NOT modify task 019's slash command code. Record the
+      integration contract in `notes/task-025-evidence.md` so task 019
+      (parallel-safe sibling P2-G5; may already be implemented or in
+      flight) has a clean consumption recipe. The contract:
+
+      ```ts
+      // Inside /ask-insights slash command handler (task 019 surface):
+      import { resolveSubject, callInsightsQuery, InsightsQueryError }
+        from '../services/insightsQueryClient';
+
+      const subjectResult = resolveSubject(entityLogicalName, entityId);
+      if (subjectResult.kind === 'no-subject') {
+        // Surface client-side `subject.required` to chat pane
+        emit({ kind: 'error', errorCode: 'subject.required',
+               detail: 'No entity in chat context.' });
+        return;
+      }
+      try {
+        const result = await callInsightsQuery({
+          query: userQuery,
+          subject: subjectResult.subject,
+          forceMode: slashSubCommand === 'playbook' ? 'playbook'
+                   : slashSubCommand === 'rag' ? 'rag' : undefined,
+        });
+        // Hand off to renderer (task 026):
+        renderInsightsResponse(result);
+      } catch (err) {
+        if (err instanceof InsightsQueryError) {
+          // Per-code UX (task 026's renderer): integration brief §5.1 column 4
+          renderInsightsError(err);
+        } else { throw err; }
+      }
+      ```
+    </step>
+    <step order="9" name="Verify acceptance criteria">
+      Walk through every `&lt;acceptance-criterion&gt;` below; confirm each
+      passes with concrete evidence (test output, log capture, file path).
+      Record per-criterion evidence in `notes/task-025-evidence.md`.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new module +
+      `__tests__/insightsQueryClient.test.ts`. Run `adr-check` skill against
+      the same; verify:
+      - **ADR-028 (Spaarke Auth v2, no token snapshot)**: tokens read fresh
+        per call via `authenticatedFetch`; Test 4 confirms.
+      - **ADR-013 §3.5 (Zone B boundary)**: client calls Insights via HTTP;
+        no `import ... from 'src/server/api/.../Insights'` paths; Test 11
+        confirms.
+      - **ADR-019 (ProblemDetails parsing)**: error path preserves
+        `errorCode` + `correlationId` + `status` + `title` + `detail`;
+        Test 8 confirms.
+      - **R5 CLAUDE.md §3.1 (reuse mandate)**: uses `@spaarke/auth`
+        primitives (`useAuth` / `authenticatedFetch`); zero parallel auth
+        code; reviewer inspection.
+      - **R5 CLAUDE.md §3.5 (Insights governance)**: HTTP consumption only;
+        no Insights-internal types injected; reviewer inspection.
+      - **ADR-016 (rate-limit honoring)**: 429 surfaced structurally with
+        retry-after; no in-client auto-retry; Test 8 confirms.
+
+      All gates MUST pass before marking the task complete.
+
+      BFF publish-size verification: `dotnet publish -c Release src/server/
+      api/Sprk.Bff.Api/ -o deploy/api-publish/`. Confirm delta = 0 MB
+      (frontend-only task; no BFF code touched). Record in task notes.
+
+      No CVE check required (frontend module adds no new npm dependencies —
+      consumes only existing `@spaarke/auth`).
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 025 🔲 →
+      ✅. Reset `current-task.md` to the next pending P2-G6 task per
+      CLAUDE.md §7 (likely 026 — the renderer that consumes this client).
+      Record in `notes/task-025-evidence.md`:
+      - Module placement decision (Candidate A — `src/solutions/SpaarkeAi/
+        src/services/insightsQueryClient.ts`).
+      - Public interface (the 5 exported types + 2 functions + 1 error
+        class) for cross-reference by tasks 026 / 027 / 028 / 029.
+      - Test run output (all 12 tests pass).
+      - `tsc --noEmit` output (clean).
+      - Correlation-id propagation evidence (Test 5 output).
+      - Fresh-token-per-call evidence (Test 4 output).
+      - SSE opt-in success + 406 fallback evidence (Tests 3 + 7 output).
+      - 12 error code mapping evidence (Test 8 output).
+      - v1.1 forward-compat evidence (Test 10 output).
+      - Zone B boundary grep result (Test 11 output).
+      - BFF publish-size delta (= 0 MB; pure frontend).
+      - Quality gates passing.
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + run Vitest test suite for the SpaarkeAi project (`npm test --workspace=SpaarkeAi` or equivalent per repo convention; verify via `package.json` scripts at Step 6)</tool>
+    <tool name="tsc">TypeScript compiler — run `tsc --noEmit` for type-check verification</tool>
+    <tool name="dotnet">Run `dotnet publish` for the BFF publish-size verification at Step 9.5 (expected delta = 0 MB; task is pure frontend)</tool>
+    <tool name="git">Stage + commit on the R5 branch (one logical commit for module + tests + docs)</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 (FULL rigor) — verify ADR-028, ADR-013 §3.5, ADR-019, ADR-016</tool>
+    <tool name="context-handoff">Checkpointing per R5 CLAUDE.md §5 (after Step 3, Step 6; verbose at &gt;60%)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/services/insightsQueryClient.ts (NEW — `resolveSubject` + `callInsightsQuery` + 5 exported types + `InsightsQueryError` class)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/services/__tests__/insightsQueryClient.test.ts (NEW — 12 tests including subject mapping, fresh-token-per-call, correlation-id propagation, SSE opt-in, 406 fallback, 12 error codes, v1.1 forward-compat, Zone B boundary grep, AbortSignal cancellation)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 025 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending P2-G6 task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-025-evidence.md (module placement decision, public interface for cross-reference, test run output, tsc clean, correlation-id evidence, fresh-token-per-call evidence, SSE + 406 fallback evidence, 12 error code mapping, v1.1 forward-compat, Zone B boundary grep, BFF publish-size delta = 0 MB, quality gates evidence)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Module `src/solutions/SpaarkeAi/src/services/insightsQueryClient.ts` exists and exports `resolveSubject`, `callInsightsQuery`, `InsightsQueryError`, plus the 5 supporting types (`SubjectScheme`, `ResolvedSubject`, `NoSubject`, `InsightsQueryRequest`, `InsightsQueryResult`).</criterion>
+    <criterion testable="true">`resolveSubject` correctly maps `sprk_matter` → `matter`, `sprk_project` → `project`, `sprk_invoice` → `invoice`; any other logical name OR missing entityId returns `{ kind: 'no-subject' }`; braces are stripped defensively; canonical subject format is `&lt;scheme&gt;:&lt;guid&gt;`. Confirmed by Tests 1 + 2.</criterion>
+    <criterion testable="true">`callInsightsQuery` POSTs to `/api/insights/assistant/query` via the EXISTING `@spaarke/auth` `authenticatedFetch` — no parallel auth client; reuse mandate satisfied (R5 CLAUDE.md §3.1).</criterion>
+    <criterion testable="true">Authorization header is set with a fresh token per call via `authenticatedFetch` (NOT snapshotted in module-level state, closure, or React state). Confirmed by Test 4 (simulated token rotation between two sequential calls).</criterion>
+    <criterion testable="true">`x-correlation-id` request header is generated via `crypto.randomUUID()` per call, propagated outbound, and returned to the caller on both success (`result.correlationId`) and error (`InsightsQueryError.correlationId`). Two sequential calls produce two distinct IDs. Confirmed by Test 5. (spec FR-17 / SC-16)</criterion>
+    <criterion testable="true">v1.1 SSE consumption works: when server returns 200 + `Content-Type: text/event-stream`, the client parses incremental SSE events (`metadata`, `delta`, `complete`) and resolves to the assembled envelope. Confirmed by Test 3.</criterion>
+    <criterion testable="true">v1.0 JSON path works directly when server returns 200 + `Content-Type: application/json` (no fallback needed). Confirmed by Test 6.</criterion>
+    <criterion testable="true">406 fallback to v1.0 JSON works: when first call (with `Accept: text/event-stream`) returns 406, client retries once with `Accept: application/json` reusing the same `x-correlation-id`. Confirmed by Test 7. (spec NFR-11 graceful fallback)</criterion>
+    <criterion testable="true">All 12 contract error codes from integration brief §5.1 surface as `InsightsQueryError` preserving `errorCode`, `correlationId`, `status`, `title`, `detail`, plus `retryAfterSeconds` for `rate-limit.429`. Codes verified: `query.required`, `subject.required`, `subject.invalid`, `forceMode.invalid`, `conversationContext.invalid`, `auth.401` (synthetic), `rate-limit.429` (synthetic), `ai.insights.disabled`, `ai.rag.disabled`, `ai.intent-classification.disabled`, `ai.assistant-default-playbook.unconfigured`, `INSIGHTS_ASSISTANT_INTERNAL_ERROR`. Confirmed by Test 8. (spec FR-16)</criterion>
+    <criterion testable="true">`forceMode` parameter works: `undefined` → field omitted from request body; `'playbook'` and `'rag'` → field forwarded; client does NOT pre-validate or default. Confirmed by Test 9. (spec FR-12 / SC-17)</criterion>
+    <criterion testable="true">v1.1 forward-compat: unknown response fields (e.g., `citations[].href`, top-level SSE/streaming fields, `confidence`) pass through unchanged in `result.envelope` (`Record&lt;string, unknown&gt;` index-signature passthrough). Confirmed by Test 10.</criterion>
+    <criterion testable="true">**Zone B boundary verified by explicit grep**: the new module file contains ZERO `import ... from 'src/server/api/...'` and ZERO references to server-internal Insights namespaces. Confirmed by Test 11 + reviewer inspection at Step 9.5. (R5 CLAUDE.md §3.5 + §10)</criterion>
+    <criterion testable="true">AbortSignal cancellation supported: passing a `signal` from an `AbortController` to `callInsightsQuery` aborts the in-flight call. Confirmed by Test 12.</criterion>
+    <criterion testable="true">429 surfaced structurally with `Retry-After` extracted; no in-client auto-retry; chat orchestration (task 029) owns retry policy. Confirmed by Test 8 `rate-limit.429` case. (ADR-016)</criterion>
+    <criterion testable="true">ZERO new auth primitives / wrappers / strategies introduced (R5 CLAUDE.md §3.1); ZERO new feature flags (R5 §3.2); ZERO new PaneEventBus channels (R5 §3.4); ZERO BFF code modified. Confirmed by reviewer inspection + `git diff` showing only frontend file additions.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (frontend-only task; no BFF code modified). Recorded in `notes/task-025-evidence.md`. (R5 CLAUDE.md §3.6)</criterion>
+    <criterion testable="true">All 12 unit tests pass via `npm test`; `tsc --noEmit` is clean. Recorded in `notes/task-025-evidence.md`.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 (ADR-028, ADR-013 §3.5, ADR-019, ADR-016, R5 CLAUDE.md §3.1 / §3.5 confirmed).</criterion>
+  </acceptance-criteria>
+</task>

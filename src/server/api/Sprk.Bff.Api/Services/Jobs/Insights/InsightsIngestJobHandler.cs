@@ -33,7 +33,8 @@ namespace Sprk.Bff.Api.Services.Jobs.Insights;
 /// <c>AiProcessingOptions.InsightsIngest = true</c> (default false in Phase 1).
 /// </para>
 /// <para>
-/// <b>Failure semantics</b> (per ADR-004 + task 040 IngestOrchestrator contract):
+/// <b>Failure semantics</b> (per ADR-004 + IInsightsAi.RunIngestAsync contract;
+/// originally established by task 040's IngestOrchestrator, retired Wave C-G4 / task 022):
 /// <list type="bullet">
 ///   <item><b>Success</b> → <see cref="JobOutcome.Success"/>: ingest returned cleanly
 ///   regardless of how many Observations the gates produced. Zero Observations is a
@@ -48,8 +49,9 @@ namespace Sprk.Bff.Api.Services.Jobs.Insights;
 ///   MatterId, malformed configuration). Sent directly to DLQ without further retry.</item>
 /// </list>
 /// Note: mirror failures inside the ingest pipeline are non-fatal and handled within
-/// <c>IngestOrchestrator</c> (substrate is the system-of-record; mirror is a review
-/// convenience). They never surface to this handler as failures.
+/// the universal-ingest@v1 ObservationEmitterNodeExecutor (substrate is the
+/// system-of-record; mirror is a review convenience). They never surface to this handler
+/// as failures.
 /// </para>
 /// <para>
 /// <b>Idempotency</b> (per ADR-004): uses

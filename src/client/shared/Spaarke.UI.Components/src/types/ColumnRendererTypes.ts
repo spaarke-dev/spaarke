@@ -9,7 +9,7 @@ import { IDatasetColumn, IDatasetRecord } from './DatasetTypes';
  * Column renderer function signature
  */
 export type ColumnRenderer = (
-  value: any,
+  value: unknown,
   record: IDatasetRecord,
   column: IDatasetColumn
 ) => React.ReactElement | string | null;

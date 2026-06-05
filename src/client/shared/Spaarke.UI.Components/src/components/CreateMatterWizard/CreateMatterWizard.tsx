@@ -44,8 +44,33 @@ import {
 } from './matterService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import { EventService } from '../CreateEventWizard/eventService';
+import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
+import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { AssociationResult } from '../AssociateToStep/types';
+
+// ---------------------------------------------------------------------------
+// Dataverse client URL helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the Dataverse client URL (e.g. `https://org.crm.dynamics.com`)
+ * via Xrm global context. Falls back to `window.location.origin`.
+ *
+ * Required for building absolute `@odata.id` URIs in N:N $ref payloads —
+ * Dataverse rejects relative URIs unless `@odata.context` is supplied.
+ */
+function getDataverseClientUrl(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    const clientUrl: string | undefined = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+    if (clientUrl) return clientUrl.replace(/\/+$/, '');
+  } catch {
+    // Cross-origin or missing Xrm — fall through.
+  }
+  return window.location.origin;
+}
 
 // ---------------------------------------------------------------------------
 // Association helper
@@ -66,19 +91,27 @@ async function associateToRecord(
   association: AssociationResult
 ): Promise<{ success: boolean }> {
   try {
-    const { entityType, recordId } = association;
+    const { entityType } = association;
+    // Dataverse `Xrm.Utility.lookupObjects` returns GUIDs wrapped in curly braces
+    // (e.g. `{39CDE3E3-9D15-...}`). OData `@odata.bind` and `$ref` URLs reject
+    // braced GUIDs with HTTP 400 "Error in query syntax". Normalize once here.
+    const recordId = association.recordId.replace(/[{}]/g, '').toLowerCase();
+    const cleanMatterId = matterId.replace(/[{}]/g, '').toLowerCase();
 
     if (entityType === 'sprk_project') {
       // N:N association via the relationship collection navigation property.
       // Dataverse REST API: POST /sprk_projects({projectId})/sprk_Project_Matter_nn/$ref
-      // Body: { "@odata.id": "[base]/sprk_matters({matterId})" }
+      // Body: { "@odata.id": "[absolute-base]/sprk_matters({matterId})" }
+      // The `@odata.id` MUST be an absolute URI — Dataverse rejects relative URIs
+      // unless `@odata.context` is also supplied.
       const apiBase = '/api/data/v9.0';
+      const absoluteApiBase = `${getDataverseClientUrl()}${apiBase}`;
       const url = `${apiBase}/sprk_projects(${recordId})/sprk_Project_Matter_nn/$ref`;
       const resp = await fetch(url, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json; odata.metadata=minimal' },
-        body: JSON.stringify({ '@odata.id': `${apiBase}/sprk_matters(${matterId})` }),
+        body: JSON.stringify({ '@odata.id': `${absoluteApiBase}/sprk_matters(${cleanMatterId})` }),
       });
       if (!resp.ok) {
         const text = await resp.text().catch(() => resp.statusText);
@@ -87,7 +120,7 @@ async function associateToRecord(
       }
       console.info(
         '[CreateMatterWizard] N:N association created:',
-        `sprk_project(${recordId}) <-> sprk_matter(${matterId})`
+        `sprk_project(${recordId}) <-> sprk_matter(${cleanMatterId})`
       );
       return { success: true };
     }
@@ -95,10 +128,13 @@ async function associateToRecord(
     if (entityType === 'account') {
       // For account: update the matter record's account lookup via @odata.bind.
       // This is a N:1 association on the matter side.
-      await dataService.updateRecord('sprk_matter', matterId, {
+      await dataService.updateRecord('sprk_matter', cleanMatterId, {
         'sprk_Account@odata.bind': `/accounts(${recordId})`,
       });
-      console.info('[CreateMatterWizard] Account association set:', `account(${recordId}) -> sprk_matter(${matterId})`);
+      console.info(
+        '[CreateMatterWizard] Account association set:',
+        `account(${recordId}) -> sprk_matter(${cleanMatterId})`
+      );
       return { success: true };
     }
 
@@ -332,46 +368,49 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
 
         // -- Create Work Assignment (sprk_workassignment) --
         // When the user selected "Assign Work" follow-on and entered a name,
-        // create the work assignment record linked to the matter via N:1.
+        // delegate to the shared WorkAssignmentService. It performs nav-prop
+        // discovery and applies the Polymorphic Resolver pattern (ADR-024) so
+        // the regarding-matter link + denormalized resolver fields are set
+        // correctly. Hardcoded relationship-style names would otherwise fail
+        // with "undeclared property" errors.
         if (context.selectedActions.includes('assign-counsel') && context.followOn.assignWorkName.trim()) {
           try {
-            const workAssignmentPayload: Record<string, unknown> = {
-              sprk_name: context.followOn.assignWorkName.trim(),
-              sprk_priority: context.followOn.assignWorkPriority,
+            const waForm: ICreateWorkAssignmentFormState = {
+              recordType: 'matter',
+              recordId: matterId,
+              recordName: matterName,
+              assignWithoutRecord: false,
+              name: context.followOn.assignWorkName.trim(),
+              description: context.followOn.assignWorkDescription.trim(),
+              matterTypeId: context.followOn.assignWorkMatterTypeId,
+              matterTypeName: context.followOn.assignWorkMatterTypeName,
+              practiceAreaId: context.followOn.assignWorkPracticeAreaId,
+              practiceAreaName: context.followOn.assignWorkPracticeAreaName,
+              priority: context.followOn.assignWorkPriority,
+              responseDueDate: context.followOn.assignWorkResponseDueDate,
             };
-            if (context.followOn.assignWorkDescription.trim()) {
-              workAssignmentPayload['sprk_description'] = context.followOn.assignWorkDescription.trim();
+            const waAssignWork: IAssignWorkState = {
+              assignedAttorneyId: context.followOn.assignedAttorneyId,
+              assignedAttorneyName: context.followOn.assignedAttorneyName,
+              assignedParalegalId: context.followOn.assignedParalegalId,
+              assignedParalegalName: context.followOn.assignedParalegalName,
+              assignedLawFirmId: context.followOn.assignedOutsideCounselId,
+              assignedLawFirmName: context.followOn.assignedOutsideCounselName,
+              assignedLawFirmAttorneyId: '',
+              assignedLawFirmAttorneyName: '',
+              notifyResources: false,
+            };
+            const waService = new WorkAssignmentService(dataService, authenticatedFetch, bffBaseUrl);
+            const waResult = await waService.createWorkAssignment(waForm, [], [], waAssignWork);
+            if (waResult.status === 'error') {
+              result.warnings.push(
+                `Work assignment could not be created (${waResult.errorMessage ?? 'Unknown error'}). ` +
+                  'You can create it manually from the matter record.'
+              );
+            } else {
+              console.info('[CreateMatterWizard] Work assignment created and linked to matter:', matterId);
+              if (waResult.warnings.length > 0) result.warnings.push(...waResult.warnings);
             }
-            if (context.followOn.assignWorkResponseDueDate) {
-              workAssignmentPayload['sprk_responseduedate'] = context.followOn.assignWorkResponseDueDate;
-            }
-            // N:1 link to parent matter via relationship
-            workAssignmentPayload['sprk_workassignment_RegardingMatter_sprk_matter_n1@odata.bind'] =
-              `/sprk_matters(${matterId})`;
-            // Classification lookups
-            if (context.followOn.assignWorkMatterTypeId) {
-              workAssignmentPayload['sprk_MatterType@odata.bind'] =
-                `/sprk_mattertype_refs(${context.followOn.assignWorkMatterTypeId})`;
-            }
-            if (context.followOn.assignWorkPracticeAreaId) {
-              workAssignmentPayload['sprk_PracticeArea@odata.bind'] =
-                `/sprk_practicearea_refs(${context.followOn.assignWorkPracticeAreaId})`;
-            }
-            // Resource lookups
-            if (context.followOn.assignedAttorneyId) {
-              workAssignmentPayload['sprk_AssignedAttorney@odata.bind'] =
-                `/contacts(${context.followOn.assignedAttorneyId})`;
-            }
-            if (context.followOn.assignedParalegalId) {
-              workAssignmentPayload['sprk_AssignedParalegal@odata.bind'] =
-                `/contacts(${context.followOn.assignedParalegalId})`;
-            }
-            if (context.followOn.assignedOutsideCounselId) {
-              workAssignmentPayload['sprk_AssignedOutsideCounsel@odata.bind'] =
-                `/sprk_organizations(${context.followOn.assignedOutsideCounselId})`;
-            }
-            await dataService.createRecord('sprk_workassignment', workAssignmentPayload);
-            console.info('[CreateMatterWizard] Work assignment created and linked to matter:', matterId);
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Unknown error';
             result.warnings.push(
@@ -488,7 +527,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       },
       retrieveRecord: (entityName: string, id: string, options?: string) =>
         dataService.retrieveRecord(entityName, id, options),
-      retrieveMultipleRecords: (entityName: string, options?: string, maxPageSize?: number) =>
+      retrieveMultipleRecords: (entityName: string, options?: string, _maxPageSize?: number) =>
         dataService.retrieveMultipleRecords(entityName, options),
       updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
         await dataService.updateRecord(entityName, id, data);

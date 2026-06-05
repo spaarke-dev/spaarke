@@ -1,0 +1,666 @@
+<task id="040" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D3-01 `/analyze` configuration-only proof point (validates SC-19 platform-extension claim)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 3 — Polish + Future-Use Validation</phase>
+    <wave>P3-1 (serial; proof-point validation; first task of Phase 3)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>Phase 2 ✅ (specifically tasks 010 action-seed pattern + 015 tool-registration pattern + 017 StructuredOutputStreamWidget + 019 slash-command pattern + 031 verification)</dependencies>
+    <tags>dataverse, seed, playbook, proof-point, validation</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Ship a configuration-only `/analyze` follow-on playbook to validate the SC-19
+    platform-extension claim: that NEW playbook capabilities ship via configuration
+    (action seed + playbook config + tool registration + slash-command entry) and NOT
+    via new orchestration code. This task is BOTH a deliverable (new `/analyze`
+    capability) AND a load-bearing measurement (does R5's "configuration-first"
+    architecture hold up when a second playbook is added?). Per SC-19, the entire
+    end-to-end cost MUST be &lt; 1 day; per plan.md Phase 3 estimate, &lt; 4 hours.
+    Time/cost MUST be tracked + documented in task notes to substantiate the claim.
+
+    The task mirrors the D2-03 (orchestrator) + D2-05 (tool wrapper) + D2-10 (slash
+    command) patterns established by Phase 2, but at MINIMAL incremental cost:
+    (a) ONE new `sprk_analysisaction` seed (`ANALYZE-DOC@v1`) deployed via the
+    EXISTING `scripts/Deploy-Playbook.ps1` harness (or its task-010 extension); (b) a
+    MINIMAL tool wrapper class that DELEGATES to a reused orchestrator pattern (per
+    R5 §3.1 reuse mandate — prefer parameterizing `SessionSummarizeOrchestrator` over
+    introducing a parallel orchestrator; if parameterization is infeasible, author
+    `SessionAnalyzeOrchestrator` as a thin delegate that shares the streaming
+    infrastructure from tasks 005/006); (c) tool registration on the EXISTING
+    `SprkChatAgent` via the EXISTING `SprkChatAgentFactory.ResolveTools` mechanism;
+    (d) one new `DEFAULT_SLASH_COMMANDS` entry (`/analyze`); (e) output rendering via
+    the EXISTING `StructuredOutputStreamWidget` (task 017) — proving the widget IS
+    schema-driven and IS reusable across playbooks, not Summarize-specific.
+
+    R5 §3.1 prohibited list applies in full: NO new prompt-bearing entity (the
+    action row IS the JPS prompt primitive per §10 gotcha); NO new chat agent; NO
+    new orchestration layer paralleling `AnalysisOrchestrationService`; NO new
+    widget paralleling `StructuredOutputStreamWidget`; NO new SSE envelope (the
+    `FieldDelta` variant from task 005 carries `/analyze` output identically); NO
+    new feature flag (per §3.2 — register unconditionally inside existing
+    capability-gated tool block; kill-switch inherits via `NullSprkChatAgentFactory`).
+    BFF publish-size delta target: ≤ +0.1 MB. If this task's delta exceeds +0.5 MB,
+    the SC-19 "configuration-only" claim is at risk — escalate per R5 §6.
+
+    Crucially: a FAILED proof point is itself a valid SC-19 finding. If the
+    implementation surfaces a forced parallel orchestrator, a forced parallel
+    widget, or a delta substantially above target, STOP and record the deviation in
+    `notes/sc-19-proof-point-evidence.md` per CLAUDE.md §6 escalation — this is
+    EVIDENCE for the platform-extension assessment, not a defect to silently mask.
+  </prompt>
+
+  <role>
+    Senior full-stack engineer with mastery across all R5 implementation surfaces:
+    Dataverse data deploys via `scripts/Deploy-Playbook.ps1` (per task 010 pattern),
+    JPS prompt + JSON Schema authoring (per task 010 Step 3–4 pattern), the
+    `SprkChatAgentFactory.ResolveTools` tool-registration site (per task 015
+    pattern), the `DEFAULT_SLASH_COMMANDS` slash-command surface + ConversationPane
+    intent-handler (per task 019 pattern), and the `StructuredOutputStreamWidget`
+    schema-driven render contract (per task 017 pattern). Capable of reasoning about
+    measurement discipline (time tracking + publish-size measurement) as
+    first-class deliverables, not afterthoughts.
+  </role>
+
+  <goal>
+    A new `/analyze` playbook capability is live end-to-end on Spaarke Dev with
+    total implementation cost &lt; 1 day (≤ 4 hours target per plan.md), fully
+    measured and documented:
+    (a) A new `sprk_analysisaction` row `ANALYZE-DOC@v1` ("Analyze Document for
+        Chat") exists in Spaarke Dev Dataverse — deployed via the EXISTING
+        `scripts/Deploy-Playbook.ps1` (or its task-010 extension), carrying a
+        JPS-formatted `sprk_systemprompt` + structured-outputs-compatible JSON
+        schema; deploy is idempotent (lookup-by-`sprk_actioncode` skip-on-exists);
+    (b) A new `sprk_analysisplaybook` row `analyze-for-chat@v1` references the
+        action via `actionCode = 'ANALYZE-DOC@v1'`;
+    (c) A MINIMAL `InvokeAnalyzePlaybookTool` class is registered on the EXISTING
+        `SprkChatAgent` via `SprkChatAgentFactory.ResolveTools`, delegating to a
+        reused orchestrator (prefer parameterized `SessionSummarizeOrchestrator`
+        per R5 §3.1; sibling `SessionAnalyzeOrchestrator` only if parameterization
+        is infeasible — decision recorded with rationale);
+    (d) A new `DEFAULT_SLASH_COMMANDS` entry for `/analyze` is added in
+        `slashCommandMenu.types.ts` + wired in the ConversationPane intent-handler
+        (mirroring task 019's `/summarize` pattern);
+    (e) Output renders progressively via the EXISTING `StructuredOutputStreamWidget`
+        (task 017) — NO new widget, NO modifications to the widget beyond
+        schema-driven extension points that already exist. This is the load-bearing
+        proof that the widget is genuinely schema-driven (NFR-12 / SC-19);
+    (f) Slash-command path (`/analyze`) + natural-language tool-call path
+        (LLM tool-calls `InvokeAnalyzePlaybook`) BOTH work end-to-end on Spaarke Dev
+        and produce structured output rendered in the Workspace pane via SSE
+        `FieldDelta` events;
+    (g) Total elapsed implementation time is tracked from Step 0 start to Step 10
+        complete and recorded in task notes as the SC-19 measurement;
+    (h) BFF publish-size delta is measured + recorded (target ≤ +0.1 MB; escalation
+        threshold +0.5 MB);
+    (i) `code-review` + `adr-check` quality gates pass at Step 9.5;
+    (j) Task notes (`notes/sc-19-proof-point-evidence.md`) substantiate the SC-19
+        claim with: elapsed cost, files modified count, lines-of-code delta, BFF
+        publish-size delta, decision log (orchestrator parameterize vs sibling),
+        widget-reuse evidence (StructuredOutputStreamWidget rendered `/analyze`
+        output without modification), and any divergences from the
+        "configuration-only" target.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="pattern-task-010-action-seed">projects/spaarke-ai-platform-unification-r5/tasks/010-sprk-analysisaction-summarize-seed.poml</file>
+    <file purpose="pattern-task-011-playbook-config">projects/spaarke-ai-platform-unification-r5/tasks/011-sprk-analysisplaybook-summarize-config.poml</file>
+    <file purpose="pattern-task-012-orchestrator">projects/spaarke-ai-platform-unification-r5/tasks/012-session-summarize-orchestrator.poml</file>
+    <file purpose="pattern-task-015-tool-registration">projects/spaarke-ai-platform-unification-r5/tasks/015-invoke-summarize-playbook-tool.poml</file>
+    <file purpose="pattern-task-017-structured-output-widget">projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml</file>
+    <file purpose="pattern-task-019-slash-command">projects/spaarke-ai-platform-unification-r5/tasks/019-slash-command-summarize-semantic-extension.poml</file>
+    <file purpose="deploy-script">scripts/Deploy-Playbook.ps1</file>
+    <file purpose="slash-command-source">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+    <file purpose="tool-resolution-site">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="bff-extensions-binding">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 spec SC-19 (BINDING — this task's reason for existing)">`/analyze` MUST work as a configuration-only follow-on, validating the platform-extension claim per design.md §6.1. Total cost MUST be &lt; 1 day (target ≤ 4 hours per plan.md Phase 3 estimate). Time/cost MUST be tracked from Step 0 start to Step 10 complete and recorded as SC-19 evidence.</constraint>
+    <constraint source="R5 CLAUDE.md §10 gotcha (BINDING)">MUST NOT add a new prompt-bearing Dataverse entity. `sprk_analysisaction.sprk_systemprompt` IS the JPS prompt primitive. Add ONE new ROW in `sprk_analysisactions` (action code `ANALYZE-DOC@v1`); do NOT store the prompt in a `.txt` file, a config JSON outside Dataverse, or any new entity.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 (reuse mandate — prohibited list)">MUST NOT introduce: a parallel orchestrator to `AnalysisOrchestrationService`; a parallel chat agent to `SprkChatAgent`; a parallel widget to `StructuredOutputStreamWidget`; a parallel SSE envelope to the `FieldDelta` variant on `AnalysisChunk`; a parallel slash-command system; a parallel deploy harness to `scripts/Deploy-Playbook.ps1`. Prefer extending/parameterizing existing components over authoring siblings.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 (orchestrator reuse — preferred path)">PREFER parameterizing `SessionSummarizeOrchestrator` (task 012) to accept a playbook-code + action-code parameter so it can drive BOTH Summarize AND Analyze pipelines from a single class. Sibling `SessionAnalyzeOrchestrator` is acceptable ONLY if parameterization surfaces a concrete blocker (e.g., divergent output schema requires divergent SSE field-emission ordering). Decision MUST be recorded in task notes with explicit rationale per R5 §3.1 step 3 ("cite the gap explicitly").</constraint>
+    <constraint source="R5 CLAUDE.md §3.2 (no new feature flags)">R5 introduces NO new feature flags. The `InvokeAnalyzePlaybookTool` registers unconditionally inside the EXISTING capability-gated tool block in `SprkChatAgentFactory.ResolveTools`. Kill-switch coverage inherits via `NullSprkChatAgentFactory` when Chat capability is disabled. ADR-032 Null-Object patterns are NOT applicable.</constraint>
+    <constraint source="R5 CLAUDE.md §3.3 + ADR-010 (DI minimalism)">ZERO new top-level `services.AddXxx()` lines in `Program.cs`. Any new orchestrator (if sibling path chosen) registers inside the EXISTING `AnalysisServicesModule.cs`. Tool registration site lives inside the factory (no DI registration required per AIPL-053 precedent).</constraint>
+    <constraint source="ADR-013 (R5 §3.5)">All AI orchestration in BFF; agents created exclusively via `SprkChatAgentFactory`; the middleware stack (cost, content safety, telemetry, service routing) MUST wrap tool execution by virtue of using the existing factory. R5 is Zone A here for the BFF tool wrapper; Zone B is N/A (no Insights consumption from `/analyze`).</constraint>
+    <constraint source="ADR-014">N/A for the action-row seed (no index document writes). For the runtime tool execution, tenant isolation flows via the orchestrator delegate (already enforced by task 012). Confirm in notes.</constraint>
+    <constraint source="ADR-018 (R5 §3.2)">N/A — no new feature flags. Confirm in notes.</constraint>
+    <constraint source="ADR-029 + R5 NFR-07 + CLAUDE.md §10 (publish-size — BINDING per-task)">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed output; report absolute size + delta vs prior baseline (post-task-031). Target ≤ +0.1 MB delta. Escalation threshold: +0.5 MB (signals the "configuration-only" claim is at risk — INVESTIGATE before proceeding). Ceiling: 60 MB compressed (NFR-01). R5 cumulative budget ≤ +1 MB.</constraint>
+    <constraint source="spec FR-02 + task 017 widget contract">Output schema field paths MUST drive `FieldDelta.Path` SSE events that `StructuredOutputStreamWidget` (task 017) consumes WITHOUT modification. The widget MUST render `/analyze` output via the same schema-driven mechanism it renders `/summarize` output. If the widget requires ANY modification to render `/analyze` output, the schema-driven claim (SC-19 + NFR-12) is contradicted — record explicitly in task notes and escalate per R5 §6.</constraint>
+    <constraint source="spec FR-11 (decline-to-find)">Output schema MUST support decline-to-find via the same mechanism task 010 used (preferred: delegation to `DeclineToFindNode` with clean schema; alternative: discriminated branch). Use the SAME decision the Summarize action took (record in notes); deviation requires justification.</constraint>
+    <constraint source="spec NFR-12 (tool routing discipline)">`InvokeAnalyzePlaybookTool` description text is load-bearing for correct LLM routing. The description MUST scope routing to "analyze files uploaded to the current chat session" and MUST NOT overlap semantically with `InvokeSummarizePlaybook` (task 015) or `insights.query` (task 024). The Summarize-vs-Analyze disambiguation is a UR-01-class risk; mitigate via description discipline.</constraint>
+    <constraint source="CLAUDE.md §10 / bff-extensions §F (test obligation)">PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`. Minimal tests: tool-delegation test, tool-discoverable-in-factory test, slash-command-routing test. Heavier convergence tests are NOT required for the proof point (this is a measurement task, not a depth-of-quality task), but the minimal test surface MUST exist.</constraint>
+    <constraint source="project (idempotency — BINDING)">Re-running the action-row + playbook-row deploy against an environment that already has the rows MUST be a no-op (skip-on-exists by `sprk_actioncode` + `sprk_name` lookup). Mirrors task 010 + task 011 idempotency pattern.</constraint>
+    <constraint source="project (measurement discipline — BINDING)">SC-19 is a MEASUREMENT claim. Time/cost tracking is a FIRST-CLASS deliverable, not metadata. Step 0 records start timestamp; Step 10 records end timestamp; total elapsed time MUST appear in `notes/sc-19-proof-point-evidence.md`. Files modified count + LOC delta + publish-size delta MUST be measured + recorded. A FAILED proof point (cost &gt; 1 day; widget required modification; orchestrator could not be parameterized) is VALID evidence — record honestly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>r5/configuration-only-playbook-extension</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/010-sprk-analysisaction-summarize-seed.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/011-sprk-analysisplaybook-summarize-config.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/012-session-summarize-orchestrator.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/015-invoke-summarize-playbook-tool.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/019-slash-command-summarize-semantic-extension.poml</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-018-feature-flag-scope-discipline.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+    <patterns>
+      <pattern name="Action-row seed (binding template from task 010)" location="projects/spaarke-ai-platform-unification-r5/tasks/010-sprk-analysisaction-summarize-seed.poml">
+        Task 010 is the canonical template for this task's action-seed half. Mirror
+        Step 2 (action-row shape discovery on Spaarke Dev — confirm whether
+        `sprk_outputschemajson` or `sprk_configjson` carries the output schema;
+        decision should already be recorded in `notes/task-010-action-shape-discovery.md`),
+        Step 3 (JPS prompt authoring), Step 4 (Structured-Outputs-compatible JSON
+        Schema), Step 5 (Option A combined definition file in
+        `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/analyze-for-chat.playbook.json`
+        per task 010's preferred path), Step 6-9 (dry-run, live deploy, verify,
+        idempotency-rerun). Action code: `ANALYZE-DOC@v1` (mnemonic `ANALYZE-DOC`;
+        version `@v1`).
+      </pattern>
+      <pattern name="Playbook config row (binding template from task 011)" location="projects/spaarke-ai-platform-unification-r5/tasks/011-sprk-analysisplaybook-summarize-config.poml">
+        Task 011 is the canonical template for the playbook-row half. Mirror its
+        playbook + node-rows structure: ONE playbook row (`analyze-for-chat@v1`
+        referencing `actionCode = 'ANALYZE-DOC@v1'`) with ONE primary LLM-analysis
+        node bound to the action row. Use the same `Deploy-Playbook.ps1` extension
+        path task 011 already established. Idempotency mirrors task 011.
+      </pattern>
+      <pattern name="Minimal tool wrapper (binding template from task 015)" location="projects/spaarke-ai-platform-unification-r5/tasks/015-invoke-summarize-playbook-tool.poml">
+        Task 015's `InvokeSummarizePlaybookTool` is the canonical shape for
+        `InvokeAnalyzePlaybookTool`. Mirror: `public sealed class`; constructor
+        accepts the orchestrator + scoped state; method
+        `InvokeAnalyzePlaybookAsync(string[]? fileIds, string? style, CancellationToken ct)`
+        decorated with `[Description("...")]`; `public IEnumerable&lt;AIFunction&gt; GetTools()`
+        yielding `AIFunctionFactory.Create(...)`; registered inside
+        `SprkChatAgentFactory.ResolveTools` in a sibling capability-gated block to
+        the Summarize block (lines 807–834 reference per task 015 Step 5). The
+        delegation target is the parameterized `SessionSummarizeOrchestrator` (with
+        playbook-code argument `analyze-for-chat@v1`) OR the new
+        `SessionAnalyzeOrchestrator` per the Step 3 decision.
+      </pattern>
+      <pattern name="Slash command extension (binding template from task 019)" location="projects/spaarke-ai-platform-unification-r5/tasks/019-slash-command-summarize-semantic-extension.poml">
+        Task 019 is the canonical template for the slash-command half. Mirror:
+        ONE-line edit to `DEFAULT_SLASH_COMMANDS` in `slashCommandMenu.types.ts`
+        ADDING a new `/analyze` entry adjacent to `/summarize`; one ConversationPane
+        intent-handler branch routing `/analyze` to `InvokeAnalyzePlaybook` (via
+        the chat-agent natural-language path) OR to the direct endpoint
+        (if a `POST /api/ai/chat/sessions/{id}/analyze` endpoint is added — note
+        below).
+      </pattern>
+      <pattern name="Widget reuse evidence (proof for SC-19)" location="projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml">
+        `StructuredOutputStreamWidget` MUST render `/analyze` output WITHOUT
+        modification. Verify by: (a) reviewing the widget's schema-driven render
+        extension points (it consumes `FieldDelta.Path` events and maps them to
+        renderers via a schema-keyed registry); (b) confirming `/analyze` output
+        fields (e.g., `analysisSummary`, `keyFindings`, `risks`, `recommendations`)
+        are renderable via the existing renderer registry OR via the widget's
+        default-renderer fallback. If a new renderer is required, record as a
+        DEVIATION from the configuration-only claim in `notes/sc-19-proof-point-evidence.md`
+        — the deviation is itself valid SC-19 evidence (the widget is not yet 100%
+        schema-driven; partial credit for SC-19).
+      </pattern>
+      <pattern name="Direct endpoint scope decision" location="design rationale">
+        The PROOF POINT scope is the natural-language tool-call path (LLM
+        tool-calls `InvokeAnalyzePlaybook`) + the slash-command path. A direct
+        endpoint (`POST /api/ai/chat/sessions/{id}/analyze`) is NOT strictly
+        required for SC-19. PREFERRED: skip the direct endpoint to keep cost &lt; 4
+        hours. If the slash-command intent-handler routes `/analyze` to the
+        agent-tool path (mirroring task 019's tri-mode `/summarize` routing where
+        natural-language → tool-call), the agent tool covers BOTH invocation
+        modes. Record the decision + rationale in task notes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 3 of R5 has one binding job: PROVE the platform-extension claim
+      (design.md §6.1 + spec SC-19). The claim is: "R5 ships a chat-driven
+      Summarize vertical slice as the FIRST playbook on a generalized configuration
+      surface; subsequent playbooks (`/analyze`, `/compare`, `/translate`,
+      `/extract`) ship via configuration alone — action seed + playbook config +
+      tool registration + slash command — without new orchestration code, new
+      widgets, or new SSE envelopes." If this claim holds, R5's architecture
+      investment compounds across R6+ playbook backlog (cheap to add new
+      capabilities). If it FAILS — if `/analyze` forces a parallel orchestrator,
+      a parallel widget, or a substantial publish-size jump — R5's architecture
+      claim is partially or fully invalidated, and the lessons-learned doc
+      (task 044 / D3-05) MUST capture that honestly.
+
+      `/analyze` is the chosen proof point because it's (a) semantically distinct
+      from `/summarize` (different output schema, different intent), (b) on the
+      R6+ backlog regardless, and (c) cheap enough to validate within Phase 3's
+      0.5-week budget. If `/analyze` ships cleanly in &lt; 4 hours with no new
+      orchestrator + no widget changes + publish-size delta ≤ +0.1 MB, SC-19 is
+      proven. If any of those three constraints is violated, SC-19 is partially
+      proven and the deviation IS the lesson.
+
+      This task is the SECOND application of the action-seed + tool-wrapper +
+      slash-command pattern (the first was tasks 010 + 015 + 019 in Phase 2 for
+      Summarize). Phase 2 established the template; Phase 3 tests its
+      reproducibility at marginal cost. The task is intentionally serial (P3-1
+      single task) because its measurement value depends on it being a fresh
+      attempt — not parallelized with Phase 3's other deliverables (Get Started
+      card, telemetry dashboards) which have independent value.
+    </background>
+    <dependencies>
+      <dependency task="Phase 2 (all of 010-031)" status="required">
+        Phase 2 MUST be ✅ per plan.md Phase 3 dependencies. Specifically required:
+        010 (Summarize action seed — establishes the action-row template); 011
+        (Summarize playbook config — establishes the playbook-row template); 012
+        (`SessionSummarizeOrchestrator` — the reuse target for `/analyze`); 015
+        (`InvokeSummarizePlaybookTool` — the wrapper template); 017
+        (`StructuredOutputStreamWidget` — the widget being proven schema-driven);
+        019 (`/summarize` slash command — establishes the slash-command-extension
+        template); 031 (Phase 2 verification — confirms baseline state of Summarize
+        works end-to-end so `/analyze`'s measurement isn't confounded by Phase 2
+        regressions). Confirm all 22 Phase 2 tasks ✅ at Step 1.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 010 (D2-01) seeded `SUM-CHAT@v1`; this task seeds `ANALYZE-DOC@v1`
+        using the same `Deploy-Playbook.ps1` combined-definition-file pattern.</item>
+      <item>Task 011 (D2-02) shipped `summarize-for-chat@v1` playbook config;
+        this task ships `analyze-for-chat@v1` using the same node-rows
+        structure (one primary LLM-analysis node bound to the action).</item>
+      <item>Task 012 (D2-03) shipped `SessionSummarizeOrchestrator`; this task's
+        PREFERRED path parameterizes it to also drive `/analyze` (per R5 §3.1
+        reuse mandate). If parameterization is infeasible, sibling
+        `SessionAnalyzeOrchestrator` is the fallback — decision in notes.</item>
+      <item>Task 015 (D2-05) shipped `InvokeSummarizePlaybookTool`; this task
+        ships `InvokeAnalyzePlaybookTool` as a near-clone with description text
+        scoped to Analyze semantics (NFR-12 disambiguation).</item>
+      <item>Task 017 (D2-07) shipped `StructuredOutputStreamWidget`; this task
+        VALIDATES the widget is genuinely schema-driven by rendering `/analyze`
+        output through it without modification.</item>
+      <item>Task 019 (D2-10) extended `DEFAULT_SLASH_COMMANDS` for `/summarize`;
+        this task ADDS a `/analyze` entry adjacent in the same constant.</item>
+      <item>Task 044 (D3-05 lessons-learned) WILL consume this task's
+        `notes/sc-19-proof-point-evidence.md` as primary evidence for the
+        platform-extension assessment + R6 backlog generation. Honest evidence
+        recording here is load-bearing for the project's final narrative.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration + START TIMESTAMP (BINDING for SC-19)">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare RIGOR LEVEL explicitly per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF tool registration + Dataverse data deploy + frontend slash
+                 command extension + AI infrastructure orchestrator
+                 parameterization. Tags: dataverse + seed + playbook +
+                 proof-point + validation. SC-19 measurement task — quality gates
+                 + publish-size verification + measurement discipline all
+                 BINDING. Qualifies for FULL per task-execute decision tree.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 with Step 9.5 quality gates.
+      Proceeding with Step 0...
+      ```
+
+      **RECORD START TIMESTAMP** in `notes/sc-19-proof-point-evidence.md` (create
+      the file now; this is the SC-19 cost-tracking anchor). Format:
+      `START: YYYY-MM-DD HH:MM:SS UTC (Step 0 begin)`. This is the BINDING anchor
+      for SC-19 "&lt; 1 day total cost" measurement — without it, the SC-19 claim
+      cannot be substantiated.
+
+      Confirm `current-task.md` reflects task 040 active. Confirm no prior R5 task
+      is in flight (P3-1 is serial).
+    </step>
+    <step order="1" name="Review Progress + Verify Phase 2 ✅">
+      Read `tasks/TASK-INDEX.md`. Confirm: task 040 status is 🔲; wave P3-1;
+      parallel-safe = false; dependencies = "Phase 2 ✅". CRITICAL: confirm ALL
+      Phase 2 tasks (010 through 031) are ✅. If ANY Phase 2 task is still 🔲 /
+      🔄, STOP and report blocker per R5 §6 — Phase 3 gating per plan.md is binding.
+      Confirm tasks 041 / 042 (P3-2 siblings) have NOT begun (P3-1 must complete
+      before P3-2 per dependency order).
+    </step>
+    <step order="2" name="Gather Resources + Confirm Reuse Hypothesis">
+      Read EVERY file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      (a) Re-read task 010's POML AND `notes/task-010-action-shape-discovery.md` +
+          `notes/task-010-deployment-evidence.md` (if present) — extract the
+          confirmed answer to "which field carries the output schema"
+          (`sprk_outputschemajson` vs `sprk_configjson`). Do NOT re-discover; use
+          the recorded answer. If the notes file is missing or unclear, fall back
+          to a single discovery query against Spaarke Dev.
+      (b) Read task 012's POML and the shipped `SessionSummarizeOrchestrator.cs`
+          (at `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs`).
+          Inspect its constructor + primary method signature to ASSESS the
+          parameterization hypothesis: can the orchestrator accept a
+          `playbookCode` + `actionCode` parameter pair (or a higher-level
+          `PlaybookSelector` enum) without breaking the existing Summarize
+          invocation site (task 014 endpoint + task 015 tool)? Sketch the
+          parameterization diff mentally; decision in Step 3.
+      (c) Read task 015's POML + the shipped `InvokeSummarizePlaybookTool.cs`.
+          Confirm constructor shape + tool-resolution-block shape for cloning.
+      (d) Read task 017's POML + the shipped `StructuredOutputStreamWidget.tsx`.
+          Inspect the schema-driven render extension points: is the renderer
+          registry keyed by output-schema field name, by field type, or by an
+          explicit hint property on the schema? Identify whether `/analyze`'s
+          output fields will route through existing renderers or default
+          renderer.
+      (e) Read task 019's POML + the shipped `slashCommandMenu.types.ts` change
+          + the ConversationPane intent-handler. Confirm slash-command-extension
+          mechanics.
+
+      Record the reuse-hypothesis assessment in
+      `notes/sc-19-proof-point-evidence.md` BEFORE Step 3 (helps quantify the
+      "configuration-only" claim).
+    </step>
+    <step order="3" name="Decide: Orchestrator Parameterize vs Sibling (SC-19 hinge decision)">
+      THIS IS THE LOAD-BEARING DECISION for SC-19. Two paths:
+
+      **Path A (PREFERRED per R5 §3.1)**: Parameterize `SessionSummarizeOrchestrator`
+      to accept `playbookCode` + `actionCode` arguments. The orchestrator becomes
+      `SessionPlaybookOrchestrator` (rename) or stays
+      `SessionSummarizeOrchestrator` (no rename — internal parameterization
+      only). Both `/summarize` and `/analyze` invocations route through the same
+      class with different arguments. Adds 0 new files; modifies 1 file + its
+      callers (task 014 endpoint + task 015 tool); maximally proves SC-19.
+
+      **Path B (FALLBACK)**: Author `SessionAnalyzeOrchestrator` as a sibling
+      class that shares the streaming infrastructure (tasks 005 + 006) but
+      duplicates orchestration logic. Adds 1 new file + 1 DI registration line
+      inside `AnalysisServicesModule.cs`. PARTIALLY proves SC-19 (configuration
+      surfaces are reused but a code surface required duplication).
+
+      DECISION CRITERIA:
+      - If `SessionSummarizeOrchestrator`'s shared internal method (per task 012)
+        can be invoked with `actionCode = 'ANALYZE-DOC@v1'` + `playbookCode =
+        'analyze-for-chat@v1'` and produce correct behavior with ZERO logic
+        changes beyond surfacing those arguments → **Path A**.
+      - If `SessionSummarizeOrchestrator` contains Summarize-specific logic
+        (e.g., field-emission ordering hardcoded for Summarize schema; file-id
+        defaulting tuned for Summarize semantics) that cannot be cleanly
+        parameterized within the time budget → **Path B** with explicit cite of
+        the blocker in notes.
+
+      Record the decision in `notes/sc-19-proof-point-evidence.md` with: chosen
+      path, rationale, files affected count, and the gap citation (Path B
+      only). This decision IS the primary SC-19 evidence — be honest.
+    </step>
+    <step order="4" name="Author JPS Prompt + Output Schema for `ANALYZE-DOC@v1`">
+      Author the `sprk_systemprompt` payload (JPS-formatted, mirroring task 010
+      Step 3) and the output schema (Structured-Outputs-compatible JSON Schema,
+      mirroring task 010 Step 4). Output-schema field shape (proposed; refine
+      based on actual `/analyze` semantics):
+
+      ```json
+      {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["analysisSummary", "keyFindings", "risks", "recommendations"],
+        "properties": {
+          "analysisSummary":  { "type": "string", "maxLength": 2000 },
+          "keyFindings":      { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["finding","supportingFiles"], "properties": { "finding": {"type":"string"}, "supportingFiles": {"type":"array","items":{"type":"string"}} } } },
+          "risks":            { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["risk","severity","mitigation"], "properties": { "risk": {"type":"string"}, "severity": {"type":"string","enum":["low","medium","high"]}, "mitigation": {"type":"string"} } } },
+          "recommendations":  { "type": "array", "items": { "type": "string" } }
+        }
+      }
+      ```
+
+      The JPS prompt instructs streaming-aware emission: `analysisSummary` first,
+      then `keyFindings`, then `risks`, then `recommendations`. Decline-to-find
+      routing: mirror task 010's decision (`DeclineToFindNode` delegation;
+      schema stays clean). Verify the field paths are renderable by
+      `StructuredOutputStreamWidget`'s existing renderer registry per Step 2(d) —
+      if a new renderer is required, RECORD AS DEVIATION in
+      `notes/sc-19-proof-point-evidence.md`.
+    </step>
+    <step order="5" name="Author Action + Playbook Definition File">
+      Per task 010's Option A combined-file convention, create
+      `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/analyze-for-chat.playbook.json`
+      containing BOTH:
+      (a) an `actions` array with the SUM-CHAT-shaped seed for `ANALYZE-DOC@v1`
+          (name: "Analyze Document for Chat"; carries the Step 4 JPS prompt +
+          JSON schema in whichever field task 010's discovery confirmed —
+          `sprk_outputschemajson` or `sprk_configjson`);
+      (b) a `playbook` row `analyze-for-chat@v1` with ONE primary LLM-analysis
+          node bound to `actionCode = 'ANALYZE-DOC@v1'`.
+
+      Mirror task 011's playbook-row + node-rows structure exactly. The file
+      lives in the SAME `Playbooks/` directory as `summarize-for-chat.playbook.json`
+      from task 011 — ZERO new directories.
+    </step>
+    <step order="6" name="Live Deploy to Spaarke Dev">
+      Invoke `scripts/Deploy-Playbook.ps1` (or its task-010 extension) against
+      Spaarke Dev via the `dataverse-deploy` skill:
+      `pwsh scripts/Deploy-Playbook.ps1 -DefinitionFile src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/analyze-for-chat.playbook.json`.
+      Capture stdout to `notes/sc-19-proof-point-evidence.md`: action-row GUID,
+      playbook-row GUID, deploy elapsed time. Idempotency verification:
+      re-run the SAME command and confirm skip-on-exists semantics (exit 0; no
+      duplicates).
+    </step>
+    <step order="7" name="Implement BFF Tool Wrapper (per Step 3 decision)">
+      Path A (parameterize): Edit `SessionSummarizeOrchestrator.cs` to accept
+      `playbookCode` + `actionCode` arguments on its primary method. Update task
+      014 endpoint + task 015 tool callers to pass `'summarize-for-chat@v1'` +
+      `'SUM-CHAT@v1'` explicitly (was implicit before). NO new file, NO new DI
+      line.
+
+      Path B (sibling): Create
+      `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionAnalyzeOrchestrator.cs`
+      delegating to shared streaming infrastructure. Register inside the EXISTING
+      `AnalysisServicesModule.cs` (one new `AddScoped&lt;SessionAnalyzeOrchestrator&gt;()`
+      line — ADR-010 compliant).
+
+      Then (both paths): Create
+      `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InvokeAnalyzePlaybookTool.cs`
+      mirroring task 015's `InvokeSummarizePlaybookTool.cs` exactly. Tool
+      description text (NFR-12-discipline):
+
+      "Analyze files uploaded to the current chat session via the Analyze
+      playbook — produces a structured analysis with summary, key findings,
+      risks, and recommendations. Use when the user asks to analyze, review,
+      assess, or critique attached session files. Do NOT use for: bare
+      summarization requests (use InvokeSummarizePlaybook for that); analytical
+      questions about a matter/project/invoice entity (use insights.query for
+      that)."
+
+      Wire into `SprkChatAgentFactory.ResolveTools` adjacent to the
+      `InvokeSummarizePlaybookTool` block (one new capability-gated block;
+      AIPU2-063 try/catch error isolation; mirror task 015 Step 5 pattern
+      exactly). Add the tool name to the appropriate capability manifest's
+      `ToolNames` allow-list per AIPU2-061.
+    </step>
+    <step order="8" name="Add `/analyze` Slash Command + Smoke Test End-to-End">
+      Edit `src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts`:
+      ADD a new entry to `DEFAULT_SLASH_COMMANDS` adjacent to `/summarize`:
+      `{ command: 'analyze', description: 'Analyze uploaded files for findings, risks, and recommendations' }`
+      (exact name/description per Step 7's tool description discipline — keep
+      the slash-command description aligned with the tool description per
+      NFR-12).
+
+      Wire the ConversationPane intent-handler to route `/analyze` to the agent
+      tool path (LLM tool-calls `InvokeAnalyzePlaybook`). If task 019's
+      `/summarize` routing is "natural-language → agent tool" by default, the
+      `/analyze` routing can mirror it with one new branch.
+
+      Smoke test end-to-end on Spaarke Dev:
+      (1) Slash-command path: open SpaarkeAi shell on Spaarke Dev → upload ≥1
+          file → type `/analyze` + Enter → confirm `StructuredOutputStreamWidget`
+          renders progressively in Workspace pane with the 4 top-level fields
+          populated.
+      (2) Natural-language path: same setup → type "analyze the attached
+          documents and flag any risks" → confirm LLM tool-calls
+          `InvokeAnalyzePlaybook` (verify via Activity span or BFF log line) →
+          same widget render.
+
+      Capture both traces (Activity span IDs + screenshots reference) to
+      `notes/sc-19-proof-point-evidence.md`. If the widget renders correctly
+      WITHOUT modification, this is the load-bearing SC-19 widget-reuse proof.
+      If it does NOT render correctly, record the specific renderer gap as a
+      DEVIATION (partial SC-19 credit).
+    </step>
+    <step order="9" name="Verify Acceptance Criteria + Record Measurements">
+      Walk every &lt;acceptance-criterion&gt; below. Record in
+      `notes/sc-19-proof-point-evidence.md`:
+      (1) Action row + playbook row GUIDs (from Step 6);
+      (2) Orchestrator decision (Path A vs B) + rationale;
+      (3) Tool wrapper file path + line count;
+      (4) Slash command edit line count (target: 1-3 lines in
+          `slashCommandMenu.types.ts` + minimal intent-handler branch);
+      (5) Widget-reuse outcome (rendered without modification = full SC-19
+          credit; required new renderer = partial SC-19 credit, deviation
+          recorded);
+      (6) Smoke-test traces (slash-command path + natural-language path);
+      (7) Files modified count + LOC delta (use `git diff --stat`);
+      (8) Build green; minimal tests pass.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor) + Publish-Size Measurement (BINDING per CLAUDE.md §10)">
+      Run `code-review` skill against all changed files (Dataverse JSON, BFF
+      orchestrator change OR new orchestrator file, tool wrapper class, factory
+      extension, slash-command types file, intent-handler change, test files).
+      Run `adr-check` skill against the same; verify: ADR-013 (BFF-only AI;
+      agent via factory; middleware inherited), ADR-010 (DI minimalism — Path A:
+      zero new DI lines; Path B: one new line in EXISTING module), ADR-018 (no
+      new feature flag — kill-switch inherits via NullSprkChatAgentFactory),
+      ADR-014 (tenant isolation flows via orchestrator delegate — N/A for
+      action-row seed itself but confirmed for runtime tool execution), ADR-028
+      (no token snapshot — OBO passes through), ADR-029 (publish hygiene — see
+      below), ADR-030 (no new PaneEventBus channel — `FieldDelta` events flow
+      through existing `workspace.field_delta` event type from task 016).
+
+      Run BFF publish + size check:
+      `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`
+      Measure compressed output. Record in `notes/sc-19-proof-point-evidence.md`:
+      absolute size + delta vs prior baseline (post-task-031 baseline). Target
+      ≤ +0.1 MB. Escalation threshold +0.5 MB — if delta ≥ +0.5 MB, STOP and
+      investigate; SC-19 "configuration-only" claim is at risk. CVE scan:
+      `dotnet list package --vulnerable --include-transitive` — confirm clean.
+
+      Both quality gates MUST pass before marking task complete. Record gate
+      outputs (code-review summary + adr-check verdict + publish size + CVE
+      scan output) in evidence notes.
+    </step>
+    <step order="10" name="Record END TIMESTAMP + Compute SC-19 Verdict + Document + Complete">
+      **RECORD END TIMESTAMP** in `notes/sc-19-proof-point-evidence.md`:
+      `END: YYYY-MM-DD HH:MM:SS UTC (Step 10 begin)`. Compute total elapsed
+      time = END - START. Record explicitly.
+
+      Compute SC-19 verdict in evidence notes:
+      - **FULL PASS** if: total time &lt; 4 hours AND orchestrator Path A taken
+        (no parallel orchestrator) AND widget rendered without modification AND
+        publish-size delta ≤ +0.1 MB.
+      - **PARTIAL PASS** if: total time &lt; 1 day (8 hours) AND ≤ 1 of the three
+        non-time constraints was deviated.
+      - **FAIL** if: total time ≥ 1 day OR ≥ 2 of the three non-time constraints
+        were deviated.
+
+      The verdict + supporting numbers feed directly into task 044 (D3-05
+      lessons-learned). Be honest — a PARTIAL or FAIL verdict is valuable
+      evidence about R5 architecture maturity, not a stigma.
+
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 040 🔲 →
+      ✅. Reset `current-task.md` per CLAUDE.md §7 to next pending task (P3-2:
+      041 D3-02 Get Started welcome card; or 042 D3-03 telemetry dashboards —
+      P3-2 tasks are parallel-safe with each other, dispatch order per
+      operator). Report task completion with verdict (FULL/PARTIAL/FAIL) +
+      total elapsed time + key SC-19 numbers in the completion report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF, run minimal tests, run `dotnet publish` for size measurement, run `dotnet list package --vulnerable`</tool>
+    <tool name="pwsh">PowerShell 7+ — invoke `scripts/Deploy-Playbook.ps1` for the action + playbook deploy</tool>
+    <tool name="az">Azure CLI — bearer-token acquisition + Dataverse Web API verification queries via `az rest` for idempotency check</tool>
+    <tool name="npm">Build the frontend slash-command + intent-handler change if local-build verification is needed</tool>
+    <tool name="dataverse-deploy">Skill for the Dataverse data deploy per Spaarke conventions</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 (FULL rigor) — verify ADR-013, ADR-010, ADR-018, ADR-014, ADR-028, ADR-029, ADR-030</tool>
+    <tool name="context-handoff">Checkpointing per R5 CLAUDE.md §5 (after Step 3 decision, Step 7, Step 8 smoke test; verbose at &gt;60%)</tool>
+    <tool name="git">Stage + commit on the R5 branch (one logical commit for the proof-point: definition JSON + orchestrator change/new file + tool wrapper + factory wiring + slash command + intent-handler + tests)</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/analyze-for-chat.playbook.json (NEW — combined action + playbook + nodes definition per task 010 Option A pattern)</output>
+    <output type="data">Spaarke Dev Dataverse: new row in `sprk_analysisactions` with `sprk_actioncode = 'ANALYZE-DOC@v1'`; new row in `sprk_analysisplaybooks` with playbook name `analyze-for-chat@v1`</output>
+    <output type="code" conditional="if-Path-A">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs (MODIFIED — parameterize primary method with playbookCode + actionCode arguments)</output>
+    <output type="code" conditional="if-Path-A">src/server/api/Sprk.Bff.Api/Api/Chat/SummarizeSessionEndpoint.cs (MODIFIED — pass explicit playbookCode/actionCode to orchestrator) + src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InvokeSummarizePlaybookTool.cs (MODIFIED — same)</output>
+    <output type="code" conditional="if-Path-B">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionAnalyzeOrchestrator.cs (NEW — sibling orchestrator delegating to shared streaming infrastructure)</output>
+    <output type="code" conditional="if-Path-B">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (MODIFIED — one new AddScoped line for SessionAnalyzeOrchestrator)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InvokeAnalyzePlaybookTool.cs (NEW — minimal wrapper mirroring task 015's InvokeSummarizePlaybookTool exactly)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (MODIFIED — add capability-gated tool-resolution block adjacent to InvokeSummarizePlaybookTool block)</output>
+    <output type="code">Capability manifest entry — `InvokeAnalyzePlaybook` added to appropriate capability's `ToolNames` allow-list per AIPU2-061</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts (MODIFIED — one new `/analyze` entry in DEFAULT_SLASH_COMMANDS)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (MODIFIED — one new intent-handler branch routing `/analyze`)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/InvokeAnalyzePlaybookToolTests.cs (NEW — minimal: tool-delegation test + tool-discoverable-in-factory test)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 040 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending P3-2 task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/sc-19-proof-point-evidence.md (LOAD-BEARING: START + END timestamps, total elapsed, orchestrator-path decision + rationale, files modified count, LOC delta, widget-reuse outcome, smoke-test traces, publish-size delta, CVE scan, SC-19 verdict FULL/PARTIAL/FAIL with supporting numbers)</output>
+    <output type="report">Task completion report (per task-execute template Step 6) — includes SC-19 verdict prominently for downstream task 044 lessons-learned consumption</output>
+  </outputs>
+
+  <examples>
+    <example name="Task 010 action-seed pattern (binding template)" location="projects/spaarke-ai-platform-unification-r5/tasks/010-sprk-analysisaction-summarize-seed.poml">
+      The canonical template for the action-seed half of this task. Especially
+      Steps 2 (shape discovery), 3 (JPS prompt), 4 (output schema), 5 (Option A
+      combined definition file), 6 (live deploy), 9 (idempotency rerun).
+      `/analyze` action row mirrors `/summarize` action row in shape; differs in
+      content.
+    </example>
+    <example name="Task 015 tool-wrapper pattern (binding template)" location="projects/spaarke-ai-platform-unification-r5/tasks/015-invoke-summarize-playbook-tool.poml">
+      The canonical template for the tool-wrapper half. Especially Step 4
+      (tool-class skeleton), Step 5 (factory resolution block), Step 6
+      (capability manifest update). `InvokeAnalyzePlaybookTool` is a near-clone
+      with description scoped to Analyze semantics.
+    </example>
+    <example name="Task 019 slash-command pattern (binding template)" location="projects/spaarke-ai-platform-unification-r5/tasks/019-slash-command-summarize-semantic-extension.poml">
+      The canonical template for the slash-command half. `/analyze`
+      registration is a one-line ADD to `DEFAULT_SLASH_COMMANDS` adjacent to
+      `/summarize`; intent-handler is a one-branch addition routing to the
+      agent-tool path.
+    </example>
+    <example name="Task 017 widget-reuse evidence target" location="projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml">
+      The widget being proven schema-driven. `/analyze` rendering through
+      `StructuredOutputStreamWidget` WITHOUT modification is the load-bearing
+      SC-19 widget-reuse proof. Any required modification is recorded as a
+      deviation in `notes/sc-19-proof-point-evidence.md`.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">New row in Spaarke Dev Dataverse `sprk_analysisactions` collection: `sprk_actioncode = 'ANALYZE-DOC@v1'`, `sprk_name = 'Analyze Document for Chat'`. Verified via `az rest` `$filter` query at Step 6 idempotency check.</criterion>
+    <criterion testable="true">New row in Spaarke Dev Dataverse `sprk_analysisplaybooks` collection: playbook name `analyze-for-chat@v1` with one primary LLM-analysis node referencing `actionCode = 'ANALYZE-DOC@v1'`.</criterion>
+    <criterion testable="true">Action row's `sprk_systemprompt` field contains the JPS-formatted prompt (per Step 4) — NOT a free-text prompt, NOT loaded from a `.txt` file. Output schema (in whichever field task 010's discovery confirmed) is the Step 4 JSON Schema verbatim with required fields `analysisSummary`, `keyFindings`, `risks`, `recommendations`.</criterion>
+    <criterion testable="true">Deploy uses `scripts/Deploy-Playbook.ps1` (or its task-010 extension) — NOT a parallel deploy mechanism. Idempotent: re-running deploys without `-Force` is a no-op (skip-on-exists; no duplicates).</criterion>
+    <criterion testable="true">Orchestrator path decision recorded in `notes/sc-19-proof-point-evidence.md` with rationale: Path A (parameterize `SessionSummarizeOrchestrator`) PREFERRED; Path B (sibling `SessionAnalyzeOrchestrator`) acceptable only with explicit gap citation per R5 §3.1.</criterion>
+    <criterion testable="true">`InvokeAnalyzePlaybookTool` is registered via the EXISTING `SprkChatAgentFactory.ResolveTools` mechanism (no new chat agent, no new tool framework, ZERO new top-level Program.cs lines). Tool function `InvokeAnalyzePlaybookAsync` accepts EXACTLY two parameters: `fileIds: string[]?` and `style: string?` (mirroring task 015 signature for shape consistency).</criterion>
+    <criterion testable="true">Tool description text explicitly scopes routing to Analyze semantics AND explicitly differentiates from `InvokeSummarizePlaybook` (task 015) AND `insights.query` (task 024) per NFR-12. Final description recorded in task notes.</criterion>
+    <criterion testable="true">New `DEFAULT_SLASH_COMMANDS` entry for `/analyze` is added in `slashCommandMenu.types.ts` adjacent to `/summarize`. ConversationPane intent-handler routes `/analyze` to the agent-tool path mirroring task 019's pattern.</criterion>
+    <criterion testable="true">Smoke test passes end-to-end on Spaarke Dev: slash-command path (`/analyze` after file upload) AND natural-language path ("analyze the attached documents") both produce structured output rendered progressively in Workspace pane via `StructuredOutputStreamWidget`. Activity span IDs / log traces captured for both paths.</criterion>
+    <criterion testable="true">`StructuredOutputStreamWidget` (task 017) renders `/analyze` output WITHOUT modification — proving the widget is genuinely schema-driven. If a new renderer was required, the deviation is explicitly recorded in `notes/sc-19-proof-point-evidence.md` (partial SC-19 credit).</criterion>
+    <criterion testable="true">ZERO new feature flags introduced (ADR-018 / R5 §3.2); tool registers unconditionally inside the existing capability-gated block; kill-switch coverage inherits via `NullSprkChatAgentFactory`. Confirmed by `adr-check` pass at Step 9.5.</criterion>
+    <criterion testable="true">BFF publish-size delta measured + recorded (per R5 §3.6 + CLAUDE.md §10); target ≤ +0.1 MB; escalation threshold +0.5 MB. Actual delta recorded in `notes/sc-19-proof-point-evidence.md`. R5 cumulative budget ≤ +1 MB still honored.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE introduced (`dotnet list package --vulnerable --include-transitive` clean).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 (ADR-013, ADR-010, ADR-018, ADR-014, ADR-028, ADR-029, ADR-030 confirmed).</criterion>
+    <criterion testable="true">Minimal test surface exists: `InvokeAnalyzePlaybookToolTests.cs` covers tool delegation + tool discoverability in factory (mirroring task 015's test minimum). Heavier convergence tests NOT required for proof-point measurement task.</criterion>
+    <criterion testable="true">SC-19 measurement evidence: `notes/sc-19-proof-point-evidence.md` contains START timestamp (Step 0), END timestamp (Step 10), total elapsed time, orchestrator-path decision + rationale, files modified count + LOC delta, widget-reuse outcome, publish-size delta, CVE scan result, and SC-19 verdict (FULL PASS / PARTIAL PASS / FAIL) with supporting numbers per Step 10 decision criteria.</criterion>
+    <criterion testable="true">SC-19 cost target: total elapsed time from Step 0 START to Step 10 END is &lt; 1 day (8 hours) per spec SC-19 wording. Target ≤ 4 hours per plan.md Phase 3 estimate. Actual time recorded honestly even if &gt; target (this IS the measurement; honest failure is valid evidence).</criterion>
+  </acceptance-criteria>
+</task>

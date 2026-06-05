@@ -101,8 +101,8 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
    # For a new service Foo:
    rg -t cs -n "[\s,(]Foo\s+\w+[,)]" src/server/api/Sprk.Bff.Api/Api/
    ```
-2. **For each consuming endpoint, verify**: Is the `MapXxxEndpoints()` call in `Infrastructure/DI/EndpointMappingExtensions.cs` ITSELF wrapped in the same `if (flag)` block? If NO → apply ADR-030.
-3. **Apply ADR-030 per the 3 patterns** (P1 Promote-to-unconditional / P2 Quiet no-op / P3 Fail-fast Null-Object). See [`.claude/adr/ADR-030-bff-nullobject-kill-switch.md`](../adr/ADR-030-bff-nullobject-kill-switch.md) §10 for the PR review checklist and full static-scan recipe.
+2. **For each consuming endpoint, verify**: Is the `MapXxxEndpoints()` call in `Infrastructure/DI/EndpointMappingExtensions.cs` ITSELF wrapped in the same `if (flag)` block? If NO → apply ADR-032.
+3. **Apply ADR-032 per the 3 patterns** (P1 Promote-to-unconditional / P2 Quiet no-op / P3 Fail-fast Null-Object). See [`.claude/adr/ADR-032-bff-nullobject-kill-switch.md`](../adr/ADR-032-bff-nullobject-kill-switch.md) §10 for the PR review checklist and full static-scan recipe.
 
 **Why this rule exists**: r2 task 011 Phase 1a inventory identified 13 conditional services + matching unconditional consumers via a static pass. Phase 1c + Step 9.5 surfaced 5 MORE that the static pass missed — because:
 - Phase 1a focused on "find conditional registrations" + "find unconditional endpoint mappings" but did NOT systematically cross-reference all CONSUMERS of conditional services across the full endpoint surface
@@ -111,7 +111,7 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 **The pattern is easy to introduce by accident** — it requires explicit reviewer discipline + the static-scan recipe to prevent. Apply to every PR touching `*Module.cs` DI files.
 
 **Cross-reference**:
-- ADR-030 (canonical pattern) — [`.claude/adr/ADR-030-bff-nullobject-kill-switch.md`](../adr/ADR-030-bff-nullobject-kill-switch.md)
+- ADR-032 (canonical pattern) — [`.claude/adr/ADR-032-bff-nullobject-kill-switch.md`](../adr/ADR-032-bff-nullobject-kill-switch.md)
 - r2 evidence — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) §2.1 + Appendix A
 - Phase 5 procedure-doc codification — [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.1
 - Per-service inventory — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md)
@@ -145,6 +145,29 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 4. **If actual root cause differs from ledger's hypothesis**: file a path-b decision record (`projects/{project}/decisions/D-XX-{ledger-id}-resolution.md`) documenting the corrected analysis BEFORE applying the fix
 
 **Cross-reference**: Phase 5 procedure-doc codification at [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.3.
+
+#### F.4 Deploy Coordination Across Parallel Projects (Binding per Insights Engine r2 Wave B post-merge)
+
+**Codified 2026-06-02** from Insights Engine r2 Wave B post-merge planning: multiple worktree-based projects can touch BFF code concurrently. The deploy surface is `.github/workflows/deploy-bff-api.yml` which has two trigger paths:
+
+| Trigger | Path filter | Concurrency control |
+|---|---|---|
+| `push` to `master` | `src/server/api/**` | Group `deploy-bff-api-production` (queues; never cancels in-flight) |
+| `workflow_dispatch` (manual) | n/a | Group `deploy-bff-api-{env}` (per-env queue) |
+
+**Binding rules**:
+
+1. **Production deploys go through PR-to-master only**. Master is protected; no direct push. Status checks (Build, Trivy, actionlint, Security Scan, Client Quality) must pass. This means production cannot be deployed by accident or by uncoordinated dev action.
+
+2. **`spaarke-bff-dev` is shared state**. Any project's `workflow_dispatch` to dev — or manual `Deploy-BffApi.ps1` from a worktree — overwrites the running deployment. Last write wins. **MUST coordinate dev deploys** when multiple projects are actively iterating:
+   - **Prefer**: trigger dev deploys via `gh workflow run deploy-bff-api.yml -f environment=dev` so the queue is visible in `gh run list`
+   - **Avoid**: ad-hoc `Deploy-BffApi.ps1` from a worktree when another project is mid-test — confirm in team channel first
+
+3. **For active worktree projects with BFF changes**: until merge, the project's BFF changes are dev-only. **Don't deploy from the worktree branch close to another project's smoke window.** Use dry-run / build verification (`dotnet build` + `dotnet test`) for as much validation as possible without deploying.
+
+4. **After merge to master, watch the auto-deploy**: it triggers immediately on push-to-master with matching path filter. `gh run watch` confirms the deploy completes successfully before the next project's merge can run cleanly.
+
+**Cross-reference**: [`docs/guides/bff-deploy-coordination.md`](../../docs/guides/bff-deploy-coordination.md) (referenced; expand here if/when a longer narrative is needed). For solo-deploy mechanics see [`.claude/skills/bff-deploy/SKILL.md`](../skills/bff-deploy/SKILL.md).
 
 ---
 

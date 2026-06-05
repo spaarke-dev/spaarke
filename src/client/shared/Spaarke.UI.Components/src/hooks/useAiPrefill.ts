@@ -263,9 +263,11 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
         await Promise.all(resolvePromises);
         if (cancelled) return;
 
-        if (fieldNames.length > 0) {
-          onApplyRef.current(resolved, fieldNames);
-        }
+        // Always invoke onApply (even with empty fields) so the consumer gets
+        // a definitive completion signal. Without this, an AI response that
+        // returns all-null fields leaves the consumer's local loading state
+        // stuck because the "success transition" lived only inside onApply.
+        onApplyRef.current(resolved, fieldNames);
 
         setPrefilledFields(fieldNames);
         setStatus('success');

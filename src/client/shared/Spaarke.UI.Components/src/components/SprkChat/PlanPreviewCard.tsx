@@ -20,7 +20,7 @@ import * as React from 'react';
 import { Card, makeStyles, tokens, Text, Button, Spinner, Input, mergeClasses } from '@fluentui/react-components';
 import {
   CheckmarkCircle20Regular,
-  DismissCircle20Regular,
+  DismissCircle20Regular as _DismissCircle20Regular,
   ErrorCircle20Regular,
   ArrowRight20Regular,
   Edit20Regular,

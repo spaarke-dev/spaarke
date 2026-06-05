@@ -1,13 +1,16 @@
 using FluentAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -37,7 +40,7 @@ public class SprkChatAgentFactoryTests
 
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedContext);
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -66,6 +69,7 @@ public class SprkChatAgentFactoryTests
                 It.IsAny<Guid>(),
                 It.IsAny<ChatHostContext?>(),
                 It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
@@ -77,7 +81,7 @@ public class SprkChatAgentFactoryTests
 
         // Assert
         contextProviderMock.Verify(
-            p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()),
+            p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -87,7 +91,7 @@ public class SprkChatAgentFactoryTests
         // Arrange
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -112,10 +116,10 @@ public class SprkChatAgentFactoryTests
 
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(doc1, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(doc1, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatContext(prompt1, null, null, TestPlaybookId));
         contextProviderMock
-            .Setup(p => p.GetContextAsync(doc2, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(doc2, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatContext(prompt2, null, null, TestPlaybookId));
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -153,7 +157,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
@@ -195,7 +199,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
@@ -226,7 +230,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
@@ -266,7 +270,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         // Previous turn had a tool called "OldTool" that no longer appears in the current set.
@@ -309,7 +313,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         // Use the original service provider (no router registration)
@@ -323,6 +327,373 @@ public class SprkChatAgentFactoryTests
 
         // Assert — agent created normally; no exception thrown
         agent.Should().NotBeNull();
+    }
+
+    // ── R5 task 015 — InvokeSummarizePlaybookTool routing-selection coverage ──
+
+    /// <summary>
+    /// When the playbook capability set contains <see cref="PlaybookCapabilities.Summarize"/>
+    /// AND <see cref="Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator"/> is registered
+    /// in DI, the factory MUST register <c>invoke_summarize_playbook</c> as an AIFunction on
+    /// the resolved agent's tool list. Verified via the <c>capability_change</c> SSE event:
+    /// when the previous turn did NOT have this tool, the factory emits a "capability_change"
+    /// event listing it as a newly-available tool.
+    ///
+    /// This satisfies R5 task 015 acceptance criterion: "tool is visible in the agent's tool
+    /// catalog when the gating capability is present".
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_WithSummarizeCapability_RegistersInvokeSummarizePlaybookTool()
+    {
+        // Arrange — null playbookId means "use CoreCapabilities" which includes Summarize.
+        // SessionSummarizeOrchestrator is registered in DI alongside its real (mocked) deps.
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDefaultContext());
+
+        var services = BuildServiceProviderWithSummarizeOrchestrator(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Capture capability_change events so we can inspect the tool catalog.
+        var capturedEvents = new List<ChatSseEvent>();
+        Func<ChatSseEvent, CancellationToken, Task> sseWriter = (evt, _) =>
+        {
+            capturedEvents.Add(evt);
+            return Task.CompletedTask;
+        };
+
+        // Act — playbookId = null → CoreCapabilities (Search/Analyze/SelectionRevise/Summarize).
+        // previousTurnToolNames empty → every current tool is reported as "available".
+        await factory.CreateAgentAsync(
+            TestSessionId, TestDocumentId,
+            playbookId: null,
+            tenantId: TestTenantId,
+            sseWriter: sseWriter,
+            latestUserMessage: "summarize the attached files",
+            previousTurnToolNames: Array.Empty<string>());
+
+        // Assert — exactly one capability_change event lists `invoke_summarize_playbook`
+        // as a newly-available tool. We assert on the event payload to confirm the LLM
+        // tool name from R5 task 015 appears in the resolved tool catalog.
+        capturedEvents.Should()
+            .Contain(e => e.Type == "capability_change",
+                because: "factory must emit capability_change when the tool set differs from the previous turn");
+
+        // Convert each capability_change event's serialized payload to a string and
+        // search for the tool name. The payload shape is implementation-defined but the
+        // tool name appears verbatim in either the JSON or via the Data property fields.
+        var changeEvents = capturedEvents.Where(e => e.Type == "capability_change").ToList();
+        var allPayloads = string.Join("\n", changeEvents.Select(e =>
+            System.Text.Json.JsonSerializer.Serialize(e.Data)));
+        allPayloads.Should().Contain(InvokeSummarizePlaybookTool.ToolName,
+            because: "the factory MUST emit a capability_change event listing invoke_summarize_playbook as available when Summarize capability is set");
+    }
+
+    // ── R5 task 024 — InvokeInsightsQueryTool routing-selection coverage ──────
+
+    /// <summary>
+    /// When the playbook capability set contains <see cref="PlaybookCapabilities.InsightsQuery"/>
+    /// AND <see cref="Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool"/> is registered
+    /// in DI, the factory MUST register <c>insights.query</c> as an AIFunction on the
+    /// resolved agent's tool list. Verified via the <c>capability_change</c> SSE event:
+    /// when the previous turn did NOT have this tool, the factory emits a "capability_change"
+    /// event listing it as a newly-available tool.
+    ///
+    /// This satisfies R5 task 024 acceptance criterion: "tool is visible in the agent's tool
+    /// catalog when the gating capability is present".
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_WithInsightsQueryCapability_RegistersInsightsQueryTool()
+    {
+        // Arrange — null playbookId means "use CoreCapabilities" which now includes InsightsQuery
+        // (per R5 task 024 PlaybookCapabilities update).
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDefaultContext());
+
+        var services = BuildServiceProviderWithInsightsQueryTool(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        var capturedEvents = new List<ChatSseEvent>();
+        Func<ChatSseEvent, CancellationToken, Task> sseWriter = (evt, _) =>
+        {
+            capturedEvents.Add(evt);
+            return Task.CompletedTask;
+        };
+
+        // Act — playbookId = null → CoreCapabilities (includes InsightsQuery per task 024).
+        // previousTurnToolNames empty → every current tool is reported as "available".
+        await factory.CreateAgentAsync(
+            TestSessionId, TestDocumentId,
+            playbookId: null,
+            tenantId: TestTenantId,
+            sseWriter: sseWriter,
+            latestUserMessage: "what will this matter cost?",
+            previousTurnToolNames: Array.Empty<string>());
+
+        // Assert — a capability_change event lists `insights.query` as a newly-available tool.
+        capturedEvents.Should()
+            .Contain(e => e.Type == "capability_change",
+                because: "factory must emit capability_change when the tool set differs from the previous turn");
+
+        var changeEvents = capturedEvents.Where(e => e.Type == "capability_change").ToList();
+        var allPayloads = string.Join("\n", changeEvents.Select(e =>
+            System.Text.Json.JsonSerializer.Serialize(e.Data)));
+        allPayloads.Should().Contain(InvokeInsightsQueryTool.ToolName,
+            because: "the factory MUST emit a capability_change event listing insights.query as available when InsightsQuery capability is set");
+    }
+
+    /// <summary>
+    /// Build a service provider that includes the dependencies needed to register
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool"/> in DI so the
+    /// tool's gating block in <c>SprkChatAgentFactory.ResolveTools</c> can wire successfully.
+    /// </summary>
+    private static ServiceProvider BuildServiceProviderWithInsightsQueryTool(
+        IChatContextProvider contextProvider)
+    {
+        var services = new ServiceCollection();
+
+        var chatClientMock = new Mock<IChatClient>();
+        services.AddSingleton(chatClientMock.Object);
+
+        var rawChatClientMock = new Mock<IChatClient>();
+        services.AddKeyedSingleton<IChatClient>("raw", rawChatClientMock.Object);
+
+        services.AddScoped(_ => contextProvider);
+        services.AddLogging();
+
+        // Register the typed HttpClient for InvokeInsightsQueryTool — mirrors the
+        // AnalysisServicesModule.AddAnalysisOrchestrationServices registration but with a
+        // test-only BaseAddress. The tool's gating block in ResolveTools only checks "is
+        // the tool resolvable?", it does NOT invoke the HTTP call.
+        services.AddHttpContextAccessor();
+        services.AddHttpClient<Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool>(client =>
+        {
+            client.BaseAddress = new Uri("https://test.local");
+            client.Timeout = TimeSpan.FromSeconds(60);
+        });
+
+        services.AddSingleton<SprkChatAgentFactory>();
+
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Build a service provider that includes the dependencies needed to register
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator"/> in DI so the
+    /// tool's gating block in <c>SprkChatAgentFactory.ResolveTools</c> can wire successfully.
+    /// </summary>
+    private static ServiceProvider BuildServiceProviderWithSummarizeOrchestrator(
+        IChatContextProvider contextProvider)
+    {
+        var services = new ServiceCollection();
+
+        var chatClientMock = new Mock<IChatClient>();
+        services.AddSingleton(chatClientMock.Object);
+
+        var rawChatClientMock = new Mock<IChatClient>();
+        services.AddKeyedSingleton<IChatClient>("raw", rawChatClientMock.Object);
+
+        services.AddScoped(_ => contextProvider);
+        services.AddLogging();
+
+        // Register dependencies of SessionSummarizeOrchestrator. ChatSessionManager is a
+        // concrete class (not an interface) so we cannot Moq.Of() it — construct with
+        // mocked I/O deps directly. The tool's registration block ONLY checks "is the
+        // orchestrator resolvable?", it does NOT invoke the orchestrator's methods.
+        var chatSessionManager = new ChatSessionManager(
+            cache: Mock.Of<IDistributedCache>(),
+            dataverseRepository: Mock.Of<IChatDataverseRepository>(),
+            logger: Mock.Of<ILogger<ChatSessionManager>>(),
+            persistence: null,
+            cleanupSignal: null);
+
+        services.AddSingleton(chatSessionManager);
+        services.AddSingleton(Mock.Of<IRagService>());
+        services.AddSingleton(Mock.Of<IOpenAiClient>());
+        services.AddSingleton(Mock.Of<Spaarke.Dataverse.IGenericEntityService>());
+        services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
+
+        // The actual orchestrator class — concrete, scoped, per task 012 + AnalysisServicesModule.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
+
+        services.AddSingleton<SprkChatAgentFactory>();
+
+        return services.BuildServiceProvider();
+    }
+
+    // ── R5 task 033 — Session Files manifest suffix on system prompt ──────────
+
+    /// <summary>
+    /// When <see cref="ChatContext.UploadedFiles"/> is non-empty, the factory MUST append a
+    /// compact "Session Files" manifest suffix to <see cref="ChatContext.SystemPrompt"/>
+    /// so the LLM's tool-call reasoning sees the files. Verifies the binding contract for
+    /// the Summarize convergence path (FR-01 + FR-08).
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_AppendsSessionFilesNoteToSystemPrompt_WhenUploadedFilesPresent()
+    {
+        // Arrange
+        const string basePrompt = "You are Spaarke AI.";
+        var manifest = new List<ChatSessionFile>
+        {
+            new("file-001", "contract.pdf", "application/pdf", 1234, "idx-001", DateTimeOffset.UtcNow),
+            new("file-002", "schedule.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 5678, "idx-002", DateTimeOffset.UtcNow)
+        };
+
+        var contextWithFiles = new ChatContext(
+            SystemPrompt: basePrompt,
+            DocumentSummary: null,
+            AnalysisMetadata: null,
+            PlaybookId: TestPlaybookId,
+            KnowledgeScope: null,
+            UploadedFiles: manifest);
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contextWithFiles);
+
+        var services = BuildServiceProvider(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId,
+            TestDocumentId,
+            TestPlaybookId,
+            TestTenantId,
+            uploadedFiles: manifest);
+
+        // Assert — suffix appended; tool-name binding present; both file names + IDs visible.
+        agent.Context.SystemPrompt.Should().StartWith(basePrompt,
+            because: "the original system prompt must be preserved (suffix is additive)");
+        agent.Context.SystemPrompt.Should().Contain("Session Files:",
+            because: "the manifest suffix is keyed by 'Session Files:' so the LLM can recognize it");
+        agent.Context.SystemPrompt.Should().Contain("contract.pdf");
+        agent.Context.SystemPrompt.Should().Contain("schedule.docx");
+        agent.Context.SystemPrompt.Should().Contain("file-001");
+        agent.Context.SystemPrompt.Should().Contain("file-002");
+        agent.Context.SystemPrompt.Should().Contain("invoke_summarize_playbook",
+            because: "the suffix MUST name the exact tool the LLM should invoke to summarize");
+        agent.Context.SystemPrompt.Should().Contain("2 uploaded file",
+            because: "the suffix announces the file count so the LLM can reason about cardinality");
+    }
+
+    /// <summary>
+    /// When <see cref="ChatContext.UploadedFiles"/> is null or empty, the factory MUST NOT
+    /// append any manifest suffix — backward compatible with pre-R5 sessions.
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_DoesNotAppendSessionFilesNote_WhenUploadedFilesEmpty()
+    {
+        // Arrange
+        const string basePrompt = "You are Spaarke AI.";
+
+        var contextWithoutFiles = new ChatContext(
+            SystemPrompt: basePrompt,
+            DocumentSummary: null,
+            AnalysisMetadata: null,
+            PlaybookId: TestPlaybookId,
+            KnowledgeScope: null,
+            UploadedFiles: null);
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contextWithoutFiles);
+
+        var services = BuildServiceProvider(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId,
+            TestDocumentId,
+            TestPlaybookId,
+            TestTenantId);
+
+        // Assert — base prompt preserved; no suffix injected.
+        agent.Context.SystemPrompt.Should().Be(basePrompt,
+            because: "no manifest = no suffix appended (backward-compatible behavior)");
+        agent.Context.SystemPrompt.Should().NotContain("Session Files:");
+        agent.Context.SystemPrompt.Should().NotContain("invoke_summarize_playbook",
+            because: "the tool-name binding only appears via the manifest suffix");
+    }
+
+    /// <summary>
+    /// ADR-015 + R5 task 033 invariant: the manifest suffix MUST NOT include any extracted
+    /// text content, chunk text, MIME, or size info — only fileId + fileName + count.
+    /// Pinning this as a regression guard so future refactors can't accidentally leak.
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_SystemPromptSuffixDoesNotIncludeExtractedTextContent()
+    {
+        // Arrange — a sentinel value that a buggy implementation might leak.
+        const string sentinelContentType = "application/x-leak-sentinel";
+        const long sentinelSize = 999_999_999L;
+
+        var manifest = new List<ChatSessionFile>
+        {
+            new(
+                FileId: "file-leak-001",
+                FileName: "leak.pdf",
+                ContentType: sentinelContentType,
+                SizeBytes: sentinelSize,
+                SearchDocumentIdsCsv: "idx-leak-sentinel-chunk-csv",
+                UploadedAt: DateTimeOffset.UtcNow)
+        };
+
+        var contextWithFile = new ChatContext(
+            SystemPrompt: "Base.",
+            DocumentSummary: null,
+            AnalysisMetadata: null,
+            PlaybookId: TestPlaybookId,
+            KnowledgeScope: null,
+            UploadedFiles: manifest);
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contextWithFile);
+
+        var services = BuildServiceProvider(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId,
+            TestDocumentId,
+            TestPlaybookId,
+            TestTenantId,
+            uploadedFiles: manifest);
+
+        // Assert — fileId + fileName are present (manifest); content-type, size, and
+        // search-document IDs MUST NOT be in the prompt (ADR-015 no-leakage).
+        agent.Context.SystemPrompt.Should().Contain("file-leak-001",
+            because: "fileId is part of the canonical manifest");
+        agent.Context.SystemPrompt.Should().Contain("leak.pdf",
+            because: "fileName is part of the canonical manifest");
+
+        agent.Context.SystemPrompt.Should().NotContain(sentinelContentType,
+            because: "MIME content type MUST NOT leak into the system prompt (ADR-015)");
+        agent.Context.SystemPrompt.Should().NotContain(sentinelSize.ToString(),
+            because: "raw byte size MUST NOT leak into the system prompt (ADR-015)");
+        agent.Context.SystemPrompt.Should().NotContain("idx-leak-sentinel-chunk-csv",
+            because: "AI Search document/chunk IDs MUST NOT leak into the system prompt (ADR-015)");
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

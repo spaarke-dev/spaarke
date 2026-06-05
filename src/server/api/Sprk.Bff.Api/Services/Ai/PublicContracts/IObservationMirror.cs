@@ -11,13 +11,15 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// <remarks>
 /// <para>
 /// <b>Cross-zone seam (task 051 design decision)</b>: this interface is consumed by
-/// Zone A (the <c>IngestOrchestrator</c> in <c>Services/Ai/Insights/Ingest/</c>) and
-/// implemented by Zone B (<c>DataverseObservationMirror</c> in
-/// <c>Services/Insights/Observations/</c>). Per project <c>CLAUDE.md §3.5.4</c>, Zone B
-/// is forbidden from importing <c>Services.Ai.Insights.*</c> (only <c>PublicContracts</c>
-/// is permitted via the <c>[^.P]</c> exception in the grep pattern). Placing this
-/// interface in <c>Services/Ai/PublicContracts/</c> alongside <see cref="IInsightsAi"/>
-/// preserves the §3.5.4 facade discipline without per-feature carve-outs.
+/// Zone A (the universal-ingest@v1 <c>ObservationEmitterNodeExecutor</c> in
+/// <c>Services/Ai/Insights/Nodes/</c>; previously also by <c>IngestOrchestrator</c> in
+/// <c>Services/Ai/Insights/Ingest/</c> — retired Wave C-G4 / task 022) and implemented by
+/// Zone B (<c>DataverseObservationMirror</c> in <c>Services/Insights/Observations/</c>).
+/// Per project <c>CLAUDE.md §3.5.4</c>, Zone B is forbidden from importing
+/// <c>Services.Ai.Insights.*</c> (only <c>PublicContracts</c> is permitted via the
+/// <c>[^.P]</c> exception in the grep pattern). Placing this interface in
+/// <c>Services/Ai/PublicContracts/</c> alongside <see cref="IInsightsAi"/> preserves the
+/// §3.5.4 facade discipline without per-feature carve-outs.
 /// </para>
 /// <para>
 /// <b>Phase 1 implementations</b>:

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>Test infra: fix 7 pre-existing compile errors in BFF handler tests (blocks `dotnet test`)</title>
+    <phase>6: Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, testing, refactoring, integration-test, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Fixes compile errors in 3 existing test files (no production code modified, no API change). STANDARD per Step 3.5.5 — modifies existing test files with explicit constraints, no .cs production-code modification.</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Modifies 3 specific test files: AppOnlyDocumentAnalysisJobHandler, EmbeddingMigrationService, EmailAnalysisJobHandler tests. Production code untouched. Independent of other R4 work.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-26 as a Phase 6 build-hygiene task after pre-existing compile errors in
+    `tests/unit/Sprk.Bff.Api.Tests/` were repeatedly flagged by R4 sub-agents (050, 053, 054).
+    7 compile errors in 3 test files block `dotnet test` from running end-to-end, which means
+    R4's BFF tests (PUT/PATCH/ETag boundary tests, attachment cap tests, modifiedOn wire-shape
+    tests) cannot run as part of CI verification. Operator approved adding to R4 scope (2026-05-26).
+  </prompt>
+
+  <role>
+    .NET 8 test-infrastructure engineer. The errors are likely stale fixtures, type drift, or
+    missing dependencies in the test project — NOT design problems with the production handlers.
+    Fix in test files only.
+  </role>
+
+  <goal>
+    `dotnet build tests/unit/Sprk.Bff.Api.Tests/` completes with 0 errors. `dotnet test` runs the
+    full test suite end-to-end. R4-added tests (PUT/PATCH/ETag, A-4 attachments, B-4 ModifiedOn
+    wire shape) execute alongside existing tests. No production code modified.
+  </goal>
+
+  <context>
+    <background>
+      Test files reporting compile errors (per R4 sub-agent reports):
+      1. `AppOnlyDocumentAnalysisJobHandler` test file
+      2. `EmbeddingMigrationService` test file
+      3. `EmailAnalysisJobHandler` test file
+
+      Cause is unknown until investigated — likely candidates: (a) stale fixture types drift from
+      production refactors landed without test updates; (b) missing NuGet package after a dep cleanup;
+      (c) implicit using namespaces stripped; (d) production handler API changed without test sync.
+
+      Pre-existing baseline. Verified on master by R4 sub-agents (stash + retest).
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No production code modification. Fix in test files (or test helper files like fixtures, builders, mocks) only.</constraint>
+    <constraint source="project">If a production class genuinely cannot be tested due to a real design issue, ESCALATE per CLAUDE.md §6 — do NOT modify production code to "make tests pass".</constraint>
+    <constraint source="ADR-013">If a handler test touches AI-internal types, route through `PublicContracts/` facade where possible (per refined ADR-013, F-2 audit).</constraint>
+    <constraint source="project">If a test is genuinely obsolete (e.g., tests a handler that no longer exists), DELETE it cleanly with a comment citing the original handler removal commit. Do NOT leave broken tests in the suite.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/bff-ai-facade-audit-2026-05.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Reproduce">Run `dotnet build tests/unit/Sprk.Bff.Api.Tests/` and capture all 7 compile errors. Document file + line + diagnostic ID.</step>
+    <step order="2" name="Diagnose each">For each error, identify root cause: (a) type drift from production refactor, (b) missing dep, (c) namespace import issue, (d) genuine API change.</step>
+    <step order="3" name="Categorize">Bin each error into: FIXABLE-IN-TEST, FIXABLE-VIA-FIXTURE-UPDATE, DELETE-OBSOLETE-TEST, or ESCALATE.</step>
+    <step order="4" name="Apply test fixes">For each FIXABLE error: update the test file or fixture. Do NOT modify production code.</step>
+    <step order="5" name="Handle obsolete tests">For DELETE-OBSOLETE-TEST errors: delete the test (or test method) with a brief comment citing the obsolescence reason + the production commit that removed the handler.</step>
+    <step order="6" name="Verify build">`dotnet build tests/unit/Sprk.Bff.Api.Tests/` → 0 errors.</step>
+    <step order="7" name="Verify test run">`dotnet test` runs end-to-end. Capture: total tests, passed, failed. Report failures (likely some existing test failures will surface, but they're separate from this task).</step>
+    <step order="8" name="Verify R4 tests now run">Confirm R4-added tests are now in the test run output: (a) PUT/PATCH/ETag boundary tests (task 054); (b) attachment cap boundary tests (task 050 ChatEndpointsAttachmentsTests); (c) ModifiedOn wire-shape tests (task 053 WorkspaceLayoutEndpointTests).</step>
+    <step order="9" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/test-infra-bff-handler-fix-2026-05-26.md` with the 7-error catalog, fixes applied, deletions made, and current `dotnet test` baseline.</step>
+    <step order="10" name="Update TASK-INDEX">Change task 069 status to ✅ completed.</step>
+    <step order="11" name="Escalate (if applicable)">If any error required production-code change, ESCALATE before applying.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect test files + fixtures + production handlers (read-only)</tool>
+    <tool name="Edit">Fix test files</tool>
+    <tool name="Bash">Run dotnet build + dotnet test</tool>
+    <tool name="Grep">Cross-reference handler usage</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/.../AppOnlyDocumentAnalysisJobHandler*.cs (fixed or deleted)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/.../EmbeddingMigrationService*.cs (fixed or deleted)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/.../EmailAnalysisJobHandler*.cs (fixed or deleted)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/test-infra-bff-handler-fix-2026-05-26.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet build tests/unit/Sprk.Bff.Api.Tests/` → 0 errors.</criterion>
+    <criterion testable="true">`dotnet test` runs to completion (any individual test failures are out of scope but the suite must execute).</criterion>
+    <criterion testable="true">R4-added BFF tests (050 attachments, 053 ModifiedOn, 054 PUT+ETag) appear in the test run output.</criterion>
+    <criterion testable="true">No production code modified in `src/server/api/Sprk.Bff.Api/` (verified via `git diff src/server/api/`).</criterion>
+    <criterion testable="true">Memo at `notes/test-infra-bff-handler-fix-2026-05-26.md` catalogs all 7 errors + fixes/deletions.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Likely root causes (sorted by probability based on sub-agent reports):
+    1. Type drift from R3+ production handler refactors that didn't update tests
+    2. Missing `using` directives after a namespace reorganization
+    3. NuGet package removal that orphaned test-only dependencies
+    4. Production handler signature change (would surface as method-not-found errors)
+
+    Do NOT pursue (out of scope, separate task):
+    - Adding test coverage where none exists
+    - Improving test quality / refactoring test patterns
+    - Migrating to a different test framework
+
+    Narrow to: get the build green + the suite running. Defer test quality improvements.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor — test fixes only, no production code. Quality gates SKIPPED per Step 0.5.</protocol>
+  </execution>
+</task>

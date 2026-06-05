@@ -63,6 +63,15 @@ export type {
 export { LAYOUT_TEMPLATES, getLayoutTemplate } from './layoutTemplates';
 export type { LayoutTemplate, LayoutTemplateId, LayoutTemplateRow } from './layoutTemplates';
 
+// Section metadata catalog (R4 W-3 / task 040, 2026-05-26).
+// Single source of truth for static section metadata (id, label, icon, ...).
+// Consumed by WorkspaceLayoutWizard's section picker AND validated against
+// LegalWorkspace's `SECTION_REGISTRY` at dev-mode module load. Eliminates the
+// pre-R4 drift where the wizard's hardcoded `SECTION_CATALOG` lagged behind
+// the dashboard's registry (Calendar + Daily Briefing missing from picker).
+export { SECTION_METADATA_CATALOG, SECTION_METADATA_IDS, getSectionMetadata } from './sectionMetadataCatalog';
+export type { SectionMetadata } from './sectionMetadataCatalog';
+
 // Dynamic workspace config builder (hoisted in task 067 from LegalWorkspace)
 export { buildDynamicWorkspaceConfig, SYSTEM_DEFAULT_LAYOUT_JSON } from './buildDynamicWorkspaceConfig';
 export type { LayoutJson, LayoutJsonRow, WorkspaceScope } from './buildDynamicWorkspaceConfig';

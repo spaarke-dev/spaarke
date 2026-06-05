@@ -53,7 +53,9 @@ $webResources = @(
     # Updated existing
     @{ Name = 'sprk_documentuploadwizard';           DisplayName = 'Upload Documents';               Type = 1; Path = 'src\solutions\DocumentUploadWizard\dist\index.html' }
     @{ Name = 'sprk_alldocuments';                   DisplayName = 'Document List';                  Type = 1; Path = 'src\solutions\AllDocuments\dist\alldocuments.html' }
-    @{ Name = 'sprk_corporateworkspace';             DisplayName = 'Corporate Workspace';            Type = 1; Path = 'src\solutions\LegalWorkspace\dist\corporateworkspace.html' }
+    # RETIRED 2026-05-26 (R4 task 041 / OC-R4-05) — sprk_corporateworkspace web resource no longer deployed.
+    # See docs/architecture/LEGALWORKSPACE-RETIREMENT.md. Re-enable ONLY for emergency rollback.
+    # @{ Name = 'sprk_corporateworkspace';             DisplayName = 'Corporate Workspace';            Type = 1; Path = 'src\solutions\LegalWorkspace\dist\corporateworkspace.html' }
     @{ Name = 'sprk_workspacelayoutwizard';          DisplayName = 'Workspace Layout Wizard';        Type = 1; Path = 'src\solutions\WorkspaceLayoutWizard\dist\sprk_workspacelayoutwizard.html' }
 
 )

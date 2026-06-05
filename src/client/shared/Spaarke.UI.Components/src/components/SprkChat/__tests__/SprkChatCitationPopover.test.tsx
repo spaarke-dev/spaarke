@@ -236,7 +236,9 @@ describe('SprkChatCitationPopover', () => {
     renderWithProviders(<CitationMarker citation={fullCitation} />);
 
     const marker = screen.getByTestId('citation-marker-1');
-    expect(marker).toHaveAttribute('aria-label', 'Citation 1, source: Company Policy Handbook');
+    // Task 071: aria-label text drifted in production to include "document source:" —
+    // updated to match the current SprkChatCitationPopover.tsx output.
+    expect(marker).toHaveAttribute('aria-label', 'Citation 1, document source: Company Policy Handbook');
     expect(marker).toHaveAttribute('role', 'button');
     expect(marker).toHaveAttribute('tabIndex', '0');
   });

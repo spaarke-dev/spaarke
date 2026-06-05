@@ -1,0 +1,128 @@
+MUTUAL NON-DISCLOSURE AGREEMENT
+
+This Mutual Non-Disclosure Agreement (this "Agreement") is entered into as of
+January 22, 2026 (the "Effective Date") by and between Lumen Cascade Robotics,
+Inc., a Delaware corporation with its principal place of business at 2200 Tech
+Boulevard, Mountain View, CA 94043 ("Lumen Cascade"), and Brightwater Capital
+Advisors LLC, a Massachusetts limited liability company with its principal
+place of business at 100 Federal Street, Floor 27, Boston, MA 02110
+("Brightwater"). Each of Lumen Cascade and Brightwater is a "Party" and
+collectively the "Parties."
+
+RECITALS
+
+WHEREAS, the Parties are exploring a possible business relationship, which may
+include a strategic minority investment by Brightwater in Lumen Cascade (the
+"Potential Transaction"); and
+
+WHEREAS, in connection with the evaluation of the Potential Transaction, each
+Party may disclose to the other certain Confidential Information (as defined
+below);
+
+NOW, THEREFORE, in consideration of the mutual covenants set forth herein, the
+Parties agree as follows:
+
+1. DEFINITIONS.
+
+   "Confidential Information" means any non-public information that a Party
+   (the "Disclosing Party") furnishes to the other Party (the "Receiving Party")
+   in connection with the Potential Transaction, whether oral, written,
+   electronic, or visual, and whether or not specifically marked as
+   confidential. Confidential Information includes business strategy, financial
+   information, product roadmaps, customer lists, technical specifications,
+   source code, and the existence and terms of this Agreement.
+
+   "Representatives" means a Party's directors, officers, employees, advisors
+   (including attorneys, accountants, and consultants), and affiliates who
+   have a need to know in connection with the Potential Transaction.
+
+2. CONFIDENTIALITY OBLIGATIONS.
+
+   2.1 Each Receiving Party shall (a) maintain the Confidential Information of
+       the Disclosing Party in strict confidence, (b) use at least the same
+       degree of care to protect the Confidential Information as the Receiving
+       Party uses for its own confidential information of comparable
+       sensitivity (and in no event less than reasonable care), and (c) not
+       disclose the Confidential Information to any third party other than its
+       Representatives, who shall be bound by confidentiality obligations no
+       less restrictive than those set forth herein.
+
+   2.2 The Receiving Party may use the Confidential Information solely for the
+       purpose of evaluating the Potential Transaction and not for any other
+       purpose, including without limitation any competitive or commercial
+       purpose.
+
+3. EXCEPTIONS.
+
+   The obligations of confidentiality and non-use set forth in Section 2 shall
+   not apply to information that:
+
+      (a) is or becomes generally available to the public through no breach
+          of this Agreement by the Receiving Party;
+      (b) was lawfully in the Receiving Party's possession without an
+          obligation of confidentiality prior to disclosure by the Disclosing
+          Party;
+      (c) is lawfully obtained from a third party not under an obligation of
+          confidentiality; or
+      (d) is independently developed by the Receiving Party without reference
+          to the Disclosing Party's Confidential Information.
+
+4. COMPELLED DISCLOSURE.
+
+   If the Receiving Party is required by law, regulation, or legal process to
+   disclose Confidential Information, the Receiving Party shall, to the extent
+   permitted by law, provide the Disclosing Party with prompt prior written
+   notice and reasonable cooperation to enable the Disclosing Party to seek a
+   protective order or other appropriate remedy.
+
+5. TERM AND TERMINATION.
+
+   This Agreement shall remain in effect for a period of two (2) years from
+   the Effective Date, unless earlier terminated by mutual written agreement.
+   The confidentiality and non-use obligations in Section 2 shall survive for
+   three (3) years following the Effective Date.
+
+6. RETURN OR DESTRUCTION.
+
+   Upon written request of the Disclosing Party or upon termination of this
+   Agreement, the Receiving Party shall, at the Disclosing Party's election,
+   return or destroy all Confidential Information in its possession and certify
+   such return or destruction in writing.
+
+7. NO LICENSE; NO REPRESENTATIONS.
+
+   No license, ownership interest, or other right in or to any Confidential
+   Information is granted or implied by this Agreement. The Disclosing Party
+   makes no representations or warranties regarding the accuracy or
+   completeness of any Confidential Information.
+
+8. INJUNCTIVE RELIEF.
+
+   The Parties acknowledge that money damages may be inadequate for breach of
+   this Agreement and that the Disclosing Party shall be entitled to seek
+   equitable relief, including injunctive relief, in addition to all other
+   remedies available at law or in equity.
+
+9. GOVERNING LAW; JURISDICTION.
+
+   This Agreement shall be governed by Delaware law without regard to its
+   conflict-of-laws principles. Any dispute arising hereunder shall be brought
+   exclusively in the state or federal courts located in New Castle County,
+   Delaware.
+
+10. MISCELLANEOUS.
+
+    This Agreement constitutes the entire agreement between the Parties with
+    respect to the subject matter hereof and supersedes all prior
+    communications. This Agreement may not be amended except in a writing
+    signed by both Parties. This Agreement may be executed in counterparts,
+    each of which shall be deemed an original.
+
+IN WITNESS WHEREOF, the Parties have executed this Mutual Non-Disclosure
+Agreement as of the Effective Date.
+
+LUMEN CASCADE ROBOTICS, INC.              BRIGHTWATER CAPITAL ADVISORS LLC
+
+By: ___________________________           By: ___________________________
+   Name: Devorah Anand                       Name: Stefan Kowalczyk
+   Title: General Counsel                    Title: Managing Partner

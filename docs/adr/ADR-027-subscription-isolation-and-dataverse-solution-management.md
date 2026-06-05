@@ -2,11 +2,31 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Proposed |
+| **Status** | Accepted (amended 2026-06-02) |
 | **Date** | 2026-03-13 |
+| **Amended** | 2026-06-02 — managed-solution prescriptions softened to "future direction" (see amendment block below) |
 | **Decision Makers** | Ralph Schroeder |
 | **Supersedes** | None |
 | **Related** | ADR-001 (Minimal API), ADR-006 (PCF over webresources), ADR-026 (Full-Page Custom Page) |
+
+---
+
+## 🟡 AMENDMENT 2026-06-02 — Read this BEFORE the body
+
+**Spaarke does NOT currently use Power Platform managed solutions in any environment.** All Dataverse customizations are deployed as unmanaged solutions, even in test/staging/prod.
+
+The body of this ADR (sections "Dataverse Solution Management Strategy", "Constraints", "Key Patterns", etc.) describes managed-solution adoption as the **target end-state** — a future direction that Spaarke intends to reach when ALM discipline justifies the additional process overhead. That target is not yet adopted in practice.
+
+**Current operating rules (2026-06-02, supersedes the body's managed-solution prescriptions until further amendment)**:
+- All environments (dev, test, staging, prod) use **unmanaged solutions**.
+- `pac solution export --managed false` (not `--managed true`).
+- The "MUST use managed solutions for all non-dev environments" constraint in the original body is **suspended**.
+- The "MUST back up the target environment before first managed import (one-time migration risk)" constraint is **suspended**.
+- Setting up a new Dataverse schema component (entity/attribute/relationship/option set) for an Insights Engine, AI feature, or other Spaarke domain → use one of: (a) unmanaged solution export + commit solution.xml, (b) idempotent PowerShell script using Dataverse Web API (the existing `scripts/Setup-*.ps1` and `scripts/Backfill-*.ps1` patterns), or (c) manual setup documented in project CLAUDE.md.
+
+**Why amended now**: The original ADR was authored assuming managed adoption would land soon. As of 2026-06-02, managed adoption hasn't happened and isn't on the immediate roadmap. The Insights Engine r2 Wave B work surfaced the gap when the schema-portability question came up — the project owner clarified that unmanaged-everywhere is current practice, and the ADR was discovered to be enforcing a phantom mandate that nobody actually follows.
+
+**Future amendment trigger**: When managed-solution adoption is formally scheduled (likely a new ADR or a substantive amendment to this one), this block will be removed and the body's prescriptions will be restored.
 
 ---
 

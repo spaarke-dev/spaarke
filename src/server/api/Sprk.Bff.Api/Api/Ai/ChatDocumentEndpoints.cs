@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -142,8 +143,14 @@ public static class ChatDocumentEndpoints
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
 
-        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys)
+        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys).
+        // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
+        // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
+        // Check both forms to match the pattern used by ChatEndpoints.cs and
+        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
+        // server-to-server scenarios that bypass JWT.
         var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
             ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
 
         if (string.IsNullOrEmpty(tenantId))
@@ -162,6 +169,28 @@ public static class ChatDocumentEndpoints
                 statusCode: 404,
                 title: "Not Found",
                 detail: $"Chat session '{sessionId}' not found or has expired");
+        }
+
+        // 2a. R5 task 032 — defense-in-depth NFR-02 per-session cap (20 files).
+        // Frontend enforces too (chat composer + slash command); this mirrors
+        // SummarizeSessionEndpoint's pattern (ADR-019: stable errorCode `summarize.too-many-files`).
+        // Reject BEFORE reading the multipart form, extracting text, or writing any Redis state
+        // so the session manifest is NOT mutated when the 21st upload arrives.
+        var existingFileCount = session.UploadedFiles?.Count ?? 0;
+        if (existingFileCount >= ChatSession.MaxUploadedFiles)
+        {
+            logger.LogWarning(
+                "Document upload rejected: session {SessionId} already has {ExistingFileCount} files (cap={MaxFiles}) — NFR-02 defense-in-depth",
+                sessionId, existingFileCount, ChatSession.MaxUploadedFiles);
+
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: $"This chat session already has {existingFileCount} uploaded files. The per-session cap is {ChatSession.MaxUploadedFiles}.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "summarize.too-many-files"
+                });
         }
 
         // 3. Read multipart form data
@@ -379,6 +408,133 @@ public static class ChatDocumentEndpoints
                 metadataCacheKey, documentId);
         }
 
+        // 10a. R5 task 032 — wire upload into the session-files RAG index + ChatSession manifest.
+        // This is the integration that ties the legacy R3 upload endpoint (Redis-only storage above)
+        // into R5's chat-driven Summarize vertical:
+        //   - IndexSessionFileAsync writes chunks into the `spaarke-session-files` AI Search index
+        //     (carries tenantId + sessionId per ADR-014 / R5 FR-09).
+        //   - ChatSession.UploadedFiles gains a new ChatSessionFile entry so
+        //     SessionSummarizeOrchestrator (task 012) sees the file via
+        //     session.UploadedFiles instead of declining.
+        //   - UpdateSessionCacheAsync persists the manifest through Redis hot tier
+        //     + fire-and-forget Cosmos warm tier (decision D-06).
+        //
+        // RagIndexingPipeline is conditionally registered (DocumentIntelligence:Enabled gate);
+        // resolve defensively so the endpoint preserves its existing AI-off behavior:
+        // ITextExtractor above already throws FeatureDisabledException when AI is off (step 8a),
+        // so this code is unreachable in practice when AI is off. The defensive GetService
+        // call protects against the unlikely case where ITextExtractor is real (DocIntel on)
+        // but RagIndexingPipeline failed to register for an unrelated reason — we still want
+        // the Redis writes to succeed and the file to be discoverable via the legacy path.
+        var ragIndexingPipeline = httpContext.RequestServices.GetService<RagIndexingPipeline>();
+        if (ragIndexingPipeline is null)
+        {
+            // AI off (or RagIndexingPipeline missing) — log and continue. The endpoint
+            // returned 503 earlier via the ITextExtractor catch path if AI is truly off;
+            // reaching here without a pipeline indicates a configuration anomaly.
+            logger.LogWarning(
+                "RagIndexingPipeline unavailable — skipping session-files indexing for DocumentId={DocumentId}, SessionId={SessionId}. " +
+                "Legacy Redis storage succeeded; SessionSummarizeOrchestrator will not see this file.",
+                documentId, sessionId);
+        }
+        else
+        {
+            try
+            {
+                // Build ParsedDocument from the extracted text. The pipeline does not need
+                // page count or tables for session-files indexing (single-granularity chunking
+                // per knowledge profile; per RagIndexingPipeline docstring lines 233-237).
+                var parsedDocument = new ParsedDocument
+                {
+                    Text = extractionResult.Text!,
+                    Pages = 0,
+                    ExtractedAt = DateTimeOffset.UtcNow,
+                    // ParserUsed defaults to DocumentIntelligence; ITextExtractor produced the
+                    // text via either DocIntel or native parsing — telemetry-only field.
+                };
+
+                // ADR-014: tenantId + sessionId BOTH set so the session-files index entries
+                // carry both partition keys. Pass documentId as both documentId and speFileId
+                // (the latter is a "best effort" link for future SPE persistence; for
+                // session-uploads we use the chat-document GUID as both per task POML §3.1).
+                var indexingResult = await ragIndexingPipeline.IndexSessionFileAsync(
+                    document: parsedDocument,
+                    documentId: documentId,
+                    tenantId: tenantId,
+                    sessionId: sessionId,
+                    fileName: filename,
+                    speFileId: documentId,
+                    cancellationToken: httpContext.RequestAborted);
+
+                // Reconstruct chunk IDs from the deterministic pattern used by
+                // BuildKnowledgeDocuments (chunkIdSuffix "s" for session-files, per
+                // RagIndexingPipeline.cs line 332 + line 448): "{documentId}_s_{index}".
+                // SearchDocumentIdsCsv is consumed by the session-files cleanup job (task 007)
+                // to enumerate index documents for deletion on session end.
+                var chunkCount = indexingResult.KnowledgeChunksIndexed;
+                var chunkIds = Enumerable.Range(0, chunkCount)
+                    .Select(i => $"{documentId}_s_{i}")
+                    .ToArray();
+                var searchDocumentIdsCsv = string.Join(",", chunkIds);
+
+                // Determine content type from filename extension (mirrors PersistDocumentAsync §5).
+                var sessionFileContentType = extension switch
+                {
+                    ".pdf" => "application/pdf",
+                    ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    ".txt" => "text/plain",
+                    ".md" => "text/markdown",
+                    _ => file.ContentType ?? "application/octet-stream"
+                };
+
+                // Build the ChatSessionFile manifest entry (six fields per ChatSession.cs §134).
+                var newFile = new ChatSessionFile(
+                    FileId: documentId,
+                    FileName: filename,
+                    ContentType: sessionFileContentType,
+                    SizeBytes: file.Length,
+                    SearchDocumentIdsCsv: searchDocumentIdsCsv,
+                    UploadedAt: DateTimeOffset.UtcNow);
+
+                // Append to UploadedFiles (immutable record — use `with` expression).
+                var updatedFiles = (session.UploadedFiles ?? Array.Empty<ChatSessionFile>())
+                    .Append(newFile)
+                    .ToList();
+                var updatedSession = session with { UploadedFiles = updatedFiles };
+
+                // Persist via UpdateSessionCacheAsync (decision D-06: Redis hot tier +
+                // fire-and-forget Cosmos write-through). Internal virtual; same-assembly access.
+                await sessionManager.UpdateSessionCacheAsync(updatedSession, httpContext.RequestAborted);
+
+                logger.LogInformation(
+                    "R5 session-files indexing + manifest update complete: DocumentId={DocumentId}, " +
+                    "ChunkCount={ChunkCount}, DurationMs={DurationMs}, SessionId={SessionId}, " +
+                    "ManifestSize={ManifestSize}",
+                    documentId, chunkCount, indexingResult.DurationMs, sessionId, updatedFiles.Count);
+            }
+            catch (FeatureDisabledException ex)
+            {
+                // RagIndexingPipeline downstream surfaced a kill-switch (e.g., NullRagService
+                // via the AI-Search-keys-missing sub-gate). Mirror the ITextExtractor catch
+                // pattern at step 8a — return 503 ProblemDetails.
+                logger.LogDebug(
+                    "Session-files indexing called while RAG feature disabled. ErrorCode={ErrorCode}, DocumentId={DocumentId}",
+                    ex.ErrorCode, documentId);
+                return ex.AsFeatureDisabled503();
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal: legacy Redis writes already succeeded. Log the failure and let
+                // the 202 response proceed — the file is at least discoverable via the
+                // R3 doc-upload Redis path, even if Summarize can't find it. This preserves
+                // back-compat for any consumer still on the legacy path.
+                logger.LogError(ex,
+                    "R5 session-files indexing OR manifest update failed for DocumentId={DocumentId}, SessionId={SessionId}. " +
+                    "Legacy Redis writes succeeded; SessionSummarizeOrchestrator will not see this file in UploadedFiles.",
+                    documentId, sessionId);
+            }
+        }
+
         // 11. Return 202 Accepted with document metadata
         // Processing is synchronous in R2, so status is always "ready"
         var response = new DocumentUploadResponse(
@@ -428,8 +584,14 @@ public static class ChatDocumentEndpoints
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
 
-        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys)
+        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys).
+        // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
+        // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
+        // Check both forms to match the pattern used by ChatEndpoints.cs and
+        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
+        // server-to-server scenarios that bypass JWT.
         var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
             ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
 
         if (string.IsNullOrEmpty(tenantId))

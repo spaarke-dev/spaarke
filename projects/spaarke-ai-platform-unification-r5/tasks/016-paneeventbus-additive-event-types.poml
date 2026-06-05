@@ -1,0 +1,345 @@
+<task id="016" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-06 Add additive PaneEventBus event types (5 new) per ADR-030</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>1 hour</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G3 (parallel-safe within group; foundational for 017, 018, 020, 021)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <tags>frontend, event-bus, pane-event, adr-030</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extend the closed 4-channel `PaneEventBus` typed-union with 5 additive event-type
+    discriminants required by the R5 chat-driven Summarize vertical slice. Per ADR-030
+    the bus channel set is permanently closed at 4 (`workspace` | `context` |
+    `conversation` | `safety`); event-type discriminants WITHIN those channels are
+    additive. This task adds the five discriminants needed by downstream R5 widgets
+    (`StructuredOutputStreamWidget`, `FilePreviewContextWidget`, chat-pane UX, per-file
+    affordance) so they can publish/subscribe to the events the vertical slice requires.
+
+    New discriminants (verbatim per R5 CLAUDE.md §3.4 and spec.md NFR-09):
+    - `workspace.streaming_started`
+    - `workspace.field_delta`
+    - `workspace.streaming_complete`
+    - `context.files_staged`
+    - `context.file_selected`
+
+    The task is **strictly additive**: existing subscribers MUST keep working unchanged
+    because TypeScript discriminated-union narrowing on `event.type === '<existing>'`
+    skips the new branches as "unknown" discriminants. No edits to existing event-type
+    structures, no new channels, no new feature flags, and NO BFF code change (frontend
+    types only → BFF publish-size delta = 0).
+
+    The work is small (2h) but high-leverage: tasks 017, 018, 020, 021 all subscribe to
+    or dispatch on these types. Getting the field set right, the channel placement
+    right, and the exhaustive-switch audit right prevents downstream rework.
+  </prompt>
+
+  <role>
+    Senior TypeScript developer familiar with discriminated-union design, ADR-030
+    PaneEventBus contract, and the closed-4-channel architecture of the R5 SpaarkeAi
+    shell. Comfortable auditing every consumer of a shared union for exhaustive-switch
+    impact + backward compatibility.
+  </role>
+
+  <goal>
+    `src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts` defines 5 new
+    additive event-type discriminants placed within the existing 4 channels per the
+    list above (3 on `workspace`, 2 on `context`). `WorkspacePaneEvent.type` and
+    `ContextPaneEvent.type` unions are extended with the new literals; matching
+    payload-shape fields (e.g. `fieldPath`, `fieldContent`, `sequence`, `fileIds`,
+    `selectedFileId`) are added as optional fields with JSDoc tying them to the
+    new discriminants. No 5th channel is added. No existing event-type literal is
+    edited. `@spaarke/ai-widgets` builds clean; all downstream consumers
+    (`@spaarke/ui-components`, `@spaarke/legal-workspace`, `@spaarke/events-components`,
+    `src/solutions/SpaarkeAi/`, `src/solutions/LegalWorkspace/`) build clean. The
+    exhaustive-switch audit is recorded in task notes (zero `never` exhaustiveness
+    sites identified, OR any identified sites have new cases added or explicit
+    no-op documented). ADR-030 compliance verified. Quality gates pass.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="current-task">projects/spaarke-ai-platform-unification-r5/current-task.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="pane-event-types-source">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    <file purpose="pane-event-bus-source">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
+    <file purpose="pane-event-index">src/client/shared/Spaarke.AI.Widgets/src/events/index.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-030">PaneEventBus channel set is permanently CLOSED at 4 (`workspace` | `context` | `conversation` | `safety`). MUST NOT add a 5th channel. Event-type discriminants WITHIN channels are additive.</constraint>
+    <constraint source="ADR-030">All event payloads MUST be typed (no `any`; `unknown` acceptable for genuinely polymorphic fields with subscriber-side narrowing). Match the existing PaneEventTypes.ts style.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">MUST NOT add a new PaneEventBus channel (explicitly listed under "Specifically prohibited"). MUST extend within existing 4 channels.</constraint>
+    <constraint source="R5 CLAUDE.md §3.2">R5 introduces NO new feature flags. New event types are unconditional additions to the typed union.</constraint>
+    <constraint source="R5 CLAUDE.md §3.4">Exactly these 5 new event types: `workspace.streaming_started`, `workspace.field_delta`, `workspace.streaming_complete`, `context.files_staged`, `context.file_selected`. No additions, no renames.</constraint>
+    <constraint source="spec NFR-09">Existing subscribers ignore unknown discriminants. New event types MUST be additive to `WorkspacePaneEvent.type` and `ContextPaneEvent.type` unions, NOT replace or restructure existing literals.</constraint>
+    <constraint source="spec NFR-10">Back-compat for AnalysisChunk SSE protocol — N/A directly to this task (no SSE code change here), but the additive principle applies identically. Confirm in task notes.</constraint>
+    <constraint source="spec NFR-07">BFF publish-size — this task is pure frontend TypeScript; no BFF binary impact. Confirm publish-size delta = 0 MB in task notes.</constraint>
+    <constraint source="ADR-010">DI minimalism — N/A for this task (no service registrations). Confirm.</constraint>
+    <constraint source="project">Existing JSDoc style and field-grouping ("// ── X fields ──") comment style MUST be preserved. New fields use the same documentation density as existing fields.</constraint>
+    <constraint source="project">No edits to `PaneEventBus.ts` runtime class are needed (channels list is unchanged at 4). If any edit is proposed, STOP and escalate — that would be a 5th-channel violation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/pane-event-bus</topic>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/index.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/usePaneEvent.ts</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Additive event-type literal" location="src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts">
+        Existing `WorkspacePaneEvent.type` is a string-literal union of 11 discriminants
+        (`'widget_load' | 'widget_update' | ... | 'active_widget_changed'`). Add the 3
+        new workspace literals (`'streaming_started'`, `'field_delta'`,
+        `'streaming_complete'`) to the union. Existing `ContextPaneEvent.type` is a
+        union of 3 (`'context_update' | 'context_highlight' | 'stage_change'`). Add the
+        2 new context literals (`'files_staged'`, `'file_selected'`).
+      </pattern>
+      <pattern name="Optional discriminant-scoped fields" location="src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts">
+        Look at how `wizardId` / `wizardAction` / `fieldName` / `fieldValue` are added
+        as optional fields tied to `type === 'wizard_step'`, documented under a `// ──
+        wizard_step fields ──` comment block. Follow this exact convention for new
+        fields tied to `streaming_*` and `files_*` / `file_*` discriminants.
+      </pattern>
+      <pattern name="JSDoc on the union literal" location="src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts">
+        The doc-comment on the `type` union itself lists each discriminant on its own
+        line with a `—` describing intent. Add the same one-line description for each
+        new discriminant inline with the existing list.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. The user uploads
+      files in the chat (Conversation pane), the orchestrator streams `FieldDelta`
+      SSE events from the BFF (task 005 / D1-05), and a new `StructuredOutputStreamWidget`
+      (task 017 / D2-07) renders the structured output progressively in the Workspace
+      pane. The widget needs to be told (a) when streaming begins
+      (`workspace.streaming_started`), (b) each field delta as it arrives
+      (`workspace.field_delta`), and (c) when streaming is complete
+      (`workspace.streaming_complete`). Separately, when the user stages files
+      (`context.files_staged`) or selects one for preview (`context.file_selected`),
+      the new `FilePreviewContextWidget` (task 018 / D2-09) reacts in the Context pane.
+
+      All 5 events are first-class members of the existing 4-channel PaneEventBus
+      typed union per ADR-030's "channels closed; types additive" discipline. Adding
+      them is a pre-requisite for tasks 017, 018, 020, and 021.
+    </background>
+    <dependencies>none — additive type union; no upstream task required</dependencies>
+    <related-work>
+      <item>Task 017 (D2-07) `StructuredOutputStreamWidget` SUBSCRIBES to
+        `workspace.streaming_started`, `workspace.field_delta`,
+        `workspace.streaming_complete`. Blocked on task 016.</item>
+      <item>Task 018 (D2-09) `FilePreviewContextWidget` SUBSCRIBES to
+        `context.files_staged`, `context.file_selected`. Blocked on task 016.</item>
+      <item>Task 020 (D2-11) Chat-pane orchestration UX DISPATCHES
+        `context.files_staged` on file upload, `workspace.streaming_started/complete`
+        when summarize runs. Blocked on task 016.</item>
+      <item>Task 021 (D2-12) "Summarize this only" per-file affordance DISPATCHES
+        `context.file_selected`. Blocked on task 016.</item>
+      <item>R5 CLAUDE.md §3.4 lists the 5 event types verbatim. Spec NFR-09 cites the
+        same list. R5 design phase confirmed channel set stays at 4.</item>
+      <item>The path-drift note in task 001 (sub-agent finding) — plan.md / spec.md /
+        CLAUDE.md reference `infra/ai-search/` but the actual repo path is
+        `infrastructure/ai-search/`. This task uses ACTUAL repo paths.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Declare:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend type-union change consumed by 4 downstream R5 tasks (017, 018,
+                 020, 021); ADR-030 compliance critical; exhaustive-switch audit
+                 required across multiple library + solution consumers.
+      📖 PROTOCOL STEPS TO EXECUTE: Per task-execute SKILL.md (Steps 1–10 below).
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 016 status is 🔲, wave is P2-G3,
+      parallel-safe = ✅, dependencies are empty. Read `current-task.md`. Confirm no
+      concurrent edits to `PaneEventTypes.ts` are in flight (check git status + recent
+      branch activity).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract
+      from `PaneEventTypes.ts`: (a) the full existing `WorkspacePaneEvent.type` union
+      literal set; (b) the full existing `ContextPaneEvent.type` union literal set;
+      (c) the field-grouping comment-block convention (`// ── wizard_step fields ──`);
+      (d) the JSDoc density / format of existing optional fields. Read ADR-030 from
+      `.claude/adr/` if available. Read spec.md NFR-09 + NFR-10 in full.
+    </step>
+    <step order="3" name="Locate Existing Union; Plan the Diff">
+      In `PaneEventTypes.ts`:
+      - Workspace union currently 11 literals (`'widget_load' | ... |
+        'active_widget_changed'`). Plan to append 3 new literals:
+        `'streaming_started' | 'field_delta' | 'streaming_complete'`.
+      - Context union currently 3 literals (`'context_update' | 'context_highlight' |
+        'stage_change'`). Plan to append 2 new literals: `'files_staged' |
+        'file_selected'`.
+      - Plan new optional fields (working draft — finalise in Step 4 once existing
+        field shapes are re-confirmed):
+        - For `streaming_*`: `streamId?: string` (correlates a stream across
+          start/delta/complete), `fieldPath?: string` (JSON path of the streaming
+          field for `field_delta`), `fieldContent?: string` (delta content for
+          `field_delta`), `sequence?: number` (monotonic seq on `field_delta`),
+          `completionStatus?: 'complete' | 'declined' | 'empty'` (for
+          `streaming_complete`).
+        - For `files_staged` / `file_selected`: `stagedFileIds?: string[]` (for
+          `files_staged`), `selectedFileId?: string` (for `file_selected`),
+          `selectionSource?: 'chip' | 'context-card' | 'preview'` (optional UX hint).
+      - Field names are best-guess; reconcile with task 017 / 018 design intent during
+        Step 4 by reading their plan.md entries.
+      - Plan zero edits to existing literals or existing optional fields.
+      - Plan zero edits to `PaneChannelEventMap` (still 4 entries) and zero edits to
+        `PaneEventBus.ts` (channels list still 4).
+      - Document the planned diff in task notes BEFORE editing.
+    </step>
+    <step order="4" name="Apply Edits to PaneEventTypes.ts">
+      Edit `src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts`:
+      1. Append 3 new literals to `WorkspacePaneEvent.type` (preserve formatting + the
+         per-literal `—` description in the JSDoc list).
+      2. Append 2 new literals to `ContextPaneEvent.type` (same JSDoc treatment).
+      3. Add new optional fields to `WorkspacePaneEvent` under a new
+         `// ── streaming fields ──` comment block adjacent to the existing
+         `// ── wizard_step fields ──` block. Each field carries full JSDoc tying
+         it to the relevant discriminant (e.g. "Present when `type ===
+         'field_delta'`.").
+      4. Add new optional fields to `ContextPaneEvent` under a new
+         `// ── files_staged / file_selected fields ──` comment block.
+      5. Do NOT touch the channel-union type `PaneChannel`. Do NOT touch
+         `PaneChannelEventMap`. Do NOT touch `PaneEventBus.ts`.
+      Verify the file diff matches the Step 3 plan exactly.
+    </step>
+    <step order="5" name="Exhaustive-Switch Audit">
+      Search the repo for any `switch (event.type)` block over `WorkspacePaneEvent` or
+      `ContextPaneEvent` that uses a `never` exhaustiveness check. Use Grep across:
+      - `src/client/shared/Spaarke.AI.Widgets/`
+      - `src/client/shared/Spaarke.UI.Components/`
+      - `src/client/shared/Spaarke.AI.Widgets/` (workspace + context widget folders)
+      - `src/solutions/SpaarkeAi/`
+      - `src/solutions/LegalWorkspace/`
+      - `src/client/code-pages/` (any code-page consumer)
+      For each match: confirm whether the switch uses exhaustiveness (a `default`
+      branch that does `const _: never = event.type`) or simply ignores unknown
+      discriminants. If exhaustive, EITHER add new no-op cases (preferred — explicit
+      ignore is safer than silent fall-through) OR document the deliberate decision in
+      a code comment. Record every audited site in task notes
+      (`notes/task-016-exhaustive-switch-audit.md`) with file path, line range,
+      outcome.
+    </step>
+    <step order="6" name="Build All Consumer Libraries + Solutions">
+      Build the entire frontend dependency closure to confirm backward compatibility:
+      ```
+      npm --prefix src/client/shared/Spaarke.AI.Widgets run build
+      npm --prefix src/client/shared/Spaarke.UI.Components run build
+      ```
+      Then build each downstream solution that consumes the bus. Identify these via
+      `package.json` workspace references and dependencies on `@spaarke/ai-widgets`.
+      Typical set: `src/solutions/SpaarkeAi/`, `src/solutions/LegalWorkspace/`, any
+      `src/client/code-pages/*` consuming AI widgets. For each, run the appropriate
+      `npm install --legacy-peer-deps --no-audit --no-fund` (per CLAUDE.md §11 Node
+      Installs rule — DO NOT use `npm ci` on Vite solutions) then `npm run build`.
+      Confirm ZERO new TS errors. Confirm ZERO new warnings (existing baseline
+      warnings acceptable; new ones blocking).
+    </step>
+    <step order="7" name="Smoke-Test Existing Subscribers">
+      Cannot directly runtime-smoke-test without spinning up SpaarkeAi shell + chat.
+      Instead perform a static smoke test:
+      - Find every `bus.subscribe('workspace', ...)` and `bus.subscribe('context', ...)`
+        callsite (and equivalent `usePaneEvent('workspace', ...)` / `usePaneEvent
+        ('context', ...)`) via Grep.
+      - Confirm each subscriber narrows on `event.type === '<known_literal>'` before
+        accessing discriminant-scoped fields, so new types fall through harmlessly.
+      - Record sample of 5+ subscribers in task notes; spot-check that adding the new
+        types doesn't break their narrowing.
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is testable
+      and passing. Record evidence per criterion in task notes.
+    </step>
+    <step order="9" name="Document Notes + BFF Publish-Size Confirmation">
+      Update `notes/task-016-summary.md`:
+      - Final diff summary (lines added per file).
+      - Exhaustive-switch audit findings.
+      - Static-subscriber sample.
+      - Channel count confirmed unchanged at 4.
+      - BFF publish-size delta = 0 MB (no BFF code touched; no `dotnet publish` run
+        needed per R5 CLAUDE.md §3.6 because this is pure frontend).
+      - ADR-030 compliance statement (additive only; zero new channels).
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against `src/client/shared/Spaarke.AI.Widgets/src/events/
+      PaneEventTypes.ts` (the only file modified, modulo any exhaustive-switch sites
+      touched in Step 5). Run `adr-check` skill against the same files and the audit
+      notes; verify:
+      - ADR-030 compliance (channels still 4; types added only)
+      - ADR-010 DI minimalism (N/A — confirmed)
+      - ADR-018 Flag scope (N/A — no new flags)
+      - R5 CLAUDE.md §3.1 reuse mandate (no parallel event bus introduced)
+      - R5 CLAUDE.md §3.4 (exact 5 event types added — verbatim)
+      Both gates MUST pass before marking the task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 016 🔲 → ✅.
+      Reset `current-task.md` to the next pending task per CLAUDE.md §7. Confirm BFF
+      publish-size delta = 0 MB in task notes. Report task completion. Notify (in the
+      completion report) that tasks 017, 018, 020, 021 are now unblocked from this
+      pre-req perspective.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build `@spaarke/ai-widgets`, `@spaarke/ui-components`, and downstream solutions. Per CLAUDE.md §11: use `npm install --legacy-peer-deps --no-audit --no-fund` (NOT `npm ci`) for Vite solutions in `src/solutions/`.</tool>
+    <tool name="dotnet">Not used — this task touches zero .NET code; no `dotnet publish` measurement required.</tool>
+    <tool name="git">Stage and review the diff to confirm only `PaneEventTypes.ts` (and any deliberate exhaustive-switch updates) are modified.</tool>
+    <tool name="grep">Repo-wide search for `switch (event.type)`, `bus.subscribe('workspace'`, `bus.subscribe('context'`, `usePaneEvent('workspace'`, `usePaneEvent('context'`.</tool>
+    <tool name="code-review">FULL-rigor quality gate at Step 9.5.</tool>
+    <tool name="adr-check">FULL-rigor quality gate at Step 9.5 (verifies ADR-030 + R5 §3.1 / §3.4).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts (MODIFIED — additive only: 3 new workspace literals + 2 new context literals + new optional fields under new comment blocks)</output>
+    <output type="code-conditional">Any exhaustive-switch site identified in Step 5 (MODIFIED only if exhaustiveness check existed and required new cases)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 016 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-016-summary.md (diff summary, exhaustive-switch audit, static subscriber sample, channel-count confirmation, BFF publish-size delta = 0, ADR-030 compliance statement)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-016-exhaustive-switch-audit.md (file path + line range + outcome per audited site)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`PaneEventTypes.ts` `WorkspacePaneEvent.type` union includes the 3 new literals `'streaming_started'`, `'field_delta'`, `'streaming_complete'` adjacent to existing literals; existing 11 literals unchanged.</criterion>
+    <criterion testable="true">`PaneEventTypes.ts` `ContextPaneEvent.type` union includes the 2 new literals `'files_staged'`, `'file_selected'`; existing 3 literals unchanged.</criterion>
+    <criterion testable="true">`PaneChannel` type literal union is STILL exactly `'workspace' | 'context' | 'conversation' | 'safety'` (no 5th channel). `PaneChannelEventMap` interface STILL maps exactly those 4 channels. `PaneEventBus.ts` `_channels` constructor STILL creates exactly 4 Sets.</criterion>
+    <criterion testable="true">New optional fields for the new discriminants are added under dedicated comment blocks (`// ── streaming fields ──`, `// ── files_staged / file_selected fields ──`) with full JSDoc tying each field to the relevant discriminant per the existing wizard_step pattern. No `any` types used; `unknown` acceptable for genuinely polymorphic payloads.</criterion>
+    <criterion testable="true">`npm run build` on `@spaarke/ai-widgets` succeeds with ZERO new TS errors and ZERO new warnings.</criterion>
+    <criterion testable="true">`npm run build` on `@spaarke/ui-components` succeeds with ZERO new TS errors and ZERO new warnings.</criterion>
+    <criterion testable="true">`npm run build` on every downstream solution that depends on `@spaarke/ai-widgets` (`src/solutions/SpaarkeAi/`, `src/solutions/LegalWorkspace/`, any consuming code-pages) succeeds with ZERO new TS errors and ZERO new warnings. Installs use `npm install --legacy-peer-deps --no-audit --no-fund` per CLAUDE.md §11 rule.</criterion>
+    <criterion testable="true">Exhaustive-switch audit recorded in `notes/task-016-exhaustive-switch-audit.md`: every `switch (event.type)` callsite over `WorkspacePaneEvent` / `ContextPaneEvent` is enumerated with file path + line range + handling outcome (either new no-op cases added OR explicit ignore documented).</criterion>
+    <criterion testable="true">Static subscriber smoke-test sample of 5+ existing subscribers (`bus.subscribe` / `usePaneEvent`) recorded in task notes; each confirmed to narrow on known literal before discriminant-scoped field access, so unknown new types fall through harmlessly.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB recorded in task notes (no BFF code change in this task).</criterion>
+    <criterion testable="true">No new feature flags introduced; new event types are unconditional members of the typed union (R5 CLAUDE.md §3.2 compliance).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5. `adr-check` specifically validates ADR-030 (channels closed at 4 + additive types only) and R5 CLAUDE.md §3.4 (exact 5 event types added verbatim).</criterion>
+  </acceptance-criteria>
+</task>

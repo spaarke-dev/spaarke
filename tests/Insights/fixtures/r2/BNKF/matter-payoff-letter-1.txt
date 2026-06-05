@@ -1,0 +1,121 @@
+PAYOFF LETTER
+
+ATLAS HERITAGE FINANCE COMPANY
+Commercial Lending Division
+2200 West Adams Boulevard, Floor 9
+Chicago, IL 60606
+
+April 6, 2026
+
+VIA EMAIL AND OVERNIGHT COURIER
+
+Cinder Peak Manufacturing Inc.
+Attn: Chief Financial Officer
+1500 Industrial Parkway
+Bend, OR 97701
+
+   Re: Cinder Peak Manufacturing Inc. — Payoff Quotation
+       Original Loan No.: ATLAS-CP-2022-0184
+       Original Note Date: September 14, 2022
+       Original Principal Amount: $14,500,000
+
+Dear Sir or Madam:
+
+Reference is made to that certain Term Loan Agreement dated as of September 14,
+2022 (as amended, restated, supplemented or otherwise modified from time to
+time, the "Loan Agreement"), among Cinder Peak Manufacturing Inc., as Borrower
+("Borrower"), the lenders party thereto (the "Lenders"), and Atlas Heritage
+Finance Company, as administrative agent for the Lenders ("Agent"). Capitalized
+terms used and not defined herein have the meanings set forth in the Loan
+Agreement.
+
+In response to your request dated April 1, 2026, this letter sets forth the
+amounts required to repay in full all Obligations under the Loan Agreement as
+of the Payoff Date specified below.
+
+1. PAYOFF DATE; EFFECTIVE PERIOD
+
+   The "Payoff Date" shall be April 17, 2026. The amounts set forth in this
+   letter are calculated through, and effective only on, the Payoff Date.
+
+   If the Payoff Amount is not received in immediately available funds by
+   2:00 p.m. Central Time on the Payoff Date, per diem interest of $3,742.00
+   shall accrue and be added to the Payoff Amount for each day thereafter
+   through (but excluding) the date of actual payment, and the figures below
+   will be subject to confirmation and recalculation.
+
+2. PAYOFF AMOUNT
+
+   Outstanding Principal Balance:                    $11,820,000.00
+   Accrued and Unpaid Interest (through Payoff Date): $    74,840.00
+   Per Diem Interest from Payoff Date (if late):     $     3,742.00 / day
+   Prepayment Premium (per § 2.10 of the Loan Agreement): $    59,100.00
+   Outstanding Letter-of-Credit Fees through 4/17/26:  $     6,820.00
+   Agent Administration Fee:                          $       500.00
+   Legal Fees and Expenses through Payoff Date:        $    12,400.00
+   ---------------------------------------------------------------------
+   TOTAL PAYOFF AMOUNT (if received by 2:00 p.m. CT on 4/17/2026):
+                                                       $11,973,660.00
+
+3. WIRE INSTRUCTIONS
+
+   Bank:           Atlas Heritage National Bank
+   ABA:            071000302
+   Account Name:   Atlas Heritage Finance Company - Collections Account
+   Account No.:    8842-019937
+   Reference:      "Cinder Peak Payoff — Loan ATLAS-CP-2022-0184"
+
+4. CONDITIONS TO RELEASE OF LIENS; UCC TERMINATIONS
+
+   Promptly (and in any event within five (5) Business Days) following receipt
+   of the Total Payoff Amount in immediately available funds, the Agent shall:
+
+      (a) file UCC-3 termination statements to terminate the financing
+          statements listed on Annex A in each applicable filing jurisdiction;
+      (b) execute and deliver a release of the Mortgage encumbering the Bend
+          Facility (recorded at Deschutes County, Oregon, Document No.
+          2022-094821);
+      (c) execute and deliver releases of any patent, trademark, and copyright
+          security agreements filed with the U.S. Patent and Trademark Office
+          and the U.S. Copyright Office; and
+      (d) return to Borrower all original notes and other Loan Documents in
+          the Agent's possession, marked "PAID IN FULL" on the face thereof.
+
+5. CONDITIONS TO PAYOFF QUOTATION
+
+   This payoff quotation is conditioned upon: (a) receipt by the Agent of the
+   Total Payoff Amount in immediately available funds by no later than the
+   Payoff Date (subject to recalculation thereafter per Section 1), and (b)
+   the absence of any Event of Default under the Loan Agreement on or before
+   the Payoff Date that has not been cured to the Agent's reasonable
+   satisfaction.
+
+6. NO MODIFICATION; RIGHTS PRESERVED
+
+   Until the Total Payoff Amount is received in full, the Loan Agreement and
+   all other Loan Documents shall remain in full force and effect, and the
+   Agent and the Lenders shall retain all rights and remedies thereunder. This
+   letter is not, and shall not be construed as, an amendment, waiver, or
+   modification of the Loan Documents.
+
+7. RELIANCE
+
+   This letter may be relied upon by Borrower and by Borrower's new lender,
+   Coastline Riverbed Bank N.A., solely for the purpose of effecting the
+   refinancing of the Obligations described above. No party other than Borrower
+   and Coastline Riverbed Bank N.A. may rely on this letter without the prior
+   written consent of the Agent.
+
+If you have any questions regarding the foregoing, please contact the
+undersigned at (312) 555-0188 or marlena.vogel@atlasheritage.example.
+
+Sincerely,
+
+ATLAS HERITAGE FINANCE COMPANY, as Administrative Agent
+
+By: ___________________________
+   Name: Marlena Vogel
+   Title: Senior Vice President — Portfolio Management
+
+cc: Coastline Riverbed Bank N.A., Attn: Closing Coordinator
+    Holwell, Strand & Adichie LLP (Borrower's counsel)

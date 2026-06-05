@@ -22,7 +22,7 @@ After review, the operator made the following IN / DEFER decisions plus added a 
 | ID | Item | Decision | Notes |
 |---|---|---|---|
 | **A-1** | Stages 2-4 (active chat / review / complete) header treatment | DEFER | Moment 2 scope |
-| **A-2** | ADR-025 (PaneEventBus) + ADR-026 (stage lifecycle) | **IN** | ~6h doc |
+| **A-2** | ADR-030 (PaneEventBus) + ADR-031 (stage lifecycle) | **IN** | ~6h doc |
 | **A-3** | AI-vs-User visual + AIReasoningSurface convention | DEFER | Major strategy work; out of R4 scope |
 | **A-4** | File-attachment policy (FR-07) | **IN — MODIFIED** | **Operator: actual code change (not just doc); raise cap to 25 MB.** ~6h (code + policy doc) |
 | **A-5** | Persistence of non-Home tabs across session restore | **IN — MODIFIED** | **Operator: verify first — user feedback says tabs ARE persisting; the operator-visible issue is that browser reopen lands on last tab rather than home/default. Separate from original UQ-03 finding.** Verify-then-fix: ~2h verify + ~4-8h fix depending on what's actually broken |
@@ -144,11 +144,11 @@ R3 design.md explicitly enumerated items the project would not address. They are
 
 ---
 
-### A-2. ADR-025 PaneEventBus pattern + ADR-026 stage lifecycle pattern as ADRs
+### A-2. ADR-030 PaneEventBus pattern + ADR-031 stage lifecycle pattern as ADRs
 
 **Source**: R3 [design.md §H, line 320](../spaarke-ai-platform-unification-r3/design.md).
 
-**What R3 said**: "ADR-025 PaneEventBus pattern + ADR-026 stage lifecycle pattern (lessons-learned candidates from R2)."
+**What R3 said**: "ADR-030 PaneEventBus pattern + ADR-031 stage lifecycle pattern (lessons-learned candidates from R2)."
 
 **Context**: R2 invented two cross-cutting patterns that R3 inherited and used extensively:
 
@@ -163,7 +163,7 @@ Neither pattern has an ADR. They are described in R2 lessons-learned and replica
 
 **Recommendation for R4**: **DEFER** but consider in a "documentation round" alongside C-1 + C-2 (all three are doc-only and benefit from co-authoring).
 
-**Effort if picked up**: ADR-025 ~3h, ADR-026 ~3h, total ~6h.
+**Effort if picked up**: ADR-030 ~3h, ADR-031 ~3h, total ~6h.
 
 ---
 
@@ -716,18 +716,18 @@ See §A-5 above for full detail. ~8h.
 |---|---|---|---|
 | Option 2 | Deploy PDF.js + mammoth as separate Dataverse web resources | TBD (recommended: BFF remediation project or dedicated project) | 1-2 weeks |
 | Option 3 | Server-side extraction via BFF endpoint | BFF remediation team | Medium |
-| ADR-026 amendment | Add "Heavy library handling" subsection (singlefile/lazy-import incompatibility note + Option 2 pattern reference) | Architecture / docs owner | ~4h |
+| ADR-031 amendment | Add "Heavy library handling" subsection (singlefile/lazy-import incompatibility note + Option 2 pattern reference) | Architecture / docs owner | ~4h |
 
 **Option 2 detail**: Build `pdfjs-dist` + `mammoth` as separate web resource files. Deploy them to Dataverse (additional script for `Deploy-SpaarkeAi.ps1`). Refactor `useChatFileAttachment` to load them via dynamic `<script>` tag injection from a known Dataverse web resource URL rather than `await import()`. Risk: cross-origin / auth nuances with loading scripts from Dataverse web resources. CSP may block. Needs investigation spike.
 
 **Option 3 detail**: Extend Phase E backend (the chat endpoint extended in task 050) to accept raw file bytes. Do extraction server-side. Return text. Risk: SPEC DEVIATION from R3 FR-07 + OC-02 (both explicitly specify "client-side text extraction"). Server-side extraction is a different architecture AND a different security posture — file bytes hit the server, not just extracted text.
 
 **Recommendation for R4**:
-- **ADR-026 amendment**: **INCLUDE**. Doc-only, ~4h. Future Code Page projects will hit the same singlefile-vs-lazy-import surprise.
+- **ADR-031 amendment**: **INCLUDE**. Doc-only, ~4h. Future Code Page projects will hit the same singlefile-vs-lazy-import surprise.
 - **Option 2** (separate web resources for heavy libs): **DEFER** as a dedicated project (1-2 weeks). Note this in the R4 backlog but don't try to fit in.
 - **Option 3** (server-side extraction): **DEFER**. Major architectural shift; needs operator + spec sign-off.
 
-**Effort for R4 minimum**: ~4h (ADR-026 amendment only).
+**Effort for R4 minimum**: ~4h (ADR-031 amendment only).
 
 ---
 
@@ -826,7 +826,7 @@ For each item, recommended decision INCLUDE / DEFER / OUT-OF-SCOPE for R4:
 | ID | Item | Recommend | Effort | Why |
 |---|---|---|---|---|
 | **A-1** | Stages 2-4 header treatment | DEFER | 3-5 days | Moment 2 scope |
-| **A-2** | ADR-025 + ADR-026 (PaneEventBus + stage lifecycle) | DEFER (or include in doc round) | ~6h | Doc-only; codifies stable patterns |
+| **A-2** | ADR-030 + ADR-031 (PaneEventBus + stage lifecycle) | DEFER (or include in doc round) | ~6h | Doc-only; codifies stable patterns |
 | **A-3** | AI-vs-User visual + AIReasoningSurface conventions | OUT-OF-SCOPE | weeks | Major strategy work |
 | **A-4** | File-attachment policy doc | INCLUDE if R4 touches BFF | ~3h | Closes FR-07 gap |
 | **A-5** = **D-1** | Task 065 — SessionPersistence tab-state ⚠️ | **INCLUDE** | ~8h | Operator-visible gap |
@@ -850,7 +850,7 @@ For each item, recommended decision INCLUDE / DEFER / OUT-OF-SCOPE for R4:
 | **C-7** | Section registry plug-in style | DEFER | ~6h | Only matters if 3rd-party sections |
 | **D-1** | Task 065 — SessionPersistence (= A-5) | **INCLUDE** | ~8h | Same as A-5 |
 | **D-2** | Bundle Option 2 (separate web resources) | DEFER as dedicated project | 1-2 weeks | Major; needs own scope |
-| **D-2 ADR** | ADR-026 amendment | **INCLUDE** | ~4h | Doc-only; future Code Pages |
+| **D-2 ADR** | ADR-031 amendment | **INCLUDE** | ~4h | Doc-only; future Code Pages |
 | **D-3** | Bundle-analyzer verification | DEFER (bundled with D-2) | bundled | Only matters with Option 2 |
 | **E-1** | R3 project wrap-up | **INCLUDE — first item** | ~2h | Closes R3 |
 | **F-1** | BFF Placement Justification rule going forward | **INCLUDE the rule** | ~1h/change | §10 binding |
@@ -868,7 +868,7 @@ For each item, recommended decision INCLUDE / DEFER / OUT-OF-SCOPE for R4:
 | E-1 | R3 project wrap-up | ~2h |
 | C-1 | Xrm.WebApi vs BFF decision criteria 🔥 | ~2h |
 | C-2 | Embedded-mode contract doc | ~3h |
-| D-2 ADR | ADR-026 amendment (heavy library handling) | ~4h |
+| D-2 ADR | ADR-031 amendment (heavy library handling) | ~4h |
 | D-1 / A-5 | Task 065 — SessionPersistence tab-state ⚠️ | ~8h |
 | F-1/F-3 | BFF governance follow-through (rule + size check) | ~2h |
 | **Tier 1 total** | | **~21h (~3 days)** |

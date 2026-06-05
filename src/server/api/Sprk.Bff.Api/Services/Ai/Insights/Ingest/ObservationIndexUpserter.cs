@@ -99,7 +99,8 @@ internal sealed class ObservationIndexUpserter : IObservationIndexUpserter
                 ProducedBy = observation.ProducedBy.Id,
                 Content = content,
                 ContentVector = embedding.ToArray(),
-                Status = "produced"
+                Status = "produced",
+                Scope = BuildScopeEntry(observation, _options.DualWriteScopeMatterId)
             };
 
             var searchClient = _searchIndexClient.GetSearchClient(_options.InsightsIndexName);
@@ -133,6 +134,80 @@ internal sealed class ObservationIndexUpserter : IObservationIndexUpserter
                 observation.Id, observation.Predicate, observation.Subject);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Wave D6 (task 035) — projects <see cref="ObservationArtifact.Scope"/> + <see cref="ObservationArtifact.Subject"/>
+    /// onto the index's top-level <c>scope</c> ComplexType per design-a6 §4.4 writer-behavior table.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Subject parsing is intentionally permissive (matches r1's <c>DataverseLiveFactResolver</c>
+    /// shape). When the subject does NOT match <c>&lt;scheme&gt;:&lt;id&gt;</c>, the entity fields are
+    /// left null and the writer falls back to whatever the Observation's <c>Scope.MatterId</c> already
+    /// carries — preserving Phase 1 behavior for legacy producers.
+    /// </para>
+    /// <para>
+    /// Dual-write rule per design-a6 §4.4: when scheme is "matter" AND
+    /// <see cref="AiSearchOptions.DualWriteScopeMatterId"/> is true, <c>scope.matterId</c> is
+    /// populated alongside the canonical <c>scope.entityType</c>/<c>scope.entityId</c>.
+    /// This preserves NFR-08 for any consumer (Wave E1 RAG retriever, future Phase 1 callers)
+    /// that filters by <c>scope/matterId eq '…'</c>.
+    /// </para>
+    /// </remarks>
+    internal static ScopeIndexEntry BuildScopeEntry(ObservationArtifact observation, bool dualWriteMatterId)
+    {
+        var (scheme, entityId) = ParseSubject(observation.Subject);
+
+        // matterId: dual-write when scheme="matter" + flag on, OR pass-through from Observation.Scope.MatterId
+        string? matterId = null;
+        if (string.Equals(scheme, "matter", StringComparison.OrdinalIgnoreCase) && dualWriteMatterId)
+        {
+            matterId = entityId;
+        }
+        else if (!string.IsNullOrWhiteSpace(observation.Scope.MatterId))
+        {
+            // Honor any matterId the Observation already carries (Phase 1 legacy producers).
+            matterId = observation.Scope.MatterId;
+        }
+
+        return new ScopeIndexEntry
+        {
+            MatterId = matterId,
+            EntityType = scheme,
+            EntityId = entityId,
+            TenantId = observation.Scope.TenantId,
+            PracticeArea = observation.Scope.PracticeArea
+        };
+    }
+
+    /// <summary>
+    /// Parses an Observation subject of the shape <c>&lt;scheme&gt;:&lt;entityId&gt;</c>. Returns
+    /// (null, null) when the subject does not match. Permissive — the entityId portion is not
+    /// validated as a GUID (Wave D5 <c>ISubjectParser</c> handles strict validation at the
+    /// dispatch layer; this writer is downstream and trusts upstream validation).
+    /// </summary>
+    internal static (string? Scheme, string? EntityId) ParseSubject(string? subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+        {
+            return (null, null);
+        }
+
+        var colonIdx = subject.IndexOf(':');
+        if (colonIdx <= 0 || colonIdx >= subject.Length - 1)
+        {
+            return (null, null);
+        }
+
+        var scheme = subject[..colonIdx].Trim().ToLowerInvariant();
+        var entityId = subject[(colonIdx + 1)..].Trim();
+        if (string.IsNullOrWhiteSpace(scheme) || string.IsNullOrWhiteSpace(entityId))
+        {
+            return (null, null);
+        }
+
+        return (scheme, entityId);
     }
 
     /// <summary>

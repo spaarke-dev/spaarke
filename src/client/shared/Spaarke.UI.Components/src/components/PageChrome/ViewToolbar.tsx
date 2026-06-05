@@ -11,10 +11,10 @@
 
 import * as React from 'react';
 import {
-  Toolbar,
+  Toolbar as _Toolbar,
   ToolbarButton,
   ToolbarDivider,
-  ToolbarGroup,
+  ToolbarGroup as _ToolbarGroup,
   Tooltip,
   Text,
   makeStyles,

@@ -1,0 +1,62 @@
+<task id="042" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>E3 — Spaarke Assistant integration (authors tool-call contract first, then implements)</title>
+    <status>completed</status>
+    <wave>E</wave>
+    <estimated-effort>1w</estimated-effort>
+    <tags>spaarke-assistant, tool-call-contract, integration, cross-team, hybrid-consumption</tags>
+    <dependencies>040, 041</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>E3</wave-item>
+  </metadata>
+
+  <prompt>
+    Integrate Insights as a callable tool in the Spaarke Assistant. Per Owner Clarification AC-1, the tool-call contract has NOT been authored — Wave E3 owns authoring it as its first sub-task. Coordinate with the Assistant team on schema, request/response shape, error model, rollout. Phase 1.5 ships read-only tool-call semantics; full bidirectional integration deferred to Phase 2.
+  </prompt>
+
+  <role>Cross-team integration lead + tool-call contract author + Zone A facade consumer.</role>
+
+  <goal>
+    Spaarke Assistant can invoke Insights as a tool. Sub-task A: Author tool-call contract (schema, request/response, error model, rate-limit), reviewed with Assistant team. Sub-task B: Implement contract in BFF (consumes IInsightsAi facade — both /ask and /search paths via intent classifier). Sub-task C: Assistant-side integration (out of r2 scope but coordinate). Phase 1.5 = read-only tool-call; user asking "what's the predicted cost of matter X" in Assistant chat triggers /ask via Insights tool.
+  </prompt>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (FR-05, AC-1, Risk-6)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r2/design.md (D-P15-06 §3, Wave E3)</file>
+    <file purpose="r1-facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs (consumed via facade)</file>
+    <file purpose="knowledge">knowledge/agent-framework/ (tool-call patterns)</file>
+    <file purpose="assistant-team">Coordinate with Spaarke Assistant project team (separate workstream)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="AC-1">Tool-call contract NOT pre-existing; author here as first sub-task</constraint>
+    <constraint source="spec.md Risk-6">Read-only tool-call semantics for Phase 1.5; bidirectional deferred to Phase 2</constraint>
+    <constraint source="ADR-013-refined">Assistant integration consumes IInsightsAi facade only; no direct Zone A imports</constraint>
+    <constraint source="bff-extensions.md">Load before authoring</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Sub-task A: Author tool-call contract">Schema (Insights tool exposes "Ask" + "Search" subtools — or unified "InsightsQuery"); request/response shape; error model; rate-limit; auth. Document as design-e3-tool-call-contract.md.</step>
+    <step order="2" name="Sub-task A.5: Review with Assistant team">Schedule + iterate; AC final agreement</step>
+    <step order="3" name="Sub-task B: Implement contract in BFF">Endpoint (or service method) consuming the contract; routes via intent classifier; calls IInsightsAi.AskAsync or IInsightsAi.SearchAsync</step>
+    <step order="4" name="Sub-task B.5: Integration tests">End-to-end: tool-call invocation → IInsightsAi → response back through contract shape</step>
+    <step order="5" name="Sub-task C: Coordinate Assistant-side integration">Out of r2 scope; document hand-off + interface expectations</step>
+    <step order="6" name="Quality gates">code-review + adr-check + §3.5 grep + contract validation</step>
+  </steps>
+
+  <outputs>
+    <output type="design-doc">projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md (canonical contract)</output>
+    <output type="code">Sprk.Bff.Api/Endpoints (Assistant-side tool endpoint, if BFF-hosted) OR Services/Ai/Insights/AssistantToolCallHandler.cs</output>
+    <output type="test">tests/integration/Services/Ai/Insights/AssistantToolCallTests.cs</output>
+    <output type="docs">Hand-off doc for Assistant team integration</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Tool-call contract authored + reviewed with Assistant team</criterion>
+    <criterion testable="true">BFF implements the contract; routes via intent classifier</criterion>
+    <criterion testable="true">Integration test: tool-call invocation → /ask or /search via contract → response</criterion>
+    <criterion testable="true">spec.md FR-05 fully met (Assistant invokes either path via classifier)</criterion>
+    <criterion testable="true">Read-only Phase 1.5 semantics; Phase 2 bidirectional documented as deferred</criterion>
+  </acceptance-criteria>
+</task>

@@ -184,5 +184,24 @@ public enum ActionType
     /// Validates non-empty evidence (D-A23 / D-48 EvidenceGuard) before return — throws
     /// <c>EvidenceRequiredException</c> on empty evidence.
     /// </summary>
-    ReturnInsightArtifact = 120
+    ReturnInsightArtifact = 120,
+
+    /// <summary>
+    /// Sanitizes raw document text for downstream LLM consumption — strips control characters,
+    /// retrieval blocks, and other noise per D-50 / D-A25 LAVERN sanitizer. Used as the first
+    /// node of the universal-ingest@v1 JPS playbook (Wave C1 task 020). Wraps
+    /// <c>IInsightsContentSanitizer</c>; pass-through for raw chunks (grounding needs them
+    /// unmodified). NEW in Wave C1 per design-a5 §4 Node 1.
+    /// </summary>
+    Sanitization = 130,
+
+    /// <summary>
+    /// Emits N observations (one per surviving L2 candidate after grounding) + the L1
+    /// classification observation. Used as the final node of the universal-ingest@v1 JPS
+    /// playbook (Wave C1 task 020). Wraps <c>IObservationEmitter</c> +
+    /// <c>IObservationIndexUpserter</c> + <c>IObservationMirror</c>. Replaced the
+    /// observation-emission portion of the code-defined <c>IngestOrchestrator</c>
+    /// (retired Wave C-G4 / task 022). NEW in Wave C1 per design-a5 §4 Node 6.
+    /// </summary>
+    ObservationEmit = 140
 }

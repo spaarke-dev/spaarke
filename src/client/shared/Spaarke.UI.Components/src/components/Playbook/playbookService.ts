@@ -28,6 +28,15 @@ import {
 /** Shared OData filter + sort applied to every entity list query. */
 const BASE_FILTER = '&$filter=statecode eq 0&$orderby=sprk_name';
 
+/**
+ * Minimal subset of `Xrm.WebApi` (or PCF `ComponentFramework.WebApi`) used by this service.
+ * Avoids depending on Xrm typings for a library that targets code pages.
+ */
+interface IPlaybookWebApi {
+  retrieveMultipleRecords(entityName: string, options?: string): Promise<{ entities: Record<string, unknown>[] }>;
+  retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>>;
+}
+
 // ---------------------------------------------------------------------------
 // Individual entity loaders
 // ---------------------------------------------------------------------------
@@ -38,14 +47,14 @@ const BASE_FILTER = '&$filter=statecode eq 0&$orderby=sprk_name';
  * @param webApi - Dataverse WebAPI accessor (Xrm.WebApi or equivalent).
  * @returns Resolved array of IPlaybook records.
  */
-export async function loadPlaybooks(webApi: any): Promise<IPlaybook[]> {
+export async function loadPlaybooks(webApi: IPlaybookWebApi): Promise<IPlaybook[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.playbook,
     `?$select=${ID_FIELDS.playbook},sprk_name,sprk_description${BASE_FILTER}`
   );
 
   return result.entities.map(
-    (entity: any): IPlaybook => ({
+    (entity: Record<string, unknown>): IPlaybook => ({
       id: entity[ID_FIELDS.playbook] as string,
       name: entity.sprk_name as string,
       description: (entity.sprk_description as string) || '',
@@ -61,14 +70,14 @@ export async function loadPlaybooks(webApi: any): Promise<IPlaybook[]> {
  * @param webApi - Dataverse WebAPI accessor.
  * @returns Resolved array of IAction records.
  */
-export async function loadActions(webApi: any): Promise<IAction[]> {
+export async function loadActions(webApi: IPlaybookWebApi): Promise<IAction[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.action,
     `?$select=${ID_FIELDS.action},sprk_name,sprk_description${BASE_FILTER}`
   );
 
   return result.entities.map(
-    (entity: any): IAction => ({
+    (entity: Record<string, unknown>): IAction => ({
       id: entity[ID_FIELDS.action] as string,
       name: entity.sprk_name as string,
       description: (entity.sprk_description as string) || '',
@@ -83,14 +92,14 @@ export async function loadActions(webApi: any): Promise<IAction[]> {
  * @param webApi - Dataverse WebAPI accessor.
  * @returns Resolved array of ISkill records.
  */
-export async function loadSkills(webApi: any): Promise<ISkill[]> {
+export async function loadSkills(webApi: IPlaybookWebApi): Promise<ISkill[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.skill,
     `?$select=${ID_FIELDS.skill},sprk_name,sprk_description${BASE_FILTER}`
   );
 
   return result.entities.map(
-    (entity: any): ISkill => ({
+    (entity: Record<string, unknown>): ISkill => ({
       id: entity[ID_FIELDS.skill] as string,
       name: entity.sprk_name as string,
       description: (entity.sprk_description as string) || '',
@@ -106,14 +115,14 @@ export async function loadSkills(webApi: any): Promise<ISkill[]> {
  * @param webApi - Dataverse WebAPI accessor.
  * @returns Resolved array of IKnowledge records.
  */
-export async function loadKnowledge(webApi: any): Promise<IKnowledge[]> {
+export async function loadKnowledge(webApi: IPlaybookWebApi): Promise<IKnowledge[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.knowledge,
     `?$select=${ID_FIELDS.knowledge},sprk_name,sprk_description${BASE_FILTER}`
   );
 
   return result.entities.map(
-    (entity: any): IKnowledge => ({
+    (entity: Record<string, unknown>): IKnowledge => ({
       id: entity[ID_FIELDS.knowledge] as string,
       name: entity.sprk_name as string,
       description: (entity.sprk_description as string) || '',
@@ -129,14 +138,14 @@ export async function loadKnowledge(webApi: any): Promise<IKnowledge[]> {
  * @param webApi - Dataverse WebAPI accessor.
  * @returns Resolved array of ITool records.
  */
-export async function loadTools(webApi: any): Promise<ITool[]> {
+export async function loadTools(webApi: IPlaybookWebApi): Promise<ITool[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.tool,
     `?$select=${ID_FIELDS.tool},sprk_name,sprk_description${BASE_FILTER}`
   );
 
   return result.entities.map(
-    (entity: any): ITool => ({
+    (entity: Record<string, unknown>): ITool => ({
       id: entity[ID_FIELDS.tool] as string,
       name: entity.sprk_name as string,
       description: (entity.sprk_description as string) || '',
@@ -161,7 +170,7 @@ export async function loadTools(webApi: any): Promise<ITool[]> {
  * @param playbookId - GUID of the sprk_analysisplaybook record.
  * @returns Resolved IPlaybookScopes containing arrays of related entity IDs.
  */
-export async function loadPlaybookScopes(webApi: any, playbookId: string): Promise<IPlaybookScopes> {
+export async function loadPlaybookScopes(webApi: IPlaybookWebApi, playbookId: string): Promise<IPlaybookScopes> {
   const scopes: IPlaybookScopes = {
     actionIds: [],
     skillIds: [],
@@ -231,7 +240,7 @@ export interface IPlaybookData {
  * @param webApi - Dataverse WebAPI accessor.
  * @returns Resolved IPlaybookData containing all entity arrays.
  */
-export async function loadAllData(webApi: any): Promise<IPlaybookData> {
+export async function loadAllData(webApi: IPlaybookWebApi): Promise<IPlaybookData> {
   const [playbooks, actions, skills, knowledge, tools] = await Promise.all([
     loadPlaybooks(webApi),
     loadActions(webApi),

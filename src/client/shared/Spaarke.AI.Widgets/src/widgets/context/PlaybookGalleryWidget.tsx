@@ -362,7 +362,7 @@ const PlaybookCard: React.FC<PlaybookCardProps> = ({ playbook, isSelected, onSel
               key={badge}
               className={styles.badge}
               appearance={isSelected ? 'filled' : 'tint'}
-              color={isSelected ? 'brand' : 'neutral'}
+              color={isSelected ? 'brand' : 'subtle'}
               size="small"
             >
               {badge}

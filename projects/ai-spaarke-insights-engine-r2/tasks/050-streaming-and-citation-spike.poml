@@ -1,0 +1,88 @@
+<task id="050" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>F1 — Spike: streaming surface + citation ID flow validation</title>
+    <status>completed</status>
+    <wave>F</wave>
+    <estimated-effort>0.5d</estimated-effort>
+    <tags>spike, research, streaming, sse, citations, contract-v1.1</tags>
+    <dependencies></dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>MINIMAL</rigor>
+    <wave-item>F1</wave-item>
+  </metadata>
+
+  <prompt>
+    Validate the technical path for Wave F (Contract v1.1) before committing to F2 + F3 implementation. Two open questions: (1) what's the cleanest streaming surface on InsightsOrchestrator that wraps IOpenAiClient.StreamCompletionAsync without changing IRagService? (2) Do citation evidence/hit shapes carry document identifiers (driveId/itemId/Guid) sufficient to construct preview-URL hrefs? Output: short spike-findings.md with answers + recommended implementation shape for 051 + 052.
+  </prompt>
+
+  <role>Senior .NET developer + integration architect.</role>
+
+  <goal>
+    Produce `notes/spikes/wave-f-streaming-citation-spike.md` (~1-2 pages) with: (A) recommended streaming method signature on `InsightsOrchestrator` + `IInsightsAi`, (B) confirmation of where SPE document IDs flow in `Evidence` (playbook path) + `RagSearchResponse` (RAG path), (C) recommended BFF URL pattern for citation href (path of least authorization complexity), (D) playbook-path streaming verdict (per-node progress vs major-phase only), (E) observation-citation URL strategy (MDA vs new BFF endpoint), (F) **plumbing-cost classification (Small ≤0.5d / Medium 0.5–1d / Large >1d)** for getting `driveId` + `itemId` into `AssistantQueryCitation` + explicit go/no-go recommendation for document-citation href in v1.1 (per R5's pre-approved escape hatch — see mini-plan §0.1). Findings unblock F2 + F3 AND determine whether F3 ships document-href OR observation-href-only.
+  </goal>
+
+  <inputs>
+    <file purpose="r5-request">projects/ai-spaarke-insights-engine-r2/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="mini-plan">projects/ai-spaarke-insights-engine-r2/notes/wave-f-v1.1-mini-plan.md</file>
+    <file purpose="current-handler">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs (citation projection at :303 + :404)</file>
+    <file purpose="current-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (SearchAsync — single-shot today)</file>
+    <file purpose="streaming-aoai">src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs (StreamCompletionAsync at :36 already exists)</file>
+    <file purpose="rag-result-shape">src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs + RagService.cs</file>
+    <file purpose="preview-url">src/server/api/Sprk.Bff.Api/Services/DocumentCheckoutService.cs (GetPreviewUrlAsync at :288)</file>
+    <file purpose="evidence-shape">src/server/api/Sprk.Bff.Api/Models/Ai/Artifacts/Evidence.cs (or wherever Evidence.Ref/Quote live)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="r5-request §2.1">IRagService interface remains UNCHANGED (verified — only LLM synthesis call needs streaming)</constraint>
+    <constraint source="r5-request §3.4">href URLs MUST respect AIPU2-027 privilege filtering — recommend BFF endpoint that re-checks auth</constraint>
+    <constraint source="wave-f-mini-plan §3.2">Citation ID flow validation is the HIGHEST-risk item — block 052 if identifiers don't currently flow</constraint>
+    <constraint source="spike rigor">No code changes in F1 — read-only investigation + write spike findings doc only</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SSE streaming patterns, IAsyncEnumerable surface design, ADR-013 §3.5 facade boundary, citation projection</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>knowledge/azure-ai-search/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read inputs">Spend ~30 min on the 6 input files above. Map current flows.</step>
+    <step order="2" name="Streaming surface design">Sketch 2-3 alternative method signatures for IInsightsAi.SearchStreamAsync; pick the one that best preserves facade boundary + reuses existing AssistantToolCallHandler dispatch logic.</step>
+    <step order="3" name="Trace citation ID flow">Confirm what fields in Evidence (playbook) + RagSearchHit (RAG) carry document identifiers. Note any gaps.</step>
+    <step order="4" name="Preview URL pattern decision">Look at how DocumentCheckoutService.GetPreviewUrlAsync is exposed. Decide: reuse a documents endpoint URL pattern OR add a new /api/insights/citations/{id}/preview shim. Recommendation with rationale.</step>
+    <step order="5" name="Playbook-path streaming verdict">Re-read predict-matter-cost@v1 node sequence. Decide per-node progress vs major-phase only. Most playbook latency is in deterministic nodes — recommend coarse-grained progress only.</step>
+    <step order="6" name="Observation URL strategy">List MDA-URL pros/cons vs new BFF JSON-shape endpoint. Recommendation.</step>
+    <step order="7" name="Plumbing-cost classification">Based on step 3 findings, classify the cost of getting driveId + itemId (or equivalent document identifiers) into AssistantQueryCitation as Small (≤0.5d — fields exist, just need to project), Medium (0.5–1d — flowing through but needs lookup or reshape), or Large (>1d — requires reshaping Evidence model upstream or RAG response assembly). Document the cost driver (which specific code change is the gating work).</step>
+    <step order="8" name="v1.1 scope recommendation">Per R5's pre-approved escape hatch (mini-plan §0.1): if cost is Small or Medium → recommend F3 ships BOTH observation + document citation href. If cost is Large → recommend F3 ships observation-href ONLY; defer document-href to v1.2. Document the recommendation with rationale.</step>
+    <step order="9" name="Write spike findings">Author notes/spikes/wave-f-streaming-citation-spike.md per goal §A-F. Include recommended IInsightsAi signature snippet + 1-2 sample citation-projection code shapes (illustrative; not committing impl) + plumbing-cost section + v1.1 scope recommendation.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Trace citation ID flow + evidence shape</tool>
+    <tool name="read">Read source files</tool>
+    <tool name="write">Author spike findings doc</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-insights-engine-r2/notes/spikes/wave-f-streaming-citation-spike.md (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spike doc exists with sections A-F per goal</criterion>
+    <criterion testable="true">Recommended IInsightsAi.SearchStreamAsync signature includes return type + parameters + cancellation token</criterion>
+    <criterion testable="true">Citation ID flow gaps (if any) explicitly listed with effort estimate to plumb through</criterion>
+    <criterion testable="true">Preview URL pattern recommendation includes the chosen endpoint path + auth-check mechanism</criterion>
+    <criterion testable="true">Plumbing-cost classification (Small / Medium / Large) with explicit cost driver</criterion>
+    <criterion testable="true">v1.1 scope recommendation per mini-plan §0.1: "ship BOTH" (Small/Medium) OR "observation-href only; defer document-href to v1.2" (Large)</criterion>
+    <criterion testable="true">F2 + F3 (tasks 051 + 052) can start without further research after reading this spike</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spike is 0.5d. No code changes. Output unblocks the implementation tasks AND determines F3 scope (full vs observation-only).
+
+    **R5 escape hatch is binding** (per mini-plan §0.1): if document-href plumbing is Large cost, R5 has pre-approved shipping observation-href only and deferring document-href to v1.2 rather than blocking on schema reshaping. The spike's scope recommendation is NOT subject to further owner review — F3 follows the spike's recommendation directly.
+  </notes>
+</task>

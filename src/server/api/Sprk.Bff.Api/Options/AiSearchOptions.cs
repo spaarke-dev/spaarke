@@ -25,4 +25,40 @@ public class AiSearchOptions
     /// Default matches SPEC §3.4 / D-P2 naming (<c>spaarke-insights-index</c>).
     /// </summary>
     public string InsightsIndexName { get; init; } = "spaarke-insights-index";
+
+    /// <summary>
+    /// R5 spec §4.2 / FR-09 — name of the session-scoped Azure AI Search index that holds
+    /// chat-session-uploaded file chunks. Documents in this index carry both
+    /// <c>tenantId</c> AND <c>sessionId</c> per ADR-014 tenant-isolation invariant; the
+    /// <see cref="Sprk.Bff.Api.Services.Ai.RagService"/> routes session-scoped queries here
+    /// (when <c>RagSearchOptions.SessionId</c> is set) and applies a
+    /// <c>tenantId eq '...' and sessionId eq '...'</c> filter so cross-tenant session leaks
+    /// are impossible. Admin-overridable for non-default environments; mirrors the existing
+    /// <see cref="KnowledgeIndexName"/> / <see cref="FilesIndexName"/> /
+    /// <see cref="RagReferencesIndexName"/> pattern. Default matches the schema deployed by
+    /// R5 task 001 (<c>infrastructure/ai-search/spaarke-session-files.json</c>).
+    /// </summary>
+    public string SessionFilesIndexName { get; init; } = "spaarke-session-files";
+
+    /// <summary>
+    /// R5 spec §4.2 / FR-09 — semantic-ranking configuration name for the session-files
+    /// index. The session-files index defines its own semantic config (distinct from the
+    /// knowledge index's <c>knowledge-semantic-config</c>) so the routing branch in
+    /// <see cref="Sprk.Bff.Api.Services.Ai.RagService"/> can apply semantic ranking against
+    /// the correct config when <c>RagSearchOptions.SessionId</c> is set. Admin-overridable.
+    /// Default matches the schema deployed by R5 task 001.
+    /// </summary>
+    public string SessionFilesSemanticConfigName { get; init; } = "session-files-semantic-config";
+
+    /// <summary>
+    /// Wave D6 (task 035) — hybrid backward-compat dual-write toggle per design-a6 §4.4 + §5.3.
+    /// When true (default), the writer populates <c>scope.matterId</c> for matter-subject
+    /// Observations in addition to <c>scope.entityType</c> + <c>scope.entityId</c>, preserving
+    /// NFR-08 backward-compat for any consumer that filters by <c>scope/matterId eq '…'</c>.
+    /// Set to false to disable dual-write (matter Observations would only carry the canonical
+    /// <c>scope.entityType</c>/<c>scope.entityId</c> fields). The reader (IndexRetrieveNode) uses
+    /// OR-filter logic per design-a6 §4.5 regardless of this flag, so flipping it does NOT
+    /// break reads — it only stops emitting the legacy field on NEW writes.
+    /// </summary>
+    public bool DualWriteScopeMatterId { get; init; } = true;
 }

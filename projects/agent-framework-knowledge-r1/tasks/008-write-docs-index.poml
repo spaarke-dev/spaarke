@@ -1,0 +1,59 @@
+<task id="008" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Write knowledge/agent-framework/docs/INDEX.md</title>
+    <phase>4</phase>
+    <tags>knowledge-base, agent-framework, index, discoverability</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>003, 004, 005, 006, 007</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Write knowledge/agent-framework/docs/INDEX.md modeled on knowledge/fluent-ui-v9/docs/INDEX.md. This is the "decide WHICH doc to load" cheat sheet — pattern files punt to specific docs via `→` links, INDEX.md is the index agents read to navigate.</goal>
+    <context>fluent-ui-v9 has INDEX.md with sections for Microsoft official / PCF integration / host visual standards / Fluent 2 design system / Community/MVP. Agent Framework's equivalent sectioning: Microsoft official — Agent Framework core (overview, agents, workflows, chat-client, tools, providers, structured-outputs, sessions-and-state) | Spaarke-critical (middleware, observability, hosted-mcp-tools, mcp-clients) | Migration (semantic-kernel, autogen) | Hosting/deployment | Community/MVP.</context>
+    <constraints>
+      - Match the format of knowledge/fluent-ui-v9/docs/INDEX.md exactly: 4-column table per section (Doc | Lines | When to load), with section preamble and a closing "Pattern files that load FROM these docs" section
+      - Line counts: use `wc -l` (or PowerShell equivalent) on each doc to get accurate counts
+      - "When to load" lines must be ≤80 chars, end with a noun phrase (e.g., "First-time orientation only"), and target the actual use case (not a re-summary of doc content)
+      - The closing "Pattern files that load FROM these docs" table forward-references the patterns task 009 will create — list them with placeholder paths; if patterns change in task 009, this INDEX.md is updated then
+      - Sub-agents may write to knowledge/ but NOT to .claude/
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>knowledge/fluent-ui-v9/docs/INDEX.md</file>
+      <file>knowledge/agent-framework/docs/overview.md</file>
+      <file>knowledge/agent-framework/docs/agents.md</file>
+      <file>knowledge/agent-framework/docs/workflows.md</file>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read knowledge/fluent-ui-v9/docs/INDEX.md as the template — note the exact format, section breaks, columns, and tone</step>
+    <step>Glob knowledge/agent-framework/docs/**/*.md to inventory all docs that exist after tasks 003-006</step>
+    <step>For each doc: get line count (Read with limit-and-offset, or Bash `wc -l`)</step>
+    <step>Draft the INDEX.md with sections: (a) Microsoft official — core, (b) Microsoft official — Spaarke-critical (middleware/observability/MCP), (c) Microsoft official — Migration, (d) Microsoft official — Hosting/deployment, (e) Community/MVP (if any captures from task 006), (f) Pattern files that load FROM these docs (forward-reference to task 009 output)</step>
+    <step>Add the preamble paragraph matching fluent-ui-v9's tone: "Use this index to decide WHICH doc to load. Most routine Agent Framework work is covered by the X pattern files in .claude/patterns/ai/ — only drill into these docs when the pattern punts to one with a `→` link, or when you need provenance / verbatim Microsoft text."</step>
+    <step>Write to knowledge/agent-framework/docs/INDEX.md</step>
+    <step>Commit: `docs(knowledge): add agent-framework docs INDEX.md (R1 task 008)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Glob</tool>
+    <tool>Bash</tool>
+    <tool>Write</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>knowledge/agent-framework/docs/INDEX.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>INDEX.md exists with format matching knowledge/fluent-ui-v9/docs/INDEX.md</criterion>
+    <criterion>Every doc under knowledge/agent-framework/docs/ is listed (or honest "this doc was a GAP" note included)</criterion>
+    <criterion>Line counts are accurate</criterion>
+    <criterion>"When to load" lines target use cases, not doc summaries</criterion>
+    <criterion>Closing pattern-loaders section forward-references the patterns from task 009</criterion>
+  </acceptance-criteria>
+</task>

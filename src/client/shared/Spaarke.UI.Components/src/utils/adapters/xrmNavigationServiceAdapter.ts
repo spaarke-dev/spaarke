@@ -109,7 +109,7 @@ export function createXrmNavigationService(): INavigationService {
     },
 
     async openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult> {
-      const navigation = getNavigation();
+      const _navigation = getNavigation();
 
       // Build the navigateTo page input
       const pageInput: Record<string, unknown> = {
@@ -173,7 +173,6 @@ export function createXrmNavigationService(): INavigationService {
         (window as any).__dialogResult = result;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const frames = [window, window.parent, window.top].filter(Boolean) as Window[];
       for (const frame of frames) {
         try {

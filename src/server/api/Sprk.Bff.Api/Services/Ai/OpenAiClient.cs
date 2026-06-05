@@ -771,4 +771,92 @@ public class OpenAiClient : IOpenAiClient
             throw;
         }
     }
+
+    /// <summary>
+    /// Stream a structured completion (json_schema strict mode + streaming).
+    /// Yields raw content-token strings as Azure OpenAI emits them; the caller is responsible
+    /// for accumulating the tokens into JSON and feeding them to an incremental parser
+    /// (see <c>Sprk.Bff.Api.Services.Ai.Streaming.IncrementalJsonParser</c>).
+    ///
+    /// Per the R5 task 006 spike (<c>notes/task-006-spike-results.md</c>), Azure OpenAI streams
+    /// JSON char-by-char / word-by-word via <c>delta.content</c> in declaration order. Token
+    /// granularity is ~3–8 chars; the first content event arrives in &lt;500ms (NFR-01 TTFB).
+    ///
+    /// Combines <see cref="ChatResponseFormat.CreateJsonSchemaFormat"/> with
+    /// <c>chatClient.CompleteChatStreamingAsync</c>. Mirrors the iteration shape of
+    /// <see cref="StreamCompletionAsync"/>; protected by the same circuit breaker.
+    /// </summary>
+    /// <param name="messages">Conversation messages (system + user prompts).</param>
+    /// <param name="jsonSchema">JSON schema the response must conform to (strict mode enforced).</param>
+    /// <param name="schemaName">Schema name (identifier; e.g., <c>"DocumentSummary"</c>).</param>
+    /// <param name="model">Optional model override. Defaults to <c>DocumentIntelligenceOptions.SummarizeModel</c>.</param>
+    /// <param name="maxOutputTokens">Optional max output tokens. Defaults to <c>DocumentIntelligenceOptions.MaxOutputTokens</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Async enumerable of content-token strings (the raw <c>delta.content</c> payload).</returns>
+    /// <exception cref="OpenAiCircuitBrokenException">Thrown when the circuit breaker is open.</exception>
+    public async IAsyncEnumerable<string> StreamStructuredCompletionAsync(
+        IEnumerable<ChatMessage> messages,
+        BinaryData jsonSchema,
+        string schemaName,
+        string? model = null,
+        int? maxOutputTokens = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var deploymentName = model ?? _options.SummarizeModel;
+        var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
+        var chatClient = _client.GetChatClient(deploymentName);
+
+        var chatOptions = new ChatCompletionOptions
+        {
+            ResponseFormat = ChatResponseFormat.CreateJsonSchemaFormat(
+                schemaName,
+                jsonSchema,
+                jsonSchemaIsStrict: true),
+            MaxOutputTokenCount = effectiveMaxTokens,
+            Temperature = 0f
+        };
+
+        var messageList = messages.ToList();
+
+        _logger.LogDebug(
+            "Starting streaming structured completion. Model={Model}, Schema={Schema}, MessageCount={MessageCount}",
+            deploymentName, schemaName, messageList.Count);
+
+        AsyncCollectionResult<StreamingChatCompletionUpdate> streamingResult;
+        try
+        {
+            streamingResult = await _circuitBreaker.ExecuteAsync(ct =>
+            {
+                var result = chatClient.CompleteChatStreamingAsync(messageList, chatOptions, ct);
+                return ValueTask.FromResult(result);
+            }, cancellationToken);
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning("OpenAI circuit breaker is open. Rejecting streaming structured completion request.");
+            throw new OpenAiCircuitBrokenException(BreakDuration);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to start streaming structured completion. Model={Model}, Schema={Schema}",
+                deploymentName, schemaName);
+            throw;
+        }
+
+        await foreach (var update in streamingResult.WithCancellation(cancellationToken))
+        {
+            foreach (var contentPart in update.ContentUpdate)
+            {
+                if (!string.IsNullOrEmpty(contentPart.Text))
+                {
+                    yield return contentPart.Text;
+                }
+            }
+        }
+
+        _logger.LogDebug(
+            "Streaming structured completion finished. Model={Model}, Schema={Schema}",
+            deploymentName, schemaName);
+    }
 }

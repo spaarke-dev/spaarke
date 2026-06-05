@@ -1,0 +1,108 @@
+PROJECT STATEMENT OF WORK
+Greene & Marlow LLP — Commercial Transactions Practice
+
+Project Code:        CTRNS-2026-038
+Project Name:        Verdant Solar / Pelican Bay APA — Closing & Post-Close Support
+Project Manager:     Camille Whittaker (Lead Partner: Devorah Anand)
+Client of Record:    Verdant Solar Holdings, Inc.
+Linked Matter ID:    CMRCL-407211 ("Verdant Solar — Pelican Bay APA Transaction")
+Effective Date:      January 30, 2026
+Target Close:        April 17, 2026
+Status:              Active — Pre-Closing
+Budget Cap:          $1,250,000 (T&M with cap; per engagement letter dated 1/29/2026)
+
+1. PROJECT OVERVIEW
+
+This Statement of Work ("SOW") sets forth the scope, schedule, and budgetary
+parameters for Greene & Marlow LLP's representation of Verdant Solar Holdings,
+Inc. ("Verdant Solar") in the sale of substantially all of its operating assets
+to Pelican Bay Energy Partners LLC under an Asset Purchase Agreement
+contemplated to be signed February 11, 2026 and closed by April 17, 2026.
+
+2. SCOPE OF SERVICES
+
+   2.1 Pre-Signing Phase (Estimated: 320 hours)
+       - Diligence response coordination across Verdant Solar's IP, environmental,
+         and tax workstreams
+       - APA drafting and counter-proposal cycles
+       - Disclosure schedules compilation and review
+       - Antitrust analysis (HSR threshold analysis completed: filing required;
+         coordination with antitrust counsel at Holwell, Strand & Adichie LLP)
+
+   2.2 Signing-to-Closing Phase (Estimated: 480 hours)
+       - Regulatory filings and clearance (HSR, FERC notification)
+       - Bring-down diligence and refresh of disclosure schedules
+       - Closing logistics and document coordination
+       - Negotiation of transition services arrangements (separate TSA)
+
+   2.3 Post-Closing Phase (Estimated: 180 hours)
+       - Post-closing adjustments and true-up of Working Capital
+       - Indemnity claim management (12-month escrow administration)
+       - Defense and resolution of any post-closing disputes
+       - File transition and matter wrap-up
+
+3. KEY MILESTONES
+
+   M-01  Diligence room substantially complete                 Feb 4, 2026
+   M-02  APA execution (signing)                                Feb 11, 2026
+   M-03  HSR filing                                              Feb 25, 2026
+   M-04  HSR waiting period expiry                               Apr 1, 2026
+   M-05  Closing                                                 Apr 17, 2026
+   M-06  Working Capital true-up determination                  Jul 17, 2026
+   M-07  Escrow release / post-close wrap-up                    Apr 17, 2027
+
+4. PROJECT TEAM
+
+   Lead Partner:                Devorah Anand
+   Senior Associate:            Patrick Devanney (also IP diligence lead)
+   Senior Associate:            Aliyah Brennan (tax)
+   Mid-level Associate:         Theodore Kawasaki-Funk (regulatory/HSR)
+   Mid-level Associate:         Roxanne Linder (corporate)
+   Junior Associate:            Two assigned (rotation)
+   Paralegal Lead:              Yusuf Ramirez
+
+5. BUDGET AND BILLING APPROACH
+
+   This project is billed on a Time-and-Materials basis with the Budget Cap
+   referenced above. The Project Manager shall report budget utilization
+   monthly to the Client of Record. If projected total fees will exceed the
+   Budget Cap, the Project Manager shall provide written notice not less than
+   thirty (30) days prior to the projected exhaustion of the Budget Cap, and
+   the parties shall negotiate an amended scope or fee arrangement before any
+   work proceeds in excess of the Budget Cap.
+
+6. ASSUMPTIONS AND CONSTRAINTS
+
+   - Verdant Solar's diligence response team will deliver documents into the
+     diligence VDR within five (5) Business Days of each request.
+   - No more than two (2) rounds of substantive APA negotiation are anticipated.
+   - If a third-party challenge to HSR clearance materializes, this SOW will
+     be paused and a separate SOW addendum negotiated.
+   - The fee estimate assumes no concurrent securities-class-action exposure
+     related to the announcement of the transaction.
+
+7. DEPENDENCIES AND RELATED MATTERS
+
+   - Linked matter CMRCL-407211 carries the substantive legal record.
+   - This project depends on coordination with Brightwater Capital Advisors LLC,
+     which holds a 17% minority equity interest in Verdant Solar.
+   - Coordination with environmental counsel (Penobscot & Reeves LLP) is
+     required for diligence of the Verdant Solar manufacturing site at
+     Wilmington, DE.
+
+8. PROJECT STATUS REPORTING
+
+   The Project Manager shall provide weekly Project Status Reports each Friday
+   covering: (a) milestones achieved that week; (b) milestones at risk; (c)
+   budget utilization snapshot; (d) escalations requiring partner attention;
+   and (e) next-week activity plan.
+
+9. ACCEPTANCE AND APPROVALS
+
+This SOW is approved as of the Effective Date.
+
+For Greene & Marlow LLP:                    For Verdant Solar Holdings, Inc.:
+
+___________________________                  ___________________________
+Devorah Anand, Lead Partner                  Camille Whittaker, CFO
+Date: January 30, 2026                        Date: January 30, 2026

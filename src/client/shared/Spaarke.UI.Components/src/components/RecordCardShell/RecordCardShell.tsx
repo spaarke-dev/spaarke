@@ -227,7 +227,6 @@ export const RecordCardShell: React.FC<IRecordCardShellProps> = ({
 
       {/* Tools + overflow menu column */}
       {(tools || overflowMenu) && (
-        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
         <div className={styles.toolsColumn} onClick={handleToolsClick}>
           {tools}
           {overflowMenu}

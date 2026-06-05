@@ -41,6 +41,16 @@ public class ChatSessionManager
     /// </summary>
     private readonly ISessionPersistenceService? _persistence;
 
+    /// <summary>
+    /// R5 task 007 (D1-07) — optional fire-and-forget signal to the session-files cleanup
+    /// <see cref="SessionFilesCleanupJob"/>. Null when AI is disabled (compound gate OFF) so
+    /// pre-R5 callers + the AI-OFF code path continue to work unchanged. When non-null,
+    /// <see cref="DeleteSessionAsync"/> raises a session-end signal at the end of its
+    /// existing logic so the cleanup job evicts session-files index documents immediately
+    /// (spec NFR-02 "Aggressive cleanup on session-end").
+    /// </summary>
+    private readonly ISessionFilesCleanupSignal? _cleanupSignal;
+
     // ADR-014: centralise key pattern in one place
     internal static string BuildCacheKey(string tenantId, string sessionId)
         => $"chat:session:{tenantId}:{sessionId}";
@@ -49,12 +59,14 @@ public class ChatSessionManager
         IDistributedCache cache,
         IChatDataverseRepository dataverseRepository,
         ILogger<ChatSessionManager> logger,
-        ISessionPersistenceService? persistence = null)
+        ISessionPersistenceService? persistence = null,
+        ISessionFilesCleanupSignal? cleanupSignal = null)
     {
         _cache = cache;
         _dataverseRepository = dataverseRepository;
         _logger = logger;
         _persistence = persistence;
+        _cleanupSignal = cleanupSignal;
     }
 
     /// <summary>
@@ -228,6 +240,21 @@ public class ChatSessionManager
                     "Cosmos DB delete failed for session {SessionId} (tenant={TenantId}) — Dataverse archive still succeeded",
                     sessionId, tenantId);
             }
+        }
+
+        // R5 task 007 — fire-and-forget signal to the session-files cleanup hosted service
+        // (spec NFR-02 "Aggressive cleanup on session-end"). Mirrors the Cosmos
+        // fire-and-forget convention above: log-and-swallow on failure; never throws.
+        // Null when AI compound gate is OFF — existing behaviour preserved.
+        try
+        {
+            _cleanupSignal?.SignalSessionEnded(tenantId, sessionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Session-files cleanup signal failed for session {SessionId} (tenant={TenantId}) — eviction will run on the next scheduled scan",
+                sessionId, tenantId);
         }
     }
 

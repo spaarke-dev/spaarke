@@ -35,6 +35,11 @@ jobs:
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
+          # Skip the knowledge/ repo (reference docs + MCP sample apps — not product code).
+          # The Azurite default key in trey-research/db.ts is a publicly documented
+          # Microsoft test credential; see .trivyignore for full rationale.
+          skip-dirs: 'knowledge'
+          trivyignores: '.trivyignore'
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -70,6 +75,7 @@ jobs:
 
       - name: Cache NuGet packages
         uses: actions/cache@v5
+        continue-on-error: true  # Prevents Debug/Release matrix race on shared cache key from failing the job (PR #337 hit this 2026-06-03 — Release lost the cache-save race to concurrent Debug at 00:18:47)
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
@@ -153,6 +159,51 @@ jobs:
         # Follow-on cleanup tracked per docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
         working-directory: src/client/pcf
         run: npx eslint .
+
+      # Spaarke.AI.Widgets tsc gate (R4 task 061 / B-2 / NFR-05)
+      # AI.Widgets tsconfig path-maps four @spaarke/* sibling packages to their
+      # respective ../<Package>/dist/index.d.ts. CI must build each dist before
+      # the typecheck so path resolution succeeds.
+      # See projects/spaarke-ai-platform-unification-r4/notes/b2-tsc-rootdir-decision.md
+      - name: Install Spaarke.Auth deps
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.Auth (declarations required by UI.Components + Widgets typecheck)
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npx tsc
+
+      - name: Install Spaarke.AI.Context deps
+        working-directory: src/client/shared/Spaarke.AI.Context
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.AI.Context (declarations required by Widgets typecheck)
+        working-directory: src/client/shared/Spaarke.AI.Context
+        run: npx tsc
+
+      - name: Install Spaarke.UI.Components deps
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.UI.Components (declarations required by Widgets typecheck)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx tsc
+
+      - name: Install Spaarke.AI.Outputs deps
+        working-directory: src/client/shared/Spaarke.AI.Outputs
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.AI.Outputs (declarations required by Widgets typecheck)
+        working-directory: src/client/shared/Spaarke.AI.Outputs
+        run: npx tsc
+
+      - name: Install Spaarke.AI.Widgets deps
+        working-directory: src/client/shared/Spaarke.AI.Widgets
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Spaarke.AI.Widgets — tsc --noEmit
+        working-directory: src/client/shared/Spaarke.AI.Widgets
+        run: npx tsc --noEmit
 
   code-quality:
     name: Code Quality

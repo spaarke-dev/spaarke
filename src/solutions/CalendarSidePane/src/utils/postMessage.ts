@@ -12,7 +12,7 @@
  * @module utils/postMessage
  */
 
-import { CalendarFilterOutput } from "./parseParams";
+import type { CalendarFilterPaneOutput } from "@spaarke/events-components";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Message Types
@@ -47,7 +47,7 @@ export interface IEventDateInfo {
 export interface CalendarFilterChangedMessage {
   type: typeof MESSAGE_TYPES.CALENDAR_FILTER_CHANGED;
   payload: {
-    filter: CalendarFilterOutput | null;
+    filter: CalendarFilterPaneOutput | null;
   };
 }
 
@@ -74,7 +74,7 @@ export interface CalendarCloseMessage {
 export interface CalendarReadyMessage {
   type: typeof MESSAGE_TYPES.CALENDAR_READY;
   payload: {
-    currentFilter: CalendarFilterOutput | null;
+    currentFilter: CalendarFilterPaneOutput | null;
   };
 }
 
@@ -141,7 +141,7 @@ function getTargetOrigin(): string {
  *
  * @param filter - New filter state (null means cleared)
  */
-export function sendFilterChanged(filter: CalendarFilterOutput | null): void {
+export function sendFilterChanged(filter: CalendarFilterPaneOutput | null): void {
   const message: CalendarFilterChangedMessage = {
     type: MESSAGE_TYPES.CALENDAR_FILTER_CHANGED,
     payload: { filter },
@@ -179,7 +179,7 @@ export function sendFilterChanged(filter: CalendarFilterOutput | null): void {
  *
  * @param currentFilter - Initial filter state
  */
-export function sendCalendarReady(currentFilter: CalendarFilterOutput | null): void {
+export function sendCalendarReady(currentFilter: CalendarFilterPaneOutput | null): void {
   const message: CalendarReadyMessage = {
     type: MESSAGE_TYPES.CALENDAR_READY,
     payload: { currentFilter },

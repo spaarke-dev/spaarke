@@ -1,9 +1,9 @@
 # Spaarke Insights Engine Architecture
 
-> **Last Updated**: 2026-05-28 (refinement callout added — see §0 below; body text unchanged from r2)
-> **Last Reviewed**: 2026-05-20 (r2 body); 2026-05-28 (§0 refinement integration)
-> **Revision**: r2 + 2026-05-28 refinement callout. Original r2 — adds source data and corpus model (§4), surfacing model (§10), evaluation and quality (§14), external integration via MCP (§15), and future considerations (§22). 2026-05-28 callout (new §0) — narrows Phase 1 scope to 17 deliverables (D-P1..D-P17) per [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) and decisions D-52..D-63.
-> **Status**: Pre-implementation. Phase 1 [`SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) is pipeline-ready and canonical for Phase 1 scope. This doc remains Spaarke-wide architecture reference; for project Phase 1 deliverables, read SPEC.md.
+> **Last Updated**: 2026-06-04 (Phase 1.5 implementation closed: Waves A/B/C/D/E shipped via PRs #330, #334, #336, #337; Wave F contract v1.1 minor-version shipped via PR #339. Wave-status table + Phase 1.5 scope sentence updated.)
+> **Last Reviewed**: 2026-06-04 (Wave F close); 2026-06-02 (r2 task 010, Wave A1); 2026-05-30 (§0a); 2026-05-28 (§0 refinement integration); 2026-05-20 (r2 body)
+> **Revision**: r2 + 2026-05-28 refinement callout + 2026-05-30 Phase 1 completion + 2026-06-02 Phase 1.5 framing refresh + 2026-06-04 Phase 1.5 close + Wave F v1.1 addition. Original r2 — adds source data and corpus model (§4), surfacing model (§10), evaluation and quality (§14), external integration via MCP (§15), and future considerations (§22). 2026-05-28 callout (§0) — narrows Phase 1 scope to 17 deliverables (D-P1..D-P17) per [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) and decisions D-52..D-63. 2026-05-30 callout (§0a) — Phase 1 completion + Phase 1.5 architectural framing. 2026-06-02 refresh — incorporates Phase 1.5 design decisions D-P15-01..D-P15-09 from r2 design.md. 2026-06-04 close (this revision) — marks all Phase 1.5 waves shipped; adds Wave F minor-version contract bump (SSE streaming + clickable citations) authored in response to R5 (`spaarke-ai-platform-unification-r5`) contract change request.
+> **Status**: Phase 1 plumbing shipped + deployed (r1, ✅). **Phase 1.5 implementation closed (r2, ✅)** — Waves B (PR #330), A+C (PR #334), D (PR #336), E (PR #337), F minor-version v1.1 (PR #339) all merged 2026-06-02..2026-06-04. **Only task 090 (lessons-learned + Phase 2 outline + archive) remains in r2 scope.** Spaarke Dev deploy of Wave C-G4 + D + E + F bundle is owner-coordinated per [`bff-extensions.md`](../../.claude/constraints/bff-extensions.md) §F.4. Canonical Phase 1.5 refs: [`projects/ai-spaarke-insights-engine-r2/spec.md`](../../projects/ai-spaarke-insights-engine-r2/spec.md), [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md), [`projects/ai-spaarke-insights-engine-r2/plan.md`](../../projects/ai-spaarke-insights-engine-r2/plan.md), [`projects/ai-spaarke-insights-engine-r2/CLAUDE.md`](../../projects/ai-spaarke-insights-engine-r2/CLAUDE.md), [`projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md`](../../projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md) (v1.1 contract). Phase 1 contract: [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md).
 > **Purpose**: Spaarke-wide canonical architecture document for the Insights Engine — the back-end subsystem that produces honestly-grounded organizational context for AI agents and end users.
 > **Note on length**: This document is comprehensive (~1500 lines) by explicit user override of the standard `docs/architecture/` "decisions-only" convention. **Project-internal authority for Phase 1 scope and deliverables is [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md)**; project-internal authority for comprehensive design is [`projects/ai-spaarke-insights-engine-r1/design.md`](../../projects/ai-spaarke-insights-engine-r1/design.md). When this doc conflicts with either, the project docs win until this doc is updated.
 
@@ -47,6 +47,18 @@ Phase 1 scope was narrowed twice after this doc was last revised (2026-05-20):
 > **Status**: Phase 1 (ai-spaarke-insights-engine-r1) **plumbing complete + deployed to Spaarke Dev**. Phase 1.5 scope captured in this section; implementation lives in new project **ai-spaarke-insights-engine-r2**. See [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md) for the Phase 1.5 project plan.
 >
 > **Why a new section**: §0 above captured the 2026-05-28 pre-implementation refinements. This section captures (1) what was actually shipped vs. designed, (2) the architectural framing corrections that emerged during live deploy/verification, and (3) the Phase 1.5 scope agreed with the project owner on 2026-05-30.
+
+### Terminology (load-bearing — locked in r2 spec.md)
+
+Earlier sections of this doc conflate "the JPS engine" with various code components. The definitions below — locked in [`projects/ai-spaarke-insights-engine-r2/spec.md`](../../projects/ai-spaarke-insights-engine-r2/spec.md) §Terminology — are the canonical meanings going forward. Body sections below (§§1–23) may use looser legacy phrasing; when there is any disagreement, this Terminology table wins.
+
+- **JPS** (JSON Prompt Schema) — the **schema/data format** for analysis actions and playbooks. JPS itself is **data, not code**. JPS data lives in Dataverse on `sprk_analysisaction.sprk_systemprompt` (a JSON document with `$schema`, `$version`, `instruction { role, task, constraints, context }`, `input`, `parameters`) and on `sprk_playbook` rows.
+- **`PlaybookExecutionEngine`** — the **code component in `Sprk.Bff.Api`** that executes JPS-defined work. Loads playbook + action rows from Dataverse, dispatches each node to its registered `INodeExecutor`, threads JPS-shaped data through the run. Earlier drafts loosely called this "the JPS engine."
+- **`INodeExecutor`** — code-side handler for a specific analysis-action TYPE. Insights contributes new `INodeExecutor` implementations (LiveFactNode, IndexRetrieveNode, EvidenceSufficiencyNode, GroundingVerifyNode, DeclineToFindNode, ReturnInsightArtifactNode). The engine itself and the JPS schema are unchanged by Insights.
+- **`sprk_analysisaction`** — the **existing JPS dispatch + prompt row**. Carries action code, action type, the **JPS-formatted system prompt in `sprk_systemprompt`** (instruction + input schema + parameter schema + constraints + context), output format/schema, tags, description, sort order. **This IS the prompt-bearing primitive** — r1 already uses this for non-Insights actions (the existing "Classify Document" action carries its full JPS prompt here, including `instruction.role` / `instruction.task` / `instruction.constraints[]` / `input.document` / `parameters.categories`). Phase 1.5 retires `.txt` prompt files by populating `sprk_systemprompt` on the new Insights action rows. **No new `sprk_prompt` entity is introduced in Phase 1.5** — superseded per r2 spec.md PR-1.
+- **`sprk_playbook` + `sprk_configjson`** — JPS playbook definition with per-playbook config blob. Carries playbook-specific tunables (cost cap, thresholds) and inline prompt templates that exist only for that playbook (e.g., the synthesis template owned by `predict-matter-cost@v1`).
+
+"Insights IS a JPS application" means: every Insights workflow is defined as JPS data (`sprk_playbook` + `sprk_analysisaction` rows) executed by `PlaybookExecutionEngine`, with Insights contributing new `INodeExecutor` implementations + a new scope substrate (`spaarke-insights-index`) + a stable facade (`IInsightsAi`). **No parallel orchestrators. No new prompt-bearing entity in Phase 1.5.**
 
 ### What Phase 1 actually shipped (relative to SPEC.md §3.1 D-P1..D-P17)
 
@@ -110,39 +122,46 @@ The conceptual end state (per project owner discussion) is NOT "every question m
 - **Intent classifier** routes user questions to either: matching playbook OR generic RAG
 - **The Insights index is the durable substrate for BOTH paths** — Observations + Precedents produced by ingest are queried equivalently whether the consumer is a playbook or ad-hoc RAG
 
-Phase 1 only built the playbook path. Phase 1.5 adds the RAG fallback + intent classifier + Assistant integration.
+Phase 1 only built the playbook path. **Phase 1.5 (r2) added the RAG fallback (`POST /api/insights/search`), LLM intent classifier, and Spaarke Assistant tool-call endpoint (`POST /api/insights/assistant/query`) — shipped 2026-06-03 via PR #337. A v1.1 minor-version of the Assistant contract (SSE streaming + clickable citation hrefs) shipped 2026-06-04 via PR #339 in response to R5 (`spaarke-ai-platform-unification-r5`) contract change request — additive + back-compatible.** Canonical contract: [`projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md`](../../projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md).
 
 **Correction 4: Document classification must be 2-dimensional — practice-area × document-type — not flat.**
 
-Phase 1's Layer 1 classification uses 8 categories (closing-letter, settlement-agreement, etc.) hard-coded in `Services/Ai/Insights/Prompts/classification.v1.txt`. This taxonomy is biased toward **litigation/dispute** practice and would mis-classify most documents in other practice areas (real estate uses lease/deed/title; patent uses application/declaration/office-action; transactional uses term-sheet/LOI/definitive-agreement). The current `outcomeBearing` gate is specifically tuned for `predict-matter-cost`'s needs — other questions need different signals.
+Phase 1's Layer 1 classification uses 8 categories (closing-letter, settlement-agreement, etc.) hard-coded in `Services/Ai/Insights/Prompts/classification.v1.txt`. This taxonomy is biased toward dispute-style practice and would mis-classify most documents in other practice areas — a Commercial Transactions matter (`CTRNS`) uses term-sheet / LOI / definitive-agreement; an IP Patents matter (`IPPAT`) uses application / declaration / office-action; a Banking & Finance matter (`BNKF`) uses facility-agreement / security-package / drawdown-notice. The current `outcomeBearing` gate is specifically tuned for `predict-matter-cost`'s needs — other questions need different signals.
 
 **Phase 1.5 redesigns classification + extraction as 2D**:
-- Practice-area dimension (sprk_practicearea_ref already exists in Dataverse): real-estate, patent, litigation, transactional, etc.
-- Document-type dimension (likely a new `sprk_documenttype_ref` entity): per-practice-area lookup of allowed types
-- Layer 1 prompts: per-practice-area (each knows its own taxonomy)
-- Layer 2 prompts + schemas: per-(practice-area, document-type) — a lease extracts different fields than a settlement agreement
-- The `spaarke-insights-index` carries `scope.practiceArea` + `scope.documentType` for filterable retrieval
+- Practice-area dimension — **sourced from the existing `sprk_practicearea_ref` table in Dataverse; the table IS the source of truth** (r2 spec.md Owner Clarification PA-1). Visible rows in Spaarke Dev today include `APPL` (Appellate), `BNKF` (Banking & Finance), `CTRNS` (Commercial Transactions), `IPPAT` (Intellectual Property Patents), `IPTM` (Intellectual Property Trademarks), `MA` (Mergers & Acquisitions); the full set is queried at task time and Wave A3 (r2) selects the initial 3 practice areas for Wave D2 prompt authoring. **Practice-area codes are never hardcoded in this doc, in prompts, or in code** — always derived from the reference table.
+- Document-type dimension (new `sprk_documenttype_ref` entity, added in r2 Wave D1): per-practice-area lookup of allowed types via the `sprk_practicearea_documenttype` N:N matrix.
+- Layer 1 prompts: per-practice-area (each knows its own taxonomy), stored as `sprk_analysisaction.sprk_systemprompt` JPS documents — variant + versioning + per-tenant-override pattern decided in r2 Wave A4.
+- Layer 2 prompts + schemas: per-(practice-area, document-type) — different combinations extract different fields (a `BNKF` facility-agreement extracts covenant data; an `IPPAT` office-action extracts claim-rejection data).
+- The `spaarke-insights-index` carries `scope.practiceArea` + `scope.documentType` for filterable retrieval (alongside multi-entity `scope.entityType` + `scope.entityId` per Correction 2 — see r2 Wave D6 migration plan).
 
-### Phase 1.5 scope (agreed 2026-05-30)
+### Phase 1.5 scope (agreed 2026-05-30; wave status as of 2026-06-04 — Phase 1.5 closed)
 
-Captured as the 6 items + 2 architectural additions; **detailed wave plan in [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md)**.
+Captured as the 6 items + 2 architectural additions + 1 R5-driven minor-version addition; **detailed wave plan + canonical statuses in [`projects/ai-spaarke-insights-engine-r2/plan.md`](../../projects/ai-spaarke-insights-engine-r2/plan.md) and [`projects/ai-spaarke-insights-engine-r2/tasks/TASK-INDEX.md`](../../projects/ai-spaarke-insights-engine-r2/tasks/TASK-INDEX.md)**.
 
-| Item | Wave | Notes |
-|---|---|---|
-| 1. Architectural overview docs + operator guide | A (foundations) | This §0a + [`docs/guides/INSIGHTS-ENGINE-GUIDE.md`](../guides/INSIGHTS-ENGINE-GUIDE.md) + r2 design.md |
-| 2. Hybrid playbook + ad-hoc RAG | E (later wave; Phase 2 candidate) | Generic RAG endpoint + intent classifier + Assistant integration |
-| 3. 2D taxonomy (practice-area × document-type) | D | Per-practice-area Layer 1 + Layer 2 prompts; new entity schemas |
-| 4. Wire JPS actions for Insights nodes | B (unblock synthesis) | 6 `sprk_analysisaction` rows + node bindings; ~½ day |
-| 5. Prompts in JPS storage (not source files) | C | Move classification + extraction prompts to Dataverse-managed scope storage |
-| 6. JPS compliance: universal-ingest as JPS playbook | C | Refactor `IngestOrchestrator` → JPS playbook |
-| **+ 7. Canonical ingest with config flexibility** | C | One universal-ingest playbook, parameterized per-invocation (not many ingest playbooks) |
-| **+ 8. Multi-entity subjects** | C+D (spans both) | Subject scheme abstraction; per-entity live-fact resolvers; index scope shape generalization |
+| Item | Wave | Status (2026-06-04) | Notes |
+|---|---|---|---|
+| 4. Wire JPS actions for Insights nodes | B (unblock synthesis) | ✅ complete (PR #330 merged 2026-06-02) | 6 `sprk_analysisaction` rows + node bindings. `predict-matter-cost@v1` dispatch unblocked end-to-end. |
+| 1. Architectural overview docs + operator guide | A (foundations) | ✅ complete (PR #334 merged 2026-06-03) | 6 design docs (a3, a4, a5, a6 + 2 refreshes) + this §0a + [`docs/guides/INSIGHTS-ENGINE-GUIDE.md`](../guides/INSIGHTS-ENGINE-GUIDE.md) |
+| 5. Prompts in JPS storage (not source files) | C | ✅ complete (PR #334) | All Insights action prompts migrated to `sprk_analysisaction.sprk_systemprompt`. **No new `sprk_prompt` entity** (PR-1 supersession). |
+| 6. JPS compliance: universal-ingest as JPS playbook | C | ✅ complete (PR #334) | `universal-ingest@v1` playbook live; `IngestOrchestrator.cs` retired (Wave C-G4) — BFF now has NO fallback path (ADR-004 dead-letter semantics). |
+| **+ 7. Canonical ingest with config flexibility** | C | ✅ complete (PR #334) | One universal-ingest playbook parameterized per-invocation. |
+| 3. 2D taxonomy (practice-area × document-type) | D | ✅ complete (PR #336 merged 2026-06-03) | Per-area Layer 1 + per-(area, doc-type) Layer 2 prompts; new `sprk_documenttype_ref` + `sprk_practicearea_documenttype` entities. Initial 3 practice areas: CTRNS / IPPAT / BNKF. `InsightsActionRouter` with 15-min IMemoryCache. |
+| **+ 8. Multi-entity subjects** | D | ✅ complete (PR #336) | `ISubjectParser` for `matter:` / `project:` / `invoice:` schemes; 3 `ILiveFactResolver` impls. `spaarke-insights-index` scope ComplexType hybrid backward-compat. |
+| 2. Hybrid playbook + ad-hoc RAG | E | ✅ complete (PR #337 merged 2026-06-03) | `POST /api/insights/search` (RAG endpoint wrapping `IRagService`) + `InsightsIntentClassifier` (gpt-4o-mini, ADR-032 P3 kill-switch) + `POST /api/insights/assistant/query` (Spaarke Assistant tool-call). Canonical contract: [`design-e3-tool-call-contract.md`](../../projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md) v1.0. |
+| **+ 9. Contract v1.1 minor-version (SSE + clickable citations)** | F | ✅ complete (PR #339 merged 2026-06-04) | Additive + back-compat. SSE streaming via `Accept: text/event-stream` (new `IInsightsAi.AssistantQueryStreamAsync` returning `IAsyncEnumerable<AssistantQueryChunk>` — shape-compatible with R5's `AnalysisChunk`); `citations[].href` optional field (URL pattern `{Insights:CitationHref:BffBaseUrl}/api/documents/{sprk_document-guid}/preview`; AIPU2-027 enforced via existing OBO). Authored in response to R5 (`spaarke-ai-platform-unification-r5`) contract change request; F1 spike classified plumbing as Small → Full scope shipped. Per-environment config `Insights:CitationHref:BffBaseUrl` required for clickable citations to render. |
+
+**Phase 1.5 close-out**: only task 090 (lessons-learned + Phase 2 outline + archive) remains. After 090, project transitions to Phase 2 design.
+
+For per-task status (010 through 053 + 090) consult [`projects/ai-spaarke-insights-engine-r2/tasks/TASK-INDEX.md`](../../projects/ai-spaarke-insights-engine-r2/tasks/TASK-INDEX.md).
 
 ### Architectural anchors that stay unchanged
 
 - **4-tier taxonomy** (Fact / Observation / Precedent / Inference) — the data-model spine
 - **§3.5 facade boundary** (Zone A / Zone B; `IInsightsAi` as the one allowed cross-zone seam)
 - **JPS as canonical playbook architecture** (Phase 1.5 brings universal-ingest into compliance)
+- **`sprk_analysisaction.sprk_systemprompt` IS the prompt-bearing primitive** — no new `sprk_prompt` entity in Phase 1.5 (r2 spec.md PR-1)
+- **Practice areas sourced from `sprk_practicearea_ref`** — never hardcoded, in this doc or anywhere else (r2 spec.md PA-1)
 - **Honesty contract** (D-04, D-49) — structured `DeclineResponse` over hallucination; `GroundingVerifier` for mechanical citation check
 - **Evidence-sufficiency rules** (D-06) as mandatory gates in synthesis playbooks
 - **Per-tenant deployment** (D-52) — single parameter file = one full deployment unit
@@ -152,12 +171,16 @@ Captured as the 6 items + 2 architectural additions; **detailed wave plan in [`p
 
 For any 2026-05-30+ question about Insights, answer-order is:
 
-1. [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md) — Phase 1.5 project plan + wave breakdown
-2. This §0a — Phase 1 completion + Phase 1.5 architectural corrections
-3. [`docs/guides/INSIGHTS-ENGINE-GUIDE.md`](../guides/INSIGHTS-ENGINE-GUIDE.md) — operator/developer guide for adding playbooks, prompts, taxonomies
-4. §0 above — 2026-05-28 pre-implementation refinements (historical)
-5. Body sections below — r2 (2026-05-20) Spaarke-wide architecture (historical context)
-6. [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) — Phase 1 deliverable contract
+1. [`projects/ai-spaarke-insights-engine-r2/spec.md`](../../projects/ai-spaarke-insights-engine-r2/spec.md) — canonical Phase 1.5 implementation spec (Terminology, FRs/NFRs, success criteria, owner clarifications)
+2. [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md) — Phase 1.5 design + 9 architectural decisions D-P15-01..D-P15-09
+3. [`projects/ai-spaarke-insights-engine-r2/plan.md`](../../projects/ai-spaarke-insights-engine-r2/plan.md) — wave structure, parallel groups, critical path
+4. [`projects/ai-spaarke-insights-engine-r2/CLAUDE.md`](../../projects/ai-spaarke-insights-engine-r2/CLAUDE.md) — project-scoped Claude instructions (Terminology + ADR + skill + pattern map)
+5. This §0a — Phase 1 completion + Phase 1.5 architectural corrections + Terminology
+6. [`docs/guides/INSIGHTS-ENGINE-GUIDE.md`](../guides/INSIGHTS-ENGINE-GUIDE.md) — operator/developer guide for adding playbooks, prompts, taxonomies
+7. [`docs/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md`](SPAARKE-REPOSITORY-ARCHITECTURE.md) — repo-wide context (NEW 2026-06-01)
+8. §0 above — 2026-05-28 pre-implementation refinements (historical)
+9. Body sections below — r2 (2026-05-20) Spaarke-wide architecture (historical context)
+10. [`projects/ai-spaarke-insights-engine-r1/SPEC.md`](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) — Phase 1 deliverable contract (historical)
 
 ---
 
@@ -2136,6 +2159,14 @@ This requires the production metrics infrastructure to be running and the corpus
 
 ### 23.1 Project documents (canonical source for Engine specifics)
 
+**Phase 1.5 (r2 — current)**:
+- [`projects/ai-spaarke-insights-engine-r2/CLAUDE.md`](../../projects/ai-spaarke-insights-engine-r2/CLAUDE.md) — project-scoped Claude instructions (Terminology + ADR + skill + pattern map)
+- [`projects/ai-spaarke-insights-engine-r2/spec.md`](../../projects/ai-spaarke-insights-engine-r2/spec.md) — canonical Phase 1.5 implementation spec
+- [`projects/ai-spaarke-insights-engine-r2/design.md`](../../projects/ai-spaarke-insights-engine-r2/design.md) — Phase 1.5 design + 9 architectural decisions D-P15-01..D-P15-09
+- [`projects/ai-spaarke-insights-engine-r2/plan.md`](../../projects/ai-spaarke-insights-engine-r2/plan.md) — wave structure + parallel groups + critical path
+- [`projects/ai-spaarke-insights-engine-r2/tasks/TASK-INDEX.md`](../../projects/ai-spaarke-insights-engine-r2/tasks/TASK-INDEX.md) — task registry + status
+
+**Phase 1 (r1 — predecessor; shipped + deployed)**:
 - [`projects/ai-spaarke-insights-engine-r1/README.md`](../../projects/ai-spaarke-insights-engine-r1/README.md) — Project README
 - [`projects/ai-spaarke-insights-engine-r1/decisions.md`](../../projects/ai-spaarke-insights-engine-r1/decisions.md) — 38 numbered decisions (anchor doc)
 - [`projects/ai-spaarke-insights-engine-r1/design.md`](../../projects/ai-spaarke-insights-engine-r1/design.md) — Comprehensive design (1268 lines, 13 sections)
@@ -2145,6 +2176,7 @@ This requires the production metrics infrastructure to be running and the corpus
 
 ### 23.2 Spaarke architecture docs (adjacent subsystems)
 
+- [SPAARKE-REPOSITORY-ARCHITECTURE.md](SPAARKE-REPOSITORY-ARCHITECTURE.md) — repo-wide context (NEW 2026-06-01)
 - [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md)
 - [playbook-architecture.md](playbook-architecture.md)
 - [chat-architecture.md](chat-architecture.md)
@@ -2171,6 +2203,8 @@ This requires the production metrics infrastructure to be running and the corpus
 - [ADR-016 — AI Cost, Rate Limit, and Backpressure](../adr/ADR-016-ai-cost-rate-limit-and-backpressure.md)
 - [ADR-019 — ProblemDetails](../adr/ADR-019-problemdetails.md)
 - [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Canonical Spaarke Auth v2 architecture (accepted 2026-05-19). Engine auth design must remain consistent.
+- [ADR-029](../../.claude/adr/ADR-029-bff-publish-hygiene.md) — BFF Publish Hygiene + CVE override (applies to any Phase 1.5 wave adding NuGet packages)
+- [ADR-032](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md) — **NEW 2026-06-01** BFF Null-Object Kill-Switch Pattern. Applies to any new Insights service in a `*Module.cs` `if (flag) { ... }` block consumed by unconditionally-mapped endpoints (P1 Promote-to-unconditional, P2 Quiet no-op — query services FORBIDDEN, P3 Fail-fast via `FeatureDisabledException` → 503 ProblemDetails). Affects r2 Wave C/D/E.
 
 ### 23.4 Knowledge base (researcher-authored, 2026-05-19)
 

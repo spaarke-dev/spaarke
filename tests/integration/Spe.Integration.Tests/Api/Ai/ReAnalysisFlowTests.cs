@@ -450,9 +450,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IIntentClassificationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IEntityResolutionService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IClarificationService>(MockBehavior.Loose).Object);
 
             // Semantic Search & Record Search - endpoints are always mapped but services
             // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true
@@ -631,6 +629,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             .Setup(p => p.GetContextAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(),
                 It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<Sprk.Bff.Api.Models.Ai.Chat.ChatSessionFile>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(testContext);
     }

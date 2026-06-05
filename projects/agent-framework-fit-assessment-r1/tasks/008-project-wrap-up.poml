@@ -1,0 +1,66 @@
+<task id="008" project="agent-framework-fit-assessment-r1">
+  <metadata>
+    <title>Sign-off + unblock note for agent-framework-knowledge-r1</title>
+    <phase>6</phase>
+    <tags>assessment, wrap-up, sign-off, unblock-note</tags>
+    <estimate>30m</estimate>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03 in main session (MINIMAL rigor). Outputs: projects/agent-framework-knowledge-r1/UNBLOCK-RECOMMENDATION.md (new) + parking-notice update on knowledge-r1 README.md (forward-pointer to assessment + recommendation) + projects/agent-framework-fit-assessment-r1/COMPLETION.md (new) + README.md status COMPLETE + TASK-INDEX.md all rows ✅ + current-task.md reset to "project complete". All SPEC §8 acceptance criteria verified met across tasks 000-008. Per scoping: UNBLOCK-RECOMMENDATION.md recommends knowledge-r1 SPEC changes but does NOT edit that SPEC (downstream owner decision).</completion-summary>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>007</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Close out the assessment project: verify SPEC.md acceptance criteria, finalize TASK-INDEX status, write a short unblock-recommendation note for the parked agent-framework-knowledge-r1 project (per scoping decision: SPEC refinement is downstream — this task does NOT edit the knowledge-r1 SPEC, only recommends what should change).</goal>
+    <context>Wrap-up tasks are MINIMAL rigor — they confirm completion, they don't introduce new content. The unblock-recommendation note is a project-local document; whether the knowledge-r1 SPEC actually gets refined is a follow-up decision after human review of the assessment.</context>
+    <constraints>
+      - Do NOT add new analytical content — wrap-up only
+      - Do NOT edit agent-framework-knowledge-r1/SPEC.md (per scoping decision)
+      - If any SPEC.md acceptance criterion from this project is not met, open a follow-up task (file naming: 009-fix-&lt;issue&gt;.poml) — do not lower the bar
+      - Unblock-recommendation note goes at projects/agent-framework-knowledge-r1/UNBLOCK-RECOMMENDATION.md and references the dated assessment doc
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-fit-assessment-r1/SPEC.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/TASK-INDEX.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/README.md</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+      <file>projects/agent-framework-knowledge-r1/README.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SPEC §8 (Acceptance criteria) and verify each: assessment doc with 9 sections; per-surface matrix for S1-S7; every recommendation citation-backed; ≥3 open questions; adversarial review ran with revisions or self-skeptical note; knowledge-r1 parking notice updated; UNBLOCK-RECOMMENDATION.md written</step>
+    <step>For any unmet criterion: open a follow-up task (009-fix-&lt;short-issue&gt;.poml); update TASK-INDEX. Do NOT close the project</step>
+    <step>If all criteria met: update TASK-INDEX.md "Phase progress" — mark all 6 phases ✅. Update each task row ✅</step>
+    <step>Update README.md status line: "Status: COMPLETE — assessment landed YYYY-MM-DD at docs/assessments/agent-framework-fit-assessment-YYYY-MM-DD.md"</step>
+    <step>Write projects/agent-framework-knowledge-r1/UNBLOCK-RECOMMENDATION.md with: (a) link to the landed assessment, (b) per-surface recommendation summary from the assessment §1, (c) recommended SPEC changes for agent-framework-knowledge-r1 (e.g., "remove S2-related curation if assessment recommends DON'T ADOPT for AnalysisOrchestration", "add deployment-model-specific samples if S6/S7 are ADOPT with MCP-server model"), (d) explicit note: "This file recommends — does not edit knowledge-r1/SPEC.md. SPEC refinement is a follow-up decision after human review of the assessment."</step>
+    <step>Also update projects/agent-framework-knowledge-r1/README.md parking notice with a forward-pointer to the landed assessment + the UNBLOCK-RECOMMENDATION note</step>
+    <step>Reset projects/agent-framework-fit-assessment-r1/current-task.md to "none — project complete"</step>
+    <step>Write projects/agent-framework-fit-assessment-r1/COMPLETION.md — what shipped, key findings (1-paragraph), what's intentionally deferred (ADR amendment, knowledge-r1 SPEC refinement)</step>
+    <step>Final commit: `chore(assessment): agent-framework-fit-assessment-r1 sign-off`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>projects/agent-framework-fit-assessment-r1/TASK-INDEX.md (all rows ✅)</output>
+    <output>projects/agent-framework-fit-assessment-r1/README.md (status line updated)</output>
+    <output>projects/agent-framework-fit-assessment-r1/COMPLETION.md (new)</output>
+    <output>projects/agent-framework-fit-assessment-r1/current-task.md (reset)</output>
+    <output>projects/agent-framework-knowledge-r1/UNBLOCK-RECOMMENDATION.md (new)</output>
+    <output>projects/agent-framework-knowledge-r1/README.md (forward-pointer to assessment + recommendation)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Every SPEC.md §8 acceptance criterion verified met OR follow-up task opened</criterion>
+    <criterion>TASK-INDEX.md shows ✅ on every row (or honest mix with follow-up)</criterion>
+    <criterion>COMPLETION.md exists with key findings + intentional-deferrals</criterion>
+    <criterion>UNBLOCK-RECOMMENDATION.md exists in knowledge-r1 project; does NOT edit that SPEC</criterion>
+    <criterion>knowledge-r1 README.md updated with forward-pointer to assessment</criterion>
+    <criterion>Final sign-off commit landed</criterion>
+  </acceptance-criteria>
+</task>

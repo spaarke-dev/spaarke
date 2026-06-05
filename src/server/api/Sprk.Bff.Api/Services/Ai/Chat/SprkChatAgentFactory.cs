@@ -141,6 +141,19 @@ public class SprkChatAgentFactory
     /// session state). When provided, a <c>capability_change</c> SSE event is emitted if
     /// the current turn's routed tool set differs. Null on the first turn (no comparison).
     /// </param>
+    /// <param name="uploadedFiles">
+    /// R5 task 033: Optional manifest of files the end user uploaded into the current chat
+    /// session (verbatim from <see cref="ChatSession.UploadedFiles"/>). Forwarded into
+    /// <see cref="IChatContextProvider.GetContextAsync"/> so the returned
+    /// <see cref="ChatContext.UploadedFiles"/> reflects session state, and surfaced as a
+    /// compact "Session Files" manifest suffix on the system prompt so the LLM's tool-call
+    /// reasoning sees that uploaded files exist and can correctly invoke
+    /// <see cref="Tools.InvokeSummarizePlaybookTool"/> (the Summarize convergence path —
+    /// FR-01 + FR-08).
+    /// Manifest only (fileId + fileName); never carries extracted text (ADR-015).
+    /// Default <c>null</c> for backward compatibility — pre-R5 sessions / call sites that
+    /// omit the parameter behave exactly as before.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -158,6 +171,7 @@ public class SprkChatAgentFactory
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null,
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
+        IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -170,13 +184,16 @@ public class SprkChatAgentFactory
         await using var scope = _serviceProvider.CreateAsyncScope();
         var contextProvider = scope.ServiceProvider.GetRequiredService<IChatContextProvider>();
 
-        // Load playbook context (system prompt, document summary, metadata)
+        // Load playbook context (system prompt, document summary, metadata).
+        // R5 task 033: forward uploadedFiles so the provider surfaces them on the
+        // returned ChatContext.UploadedFiles for the manifest-suffix step below.
         var context = await contextProvider.GetContextAsync(
             documentId,
             tenantId,
             playbookId,
             hostContext,
             additionalDocumentIds,
+            uploadedFiles,
             cancellationToken);
 
         // === Document context injection (R2-011, R2-012) ===
@@ -218,6 +235,50 @@ public class SprkChatAgentFactory
             _logger.LogWarning(ex,
                 "Failed to enrich system prompt with Active Capabilities; continuing without");
         }
+
+        // === R5 task 033 — Session Files manifest enrichment ====================
+        // Surface uploaded session-file awareness (fileId + fileName) to the LLM so its
+        // tool-call reasoning correctly invokes invoke_summarize_playbook when the user
+        // asks to summarize. Without this signal the agent has historically (verbatim
+        // observed on Dev 2026-06-04) declined: "I don't see the document uploaded yet"
+        // — even with the InvokeSummarizePlaybookTool registered and the playbook gated
+        // on PlaybookCapabilities.Summarize.
+        //
+        // Constraints (R5 task 033 + ADR-015 + R5 CLAUDE.md §3.4):
+        //   - Manifest only — fileId + fileName + count. NEVER include extracted text
+        //     content, chunk text, or binary previews in the system prompt.
+        //   - Compact — token budget matters (sits alongside playbook prompt + skills +
+        //     reference materials + active capabilities + entity enrichment).
+        //   - Additive — when no files uploaded, leaves the system prompt unchanged
+        //     (zero behavior change for pre-R5 sessions and standalone chat).
+        //   - Tool-name binding — names `invoke_summarize_playbook` explicitly so the
+        //     LLM has the exact tool identifier to invoke (matches the AIFunction name
+        //     registered for InvokeSummarizePlaybookTool — R5 task 015).
+        if (context.UploadedFiles is { Count: > 0 } files)
+        {
+            try
+            {
+                var manifestSuffix = BuildSessionFilesManifestSuffix(files);
+                if (!string.IsNullOrEmpty(manifestSuffix))
+                {
+                    context = context with { SystemPrompt = context.SystemPrompt + manifestSuffix };
+                    _logger.LogInformation(
+                        "R5 task 033: appended Session Files manifest to system prompt — sessionId={SessionId}, fileCount={FileCount}",
+                        sessionId, files.Count);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Soft failure — manifest enrichment is enhancing, not required.
+                // The agent still works without the suffix; the LLM may simply decline
+                // to invoke the summarize tool until the user re-prompts. Logged as
+                // warning so operators see this in App Insights.
+                _logger.LogWarning(ex,
+                    "R5 task 033: failed to append Session Files manifest to system prompt — sessionId={SessionId}, continuing without",
+                    sessionId);
+            }
+        }
+        // === End R5 task 033 ====================================================
 
         // Resolve playbook capabilities from Dataverse to determine which tools should be available.
         // When no playbook is specified (generic/standalone chat mode), use core capabilities only.
@@ -356,7 +417,7 @@ public class SprkChatAgentFactory
         // Otherwise fall back to the full playbook capability set (backward compatible).
         var effectiveCapabilities = routedCapabilities ?? capabilities;
         var tools = ResolveTools(
-            scope.ServiceProvider, tenantId, context.KnowledgeScope, effectiveCapabilities,
+            scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, effectiveCapabilities,
             playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
             routingResult);
 
@@ -548,6 +609,62 @@ public class SprkChatAgentFactory
     // === Private helpers ===
 
     /// <summary>
+    /// Builds the compact "Session Files" manifest suffix appended to the system prompt
+    /// when <see cref="ChatContext.UploadedFiles"/> is non-empty (R5 task 033).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Format (final wording per task 033 POML §1 step 3):
+    /// <code>
+    /// Session Files: This chat session has {N} uploaded file(s) available for tool calls:
+    /// {comma-separated fileNames}. When the user asks to summarize, invoke the
+    /// `invoke_summarize_playbook` tool with these file IDs: {comma-separated fileIds}.
+    /// </code>
+    /// </para>
+    /// <para>
+    /// ADR-015 invariant: only <see cref="ChatSessionFile.FileName"/> and
+    /// <see cref="ChatSessionFile.FileId"/> are emitted — never extracted text, chunk
+    /// content, MIME, or size beyond what the manifest already exposes.
+    /// </para>
+    /// <para>
+    /// Tool name reference: the literal <c>invoke_summarize_playbook</c> matches the
+    /// AIFunction name registered for
+    /// <see cref="Tools.InvokeSummarizePlaybookTool"/> via
+    /// <c>InvokeSummarizePlaybookTool.ToolName</c> (R5 task 015). Updating that constant
+    /// REQUIRES updating this suffix.
+    /// </para>
+    /// </remarks>
+    /// <param name="uploadedFiles">Non-empty, non-null manifest list. Caller guarantees Count &gt; 0.</param>
+    /// <returns>The suffix beginning with two newlines, ready to concatenate onto a system prompt. Empty string when the manifest yields no usable entries (defensive — should not happen for Count &gt; 0).</returns>
+    internal static string BuildSessionFilesManifestSuffix(IReadOnlyList<ChatSessionFile> uploadedFiles)
+    {
+        if (uploadedFiles is null || uploadedFiles.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        // Defensive: only include entries with non-blank FileId AND FileName. A blank
+        // entry would confuse the LLM (tool call with empty fileId, or fileName like ", ,").
+        var usable = uploadedFiles
+            .Where(f => !string.IsNullOrWhiteSpace(f.FileId) && !string.IsNullOrWhiteSpace(f.FileName))
+            .ToList();
+
+        if (usable.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var fileNames = string.Join(", ", usable.Select(f => f.FileName));
+        var fileIds = string.Join(", ", usable.Select(f => f.FileId));
+        var pluralSuffix = usable.Count == 1 ? string.Empty : "s";
+
+        // Two leading newlines isolate the suffix as its own paragraph so the LLM does
+        // not blend it into the preceding "### Active Capabilities" or entity enrichment.
+        return $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
+               $"When the user asks to summarize, invoke the `invoke_summarize_playbook` tool with these file IDs: {fileIds}.";
+    }
+
+    /// <summary>
     /// Creates <see cref="AIFunction"/> tool instances for the agent session.
     ///
     /// Tool classes are instantiated directly (not resolved from DI) per the AIPL-053 design:
@@ -604,6 +721,7 @@ public class SprkChatAgentFactory
     private IReadOnlyList<AIFunction> ResolveTools(
         IServiceProvider scopedProvider,
         string tenantId,
+        string sessionId,
         ChatKnowledgeScope? knowledgeScope,
         IReadOnlySet<string> capabilities,
         Guid playbookId,
@@ -830,6 +948,130 @@ public class SprkChatAgentFactory
             {
                 _logger.LogWarning(ex, "Failed to resolve AnalysisExecutionTools — skipping");
                 failedTools.Add(nameof(AnalysisExecutionTools));
+            }
+        }
+
+        // --- InvokeSummarizePlaybookTool (R5 D2-05 / task 015) ---
+        // Gated behind the existing "summarize" capability (PlaybookCapabilities.Summarize).
+        // Reuses the existing capability constant (no new feature flag, no new capability key)
+        // per R5 CLAUDE.md §3.2 + ADR-018. The tool DELEGATES to SessionSummarizeOrchestrator
+        // (task 012 — registered Scoped inside AnalysisServicesModule.AddAnalysisOrchestrationServices)
+        // — both this agent-tool path and task 014's direct endpoint converge on the SAME
+        // SummarizeSessionFilesAsync method (FR-01 + FR-08 + SC-08).
+        //
+        // Tool routing scope (NFR-12 / UR-01): the tool description text is the LOAD-BEARING
+        // artifact for correct LLM routing between this Summarize tool and the upcoming
+        // insights.query tool (task 024). See InvokeSummarizePlaybookTool.ToolDescription.
+        //
+        // ADR-028: no token snapshot — the orchestrator uses its existing scoped DI
+        // resolution; fresh tokens flow through RAG / OpenAI / Dataverse clients per call.
+        // No HttpContext dependency (Summarize operates over pre-indexed session content
+        // — task 003 — not SPE OBO-authenticated file download).
+        //
+        // Factory-instantiated (ADR-010): no new top-level DI registration; orchestrator
+        // already registered via AnalysisServicesModule (task 012 evidence note).
+        if (capabilities.Contains(PlaybookCapabilities.Summarize))
+        {
+            attempted++;
+            try
+            {
+                var sessionSummarizeOrchestrator =
+                    scopedProvider.GetService<SessionSummarizeOrchestrator>();
+                if (sessionSummarizeOrchestrator != null)
+                {
+                    var loggerFactory =
+                        scopedProvider.GetRequiredService<ILoggerFactory>();
+                    var toolLogger =
+                        loggerFactory.CreateLogger<InvokeSummarizePlaybookTool>();
+
+                    var correlationId = httpContext?.TraceIdentifier;
+
+                    var invokeSummarizeTool = new InvokeSummarizePlaybookTool(
+                        sessionSummarizeOrchestrator,
+                        tenantId,
+                        sessionId,
+                        correlationId,
+                        sseWriter,
+                        toolLogger);
+                    tools.AddRange(invokeSummarizeTool.GetTools());
+                    resolved++;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "SessionSummarizeOrchestrator not available; " +
+                        "InvokeSummarizePlaybookTool will not be registered. Verify " +
+                        "AnalysisServicesModule.AddAnalysisOrchestrationServices is " +
+                        "enabled (Analysis:Enabled and DocumentIntelligence:Enabled).");
+                    failedTools.Add(nameof(InvokeSummarizePlaybookTool));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to resolve InvokeSummarizePlaybookTool — skipping");
+                failedTools.Add(nameof(InvokeSummarizePlaybookTool));
+            }
+        }
+
+        // --- InvokeInsightsQueryTool (R5 D2-14 / task 024) ---
+        // Gated behind the InsightsQuery capability (PlaybookCapabilities.InsightsQuery).
+        // Reuses the existing capability gate framework (no new feature flag per R5
+        // CLAUDE.md §3.2 + ADR-018; kill-switch coverage inherits via the Insights
+        // endpoint's own 503 responses for ai.insights.disabled / ai.rag.disabled /
+        // ai.intent-classification.disabled).
+        //
+        // Zone B HTTP consumer (R5 CLAUDE.md §3.5 / §10 + refined ADR-013 §3.5): the
+        // tool consumes POST /api/insights/assistant/query via the typed HttpClient
+        // registered in AnalysisServicesModule.AddAnalysisOrchestrationServices. The
+        // tool does NOT inject Insights internals (IInsightsAi, InsightsOrchestrator,
+        // Models.Insights.*) — same-process HTTP is the canonical Zone B pattern.
+        //
+        // Tool routing scope (NFR-12 / UR-01): the tool description text is the
+        // LOAD-BEARING artifact for correct LLM routing between this insights.query
+        // tool and the invoke_summarize_playbook tool (task 015). See
+        // InvokeInsightsQueryTool.ToolDescription — entity-scoped analytical questions
+        // (matter/project/invoice) vs session-uploaded files summarization.
+        //
+        // ADR-028: no token snapshot — the tool reads HttpContext.Request.Headers
+        // Authorization FRESH per outbound call via IHttpContextAccessor (NEVER captured
+        // in constructor or closure).
+        //
+        // Factory-instantiated (ADR-010): the tool class itself is NOT DI-registered;
+        // we resolve the typed HttpClient + IHttpContextAccessor + logger from the
+        // scopedProvider and construct the tool here. Mirrors the canonical
+        // InvokeSummarizePlaybookTool pattern (AIPL-053).
+        if (capabilities.Contains(PlaybookCapabilities.InsightsQuery))
+        {
+            attempted++;
+            try
+            {
+                // The typed HttpClient is registered via
+                // services.AddHttpClient<InvokeInsightsQueryTool>(...) so we resolve the
+                // tool itself directly — IHttpClientFactory wires the HttpClient into the
+                // constructor.
+                var insightsQueryTool =
+                    scopedProvider.GetService<InvokeInsightsQueryTool>();
+                if (insightsQueryTool != null)
+                {
+                    tools.AddRange(insightsQueryTool.GetTools());
+                    resolved++;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "InvokeInsightsQueryTool not available; insights.query will not be " +
+                        "registered. Verify AnalysisServicesModule.AddAnalysisOrchestrationServices " +
+                        "registered the typed HttpClient (Analysis:Enabled and " +
+                        "DocumentIntelligence:Enabled).");
+                    failedTools.Add(nameof(InvokeInsightsQueryTool));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to resolve InvokeInsightsQueryTool — skipping");
+                failedTools.Add(nameof(InvokeInsightsQueryTool));
             }
         }
 

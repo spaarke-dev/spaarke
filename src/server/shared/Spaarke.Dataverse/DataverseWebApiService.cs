@@ -957,6 +957,12 @@ public class DataverseWebApiService : IDataverseService
         return await GetDocumentsByLookupAsync("_sprk_invoice_value", invoiceId, excludeDocumentId, "Invoice", ct);
     }
 
+    /// <inheritdoc />
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByWorkAssignmentAsync(Guid workAssignmentId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("_sprk_workassignment_value", workAssignmentId, excludeDocumentId, "WorkAssignment", ct);
+    }
+
     /// <summary>
     /// Generic helper to query documents by a lookup field value.
     /// </summary>

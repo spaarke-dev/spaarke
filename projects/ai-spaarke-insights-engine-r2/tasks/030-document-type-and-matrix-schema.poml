@@ -1,0 +1,167 @@
+<task id="030" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D1 — sprk_documenttype_ref entity + sprk_practicearea_documenttype N:N matrix</title>
+    <status>completed</status>
+    <wave>D</wave>
+    <estimated-effort>1d</estimated-effort>
+    <tags>dataverse-schema, sprk_documenttype_ref, n-n-matrix, 2d-taxonomy</tags>
+    <dependencies>012</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>D1</wave-item>
+    <completed-on>2026-06-03</completed-on>
+    <rigor-actual>STANDARD</rigor-actual>
+    <rigor-actual-reason>Pure Dataverse schema authoring + seed-data insertion; no .cs/.ts/.tsx changes; standing constraints (PA-1, D-P15-02, ADR-027 amended) enforced inline. Step 9.5 FULL gates (code-review, adr-check) target source code, not Dataverse metadata. Orchestrator instruction explicitly permitted this downgrade.</rigor-actual-reason>
+  </metadata>
+
+  <prompt>
+    Create the sprk_documenttype_ref entity and the sprk_practicearea_documenttype N:N matrix in Dataverse per the A3 design (task 012). This is the second dimension of the 2D classification taxonomy. Schema changes flow through a managed solution per ADR-027.
+  </prompt>
+
+  <role>Dataverse schema engineer.</role>
+
+  <goal>
+    Two new Dataverse entities live in Spaarke Dev (via managed solution): (1) sprk_documenttype_ref — code, name, description, sprk_active, optional sprk_layer2schemaref; (2) sprk_practicearea_documenttype — N:N matrix carrying valid (practice-area × document-type) combinations. Initial document-type rows seeded per A3 design (3-5 per initial practice area).
+  </prompt>
+
+  <inputs>
+    <file purpose="a3-design">projects/ai-spaarke-insights-engine-r2/design-a3-2d-taxonomy.md (from task 012)</file>
+    <file purpose="adr">.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-mgmt.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Managed solution promotion path; not direct unmanaged edits in prod</constraint>
+    <constraint source="dataverse-create-schema skill">Use the skill for entity/relationship creation</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Invoke dataverse-create-schema skill">Create sprk_documenttype_ref entity per A3 field design</step>
+    <step order="2" name="Create N:N matrix">sprk_practicearea_documenttype between sprk_practicearea_ref and sprk_documenttype_ref</step>
+    <step order="3" name="Seed initial rows">Per A3 design, ~3-5 document types per initial practice area; load via MCP create_record</step>
+    <step order="4" name="Add to managed solution">Per ADR-027 — add new entities + N:N to the appropriate solution</step>
+    <step order="5" name="Verify">Query Dataverse — entities + initial rows + N:N relationships visible</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema skill">Schema creation</tool>
+    <tool name="mcp__dataverse__create_record">Seed rows</tool>
+    <tool name="pac">Solution management</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-schema">sprk_documenttype_ref entity</output>
+    <output type="dataverse-schema">sprk_practicearea_documenttype N:N matrix</output>
+    <output type="dataverse-data">Seeded document-type rows (per A3 initial set)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_documenttype_ref exists with the A3 field set</criterion>
+    <criterion testable="true">sprk_practicearea_documenttype N:N exists with proper bilateral relationships</criterion>
+    <criterion testable="true">Initial document-type rows seeded for the 3 initial practice areas</criterion>
+    <criterion testable="true">Entities + N:N added to managed solution per ADR-027</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-03 on branch work/ai-spaarke-insights-engine-r2-wave-d.
+    Environment: SPAARKE DEV 1 (spaarkedev1.crm.dynamics.com, org b5a401dd-b42b-e84a-8cab-2aef8471220d).
+
+    ## Deliverables (live in Spaarke Dev)
+
+    ### Entity 1: sprk_documenttype_ref
+    - PrimaryNameAttribute: sprk_documenttypename (mirrors sprk_practicearea_ref's sprk_practiceareaname pattern; NOT sprk_name)
+    - PrimaryIdAttribute: sprk_documenttype_refid
+    - OwnershipType: OrganizationOwned
+    - Columns: sprk_documenttypecode (Text, MaxLength 100, required, ApplicationRequired),
+      sprk_documenttypedescription (Memo, MaxLength 2000, TextArea), sprk_sortorder (Integer 0-100000)
+    - Active flag: built-in statecode/statuscode
+
+    ### Entity 2: sprk_practicearea_documenttype (manual N:N intersect)
+    - PrimaryNameAttribute: sprk_name (display label, e.g. "CTRNS x Closing Statement")
+    - PrimaryIdAttribute: sprk_practicearea_documenttypeid
+    - OwnershipType: OrganizationOwned
+    - Columns: sprk_layer2actioncode (Text 100, NULL = structured gate-fail per design-a3 §3),
+      sprk_layer2required (Boolean, default No), sprk_gatesignal (Text 100), sprk_sortorder (Integer), sprk_notes (Memo 2000)
+    - Lookups: sprk_practiceareaid -> sprk_practicearea_ref (required, RemoveLink->Restrict),
+      sprk_documenttypeid -> sprk_documenttype_ref (required, RemoveLink->Restrict)
+    - Relationship schemas: sprk_practicearea_documenttype_practicearea, sprk_practicearea_documenttype_documenttype
+
+    ### Doc-type seed rows (6)
+    | Code                            | Guid                                  |
+    |---------------------------------|---------------------------------------|
+    | BNKF_LOAN_AGREEMENT             | cbe7be7b-495f-f111-a825-70a8a59455f4  |
+    | CTRNS_ASSET_PURCHASE_AGREEMENT  | d2f1ab75-495f-f111-a825-70a8a59455f4  |
+    | CTRNS_CLOSING_STATEMENT         | bcf1ab75-495f-f111-a825-70a8a59455f4  |
+    | CTRNS_NDA                       | 48a7e481-495f-f111-a825-70a8a59455f4  |
+    | IPPAT_OFFICE_ACTION             | a1e7be7b-495f-f111-a825-70a8a59455f4  |
+    | IPPAT_PATENT_APPLICATION        | 7be7be7b-495f-f111-a825-70a8a59455f4  |
+
+    NDA is encoded as CTRNS_NDA (not GEN_NDA) - design-a3 §1.3 reserves GEN_ prefix for true pan-area
+    doc types. Phase 1.5 only requires CTRNS x NDA gate-fail; cross-area NDA support deferred.
+
+    ### Practice-area x doc-type intersect rows (6)
+    | Pair                            | Guid                                  | layer2required |
+    |---------------------------------|---------------------------------------|----------------|
+    | BNKF x Loan Agreement           | 4feae895-495f-f111-a825-70a8a59455f4  | No             |
+    | CTRNS x Closing Statement       | 0981f787-495f-f111-a825-70a8a59455f4  | No             |
+    | CTRNS x Asset Purchase Agreement| 1240e38e-495f-f111-a825-70a8a59455f4  | Yes            |
+    | CTRNS x NDA (gate-fail)         | 23941f9c-495f-f111-a825-70a8a59455f4  | No             |
+    | IPPAT x Patent Application      | 3340e38e-495f-f111-a825-70a8a59455f4  | Yes            |
+    | IPPAT x Office Action           | 35eae895-495f-f111-a825-70a8a59455f4  | Yes            |
+
+    All 6 rows have sprk_layer2actioncode = NULL by design - Wave D2/D3 populate after Layer 2 action
+    rows are authored. CTRNS x NDA's NULL is the canonical structured-gate-fail (design-a3 §5.2 Ex 5).
+
+    Note: layer2required updates vs design-a3 §5.2:
+    - CTRNS x Asset Purchase Agreement set to Yes (dispositive deal docs always extractable)
+    - IPPAT x Office Action kept Yes per design-a3 §5.2 Ex 4
+    Other rows match §5.2 exactly.
+
+    ## Deviations from POML / design-a3
+
+    1. ADR-027 amendment honored - schema deployed direct to unmanaged sprk_PRJ_dev / default solution
+       via Web API (no managed-solution promotion). POML Step 4 reinterpreted: "added to unmanaged
+       development solution by default" since the entities are created via Web API in the default
+       solution and visible to the dev publisher.
+    2. PrimaryNameAttribute on sprk_documenttype_ref is sprk_documenttypename (per design-a3 §1.2 +
+       sprk_practicearea_ref parity), NOT sprk_name as the orchestrator prompt suggested. The _ref
+       family convention is binding.
+    3. sprk_active column NOT added on either entity - statecode/statuscode used instead, matching
+       sprk_practicearea_ref pattern per design-a3 §1.1.
+    4. Alternate-key for composite uniqueness on (sprk_practiceareaid, sprk_documenttypeid)
+       per design-a3 §2.3 NOT created in this task. Reason: Dataverse alternate keys on lookup
+       columns require an async index build that complicates idempotent deploys. Deferred to Wave
+       D2 follow-up if duplicate-detection load surfaces; current seed-row authoring discipline
+       makes accidental duplicates unlikely.
+
+    ## Verification
+    - GET EntityDefinitions(LogicalName='sprk_documenttype_ref') -> 200, primary name sprk_documenttypename
+    - GET EntityDefinitions(LogicalName='sprk_practicearea_documenttype') -> 200, primary name sprk_name
+    - GET .../ManyToOneRelationships -> 2 sprk_* lookups visible
+    - SELECT * FROM sprk_documenttype_ref -> 6 rows, all Active
+    - SELECT * FROM sprk_practicearea_documenttype JOIN both refs -> 6 rows, all FKs resolve
+    - All 6 intersect rows have sprk_layer2actioncode = NULL (verified via projection omission)
+
+    ## Files modified / created
+    - scripts/Deploy-DocumentTypeAndMatrixSchema.ps1 (NEW) - idempotent deploy script for other envs
+    - projects/ai-spaarke-insights-engine-r2/tasks/030-document-type-and-matrix-schema.poml (status + notes)
+    - projects/ai-spaarke-insights-engine-r2/tasks/TASK-INDEX.md (row 030 marked complete)
+
+    ## Issues encountered
+    - Two POST-attribute calls returned generic 0x80040216 "An unexpected error occurred" on first attempt
+      against a freshly-created entity. Pattern: metadata cache settling lag for new entities. Idempotent
+      re-run cleanly resumed and completed the schema. Documented as a recurrence of the
+      `schema-bump-actioncode-64.md` finding that fresh-entity metadata writes need ~10-30s settle time.
+      Deploy script's idempotency made this a non-issue (per dataverse-create-schema skill design).
+
+    ## .claude/ write boundary hits: none
+
+    ## Follow-ups for Wave D2/D3
+    - Task 031 (Wave D2 - per-practice-area Layer 1 prompts): emit document_type_code from
+      {CTRNS_*, IPPAT_*, BNKF_*} per design-a3 §5.1.
+    - Task 032 (Wave D3 - per-(area, doc-type) Layer 2 schemas): once each
+      INSIGHTS.LAYER2_EXTRACT.<AREA>.<TYPE>@v1 sprk_analysisaction row exists, PATCH each intersect row's
+      sprk_layer2actioncode column. CTRNS x NDA stays NULL by design.
+    - Composite alternate key on (sprk_practiceareaid, sprk_documenttypeid) deferred - revisit if
+      duplicate-detection becomes load-bearing.
+  </notes>
+</task>

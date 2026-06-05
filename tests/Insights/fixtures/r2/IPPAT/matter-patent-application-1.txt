@@ -1,0 +1,127 @@
+UNITED STATES PATENT APPLICATION
+
+Title: METHOD AND SYSTEM FOR ADAPTIVE THERMAL MANAGEMENT IN HIGH-DENSITY
+COMPUTE FABRICS USING FLUID-DYNAMIC FEEDBACK CONTROL
+
+Applicant: Helios Quantum Compute, Inc., a Delaware corporation
+Application No. (assigned upon filing): 18/734,521
+Filing Date: March 11, 2026
+Priority Claim: U.S. Provisional Application No. 63/598,142, filed November 3,
+                2025; entitled "Closed-Loop Coolant Dynamics for Stacked
+                Accelerator Arrays" (the "Priority Application")
+Examiner: (to be assigned)
+Art Unit: (to be assigned)
+Attorney Docket No.: HQC-2026-0034-US1
+
+INVENTORS:
+   - Lior Bekele, of Cambridge, Massachusetts (U.S. citizen)
+   - Maitreyi Saraswat, of Berkeley, California (U.S. citizen)
+   - Tomasz Wronski, of Cambridge, Massachusetts (Permanent Resident)
+
+ASSIGNEE OF RECORD:
+   Helios Quantum Compute, Inc., 88 Memorial Drive, Suite 400, Cambridge, MA 02142
+   (per Assignment recorded at Reel 067894 Frame 0312 on March 12, 2026)
+
+CROSS-REFERENCE TO RELATED APPLICATIONS
+
+This application claims the benefit of priority under 35 U.S.C. § 119(e) to U.S.
+Provisional Application No. 63/598,142, filed November 3, 2025, the entire
+contents of which are incorporated herein by reference.
+
+FIELD OF THE INVENTION
+
+The present invention relates generally to thermal management systems for
+high-density computational hardware, and more particularly to closed-loop
+fluid-dynamic feedback control for cooling stacked accelerator arrays operating
+at thermal design power (TDP) levels exceeding 800 watts per chip.
+
+BACKGROUND
+
+Conventional thermal management approaches for compute accelerators rely on
+static coolant flow rates determined at system design time. As workloads vary
+in arithmetic intensity, instantaneous thermal output of individual chips can
+exceed the nominal design assumptions by factors of 2x or more during burst
+phases, leading to thermal throttling, accelerated component aging, or
+catastrophic failure. There exists a need for a thermal management system
+capable of adapting coolant flow on millisecond timescales based on
+chip-level temperature feedback.
+
+SUMMARY OF THE INVENTION
+
+The present invention provides a method and system for adaptive thermal
+management in a high-density compute fabric, comprising: (a) a network of
+micro-channel coolant passages thermally coupled to a plurality of accelerator
+chips arranged in a vertically stacked configuration; (b) per-chip temperature
+sensors providing time-series telemetry at a sampling rate of at least 1 kHz;
+and (c) a fluid-dynamic feedback controller that adjusts coolant pressure and
+flow rate via piezoelectric microvalves in response to predicted thermal
+trajectories derived from a state-space model of chip thermal dynamics.
+
+CLAIMS
+
+What is claimed is:
+
+1. A method for thermal management of a high-density compute fabric, comprising:
+      (a) receiving, by a feedback controller, time-series temperature signals
+          from a plurality of temperature sensors thermally coupled to
+          respective accelerator chips of the compute fabric;
+      (b) computing, by the feedback controller, a predicted thermal
+          trajectory for each accelerator chip based on a state-space model
+          parameterized by the time-series temperature signals;
+      (c) determining, by the feedback controller, an adjusted coolant flow
+          rate for each of a plurality of micro-channel coolant passages
+          based on the predicted thermal trajectories; and
+      (d) actuating one or more piezoelectric microvalves to effect the
+          adjusted coolant flow rate within a control horizon of less than
+          ten milliseconds.
+
+2. The method of claim 1, wherein the state-space model is a Kalman filter
+   tuned to chip-package thermal time constants of between fifty and two
+   hundred milliseconds.
+
+3. The method of claim 1, wherein the time-series temperature signals are
+   sampled at a rate of at least 1000 samples per second per chip.
+
+4. The method of claim 1, wherein the high-density compute fabric comprises
+   at least one stack of eight accelerator chips, and wherein each accelerator
+   chip operates at a thermal design power exceeding 800 watts during nominal
+   operation.
+
+5. A system for thermal management of a high-density compute fabric,
+   comprising: a plurality of accelerator chips arranged in a vertically
+   stacked configuration; a network of micro-channel coolant passages
+   thermally coupled to said accelerator chips; a plurality of piezoelectric
+   microvalves operable to regulate coolant flow through respective
+   micro-channel coolant passages; a plurality of temperature sensors thermally
+   coupled to respective accelerator chips; and a feedback controller
+   programmed to perform the method of any one of claims 1 to 4.
+
+(Claims 6 through 22 omitted from this synthetic excerpt; full filing comprises
+twenty-two claims as enumerated in Appendix A.)
+
+ABSTRACT
+
+A method and system for adaptive thermal management in a high-density compute
+fabric. Time-series temperature signals from sensors thermally coupled to
+stacked accelerator chips are processed by a feedback controller that computes
+predicted thermal trajectories via a Kalman-filter-based state-space model.
+Piezoelectric microvalves regulate coolant flow through micro-channel passages
+within a control horizon of less than ten milliseconds, enabling sustained
+operation of accelerator chips at thermal design power levels exceeding 800
+watts per chip without thermal throttling.
+
+DECLARATION AND POWER OF ATTORNEY
+
+The inventors named above hereby declare that each made an original
+contribution to the subject matter for which a patent is sought on this
+application, and authorize the attorneys of Greene Marlow Patent Group LLP,
+Reg. No. 76,492, to act as their attorneys in connection with this application.
+
+Signed: ___________________________ Date: March 11, 2026
+        Lior Bekele
+
+Signed: ___________________________ Date: March 11, 2026
+        Maitreyi Saraswat
+
+Signed: ___________________________ Date: March 11, 2026
+        Tomasz Wronski

@@ -20,7 +20,7 @@ export interface IThemeContext {
  * @param themeMode User-configured theme mode
  * @returns Fluent UI v9 Theme
  */
-export function detectTheme(context: any, themeMode: ThemeMode = 'Auto'): Theme {
+export function detectTheme(context: unknown, themeMode: ThemeMode = 'Auto'): Theme {
   // User explicitly chose Spaarke theme
   if (themeMode === 'Spaarke') {
     return spaarkeLight;
@@ -52,6 +52,6 @@ export function detectTheme(context: any, themeMode: ThemeMode = 'Auto'): Theme 
  * @param context PCF context
  * @returns true if dark mode, false otherwise
  */
-export function isDarkMode(context: any): boolean {
+export function isDarkMode(context: unknown): boolean {
   return (context as IThemeContext).fluentDesignLanguage?.isDarkTheme ?? false;
 }

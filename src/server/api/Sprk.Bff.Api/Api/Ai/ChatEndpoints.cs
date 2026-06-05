@@ -486,6 +486,7 @@ public static class ChatEndpoints
                 httpContext,
                 sseWriter,
                 latestUserMessage: effectiveMessage,
+                uploadedFiles: session.UploadedFiles,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -1190,6 +1191,7 @@ public static class ChatEndpoints
                 httpContext,
                 sseWriter,
                 latestUserMessage: lastUserMessage,
+                uploadedFiles: session.UploadedFiles,
                 cancellationToken: cancellationToken);
 
             var history = BuildAiHistory(session.Messages);
@@ -2033,7 +2035,9 @@ public static class ChatEndpoints
     }
 
     // =========================================================================
-    // FR-07 Multi-file attachment validation + composition (task 050)
+    // FR-07 Multi-file attachment validation + composition (R3 task 050)
+    // R4 task 050 (A-4): client-side binary cap raised 10 → 25 MB; server text
+    // caps unchanged (operate on extracted text, not binary — see policy doc).
     // =========================================================================
     //
     // PLACEMENT JUSTIFICATION (per CLAUDE.md §10 BFF Hygiene + ADR-013):
@@ -2044,6 +2048,9 @@ public static class ChatEndpoints
     // - All four BFF decision criteria (ADR-013 §"Decision Criteria") answer "BFF" → stays here.
     // - All four CRUD→AI facade boundary rules satisfied: this is AI-internal code in
     //   Api/Ai/, not CRUD code consuming AI — no IBffAiPublicContracts facade needed.
+    //
+    // See docs/standards/CHAT-ATTACHMENT-POLICY.md for the policy, MIME allow-list,
+    // total-text cap rationale, PDF page cap, and upgrade path.
 
     /// <summary>Maximum attachments per chat message (NFR-04, FR-07).</summary>
     internal const int MaxAttachmentsPerMessage = 5;
@@ -2051,13 +2058,24 @@ public static class ChatEndpoints
     /// <summary>
     /// Maximum extracted text length per attachment, in characters.
     /// ~2.5M chars ≈ 10 MB UTF-16 in memory; bounds LLM prompt growth per attachment.
-    /// Aligned with NFR-04 (10 MB per file at the binary/extraction layer).
+    ///
+    /// R4 task 050 (A-4) raised the CLIENT-side binary cap from 10 MB → 25 MB to
+    /// align with DocumentUploadWizard + OfficeService. This char-cap is NOT scaled
+    /// proportionally because it operates on EXTRACTED TEXT, not raw binary. A 25 MB
+    /// PDF typically extracts to &lt;1M chars (image-heavy PDFs even less); a 25 MB
+    /// DOCX often extracts to &lt;500K chars. Keeping this cap at 2.5M chars preserves
+    /// the LLM-prompt envelope without artificially limiting binary file size.
+    ///
+    /// See <c>docs/standards/CHAT-ATTACHMENT-POLICY.md</c> for the full policy + rationale.
     /// </summary>
     internal const int MaxAttachmentTextCharsPerFile = 2_500_000;
 
     /// <summary>
     /// Maximum sum of all attachment <c>TextContent</c> lengths in a single message.
     /// Bounds the LLM prompt size so 5 × 2.5M = 12.5M does not balloon context.
+    ///
+    /// R4 task 050 (A-4): NOT scaled with the 25 MB binary cap — char-cap is the
+    /// LLM-prompt envelope, independent of binary file size. See policy doc.
     /// </summary>
     internal const int MaxAttachmentTextCharsTotal = 5_000_000;
 
@@ -2120,7 +2138,8 @@ public static class ChatEndpoints
                     status: 400));
             }
 
-            // Rule 3: per-file size cap (NFR-04: ≤ 10 MB extracted text)
+            // Rule 3: per-file textContent cap (LLM prompt envelope; independent of
+            // the 25 MB client-side binary cap raised in R4 A-4 — see policy doc).
             if (att.TextContent.Length > MaxAttachmentTextCharsPerFile)
             {
                 return (400, BuildProblemDetails(
