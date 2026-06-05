@@ -237,7 +237,10 @@ describe('useChatFileAttachment', () => {
       expect(result.current.files).toHaveLength(1);
       expect(result.current.files[0].status).toBe('ready');
       expect(result.current.attachments).toHaveLength(1);
-      expect(result.current.attachments[0]).toEqual({
+      // toMatchObject (not toEqual) — the derived attachment also carries an
+      // additive `file?: File` field (R5 task 036) which would otherwise fail
+      // a strict toEqual deep comparison under jsdom's Blob polyfill.
+      expect(result.current.attachments[0]).toMatchObject({
         filename: 'notes.txt',
         contentType: 'text/plain',
         textContent: 'hello world',
@@ -413,6 +416,42 @@ describe('useChatFileAttachment', () => {
       expect(result.current.files).toEqual([]);
       expect(result.current.attachments).toEqual([]);
       expect(result.current.errors).toEqual([]);
+    });
+  });
+
+  describe('R5 task 036: File reference retention', () => {
+    it('retains the original File on the chip after addFiles', async () => {
+      const { result } = renderHook(() => useChatFileAttachment());
+      const txt = makeFile('notes.txt', 'text/plain', 'hello world');
+
+      await act(async () => {
+        await result.current.addFiles([txt]);
+      });
+
+      expect(result.current.files).toHaveLength(1);
+      // The chip carries the original File reference for downstream binary
+      // upload paths (R5 task 036 — POST /documents requires multipart bytes).
+      expect(result.current.files[0].file).toBe(txt);
+      expect(result.current.files[0].file).toBeInstanceOf(File);
+    });
+
+    it('forwards the File through to the derived attachments array', async () => {
+      const { result } = renderHook(() => useChatFileAttachment());
+      const txt = makeFile('notes.txt', 'text/plain', 'hello world');
+
+      await act(async () => {
+        await result.current.addFiles([txt]);
+      });
+
+      expect(result.current.attachments).toHaveLength(1);
+      // The derived ChatAttachment carries the same File reference so hosts
+      // (e.g. ConversationPane → executeSummarizeIntent) can POST the bytes
+      // without reconstructing a synthetic File from extracted text.
+      expect(result.current.attachments[0].file).toBe(txt);
+      // Existing fields are unchanged (back-compat invariant).
+      expect(result.current.attachments[0].filename).toBe('notes.txt');
+      expect(result.current.attachments[0].contentType).toBe('text/plain');
+      expect(result.current.attachments[0].textContent).toBe('hello world');
     });
   });
 

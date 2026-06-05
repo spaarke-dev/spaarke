@@ -1,0 +1,195 @@
+<task id="037" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>P2-CLOSEOUT-06 Context-pane execution-trace widget ("what the AI is doing" view)</title>
+    <status>🔲</status>
+    <status-note>Closeout task added 2026-06-05 after SC-18 walkthrough cycle 4. Operator UX clarification (2026-06-05): the Context pane should show what the Assistant is executing — tools invoked, playbook steps, promoted documents — analogous to Claude Code's tool-call visibility ("its the 'proof' or evidence that users want so they know what the LLM is actually doing"). Currently the Context pane only hosts FilePreviewContextWidget (R5 task 018) showing a file viewer; it does NOT show execution traces.</status-note>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>TBD</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>TBD</started>
+    <completed>TBD</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration (CLOSEOUT)</phase>
+    <wave>P2-G10-CLOSEOUT (parallel-safe with 038; depends on 036)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>036 (provides PaneEventBus publisher); 016 (additive event types already in PaneEventTypes per ADR-030); 018 (existing FilePreviewContextWidget — coexists)</dependencies>
+    <tags>spaarke-ai, frontend, widgets, context-pane, observability, ux, closeout</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Build a new shared-library widget `ExecutionTraceContextWidget` that
+    renders the live execution trace of whatever the Assistant is doing —
+    documents promoted to session-files, playbooks invoked, steps in
+    progress, completion — all in the Context pane. Operator analogy
+    (2026-06-05): "just like in claude code when i can see the work that
+    is being done."
+
+    The widget subscribes to PaneEventBus events emitted by task 036's
+    publisher and the existing SSE bridge:
+
+      • `context.files_staged` — emitted by task 036 after held files are
+        promoted to session-files. Rendered as a trace line: "📄 {filename}
+        indexed to session-files ({N} chunks)."
+
+      • `workspace.streaming_started` — Summarize playbook execution begins.
+        Rendered as: "▶ Summarize playbook started for {N} document(s)."
+
+      • `workspace.field_delta` (path-aware) — Each field-delta is mapped
+        to a step description by `path`:
+          - `tldr` / `summary.tldr` → "Extracting TL;DR…"
+          - `summary.body` / `summary` → "Generating summary…"
+          - `keywords` → "Extracting keywords…"
+          - `entities` → "Identifying entities…"
+        Steps de-duplicate (we only show "Extracting TL;DR…" ONCE even if
+        many field-delta events have path=`tldr`). Each step shows a
+        progress dot until the next step's first delta arrives, at which
+        point the prior step flips to "done" (✓).
+
+      • `workspace.streaming_complete` — Final step renders: "✓ Summary
+        complete ({elapsed}s)."
+
+      • `workspace.streaming_error` (if present in PaneEventTypes; check
+        task 016's event-type registry) — Rendered with error styling +
+        the message.
+
+    The widget MUST be:
+
+      1. **Pure subscriber** — no BFF calls, no fetch, no side effects
+         beyond local state. Identical pattern to StructuredOutputStreamWidget
+         (which already exists and is the canonical reference).
+
+      2. **Correlation-aware** — accept an optional `correlationId` prop;
+         when set, only events whose correlation matches are rendered.
+         (Allows the same widget to be reused across concurrent sessions
+         in future without cross-talk.) For the initial summarize-only
+         scope, pass the chat sessionId as the correlationId.
+
+      3. **Auto-clearing on new session** — when `correlationId` changes,
+         clear the trace state. Trace shows only the CURRENT execution.
+
+      4. **Scrollable** — older steps remain visible in the pane; the
+         scrollback is the audit trail. No automatic truncation. The pane
+         has its own scroll container.
+
+      5. **Tested for dark-mode + Fluent v9 tokens** — ADR-021. No
+         hard-coded colors.
+
+      6. **Empty state** — when no events have arrived yet, render a quiet
+         placeholder: "No active execution. Send a message to see what the
+         Assistant is doing." Not an error state, not loading.
+
+    Registration:
+      - Export from `@spaarke/ai-widgets` per its existing barrel pattern
+        (mirror `register-structured-output-stream-widget.ts` for naming
+        consistency: `register-execution-trace-context-widget.ts`).
+      - Register the widget in the SpaarkeAi shell's Context pane controller
+        as a TAB or stacked panel coexisting with FilePreviewContextWidget.
+        Operator preference for layout: read ContextPaneController.tsx
+        existing pattern and follow it (likely a tab strip with default
+        focus on this widget when execution events are active, falling
+        back to FilePreview when no execution is in progress).
+
+    Tests (Vitest + React Testing Library):
+      - Empty state renders placeholder text
+      - `context.files_staged` event renders the trace line + chunk count
+      - Sequence of field-delta events for the same path renders ONE step
+        (de-duplication), and a subsequent field-delta with a different
+        path flips the prior to ✓
+      - streaming_complete renders the final ✓ line with elapsed time
+      - correlationId change clears trace state
+      - Mismatched correlationId events are IGNORED
+      - Dark-mode snapshot test (Fluent v9 dark theme provider)
+
+    Out of scope for this task:
+      - Backend changes (publisher is task 036; events already defined per
+        task 016)
+      - Tool-call trace for InsightsQueryToolHandler / other non-summarize
+        flows (track as R6 backlog: extend the widget when those flows
+        adopt the same event channels)
+      - Persisting trace history across page reloads (in-memory only)
+      - Workspace-pane Summary tab (task 038)
+
+    Acceptance: after this task ships, when the operator triggers Summarize
+    via task 036's deterministic intent flow, the Context pane shows a
+    visible step-by-step trace of what the Assistant is doing — promoted
+    documents, playbook started, each field-delta-mapped step, completion.
+    This satisfies the operator's "Claude-Code-like tool-call visibility"
+    requirement and closes the SC-18 cycle-4 "I'm not sure what just
+    happened" UX gap.
+  </prompt>
+
+  <context>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/task-036-design-2026-06-05.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-dark-mode.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-030-pane-eventbus-channels.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint>ADR-012: widget lives in @spaarke/ai-widgets (shared lib); context-agnostic; no PCF / SpaarkeAi-shell-specific imports.</constraint>
+    <constraint>ADR-021 Fluent v9: semantic tokens only; no hard-coded colors; dark-mode tested.</constraint>
+    <constraint>ADR-022: React 19 patterns.</constraint>
+    <constraint>ADR-030: subscribe to additive event types within existing 4 channels — DO NOT introduce new channels.</constraint>
+    <constraint>R5 reuse mandate (spec §2.11): widget pattern mirrors StructuredOutputStreamWidget; do NOT introduce a parallel event-subscription mechanism.</constraint>
+    <constraint>ADR-028 client contract: widget is a pure subscriber; NO BFF calls; NO authenticatedFetch usage.</constraint>
+    <constraint>Empty state is a normal UX state, NOT an error or loading state.</constraint>
+    <constraint>Correlation isolation: events with mismatched correlationId MUST be ignored, NOT rendered into a different correlation's trace.</constraint>
+  </constraints>
+
+  <steps>
+    <step>Verify task 036 is complete + merged (events being published). If not, BLOCK on 036.</step>
+    <step>Read StructuredOutputStreamWidget.tsx fully — this is the canonical reference for PaneEventBus subscription, correlation handling, dispatch reducer pattern.</step>
+    <step>Read PaneEventTypes.ts to enumerate exact event-type names + payload shapes used by task 016's additive types.</step>
+    <step>Read ContextPaneController.tsx to understand current widget layout + how FilePreviewContextWidget mounts.</step>
+    <step>Design the step-aggregation reducer: maps incoming field-delta events to a deduplicated step list. Write its tests first (TDD).</step>
+    <step>Write ExecutionTraceContextWidget.tsx + register-execution-trace-context-widget.ts.</step>
+    <step>Wire registration into ContextPaneController (tab or stacked panel per operator preference; default focus when execution active).</step>
+    <step>Write tests: empty state, files-staged, field-delta dedup + step flip, streaming-complete, correlationId change, mismatched correlation ignored, dark-mode snapshot.</step>
+    <step>Build @spaarke/ai-widgets — verify 0 errors.</step>
+    <step>Build SpaarkeAi shell — verify 0 errors.</step>
+    <step>Run frontend test suites — verify 0 regressions.</step>
+    <step>Local smoke test: trigger summarize via task 036's flow against deployed BFF; verify trace renders correctly. Capture screenshot.</step>
+    <step>Deploy SpaarkeAi shell to Spaarke Dev per code-page-deploy skill.</step>
+    <step>Commit with conventional message.</step>
+    <step>Update TASK-INDEX.md status 🔲 → ✅.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Widget renders empty-state placeholder when no events have arrived.</criterion>
+    <criterion>Widget renders one trace line per `context.files_staged` event with filename + chunk count.</criterion>
+    <criterion>Widget de-duplicates field-delta events of the same `path` into ONE step entry; advancing path flips the prior to ✓.</criterion>
+    <criterion>Widget renders streaming_complete as a final ✓ line with elapsed seconds.</criterion>
+    <criterion>Widget subscribes to ALL 4 event types declared in scope; ignores events with mismatched correlationId.</criterion>
+    <criterion>Widget cleared on correlationId change (new session).</criterion>
+    <criterion>Widget is a pure subscriber — no fetch, no BFF calls.</criterion>
+    <criterion>Registered in SpaarkeAi ContextPaneController; coexists with FilePreviewContextWidget without layout regression.</criterion>
+    <criterion>Dark-mode + Fluent v9 token compliance verified by snapshot test.</criterion>
+    <criterion>All new tests pass; 0 regressions in existing @spaarke/ai-widgets or SpaarkeAi suites.</criterion>
+    <criterion>Bundle-size delta &lt; 30 KB for @spaarke/ai-widgets.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>New file: src/client/shared/Spaarke.AI.Widgets/src/widgets/context/ExecutionTraceContextWidget.tsx</output>
+    <output>New file: src/client/shared/Spaarke.AI.Widgets/src/widgets/context/register-execution-trace-context-widget.ts</output>
+    <output>New file: src/client/shared/Spaarke.AI.Widgets/src/widgets/context/__tests__/ExecutionTraceContextWidget.test.tsx</output>
+    <output>Modified file: src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx (registration)</output>
+    <output>New file: projects/spaarke-ai-platform-unification-r5/notes/task-037-evidence.md (screenshot + bundle delta)</output>
+    <output>TASK-INDEX.md row 037 flipped 🔲 → ✅</output>
+  </outputs>
+</task>

@@ -97,9 +97,14 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 | 032 | P2-G9-CLOSEOUT | P2-CLOSEOUT-01 Wire ChatDocumentEndpoints upload into R5 session-files pipeline (IndexSessionFileAsync + ChatSession.UploadedFiles[] + UpdateSessionCacheAsync) | ✅ 2026-06-04 | 1.5h | ✅ (with 033) | 003, 004, 011, 012 |
 | 033 | P2-G9-CLOSEOUT | P2-CLOSEOUT-02 Surface ChatSession.UploadedFiles[] in PlaybookChatContextProvider so chat agent sees them | ✅ 2026-06-04 | 1h | ✅ (with 032) | 004, 011, 015 |
 | 034 | P2-G10-CLOSEOUT | P2-CLOSEOUT-03 Frontend auto-trigger: when upload completes after summarize intent, auto-invoke summary (pattern B) | 🔲 | 1h | ❌ | 032 + 033 deployed |
-| 035 | P2-G11-CLOSEOUT | P2-CLOSEOUT-04 Re-run SC-18 SME walkthrough end-to-end; capture solo-SME signoff; close 030 + 031 | 🔲 | 30m operator + 5m agent | ❌ | 032 + 033 + 034 deployed |
+| 035 | P2-G11-CLOSEOUT | P2-CLOSEOUT-04 Re-run SC-18 SME walkthrough end-to-end; capture solo-SME signoff; close 030 + 031 | 🔲 | 30m operator + 5m agent | ❌ | 036 + 037 + 038 deployed |
+| 036 | P2-G12-CLOSEOUT | P2-CLOSEOUT-05 Inline file holding + extensible intent matcher + deterministic Summarize promotion (frontend UX rework) | 🔄 | 4h | ❌ | 032, 033, PR #361 ✅ |
+| 037 | P2-G13-CLOSEOUT | P2-CLOSEOUT-06 Context-pane execution-trace widget ("what the AI is doing" view) | 🔲 | 3h | ✅ (with 038) | 036 |
+| 038 | P2-G13-CLOSEOUT | P2-CLOSEOUT-07 Workspace-pane "Summary" tab registration + auto-focus on streaming_started | 🔲 | 2h | ✅ (with 037) | 036 |
 
-**Plus (follow-up PR, not a numbered task)**: promote the live-patched `ChatDocumentEndpoints.cs` tid-claim fix (applied to Dev mid-walkthrough 2026-06-04) to master via small PR so the next deploy preserves it.
+**Plus (follow-up PR, not a numbered task)**: promote the live-patched `ChatDocumentEndpoints.cs` tid-claim fix (applied to Dev mid-walkthrough 2026-06-04) to master via small PR so the next deploy preserves it. — **Done**: PR #354 + PR #359 + PR #361 carry all closeout backend fixes; deployed to Spaarke Dev 2026-06-05 14:54 UTC with hash verify MATCH.
+
+**Closeout cycle log (2026-06-04 → 2026-06-05)**: 4 backend bug-fix cycles (tid claim → upload wiring → Tags=null → 7 customer-corpus-only field rejections), followed by frontend UX rework (036/037/038). PR #354 (cycle 1+2), PR #359 (cycle 3), PR #361 (cycle 4 + schema-conformance regression test). Cycle 5 surfaced "two upload paths" structural gap → tasks 036/037/038.
 
 ---
 

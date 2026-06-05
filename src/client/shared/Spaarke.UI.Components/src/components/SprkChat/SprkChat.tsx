@@ -509,6 +509,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           filename: chip.filename,
           contentType: chip.mimeType,
           textContent: chip.textContent,
+          // R5 task 036: forward the original File reference so hosts can
+          // post the binary to /documents instead of synthesizing a File
+          // from extracted text (synthetic Files fail BFF Document
+          // Intelligence for PDF/DOCX).
+          file: chip.file,
         });
       } catch {
         // Host callback errors must not break SprkChat's attachment lifecycle.
