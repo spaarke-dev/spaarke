@@ -1,0 +1,83 @@
+<task id="010" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P2 — Bicep modules for spaarke-insights-index + Function App shell + single-tenant parameter file</title>
+    <status>completed</status>
+    <wave>2</wave>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>infra, bicep, ai-search, function-app, single-tenant, azure</tags>
+    <dependencies></dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P2</d-p>
+    <first-step-blocker>Confirm final index name (spaarke-insights-index vs spaarke-insights vs other)</first-step-blocker>
+  </metadata>
+
+  <prompt>
+    Provision the new `spaarke-insights-index` AI Search index (one index, `artifactType` discriminator per D-53 revised) and the Function App shell for D-P8 SPE consumer. Single-tenant parameter file pattern per D-52: one customer = one Bicep parameter file = one deployment unit. Provision only — no functions deployed yet.
+  </prompt>
+
+  <role>Azure infra engineer familiar with Bicep, AI Search index schemas, Flex Consumption Function Apps, per-tenant UAMI.</role>
+
+  <goal>
+    Bicep modules deploy clean to Spaarke Dev (`spe-infrastructure-westus2`) using a single-tenant parameter file. Provisioned: `spaarke-insights-index` with schema matching SPEC §3.4 (artifactType / subject / predicate / value / confidence / evidence / asOf / producedBy / content / contentVector 3072-dim / status / tenantId, vectorFilterMode-preFilter-friendly), Function App shell with per-tenant UAMI, Key Vault refs, App Insights connection. No functions deployed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P2, §3.4 schema, §3.4.1-§3.4.3 worked examples)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r1/design.md (§4.1.3 illustrative schema; adjust to single-discriminator)</file>
+    <file purpose="azure-inventory">projects/ai-spaarke-insights-engine-r1/azure-inventory.md</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-52">Single-tenant deployment unit; tenantId field retained on index for partition keys + future federation</constraint>
+    <constraint source="D-53">ONE derived index (not 5); discriminator field artifactType</constraint>
+    <constraint source="D-08">text-embedding-3-large, 3072 dim</constraint>
+    <constraint source="D-33">vectorFilterMode=preFilter friendly schema</constraint>
+    <constraint source="D-27">No new ClientSecretCredential; UAMI only</constraint>
+    <constraint source="ADR-001">Function App shell (Flex Consumption); no functions deployed yet</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-ai-search, bicep, flex-consumption, single-tenant, embedding-models</topic>
+    <files>
+      <file>knowledge/azure-ai-search/INDEX.md</file>
+      <file>knowledge/azure-functions-isv/INDEX.md</file>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="First-step blocker">Resolve final index name with SME / Spaarke team; document choice</step>
+    <step order="1" name="Read knowledge">azure-ai-search/ for index schema patterns, vector profile, semantic config</step>
+    <step order="2" name="Create folder structure">`infra/insights/` with `main.bicep`, `parameters/`, `modules/`, `schemas/`</step>
+    <step order="3" name="Author schema JSON">`schemas/spaarke-insights-index.index.json` matching SPEC §3.4 fields with discriminator</step>
+    <step order="4" name="Author Bicep modules">search-index.bicep, function-app.bicep, managed-identity.bicep, keyvault-secrets.bicep, monitoring.bicep</step>
+    <step order="5" name="Author main.bicep">Composes modules; tenant parameter; region parameter</step>
+    <step order="6" name="Author parameter file">`parameters/dev.json` for Spaarke Dev tenant</step>
+    <step order="7" name="Deploy + verify">az deployment group; verify index queryable + Function App reachable</step>
+    <step order="8" name="Quality gates">Run code-review + adr-check skills</step>
+  </steps>
+
+  <tools>
+    <tool name="bicep">Bicep build + lint</tool>
+    <tool name="az">Azure CLI for deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">infra/insights/main.bicep</output>
+    <output type="infra">infra/insights/parameters/dev.json</output>
+    <output type="infra">infra/insights/schemas/spaarke-insights-index.index.json</output>
+    <output type="infra">infra/insights/modules/search-index.bicep + function-app.bicep + managed-identity.bicep + keyvault-secrets.bicep + monitoring.bicep</output>
+    <output type="docs">Update README with deployment notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Bicep deploys clean to Spaarke Dev (no errors)</criterion>
+    <criterion testable="true">`spaarke-insights-index` exists in spaarke-search-dev with schema matching SPEC §3.4</criterion>
+    <criterion testable="true">Index supports vectorFilterMode=preFilter on tenantId + artifactType</criterion>
+    <criterion testable="true">Function App shell provisioned with per-tenant UAMI (no functions deployed)</criterion>
+    <criterion testable="true">Single-tenant parameter file pattern documented; new customer onboarding = copy + modify one file</criterion>
+    <criterion testable="true">Zero new SAS keys or ClientSecretCredential per D-24/D-27</criterion>
+  </acceptance-criteria>
+</task>

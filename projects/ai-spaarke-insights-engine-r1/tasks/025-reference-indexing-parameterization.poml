@@ -1,0 +1,73 @@
+<task id="025" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>W3.5 refactor — Parameterize ReferenceIndexingService for index name + schema mapper</title>
+    <status>not-started</status>
+    <wave>3.5</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, refactor, reusability, indexing, dotnet, q5-audit</tags>
+    <dependencies></dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <d-p>W3.5-refactor</d-p>
+  </metadata>
+
+  <prompt>
+    Refactor `ReferenceIndexingService` (currently hard-coded to `spaarke-rag-references` per Q5 audit) to accept an index-name parameter + optional schema mapper so D-P2 (spaarke-insights-index upserts) and D-P4 (Precedent projection) can reuse the same indexing infrastructure without duplication. Per Q5 audit finding — half-day refactor that eliminates parallel implementation.
+  </prompt>
+
+  <role>Senior .NET developer with refactoring discipline and AI Search SDK familiarity.</role>
+
+  <goal>
+    `ReferenceIndexingService` (or refactored `GenericAISearchIndexer`) accepts index name + schema mapper. Existing `spaarke-rag-references` indexing behavior unchanged (regression tests pass). New API ready for D-P4 Precedent projection sync and D-P10/D-P11 Observation upserts.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 W3.5 callout + Q5 audit reference)</file>
+    <file purpose="existing">src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs (current 531 lines; index name hard-coded)</file>
+    <file purpose="ai-inventory">projects/ai-spaarke-insights-engine-r1/ai-inventory.md (existing indexer patterns)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="backward-compat">Existing spaarke-rag-references indexing behavior MUST be unchanged (regression tests pass)</constraint>
+    <constraint source="ADR-013">Zone A placement (Services/Ai/)</constraint>
+    <constraint source="ADR-010">DI minimalism — single registration; existing callers may need adapter shim</constraint>
+    <constraint source="Q5-audit">Two reasonable options: (a) add overload accepting index name + schema mapper; (b) extract generic GenericAISearchIndexer + keep ReferenceIndexingService as thin caller. Pick (a) for minimum disruption.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>refactoring, ai-search-sdk, generics, schema-mapping</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing ReferenceIndexingService">Understand all 6 hard-coded behaviors per Q5 audit findings</step>
+    <step order="2" name="Design API">Add overload(s): IndexIntoAsync&lt;TDoc&gt;(indexName, documents, chunkingOptions?, ct); existing methods become thin wrappers calling this overload with RagReferencesIndexName</step>
+    <step order="3" name="Author schema mapper interface">ISchemaMapper&lt;TDoc&gt; for converting domain types to SearchDocument; default mapper for KnowledgeDocument</step>
+    <step order="4" name="Refactor existing method">IndexKnowledgeSourceAsync now calls IndexIntoAsync with KnowledgeDocument mapper; behavior unchanged</step>
+    <step order="5" name="Regression test">All existing ReferenceIndexingService tests pass; existing AdminKnowledgeEndpoints integration unchanged</step>
+    <step order="6" name="New extension test">IndexIntoAsync with a different schema (e.g., Observation row) round-trips correctly</step>
+    <step order="7" name="Quality gates">code-review + adr-check; explicit verification existing behavior preserved</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs (parameterized)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Indexing/ISchemaMapper.cs (new interface)</output>
+    <output type="test">tests/unit/Services/Ai/ReferenceIndexingServiceTests.cs (regression + extension)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All existing ReferenceIndexingService tests pass (regression)</criterion>
+    <criterion testable="true">AdminKnowledgeEndpoints integration test passes (regression)</criterion>
+    <criterion testable="true">New IndexIntoAsync overload accepts arbitrary index name + schema mapper</criterion>
+    <criterion testable="true">Round-trip test: insert custom-schema document via new overload → query via SearchClient → retrieve correctly</criterion>
+    <criterion testable="true">D-P4 (Precedent projection) and D-P11 (Observation mirror) can adopt this in their tasks without further refactoring</criterion>
+  </acceptance-criteria>
+</task>

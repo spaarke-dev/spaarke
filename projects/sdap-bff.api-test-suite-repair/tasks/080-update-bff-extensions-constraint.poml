@@ -1,0 +1,114 @@
+<task id="080" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P4.A1 — Update `.claude/constraints/bff-extensions.md` with "Test update obligation" section (FR-22)</title>
+    <status>completed</status>
+    <estimated-effort>45-60 minutes</estimated-effort>
+    <assigned>AI agent (main session only)</assigned>
+    <tags>phase-4, governance, anti-drift, constraint, main-session-only</tags>
+    <parallel-group>4-main-seq</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Main-session-only — sub-agent write boundary per root CLAUDE.md §3 prohibits sub-agent edits to `.claude/` paths. Task-execute MUST refuse Agent delegation; main session edits this file directly.</parallel-reason>
+    <main-session-only>true</main-session-only>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Update `.claude/constraints/bff-extensions.md` (the binding pre-merge checklist for every BFF-touching task per root CLAUDE.md §10) to add a NEW section titled "Test update obligation". This section is the durable anti-drift mechanism: it codifies that any PR modifying `src/server/api/Sprk.Bff.Api/Services/` MUST include corresponding test additions/updates. Exceptions require explicit code review sign-off citing reason.
+
+    Per design.md §5.5, this is one of three coordinated anti-drift mechanisms (this constraint + PR template question via task 081 + code review checklist line via task 082). Tasks 081, 082, 083 cross-reference this section. Without this constraint codified, the other governance updates have nothing to reference.
+
+    🚨 CRITICAL — task-execute MUST refuse Agent delegation for this task. Main session edits this file directly via the Edit tool. Per root CLAUDE.md §3, sub-agents launched via Agent tool CANNOT write to `.claude/` paths; attempting delegation will fail with "Edit denied on `.claude/...`". This is the boundary working correctly. The main session is the ONLY agent permitted to perform this edit.
+
+    NO production code changes. NO test changes. Constraint document update only.
+  </prompt>
+
+  <role>Main-session AI agent codifying anti-drift governance into the binding BFF-extensions constraint document.</role>
+
+  <goal>
+    `.claude/constraints/bff-extensions.md` updated with a NEW section "Test update obligation" containing:
+    - The binding rule statement (PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST include corresponding test additions/updates)
+    - The exception clause (requires explicit code review sign-off citing reason)
+    - Forward-reference to PR template (FR-23 task 081) and code review checklist (FR-24 task 082)
+    - Forward-reference to root CLAUDE.md §10 (FR-25 task 083 will add the reverse cross-reference)
+
+    Existing sections in the constraint file are PRESERVED unchanged (additive edit only). The constraint remains a pre-merge checklist; the new section integrates into that structure.
+  </goal>
+
+  <inputs>
+    <file purpose="target-file">.claude/constraints/bff-extensions.md</file>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-22">`.claude/constraints/bff-extensions.md` gains a "Test update obligation" section detailing the binding rule + exception clause; cross-referenced from CLAUDE.md §10 (verified by task 083)</constraint>
+    <constraint source="design.md §5.5">Anti-drift enforcement via code review checklist + PR template question (NOT a CI script); this constraint is the canonical reference cited by both</constraint>
+    <constraint source="root CLAUDE.md §3">Sub-agent write boundary: sub-agents CANNOT write to `.claude/` paths. Main session ONLY for this edit.</constraint>
+    <constraint source="NFR-01">No production code changes (`.claude/constraints/` is project doc, not `src/`)</constraint>
+    <constraint source="NFR-09">Task POML metadata declares `repair-not-rewrite: true`</constraint>
+    <constraint source="root CLAUDE.md §10">BFF Hygiene binds: any task adding to BFF surface area MUST load `bff-extensions.md`. This update extends the obligation to test-coverage</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §5.5 (anti-drift enforcement, locked decision 2026-05-30), this project chose Option D (code review checklist + PR template question) over Option C (CI script). The CI script was rejected because: (a) doc-only PRs would false-positive; (b) refactor PRs with unchanged-but-still-valid tests would false-positive; (c) owner direction was "do not over-burden PR process." The constraint file `bff-extensions.md` is the canonical reference cited by both the PR template (task 081) and the code review checklist (task 082). Without the constraint section codified here, the other tasks have nothing to cross-reference. This task is the first link in the anti-drift chain.
+
+      Per root CLAUDE.md §3, sub-agents launched via Agent tool CANNOT write to `.claude/` paths. Task-execute MUST refuse Agent delegation for this task — main session edits the file directly. Tasks 081 (`.github/`), 082 (`docs/`), 084, 085, 086 are agent-safe; tasks 080 and 083 are main-session-only.
+    </background>
+    <dependencies>
+      <dependency task="P2+P3" status="substantially-complete">Project is at zero-failure target close (or close to it) — governance update lands when repair body of work is in final shape</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>.claude/constraints/bff-extensions.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `.claude/constraints/bff-extensions.md` in full to understand existing structure (section order, formatting conventions, cross-reference style).</step>
+    <step order="2">Identify the most appropriate insertion point for the new "Test update obligation" section. Likely candidate: just after the existing pre-merge checklist section, or as a NEW top-level section near the file's coverage governance discussion. Preserve all existing sections unchanged.</step>
+    <step order="3">Draft the new section "Test update obligation". Contents:
+      (a) Binding rule: "When a PR modifies `src/server/api/Sprk.Bff.Api/Services/`, it MUST include corresponding test additions or updates in `tests/unit/Sprk.Bff.Api.Tests/Services/` (matching the modified service's path)."
+      (b) Exception clause: "Exceptions require explicit code review sign-off citing reason (e.g., 'test already covers new behavior via existing parametric case', 'change is internal refactor with no behavioral surface area')."
+      (c) Enforcement: "Enforced by (1) PR template question (`.github/pull_request_template.md`); (2) code review checklist (`docs/procedures/testing-and-code-quality.md`); (3) reviewer judgment per this constraint. NOT enforced by CI script (design.md §5.5 — over-engineering against the wrong failure mode)."
+      (d) Cross-reference: "See root `CLAUDE.md` §10 for BFF Hygiene binding context."
+    </step>
+    <step order="4">Apply the edit via the Edit tool (main session only — DO NOT delegate to sub-agent). Verify the section is inserted; existing sections are unchanged.</step>
+    <step order="5">Read the modified file and confirm: (a) new section present and complete; (b) existing pre-merge checklist still intact; (c) cross-reference to root CLAUDE.md §10 included.</step>
+    <step order="6">Verify `git status` shows ONLY `.claude/constraints/bff-extensions.md` modified (no `src/`, `power-platform/`, `infra/`, `scripts/`, or any other path).</step>
+    <step order="7">Commit message: "docs(.claude): add 'Test update obligation' section to bff-extensions.md (FR-22)" — references FR-22 from spec.md.</step>
+    <step order="8">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + cite the new section heading + paragraph count.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">`.claude/constraints/bff-extensions.md` for current structure</tool>
+    <tool name="Edit">Append new "Test update obligation" section; preserve existing sections</tool>
+    <tool name="Bash">`git status` for boundary verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/constraints/bff-extensions.md (updated with new "Test update obligation" section)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File diff shows new "Test update obligation" section present in `.claude/constraints/bff-extensions.md`</criterion>
+    <criterion testable="true">New section includes: binding rule statement; exception clause requiring explicit code review sign-off; cross-reference to root CLAUDE.md §10</criterion>
+    <criterion testable="true">Existing pre-merge checklist + all prior sections preserved unchanged (verified via diff)</criterion>
+    <criterion testable="true">Cross-reference from CLAUDE.md §10 to this section verified by task 083 (downstream — not blocking this task's completion)</criterion>
+    <criterion testable="true">`git status` shows ONLY `.claude/constraints/bff-extensions.md` modified (no `src/`, `power-platform/`, `infra/`, `scripts/`)</criterion>
+    <criterion testable="true">Edit performed by main session (not delegated to Agent sub-agent — would fail with "Edit denied" per root CLAUDE.md §3)</criterion>
+  </acceptance-criteria>
+</task>

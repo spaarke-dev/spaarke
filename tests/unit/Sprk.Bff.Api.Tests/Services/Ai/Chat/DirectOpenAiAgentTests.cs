@@ -24,6 +24,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 ///   - Exception during streaming → "error" + "done" emitted cleanly (ADR-019)
 ///   - Content filter finish reason → "error" + "done" emitted cleanly
 /// </summary>
+[Trait("status", "repaired")]
 public class DirectOpenAiAgentTests
 {
     private readonly Mock<IChatClient> _chatClientMock;
@@ -170,7 +171,12 @@ public class DirectOpenAiAgentTests
     [Fact]
     public async Task ProcessAsync_StopsEmitting_WhenCancellationTriggered()
     {
-        // Arrange — stream that yields many tokens but we cancel after 1
+        // Arrange — stream that yields many tokens but we cancel after 1.
+        // Per DirectOpenAiAgent.cs:176, the producer calls cancellationToken.ThrowIfCancellationRequested()
+        // inside the streaming loop, so a triggered cancellation surfaces as
+        // OperationCanceledException to the caller (standard .NET cooperative-cancellation
+        // contract). The behavioral guarantee is: streaming halts EARLY (fewer than the full
+        // 10 tokens) once the token is cancelled, not that the producer silently completes.
         using var cts = new CancellationTokenSource();
 
         var updates = CreateManyTokenUpdates(10);
@@ -181,11 +187,18 @@ public class DirectOpenAiAgentTests
 
         // Act — cancel after collecting first token event
         var events = new List<SseEvent>();
-        await foreach (var evt in agent.ProcessAsync(request, cts.Token))
+        try
         {
-            events.Add(evt);
-            if (evt.Type == "token")
-                cts.Cancel();
+            await foreach (var evt in agent.ProcessAsync(request, cts.Token))
+            {
+                events.Add(evt);
+                if (evt.Type == "token")
+                    cts.Cancel();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected: cooperative cancellation propagates from the producer.
         }
 
         // Assert: cancelled early — fewer than 10 tokens

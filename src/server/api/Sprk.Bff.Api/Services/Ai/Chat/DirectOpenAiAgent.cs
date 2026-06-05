@@ -265,10 +265,10 @@ public sealed class DirectOpenAiAgent : ISprkAgent
         {
             var role = turn.Role switch
             {
-                AgentRole.User      => ChatRole.User,
+                AgentRole.User => ChatRole.User,
                 AgentRole.Assistant => ChatRole.Assistant,
-                AgentRole.System    => ChatRole.System,
-                _                   => ChatRole.User
+                AgentRole.System => ChatRole.System,
+                _ => ChatRole.User
             };
 
             messages.Add(new AiChatMessage(role, turn.Content));

@@ -1,9 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Telemetry;
-
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Jobs;
 

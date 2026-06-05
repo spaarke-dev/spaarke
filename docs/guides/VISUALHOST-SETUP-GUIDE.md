@@ -2276,4 +2276,136 @@ Follow the same process as adding other option set values: open the `sprk_colors
 
 ---
 
+## Chart Legend Configuration (v1.4.4)
+
+> Today consumed by the `DonutChart` visual; the schema is generic and will be adopted by other visual types over time.
+
+The donut chart can show a legend (each segment's color, category, and value) in any of four placements, or hidden entirely. Configure via the `legend` object in `sprk_optionsjson`. When `legend` is absent, the existing `donutLayout: "matrixRight"` + `showBreakdownRows: true` keys derive a `placement: "right"` default — every pre-v1.4.4 chart def renders identically (NFR-05).
+
+### Schema
+
+```json
+{
+  "legend": {
+    "placement": "right" | "left" | "top" | "bottom" | "hidden",
+    "orientation": "rows" | "inline",
+    "itemFormat": "swatchLabelValue" | "swatchLabel" | "labelValue" | "labelOnly",
+    "valueAlignment": "near" | "far",
+    "swatchSize": 10
+  }
+}
+```
+
+| Field | Values | Default | Effect |
+|---|---|---|---|
+| `placement` | `right`, `left`, `top`, `bottom`, `hidden` | `right` (back-compat) | Where the legend sits relative to the donut. `hidden` removes the legend entirely. |
+| `orientation` | `rows`, `inline` | `rows` for left/right placement; `inline` for top/bottom | `rows` = vertical stack (one item per row). `inline` = horizontal flow with wrap. |
+| `itemFormat` | `swatchLabelValue`, `swatchLabel`, `labelValue`, `labelOnly` | `swatchLabelValue` | What each legend item shows. |
+| `valueAlignment` | `near`, `far` | `near` | `rows` orientation only. `near` = value sits next to label (CSS grid `auto auto auto`). `far` = value pushed to far edge of legend cell. |
+| `swatchSize` | integer pixels (1-99) | `10` | Override for the color square's size. Ignored when `itemFormat` has no swatch. |
+
+### Worked Examples
+
+**Default (back-compat with v1.4.3 Matter Health Composite)**
+
+```json
+{
+  "donutLayout": "matrixRight",
+  "showBreakdownRows": true,
+  "breakdownValueFormat": "percentage"
+}
+```
+Renders: donut on left, legend on right with swatch + label + value, value sits next to label.
+
+**Same result, new-schema authoring**
+
+```json
+{
+  "legend": {
+    "placement": "right",
+    "itemFormat": "swatchLabelValue",
+    "valueAlignment": "near"
+  },
+  "breakdownValueFormat": "percentage"
+}
+```
+
+**Legend below, horizontal flow**
+
+```json
+{
+  "legend": {
+    "placement": "bottom",
+    "orientation": "inline",
+    "itemFormat": "swatchLabelValue"
+  }
+}
+```
+Renders: donut at top (wider, 75% of width), legend at bottom as a wrapping row of `■ Label Value` items.
+
+**Hide the legend entirely (just the donut)**
+
+```json
+{
+  "legend": { "placement": "hidden" }
+}
+```
+
+**Swatch + label only (no values shown)**
+
+```json
+{
+  "legend": {
+    "placement": "right",
+    "itemFormat": "swatchLabel"
+  }
+}
+```
+
+### Authoring Notes
+
+- Field name validation runs in `cardConfigResolver.parseLegend`. Unknown values silently fall back to defaults — invalid JSON does NOT break rendering.
+- When `placement` is `hidden`, `orientation`/`itemFormat`/`valueAlignment`/`swatchSize` are all ignored.
+- `valueAlignment: "far"` only applies to `orientation: "rows"` with an item format that includes a value (`swatchLabelValue` or `labelValue`).
+
+---
+
+## AI Summary Field Configuration (v1.4.4)
+
+The VisualHost toolbar renders an **AI sparkle icon** (top-right of each chart card) when a chart definition supplies an `aiSummaryField` value. Clicking the icon opens a popover that shows the pre-computed summary text from the configured Dataverse column on the parent record.
+
+### Schema
+
+```json
+{
+  "aiSummaryField": "sprk_performancesummary"
+}
+```
+
+`aiSummaryField` is a **column logical name** on the chart's parent entity (typically `sprk_matter`). The column type should be **multi-line text** containing the summary. When the icon is clicked, the VisualHost fetches the current record via the Dataverse WebAPI:
+
+```ts
+context.webAPI.retrieveRecord(entityLogicalName, recordId, `?$select=${aiSummaryField}`);
+```
+
+### Conventional Mapping (current state)
+
+| Chart Definition | `aiSummaryField` value |
+|---|---|
+| Matter Health Composite | `sprk_performancesummary` |
+| Matter Budget (Financial) | `sprk_financialsummary` |
+| Matter Tasks | `sprk_tasksummary` |
+| Matter Activity | *(not configured — no icon shown)* |
+| Matter Next Date | *(not configured — no icon shown)* |
+
+If `aiSummaryField` is omitted, the toolbar shows no sparkle icon (legacy behavior).
+
+### Authoring Notes
+
+- The column must exist on the parent entity (validate via `dataverse:dv-metadata describe_table` if unsure).
+- The column should be populated by a server-side process (Power Automate flow, plugin, Insights Engine R2, etc.). The VisualHost only READS the value — it does not generate the summary.
+- If the column is null/empty for the current record, the popover shows a "Summary not available" empty-state message.
+
+---
+
 *For architecture details and component reusability, see [VISUALHOST-ARCHITECTURE.md](VISUALHOST-ARCHITECTURE.md)*

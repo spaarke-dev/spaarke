@@ -36,14 +36,14 @@ public class SafetyPipelineMiddlewareTests
     // =========================================================================
 
     private static readonly ChatContext TestContext = new(
-        SystemPrompt:     "You are a helpful assistant.",
-        DocumentSummary:  null,
+        SystemPrompt: "You are a helpful assistant.",
+        DocumentSummary: null,
         AnalysisMetadata: null,
-        PlaybookId:       Guid.Parse("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"));
+        PlaybookId: Guid.Parse("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"));
 
     private const string SessionId = "session-001";
-    private const string TenantId  = "tenant-abc";
-    private const string UserId    = "user-xyz";
+    private const string TenantId = "tenant-abc";
+    private const string UserId = "user-xyz";
 
     // -------------------------------------------------------------------------
     // Fake inner agent
@@ -64,7 +64,7 @@ public class SafetyPipelineMiddlewareTests
             IEnumerable<string> chunks,
             IEnumerable<(string chunkId, string excerpt)>? citations = null)
         {
-            _chunks    = chunks.ToList();
+            _chunks = chunks.ToList();
             _citations = new CitationContext();
 
             if (citations is not null)
@@ -76,7 +76,7 @@ public class SafetyPipelineMiddlewareTests
             }
         }
 
-        public ChatContext Context  => TestContext;
+        public ChatContext Context => TestContext;
         public CitationContext? Citations => _citations;
 
         public async IAsyncEnumerable<ChatResponseUpdate> SendMessageAsync(
@@ -107,24 +107,24 @@ public class SafetyPipelineMiddlewareTests
 
     private record TestSetup(
         SafetyPipelineMiddleware Middleware,
-        FakeInnerAgent           InnerAgent,
-        Mock<IPromptShieldService>      Shield,
+        FakeInnerAgent InnerAgent,
+        Mock<IPromptShieldService> Shield,
         Mock<IGroundednessCheckService> Groundedness,
         Mock<ICitationVerificationService> CitationVerification,
         Mock<IConfidenceScoringService> Confidence,
-        Mock<IAuditLogService>          Audit,
-        List<ChatSseEvent>             EmittedEvents);
+        Mock<IAuditLogService> Audit,
+        List<ChatSseEvent> EmittedEvents);
 
     private static TestSetup Build(
-        string[]? innerChunks               = null,
+        string[]? innerChunks = null,
         (string chunkId, string excerpt)[]? citations = null,
-        PromptShieldResult? shieldResult    = null,
+        PromptShieldResult? shieldResult = null,
         GroundednessResult? groundednessResult = null,
         ConfidenceScoringResult? confidenceResult = null,
-        bool withSseWriter                  = true)
+        bool withSseWriter = true)
     {
-        var chunks       = innerChunks ?? ["Hello", " world."];
-        var innerAgent   = new FakeInnerAgent(chunks, citations);
+        var chunks = innerChunks ?? ["Hello", " world."];
+        var innerAgent = new FakeInnerAgent(chunks, citations);
 
         var shield = new Mock<IPromptShieldService>();
         shield.Setup(s => s.ScanAsync(It.IsAny<PromptShieldRequest>(), It.IsAny<CancellationToken>()))
@@ -150,8 +150,8 @@ public class SafetyPipelineMiddlewareTests
         confidence
             .Setup(c => c.Score(It.IsAny<ConfidenceScoringRequest>()))
             .Returns(confidenceResult ?? new ConfidenceScoringResult(
-                Level:     ConfidenceLevel.High,
-                Score:     0.9f,
+                Level: ConfidenceLevel.High,
+                Score: 0.9f,
                 Rationale: "Test: high confidence."));
 
         var audit = new Mock<IAuditLogService>();
@@ -162,20 +162,20 @@ public class SafetyPipelineMiddlewareTests
         var emittedEvents = new List<ChatSseEvent>();
         Func<ChatSseEvent, CancellationToken, Task>? sseWriter = withSseWriter
             ? (evt, _) => { emittedEvents.Add(evt); return Task.CompletedTask; }
-            : null;
+        : null;
 
         var middleware = new SafetyPipelineMiddleware(
-            inner:             innerAgent,
-            promptShield:      shield.Object,
+            inner: innerAgent,
+            promptShield: shield.Object,
             groundednessCheck: groundedness.Object,
-            citationCheck:     citationCheck,
+            citationCheck: citationCheck,
             confidenceScoring: confidence.Object,
-            auditLog:          audit.Object,
-            sseWriter:         sseWriter,
-            sessionId:         SessionId,
-            tenantId:          TenantId,
-            userId:            UserId,
-            logger:            NullLogger<SafetyPipelineMiddleware>.Instance);
+            auditLog: audit.Object,
+            sseWriter: sseWriter,
+            sessionId: SessionId,
+            tenantId: TenantId,
+            userId: UserId,
+            logger: NullLogger<SafetyPipelineMiddleware>.Instance);
 
         return new TestSetup(
             middleware, innerAgent,
@@ -209,8 +209,8 @@ public class SafetyPipelineMiddlewareTests
     {
         // Arrange
         var setup = Build(
-            innerChunks:     ["The answer is 42."],
-            shieldResult:    PromptShieldResult.Safe(3.0),
+            innerChunks: ["The answer is 42."],
+            shieldResult: PromptShieldResult.Safe(3.0),
             groundednessResult: GroundednessResult.Grounded(8.0),
             confidenceResult: new ConfidenceScoringResult(ConfidenceLevel.High, 0.85f, "High confidence."));
 
@@ -246,9 +246,9 @@ public class SafetyPipelineMiddlewareTests
                 It.Is<AuditEntry>(e =>
                     e.SafetyResults.PromptShieldPassed &&
                     e.SessionId == SessionId &&
-                    e.TenantId  == TenantId  &&
-                    e.UserId    == UserId    &&
-                    e.Action    == "chat_response"),
+                    e.TenantId == TenantId &&
+                    e.UserId == UserId &&
+                    e.Action == "chat_response"),
                 It.IsAny<CancellationToken>()),
             Times.Once);
 
@@ -267,11 +267,11 @@ public class SafetyPipelineMiddlewareTests
     {
         // Arrange
         var blockedResult = new PromptShieldResult(
-            IsBlocked:             true,
-            BlockReason:           PromptShieldBlockReason.UserInjection,
-            DetectedAttackType:    "UserPromptAttack",
+            IsBlocked: true,
+            BlockReason: PromptShieldBlockReason.UserInjection,
+            DetectedAttackType: "UserPromptAttack",
             BlockedDocumentIndexes: [],
-            LatencyMs:             4.0);
+            LatencyMs: 4.0);
 
         var setup = Build(shieldResult: blockedResult);
 
@@ -321,16 +321,16 @@ public class SafetyPipelineMiddlewareTests
             new("Fabricated claim B", null),
         };
         var ungroundedResult = GroundednessResult.Ungrounded(ungroundedSegments, 45.0);
-        var lowConfidence    = new ConfidenceScoringResult(
-            Level:     ConfidenceLevel.Low,
-            Score:     0.2f,
+        var lowConfidence = new ConfidenceScoringResult(
+            Level: ConfidenceLevel.Low,
+            Score: 0.2f,
             Rationale: "2 ungrounded segments detected; source_score=0.0; raw_score=0.200.");
 
         var setup = Build(
-            innerChunks:        ["This response has unverified claims."],
-            shieldResult:       PromptShieldResult.Safe(2.0),
+            innerChunks: ["This response has unverified claims."],
+            shieldResult: PromptShieldResult.Safe(2.0),
             groundednessResult: ungroundedResult,
-            confidenceResult:   lowConfidence);
+            confidenceResult: lowConfidence);
 
         // Act
         var updates = await DrainAsync(
@@ -402,17 +402,17 @@ public class SafetyPipelineMiddlewareTests
 
         var emitted = new List<ChatSseEvent>();
         var middleware = new SafetyPipelineMiddleware(
-            inner:             innerAgent,
-            promptShield:      shieldMock.Object,
+            inner: innerAgent,
+            promptShield: shieldMock.Object,
             groundednessCheck: groundedness.Object,
-            citationCheck:     citationCheck,
+            citationCheck: citationCheck,
             confidenceScoring: confidence.Object,
-            auditLog:          audit.Object,
-            sseWriter:         (e, _) => { emitted.Add(e); return Task.CompletedTask; },
-            sessionId:         SessionId,
-            tenantId:          TenantId,
-            userId:            UserId,
-            logger:            NullLogger<SafetyPipelineMiddleware>.Instance);
+            auditLog: audit.Object,
+            sseWriter: (e, _) => { emitted.Add(e); return Task.CompletedTask; },
+            sessionId: SessionId,
+            tenantId: TenantId,
+            userId: UserId,
+            logger: NullLogger<SafetyPipelineMiddleware>.Instance);
 
         // Act
         var updates = await DrainAsync(
@@ -466,20 +466,20 @@ public class SafetyPipelineMiddlewareTests
             .ReturnsAsync(PromptShieldResult.Safe(2.0));
 
         var innerAgent = new FakeInnerAgent(["Response despite groundedness failure."]);
-        var emitted    = new List<ChatSseEvent>();
+        var emitted = new List<ChatSseEvent>();
 
         var middleware = new SafetyPipelineMiddleware(
-            inner:             innerAgent,
-            promptShield:      shieldMock.Object,
+            inner: innerAgent,
+            promptShield: shieldMock.Object,
             groundednessCheck: groundedness.Object,
-            citationCheck:     citationCheck,
+            citationCheck: citationCheck,
             confidenceScoring: confidence.Object,
-            auditLog:          audit.Object,
-            sseWriter:         (e, _) => { emitted.Add(e); return Task.CompletedTask; },
-            sessionId:         SessionId,
-            tenantId:          TenantId,
-            userId:            UserId,
-            logger:            NullLogger<SafetyPipelineMiddleware>.Instance);
+            auditLog: audit.Object,
+            sseWriter: (e, _) => { emitted.Add(e); return Task.CompletedTask; },
+            sessionId: SessionId,
+            tenantId: TenantId,
+            userId: UserId,
+            logger: NullLogger<SafetyPipelineMiddleware>.Instance);
 
         // Act — must not throw even though groundedness threw.
         var updates = await DrainAsync(
@@ -541,7 +541,7 @@ public class SafetyPipelineMiddlewareTests
 
         var setup = Build(
             innerChunks: ["Based on the documents, the answer is clear."],
-            citations:   citations);
+            citations: citations);
 
         // Act
         await DrainAsync(

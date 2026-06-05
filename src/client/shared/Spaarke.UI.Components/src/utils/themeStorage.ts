@@ -168,7 +168,7 @@ export function detectDarkModeFromNavbar(): boolean | null {
  * @param context - PCF context (optional)
  * @returns true if dark mode should be active
  */
-export function getEffectiveDarkMode(context?: any): boolean {
+export function getEffectiveDarkMode(context?: unknown): boolean {
   const preference = getUserThemePreference();
 
   // Explicit user choice
@@ -176,8 +176,9 @@ export function getEffectiveDarkMode(context?: any): boolean {
   if (preference === 'light') return false;
 
   // Auto mode: check Power Platform context first
-  if (context?.fluentDesignLanguage?.isDarkTheme !== undefined) {
-    return context.fluentDesignLanguage.isDarkTheme;
+  const ctx = context as { fluentDesignLanguage?: { isDarkTheme?: boolean } } | undefined;
+  if (ctx?.fluentDesignLanguage?.isDarkTheme !== undefined) {
+    return ctx.fluentDesignLanguage.isDarkTheme;
   }
 
   // Navbar DOM detection
@@ -193,7 +194,7 @@ export function getEffectiveDarkMode(context?: any): boolean {
  * @param context - PCF context (optional)
  * @returns Fluent UI v9 Theme (webDarkTheme or webLightTheme)
  */
-export function resolveThemeWithUserPreference(context?: any): Theme {
+export function resolveThemeWithUserPreference(context?: unknown): Theme {
   return getEffectiveDarkMode(context) ? webDarkTheme : webLightTheme;
 }
 
@@ -313,7 +314,7 @@ export interface ThemeChangeHandler {
  * @param context - PCF context (optional, for re-evaluating effective theme)
  * @returns Cleanup function to remove listeners
  */
-export function setupThemeListener(onChange: ThemeChangeHandler, context?: any): () => void {
+export function setupThemeListener(onChange: ThemeChangeHandler, context?: unknown): () => void {
   const handleStorageChange = (event: StorageEvent) => {
     if (event.key === THEME_STORAGE_KEY) {
       onChange(getEffectiveDarkMode(context));
@@ -414,16 +415,9 @@ export interface IThemeWebApi {
     entityType: string,
     options: string,
     maxPageSize?: number
-  ): Promise<{ entities: any[] }>;
-  createRecord(
-    entityType: string,
-    data: Record<string, any>
-  ): Promise<{ id: string }>;
-  updateRecord(
-    entityType: string,
-    id: string,
-    data: Record<string, any>
-  ): Promise<void>;
+  ): Promise<{ entities: Record<string, unknown>[] }>;
+  createRecord(entityType: string, data: Record<string, unknown>): Promise<{ id: string }>;
+  updateRecord(entityType: string, id: string, data: Record<string, unknown>): Promise<void>;
 }
 
 /**
@@ -439,10 +433,7 @@ export interface IThemeWebApi {
  * @param webApi - WebApi interface (Xrm.WebApi or adapter)
  * @param userId - Current user's systemuser GUID
  */
-export async function syncThemeFromDataverse(
-  webApi: IThemeWebApi,
-  userId: string
-): Promise<void> {
+export async function syncThemeFromDataverse(webApi: IThemeWebApi, userId: string): Promise<void> {
   try {
     const select = 'sprk_userpreferenceid,sprk_preferencevalue';
     const filter = `_sprk_user_value eq ${userId} and sprk_preferencetype eq ${PREFERENCE_TYPE_THEME}`;

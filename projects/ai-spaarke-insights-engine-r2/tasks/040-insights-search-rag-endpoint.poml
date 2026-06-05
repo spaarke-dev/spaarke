@@ -1,0 +1,98 @@
+<task id="040" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>E1 — POST /api/insights/search endpoint (wraps existing IRagService)</title>
+    <status>completed</status>
+    <wave>E</wave>
+    <estimated-effort>1.5d</estimated-effort>
+    <tags>endpoint, rag, irag-service-facade, bff-api, zone-a, adr-030</tags>
+    <dependencies>035</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>E1</wave-item>
+  </metadata>
+
+  <prompt>
+    Implement POST /api/insights/search as a thin endpoint that wraps the **existing IRagService** (shipped to master 2026-06-01 in `Services/Ai/IRagService.cs` + `RagService.cs` + `NullRagService.cs`). The endpoint adds Insights-specific subject scoping + grounded-citation formatting on top of the existing RAG primitive. **This task was significantly re-scoped after master sync revealed IRagService already exists** — effort dropped from 3d to 1.5d.
+  </prompt>
+
+  <role>Senior .NET developer + endpoint architect (Zone A).</role>
+
+  <goal>
+    POST /api/insights/search live on Spaarke Dev. Endpoint accepts { query, subject, top? (default 10), filter? (artifactType, predicate, …) } and delegates to IRagService.SearchAsync (extended if needed for Insights subject filtering). Response carries ranked Observations/Precedents + LLM-synthesized summary with grounded [n] citations. Auth filter per ADR-008/ADR-028; ProblemDetails per ADR-019; rate-limit per ADR-016. ADR-030 P3 Fail-fast already handled in NullRagService — endpoint catches FeatureDisabledException → 503 via AsFeatureDisabled503().
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (FR-04, SC-04)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r2/design.md (D-P15-06)</file>
+    <file purpose="existing-rag-service">src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs (NEW per 2026-06-01)</file>
+    <file purpose="existing-rag-impl">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs (NEW per 2026-06-01)</file>
+    <file purpose="existing-null-impl">src/server/api/Sprk.Bff.Api/Services/Ai/NullRagService.cs (ADR-030 kill-switch — already wired)</file>
+    <file purpose="existing-feature-exception">src/server/api/Sprk.Bff.Api/Configuration/FeatureDisabledException.cs + AsFeatureDisabled503() extension</file>
+    <file purpose="r1-endpoint-pattern">existing /api/insights/ask endpoint</file>
+    <file purpose="r1-facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs</file>
+    <file purpose="reference-impl">src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs (uses IRagService — same pattern E1 follows)</file>
+    <file purpose="knowledge">knowledge/azure-ai-search/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern, no Azure Functions</constraint>
+    <constraint source="ADR-007 + ADR-013-refined">Endpoint depends on IRagService facade, **NOT** SearchIndexClient. Per commit 5613b8ad refactor that removed direct SearchIndexClient injection from KnowledgeBaseEndpoints.</constraint>
+    <constraint source="ADR-008">Endpoint filter for auth, not global middleware</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 — function-based contract, named API key scheme</constraint>
+    <constraint source="ADR-019">ProblemDetails on errors</constraint>
+    <constraint source="ADR-030">P3 Fail-fast already implemented in NullRagService — endpoint MUST catch FeatureDisabledException FIRST (before generic catch), return via AsFeatureDisabled503()</constraint>
+    <constraint source="ADR-029">Verify publish-size + transitive CVE impact</constraint>
+    <constraint source="bff-extensions.md F.1">If extending IRagService adds any new conditional service registration, apply ADR-030 PR review checklist</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>IRagService facade, RAG endpoint patterns, ADR-030 kill-switch, FeatureDisabledException</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-030-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md (F.1 binding rule)</file>
+      <file>.claude/patterns/auth/spaarke-auth-initialization.md (NEW per 2026-06-01)</file>
+      <file>knowledge/azure-ai-search/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing IRagService surface">Identify methods + DTOs already shipped (SearchAsync? Need to verify exact method signatures vs Insights subject-filter needs). Read RagService.cs + NullRagService.cs for current contract.</step>
+    <step order="2" name="Identify extension needs">Insights search needs subject-scope filtering (matter/project/invoice from Wave D5) + artifactType filtering. If IRagService.SearchAsync doesn't accept these, EXTEND the interface (add to IRagService + RagService + NullRagService — keep symmetric per ADR-030). Document the extension in spec/plan.</step>
+    <step order="3" name="Extend IInsightsAi facade (if needed)">Decision: does Insights search go through IInsightsAi.SearchAsync (consistent with Ask)? OR does the endpoint call IRagService directly via DI? Per refined ADR-013 + the KnowledgeBaseEndpoints pattern, calling IRagService directly is acceptable for Zone A endpoints. Document choice in handoff notes.</step>
+    <step order="4" name="Author endpoint">Sprk.Bff.Api/Api/Insights/InsightsSearchEndpoint.cs — minimal API + filter + ProblemDetails + rate-limit. Pattern matches existing KnowledgeBaseEndpoints (uses IRagService) + existing /api/insights/ask (Insights conventions for subject parsing).</step>
+    <step order="5" name="Endpoint catches">FeatureDisabledException → AsFeatureDisabled503() FIRST; ArgumentException(subject scheme) → 400; generic Exception → 500 ProblemDetails LAST.</step>
+    <step order="6" name="DI registration">No new module registrations expected (IRagService already wired). If new helper services added, run F.1 Tier 1.5 check.</step>
+    <step order="7" name="§3.5 grep">Endpoint stays in Zone A; client consumers go through IInsightsAi/IRagService facades only</step>
+    <step order="8" name="Integration tests">(a) Query returns ranked results from spaarke-insights-index; (b) Synthesis carries grounded [n] citations; (c) Subject filter respects matter/project/invoice; (d) Auth filter rejects unauthorized; (e) Unknown subject scheme returns 400; (f) Kill-switch (Insights flag off) returns 503 with errorCode=ai.insights.disabled OR ai.rag.disabled.</step>
+    <step order="9" name="Quality gates">code-review + adr-check + §3.5 grep + publish-size check</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test</tool>
+    <tool name="grep">§3.5 forbidden-imports gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Sprk.Bff.Api/Api/Insights/InsightsSearchEndpoint.cs (NEW endpoint)</output>
+    <output type="code">Possibly: extension methods on IRagService (if subject-filtering not yet supported)</output>
+    <output type="code">Possibly: IInsightsAi.SearchAsync facade extension (if facade-routing preferred over direct IRagService call)</output>
+    <output type="test">tests/integration/Services/Ai/Insights/InsightsSearchEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/insights/search live; auth filter applied per ADR-028</criterion>
+    <criterion testable="true">Response carries ranked Observations/Precedents from spaarke-insights-index</criterion>
+    <criterion testable="true">Synthesis includes grounded [n] citations matching results</criterion>
+    <criterion testable="true">Endpoint consumes IRagService — grep confirms no SearchIndexClient in endpoint source</criterion>
+    <criterion testable="true">ADR-030: kill-switch returns 503 via FeatureDisabledException → AsFeatureDisabled503()</criterion>
+    <criterion testable="true">spec.md FR-04 + SC-04 demonstrably met</criterion>
+    <criterion testable="true">§3.5 grep clean; publish-size within baseline</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **Master-sync re-scope (2026-06-02)**: This task was originally scoped for 3 days assuming a parallel RAG implementation. Master commit 5613b8ad (2026-06-01) shipped IRagService + RagService + NullRagService as part of the sdap-bff-test-r2 ADR-030 migration. Task re-scoped to 1.5 days: build a thin endpoint that wraps the existing facade. If Insights subject-filtering requires interface extension, that's a small addition (likely &lt;1 day in itself). Step 1 of execution should verify the actual IRagService surface area first.
+  </notes>
+</task>

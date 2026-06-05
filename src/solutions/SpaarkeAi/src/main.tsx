@@ -57,7 +57,15 @@ import type { IRuntimeConfig } from "@spaarke/auth";
 // Both singletons receive the SAME `IRuntimeConfig` so they agree on bffBaseUrl
 // / scope / clientId / tenantId. The two are distinct in-process instances by
 // design — embedding does not collapse them; it just keeps both warm.
-import { setLegalWorkspaceRuntimeConfig } from "@spaarke/legal-workspace";
+import {
+  LegalWorkspaceRenderer,
+  setLegalWorkspaceRuntimeConfig,
+} from "@spaarke/legal-workspace";
+// R4 task 052 (C-4): register LegalWorkspaceApp as the default workspace
+// renderer. `WorkspaceLayoutWidget` in `@spaarke/ai-widgets` consults this
+// slot at render time instead of importing `@spaarke/legal-workspace` directly.
+// Zero behavioural change today — `LegalWorkspaceRenderer` IS `LegalWorkspaceApp`.
+import { setDefaultWorkspaceRenderer } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // BFF base URL baked in at build time via Vite env var (AIPU-091).
@@ -178,6 +186,16 @@ async function bootstrap(): Promise<void> {
   // React tree (including any embedded LegalWorkspaceApp instances) mounts.
   // See the docblock above this bootstrap() definition for full rationale.
   suppressLegalWorkspaceDailyDigestAutoPopup();
+
+  // R4 task 052 (C-4): register LegalWorkspaceApp as the default workspace
+  // renderer BEFORE rendering the React tree. `WorkspaceLayoutWidget`
+  // (registered into WorkspaceWidgetRegistry by @spaarke/ai-widgets) consults
+  // `getDefaultWorkspaceRenderer()` at render time. Without this call, the
+  // widget would render a "no renderer registered" empty state.
+  //
+  // Zero behavioural change vs pre-C-4 (Risk R-4): `LegalWorkspaceRenderer`
+  // IS `LegalWorkspaceApp` — the rename is a typed re-export, not a wrapper.
+  setDefaultWorkspaceRenderer(LegalWorkspaceRenderer);
 
   // -------------------------------------------------------------------------
   // 1. Resolve runtime config

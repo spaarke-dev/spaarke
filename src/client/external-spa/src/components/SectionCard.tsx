@@ -1,26 +1,19 @@
-import * as React from "react";
-import {
-  Card,
-  CardHeader,
-  CardFooter,
-  makeStyles,
-  tokens,
-  Text,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { Card, CardHeader, CardFooter, makeStyles, tokens, Text } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   card: {
     backgroundColor: tokens.colorNeutralBackground2,
     borderColor: tokens.colorNeutralStroke2,
-    borderWidth: "1px",
-    borderStyle: "solid",
+    borderWidth: '1px',
+    borderStyle: 'solid',
     borderRadius: tokens.borderRadiusMedium,
-    width: "100%",
-    boxSizing: "border-box",
+    width: '100%',
+    boxSizing: 'border-box',
   },
   body: {
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    paddingTop: "0",
+    paddingTop: '0',
   },
 });
 

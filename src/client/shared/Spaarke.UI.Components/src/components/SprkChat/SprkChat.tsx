@@ -328,6 +328,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onDocumentStreamEvent: onDocumentStreamEventProp,
   initialMessages,
   onPaneEvent: onPaneEventProp,
+  onAttachmentReady,
+  // R5 task 020 / D2-11 chat-pane orchestration UX props (all optional;
+  // existing consumers ignore — generic shared-lib hooks per ADR-012).
+  onAttachmentsChanged,
+  onAttachmentRemoved,
+  injectLocalMessage,
+  onLocalMessageInjected,
+  onBeforeSendMessage,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -471,6 +479,97 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     removeFile: removeAttachmentFile,
     clearAll: clearAttachments,
   } = useChatFileAttachment();
+
+  // ── R4 task 042 (W-4): onAttachmentReady host callback ────────────────────
+  //
+  // Fires the host callback once per file that transitions to `ready` state.
+  // Hosts (e.g. ConversationPane in SpaarkeAi) use this to dispatch
+  // `widget_load` on the workspace PaneEventBus channel so the file mounts as
+  // a workspace tab while the user composes their message.
+  //
+  // The ref tracks which attachment IDs have already been signalled — prevents
+  // double-firing when the chip list re-renders for unrelated reasons (status
+  // patches, removals, etc.). Cleared when chips are removed so re-adding the
+  // same file re-fires the callback (operator-visible intent: re-uploading
+  // should re-open the tab).
+  const notifiedReadyRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (!onAttachmentReady) return;
+
+    const currentIds = new Set<string>();
+    for (const chip of attachmentFiles) {
+      currentIds.add(chip.id);
+      if (chip.status !== 'ready') continue;
+      if (notifiedReadyRef.current.has(chip.id)) continue;
+      if (typeof chip.textContent !== 'string') continue;
+
+      notifiedReadyRef.current.add(chip.id);
+      try {
+        onAttachmentReady({
+          filename: chip.filename,
+          contentType: chip.mimeType,
+          textContent: chip.textContent,
+        });
+      } catch {
+        // Host callback errors must not break SprkChat's attachment lifecycle.
+        // Errors are swallowed; the host is responsible for its own telemetry.
+      }
+    }
+
+    // Prune the notified set so re-adding a previously-removed file re-fires.
+    for (const id of Array.from(notifiedReadyRef.current)) {
+      if (!currentIds.has(id)) notifiedReadyRef.current.delete(id);
+    }
+  }, [attachmentFiles, onAttachmentReady]);
+
+  // ── R5 task 020 / D2-11: onAttachmentsChanged host callback ──────────────
+  //
+  // Fires the host callback on every chip lifecycle mutation — add, remove,
+  // status transition. Independent of `onAttachmentReady` (which fires only
+  // on extracting→ready transitions). Hosts (ConversationPane) use this to
+  // derive the "N files attached" indicator count + the `uploadedFileCount`
+  // input for tri-mode `/summarize` routing (R5 FR-03).
+  //
+  // Generic chip shape only crosses the boundary — NO host-specific types,
+  // preserving ADR-012 shared-lib context-agnosticism.
+  React.useEffect(() => {
+    if (!onAttachmentsChanged) return;
+    try {
+      onAttachmentsChanged(attachmentFiles);
+    } catch {
+      // Host callback errors must not break SprkChat's attachment lifecycle.
+      // Errors are swallowed; the host is responsible for its own telemetry.
+    }
+  }, [attachmentFiles, onAttachmentsChanged]);
+
+  // ── R5 task 020 / D2-11: injectLocalMessage one-shot injection ───────────
+  //
+  // When the host transitions `injectLocalMessage` from null → non-null, append
+  // the message to the chat thread via `addMessage` (the same path streamed
+  // turns use). The host is responsible for clearing the prop back to null via
+  // `onLocalMessageInjected` so re-renders do not re-inject the same message.
+  //
+  // The `dispatchedRef` guards against double-injection during React Strict
+  // Mode double-invocation of effects in development: we record the reference
+  // identity of the message we last dispatched and skip if the prop has not
+  // changed identity.
+  const lastInjectedRef = React.useRef<IChatMessage | null>(null);
+  React.useEffect(() => {
+    if (!injectLocalMessage) {
+      lastInjectedRef.current = null;
+      return;
+    }
+    if (lastInjectedRef.current === injectLocalMessage) return;
+    lastInjectedRef.current = injectLocalMessage;
+    addMessage(injectLocalMessage);
+    if (onLocalMessageInjected) {
+      try {
+        onLocalMessageInjected();
+      } catch {
+        // Host callback errors must not break the injection lifecycle.
+      }
+    }
+  }, [injectLocalMessage, onLocalMessageInjected, addMessage]);
 
   // Imperative handle for SprkChatInput so the [Prompt] button in our controls
   // strip can open the slash menu without re-implementing the wiring (FR-09).
@@ -873,6 +972,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         return;
       }
 
+      // R5 task 020 / D2-11: synchronous pre-send hook. The host MAY use this
+      // to inject a deterministic interjection (e.g. R5 FR-03 multi-file
+      // combined-summary interjection) via `injectLocalMessage` BEFORE the
+      // user's message is appended below. Per the prop docstring this hook is
+      // INFORMATIONAL — it cannot abort the send.
+      if (onBeforeSendMessage) {
+        try {
+          onBeforeSendMessage(messageText);
+        } catch {
+          // Host failures must not break the send lifecycle.
+        }
+      }
+
       // Clear follow-up suggestions from previous response
       clearSuggestions();
 
@@ -912,11 +1024,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           textContent: a.textContent,
         }));
       }
-      startStream(
-        `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`,
-        body,
-        getAccessToken
-      );
+      startStream(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`, body, getAccessToken);
     },
     [
       session,
@@ -928,6 +1036,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       documentId,
       getAccessToken,
       chatAttachments,
+      onBeforeSendMessage,
     ]
   );
 
@@ -1007,7 +1116,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       // the UI thread stays responsive.
       void addAttachmentFiles(list);
     },
-    [addAttachmentFiles],
+    [addAttachmentFiles]
   );
 
   // FR-09: opens the slash command menu from the strip-mounted [Prompt] button.
@@ -2223,19 +2332,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 ? `${styles.attachmentChip} ${styles.attachmentChipError}`
                 : styles.attachmentChip;
               const statusNode =
-                file.status === 'extracting'
-                  ? <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
-                  : file.status === 'ready'
-                    ? <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
-                    : <WarningRegular aria-label="Extraction failed" data-testid={`attachment-chip-status-error-${index}`} />;
+                file.status === 'extracting' ? (
+                  <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
+                ) : file.status === 'ready' ? (
+                  <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
+                ) : (
+                  <WarningRegular
+                    aria-label="Extraction failed"
+                    data-testid={`attachment-chip-status-error-${index}`}
+                  />
+                );
 
               const chipBody = (
-                <div
-                  key={file.id}
-                  className={chipClassName}
-                  role="listitem"
-                  data-testid={`attachment-chip-${index}`}
-                >
+                <div key={file.id} className={chipClassName} role="listitem" data-testid={`attachment-chip-${index}`}>
                   <span className={styles.attachmentChipStatus} aria-hidden={file.status === 'ready'}>
                     {statusNode}
                   </span>
@@ -2246,7 +2355,22 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                     appearance="subtle"
                     size="small"
                     icon={<DismissRegular />}
-                    onClick={() => removeAttachmentFile(index)}
+                    onClick={() => {
+                      // R5 task 020 / D2-11: notify host BEFORE local splice so
+                      // it can capture the chip metadata for the manifest +
+                      // session-files index cleanup cascade. Host failures do
+                      // NOT block the local removal — orphaned manifest/index
+                      // entries are bounded by the session-end cleanup
+                      // HostedService (R5 task 007).
+                      if (onAttachmentRemoved) {
+                        try {
+                          onAttachmentRemoved(file, index);
+                        } catch {
+                          // Host failures must not block the local chip removal.
+                        }
+                      }
+                      removeAttachmentFile(index);
+                    }}
                     aria-label={`Remove ${file.filename}`}
                     title={`Remove ${file.filename}`}
                     className={styles.attachmentChipDismiss}
@@ -2256,24 +2380,24 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               );
 
               // For error chips, wrap in a Tooltip exposing the parse error.
-              return isError && file.error
-                ? (
-                    <Tooltip
-                      key={file.id}
-                      content={file.error}
-                      relationship="description"
-                      withArrow
-                    >
-                      {chipBody}
-                    </Tooltip>
-                  )
-                : chipBody;
+              return isError && file.error ? (
+                <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
+                  {chipBody}
+                </Tooltip>
+              ) : (
+                chipBody
+              );
             })}
           </div>
         )}
 
         {/* Region 2: controls strip — [ Prompt ▾ ] [ + Attach ] (FR-09) */}
-        <div className={styles.controlsStrip} role="toolbar" aria-label="Chat input actions" data-testid="chat-input-controls-strip">
+        <div
+          className={styles.controlsStrip}
+          role="toolbar"
+          aria-label="Chat input actions"
+          data-testid="chat-input-controls-strip"
+        >
           <Button
             appearance="subtle"
             icon={<PromptRegular />}

@@ -30,7 +30,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        var url = $"sprk_analysisactions({actionId})?$expand=sprk_ActionTypeId($select=sprk_name)";
+        var url = $"sprk_analysisactions({actionId})?$expand=sprk_ActionTypeId($select=sprk_name,sprk_executoractiontype)";
         var response = await Http.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -50,9 +50,17 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         var sortOrder = ExtractSortOrderFromTypeName(entity.ActionTypeId?.Name);
 
-        var actionType = entity.ActionTypeValue.HasValue
-            ? (Nodes.ActionType)entity.ActionTypeValue.Value
-            : Nodes.ActionType.AiAnalysis;
+        // ActionType dispatch — single source of truth is the lookup target (sprk_analysisactiontype)
+        // via the sprk_executoractiontype field. See Insights Engine r2 decisions/D-01 +
+        // notes/handoffs/wave-b1-investigation-notes.md for the empirical reasoning. The
+        // legacy sprk_actiontype int field on sprk_analysisaction is absent on the entity
+        // (Q1 empirically confirmed 2026-06-02) — ActionTypeValue is kept as a safety
+        // fallback but is expected to always be null in practice.
+        var actionType = entity.ActionTypeId?.ExecutorActionType.HasValue == true
+            ? (Nodes.ActionType)entity.ActionTypeId.ExecutorActionType.Value
+            : entity.ActionTypeValue.HasValue
+                ? (Nodes.ActionType)entity.ActionTypeValue.Value
+                : Nodes.ActionType.AiAnalysis;
 
         var action = new AnalysisAction
         {
@@ -92,7 +100,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         var query = BuildODataQuery(
             options,
             selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt",
-            expandClause: "sprk_ActionTypeId($select=sprk_name)",
+            expandClause: "sprk_ActionTypeId($select=sprk_name,sprk_executoractiontype)",
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
             sortFieldMappings: sortMappings);
@@ -400,6 +408,17 @@ public class AnalysisActionService : DataverseHttpServiceBase
     {
         [JsonPropertyName("sprk_name")]
         public string? Name { get; set; }
+
+        /// <summary>
+        /// Dispatch ActionType integer. Single source of truth for which INodeExecutor handles
+        /// actions of this type. Per Insights Engine r2 D-01 + owner direction 2026-06-02:
+        /// lookup target is canonical (not a duplicated int field on sprk_analysisaction).
+        /// Backfilled = 0 (AiAnalysis) for existing 11 lookup rows; set to 70/80/90/100/110/120
+        /// for the 6 Insights ActionType lookup rows. Field is being made required (NOT NULL)
+        /// post-backfill.
+        /// </summary>
+        [JsonPropertyName("sprk_executoractiontype")]
+        public int? ExecutorActionType { get; set; }
     }
 
     #endregion

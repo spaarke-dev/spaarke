@@ -40,10 +40,10 @@
  * See: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md — external SPA out-of-scope rationale
  */
 
-import { BFF_API_URL } from "../config";
-import { acquireBffToken } from "./msal-auth";
-import { ApiError } from "../types";
-import { getMockResponse } from "../mocks/mock-service";
+import { BFF_API_URL } from '../config';
+import { acquireBffToken } from './msal-auth';
+import { ApiError } from '../types';
+import { getMockResponse } from '../mocks/mock-service';
 
 // ---------------------------------------------------------------------------
 // Request / Response types for BFF endpoints
@@ -135,11 +135,8 @@ export interface ExternalUserContextResponse {
  * @param options Standard RequestInit options (method, body, headers, etc.)
  * @returns Parsed JSON response body typed as T.
  */
-export async function bffApiCall<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
-  if (import.meta.env.VITE_DEV_MOCK === "true") {
+export async function bffApiCall<T>(path: string, options: RequestInit = {}): Promise<T> {
+  if (import.meta.env.VITE_DEV_MOCK === 'true') {
     return getMockResponse<T>(path, options);
   }
 
@@ -164,26 +161,22 @@ export async function bffApiCall<T>(
  * outside `authenticatedFetch.ts` will allowlist this path because the
  * external SPA is out of scope for `@spaarke/auth` (see file header).
  */
-async function executeFetch(
-  path: string,
-  options: RequestInit,
-  token: string
-): Promise<Response> {
+async function executeFetch(path: string, options: RequestInit, token: string): Promise<Response> {
   const url = `${BFF_API_URL}${path}`;
 
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
     // Auth v2 (D-AUTH-7): External SPA uses sessionStorage MSAL (B2B threat
     // model) — opts out of @spaarke/auth's authenticatedFetch. This is the
     // single allowlisted Bearer-literal site for this surface.
-    "Authorization": `Bearer ${token}`,
+    Authorization: `Bearer ${token}`,
     ...(options.headers as Record<string, string> | undefined),
   };
 
   // FormData uploads must NOT have Content-Type set — the browser sets it
   // automatically with the correct multipart/form-data boundary value.
   if (options.body instanceof FormData) {
-    delete headers["Content-Type"];
+    delete headers['Content-Type'];
   }
 
   return fetch(url, {
@@ -226,7 +219,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
  * level for each.
  */
 export async function getExternalUserContext(): Promise<ExternalUserContextResponse> {
-  return bffApiCall<ExternalUserContextResponse>("/api/v1/external/me");
+  return bffApiCall<ExternalUserContextResponse>('/api/v1/external/me');
 }
 
 /**
@@ -235,11 +228,9 @@ export async function getExternalUserContext(): Promise<ExternalUserContextRespo
  * Grants a contact access to a secure project at the specified access level.
  * Creates an sprk_externalrecordaccess record and provisions SPE permissions.
  */
-export async function grantAccess(
-  request: GrantAccessRequest
-): Promise<void> {
-  return bffApiCall<void>("/api/v1/external-access/grant", {
-    method: "POST",
+export async function grantAccess(request: GrantAccessRequest): Promise<void> {
+  return bffApiCall<void>('/api/v1/external-access/grant', {
+    method: 'POST',
     body: JSON.stringify(request),
   });
 }
@@ -250,11 +241,9 @@ export async function grantAccess(
  * Revokes an external user's access to a secure project.
  * Sets the access record to revoked and removes SPE permissions.
  */
-export async function revokeAccess(
-  request: RevokeAccessRequest
-): Promise<void> {
-  return bffApiCall<void>("/api/v1/external-access/revoke", {
-    method: "POST",
+export async function revokeAccess(request: RevokeAccessRequest): Promise<void> {
+  return bffApiCall<void>('/api/v1/external-access/revoke', {
+    method: 'POST',
     body: JSON.stringify(request),
   });
 }
@@ -276,11 +265,9 @@ export interface InviteUserResponse {
  * The BFF looks up or creates the Contact record, creates the access record,
  * and sends the portal invitation email via adx_invitation.
  */
-export async function inviteUser(
-  request: InviteUserRequest
-): Promise<InviteUserResponse> {
-  return bffApiCall<InviteUserResponse>("/api/v1/external-access/invite", {
-    method: "POST",
+export async function inviteUser(request: InviteUserRequest): Promise<InviteUserResponse> {
+  return bffApiCall<InviteUserResponse>('/api/v1/external-access/invite', {
+    method: 'POST',
     body: JSON.stringify(request),
   });
 }

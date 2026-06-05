@@ -1,0 +1,109 @@
+<task id="041" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.H2 — Scorecard tests (4 files)</title>
+    <status>completed</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, high-tier, p23-h, bff-api, testing, scorecard</tags>
+    <parallel-group>23-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Services/Scorecard* test files are disjoint from other H-track batches</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair the HIGH-tier Scorecard tests (~4 files under `tests/unit/Sprk.Bff.Api.Tests/Services/Scorecard*`).
+    Per design.md §3.3 these are pure-algorithm tests with high defect-prevention value (deterministic
+    scoring; silent bugs directly affect user-facing matter ranking).
+
+    For each failing test:
+    1. Identify failure (scoring rule change, weight change, normalization change)
+    2. Determine: `test-stale` (update assertion) OR `production-bug` (mark `real-bug-pending-fix` + ledger)
+    3. Apply §6.2 trait
+    4. Verify Pass
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-041-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every touched test ends in `repaired`,
+    `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist with scoring/ranking algorithm expertise.</role>
+
+  <goal>
+    All ~4 Scorecard test files end in §6.2 final end-state. Zero Failed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state trait</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-16">HIGH-tier tests must end in §6.2 final end-state</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.3, Scorecard tests are HIGH-tier — pure algorithm coverage with silent-bug
+      cost. ~4 files in `Services/Scorecard*`. Disjoint from other H-track batches (Workspace,
+      Finance, Email, Ai/Safety, Filters, Resilience) enables parallel execution.
+    </background>
+    <dependencies>
+      <dependency task="014" status="not-started">Compile health verified</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Scorecard*.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Scorecard/*.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">List the ~4 Scorecard test files. From Phase 0 baseline TRX, identify failing tests per file.</step>
+    <step order="2">For each file: compute pre-edit line count; read failing tests + corresponding production code.</step>
+    <step order="3">If any planned file edit would exceed 50% of file lines → HALT, file `escalations/rewrite-request-T-041-{FileName}.md`, await owner approval.</step>
+    <step order="4">Classify each failure: `test-stale` (update assertion) vs `production-bug` (mark `real-bug-pending-fix`).</step>
+    <step order="5">Apply `[Trait("status", "repaired")]` or `[Trait("status", "real-bug-pending-fix")]` per case; for the latter add a `real-bug-ledger.md` entry.</step>
+    <step order="6">After each file: `dotnet test --filter "FullyQualifiedName~Scorecard"` verify expected outcome.</step>
+    <step order="7">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with disposition.</step>
+    <step order="8">Verify `git status` shows NO production changes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Scorecard*.cs (repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries if bugs found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Scorecard tests Pass or Skip-with-reason; zero Failed</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement (NFR-02)</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
+  </acceptance-criteria>
+</task>

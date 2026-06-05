@@ -1,0 +1,62 @@
+<task id="013" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Project sign-off + completion entry</title>
+    <phase>6</phase>
+    <tags>knowledge-base, agent-framework, wrap-up, sign-off</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>012</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Close out the project: verify SPEC.md acceptance criteria, finalize TASK-INDEX.md status, write completion note, and decide whether the work merges directly to master or runs through a PR review. This is the gate that says "the knowledge base is production-ready for Claude Code to use."</goal>
+    <context>Other Spaarke projects close via a `*-wrap-up.poml` task. This task mirrors that convention. Wrap-up tasks are MINIMAL rigor — they confirm completion, they don't introduce new content.</context>
+    <constraints>
+      - Do NOT add new knowledge content in this task — wrap-up only
+      - If SPEC.md acceptance criteria are NOT met, OPEN A NEW TASK rather than closing the project — do not silently lower the bar
+      - Final commit message MUST reference the project name + sign-off (e.g., `chore(knowledge): agent-framework-knowledge-r1 sign-off`)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+      <file>projects/agent-framework-knowledge-r1/TASK-INDEX.md</file>
+      <file>projects/agent-framework-knowledge-r1/README.md</file>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>knowledge/agent-framework/NOTES.md</file>
+      <file>knowledge/agent-framework/docs/INDEX.md</file>
+      <file>.claude/skills/agent-framework-component/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SPEC.md §8 (Acceptance criteria) and verify each item: SHA reflects current upstream HEAD; ≥6 new samples; ≥10 new docs; NOTES.md STUB banner removed and §1+§2 substantive; docs/INDEX.md matches fluent-ui-v9 format; SKILL.md exists; ≥5 pattern files; INDEX entries updated; verification prompt run with results; REFRESH-LOG completion entry</step>
+    <step>For any acceptance criterion not met: STOP. Open a new task (file naming: 014-fix-&lt;short-issue&gt;.poml) describing the gap and do NOT close the project. Update TASK-INDEX.md to add the new row</step>
+    <step>If all criteria met: update TASK-INDEX.md "Phase progress" table — mark all 6 phases ✅. Update each individual task row to ✅</step>
+    <step>Update README.md status line at top: "Status: COMPLETE — agent-framework-component skill production-ready as of YYYY-MM-DD"</step>
+    <step>Write a brief completion note in projects/agent-framework-knowledge-r1/COMPLETION.md (modeled on coding-knowledge-base-setup-r1 PHASE-4-ANNOTATION-HANDOFF.md style): what shipped, what GAPs are intentional (e.g., sparse community content), what is forwarded to monthly REFRESH cadence</step>
+    <step>Reset current-task.md to "none — project complete; next project TBD"</step>
+    <step>Consider whether to merge to master directly OR open a PR for human review — recommend PR if any phase had material defects fixed in task 011; recommend direct merge if all tasks were clean</step>
+    <step>Final commit: `chore(knowledge): agent-framework-knowledge-r1 sign-off`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>projects/agent-framework-knowledge-r1/TASK-INDEX.md (all rows ✅)</output>
+    <output>projects/agent-framework-knowledge-r1/README.md (status line updated)</output>
+    <output>projects/agent-framework-knowledge-r1/COMPLETION.md (new)</output>
+    <output>projects/agent-framework-knowledge-r1/current-task.md (reset to "none")</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Every SPEC.md §8 acceptance criterion verified met OR a follow-up task opened for the gap</criterion>
+    <criterion>TASK-INDEX.md shows ✅ on every row (or honest mix of ✅ + 🔲 for any opened follow-up)</criterion>
+    <criterion>COMPLETION.md exists with what-shipped + intentional-GAPs + forwarded-to-refresh sections</criterion>
+    <criterion>current-task.md reset</criterion>
+    <criterion>Final sign-off commit landed</criterion>
+  </acceptance-criteria>
+</task>

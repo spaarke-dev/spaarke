@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Claims;
 using Azure;
 using Azure.Search.Documents;
+using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
@@ -41,6 +42,11 @@ public partial class RagService : IRagService
     private readonly AnalysisOptions _analysisOptions;
     private readonly ILogger<RagService> _logger;
     private readonly AiTelemetry? _telemetry;
+    // B8 (task 011 Phase 1b Tier 3, D-09 §2 B8): direct Azure SDK access for knowledge-base
+    // index administration. Used only by GetIndexHealthAsync / GetIndexedDocumentsAsync /
+    // DeleteIndexedDocumentAsync which absorb the calls previously made by KnowledgeBaseEndpoints.
+    private readonly SearchIndexClient _searchIndexClient;
+    private readonly AiSearchOptions _aiSearchOptions;
 
     // Semantic configuration name from the index definition
     private const string SemanticConfigurationName = "knowledge-semantic-config";
@@ -67,6 +73,8 @@ public partial class RagService : IRagService
         IEmbeddingCache embeddingCache,
         IPrivilegeGroupResolver privilegeGroupResolver,
         IOptions<AnalysisOptions> analysisOptions,
+        SearchIndexClient searchIndexClient,
+        IOptions<AiSearchOptions> aiSearchOptions,
         ILogger<RagService> logger,
         IResilientSearchClient? resilientClient = null,
         AiTelemetry? telemetry = null)
@@ -77,6 +85,8 @@ public partial class RagService : IRagService
         _privilegeGroupResolver = privilegeGroupResolver ?? throw new ArgumentNullException(nameof(privilegeGroupResolver));
         _resilientClient = resilientClient;
         _analysisOptions = analysisOptions.Value;
+        _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
+        _aiSearchOptions = (aiSearchOptions ?? throw new ArgumentNullException(nameof(aiSearchOptions))).Value;
         _logger = logger;
         _telemetry = telemetry;
     }
@@ -175,11 +185,31 @@ public partial class RagService : IRagService
                     embeddingStopwatch.ElapsedMilliseconds, embeddingCacheHit);
             }
 
-            // Step 2: Get SearchClient for tenant's deployment
+            // Step 2: Get SearchClient — session-scoped routing wins when SessionId is set
+            // (R5 task 002 / FR-09); else preserve pre-R5 deployment-routing behavior.
+            // Branch order is most-specific-first: SessionId > DeploymentId > default tenant.
+            // The session-files index is a SHARED session-scoped index (not per-tenant), so
+            // we resolve the SearchClient directly via the injected SearchIndexClient rather
+            // than via IKnowledgeDeploymentService (which routes per-tenant for the knowledge
+            // index family). Tenant isolation is preserved via the unconditional
+            // `tenantId eq '...'` filter in BuildSearchOptions (ADR-014 invariant).
             searchStopwatch.Start();
-            var searchClient = options.DeploymentId.HasValue
-                ? await _deploymentService.GetSearchClientByDeploymentAsync(options.DeploymentId.Value, cancellationToken)
-                : await _deploymentService.GetSearchClientAsync(options.TenantId, cancellationToken);
+            SearchClient searchClient;
+            if (!string.IsNullOrEmpty(options.SessionId))
+            {
+                searchClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.SessionFilesIndexName);
+                _logger.LogDebug(
+                    "RAG search routing to session-files index {IndexName} for tenant {TenantId} session {SessionId}",
+                    _aiSearchOptions.SessionFilesIndexName, options.TenantId, options.SessionId);
+            }
+            else if (options.DeploymentId.HasValue)
+            {
+                searchClient = await _deploymentService.GetSearchClientByDeploymentAsync(options.DeploymentId.Value, cancellationToken);
+            }
+            else
+            {
+                searchClient = await _deploymentService.GetSearchClientAsync(options.TenantId, cancellationToken);
+            }
 
             // Step 3: Build hybrid search options with privilege filter applied
             var searchOptions = BuildSearchOptions(options, queryEmbedding, userGroupIds);
@@ -714,6 +744,212 @@ public partial class RagService : IRagService
         return embedding;
     }
 
+    // ── B8: Knowledge-base index administration (task 011 Phase 1b Tier 3, D-09 §2 B8) ────
+    // The 3 methods below absorb the direct SearchIndexClient calls that
+    // KnowledgeBaseEndpoints (GetIndexHealth, GetIndexedDocuments, DeleteIndexedDocument)
+    // previously made. Behavior is preserved 1:1 (verbatim move) per D-09 §8 Risks; this
+    // is a facade refactor (ADR-007), not a redesign. The Null-Object path is
+    // NullRagService which throws FeatureDisabledException for these methods.
+
+    /// <inheritdoc />
+    public async Task<KnowledgeIndexHealth> GetIndexHealthAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        var knowledgeFilter = $"tenantId eq '{EscapeFilterValue(tenantId)}'";
+
+        // Query both indexes in parallel for document counts
+        var knowledgeClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.KnowledgeIndexName);
+        var discoveryClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.DiscoveryIndexName);
+
+        var knowledgeCountTask = GetTenantDocumentCountAsync(knowledgeClient, knowledgeFilter, cancellationToken);
+        var discoveryCountTask = GetTenantDocumentCountAsync(discoveryClient, knowledgeFilter, cancellationToken);
+
+        await Task.WhenAll(knowledgeCountTask, discoveryCountTask);
+
+        var health = new KnowledgeIndexHealth(
+            KnowledgeDocCount: knowledgeCountTask.Result,
+            DiscoveryDocCount: discoveryCountTask.Result,
+            LastUpdated: DateTimeOffset.UtcNow,
+            KnowledgeIndexName: _aiSearchOptions.KnowledgeIndexName,
+            DiscoveryIndexName: _aiSearchOptions.DiscoveryIndexName);
+
+        _logger.LogInformation(
+            "Knowledge base health: tenant={TenantId} knowledgeDocs={KnowledgeCount} discoveryDocs={DiscoveryCount}",
+            tenantId, health.KnowledgeDocCount, health.DiscoveryDocCount);
+
+        return health;
+    }
+
+    /// <inheritdoc />
+    public async Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
+        string indexName,
+        string tenantId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(indexName);
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        EnsureKnownIndex(indexName);
+
+        if (page < 1) page = 1;
+        if (pageSize < 1 || pageSize > 200) pageSize = 50;
+
+        var searchClient = _searchIndexClient.GetSearchClient(indexName);
+        var filter = $"tenantId eq '{EscapeFilterValue(tenantId)}'";
+        var skip = (page - 1) * pageSize;
+
+        var searchOptions = new SearchOptions
+        {
+            Filter = filter,
+            Size = pageSize,
+            Skip = skip,
+            Select = { "id", "documentId", "fileName", "createdAt", "updatedAt" },
+            IncludeTotalCount = true
+        };
+
+        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", searchOptions, cancellationToken);
+        var results = new List<IndexedDocumentSummary>();
+
+        await foreach (var item in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
+        {
+            if (item.Document != null)
+            {
+                results.Add(new IndexedDocumentSummary(
+                    ChunkId: item.Document.Id,
+                    DocumentId: item.Document.DocumentId,
+                    FileName: item.Document.FileName,
+                    CreatedAt: item.Document.CreatedAt,
+                    UpdatedAt: item.Document.UpdatedAt));
+            }
+        }
+
+        return new IndexedDocumentsPage(
+            IndexName: indexName,
+            Documents: results,
+            Page: page,
+            PageSize: pageSize,
+            TotalCount: response.Value.TotalCount ?? 0);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> DeleteIndexedDocumentAsync(
+        string indexName,
+        string documentId,
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(indexName);
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        EnsureKnownIndex(indexName);
+
+        _logger.LogInformation(
+            "Deleting document {DocumentId} from index {IndexName} for tenant {TenantId}",
+            documentId, indexName, tenantId);
+
+        int chunksDeleted;
+
+        // Route to appropriate deletion method based on index
+        if (indexName.Equals(_aiSearchOptions.KnowledgeIndexName, StringComparison.OrdinalIgnoreCase))
+        {
+            // Use the existing knowledge-index deletion path (handles deployment routing)
+            chunksDeleted = await DeleteBySourceDocumentAsync(documentId, tenantId, cancellationToken);
+        }
+        else
+        {
+            // Delete directly from the discovery index using the named SearchClient
+            var searchClient = _searchIndexClient.GetSearchClient(indexName);
+            chunksDeleted = await DeleteChunksFromIndexAsync(
+                searchClient, documentId, tenantId, cancellationToken);
+        }
+
+        return chunksDeleted;
+    }
+
+    /// <summary>
+    /// Throws <see cref="ArgumentException"/> when <paramref name="indexName"/> is not one of
+    /// the two admin-allowed indexes (knowledge or discovery). Used by B8 endpoints to surface
+    /// a 400 / 404 ProblemDetails when an unknown index is targeted.
+    /// </summary>
+    private void EnsureKnownIndex(string indexName)
+    {
+        if (!string.Equals(indexName, _aiSearchOptions.KnowledgeIndexName, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(indexName, _aiSearchOptions.DiscoveryIndexName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"Index '{indexName}' is not recognized. Valid indexes: " +
+                $"{_aiSearchOptions.KnowledgeIndexName}, {_aiSearchOptions.DiscoveryIndexName}",
+                nameof(indexName));
+        }
+    }
+
+    /// <summary>
+    /// Gets the count of documents in an index that match the given OData filter.
+    /// Moved verbatim from <c>KnowledgeBaseEndpoints.GetTenantDocumentCountAsync</c> per
+    /// D-09 §2 B8 (task 011 Phase 1b Tier 3).
+    /// </summary>
+    private static async Task<long> GetTenantDocumentCountAsync(
+        SearchClient searchClient,
+        string filter,
+        CancellationToken cancellationToken)
+    {
+        var options = new SearchOptions
+        {
+            Filter = filter,
+            Size = 0,
+            IncludeTotalCount = true
+        };
+
+        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", options, cancellationToken);
+        return response.Value.TotalCount ?? 0;
+    }
+
+    /// <summary>
+    /// Deletes all chunks for <paramref name="documentId"/> from the specified search client,
+    /// scoped to <paramref name="tenantId"/>. Moved verbatim from
+    /// <c>KnowledgeBaseEndpoints.DeleteChunksFromIndexAsync</c> per D-09 §2 B8.
+    /// </summary>
+    private static async Task<int> DeleteChunksFromIndexAsync(
+        SearchClient searchClient,
+        string documentId,
+        string tenantId,
+        CancellationToken cancellationToken)
+    {
+        var filter = $"documentId eq '{EscapeFilterValue(documentId)}' and tenantId eq '{EscapeFilterValue(tenantId)}'";
+        var options = new SearchOptions
+        {
+            Filter = filter,
+            Size = 1000,
+            Select = { "id" }
+        };
+
+        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", options, cancellationToken);
+        var idsToDelete = new List<string>();
+
+        await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
+        {
+            if (!string.IsNullOrEmpty(result.Document?.Id))
+            {
+                idsToDelete.Add(result.Document.Id);
+            }
+        }
+
+        if (idsToDelete.Count == 0)
+        {
+            return 0;
+        }
+
+        var deleteResponse = await searchClient.DeleteDocumentsAsync(
+            "id", idsToDelete, cancellationToken: cancellationToken);
+        return deleteResponse.Value.Results.Count(r => r.Succeeded);
+    }
+
     #region Private Methods
 
     private SearchOptions BuildSearchOptions(
@@ -721,6 +957,15 @@ public partial class RagService : IRagService
         ReadOnlyMemory<float> queryEmbedding,
         IReadOnlyList<string>? userGroupIds = null)
     {
+        // R5 task 002 / FR-09 — under session-scoped routing, use the session-files
+        // semantic configuration (the knowledge index's `knowledge-semantic-config` does
+        // not exist on the session-files index). The session-files schema has its own
+        // titleField=fileName + prioritizedContentFields=content per task 001 schema.
+        var isSessionScoped = !string.IsNullOrEmpty(options.SessionId);
+        var semanticConfigName = isSessionScoped
+            ? _aiSearchOptions.SessionFilesSemanticConfigName
+            : SemanticConfigurationName;
+
         var searchOptions = new SearchOptions
         {
             Size = options.TopK,
@@ -728,13 +973,14 @@ public partial class RagService : IRagService
             QueryType = SearchQueryType.Semantic,
             SemanticSearch = new SemanticSearchOptions
             {
-                SemanticConfigurationName = SemanticConfigurationName,
+                SemanticConfigurationName = semanticConfigName,
                 QueryCaption = new QueryCaption(QueryCaptionType.Extractive),
                 QueryAnswer = new QueryAnswer(QueryAnswerType.None)
             }
         };
 
-        // Add vector search if enabled
+        // Add vector search if enabled — both indexes use the same `contentVector3072`
+        // field name (3072-dim text-embedding-3-large) per task 001 schema.
         if (options.UseVectorSearch && queryEmbedding.Length > 0)
         {
             searchOptions.VectorSearch = new VectorSearchOptions
@@ -753,97 +999,171 @@ public partial class RagService : IRagService
         // Build filter expression
         var filters = new List<string>();
 
-        // Always filter by tenant for security (ADR-014)
+        // Always filter by tenant for security (ADR-014) — applied for BOTH the
+        // knowledge-index and session-files-index code paths.
         filters.Add($"tenantId eq '{EscapeFilterValue(options.TenantId)}'");
 
-        // Include knowledge sources — KnowledgeSourceIds (plural) takes precedence over singular.
-        // Use search.in() for lists > 10 items to avoid OData clause limits; OR chain below 10 for log readability.
-        if (options.KnowledgeSourceIds is { Count: > 0 })
+        if (isSessionScoped)
         {
-            if (options.KnowledgeSourceIds.Count > 10)
+            // R5 task 002 / FR-09 — session isolation invariant per ADR-014: when
+            // SessionId is set, both `tenantId` AND `sessionId` MUST match (ANDed
+            // with the unconditional tenant filter above). Never OR — cross-tenant
+            // session leaks would otherwise be possible.
+            filters.Add($"sessionId eq '{EscapeFilterValue(options.SessionId!)}'");
+
+            // The session-files schema (task 001) carries only `tenantId` + `sessionId`
+            // + chunk + tags + timestamps columns. It does NOT carry
+            // `knowledgeSourceId` / `parentEntityType` / `parentEntityId` /
+            // `privilege_group_ids` / `documentType` filterable fields. Apply tags only;
+            // skip the rest with a debug log so a misuse is visible in diagnostics.
+            if (options.KnowledgeSourceId is not null
+                || options.KnowledgeSourceIds is { Count: > 0 }
+                || options.ExcludeKnowledgeSourceIds is { Count: > 0 }
+                || !string.IsNullOrEmpty(options.DocumentType)
+                || !string.IsNullOrEmpty(options.ParentEntityType)
+                || !string.IsNullOrEmpty(options.ParentEntityId))
             {
-                var escaped = string.Join(",", options.KnowledgeSourceIds.Select(EscapeFilterValue));
-                filters.Add($"search.in(knowledgeSourceId, '{escaped}', ',')");
+                _logger.LogDebug(
+                    "RAG search session-scoped routing for tenant {TenantId} session {SessionId} — " +
+                    "knowledge-source / document-type / parent-entity filters are ignored " +
+                    "(session-files schema does not carry those columns; see R5 task 002 + task 001 schema).",
+                    options.TenantId, options.SessionId);
             }
-            else
+
+            // Tags ARE supported on the session-files schema (Collection(Edm.String),
+            // filterable). Preserve the same OR / AND / NOT semantics as the knowledge path.
+            if (options.Tags?.Count > 0)
             {
-                var sourceFilters = options.KnowledgeSourceIds
-                    .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
-                filters.Add($"({string.Join(" or ", sourceFilters)})");
+                var tagFilters = options.Tags.Select(t => $"tags/any(tag: tag eq '{EscapeFilterValue(t)}')");
+                filters.Add($"({string.Join(" or ", tagFilters)})");
             }
-        }
-        else if (!string.IsNullOrEmpty(options.KnowledgeSourceId))
-        {
-            filters.Add($"knowledgeSourceId eq '{EscapeFilterValue(options.KnowledgeSourceId)}'");
-        }
-
-        // Exclude knowledge sources (NOT filter)
-        if (options.ExcludeKnowledgeSourceIds is { Count: > 0 })
-        {
-            if (options.ExcludeKnowledgeSourceIds.Count > 10)
+            if (options.RequiredTags is { Count: > 0 })
             {
-                var escaped = string.Join(",", options.ExcludeKnowledgeSourceIds.Select(EscapeFilterValue));
-                filters.Add($"not search.in(knowledgeSourceId, '{escaped}', ',')");
+                foreach (var tag in options.RequiredTags)
+                {
+                    filters.Add($"tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                }
             }
-            else
+            if (options.ExcludeTags is { Count: > 0 })
             {
-                var excludeFilters = options.ExcludeKnowledgeSourceIds
-                    .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
-                filters.Add($"not ({string.Join(" or ", excludeFilters)})");
+                foreach (var tag in options.ExcludeTags)
+                {
+                    filters.Add($"not tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                }
             }
-        }
 
-        if (!string.IsNullOrEmpty(options.DocumentType))
-        {
-            filters.Add($"documentType eq '{EscapeFilterValue(options.DocumentType)}'");
+            // Privilege filter is SKIPPED under session-scoped routing — the session-files
+            // schema does not carry the `privilege_group_ids` column, and session isolation
+            // is enforced by the `sessionId eq '...'` clause itself (the chat session owner
+            // already passed authorization to upload the file). See R5 design.md §2.11 +
+            // task 002 POML constraint "privilege-group filter (AIPU2-027)".
         }
-
-        // Tags — OR semantics (existing): documents matching ANY of the specified tags
-        if (options.Tags?.Count > 0)
+        else
         {
-            var tagFilters = options.Tags.Select(t => $"tags/any(tag: tag eq '{EscapeFilterValue(t)}')");
-            filters.Add($"({string.Join(" or ", tagFilters)})");
-        }
+            // Knowledge-index path — preserved byte-for-byte from pre-R5 (NFR-10
+            // back-compat). All filter logic below this point is identical to the
+            // historical implementation; only the indentation changes.
 
-        // Required tags — AND semantics: documents must have ALL of the specified tags
-        if (options.RequiredTags is { Count: > 0 })
-        {
-            foreach (var tag in options.RequiredTags)
+            // Include knowledge sources — KnowledgeSourceIds (plural) takes precedence over singular.
+            // Use search.in() for lists > 10 items to avoid OData clause limits; OR chain below 10 for log readability.
+            if (options.KnowledgeSourceIds is { Count: > 0 })
             {
-                filters.Add($"tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                if (options.KnowledgeSourceIds.Count > 10)
+                {
+                    var escaped = string.Join(",", options.KnowledgeSourceIds.Select(EscapeFilterValue));
+                    filters.Add($"search.in(knowledgeSourceId, '{escaped}', ',')");
+                }
+                else
+                {
+                    var sourceFilters = options.KnowledgeSourceIds
+                        .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
+                    filters.Add($"({string.Join(" or ", sourceFilters)})");
+                }
             }
-        }
-
-        // Exclude tags — NOT semantics: exclude documents with any of the specified tags
-        if (options.ExcludeTags is { Count: > 0 })
-        {
-            foreach (var tag in options.ExcludeTags)
+            else if (!string.IsNullOrEmpty(options.KnowledgeSourceId))
             {
-                filters.Add($"not tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                filters.Add($"knowledgeSourceId eq '{EscapeFilterValue(options.KnowledgeSourceId)}'");
             }
-        }
 
-        // Entity scope — filter by parent entity type and ID (both required)
-        if (!string.IsNullOrEmpty(options.ParentEntityType) && !string.IsNullOrEmpty(options.ParentEntityId))
-        {
-            filters.Add($"parentEntityType eq '{EscapeFilterValue(options.ParentEntityType)}'");
-            filters.Add($"parentEntityId eq '{EscapeFilterValue(options.ParentEntityId)}'");
-        }
+            // Exclude knowledge sources (NOT filter)
+            if (options.ExcludeKnowledgeSourceIds is { Count: > 0 })
+            {
+                if (options.ExcludeKnowledgeSourceIds.Count > 10)
+                {
+                    var escaped = string.Join(",", options.ExcludeKnowledgeSourceIds.Select(EscapeFilterValue));
+                    filters.Add($"not search.in(knowledgeSourceId, '{escaped}', ',')");
+                }
+                else
+                {
+                    var excludeFilters = options.ExcludeKnowledgeSourceIds
+                        .Select(id => $"knowledgeSourceId eq '{EscapeFilterValue(id)}'");
+                    filters.Add($"not ({string.Join(" or ", excludeFilters)})");
+                }
+            }
 
-        // Privilege filter — ALWAYS applied (AIPU2-027 security requirement).
-        // Ensures only documents the user's groups are authorised to view are returned.
-        // Null userGroupIds means system/background call: treat as public-only.
-        var privilegeFilter = PrivilegeFilterBuilder.BuildFilter(userGroupIds ?? Array.Empty<string>());
-        filters.Add(privilegeFilter);
+            if (!string.IsNullOrEmpty(options.DocumentType))
+            {
+                filters.Add($"documentType eq '{EscapeFilterValue(options.DocumentType)}'");
+            }
+
+            // Tags — OR semantics (existing): documents matching ANY of the specified tags
+            if (options.Tags?.Count > 0)
+            {
+                var tagFilters = options.Tags.Select(t => $"tags/any(tag: tag eq '{EscapeFilterValue(t)}')");
+                filters.Add($"({string.Join(" or ", tagFilters)})");
+            }
+
+            // Required tags — AND semantics: documents must have ALL of the specified tags
+            if (options.RequiredTags is { Count: > 0 })
+            {
+                foreach (var tag in options.RequiredTags)
+                {
+                    filters.Add($"tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                }
+            }
+
+            // Exclude tags — NOT semantics: exclude documents with any of the specified tags
+            if (options.ExcludeTags is { Count: > 0 })
+            {
+                foreach (var tag in options.ExcludeTags)
+                {
+                    filters.Add($"not tags/any(tag: tag eq '{EscapeFilterValue(tag)}')");
+                }
+            }
+
+            // Entity scope — filter by parent entity type and ID (both required)
+            if (!string.IsNullOrEmpty(options.ParentEntityType) && !string.IsNullOrEmpty(options.ParentEntityId))
+            {
+                filters.Add($"parentEntityType eq '{EscapeFilterValue(options.ParentEntityType)}'");
+                filters.Add($"parentEntityId eq '{EscapeFilterValue(options.ParentEntityId)}'");
+            }
+
+            // Privilege filter — ALWAYS applied (AIPU2-027 security requirement).
+            // Ensures only documents the user's groups are authorised to view are returned.
+            // Null userGroupIds means system/background call: treat as public-only.
+            var privilegeFilter = PrivilegeFilterBuilder.BuildFilter(userGroupIds ?? Array.Empty<string>());
+            filters.Add(privilegeFilter);
+        }
 
         searchOptions.Filter = string.Join(" and ", filters);
 
-        // Set search fields for keyword search
+        // Set search fields for keyword search — both schemas expose `content` + `fileName`
+        // as searchable text fields. `knowledgeSourceName` is knowledge-only; safe to add
+        // because Azure AI Search ignores unknown searchFields rather than erroring, but
+        // we trim under session-routing to keep the query plan tight.
         if (options.UseKeywordSearch)
         {
-            foreach (var field in SearchFields)
+            if (isSessionScoped)
             {
-                searchOptions.SearchFields.Add(field);
+                searchOptions.SearchFields.Add("content");
+                searchOptions.SearchFields.Add("fileName");
+            }
+            else
+            {
+                foreach (var field in SearchFields)
+                {
+                    searchOptions.SearchFields.Add(field);
+                }
             }
         }
 

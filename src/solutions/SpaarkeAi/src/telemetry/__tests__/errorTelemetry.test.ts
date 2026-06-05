@@ -18,7 +18,7 @@ import type { ApplicationInsights } from "@microsoft/applicationinsights-web";
 import {
   TELEMETRY_DAILY_BRIEFING_429,
   TELEMETRY_FILE_EXTRACTION_FAILURE,
-  TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE,
+  TELEMETRY_HISTORY_LOAD_FAILURE,
   __resetForTests,
   logTelemetryError,
   setAppInsightsInstance,
@@ -62,11 +62,11 @@ describe("errorTelemetry — exported event-name constants", () => {
   });
 
   it("exports the HistoryOverlay load-failure event name with the correct prefix", () => {
-    expect(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE).toMatch(
+    expect(TELEMETRY_HISTORY_LOAD_FAILURE).toMatch(
       /^spaarke-ai-error\./,
     );
-    expect(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE).toBe(
-      "spaarke-ai-error.history-overlay.load-failure",
+    expect(TELEMETRY_HISTORY_LOAD_FAILURE).toBe(
+      "spaarke-ai-error.history.load-failure",
     );
   });
 
@@ -74,7 +74,7 @@ describe("errorTelemetry — exported event-name constants", () => {
     const names = new Set([
       TELEMETRY_DAILY_BRIEFING_429,
       TELEMETRY_FILE_EXTRACTION_FAILURE,
-      TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE,
+      TELEMETRY_HISTORY_LOAD_FAILURE,
     ]);
     expect(names.size).toBe(3);
   });
@@ -157,11 +157,11 @@ describe("errorTelemetry — when App Insights is wired", () => {
     const fake = makeFakeAppInsights();
     setAppInsightsInstance(fake as unknown as ApplicationInsights);
 
-    logTelemetryError(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE, {});
+    logTelemetryError(TELEMETRY_HISTORY_LOAD_FAILURE, {});
 
     expect(fake.trackEvent).toHaveBeenCalledTimes(1);
     expect(fake.trackEvent).toHaveBeenCalledWith(
-      { name: TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE },
+      { name: TELEMETRY_HISTORY_LOAD_FAILURE },
       {},
     );
   });

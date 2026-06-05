@@ -1,0 +1,142 @@
+SECURITY AGREEMENT
+
+This Security Agreement (this "Security Agreement"), dated as of February 27,
+2026, is by and among Mariner Logistics Group LLC, a Delaware limited
+liability company, and Mariner Coastal Operations LLC, a Virginia limited
+liability company (each a "Grantor" and collectively, the "Grantors"), in
+favor of Linden Trust National Bank, N.A., as administrative agent for the
+Secured Parties (in such capacity, the "Administrative Agent").
+
+RECITALS
+
+WHEREAS, the Grantors, the Administrative Agent, and the Lenders are entering
+into that certain Credit and Security Agreement dated as of even date herewith
+(as amended, restated, supplemented, or otherwise modified from time to time,
+the "Credit Agreement"); and
+
+WHEREAS, as a condition precedent to the Lenders' obligation to extend credit
+under the Credit Agreement, the Grantors are required to grant to the
+Administrative Agent, for the ratable benefit of the Secured Parties, a
+security interest in the Collateral described herein;
+
+NOW, THEREFORE, in consideration of the foregoing and other good and valuable
+consideration, the receipt and sufficiency of which are hereby acknowledged,
+the Grantors hereby agree as follows:
+
+SECTION 1. DEFINITIONS.
+
+Capitalized terms used but not otherwise defined herein have the meanings
+ascribed to them in the Credit Agreement.
+
+   "Collateral" means all of each Grantor's right, title, and interest in and
+   to all of the following property, whether now owned or hereafter acquired
+   and wherever located: (a) all Accounts; (b) all Inventory; (c) all
+   Equipment; (d) all General Intangibles; (e) all Deposit Accounts and
+   Securities Accounts; (f) all Investment Property; (g) all books, records,
+   and documents related to any of the foregoing; and (h) all Proceeds and
+   products of any of the foregoing.
+
+   "Excluded Property" means: (i) the deposit account maintained at
+   Norfolk Community Credit Union, Account No. ending in 8841, used
+   exclusively as a payroll funding account; (ii) any vehicle or other
+   property subject to a certificate of title, to the extent perfection of a
+   security interest therein would require notation on such certificate;
+   and (iii) any rights in any contract or License to the extent the grant
+   of a security interest therein would result in the breach of such
+   contract or License under applicable law (other than to the extent such
+   prohibition is rendered ineffective under the UCC or other applicable law).
+
+SECTION 2. GRANT OF SECURITY INTEREST.
+
+Each Grantor hereby grants to the Administrative Agent, for the ratable
+benefit of the Secured Parties, a continuing first-priority security interest
+in all of such Grantor's right, title, and interest in and to the Collateral.
+
+SECTION 3. PERFECTION.
+
+3.1 UCC Filings. Each Grantor authorizes the Administrative Agent to file UCC
+    financing statements in any jurisdiction necessary to perfect the security
+    interest granted hereunder, describing the Collateral as "all assets of
+    Debtor, whether now owned or hereafter acquired."
+
+3.2 Control Agreements. Each Grantor shall use commercially reasonable efforts
+    to deliver, within sixty (60) days of the Closing Date, a Deposit Account
+    Control Agreement (DACA) for each Deposit Account constituting Collateral
+    other than Excluded Property.
+
+3.3 Intellectual Property Filings. Each Grantor shall execute and deliver a
+    short-form Patent Security Agreement, Trademark Security Agreement, and
+    Copyright Security Agreement, as applicable, for filing with the United
+    States Patent and Trademark Office and the United States Copyright Office
+    within fifteen (15) Business Days of the Closing Date.
+
+SECTION 4. REPRESENTATIONS AND WARRANTIES.
+
+Each Grantor represents and warrants that: (a) it has good and marketable
+title to the Collateral, free and clear of all Liens other than Permitted
+Liens; (b) no UCC financing statement covering the Collateral is on file in
+any jurisdiction except those in favor of the Administrative Agent;
+(c) Schedule 4(c) sets forth (i) each Grantor's chief executive office,
+(ii) each location at which Equipment having a value in excess of Two Hundred
+Fifty Thousand Dollars ($250,000) is maintained, and (iii) each Deposit
+Account and Securities Account maintained by such Grantor.
+
+SECTION 5. COVENANTS.
+
+5.1 Maintenance of Collateral. Each Grantor shall maintain the Collateral in
+    good operating condition, ordinary wear and tear excepted, and shall
+    promptly repair or replace any material Collateral that becomes damaged or
+    destroyed.
+
+5.2 Insurance. Each Grantor shall maintain insurance on the Collateral in
+    accordance with Section 6.5 of the Credit Agreement, with the
+    Administrative Agent named as additional insured and loss payee.
+
+5.3 Notice of Adverse Events. Each Grantor shall give the Administrative Agent
+    prompt written notice (and in any event within five (5) Business Days) of
+    any (a) loss, theft, or damage to Collateral with a value in excess of
+    Five Hundred Thousand Dollars ($500,000); (b) judicial seizure or
+    forfeiture proceeding affecting the Collateral; or (c) change in such
+    Grantor's chief executive office, name, or jurisdiction of organization.
+
+SECTION 6. REMEDIES UPON DEFAULT.
+
+Upon the occurrence and during the continuance of an Event of Default, the
+Administrative Agent may, without further notice (except as required by law):
+
+   (a) declare all Obligations immediately due and payable;
+   (b) take possession of the Collateral and exercise all rights of a secured
+       party under the UCC, including the right to sell, lease, or otherwise
+       dispose of the Collateral at public or private sale;
+   (c) collect, receive, and apply all Proceeds of the Collateral to the
+       Obligations in such order as the Administrative Agent determines; and
+   (d) exercise all other rights and remedies available at law or in equity.
+
+SECTION 7. INDEMNIFICATION.
+
+Each Grantor agrees to indemnify and hold harmless the Administrative Agent and
+each Secured Party from and against all losses, claims, damages, liabilities,
+and expenses (including reasonable attorneys' fees) arising out of or related
+to the Collateral or this Security Agreement, except to the extent caused by
+the gross negligence or willful misconduct of the indemnified party.
+
+SECTION 8. GOVERNING LAW; JURISDICTION.
+
+This Security Agreement shall be governed by New York law. The parties consent
+to the exclusive jurisdiction of the courts located in New York County.
+
+IN WITNESS WHEREOF, the Grantors have executed this Security Agreement as of
+the date first written above.
+
+MARINER LOGISTICS GROUP LLC                MARINER COASTAL OPERATIONS LLC
+
+By: ___________________________            By: ___________________________
+   Name: Imani Okafor                          Name: Imani Okafor
+   Title: Chief Executive Officer              Title: President
+
+ACKNOWLEDGED:
+LINDEN TRUST NATIONAL BANK, N.A., as Administrative Agent
+
+By: ___________________________
+   Name: Hiroshi Brenner
+   Title: Senior Vice President

@@ -290,3 +290,20 @@ Also enabled in FR-VH-01: `fieldPivot` consumption for the Donut case in `ChartR
 | Data services | Client-side aggregation | Server-side aggregation via BFF API for large datasets |
 | Visual type presets | ReportCardMetric as fallthrough | Additional domain presets via same pattern |
 | Chart components | Internal to VisualHost | Extract to `@spaarke/ui-components` for Custom Page reuse |
+
+---
+
+## v1.4.4 — Generic Chart Legend Schema
+
+The Donut chart's legend (each segment's color + category + value) is configurable via `sprk_optionsjson` per the schema in [`VISUALHOST-SETUP-GUIDE.md` §"Chart Legend Configuration"](../guides/VISUALHOST-SETUP-GUIDE.md#chart-legend-configuration-v144).
+
+**Design notes**:
+- The `legend` schema lives on `ICardConfig` (not on a Donut-specific config) so future visual types (BarChart, HSBar, etc.) can opt in by reading the same field. No schema migration is needed when a new visual adopts it.
+- Legacy `donutLayout: "matrixRight"` + `showBreakdownRows: true` automatically derive `legend: { placement: "right", orientation: "rows", itemFormat: "swatchLabelValue", valueAlignment: "near", swatchSize: 10 }` in `DonutChart.resolveLegendConfig()` — every pre-v1.4.4 chart def renders identically (NFR-05).
+- `cardConfigResolver.parseLegend()` whitelists every subfield independently; unknown values are silently dropped so a malformed legend never breaks rendering.
+
+## v1.4.4 — Chart-Def-Driven AI Summary Field
+
+The toolbar's AI sparkle icon is enabled by setting `aiSummaryField` in `sprk_optionsjson` to a Dataverse column logical name on the parent entity (e.g., `sprk_performancesummary` on `sprk_matter`). The icon's popover lazily fetches the column value via `context.webAPI.retrieveRecord`. See [`VISUALHOST-SETUP-GUIDE.md` §"AI Summary Field Configuration"](../guides/VISUALHOST-SETUP-GUIDE.md#ai-summary-field-configuration-v144) for authoring guidance.
+
+**Why chart-def-owned (not PCF-property-only)**: The summary column is conceptually a property of the *chart definition* — the same chart placed on multiple forms should always read from the same column. PCF-property override is intentionally not yet exposed; if per-placement override becomes a real need, an `aiSummaryField` PCF property can be added with priority over the chart-def value.

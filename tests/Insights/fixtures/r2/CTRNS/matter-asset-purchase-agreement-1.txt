@@ -1,0 +1,156 @@
+ASSET PURCHASE AGREEMENT
+
+THIS ASSET PURCHASE AGREEMENT (this "Agreement") is made and entered into as of
+February 5, 2026 (the "Effective Date"), by and among:
+
+  (i)   STERLING ARC MEDICAL INSTRUMENTS, INC., a Delaware corporation with its
+        principal place of business at 770 Innovation Boulevard, Wilmington, DE
+        19801 ("Seller");
+
+  (ii)  CRESCENT DELTA SURGICAL HOLDINGS LLC, a Nevada limited liability company
+        with its principal place of business at 1100 Sandhill Drive, Reno, NV
+        89509 ("Buyer"); and
+
+  (iii) HENRIK STERLING, an individual residing in the Commonwealth of
+        Massachusetts (the "Founder Shareholder").
+
+Seller, Buyer, and the Founder Shareholder are each a "Party" and collectively
+the "Parties."
+
+R E C I T A L S
+
+WHEREAS, Seller designs, manufactures, and distributes proprietary minimally
+invasive surgical instruments under the "ArcCutter" product line (the
+"Business");
+
+WHEREAS, Seller desires to sell, and Buyer desires to purchase, substantially
+all of the assets of the Business on the terms and conditions set forth herein;
+
+WHEREAS, the Founder Shareholder owns of record 100% of the issued and
+outstanding capital stock of Seller and is joining this Agreement to make the
+specific representations and covenants set forth in Article VII;
+
+NOW, THEREFORE, in consideration of the mutual covenants and agreements set
+forth herein, and for other good and valuable consideration, the receipt and
+sufficiency of which are hereby acknowledged, the Parties agree as follows:
+
+ARTICLE I — PURCHASE AND SALE
+
+1.1 Purchase and Sale of Assets. Subject to the terms hereof, at the Closing
+    Seller shall sell, convey, assign, transfer, and deliver to Buyer, and
+    Buyer shall purchase from Seller, free and clear of all Liens (other than
+    Permitted Liens), all right, title, and interest of Seller in and to the
+    Purchased Assets, including without limitation: (a) all Intellectual
+    Property listed on Schedule 1.1(a) (the "Transferred IP"), (b) all
+    inventory and work-in-process, (c) all accounts receivable, (d) the
+    Assumed Contracts listed on Schedule 1.1(d), and (e) the Transferred
+    Equipment listed on Schedule 1.1(e).
+
+1.2 Excluded Assets. The Purchased Assets do NOT include the Excluded Assets
+    listed on Schedule 1.2, including Seller's cash, cash equivalents, and the
+    Excluded Real Property at 770 Innovation Boulevard.
+
+1.3 Assumed Liabilities; Excluded Liabilities. At Closing, Buyer shall assume
+    only the Assumed Liabilities listed on Schedule 1.3. All other liabilities,
+    known or unknown, fixed or contingent, are Excluded Liabilities and shall
+    remain the sole responsibility of Seller.
+
+ARTICLE II — PURCHASE PRICE; DEAL STRUCTURE
+
+2.1 Purchase Price. The aggregate purchase price for the Purchased Assets shall
+    be SIXTY-EIGHT MILLION SEVEN HUNDRED THOUSAND DOLLARS ($68,700,000) (the
+    "Purchase Price"), payable as follows at Closing:
+
+      (a) Sixty-One Million Two Hundred Thousand Dollars ($61,200,000) in cash;
+      (b) A non-interest-bearing Promissory Note in the principal amount of
+          Four Million Five Hundred Thousand Dollars ($4,500,000), maturing
+          eighteen (18) months after Closing; and
+      (c) Three Million Dollars ($3,000,000) deposited into the Indemnity
+          Escrow (the "Indemnity Escrow Amount").
+
+2.2 Earn-Out. As additional consideration, Seller shall be entitled to receive
+    an earn-out payment of up to Five Million Dollars ($5,000,000) (the
+    "Earn-Out Amount") based on the ArcCutter product line achieving net
+    revenues of at least Eighteen Million Dollars ($18,000,000) for the
+    twelve-month period ending on the first anniversary of Closing, as set
+    forth in Schedule 2.2.
+
+2.3 Working Capital Adjustment. The Purchase Price shall be adjusted at and
+    after Closing for actual versus target Net Working Capital, with the
+    target set at Four Million One Hundred Thousand Dollars ($4,100,000) and
+    the adjustment determined in accordance with Schedule 2.3.
+
+ARTICLE III — CLOSING
+
+3.1 Closing Date. The Closing shall take place electronically on the second
+    business day following the satisfaction or waiver of all conditions set
+    forth in Article VIII (the "Closing Date").
+
+ARTICLE IV — REPRESENTATIONS AND WARRANTIES OF SELLER (summary)
+
+Sections 4.1–4.22 cover organization, authority, no-conflict, capitalization,
+financial statements (including audited 2024 and 2025 statements), tax matters,
+real property (none Transferred), intellectual property (with detailed
+representations re: the Transferred IP), material contracts, employee matters,
+benefit plans, ERISA matters, environmental matters, regulatory compliance
+(including FDA 510(k) clearance for the ArcCutter), and absence of changes.
+
+ARTICLE V — REPRESENTATIONS AND WARRANTIES OF BUYER
+
+Customary buyer representations regarding organization, authority, sufficient
+funds (with executed equity commitment from Crescent Delta's parent fund), and
+absence of disqualifying litigation.
+
+ARTICLE VIII — CONDITIONS PRECEDENT (summary)
+
+Customary mutual conditions including HSR Act expiration without challenge,
+delivery of the executed Transition Services Agreement, payoff letters for all
+Indebtedness, and delivery of estoppel certificates from the top ten customers
+listed on Schedule 8.1(g).
+
+ARTICLE IX — INDEMNIFICATION
+
+9.1 Survival. Representations and warranties survive Closing for eighteen (18)
+    months, except fundamental representations which survive for the
+    applicable statute of limitations and tax representations which survive
+    for seven (7) years.
+
+9.2 Indemnity Cap. Seller's aggregate indemnification obligation (other than
+    for fundamental and fraud-based claims) is capped at Ten Million Dollars
+    ($10,000,000), of which the first Three Million Dollars ($3,000,000) is
+    payable solely from the Indemnity Escrow Amount.
+
+9.3 Basket. No claim may be asserted until aggregate Losses exceed Three
+    Hundred Forty Thousand Dollars ($340,000) (the "Basket"), after which
+    claims are recoverable from dollar one.
+
+ARTICLE XI — MISCELLANEOUS
+
+11.1 Governing Law. This Agreement shall be governed by Delaware law without
+     regard to its conflict-of-laws principles.
+
+11.2 Venue. The Parties consent to exclusive jurisdiction of the Delaware
+     Court of Chancery.
+
+11.3 Entire Agreement. This Agreement, together with the Schedules and
+     Exhibits, constitutes the entire agreement among the Parties.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective
+Date.
+
+SELLER: STERLING ARC MEDICAL INSTRUMENTS, INC.
+
+By: ___________________________
+Name: Henrik Sterling
+Title: Chief Executive Officer
+
+BUYER: CRESCENT DELTA SURGICAL HOLDINGS LLC
+
+By: ___________________________
+Name: Yolanda Marchetti
+Title: Managing Director
+
+FOUNDER SHAREHOLDER:
+
+___________________________
+Henrik Sterling, in his individual capacity

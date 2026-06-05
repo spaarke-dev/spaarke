@@ -1,0 +1,58 @@
+<task id="003" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>B3 — Deploy-Playbook.ps1 action-wiring lint check (prevents future regressions)</title>
+    <status>completed</status>
+    <completed>2026-06-02</completed>
+    <wave>B</wave>
+    <estimated-effort>1h</estimated-effort>
+    <tags>scripts, powershell, lint, deploy-playbook, regression-prevention</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>B3</wave-item>
+  </metadata>
+
+  <prompt>
+    **Re-scoped 2026-06-02 per D-01 + owner direction**: task expanded beyond original "lint check only". Per D-01 §2.4–§2.5, the deployed predict-matter-cost@v1 nodes have BOTH missing sprk_actionid bindings AND wiped sprk_configjson contents. This task's lint check now MUST verify all three: (1) every node JSON has actionCode, (2) deployed sprk_actionid is populated post-deploy, (3) deployed sprk_configjson matches the JSON spec (catches canvas Designer clobbering). See D-01 §4 path-b re-scope. Original "action-wiring lint" framing below is preserved as the foundation.
+
+    Add a lint check to Deploy-Playbook.ps1 that rejects any playbook JSON whose nodes lack action-code references. This prevents the regression that surfaced in r1 deployment (nodes created without sprk_isactive=true; nodes created without action wiring → engine builds "0 active nodes" execution graphs → defensive scaffold decline at the orchestrator). PATH-B EXTENSION: also lint configjson preservation per D-01.
+  </prompt>
+
+  <role>PowerShell engineer + Spaarke deployment-script maintainer.</role>
+
+  <goal>
+    Deploy-Playbook.ps1 reads the playbook JSON, enumerates nodes, and fails fast with a clear error message if any node lacks an actionCode (or equivalent). The check runs BEFORE any Dataverse writes. Lint passes for the updated predict-matter-cost.playbook.json (from task 002); a deliberately broken JSON (action ref removed) fails with a clear error.
+  </prompt>
+
+  <inputs>
+    <file purpose="script">scripts/Deploy-Playbook.ps1</file>
+    <file purpose="r1-playbook">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json (updated by task 002)</file>
+    <file purpose="r1-related-fix">commit bb099d33 — already added sprk_isactive=true enforcement; build on that pattern</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="r1-pattern">Match the style of the existing sprk_isactive enforcement (commit bb099d33) — explicit, clearly named function, runs pre-Dataverse</constraint>
+    <constraint source="script-aware">Update scripts/README.md registry entry for Deploy-Playbook.ps1 to mention the new lint behavior</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read existing script">Identify where node validation happens; where to insert the lint check (recommend: just after JSON load, before any Dataverse calls)</step>
+    <step order="2" name="Implement lint function">e.g., Test-PlaybookNodeActionWiring — iterates nodes, returns array of node names missing actionCode</step>
+    <step order="3" name="Wire into main flow">Call lint after JSON load; if errors, throw with clear message listing the offending nodes</step>
+    <step order="4" name="Test with valid JSON">Run script with task-002 output → lint passes</step>
+    <step order="5" name="Test with deliberately broken JSON">Remove one actionCode → lint fails with informative message</step>
+    <step order="6" name="Update scripts/README.md">Note the new lint behavior</step>
+  </steps>
+
+  <outputs>
+    <output type="script">scripts/Deploy-Playbook.ps1 (modified)</output>
+    <output type="docs">scripts/README.md (registry entry updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Lint passes for the updated predict-matter-cost.playbook.json</criterion>
+    <criterion testable="true">Lint fails (with clear node-name list) for a JSON where actionCode is missing on any node</criterion>
+    <criterion testable="true">Lint runs BEFORE any Dataverse writes (verified by tracing script flow)</criterion>
+    <criterion testable="true">scripts/README.md updated</criterion>
+  </acceptance-criteria>
+</task>

@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat.Tools;
 public class DataverseQueryToolsTests
 {
     private const string TestEnvironmentUrl = "https://spaarkedev1.crm.dynamics.com";
-    private const string TestBearerToken    = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test.token";
+    private const string TestBearerToken = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test.token";
 
     // === [Description] attribute tests ===
 
@@ -40,7 +40,7 @@ public class DataverseQueryToolsTests
         method.Should().NotBeNull();
 
         var param = method!.GetParameters().First(p => p.Name == "entityType");
-        var desc  = param.GetCustomAttribute<DescriptionAttribute>();
+        var desc = param.GetCustomAttribute<DescriptionAttribute>();
 
         desc.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on key parameters");
         desc!.Description.Should().Contain("sprk_matter");
@@ -53,7 +53,7 @@ public class DataverseQueryToolsTests
         method.Should().NotBeNull();
 
         var param = method!.GetParameters().First(p => p.Name == "filter");
-        var desc  = param.GetCustomAttribute<DescriptionAttribute>();
+        var desc = param.GetCustomAttribute<DescriptionAttribute>();
 
         desc.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on filter parameter");
         desc!.Description.Should().Contain("OData");
@@ -66,7 +66,7 @@ public class DataverseQueryToolsTests
         method.Should().NotBeNull();
 
         var param = method!.GetParameters().First(p => p.Name == "entityType");
-        var desc  = param.GetCustomAttribute<DescriptionAttribute>();
+        var desc = param.GetCustomAttribute<DescriptionAttribute>();
 
         desc.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on key parameters");
         desc!.Description.Should().Contain("sprk_matter");
@@ -79,7 +79,7 @@ public class DataverseQueryToolsTests
         method.Should().NotBeNull();
 
         var param = method!.GetParameters().First(p => p.Name == "identifier");
-        var desc  = param.GetCustomAttribute<DescriptionAttribute>();
+        var desc = param.GetCustomAttribute<DescriptionAttribute>();
 
         desc.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on identifier parameter");
         desc!.Description.Should().Contain("GUID");
@@ -335,7 +335,7 @@ public class DataverseQueryToolsTests
     public async Task GetEntityDetailAsync_ValidRecord_ReturnsFullFieldMap()
     {
         // Arrange
-        var id   = Guid.NewGuid();
+        var id = Guid.NewGuid();
         var json = $$"""
             {
               "sprk_matterid": "{{id}}",
@@ -363,7 +363,7 @@ public class DataverseQueryToolsTests
     public async Task GetEntityDetailAsync_ODataAnnotations_AreExcludedFromOutput()
     {
         // Arrange
-        var id   = Guid.NewGuid();
+        var id = Guid.NewGuid();
         var json = $$"""
             {
               "contactid": "{{id}}",
@@ -486,7 +486,7 @@ public class DataverseQueryToolsTests
     public async Task GetEntityDetailAsync_ForwardsCallerBearerToken_ToDataverseRequest()
     {
         // Arrange
-        var id   = Guid.NewGuid();
+        var id = Guid.NewGuid();
         var json = $"{{ \"accountid\": \"{id}\", \"name\": \"Acme\" }}";
         var (sut, handler) = BuildSut(HttpStatusCode.OK, json);
 
@@ -503,7 +503,7 @@ public class DataverseQueryToolsTests
     public void Constructor_ThrowsArgumentNullException_WhenHttpClientIsNull()
     {
         var options = Options.Create(new DataverseOptions { EnvironmentUrl = TestEnvironmentUrl, ClientId = "x", ClientSecret = "x", TenantId = "x" });
-        var action  = () => new DataverseQueryTools(null!, options, null, NullLogger<DataverseQueryTools>.Instance);
+        var action = () => new DataverseQueryTools(null!, options, null, NullLogger<DataverseQueryTools>.Instance);
         action.Should().Throw<ArgumentNullException>().WithParameterName("httpClient");
     }
 
@@ -518,7 +518,7 @@ public class DataverseQueryToolsTests
     public void Constructor_ThrowsArgumentNullException_WhenLoggerIsNull()
     {
         var options = Options.Create(new DataverseOptions { EnvironmentUrl = TestEnvironmentUrl, ClientId = "x", ClientSecret = "x", TenantId = "x" });
-        var action  = () => new DataverseQueryTools(new HttpClient(), options, null, null!);
+        var action = () => new DataverseQueryTools(new HttpClient(), options, null, null!);
         action.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
@@ -532,17 +532,17 @@ public class DataverseQueryToolsTests
         HttpStatusCode statusCode,
         string responseBody)
     {
-        var handler    = new FakeHttpHandler(statusCode, responseBody);
+        var handler = new FakeHttpHandler(statusCode, responseBody);
         var httpClient = new HttpClient(handler);
-        var options    = Options.Create(new DataverseOptions
+        var options = Options.Create(new DataverseOptions
         {
             EnvironmentUrl = TestEnvironmentUrl,
-            ClientId       = "test-client-id",
-            ClientSecret   = "test-secret",
-            TenantId       = "test-tenant"
+            ClientId = "test-client-id",
+            ClientSecret = "test-secret",
+            TenantId = "test-tenant"
         });
         var httpContext = BuildHttpContext(TestBearerToken);
-        var sut        = new DataverseQueryTools(httpClient, options, httpContext, NullLogger<DataverseQueryTools>.Instance);
+        var sut = new DataverseQueryTools(httpClient, options, httpContext, NullLogger<DataverseQueryTools>.Instance);
         return (sut, handler);
     }
 
@@ -551,14 +551,14 @@ public class DataverseQueryToolsTests
     /// </summary>
     private DataverseQueryTools BuildSutNoContext()
     {
-        var handler    = new FakeHttpHandler(HttpStatusCode.OK, "{}");
+        var handler = new FakeHttpHandler(HttpStatusCode.OK, "{}");
         var httpClient = new HttpClient(handler);
-        var options    = Options.Create(new DataverseOptions
+        var options = Options.Create(new DataverseOptions
         {
             EnvironmentUrl = TestEnvironmentUrl,
-            ClientId       = "test-client-id",
-            ClientSecret   = "test-secret",
-            TenantId       = "test-tenant"
+            ClientId = "test-client-id",
+            ClientSecret = "test-secret",
+            TenantId = "test-tenant"
         });
         return new DataverseQueryTools(httpClient, options, httpContext: null, NullLogger<DataverseQueryTools>.Instance);
     }
@@ -572,20 +572,20 @@ public class DataverseQueryToolsTests
 
     private static string BuildODataCollectionResponse(string entityType, int count)
     {
-        var idField   = entityType switch
+        var idField = entityType switch
         {
-            "sprk_matter"   => "sprk_matterid",
-            "sprk_project"  => "sprk_projectid",
-            "contact"       => "contactid",
-            "account"       => "accountid",
+            "sprk_matter" => "sprk_matterid",
+            "sprk_project" => "sprk_projectid",
+            "contact" => "contactid",
+            "account" => "accountid",
             "sprk_document" => "sprk_documentid",
-            _               => "id"
+            _ => "id"
         };
         var nameField = entityType switch
         {
             "contact" => "fullname",
             "account" => "name",
-            _         => "sprk_name"
+            _ => "sprk_name"
         };
 
         var records = Enumerable.Range(1, count).Select(i =>
@@ -601,13 +601,13 @@ public class DataverseQueryToolsTests
         private readonly HttpStatusCode _statusCode;
         private readonly string _responseBody;
 
-        public string LastRequestUri  { get; private set; } = string.Empty;
+        public string LastRequestUri { get; private set; } = string.Empty;
         public string LastAuthorizationHeader { get; private set; } = string.Empty;
-        public int    CallCount       { get; private set; }
+        public int CallCount { get; private set; }
 
         public FakeHttpHandler(HttpStatusCode statusCode, string responseBody)
         {
-            _statusCode   = statusCode;
+            _statusCode = statusCode;
             _responseBody = responseBody;
         }
 
@@ -616,8 +616,8 @@ public class DataverseQueryToolsTests
             CancellationToken cancellationToken)
         {
             CallCount++;
-            LastRequestUri           = request.RequestUri?.ToString() ?? string.Empty;
-            LastAuthorizationHeader  = request.Headers.Authorization?.ToString() ?? string.Empty;
+            LastRequestUri = request.RequestUri?.ToString() ?? string.Empty;
+            LastAuthorizationHeader = request.Headers.Authorization?.ToString() ?? string.Empty;
 
             var response = new HttpResponseMessage(_statusCode)
             {

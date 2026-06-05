@@ -1,0 +1,124 @@
+RESPONSE TO NON-FINAL OFFICE ACTION
+
+Application No.:    18/501,772
+Applicant:          Tessera Photonic Networks, Inc.
+Filing Date:        June 18, 2024
+Title:              METHOD FOR LOW-LOSS PHOTONIC ROUTING IN SILICON-NITRIDE
+                    WAVEGUIDE ARRAYS USING ASYMMETRIC RING RESONATORS
+Examiner:           Yuki Tanaka-Williams
+Art Unit:           2879
+Confirmation No.:   3041
+Office Action Mailed: March 24, 2026
+Response Due:       June 24, 2026
+Response Submitted: June 9, 2026
+Attorney Docket:    TPN-2024-0011-US1
+
+Submitted via EFS-Web by:
+   Greene Marlow Patent Group LLP
+   Patrick Devanney, Reg. No. 71,883
+   Lead Counsel for Applicant
+
+REMARKS
+
+The Applicant respectfully submits this Response to the Non-Final Office Action
+mailed March 24, 2026. Pursuant to 37 CFR 1.111, this Response addresses each
+of the Examiner's rejections and objections seriatim. Claims 7, 20–24, and 26
+have been amended to address the § 112(b) indefiniteness rejections. Claim 25
+has been amended to recite a tangible computer-readable medium, addressing the
+§ 101 rejection. Claims 1 and 14 have been amended to recite limitations
+distinguishing the present invention from the combined teachings of Park and
+Rajagopalan. No new matter has been added; support for the amendments is found
+in the originally filed specification at the locations identified below.
+
+I. AMENDMENTS TO THE CLAIMS
+
+   Claim 1 (currently amended):
+      A photonic routing structure for low-insertion-loss wavelength-selective
+      routing, comprising: a silicon-nitride waveguide array; and at least one
+      asymmetric ring resonator coupled to the waveguide array, wherein the
+      asymmetric ring resonator has a first coupling region and a second
+      coupling region, the first and second coupling regions having a
+      coupling-region asymmetry ratio of between 1.4 and 2.6, *AND WHEREIN
+      THE ASYMMETRIC RING RESONATOR FURTHER COMPRISES AN INTRA-CAVITY
+      DISPERSION-COMPENSATION ELEMENT POSITIONED BETWEEN THE FIRST AND SECOND
+      COUPLING REGIONS AND CONFIGURED TO REDUCE GROUP-DELAY DISPERSION WITHIN
+      THE RING TO LESS THAN 5 ps/nm AT A WAVELENGTH OF 1550 nm*.
+
+   (Words in CAPITALS are additions; no deletions made.)
+
+   Support for the added limitations is found at specification paragraphs
+   [0089]–[0094] and Figs. 6A–6C as originally filed.
+
+   Claims 7, 20–24, 25, and 26 are amended as set forth in the marked-up claim
+   listing attached as Appendix A.
+
+II. ARGUMENTS RESPONDING TO § 103 REJECTIONS
+
+   A. The Park-Rajagopalan combination does not teach or suggest the
+      dispersion-compensation element added to amended claim 1.
+
+      Neither Park nor Rajagopalan discloses an intra-cavity dispersion
+      compensation element positioned between the coupling regions of an
+      asymmetric ring resonator. Park is silent regarding dispersion
+      compensation. Rajagopalan, while teaching asymmetric coupling for
+      wavelength selectivity, expressly relies on the natural dispersion
+      characteristics of the ring (Rajagopalan, paragraph [0079]: "additional
+      dispersion compensation is unnecessary for the disclosed wavelength
+      ranges"). One of ordinary skill, reading Rajagopalan, would have been
+      taught AWAY from incorporating an additional dispersion-compensation
+      element.
+
+   B. The combination lacks a reasonable expectation of success under
+      KSR-style obviousness analysis.
+
+      Even if one were to combine Park and Rajagopalan as suggested by the
+      Examiner, the resulting structure would not provide the insertion-loss
+      reduction required for the claimed application range. The Singh
+      reference cited by the Examiner at item G.4 in fact demonstrates that
+      asymmetric ring resonators without intra-cavity dispersion compensation
+      exhibit insertion losses of 0.45 dB or greater at the relevant operating
+      wavelengths (Singh, Table II) — well above the 0.18 dB threshold
+      Applicant teaches as enabling for low-loss routing applications
+      (specification, paragraph [0024]).
+
+III. ARGUMENTS RESPONDING TO § 112(b) REJECTIONS
+
+   Amended claim 7 now recites "a coupling profile having a spatial period of
+   200 nm and a period-to-period variance of less than 3%," providing
+   quantitative bounds in compliance with 35 U.S.C. § 112(b).
+
+IV. ARGUMENT RESPONDING TO § 101 REJECTION
+
+   Amended claim 25 now recites "a non-transitory computer-readable storage
+   medium storing instructions executable by a processor to perform the
+   method of claim 1." This amendment places claim 25 squarely within the
+   "manufacture" statutory category and complies with Examiner guidance under
+   MPEP § 2106 regarding tangible-medium claims.
+
+V. CONCLUSION
+
+   Applicant respectfully submits that all rejections and objections in the
+   Office Action have been overcome by the foregoing amendments and arguments.
+   Reconsideration and allowance of all pending claims (1–27) is respectfully
+   requested.
+
+   Applicant invites the Examiner to schedule an Examiner Interview at her
+   convenience to discuss any remaining issues.
+
+   Respectfully submitted,
+
+   /Patrick Devanney/
+   Patrick Devanney, Reg. No. 71,883
+   Greene Marlow Patent Group LLP
+   500 Boylston Street, Suite 1800
+   Boston, MA 02116
+   (617) 555-0192
+   pdevanney@greenemarlow.example
+   Lead Counsel for Applicant Tessera Photonic Networks, Inc.
+
+   Date: June 9, 2026
+
+ATTACHMENTS:
+   Appendix A — Marked-up Claim Listing
+   Appendix B — Amended Claims (Clean Copy)
+   Appendix C — Updated Information Disclosure Statement

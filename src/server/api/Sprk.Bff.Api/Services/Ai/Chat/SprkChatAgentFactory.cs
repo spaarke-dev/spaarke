@@ -1,20 +1,20 @@
 using Azure.Search.Documents.Indexes;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
-using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
-using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Services.Ai.Foundry;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
+using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -37,8 +37,15 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///
 /// Constraint (spec): Factory supports context switching — callers create a new agent
 /// with a new context but attach the existing chat history from the session.
+///
+/// Unseal note (task 011 Phase 1b Tier 3, D-09 §2 B2, 2026-06-01): class was `sealed`;
+/// unsealed to permit <see cref="NullSprkChatAgentFactory"/> subclassing for the
+/// kill-switch-OFF (compound AI disabled) DI state. Per ADR-010 (DI minimalism) the
+/// concrete-class Null-Object is preferred over introducing an interface. Production
+/// constructor and public methods unchanged; only the `sealed` keyword was removed
+/// and the 4 publicly-overridable methods were marked `virtual`.
 /// </summary>
-public sealed class SprkChatAgentFactory
+public class SprkChatAgentFactory
 {
     private readonly IChatClient _chatClient;
     private readonly IChatClient _rawChatClient;
@@ -64,6 +71,26 @@ public sealed class SprkChatAgentFactory
         _serviceProvider = serviceProvider;
         _logger = logger;
         _capabilityRouter = capabilityRouter;
+    }
+
+    /// <summary>
+    /// Protected constructor used only by <see cref="NullSprkChatAgentFactory"/> when the
+    /// compound AI kill switch is OFF. The production singleton always uses the public ctor.
+    /// </summary>
+    /// <remarks>
+    /// Task 011 Phase 1b Tier 3 (D-09 §2 B2, 2026-06-01). Per D-09 §8 Risks the cleanest
+    /// path to support a Null-Object subclass without registering AI dependencies is a
+    /// protected constructor that bypasses the AI-dep chain entirely. Public methods are
+    /// `virtual` so the Null subclass can override every entry point with a feature-disabled
+    /// throw — no base-class behavior runs in the kill-switch-OFF DI state.
+    /// </remarks>
+    protected SprkChatAgentFactory(ILogger<SprkChatAgentFactory> logger)
+    {
+        _chatClient = null!;
+        _rawChatClient = null!;
+        _serviceProvider = null!;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _capabilityRouter = null;
     }
 
     /// <summary>
@@ -120,7 +147,7 @@ public sealed class SprkChatAgentFactory
     /// The returned agent is wrapped with the middleware pipeline (AIPL-057, AIPU-072):
     /// ContentSafety (innermost) -> CostControl -> Telemetry -> Routing (outermost).
     /// </returns>
-    public async Task<ISprkChatAgent> CreateAgentAsync(
+    public virtual async Task<ISprkChatAgent> CreateAgentAsync(
         string sessionId,
         string documentId,
         Guid? playbookId,
@@ -329,7 +356,7 @@ public sealed class SprkChatAgentFactory
         // Otherwise fall back to the full playbook capability set (backward compatible).
         var effectiveCapabilities = routedCapabilities ?? capabilities;
         var tools = ResolveTools(
-            scope.ServiceProvider, tenantId, context.KnowledgeScope, effectiveCapabilities,
+            scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, effectiveCapabilities,
             playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
             routingResult);
 
@@ -440,7 +467,7 @@ public sealed class SprkChatAgentFactory
     /// <param name="tenantId">Tenant ID for cache key scoping (ADR-014).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A configured <see cref="PlaybookDispatcher"/> instance.</returns>
-    public async Task<PlaybookDispatcher> CreatePlaybookDispatcherAsync(
+    public virtual async Task<PlaybookDispatcher> CreatePlaybookDispatcherAsync(
         string tenantId,
         CancellationToken cancellationToken = default)
     {
@@ -479,7 +506,7 @@ public sealed class SprkChatAgentFactory
     ///   - <see cref="IDistributedCache"/> (singleton) — for Redis caching (ADR-009)
     /// </summary>
     /// <returns>A configured <see cref="DynamicCommandResolver"/> instance.</returns>
-    public DynamicCommandResolver CreateCommandResolver()
+    public virtual DynamicCommandResolver CreateCommandResolver()
     {
         var entityService = _serviceProvider.GetRequiredService<IGenericEntityService>();
         var cache = _serviceProvider.GetRequiredService<IDistributedCache>();
@@ -502,7 +529,7 @@ public sealed class SprkChatAgentFactory
     ///   - <see cref="DocxExportService"/> (resolved from DI via <see cref="IExportService"/>)
     /// </summary>
     /// <returns>A configured <see cref="PlaybookOutputHandler"/> instance.</returns>
-    public PlaybookOutputHandler CreatePlaybookOutputHandler()
+    public virtual PlaybookOutputHandler CreatePlaybookOutputHandler()
     {
         using var scope = _serviceProvider.CreateScope();
         var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
@@ -577,6 +604,7 @@ public sealed class SprkChatAgentFactory
     private IReadOnlyList<AIFunction> ResolveTools(
         IServiceProvider scopedProvider,
         string tenantId,
+        string sessionId,
         ChatKnowledgeScope? knowledgeScope,
         IReadOnlySet<string> capabilities,
         Guid playbookId,
@@ -803,6 +831,130 @@ public sealed class SprkChatAgentFactory
             {
                 _logger.LogWarning(ex, "Failed to resolve AnalysisExecutionTools — skipping");
                 failedTools.Add(nameof(AnalysisExecutionTools));
+            }
+        }
+
+        // --- InvokeSummarizePlaybookTool (R5 D2-05 / task 015) ---
+        // Gated behind the existing "summarize" capability (PlaybookCapabilities.Summarize).
+        // Reuses the existing capability constant (no new feature flag, no new capability key)
+        // per R5 CLAUDE.md §3.2 + ADR-018. The tool DELEGATES to SessionSummarizeOrchestrator
+        // (task 012 — registered Scoped inside AnalysisServicesModule.AddAnalysisOrchestrationServices)
+        // — both this agent-tool path and task 014's direct endpoint converge on the SAME
+        // SummarizeSessionFilesAsync method (FR-01 + FR-08 + SC-08).
+        //
+        // Tool routing scope (NFR-12 / UR-01): the tool description text is the LOAD-BEARING
+        // artifact for correct LLM routing between this Summarize tool and the upcoming
+        // insights.query tool (task 024). See InvokeSummarizePlaybookTool.ToolDescription.
+        //
+        // ADR-028: no token snapshot — the orchestrator uses its existing scoped DI
+        // resolution; fresh tokens flow through RAG / OpenAI / Dataverse clients per call.
+        // No HttpContext dependency (Summarize operates over pre-indexed session content
+        // — task 003 — not SPE OBO-authenticated file download).
+        //
+        // Factory-instantiated (ADR-010): no new top-level DI registration; orchestrator
+        // already registered via AnalysisServicesModule (task 012 evidence note).
+        if (capabilities.Contains(PlaybookCapabilities.Summarize))
+        {
+            attempted++;
+            try
+            {
+                var sessionSummarizeOrchestrator =
+                    scopedProvider.GetService<SessionSummarizeOrchestrator>();
+                if (sessionSummarizeOrchestrator != null)
+                {
+                    var loggerFactory =
+                        scopedProvider.GetRequiredService<ILoggerFactory>();
+                    var toolLogger =
+                        loggerFactory.CreateLogger<InvokeSummarizePlaybookTool>();
+
+                    var correlationId = httpContext?.TraceIdentifier;
+
+                    var invokeSummarizeTool = new InvokeSummarizePlaybookTool(
+                        sessionSummarizeOrchestrator,
+                        tenantId,
+                        sessionId,
+                        correlationId,
+                        sseWriter,
+                        toolLogger);
+                    tools.AddRange(invokeSummarizeTool.GetTools());
+                    resolved++;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "SessionSummarizeOrchestrator not available; " +
+                        "InvokeSummarizePlaybookTool will not be registered. Verify " +
+                        "AnalysisServicesModule.AddAnalysisOrchestrationServices is " +
+                        "enabled (Analysis:Enabled and DocumentIntelligence:Enabled).");
+                    failedTools.Add(nameof(InvokeSummarizePlaybookTool));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to resolve InvokeSummarizePlaybookTool — skipping");
+                failedTools.Add(nameof(InvokeSummarizePlaybookTool));
+            }
+        }
+
+        // --- InvokeInsightsQueryTool (R5 D2-14 / task 024) ---
+        // Gated behind the InsightsQuery capability (PlaybookCapabilities.InsightsQuery).
+        // Reuses the existing capability gate framework (no new feature flag per R5
+        // CLAUDE.md §3.2 + ADR-018; kill-switch coverage inherits via the Insights
+        // endpoint's own 503 responses for ai.insights.disabled / ai.rag.disabled /
+        // ai.intent-classification.disabled).
+        //
+        // Zone B HTTP consumer (R5 CLAUDE.md §3.5 / §10 + refined ADR-013 §3.5): the
+        // tool consumes POST /api/insights/assistant/query via the typed HttpClient
+        // registered in AnalysisServicesModule.AddAnalysisOrchestrationServices. The
+        // tool does NOT inject Insights internals (IInsightsAi, InsightsOrchestrator,
+        // Models.Insights.*) — same-process HTTP is the canonical Zone B pattern.
+        //
+        // Tool routing scope (NFR-12 / UR-01): the tool description text is the
+        // LOAD-BEARING artifact for correct LLM routing between this insights.query
+        // tool and the invoke_summarize_playbook tool (task 015). See
+        // InvokeInsightsQueryTool.ToolDescription — entity-scoped analytical questions
+        // (matter/project/invoice) vs session-uploaded files summarization.
+        //
+        // ADR-028: no token snapshot — the tool reads HttpContext.Request.Headers
+        // Authorization FRESH per outbound call via IHttpContextAccessor (NEVER captured
+        // in constructor or closure).
+        //
+        // Factory-instantiated (ADR-010): the tool class itself is NOT DI-registered;
+        // we resolve the typed HttpClient + IHttpContextAccessor + logger from the
+        // scopedProvider and construct the tool here. Mirrors the canonical
+        // InvokeSummarizePlaybookTool pattern (AIPL-053).
+        if (capabilities.Contains(PlaybookCapabilities.InsightsQuery))
+        {
+            attempted++;
+            try
+            {
+                // The typed HttpClient is registered via
+                // services.AddHttpClient<InvokeInsightsQueryTool>(...) so we resolve the
+                // tool itself directly — IHttpClientFactory wires the HttpClient into the
+                // constructor.
+                var insightsQueryTool =
+                    scopedProvider.GetService<InvokeInsightsQueryTool>();
+                if (insightsQueryTool != null)
+                {
+                    tools.AddRange(insightsQueryTool.GetTools());
+                    resolved++;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "InvokeInsightsQueryTool not available; insights.query will not be " +
+                        "registered. Verify AnalysisServicesModule.AddAnalysisOrchestrationServices " +
+                        "registered the typed HttpClient (Analysis:Enabled and " +
+                        "DocumentIntelligence:Enabled).");
+                    failedTools.Add(nameof(InvokeInsightsQueryTool));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to resolve InvokeInsightsQueryTool — skipping");
+                failedTools.Add(nameof(InvokeInsightsQueryTool));
             }
         }
 

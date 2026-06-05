@@ -19,15 +19,7 @@
  */
 
 import * as React from 'react';
-import {
-  Divider,
-  MessageBar,
-  MessageBarBody,
-  Switch,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Divider, MessageBar, MessageBarBody, Switch, Text, makeStyles, tokens } from '@fluentui/react-components';
 import {
   LockClosedRegular,
   BuildingRegular,
@@ -156,14 +148,12 @@ const PROVISIONING_ITEMS: IProvisioningItem[] = [
   {
     icon: <BuildingRegular fontSize={16} />,
     title: 'Dedicated Business Unit',
-    description:
-      'A Dataverse Business Unit is created to scope security roles and data access for this project.',
+    description: 'A Dataverse Business Unit is created to scope security roles and data access for this project.',
   },
   {
     icon: <StorageRegular fontSize={16} />,
     title: 'SharePoint Embedded Container',
-    description:
-      'An isolated SPE document container is provisioned exclusively for this project\u2019s files.',
+    description: 'An isolated SPE document container is provisioned exclusively for this project\u2019s files.',
   },
   {
     icon: <PeopleTeamRegular fontSize={16} />,
@@ -177,10 +167,7 @@ const PROVISIONING_ITEMS: IProvisioningItem[] = [
 // SecureProjectSection (exported)
 // ---------------------------------------------------------------------------
 
-export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({
-  isSecure,
-  onSecureChange,
-}) => {
+export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({ isSecure, onSecureChange }) => {
   const styles = useStyles();
 
   const handleToggleChange = React.useCallback(
@@ -210,8 +197,7 @@ export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({
             Secure Project
           </Text>
           <Text size={200} className={styles.toggleDescription}>
-            Enables external access, an isolated document container, and dedicated
-            security boundaries for this project.
+            Enables external access, an isolated document container, and dedicated security boundaries for this project.
           </Text>
         </div>
 
@@ -233,7 +219,7 @@ export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({
             </Text>
 
             <div className={styles.provisioningList}>
-              {PROVISIONING_ITEMS.map((item) => (
+              {PROVISIONING_ITEMS.map(item => (
                 <div key={item.title} className={styles.provisioningItem}>
                   <span className={styles.provisioningIcon} aria-hidden="true">
                     {item.icon}
@@ -255,12 +241,11 @@ export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({
           <MessageBar intent="warning" className={styles.warningBar}>
             <MessageBarBody>
               <Text size={200} weight="semibold">
-                <WarningRegular fontSize={14} aria-hidden="true" />{' '}
-                This designation is permanent.{' '}
+                <WarningRegular fontSize={14} aria-hidden="true" /> This designation is permanent.{' '}
               </Text>
               <Text size={200}>
-                Once a project is marked as Secure and created, the secure designation
-                cannot be removed. Please confirm this is correct before proceeding.
+                Once a project is marked as Secure and created, the secure designation cannot be removed. Please confirm
+                this is correct before proceeding.
               </Text>
             </MessageBarBody>
           </MessageBar>

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Author .github/WORKFLOWS.md</title>
+    <phase>4: Observability + Docs</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022, 030, 040</dependencies>
+    <blocks>050</blocks>
+    <tags>documentation, ci-cd, github-actions</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task; no code modified; FR-09 acceptance</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Author `.github/WORKFLOWS.md` documenting each remaining workflow (post-Phase-2 rationalization) with: purpose, owner, SLA, trigger model, common failure modes, escalation path. Cross-link to `docs/procedures/workflow-incident-response.md` (task 042) and the weekly health report issue.
+  </prompt>
+
+  <role>
+    SPAARKE technical writer + DevOps engineer. Writes for the operator audience (someone hitting a failed workflow on a PR).
+  </role>
+
+  <goal>
+    `.github/WORKFLOWS.md` exists with a per-workflow table or per-workflow section for every retained workflow, plus cross-links to the incident-response runbook and the CI Health Report issue.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-09: file exists; doc-drift audit confirms it matches the current workflow set (post-Phase-2). Per FR-12: notification routing documented here (task 043 may extend).
+    </background>
+    <relevant-files>
+      <file>.github/WORKFLOWS.md</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+      <file>projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-09: file exists; matches current workflow set</constraint>
+    <constraint source="spec">FR-12 (partial): notification-routing section anchor here (task 043 fills it in)</constraint>
+    <constraint source="project">For each retained workflow, list: purpose, owner, SLA, trigger model, common failure modes</constraint>
+    <constraint source="project">Cross-link to `docs/procedures/workflow-incident-response.md` (task 042) — use relative path</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+      <file>projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load the post-Phase-2 workflow set: `ls .github/workflows/*.yml`. Should be ≤8 files per FR-06.</step>
+    <step order="2">For each retained workflow, read the file and extract: name, triggers, purpose. Note common failure modes from the inventory (if recorded).</step>
+    <step order="3">Author `.github/WORKFLOWS.md` with:
+      - Brief intro (1 paragraph: what this doc is + cross-link to incident-response)
+      - Per-workflow table OR per-workflow section. Include columns/fields: Workflow, Purpose, Owner, SLA, Triggers, Common Failures, Escalation
+      - Section "Notification Routing" with placeholder for task 043 to fill
+      - Section "Weekly Health Report" linking to the CI Health Report issue (use issue search URL: `https://github.com/{owner}/{repo}/issues?q=is%3Aissue+%22CI+Health+Report%22`)
+      - Section "Adding or Modifying Workflows" — must run `actionlint` locally; PR must pass actionlint check
+    </step>
+    <step order="4">Run doc-drift audit: `grep -E '^\| .*deploy-' .github/WORKFLOWS.md` against `ls .github/workflows/`. Confirm match.</step>
+    <step order="5">Update TASK-INDEX.md: change task 041 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Workflow files</tool>
+    <tool name="Write">New documentation file</tool>
+    <tool name="Grep">Verify doc matches workflow set</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.github/WORKFLOWS.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.github/WORKFLOWS.md` exists with one entry per retained workflow.</criterion>
+    <criterion testable="true">Doc-drift audit passes: every `.github/workflows/*.yml` file is documented; no documented workflow is missing.</criterion>
+    <criterion testable="true">Cross-links to `docs/procedures/workflow-incident-response.md` and CI Health Report issue present.</criterion>
+    <criterion testable="true">Notification Routing section exists (placeholder OK; task 043 fills in).</criterion>
+    <criterion testable="true">TASK-INDEX.md task 041 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Owner field can be a team alias ("DevOps", "Platform") if a specific individual isn't appropriate. SLA can be best-effort ("Best effort; weekly review") for non-critical workflows. Goal is operator clarity, not bureaucratic detail.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: MINIMAL. Parallel-safe with 040, 042, 043.</protocol>
+  </execution>
+</task>

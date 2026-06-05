@@ -36,7 +36,7 @@
  *     detect that condition cleanly and render the empty state.
  */
 
-import * as React from "react";
+import * as React from 'react';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -46,10 +46,10 @@ import * as React from "react";
  * Daily briefing error shape (discriminated union).
  */
 export type DailyBriefingError =
-  | { kind: "rate-limit"; status: 429; message: string }
-  | { kind: "unavailable"; status: number; message: string }
-  | { kind: "auth"; status: number; message: string }
-  | { kind: "error"; status: number; message: string };
+  | { kind: 'rate-limit'; status: 429; message: string }
+  | { kind: 'unavailable'; status: number; message: string }
+  | { kind: 'auth'; status: number; message: string }
+  | { kind: 'error'; status: number; message: string };
 
 /**
  * Daily briefing hook return shape.
@@ -190,7 +190,7 @@ interface NarrativeBulletResult {
 // ---------------------------------------------------------------------------
 
 const TTL_MS = 5 * 60 * 1000; // 5 minutes per ADR-014
-const DEFAULT_ENDPOINT = "/api/ai/daily-briefing/narrate";
+const DEFAULT_ENDPOINT = '/api/ai/daily-briefing/narrate';
 
 interface CacheEntry {
   bullets: string[];
@@ -204,7 +204,7 @@ function resolveCacheKey(tenantId: string | undefined): string {
   if (tenantId && tenantId.length > 0) {
     return `daily-briefing:${tenantId}`;
   }
-  return "daily-briefing:anonymous";
+  return 'daily-briefing:anonymous';
 }
 
 /** Inspect cache; return cached bullets if still fresh. */
@@ -273,19 +273,19 @@ function flattenBullets(response: NarrateResponse): string[] {
 /** Map an ApiError-like throw from authenticatedFetch into DailyBriefingError. */
 function mapError(err: unknown): DailyBriefingError {
   const e = err as { statusCode?: number; message?: string };
-  const status = typeof e?.statusCode === "number" ? e.statusCode : 0;
-  const message = e?.message ?? "Failed to fetch daily briefing.";
+  const status = typeof e?.statusCode === 'number' ? e.statusCode : 0;
+  const message = e?.message ?? 'Failed to fetch daily briefing.';
 
   if (status === 429) {
-    return { kind: "rate-limit", status: 429, message };
+    return { kind: 'rate-limit', status: 429, message };
   }
   if (status === 503) {
-    return { kind: "unavailable", status: 503, message };
+    return { kind: 'unavailable', status: 503, message };
   }
   if (status === 401) {
-    return { kind: "auth", status, message };
+    return { kind: 'auth', status, message };
   }
-  return { kind: "error", status, message };
+  return { kind: 'error', status, message };
 }
 
 // ---------------------------------------------------------------------------
@@ -364,16 +364,13 @@ export function useDailyBriefing(options: UseDailyBriefingOptions): DailyBriefin
             // Don't crash the section if the context loader itself fails —
             // fall through to the empty payload so the BFF returns 200/empty
             // and the empty-state UI surfaces (preserves the pre-086 UX).
-            console.warn(
-              "[useDailyBriefing] loadNotificationContext failed; falling back to empty payload.",
-              loadErr,
-            );
+            console.warn('[useDailyBriefing] loadNotificationContext failed; falling back to empty payload.', loadErr);
           }
         }
 
         const response = await authenticatedFetch(targetEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
 
@@ -411,7 +408,7 @@ export function useDailyBriefing(options: UseDailyBriefingOptions): DailyBriefin
         }
       }
     },
-    [authenticatedFetch, tenantId, targetEndpoint, loadNotificationContext],
+    [authenticatedFetch, tenantId, targetEndpoint, loadNotificationContext]
   );
 
   // Initial fetch on mount (and when auth deps change).

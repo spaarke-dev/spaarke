@@ -106,7 +106,92 @@ public interface IRagService
     Task<ReadOnlyMemory<float>> GetEmbeddingAsync(
         string text,
         CancellationToken cancellationToken = default);
+
+    // ── Knowledge-base index administration (D-09 §2 B8, task 011 Phase 1b Tier 3) ────
+    // Endpoints (KnowledgeBaseEndpoints) used to inject Azure SDK SearchIndexClient directly
+    // and call its index/search APIs. Per ADR-007 (facade pattern) endpoints should consume
+    // domain services, not Azure SDK clients. The following 3 methods absorb those direct
+    // SDK calls so the endpoints depend only on IRagService — which has a fail-fast
+    // Null-Object implementation (NullRagService) registered when the kill switch is off.
+
+    /// <summary>
+    /// Returns document chunk counts for the knowledge and discovery indexes scoped to the
+    /// requesting tenant. Used by the knowledge-base admin health endpoint.
+    /// </summary>
+    /// <param name="tenantId">Tenant ID scoping the count filter (ADR-014).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Health summary with per-index document counts and timestamp.</returns>
+    Task<KnowledgeIndexHealth> GetIndexHealthAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns a paged list of indexed document summaries for the requesting tenant in the
+    /// specified index. Used by the knowledge-base admin "list documents" endpoint.
+    /// </summary>
+    /// <param name="indexName">Target index name (knowledge or discovery).</param>
+    /// <param name="tenantId">Tenant ID scoping the filter (ADR-014).</param>
+    /// <param name="page">1-based page number.</param>
+    /// <param name="pageSize">Page size (1-200).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Paged indexed-document listing.</returns>
+    /// <exception cref="System.ArgumentException">Thrown when <paramref name="indexName"/> is not a known index.</exception>
+    Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
+        string indexName,
+        string tenantId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes all chunks for a source document from the specified index, scoped to tenant.
+    /// Used by the knowledge-base admin "delete document" endpoint.
+    /// </summary>
+    /// <param name="indexName">Target index name (knowledge or discovery).</param>
+    /// <param name="documentId">Source document ID.</param>
+    /// <param name="tenantId">Tenant ID scoping the filter (ADR-014).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Number of chunks deleted (zero when no chunks match).</returns>
+    /// <exception cref="System.ArgumentException">Thrown when <paramref name="indexName"/> is not a known index.</exception>
+    Task<int> DeleteIndexedDocumentAsync(
+        string indexName,
+        string documentId,
+        string tenantId,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Health summary returned by <see cref="IRagService.GetIndexHealthAsync"/>.
+/// Mirrors the previous <c>KnowledgeIndexHealthResult</c> shape verbatim (D-09 §2 B8).
+/// </summary>
+public sealed record KnowledgeIndexHealth(
+    long KnowledgeDocCount,
+    long DiscoveryDocCount,
+    DateTimeOffset LastUpdated,
+    string KnowledgeIndexName,
+    string DiscoveryIndexName);
+
+/// <summary>
+/// Paged list of indexed-document summaries returned by
+/// <see cref="IRagService.GetIndexedDocumentsAsync"/>.
+/// </summary>
+public sealed record IndexedDocumentsPage(
+    string IndexName,
+    IReadOnlyList<IndexedDocumentSummary> Documents,
+    int Page,
+    int PageSize,
+    long TotalCount);
+
+/// <summary>
+/// Summary of a single indexed document chunk; mirrors the previous
+/// <c>KnowledgeDocumentSummary</c> verbatim.
+/// </summary>
+public sealed record IndexedDocumentSummary(
+    string ChunkId,
+    string? DocumentId,
+    string FileName,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
 
 /// <summary>
 /// Options for RAG search operations.
@@ -201,6 +286,24 @@ public record RagSearchOptions
     /// Both ParentEntityType and ParentEntityId must be set for entity scoping.
     /// </summary>
     public string? ParentEntityId { get; init; }
+
+    /// <summary>
+    /// R5 spec §4.2 / FR-09 — optional session identifier for session-scoped retrieval.
+    /// When set (non-null/non-empty), <see cref="IRagService.SearchAsync(string, RagSearchOptions, CancellationToken)"/>
+    /// routes the underlying <c>SearchClient</c> to the session-files index
+    /// (see <c>AiSearchOptions.SessionFilesIndexName</c>) instead of the tenant-scoped
+    /// knowledge index, and appends a <c>sessionId eq '...'</c> clause to the OData
+    /// filter ANDed with the existing unconditional <c>tenantId eq '...'</c> clause —
+    /// preserving the ADR-014 tenant-isolation invariant (a session query in tenant A
+    /// can never leak across to tenant B). When null/empty, behavior is byte-for-byte
+    /// identical to the pre-R5 path: tenant-deployment routing via
+    /// <c>IKnowledgeDeploymentService</c>. Under session-scoped routing, the
+    /// <c>KnowledgeSourceId(s)</c> / <c>ExcludeKnowledgeSourceIds</c> /
+    /// <c>ParentEntityType</c>+<c>ParentEntityId</c> / privilege-group filters are
+    /// SKIPPED (with debug log) because the session-files schema does not carry those
+    /// columns (per task 001 schema).
+    /// </summary>
+    public string? SessionId { get; init; }
 
     /// <summary>
     /// Whether to use semantic ranking.

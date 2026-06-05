@@ -33,6 +33,14 @@ public static class JobProcessingModule
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.AppOnlyDocumentAnalysisJobHandler>();
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.EmailAnalysisJobHandler>();
 
+        // Insights Engine Phase 1 — D-P8 SPE-upload consumer (task 050).
+        // Zone B IJobHandler per SPEC §3.5 (Services/Jobs/Insights/) — injects
+        // IInsightsAi only (the Zone-A → Zone-B facade) and routes JobType
+        // "InsightsUniversalIngest" through the existing sdap-jobs queue.
+        // Opt-in via AiProcessingOptions.InsightsIngest=true (Phase 1 default off);
+        // queued from UploadFinalizationWorker.QueueNextStageAsync.
+        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Insights.InsightsIngestJobHandler>();
+
         // AI-dependent handlers (require IFileIndexingService and/or IOpenAiClient)
         // Mixed handlers (RagIndexing references Dataverse) stay in Services/Jobs/Handlers/;
         // pure-AI handlers (ProfileSummary, BulkRagIndexing) relocated per task 051 (FR-E3)

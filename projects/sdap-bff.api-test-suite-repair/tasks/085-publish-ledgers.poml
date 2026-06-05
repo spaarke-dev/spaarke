@@ -1,0 +1,149 @@
+<task id="085" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P4.B2 — Publish all ledgers (repair, archive, real-bug, flaky, rewrite, exit) — FR-27, FR-28</title>
+    <status>completed</status>
+    <completion-date>2026-05-31</completion-date>
+    <completion-notes>All 6 ledgers published in `projects/sdap-bff.api-test-suite-repair/ledgers/`: repair-ledger.md (new — ~478 entries aggregated by task with master totals + sibling-fixture pattern §); archive-ledger.md (finalized — 0 entries; NFR-04/06 trivially satisfied); real-bug-ledger.md (summary header added: 20 entries, HIGH 5 / MED 7 / LOW 8; per-task breakdown; sibling-coord flags incl. RB-T028-02 HOLD); flaky-ledger.md (finalized footer — 0 entries; FR-28 satisfaction documented); rewrite-ledger.md (new — 1 §4.8-adjacent NO-OP escalation for task 031 SCOPE-MISMATCH; 1.23% of touched-files vs 5% NFR-02 hard limit); exit-ledger.md (new AUTHORITATIVE FR-28 project-close artifact — 13 sections incl. per-§6.2-state counts, per-tier disposition, sibling-coord outcomes for Action Engine / Insights / Communications, actual vs estimated effort, triple-run evidence, anti-drift governance, 14 SCs satisfied). Cross-ledger reconciliation: 478+0+20+0+1 = 499 of 540 touched-test baseline; ~41 delta explained by transitive fixture-fix effects. NFR-01 / NFR-02 / NFR-04 / NFR-06 all satisfied.</completion-notes>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-4, ledger, exit-ledger, validation, success-criteria</tags>
+    <parallel-group>4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Agent-safe — each ledger is a new (or finalized append-only) file in `projects/sdap-bff.api-test-suite-repair/ledgers/`. Disjoint from tasks 080/081/082/083 (governance edits in other paths), task 084 (`baseline/` TRX files), task 086 (final verification of these ledgers). All 6 ledger files have unique paths; no file collision risk.</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Publish all 6 project ledgers to `projects/sdap-bff.api-test-suite-repair/ledgers/`. These ledgers are the audit trail for every triage decision made during Phase 1, 2, and 3. Per FR-27 + FR-28, they MUST exist with reconciling entries before project close.
+
+    The 6 ledgers per design.md §6.2 + §7 Phase 4 exit gate:
+    1. **`repair-ledger.md`** — every test repaired (trait `repaired`); per-test row with file path, root cause, fix summary, originating task
+    2. **`archive-ledger.md`** — every test archived (filename `*.cs.archived-YYYY-MM-DD`); per-file row with archive reason (`archived-duplicate` / `archived-dead-target` / `archived-rewrite`) + owner sign-off if archive count > 10 in a phase
+    3. **`real-bug-ledger.md`** — every test trait-tagged `real-bug-pending-fix`; per-test row with date + owner sign-off + linked bug-tracker issue (if applicable)
+    4. **`flaky-ledger.md`** — every test trait-tagged `flaky-quarantined`; per-test row with date + fix-by date + root cause (environmental / timing / shared-state)
+    5. **`rewrite-ledger.md`** — every §4.8 escalation outcome (approved or denied); per-file row with rewrite request file reference + owner approval date
+    6. **`exit-ledger.md`** — the project's summary ledger: per-§6.2-state counts + per-tier disposition (HIGH/MEDIUM/INTEGRATION/LOW) + sibling-coordination outcomes (Action Engine, Insights Phase 2, Communications) + actual vs estimated effort (vs design.md §10 estimate of 80-124 person-hours, 16-27 day wall-clock)
+
+    Each ledger is APPENDED to during Phase 2+3 (per-task append per design.md §7). This task AGGREGATES, RECONCILES, and finalizes the ledgers — confirming totals match across files and that no taxonomy state is "lost." The exit ledger must reconcile: `exit-ledger total touched tests = repair-ledger count + archive-ledger count + real-bug-ledger count + flaky-ledger count + rewrite-ledger count`.
+
+    NO production code changes. NO test changes. Ledger publication only.
+
+    Hard dependency: ALL Phase 2+3 tasks complete; per-task ledger entries already appended.
+  </prompt>
+
+  <role>AI agent aggregating per-task ledger entries into reconciled exit ledgers for project close.</role>
+
+  <goal>
+    6 ledger files exist in `projects/sdap-bff.api-test-suite-repair/ledgers/`:
+    - `repair-ledger.md` — finalized + reconciled (sum row at end)
+    - `archive-ledger.md` — finalized + reconciled + owner-approval references for any phase > 10 archives
+    - `real-bug-ledger.md` — finalized; every entry has date + owner sign-off
+    - `flaky-ledger.md` — finalized; every entry has date + fix-by date
+    - `rewrite-ledger.md` — finalized; rewrite count ≤ 5% of touched files (verified by task 086)
+    - `exit-ledger.md` — published with per-§6.2-state counts + per-tier disposition + sibling-coordination outcomes + actual vs estimated effort
+
+    Cross-ledger reconciliation: `exit-ledger total touched tests = repair-ledger count + archive-ledger count + real-bug-ledger count + flaky-ledger count + rewrite-ledger count`. Discrepancies must be explained in the exit ledger or fixed before close.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="task-index">projects/sdap-bff.api-test-suite-repair/tasks/TASK-INDEX.md</file>
+    <file purpose="phase-0-baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="final-runs">projects/sdap-bff.api-test-suite-repair/baseline/final-runs-summary.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-27">`exit-ledger.md` published with per-§6.2-state counts + per-tier file disposition + sibling-project coordination outcomes + total effort actual vs design.md §10 estimate</constraint>
+    <constraint source="FR-28">`rewrite-ledger.md`, `real-bug-ledger.md`, `flaky-ledger.md` exist with entries for any non-Pass tests; each entry has a date or owner sign-off; counts reconcile with FR-27 exit ledger</constraint>
+    <constraint source="§6.2">Every touched test ends in a §6.2 final end-state (`repaired`, `real-bug-pending-fix`, `flaky-quarantined`, or archived). Sum of all states = total touched-test count</constraint>
+    <constraint source="NFR-04">Archive count > 10 files in a single phase requires owner sign-off recorded in `archive-ledger.md`</constraint>
+    <constraint source="NFR-06">Archive via rename to `*.cs.archived-YYYY-MM-DD`; never delete-from-disk. Archive-ledger paths must reflect this</constraint>
+    <constraint source="NFR-01">No production code changes; ledger publication is doc-only</constraint>
+    <constraint source="NFR-09">Task POML metadata declares `repair-not-rewrite: true`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §7 Phase 4 exit gate ("Zero failures in suite. Every touched test has a §6.2 status trait. `repair-ledger.md`, `archive-ledger.md`, `real-bug-ledger.md`, `flaky-ledger.md` populated") + §10 ("publish `exit-ledger.md`: counts per §6.2 status; per-tier file disposition; coordination outcomes with sibling projects; total effort actual vs §10 estimate"), the ledger publication is the project's audit-trail deliverable.
+
+      Per-task append model: each Phase 2+3 task appends its repair/archive/real-bug/flaky/rewrite entries to the corresponding ledger as it completes. This task AGGREGATES — it does not author from scratch. The author work is reconciliation (do all sums match?), finalization (is every entry complete with date + sign-off where required?), and exit-ledger composition (the new file synthesizing all five other ledgers + sibling coordination + effort accounting).
+
+      The exit-ledger format follows the predecessor `sdap-bff-api-remediation-fix` Phase 4 exit-ledger pattern (referenced as predecessor in the project CLAUDE.md). Per-§6.2-state counts go in a top section; per-tier disposition (HIGH/MEDIUM/INTEGRATION/LOW) in a middle table; sibling-coordination outcomes (Action Engine, Insights Phase 2, Communications per design.md §2.3) at the end with actual vs estimated effort. The exit ledger is the canonical artifact future audits cite.
+    </background>
+    <dependencies>
+      <dependency task="030-074" status="must-be-complete">All Phase 2+3 tasks complete; per-task ledger entries already appended to the 5 in-progress ledgers</dependency>
+      <dependency task="084" status="must-be-complete">Triple-run validation passed (zero failures across all 6 runs) — exit ledger references this baseline as evidence</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/flaky-ledger.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/rewrite-ledger.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read all 5 in-progress ledgers (`repair-ledger.md`, `archive-ledger.md`, `real-bug-ledger.md`, `flaky-ledger.md`, `rewrite-ledger.md`). Confirm each has entries from Phase 2+3 tasks. If any ledger is missing or empty when it shouldn't be (e.g., real-bug-ledger empty BUT some tests have `[Trait("status", "real-bug-pending-fix")]`), backfill from `tests/` grep before proceeding.</step>
+    <step order="2">For `repair-ledger.md`: aggregate count per Phase tier (HIGH/MEDIUM/INTEGRATION/LOW); confirm every entry has file path + root cause + fix summary + originating task ID. Add a "Reconciliation" footer with total count.</step>
+    <step order="3">For `archive-ledger.md`: aggregate count per archive reason (`archived-duplicate` / `archived-dead-target` / `archived-rewrite`); for any phase with > 10 archives, verify owner sign-off cited in entry. Confirm file paths follow `*.cs.archived-YYYY-MM-DD` convention. Add a "Reconciliation" footer.</step>
+    <step order="4">For `real-bug-ledger.md`: verify every entry has date + owner sign-off + (optional) linked bug-tracker issue. The bug-tracker link is optional but recommended; if missing, add a "follow-up needed" note. Count entries.</step>
+    <step order="5">For `flaky-ledger.md`: verify every entry has date + fix-by date + root cause classification (environmental / timing / shared-state). Per §6.2, flaky-quarantined is acceptable ONLY if flakiness is environmental; if any entry's root cause is "we couldn't be bothered to fix," reject and re-triage to either `repaired` or `archived-duplicate`. Count entries.</step>
+    <step order="6">For `rewrite-ledger.md`: verify every entry references its corresponding `escalations/rewrite-request-T-XX-FileName.md` file + owner approval date. Count entries. (Task 086 verifies count / touched-files ≤ 5%.)</step>
+    <step order="7">Compose `exit-ledger.md` with these sections:
+      (a) **Header**: project name, close date, branch, owner, references to spec.md + design.md.
+      (b) **Per-§6.2-state counts**: total tests at Phase 0 baseline; total tests at project close; counts per state (`repaired`, `real-bug-pending-fix`, `flaky-quarantined`, archived-duplicate, archived-dead-target, archived-rewrite); confirm sum = touched-test count.
+      (c) **Per-tier disposition**: table (HIGH/MEDIUM/INTEGRATION/LOW) with files-touched + repair count + archive count + real-bug + flaky + rewrite counts per tier.
+      (d) **Sibling-coordination outcomes**: per design.md §2.3 (Action Engine, Insights Phase 2, Communications) — what coordination happened; what conflicts surfaced; what follow-up commitments exist.
+      (e) **Actual vs estimated effort**: actual person-hours from task time-logs (sum) vs design.md §10 estimate (80-124h); actual wall-clock vs estimate (16-27 days). Variance analysis.
+      (f) **Triple-run evidence**: reference to `baseline/final-runs-summary.md` (task 084 output).
+      (g) **Sign-off line**: owner sign-off placeholder + date stamp.
+    </step>
+    <step order="8">Verify cross-ledger reconciliation: `exit-ledger touched count = repair count + archive count + real-bug count + flaky count + rewrite count`. Document any discrepancies; either explain (e.g., "rewrites are also counted as archive-rewrite, so subtract") or fix before publishing.</step>
+    <step order="9">Verify `git status` shows only files in `projects/sdap-bff.api-test-suite-repair/ledgers/` modified (and possibly the 5 in-progress ledgers being finalized with footer reconciliation rows).</step>
+    <step order="10">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + cite all 6 ledger paths + the reconciliation result (total touched-test count + per-state breakdown).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">All 5 in-progress ledgers; per-task POML files (for time logs); TRX files (for total-count anchor)</tool>
+    <tool name="Edit">Append reconciliation footers to 5 in-progress ledgers</tool>
+    <tool name="Write">Create `exit-ledger.md` synthesizing all sections</tool>
+    <tool name="Grep">For finding `[Trait("status", "...")]` occurrences in tests/ to cross-check ledger entries</tool>
+    <tool name="Bash">`git status` for boundary verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/repair-ledger.md (finalized + reconciled)</output>
+    <output type="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/archive-ledger.md (finalized + reconciled)</output>
+    <output type="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (finalized)</output>
+    <output type="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/flaky-ledger.md (finalized)</output>
+    <output type="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/rewrite-ledger.md (finalized)</output>
+    <output type="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/exit-ledger.md (new — composed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 ledger files exist in `projects/sdap-bff.api-test-suite-repair/ledgers/`</criterion>
+    <criterion testable="true">`repair-ledger.md` has per-test entries + per-tier aggregate + total count</criterion>
+    <criterion testable="true">`archive-ledger.md` has per-file entries + archive-reason classification + owner sign-off where phase count > 10</criterion>
+    <criterion testable="true">`real-bug-ledger.md` entries each have date + owner sign-off</criterion>
+    <criterion testable="true">`flaky-ledger.md` entries each have date + fix-by date + environmental-cause classification</criterion>
+    <criterion testable="true">`rewrite-ledger.md` entries each reference corresponding `escalations/rewrite-request-*.md` + owner approval date</criterion>
+    <criterion testable="true">`exit-ledger.md` has 7 sections: header, per-§6.2-state counts, per-tier disposition, sibling-coordination outcomes, actual vs estimated effort, triple-run evidence, sign-off placeholder</criterion>
+    <criterion testable="true">Cross-ledger reconciliation passes: `exit-ledger touched count = repair + archive + real-bug + flaky + rewrite counts` (or discrepancy explained)</criterion>
+    <criterion testable="true">`git status` shows only `projects/sdap-bff.api-test-suite-repair/ledgers/` files modified; no `src/`, `power-platform/`, `infra/`, `scripts/`, or `tests/`</criterion>
+  </acceptance-criteria>
+</task>

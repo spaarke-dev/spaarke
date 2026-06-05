@@ -57,13 +57,7 @@ jest.mock('@fluentui/react-components', () => ({
 /**
  * Renders children inside a PaneEventBusProvider backed by a test-controlled bus.
  */
-function BusWrapper({
-  bus,
-  children,
-}: {
-  bus: PaneEventBus;
-  children: React.ReactNode;
-}): React.JSX.Element {
+function BusWrapper({ bus, children }: { bus: PaneEventBus; children: React.ReactNode }): React.JSX.Element {
   return <PaneEventBusProvider bus={bus}>{children}</PaneEventBusProvider>;
 }
 
@@ -75,12 +69,9 @@ describe('handleCitationClick — pure utility', () => {
   it('dispatches context_highlight with citationId to context channel', () => {
     const bus = new PaneEventBus();
     const received: ContextPaneEvent[] = [];
-    bus.subscribe('context', (e) => received.push(e));
+    bus.subscribe('context', e => received.push(e));
 
-    const dispatch = <C extends 'context'>(
-      _channel: C,
-      event: ContextPaneEvent,
-    ) => bus.dispatch('context', event);
+    const dispatch = <C extends 'context'>(_channel: C, event: ContextPaneEvent) => bus.dispatch('context', event);
 
     handleCitationClick(dispatch as any, { citationId: '1' });
 
@@ -95,12 +86,9 @@ describe('handleCitationClick — pure utility', () => {
   it('forwards selectionRef when provided', () => {
     const bus = new PaneEventBus();
     const received: ContextPaneEvent[] = [];
-    bus.subscribe('context', (e) => received.push(e));
+    bus.subscribe('context', e => received.push(e));
 
-    const dispatch = <C extends 'context'>(
-      _channel: C,
-      event: ContextPaneEvent,
-    ) => bus.dispatch('context', event);
+    const dispatch = <C extends 'context'>(_channel: C, event: ContextPaneEvent) => bus.dispatch('context', event);
 
     handleCitationClick(dispatch as any, {
       citationId: 'smith-v-jones',
@@ -117,12 +105,11 @@ describe('handleCitationClick — pure utility', () => {
   it('dispatches synchronously — no async boundary', () => {
     const bus = new PaneEventBus();
     let callCount = 0;
-    bus.subscribe('context', () => { callCount++; });
+    bus.subscribe('context', () => {
+      callCount++;
+    });
 
-    const dispatch = <C extends 'context'>(
-      _channel: C,
-      event: ContextPaneEvent,
-    ) => bus.dispatch('context', event);
+    const dispatch = <C extends 'context'>(_channel: C, event: ContextPaneEvent) => bus.dispatch('context', event);
 
     const start = Date.now();
     handleCitationClick(dispatch as any, { citationId: '2' });
@@ -147,13 +134,13 @@ describe('useCitationLink — React hook', () => {
       const handler = useCitationLink();
       refs.push(handler);
       const [, setN] = React.useState(0);
-      return <button onClick={() => setN((n) => n + 1)}>rerender</button>;
+      return <button onClick={() => setN(n => n + 1)}>rerender</button>;
     }
 
     render(
       <BusWrapper bus={bus}>
         <Inspector />
-      </BusWrapper>,
+      </BusWrapper>
     );
 
     act(() => {
@@ -167,21 +154,19 @@ describe('useCitationLink — React hook', () => {
   it('dispatches context_highlight when invoked with citationId', async () => {
     const bus = new PaneEventBus();
     const received: ContextPaneEvent[] = [];
-    bus.subscribe('context', (e) => received.push(e));
+    bus.subscribe('context', e => received.push(e));
 
     const user = userEvent.setup();
 
     function CitationButton() {
       const handleCitation = useCitationLink();
-      return (
-        <button onClick={() => handleCitation('3')}>cite-3</button>
-      );
+      return <button onClick={() => handleCitation('3')}>cite-3</button>;
     }
 
     render(
       <BusWrapper bus={bus}>
         <CitationButton />
-      </BusWrapper>,
+      </BusWrapper>
     );
 
     await user.click(screen.getByRole('button', { name: 'cite-3' }));
@@ -197,21 +182,19 @@ describe('useCitationLink — React hook', () => {
   it('dispatches context_highlight with selectionRef when provided', async () => {
     const bus = new PaneEventBus();
     const received: ContextPaneEvent[] = [];
-    bus.subscribe('context', (e) => received.push(e));
+    bus.subscribe('context', e => received.push(e));
 
     const user = userEvent.setup();
 
     function CitationButtonWithRef() {
       const handleCitation = useCitationLink();
-      return (
-        <button onClick={() => handleCitation('7', 'section:3.2')}>cite-7</button>
-      );
+      return <button onClick={() => handleCitation('7', 'section:3.2')}>cite-7</button>;
     }
 
     render(
       <BusWrapper bus={bus}>
         <CitationButtonWithRef />
-      </BusWrapper>,
+      </BusWrapper>
     );
 
     await user.click(screen.getByRole('button', { name: 'cite-7' }));
@@ -229,7 +212,9 @@ describe('useCitationLink — React hook', () => {
 // ---------------------------------------------------------------------------
 
 describe('WorkspaceWidgetWrapper — citation link wiring', () => {
-  interface TestData { title: string }
+  interface TestData {
+    title: string;
+  }
 
   // Inner R1 widget that renders a clickable citation anchor
   const MockWidgetWithCitation: React.FC<{
@@ -241,24 +226,16 @@ describe('WorkspaceWidgetWrapper — citation link wiring', () => {
   }> = ({ data, onLink }) => (
     <div data-testid="mock-widget">
       <span>{data.title}</span>
-      <button
-        data-testid="citation-anchor-1"
-        onClick={() => onLink?.('1')}
-      >
+      <button data-testid="citation-anchor-1" onClick={() => onLink?.('1')}>
         [1]
       </button>
-      <button
-        data-testid="citation-anchor-2"
-        onClick={() => onLink?.('2', 'char:100-200')}
-      >
+      <button data-testid="citation-anchor-2" onClick={() => onLink?.('2', 'char:100-200')}>
         [2]
       </button>
     </div>
   );
 
-  const loader = jest.fn(() =>
-    Promise.resolve({ default: MockWidgetWithCitation as React.ComponentType<any> }),
-  );
+  const loader = jest.fn(() => Promise.resolve({ default: MockWidgetWithCitation as React.ComponentType<any> }));
 
   const TestWrapper = createWorkspaceWrapper<TestData>(loader, 'TestWidget');
 
@@ -279,7 +256,7 @@ describe('WorkspaceWidgetWrapper — citation link wiring', () => {
     render(
       <BusWrapper bus={bus}>
         <TestWrapper {...defaultProps} onLink={onLinkSpy} />
-      </BusWrapper>,
+      </BusWrapper>
     );
 
     await waitFor(() => expect(screen.getByTestId('mock-widget')).toBeInTheDocument());
@@ -295,14 +272,14 @@ describe('WorkspaceWidgetWrapper — citation link wiring', () => {
   it('clicking citation anchor [1] dispatches context_highlight via built-in handler', async () => {
     const bus = new PaneEventBus();
     const received: ContextPaneEvent[] = [];
-    bus.subscribe('context', (e) => received.push(e));
+    bus.subscribe('context', e => received.push(e));
 
     const user = userEvent.setup();
 
     render(
       <BusWrapper bus={bus}>
         <TestWrapper {...defaultProps} />
-      </BusWrapper>,
+      </BusWrapper>
     );
 
     await waitFor(() => expect(screen.getByTestId('citation-anchor-1')).toBeInTheDocument());
@@ -320,14 +297,14 @@ describe('WorkspaceWidgetWrapper — citation link wiring', () => {
   it('clicking citation anchor [2] dispatches context_highlight with selectionRef', async () => {
     const bus = new PaneEventBus();
     const received: ContextPaneEvent[] = [];
-    bus.subscribe('context', (e) => received.push(e));
+    bus.subscribe('context', e => received.push(e));
 
     const user = userEvent.setup();
 
     render(
       <BusWrapper bus={bus}>
         <TestWrapper {...defaultProps} />
-      </BusWrapper>,
+      </BusWrapper>
     );
 
     await waitFor(() => expect(screen.getByTestId('citation-anchor-2')).toBeInTheDocument());
@@ -361,7 +338,7 @@ describe('ContextPaneController — context_highlight → CitationWidget path (A
     const highlightRef = { current: { onHighlight: onHighlightSpy } };
 
     // Subscribe as ContextPaneController would
-    bus.subscribe('context', (event) => {
+    bus.subscribe('context', event => {
       if (event.type === 'context_highlight' && event.citationId) {
         highlightRef.current?.onHighlight(event.citationId, event.selectionRef);
       }
@@ -385,7 +362,7 @@ describe('ContextPaneController — context_highlight → CitationWidget path (A
     const onHighlightSpy = jest.fn<void, [string, string | undefined]>();
     const highlightRef = { current: { onHighlight: onHighlightSpy } };
 
-    bus.subscribe('context', (event) => {
+    bus.subscribe('context', event => {
       if (event.type === 'context_highlight' && event.citationId) {
         highlightRef.current?.onHighlight(event.citationId, event.selectionRef);
       }
@@ -414,7 +391,7 @@ describe('ContextPaneController — context_highlight → SearchResultsWidget pa
     const searchHighlightSpy = jest.fn<void, [string, string | undefined]>();
     const highlightRef = { current: { onHighlight: searchHighlightSpy } };
 
-    bus.subscribe('context', (event) => {
+    bus.subscribe('context', event => {
       if (event.type === 'context_highlight' && event.citationId) {
         highlightRef.current?.onHighlight(event.citationId, event.selectionRef);
       }
@@ -437,7 +414,7 @@ describe('ContextPaneController — context_highlight → SearchResultsWidget pa
     const onHighlightSpy = jest.fn();
     const highlightRef = { current: { onHighlight: onHighlightSpy } };
 
-    bus.subscribe('context', (event) => {
+    bus.subscribe('context', event => {
       if (event.type === 'context_highlight' && event.citationId) {
         highlightRef.current?.onHighlight(event.citationId, event.selectionRef);
       }
@@ -475,13 +452,13 @@ describe('useCitationLink — no memory leaks (AC-6)', () => {
     const { unmount: unmount1 } = render(
       <BusWrapper bus={bus}>
         <CitationConsumer />
-      </BusWrapper>,
+      </BusWrapper>
     );
 
     const { unmount: unmount2 } = render(
       <BusWrapper bus={bus}>
         <CitationConsumer />
-      </BusWrapper>,
+      </BusWrapper>
     );
 
     // Neither instance adds a direct subscription (dispatch only)
@@ -512,7 +489,7 @@ describe('useCitationLink — no memory leaks (AC-6)', () => {
     const { unmount } = render(
       <BusWrapper bus={bus}>
         <FakeContextPaneController />
-      </BusWrapper>,
+      </BusWrapper>
     );
 
     expect(bus.subscriberCount('context')).toBe(1);

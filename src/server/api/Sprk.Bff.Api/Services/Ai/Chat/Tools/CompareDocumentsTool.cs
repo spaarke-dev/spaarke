@@ -107,10 +107,10 @@ public sealed class CompareDocumentsTool
         ILogger<CompareDocumentsTool> logger)
     {
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
-        _speFileStore    = speFileStore    ?? throw new ArgumentNullException(nameof(speFileStore));
-        _textExtractor   = textExtractor   ?? throw new ArgumentNullException(nameof(textExtractor));
-        _httpContext     = httpContext;
-        _logger          = logger          ?? throw new ArgumentNullException(nameof(logger));
+        _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
+        _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
+        _httpContext = httpContext;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -209,10 +209,10 @@ public sealed class CompareDocumentsTool
         // ── 4. Diff sections ──────────────────────────────────────────────────
         var sectionDiffs = DiffSections(sections1, sections2);
 
-        var additions    = sectionDiffs.Count(s => s.ChangeType == DiffChangeType.Addition);
-        var deletions    = sectionDiffs.Count(s => s.ChangeType == DiffChangeType.Deletion);
+        var additions = sectionDiffs.Count(s => s.ChangeType == DiffChangeType.Addition);
+        var deletions = sectionDiffs.Count(s => s.ChangeType == DiffChangeType.Deletion);
         var modifications = sectionDiffs.Count(s => s.ChangeType == DiffChangeType.Modification);
-        var totalChanges  = additions + deletions + modifications;
+        var totalChanges = additions + deletions + modifications;
 
         _logger.LogInformation(
             "CompareDocumentsTool: diff complete — {Total} changes " +
@@ -220,15 +220,15 @@ public sealed class CompareDocumentsTool
             totalChanges, additions, deletions, modifications);
 
         return new DocumentDiff(
-            DocumentId1:   documentId1,
-            DocumentId2:   documentId2,
-            ComparedAt:    DateTimeOffset.UtcNow,
+            DocumentId1: documentId1,
+            DocumentId2: documentId2,
+            ComparedAt: DateTimeOffset.UtcNow,
             TotalSections: sectionDiffs.Count,
-            TotalChanges:  totalChanges,
-            Additions:     additions,
-            Deletions:     deletions,
+            TotalChanges: totalChanges,
+            Additions: additions,
+            Deletions: deletions,
             Modifications: modifications,
-            Sections:      sectionDiffs);
+            Sections: sectionDiffs);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -305,7 +305,7 @@ public sealed class CompareDocumentsTool
         using (fileStream)
         {
             var fileName = document.FileName ?? "document";
-            var result   = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
+            var result = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
 
             if (!result.Success)
             {
@@ -358,9 +358,9 @@ public sealed class CompareDocumentsTool
         {
             var headingLine = headingIndices[h];
             var nextHeading = h + 1 < headingIndices.Count ? headingIndices[h + 1] : lines.Length;
-            var title       = lines[headingLine].Trim();
-            var bodyLines   = lines[(headingLine + 1)..nextHeading];
-            var body        = string.Join('\n', bodyLines).Trim();
+            var title = lines[headingLine].Trim();
+            var bodyLines = lines[(headingLine + 1)..nextHeading];
+            var body = string.Join('\n', bodyLines).Trim();
             sections.Add((title, body));
         }
 
@@ -431,7 +431,7 @@ public sealed class CompareDocumentsTool
         {
             // Use the first line as a title-like label, truncated to 60 chars
             var firstLine = paragraphs[i].Split('\n')[0].Trim();
-            var label     = firstLine.Length > 60 ? firstLine[..60] + "…" : firstLine;
+            var label = firstLine.Length > 60 ? firstLine[..60] + "…" : firstLine;
             result.Add(($"Paragraph {i + 1}: {label}", paragraphs[i]));
         }
         return result;
@@ -458,21 +458,21 @@ public sealed class CompareDocumentsTool
         IReadOnlyList<(string Title, string Body)> sectionsA,
         IReadOnlyList<(string Title, string Body)> sectionsB)
     {
-        var result  = new List<SectionDiff>();
-        var usedB   = new HashSet<int>();
+        var result = new List<SectionDiff>();
+        var usedB = new HashSet<int>();
 
         // For each section in A, try to find a match in B
         for (var a = 0; a < sectionsA.Count; a++)
         {
             var (titleA, bodyA) = sectionsA[a];
-            var matchB          = FindBestMatch(titleA, sectionsB, usedB);
+            var matchB = FindBestMatch(titleA, sectionsB, usedB);
 
             if (matchB < 0)
             {
                 // Section exists only in A → Deletion
                 result.Add(new SectionDiff(
                     SectionTitle: titleA,
-                    ChangeType:   DiffChangeType.Deletion,
+                    ChangeType: DiffChangeType.Deletion,
                     Changes:
                     [
                         new DiffChange(DiffChangeType.Deletion, bodyA, null,
@@ -483,15 +483,15 @@ public sealed class CompareDocumentsTool
             {
                 usedB.Add(matchB);
                 var (titleB, bodyB) = sectionsB[matchB];
-                var title           = titleA; // keep A's title for baseline
+                var title = titleA; // keep A's title for baseline
 
                 if (string.Equals(bodyA, bodyB, StringComparison.Ordinal))
                 {
                     // Identical section
                     result.Add(new SectionDiff(
                         SectionTitle: title,
-                        ChangeType:   DiffChangeType.Unchanged,
-                        Changes:      []));
+                        ChangeType: DiffChangeType.Unchanged,
+                        Changes: []));
                 }
                 else
                 {
@@ -499,8 +499,8 @@ public sealed class CompareDocumentsTool
                     var changes = DiffWords(bodyA, bodyB);
                     result.Add(new SectionDiff(
                         SectionTitle: title,
-                        ChangeType:   DiffChangeType.Modification,
-                        Changes:      changes));
+                        ChangeType: DiffChangeType.Modification,
+                        Changes: changes));
                 }
             }
         }
@@ -514,7 +514,7 @@ public sealed class CompareDocumentsTool
             var (titleB, bodyB) = sectionsB[b];
             result.Add(new SectionDiff(
                 SectionTitle: titleB,
-                ChangeType:   DiffChangeType.Addition,
+                ChangeType: DiffChangeType.Addition,
                 Changes:
                 [
                     new DiffChange(DiffChangeType.Addition, null, bodyB,
@@ -593,18 +593,18 @@ public sealed class CompareDocumentsTool
         if (wordsA.Count > MaxDiffWords) wordsA = wordsA[..MaxDiffWords];
         if (wordsB.Count > MaxDiffWords) wordsB = wordsB[..MaxDiffWords];
 
-        var m   = wordsA.Count;
-        var n   = wordsB.Count;
+        var m = wordsA.Count;
+        var n = wordsB.Count;
 
         // Build LCS length table
         var dp = new int[m + 1, n + 1];
         for (var i = 1; i <= m; i++)
-        for (var j = 1; j <= n; j++)
-        {
-            dp[i, j] = string.Equals(wordsA[i - 1], wordsB[j - 1], StringComparison.OrdinalIgnoreCase)
-                ? dp[i - 1, j - 1] + 1
-                : Math.Max(dp[i - 1, j], dp[i, j - 1]);
-        }
+            for (var j = 1; j <= n; j++)
+            {
+                dp[i, j] = string.Equals(wordsA[i - 1], wordsB[j - 1], StringComparison.OrdinalIgnoreCase)
+                    ? dp[i - 1, j - 1] + 1
+                    : Math.Max(dp[i - 1, j], dp[i, j - 1]);
+            }
 
         // Trace back the edit script
         var edits = new List<(EditKind Kind, string Word)>(m + n);
@@ -651,14 +651,14 @@ public sealed class CompareDocumentsTool
     {
         var tokens = new List<string>();
         var inWord = false;
-        var start  = 0;
+        var start = 0;
 
         for (var i = 0; i <= text.Length; i++)
         {
             var isWordChar = i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '\'');
             if (isWordChar && !inWord)
             {
-                start  = i;
+                start = i;
                 inWord = true;
             }
             else if (!isWordChar && inWord)
@@ -678,7 +678,7 @@ public sealed class CompareDocumentsTool
     private static IReadOnlyList<DiffChange> CondenseEdits(List<(EditKind Kind, string Word)> edits)
     {
         var changes = new List<DiffChange>();
-        var i       = 0;
+        var i = 0;
 
         while (i < edits.Count)
         {
@@ -742,17 +742,17 @@ public sealed class CompareDocumentsTool
 
     private static DocumentDiff ErrorResult(string documentId1, string documentId2, string message) =>
         new(
-            DocumentId1:   documentId1,
-            DocumentId2:   documentId2,
-            ComparedAt:    DateTimeOffset.UtcNow,
+            DocumentId1: documentId1,
+            DocumentId2: documentId2,
+            ComparedAt: DateTimeOffset.UtcNow,
             TotalSections: 0,
-            TotalChanges:  0,
-            Additions:     0,
-            Deletions:     0,
+            TotalChanges: 0,
+            Additions: 0,
+            Deletions: 0,
             Modifications: 0,
-            Sections:      [],
-            IsError:       true,
-            ErrorMessage:  message);
+            Sections: [],
+            IsError: true,
+            ErrorMessage: message);
 
     private static string Truncate(string s, int maxLen) =>
         s.Length <= maxLen ? s : s[..maxLen] + "…";

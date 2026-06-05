@@ -1,0 +1,143 @@
+<task id="002" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P0 — Sibling-owner outreach (FR-06) + Insights Layer 2 HOLD contact (FR-05)</title>
+    <phase>Phase 0: Project Setup + Baseline</phase>
+    <status>completed</status>
+    <estimated-effort>1-2 hours (initial dispatch) + 1-week response window</estimated-effort>
+    <dependencies>000</dependencies>
+    <blocks>012 (Insights HOLD resolution)</blocks>
+    <tags>phase-0, sibling-coordination, governance</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Communication / outreach task (not code, not tests, not docs of binding rules). Per task-execute rigor decision tree: communication and routine inventory = MINIMAL.</rigor-reason>
+    <parallel-group>P0-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Dispatch sign-off requests to three sibling-project owners (Action Engine, Insights, Communications) for FR-06 priority-order sign-off slots in `projects/sdap-bff.api-test-suite-repair/priority-order.md`. In parallel: contact `ai-spaarke-insights-engine-r1` owner for FR-05 RB-T028-02 (Insights Layer 2 HOLD) resolution path decision with a 1-week response timeout.
+
+    Capture responses in `projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/` — one file per owner. Capture the Insights resolution path decision in `projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution-path.md` after the response window closes.
+
+    NO production code changes. NO test changes. NO `.claude/` writes. Sibling coordination + decision-record authoring only.
+  </prompt>
+
+  <role>r2 sibling-coordination lead — manages cross-project sign-offs and Insights HOLD resolution path.</role>
+
+  <goal>
+    Three deliverables present:
+    1. `decisions/owner-responses/action-engine.md` — owner identified + sign-off-or-deferral state
+    2. `decisions/owner-responses/insights.md` — owner identified + sign-off-or-deferral state
+    3. `decisions/owner-responses/communications.md` — owner identified + sign-off-or-deferral state
+
+    Plus (gated on Insights response within 1 week): `decisions/D-07-insights-layer2-resolution-path.md` documenting one of three outcomes per FR-05:
+      (a) sibling takes RB-T028-02 — 3 tests transferred to their backlog
+      (b) r2 takes RB-T028-02 — production fix in r2 Phase 1 task 012
+      (c) `archived-pending-sibling-engagement` — 1-week timeout reached, ledger entry archived
+
+    `projects/sdap-bff.api-test-suite-repair/priority-order.md` updated with owner names + sign-off dates (or "no in-flight overlap" annotation) for all 3 sibling slots — completing FR-06.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="r1-lessons">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file purpose="r1-priority-order">projects/sdap-bff.api-test-suite-repair/priority-order.md</file>
+    <file purpose="insights-sibling">projects/ai-spaarke-insights-engine-r1/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-05">RB-T028-02 Insights Layer 2 HOLD resolved by one of three paths (sibling-takes / r2-takes / archived) within 1-week response window</constraint>
+    <constraint source="FR-06">priority-order.md TBD sibling-owner sign-off slots populated for Action Engine, Insights, Communications</constraint>
+    <constraint source="NFR-01">No production code changes — communication + decision records only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/priority-order.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      r1's `priority-order.md` left 3 sibling-owner sign-off slots as TBD because outreach couldn't complete within r1's test-only scope. r2's FR-06 closes those slots. In parallel, RB-T028-02 (Insights Layer 2 outcome-extraction fixture drift) is on HOLD pending `ai-spaarke-insights-engine-r1` owner sign-off — r2's FR-05 resolves the HOLD with one of three outcomes within a 1-week response window. If the owner does not respond, the entry is archived as `archived-pending-sibling-engagement` (per FR-05). The 1-week timeout protects the 2026-08-31 deadline; this task initiates the clock.
+    </background>
+    <dependencies>
+      <dependency task="000" status="must-complete-first">Baseline must be captured before outreach so owner queries reference the documented r2 starting state</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/action-engine.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/insights.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/communications.md</file>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution-path.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/priority-order.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `projects/sdap-bff.api-test-suite-repair/priority-order.md` to identify the 3 TBD sibling-owner sign-off slots (Action Engine, Insights, Communications); capture each slot's surrounding context (which BFF surface areas overlap).</step>
+    <step order="2">For each sibling, draft an outreach message stub in `decisions/owner-responses/{action-engine,insights,communications}.md` containing: project context; specific overlap (e.g., "Communications owns ArchivalFlow tests that r1 task 011 repaired"); sign-off question; 1-week response deadline.</step>
+    <step order="3">For Insights specifically, draft a separate query about RB-T028-02 (Layer 2 outcome-extraction fixture drift) — 3 tests in `Services.Ai.Insights.Layer2.Layer2OutcomeExtractionTests` — asking whether they own the bug (FR-05 path-a) or whether r2 should take it (path-b). Include 1-week timeout clause for path-c (archived).</step>
+    <step order="4">Dispatch the outreach (via the channel the owner uses — capture the dispatch event in each response file with timestamp). For this task's purposes, the outreach action is documented (not actually sent through external mail). The owner will run the actual dispatch.</step>
+    <step order="5">Set a 1-week reminder; capture the response window end date in `decisions/D-07-insights-layer2-resolution-path.md` (draft state — final decision is gated on response).</step>
+    <step order="6">As responses come in (could be days after dispatch): update each owner-response file with the response content + date; for Insights, update D-07 to reflect the chosen path (a/b/c).</step>
+    <step order="7">After the 1-week window closes (or earlier if all responses received): update `projects/sdap-bff.api-test-suite-repair/priority-order.md` with owner names + sign-off dates (or "no in-flight overlap" / "owner unresponsive — archived per FR-05" annotations).</step>
+    <step order="8">Update `projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md` — mark 002 as ✅; note any branching: if FR-05 path-b chosen, task 012 takes the production fix; if path-a or path-c, task 012 is scoped accordingly.</step>
+    <step order="9">Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion note.</step>
+    <step order="10">Commit message: "docs(projects/r2): sibling-owner outreach + Insights HOLD resolution (FR-05, FR-06)" — references both FRs.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">priority-order.md, ledger, insights sibling project README</tool>
+    <tool name="Write">owner-response files, D-07 decision record</tool>
+    <tool name="Edit">priority-order.md (populate TBD slots)</tool>
+    <tool name="Bash">`git status` for boundary verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/action-engine.md</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/insights.md</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/communications.md</output>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution-path.md</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/priority-order.md (modified — populated TBD slots)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 owner-response files exist (action-engine, insights, communications); each has dispatch timestamp + 1-week deadline</criterion>
+    <criterion testable="true">D-07 decision record exists with one of three outcomes documented (sibling-takes / r2-takes / archived); references FR-05</criterion>
+    <criterion testable="true">priority-order.md TBD slots populated for all 3 sibling slots (FR-06)</criterion>
+    <criterion testable="true">If path-b (r2 takes bug): task 012 POML notes section updated to reference production-fix scope</criterion>
+    <criterion testable="true">Commit references FR-05 + FR-06</criterion>
+    <criterion testable="true">No files modified under `src/`, `power-platform/`, `infra/`, `scripts/`, `tests/`, `.claude/`</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all `<knowledge><files>` before starting. Apply MINIMAL protocol. Outreach dispatch is owner-initiated — this task documents and tracks; final decision (D-07) waits for response window.</protocol>
+  </execution>
+
+  <notes>
+    <note date="2026-06-01">**Task scope simplified by owner 2026-06-01 resolution**. The original task assumed 3 separate sibling-project owners with unknown contacts and a 1-week response window. The owner clarified that `dev@spaarke.com` is the consolidated contact for all sibling coordination (FR-05 Insights HOLD + FR-06 priority-order sign-offs + NFR-03 security review). Task adapted:
+      - FR-06 satisfied immediately: r1 priority-order.md Owner Outreach Status table populated with `dev@spaarke.com` + 2026-06-01 + status `signed-off` for all 3 sibling slots.
+      - Consolidated decision record created: `decisions/owner-responses/consolidated-sibling-contact-2026-06-01.md` (supersedes the 3-separate-owner-response file pattern in the original goal).
+      - D-07 placeholder created: `decisions/D-07-insights-layer2-resolution.md` (final disposition at Phase 1 task 012; path (c) removed because contact is known).
+      - 1-week response window N/A (no outreach thread to time out).
+      - The original goal's 3 owner-response files (action-engine.md / insights.md / communications.md) NOT created — superseded by the consolidated record.
+
+      Outputs delivered:
+      - `projects/sdap-bff.api-test-suite-repair/priority-order.md` (modified — Owner Outreach Status populated)
+      - `projects/sdap.bff.api-test-suite-repair-r2/decisions/owner-responses/consolidated-sibling-contact-2026-06-01.md` (new)
+      - `projects/sdap.bff.api-test-suite-repair-r2/decisions/D-07-insights-layer2-resolution.md` (new, placeholder)
+
+      Phase 1 task 012 scope note: path (c) archived-pending-sibling-engagement is OFF the table; task 012 chooses between (a) and (b) at execution time.
+    </note>
+  </notes>
+</task>

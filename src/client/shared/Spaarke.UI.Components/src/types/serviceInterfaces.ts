@@ -71,11 +71,7 @@ export interface IDataService {
    * @param options - OData query options (e.g., "$select=sprk_name,statuscode")
    * @returns Promise resolving to the entity record
    */
-  retrieveRecord(
-    entityName: string,
-    id: string,
-    options?: string
-  ): Promise<Record<string, unknown>>;
+  retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>>;
 
   /**
    * Retrieves multiple entity records using an OData query.
@@ -84,10 +80,7 @@ export interface IDataService {
    * @param options - OData query string (e.g., "?$filter=statecode eq 0&$select=sprk_name")
    * @returns Promise resolving to an object containing the entities array
    */
-  retrieveMultipleRecords(
-    entityName: string,
-    options?: string
-  ): Promise<{ entities: Record<string, unknown>[] }>;
+  retrieveMultipleRecords(entityName: string, options?: string): Promise<{ entities: Record<string, unknown>[] }>;
 
   /**
    * Updates an existing entity record.
@@ -185,12 +178,7 @@ export interface IUploadService {
    * @param options - Optional upload configuration (progress callback, metadata)
    * @returns Promise resolving to the upload result with file details
    */
-  uploadFile(
-    entityName: string,
-    entityId: string,
-    file: File,
-    options?: UploadOptions
-  ): Promise<UploadResult>;
+  uploadFile(entityName: string, entityId: string, file: File, options?: UploadOptions): Promise<UploadResult>;
 
   /**
    * Retrieves the storage container ID for a given entity record.
@@ -262,9 +250,9 @@ export interface LookupResult {
  */
 export interface DialogOptions {
   /** Dialog width — number of pixels or a percentage object */
-  width?: number | { value: number; unit: "%" | "px" };
+  width?: number | { value: number; unit: '%' | 'px' };
   /** Dialog height — number of pixels or a percentage object */
-  height?: number | { value: number; unit: "%" | "px" };
+  height?: number | { value: number; unit: '%' | 'px' };
   /** Title displayed in the dialog header */
   title?: string;
 }
@@ -346,11 +334,7 @@ export interface INavigationService {
    * @param options - Optional dialog dimensions and title
    * @returns Promise resolving to the dialog result when closed
    */
-  openDialog(
-    webresourceName: string,
-    data?: string,
-    options?: DialogOptions
-  ): Promise<DialogResult>;
+  openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult>;
 
   /**
    * Closes the current dialog, optionally returning a result to the opener.

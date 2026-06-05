@@ -1,0 +1,91 @@
+<task id="071" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>Pre-deploy functional gap fix — DataverseLiveFactResolver + DeclineResponse extraction from engine stream</title>
+    <status>completed</status>
+    <wave>8.5</wave>
+    <estimated-effort>6-8 hours</estimated-effort>
+    <tags>bff-api, gap-fix, live-fact-resolver, decline-extraction, zone-a, zone-b, pre-deploy</tags>
+    <dependencies>040, 042, 060, 061</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>pre-deploy-fix</d-p>
+  </metadata>
+
+  <prompt>
+    Two functional gaps were identified during pre-deploy audit that would break the live `/api/insights/ask` endpoint. Both are pure-code fixes (no schema or infra change). Close them before task 080 deploy so the runbook actually exercises the synthesis pipeline end-to-end rather than scaffold fallbacks.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Dataverse reads (sprk_matter), playbook engine stream draining, and the §3.5 facade boundary discipline.</role>
+
+  <goal>
+    (1) `DataverseLiveFactResolver : ILiveFactResolver` reads `sprk_matter` via `IDataverseService` and returns `FactArtifact` for the 4 predicates predict-matter-cost playbook (task 060) needs: `attorney`, `client`, `matterType`, `opposingCounsel`. Confidence = 1.0 (deterministic system-of-record). DI swap from `StubLiveFactResolver` to `DataverseLiveFactResolver`. Stub stays in place for tests. (2) `InsightsPlaybookExecutionCache.DrainEngineStreamAsync` extracts BOTH `ReturnInsightArtifactNode` AND `DeclineToFindNode` events; returns typed result `InsightsEngineRunResult { Artifact, Decline }`. `InsightsOrchestrator.AnswerQuestionAsync` surfaces real `DeclineResponse` (MinimumEvidenceNeeded, ConfidenceInDecline, etc.) via `InsightsAgentResult.Declined`. Cache only caches when Artifact is non-null (declines are state-of-evidence-specific; never cached).
+  </goal>
+
+  <inputs>
+    <file purpose="audit">2026-05-29 pre-deploy audit findings (this conversation transcript)</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.4.3 worked example shows the expected DeclineResponse shape for predict-matter-cost insufficient path)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§6 synthesis path requires DeclineToFindNode → DeclineResponse propagation)</file>
+    <file purpose="existing">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json (task 060) — references LiveFactNode predicates</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="§3.5">DataverseLiveFactResolver is Zone B (Services/Insights/LiveFacts/); reads via IDataverseService only; ZERO AI-internal imports</constraint>
+    <constraint source="§3.5">Decline extraction in cache + orchestrator is Zone A; no change to facade DTOs needed (InsightsAgentResult already supports both Artifact + Decline)</constraint>
+    <constraint source="ADR-010">If new DI registration count exceeds module cap, place DataverseLiveFactResolver in existing InsightsModule (Zone B) replacing StubLiveFactResolver registration</constraint>
+    <constraint source="cache-correctness">Declines MUST NOT be cached — evidence sufficiency depends on the current state of the index; a cached decline becomes stale the moment a new Observation lands</constraint>
+    <constraint source="backward-compat">Existing artifact-cached entries remain valid; cache key shape unchanged</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse-read, live-facts, decline-extraction, engine-stream-drain</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/DataversePrecedentBoard.cs (Zone B Dataverse-read template from task 012)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeclineToFindNode.cs (StructuredData shape — DeclineResponse)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LiveFactNode.cs (consumer; understand FactArtifact emit shape)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Investigate sprk_matter schema">Use mcp__dataverse__describe_table("sprk_matter") to confirm the field names for: attorney (lookup → systemuser? primary contact?), client, matterType (likely sprk_mattertype), opposingCounsel. Document findings inline + in task notes.</step>
+    <step order="2" name="Author DataverseLiveFactResolver">Zone B; Services/Insights/LiveFacts/DataverseLiveFactResolver.cs. Implement GetMatterFactAsync(subject, predicate, ct) — parse subject "matter:{id}", read sprk_matter row, return FactArtifact for the requested predicate. Confidence = 1.0 (system-of-record). Throw LiveFactNotSupportedException ONLY for unrecognized predicates (preserves stub semantics for unsupported cases).</step>
+    <step order="3" name="DI swap">Replace `services.AddSingleton&lt;ILiveFactResolver, StubLiveFactResolver&gt;()` with `services.AddScoped&lt;ILiveFactResolver, DataverseLiveFactResolver&gt;()` in InsightsModule.cs. Keep StubLiveFactResolver class file in place (tests + as documented fallback).</step>
+    <step order="4" name="Author InsightsEngineRunResult">New record at Services/Ai/Insights/InsightsEngineRunResult.cs: `{ InsightArtifact? Artifact, DeclineResponse? Decline }`. Used as DrainEngineStreamAsync return type.</step>
+    <step order="5" name="Extend DrainEngineStreamAsync">In InsightsPlaybookExecutionCache.cs: change the drain to scan for BOTH `ReturnInsightArtifactNode` AND `DeclineToFindNode` NodeCompleted events. Build InsightsEngineRunResult. If both present (shouldn't happen but defend), prefer Artifact (sufficient path wins). Don't cache declines (only artifacts get cached).</step>
+    <step order="6" name="Update GetOrExecuteAsync signature">Change return type from `Task&lt;InsightArtifact?&gt;` to `Task&lt;InsightsEngineRunResult&gt;` (or add a new method, deprecate old). Cache only checks/writes the Artifact field; Decline always pass-through.</step>
+    <step order="7" name="Update InsightsOrchestrator">AnswerQuestionAsync: when DrainEngineStreamAsync returns Result with non-null Decline → use that directly in InsightsAgentResult.Declined (no more scaffold "no-artifact-produced"). When both null → keep the existing scaffold path as defensive fallback (log-only — should never happen with a well-formed playbook).</step>
+    <step order="8" name="Update tests">(a) DataverseLiveFactResolver unit tests with mocked IDataverseService for all 4 predicates + unsupported-predicate + invalid-subject. (b) InsightsPlaybookExecutionCache tests for decline-event extraction + non-caching of declines. (c) InsightsOrchestrator tests for the new decline propagation path (real DeclineResponse with non-empty MinimumEvidenceNeeded). (d) PredictMatterCostPlaybookTests update — insufficient-evidence test should now assert real MinimumEvidenceNeeded ≥ 7 (task 060 scaffold note can be removed).</step>
+    <step order="9" name="§3.5 grep">Zone B paths still clean (DataverseLiveFactResolver imports IDataverseService only, no AI internals).</step>
+    <step order="10" name="Quality gates">code-review + adr-check. Confirm: ADR-010 (no new module needed, DI swap only), ADR-013 (Zone A decline extraction; Zone B fact resolution), §3.5.4 (Zone B grep clean), D-47 (DeclineResponse propagation honors honesty contract), D-A23 (EvidenceGuard still validates evidence on artifact path).</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="dataverse-mcp">mcp__dataverse__describe_table for sprk_matter schema confirmation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/DataverseLiveFactResolver.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsEngineRunResult.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsPlaybookExecutionCache.cs (MODIFIED — drain both event types)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs (MODIFIED — surface real decline)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsModule.cs (MODIFIED — swap registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Insights/LiveFacts/DataverseLiveFactResolverTests.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/InsightsPlaybookExecutionCacheTests.cs (MODIFIED — decline-extraction coverage)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/InsightsOrchestratorTests.cs (MODIFIED — real decline path)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Playbooks/PredictMatterCostPlaybookTests.cs (MODIFIED — assert real MinimumEvidenceNeeded)</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r1/notes/sprk-matter-livefact-predicates.md (Step 1 findings)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DataverseLiveFactResolver resolves all 4 predict-matter-cost predicates (attorney, client, matterType, opposingCounsel) from sprk_matter — unit-tested via mocked IDataverseService</criterion>
+    <criterion testable="true">DI registration is DataverseLiveFactResolver, not StubLiveFactResolver, in production composition</criterion>
+    <criterion testable="true">Predict-matter-cost playbook now exercises real LiveFactNode → FactArtifact path (no LiveFactNotSupportedException thrown for the 4 expected predicates)</criterion>
+    <criterion testable="true">InsightsPlaybookExecutionCache.DrainEngineStreamAsync returns InsightsEngineRunResult with both Artifact and Decline fields; insufficient-evidence path populates Decline non-null</criterion>
+    <criterion testable="true">InsightsOrchestrator surfaces real DeclineResponse (with non-empty MinimumEvidenceNeeded reflecting EvidenceSufficiencyNode gap analysis) when insufficient path fires — no more "no-artifact-produced" scaffold for that case</criterion>
+    <criterion testable="true">Declines are NOT cached (verified by test: insufficient-evidence invocation followed by sufficient-evidence invocation for the same key returns artifact, not stale decline)</criterion>
+    <criterion testable="true">PredictMatterCostPlaybookTests insufficient-evidence test asserts real MinimumEvidenceNeeded ≥ 7 (not generic "no-artifact-produced")</criterion>
+    <criterion testable="true">§3.5.4 grep on Zone B still clean (DataverseLiveFactResolver imports IDataverseService only)</criterion>
+    <criterion testable="true">All existing Insights tests still pass (zero regressions)</criterion>
+  </acceptance-criteria>
+</task>

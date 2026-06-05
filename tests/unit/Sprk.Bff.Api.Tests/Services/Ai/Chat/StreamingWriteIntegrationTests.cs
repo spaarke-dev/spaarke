@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
+using Sprk.Bff.Api.Tests.Mocks;
 using Xunit;
 
 // Explicit alias to avoid ChatMessage ambiguity
@@ -37,7 +38,12 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 ///
 /// ADR-015: Tests use generic content only (no real document strings in CI logs).
 /// ADR-019: Error events use ProblemDetails-compatible errorCode + errorMessage.
+///
+/// Status (project sdap-bff.api-test-suite-repair, task 030, P23.A1 batch 1):
+/// Migrated to <see cref="AsyncEnumerableHelpers"/> + <c>ThrowingAsyncEnumerable</c> per FR-06
+/// / D-01 BUILD LOCAL verdict. Tests Pass at task-execution time (all 28).
 /// </summary>
+[Trait("status", "repaired")]
 public class StreamingWriteIntegrationTests
 {
     // === JSON options matching ChatEndpoints.WriteChatSSEAsync ===
@@ -1013,6 +1019,8 @@ public class StreamingWriteIntegrationTests
 
     /// <summary>
     /// Configures IChatClient to return the specified tokens as a streaming response.
+    /// Uses <see cref="AsyncEnumerableHelpers.ToAsyncEnumerable{T}(IEnumerable{T}, CancellationToken)"/>
+    /// per project task 030 / D-01 BUILD LOCAL verdict.
     /// </summary>
     private static void SetupChatClientTokens(IChatClient chatClient, params string[] tokens)
     {
@@ -1021,25 +1029,28 @@ public class StreamingWriteIntegrationTests
                 Arg.Any<IEnumerable<AiChatMessage>>(),
                 Arg.Any<ChatOptions?>(),
                 Arg.Any<CancellationToken>())
-            .Returns(ToAsyncEnumerable(updates));
+            .Returns(AsyncEnumerableHelpers.ToAsyncEnumerable(updates));
     }
 
     /// <summary>
     /// Configures IChatClient to yield specified tokens then throw OperationCanceledException.
+    /// Uses <see cref="AsyncEnumerableHelpers.ThrowingAsyncEnumerable{T}(Exception, T[])"/>.
     /// </summary>
     private static void SetupChatClientTokensThenCancel(IChatClient chatClient, params string[] tokensBeforeCancel)
     {
+        var updates = tokensBeforeCancel.Select(CreateStreamingUpdate).ToArray();
         chatClient.GetStreamingResponseAsync(
                 Arg.Any<IEnumerable<AiChatMessage>>(),
                 Arg.Any<ChatOptions?>(),
                 Arg.Any<CancellationToken>())
-            .Returns(ToAsyncEnumerableThenThrow(
-                tokensBeforeCancel.Select(CreateStreamingUpdate),
-                new OperationCanceledException()));
+            .Returns(AsyncEnumerableHelpers.ThrowingAsyncEnumerable(
+                new OperationCanceledException(),
+                updates));
     }
 
     /// <summary>
     /// Configures IChatClient to yield a token then throw the specified exception.
+    /// Uses <see cref="AsyncEnumerableHelpers.ThrowingAsyncEnumerable{T}(Exception, T[])"/>.
     /// </summary>
     private static void SetupChatClientTokensThenFail(
         IChatClient chatClient, string tokenBeforeFail, Exception exception)
@@ -1048,13 +1059,14 @@ public class StreamingWriteIntegrationTests
                 Arg.Any<IEnumerable<AiChatMessage>>(),
                 Arg.Any<ChatOptions?>(),
                 Arg.Any<CancellationToken>())
-            .Returns(ToAsyncEnumerableThenThrow(
-                new[] { CreateStreamingUpdate(tokenBeforeFail) },
-                exception));
+            .Returns(AsyncEnumerableHelpers.ThrowingAsyncEnumerable(
+                exception,
+                CreateStreamingUpdate(tokenBeforeFail)));
     }
 
     /// <summary>
     /// Configures IChatClient to immediately throw (no tokens yielded).
+    /// Uses <see cref="AsyncEnumerableHelpers.ThrowingAsyncEnumerable{T}(Exception)"/>.
     /// </summary>
     private static void SetupChatClientFails(IChatClient chatClient, Exception exception)
     {
@@ -1062,9 +1074,7 @@ public class StreamingWriteIntegrationTests
                 Arg.Any<IEnumerable<AiChatMessage>>(),
                 Arg.Any<ChatOptions?>(),
                 Arg.Any<CancellationToken>())
-            .Returns(ToAsyncEnumerableThenThrow(
-                Enumerable.Empty<ChatResponseUpdate>(),
-                exception));
+            .Returns(AsyncEnumerableHelpers.ThrowingAsyncEnumerable<ChatResponseUpdate>(exception));
     }
 
     private static ChatResponseUpdate CreateStreamingUpdate(string text)
@@ -1074,27 +1084,5 @@ public class StreamingWriteIntegrationTests
             Role = ChatRole.Assistant,
             Contents = [new TextContent(text)]
         };
-    }
-
-    private static async IAsyncEnumerable<T> ToAsyncEnumerable<T>(IEnumerable<T> items)
-    {
-        foreach (var item in items)
-        {
-            await Task.Yield();
-            yield return item;
-        }
-    }
-
-    private static async IAsyncEnumerable<ChatResponseUpdate> ToAsyncEnumerableThenThrow(
-        IEnumerable<ChatResponseUpdate> items,
-        Exception exceptionToThrow)
-    {
-        foreach (var item in items)
-        {
-            await Task.Yield();
-            yield return item;
-        }
-
-        throw exceptionToThrow;
     }
 }

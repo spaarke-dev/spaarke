@@ -26,6 +26,7 @@ namespace Sprk.Bff.Api.Tests.Integration.Workspace;
 ///   POST /api/workspace/ai/summary         — AI summary (WorkspaceAiEndpoints)
 ///   POST /api/workspace/matters/pre-fill   — Matter AI pre-fill (WorkspaceMatterEndpoints)
 /// </summary>
+[Trait("status", "repaired")]
 public class WorkspaceEndpointsTests : IClassFixture<WorkspaceTestFixture>
 {
     private readonly WorkspaceTestFixture _fixture;

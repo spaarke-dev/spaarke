@@ -1,0 +1,62 @@
+<task id="004" project="agent-framework-fit-assessment-r1">
+  <metadata>
+    <title>Apply decision criteria to each surface; produce per-surface matrix</title>
+    <phase>3</phase>
+    <tags>assessment, decision-matrix, per-surface, criteria</tags>
+    <estimate>2h</estimate>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03 via sub-agent (commit d473c023). Output: notes/04-per-surface-decision-matrix.md (708 lines, 10 surfaces). S5 correctly bifurcated into S5A (shipped Foundry wrapper) + S5B (planned canonical durable HITL); 2 S8 surfaces from task 001 (SessionSummarizationService + CapabilityRouter) included. Distribution: 1 ADOPT / 5 PARTIAL / 4 DON'T ADOPT — anti-bias guard rail passes decisively. Top 3 conclusions: (1) S2 JPS DON'T ADOPT — Workflows is conceptually competitive but no incremental migration path; rewrite touches 30+ files + Dataverse schema + plugin pipeline, cost grossly disproportionate to benefit; (2) S5B is the only ADOPT — F7 Workflows + F11 RequestPort + F12 Foundry hosting purpose-built for multi-day legal workflows; importantly workflow HITL is framework-internal not Foundry-exclusive, narrowing Foundry-vs-framework to deployment-only; (3) S1 PARTIAL gated on Issue #6268 — structural fit is highest in assessment but bug affects SprkChat's canonical multi-tool streaming, adopting before resolution ships a regression. Unexpected verdict: S6 DON'T ADOPT for the right reason — uses Microsoft.Agents.Builder (M365 Agents SDK), an entirely separate SDK from Microsoft.Agents.AI; conflating would push wrong abstraction onto Copilot integration boundary. Top open questions for synthesis §8: VM-isolation requirement for S5B (Foundry-hosted vs Workflows-in-BFF/Function); S1 wait-or-pilot timing for #6268; S7 D-A20 contract authoring address 3 UNKNOWNs (host library, deployment model, BFF seam).</completion-summary>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Apply the SPEC §4 decision-criteria framework (technical fit + Agent Framework value + migration cost) to each of S1-S8. Produce a per-surface decision matrix with: recommendation (Adopt / Don't adopt / Partial adopt), specific rationale citing inventory + feature-map evidence, list of open questions per surface. Output: projects/agent-framework-fit-assessment-r1/notes/04-per-surface-decision-matrix.md.</goal>
+    <context>This is the analytical core of the assessment. Tasks 001-003 produced raw inventory + feature catalog; this task synthesizes them into per-surface decisions. The output drives task 006's assessment document §5 (per-surface decision matrix) and §8 (open questions).</context>
+    <constraints>
+      - For each surface S1-S8: explicitly evaluate against EVERY SPEC §4 criterion (technical fit a-g, value criteria for the 9 Agent Framework features, migration cost a-f). Do not skip criteria — if a criterion is N/A for a surface, say so explicitly
+      - Recommendation MUST be one of: ADOPT / DON'T ADOPT / PARTIAL — no "maybe"; no "TBD"
+      - Each recommendation MUST cite at least 2 concrete pieces of evidence from notes/01, notes/02, or notes/03 — by section or quote
+      - For ADOPT or PARTIAL recommendations: list specific Agent Framework features the surface would use (from notes/03)
+      - For DON'T ADOPT: list specific reasons (e.g., "JPS-driven; never invokes LLM via agent interface; Workflows is competitive but migration cost > benefit")
+      - Surface at least one "open question for human decision" per surface — these become §8 of the assessment doc
+      - Be willing to recommend DON'T ADOPT — the assessment is not biased toward adopting just because the work is fun
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-fit-assessment-r1/SPEC.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/01-spaarke-ai-surfaces-inventory.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/02-non-bff-ai-touchpoints-inventory.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/03-agent-framework-feature-map.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Re-read SPEC §4 (the decision-criteria framework) — internalize the criteria categories before applying</step>
+    <step>Re-read notes/01, notes/02, notes/03 in sequence to load the inventory + feature catalog</step>
+    <step>For S1 SprkChat: apply technical fit criteria (conversational? latency budget? state coupling? streaming?), apply Agent Framework value criteria (which of 10 features would S1 use?), apply migration cost criteria (rewrite scope? package impact? test impact?). Recommendation + rationale + open questions</step>
+    <step>Repeat for S2 AnalysisOrchestration + JPS, S3 Builder, S4 Background AI jobs, S5 Foundry Agent Service overlap, S6 M365 Copilot, S7 Insights Engine MCP, S8 (if discovered)</step>
+    <step>Use Spaarke's BFF AI extraction assessment as a tonal model — it surfaced honest "structurally AI-dominant but operationally justified" findings; this assessment should surface similarly honest conclusions even when uncomfortable</step>
+    <step>Write notes/04-per-surface-decision-matrix.md — one section per surface, each with subsections: "Technical fit evaluation", "Agent Framework value", "Migration cost", "Recommendation", "Open questions for human decision". Cite notes/01-03 sections in every claim</step>
+    <step>Add a closing "Recommendation summary table" — single table with columns: Surface | Recommendation | Top 2 reasons | Top open question</step>
+    <step>Commit: `docs(assessment): per-surface decision matrix (R1 task 004)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>projects/agent-framework-fit-assessment-r1/notes/04-per-surface-decision-matrix.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Every surface S1-S7 (S8 if discovered) has its own section + ADOPT/DON'T ADOPT/PARTIAL recommendation</criterion>
+    <criterion>Every recommendation cites at least 2 concrete pieces of evidence from notes/01-03</criterion>
+    <criterion>Every surface has at least 1 open-question-for-human-decision item</criterion>
+    <criterion>Closing summary table lists all surfaces in one place</criterion>
+    <criterion>At least one DON'T ADOPT or PARTIAL recommendation surfaces (sanity check against adoption bias)</criterion>
+  </acceptance-criteria>
+</task>

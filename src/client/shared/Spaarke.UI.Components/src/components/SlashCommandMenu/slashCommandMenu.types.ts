@@ -131,7 +131,7 @@ export interface SlashCommandMenuProps {
    * Ref to the anchor element (typically the chat input container).
    * The popover positions itself above this element.
    */
-  anchorRef: React.RefObject<HTMLElement>;
+  anchorRef: React.RefObject<HTMLElement | null>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,7 +156,12 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
   {
     id: 'summarize',
     label: 'Summarize',
-    description: 'Summarize the current analysis document',
+    // R5 task 019 (D2-10): description widened to signal both modes the
+    // chat agent supports — session-uploaded files (R5 chat-driven path
+    // per FR-01 / FR-03) AND the active workspace document (R3 back-compat
+    // wizard flow via SummarizeFilesDialog). Wording is spec-driven, not
+    // implementer-chosen, per spec NFR-12 (tool description quality).
+    description: 'Summarize uploaded files or the active document',
     trigger: '/summarize',
     icon: React.createElement(SparkleRegular),
     category: 'system',

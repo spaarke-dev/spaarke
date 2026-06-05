@@ -1,0 +1,117 @@
+<task id="023" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.D4 — CI gate negative-path verification (FR-12)</title>
+    <status>completed</status>
+    <completed>2026-05-31</completed>
+    <completion-notes>
+      PR #312 opened with deliberate-fail test; retargeted to master to exercise the gate.
+      mergeStateStatus = BLOCKED; admin override refused (`GraphQL: 3 of 3 required status
+      checks are expected. (mergePullRequest)`). PR closed, remote+local branches deleted.
+      Evidence: baseline/ci-gate-verification-2026-05-31.md. CI gate confirmed OPERATIONAL.
+
+      Critical follow-up filed in evidence doc §3: sdap-ci.yml workflow is currently
+      broken (0s failures, workflow_run_id:0) on all recent runs — unrelated to this
+      task (pre-existing, NFR-01 scope boundary). Reported for separate repair.
+    </completion-notes>
+    <estimated-effort>45-90 minutes</estimated-effort>
+    <assigned>AI agent (with GH PR creation rights)</assigned>
+    <tags>phase-1, ci-gate, verification, p1-d</tags>
+    <parallel-group>1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Creates an ephemeral test branch + closes it; no permanent file changes; disjoint from sibling Wave 1-B tasks 014 (baseline write) and 016 (helper tests)</parallel-reason>
+    <rigor>STANDARD</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Verify the CI gate is operational by deliberately introducing a failing test in a throwaway
+    branch + PR. The merge button must be DISABLED for that PR, confirming task 020's
+    `enforce_admins:true` flip + task 021's `skip-tests` removal + task 022's documented
+    emergency path produce an actually-blocking gate.
+
+    Per design.md §7 Phase 1 P1.D exit gate: "verify gate works: deliberately push a
+    failing-test PR; confirm it blocks." This task is that verification.
+
+    NO permanent code changes — the test branch + PR are CLEANED UP at task end. Only the
+    verification record persists in `baseline/ci-gate-verification-{date}.md`.
+  </prompt>
+
+  <role>AI agent performing negative-path verification of the restored CI gate.</role>
+
+  <goal>
+    Verification record `projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-verification-2026-MM-DD.md`
+    documents: (a) a test PR with a deliberately failing test was opened, (b) `Build & Test
+    (Release)` status check returned `failure`, (c) merge button was disabled, (d) PR was
+    closed and branch deleted without merging.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-post-flip-2026-MM-DD.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No permanent code changes — failing-test branch is cleaned up at task end</constraint>
+    <constraint source="FR-12">PR closed without merging; status check shows `failure`; merge button disabled</constraint>
+    <constraint source="design.md §7 P1.D">Verification is the final step proving the CI gate operational</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      P1.D Track tasks 020 (enforce_admins flip), 021 (skip-tests removal), 022 (emergency doc)
+      have all completed by the time this task runs. This task is the LIVE verification: a
+      deliberately failing test in a throwaway branch must be blocked by the gate. Without this
+      verification, the P1.D Track exit is theoretical — the gate's correctness is asserted but
+      not demonstrated.
+    </background>
+    <dependencies>
+      <dependency task="020" status="not-started">enforce_admins flipped to true</dependency>
+      <dependency task="021" status="not-started">skip-tests workflow input removed</dependency>
+      <dependency task="022" status="not-started">Emergency-deploy procedure documented</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-verification-2026-MM-DD.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Create branch `test/ci-gate-negative-path-verification` from current `work/sdap-bff.api-test-suite-repair`.</step>
+    <step order="2">Add a deliberately failing test to a NEW file (do NOT modify existing tests). Suggested path: `tests/unit/Sprk.Bff.Api.Tests/_CiGateVerificationTests.cs`. Content: a single `[Fact]` named `CiGate_NegativePath_VerificationOnly_DELETE_ME` with body `Assert.True(false, "intentional failure to verify CI gate — task 023; safe to delete");`. Add `[Trait("status", "ci-gate-verification-only-delete")]` for clarity.</step>
+    <step order="3">Commit + push: `git commit -m "test(ci): deliberate failure for CI gate verification (FR-12) — DO NOT MERGE"` and `git push -u origin test/ci-gate-negative-path-verification`.</step>
+    <step order="4">Open PR: `gh pr create --title "test(ci): deliberate failure — DO NOT MERGE — verifies FR-12" --body "Negative-path verification for FR-12 per task 023. This PR will be closed without merging. Test will be deleted from the branch."`.</step>
+    <step order="5">Wait for `Build & Test (Release)` status check to complete (poll `gh pr checks &lt;PR-NUMBER&gt;` until done; allow up to 20 min).</step>
+    <step order="6">Verify check result: status MUST be `failure`. If `success` → HALT and investigate why the deliberately-failing test passed (gate is broken; this is a critical finding).</step>
+    <step order="7">Verify merge button disabled: `gh pr view &lt;PR-NUMBER&gt; --json mergeable,mergeStateStatus`. Expect `mergeable: CONFLICTING` or `mergeStateStatus: BLOCKED` (per enforce_admins:true on failing required check).</step>
+    <step order="8">Write `projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-verification-2026-MM-DD.md` documenting: (a) PR URL + number, (b) check result, (c) merge button state, (d) declared CI gate operational.</step>
+    <step order="9">Cleanup: `gh pr close &lt;PR-NUMBER&gt; --delete-branch` (deletes both PR and remote branch). Also delete the local branch: `git checkout work/sdap-bff.api-test-suite-repair &amp;&amp; git branch -D test/ci-gate-negative-path-verification`.</step>
+    <step order="10">Verify `git status` on `work/sdap-bff.api-test-suite-repair` shows changes ONLY under `projects/sdap-bff.api-test-suite-repair/baseline/` — the verification doc is the only persistent artifact.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">checkout, commit, push, branch (cleanup)</tool>
+    <tool name="gh">pr create, pr checks, pr view, pr close --delete-branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="baseline">projects/sdap-bff.api-test-suite-repair/baseline/ci-gate-verification-2026-MM-DD.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Verification doc exists with PR URL + status check result + merge button state</criterion>
+    <criterion testable="true">`Build &amp; Test (Release)` returned `failure` on the deliberately failing test</criterion>
+    <criterion testable="true">Merge button was BLOCKED (verified via `gh pr view --json mergeable,mergeStateStatus`)</criterion>
+    <criterion testable="true">Test PR closed + branch deleted (remote AND local)</criterion>
+    <criterion testable="true">No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/` on `work/sdap-bff.api-test-suite-repair` after cleanup</criterion>
+    <criterion testable="true">P1.D Track exit gate declared operational in `current-task.md`</criterion>
+  </acceptance-criteria>
+</task>

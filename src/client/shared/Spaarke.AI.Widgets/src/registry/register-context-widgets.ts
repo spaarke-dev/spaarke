@@ -28,6 +28,7 @@
  */
 
 import { registerContextWidget } from './ContextWidgetRegistry';
+import type { ContextWidgetComponent } from '../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // progress-tracker
@@ -35,8 +36,7 @@ import { registerContextWidget } from './ContextWidgetRegistry';
 // ---------------------------------------------------------------------------
 
 registerContextWidget('progress-tracker', {
-  factory: () =>
-    import('../widgets/context/ProgressTrackerWidget').then((m) => ({ default: m.default })),
+  factory: () => import('../widgets/context/ProgressTrackerWidget').then(m => ({ default: m.default })),
 });
 
 // ---------------------------------------------------------------------------
@@ -50,7 +50,12 @@ registerContextWidget('progress-tracker', {
 
 registerContextWidget('playbook-gallery', {
   factory: () =>
-    import('../widgets/context/PlaybookGalleryWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: ContextWidgetComponent<unknown> at registry vs widget's
+    // typed default (ContextWidgetComponent<PlaybookGalleryData>) — registry
+    // boundary variance, see ../index.ts for the same pattern.
+    import('../widgets/context/PlaybookGalleryWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------
@@ -67,7 +72,10 @@ registerContextWidget('playbook-gallery', {
 
 registerContextWidget('entity-info', {
   factory: () =>
-    import('../widgets/context/EntityInfoWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/EntityInfoWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------
@@ -84,7 +92,37 @@ registerContextWidget('entity-info', {
 
 registerContextWidget('findings', {
   factory: () =>
-    import('../widgets/context/FindingsWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/FindingsWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
+// file-preview (R5 task 018 / D2-09)
+//
+// Widget type: 'file-preview'
+// Stage:       chat-driven Summarize vertical slice (Context-pane mount,
+//              non-modal)
+// Purpose:     Inline preview of files uploaded into the active chat session
+//              (`ChatSession.UploadedFiles`; spec NFR-02 hard-cap = 20).
+//              Wraps the extracted `RichFilePreview` renderer (task 013 /
+//              D2-08) instead of rebuilding iframe/metadata/menu UI (R5
+//              CLAUDE.md §3.1 reuse mandate).
+// Dispatches:  `context.file_selected` on the `context` channel when the
+//              user picks a different file from the multi-file list
+//              (additive ADR-030 event type added by task 016 / D2-06).
+//              Also dispatches `workspace.widget_load` for the
+//              `toggleWorkspace` per-file action so a file can be pinned
+//              into the Workspace pane as a `document-viewer` tab.
+// ---------------------------------------------------------------------------
+
+registerContextWidget('file-preview', {
+  factory: () =>
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/FilePreviewContextWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,372 @@
+<task id="018" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-09 Build `FilePreviewContextWidget` (Context pane; non-modal)</title>
+    <status>complete</status>
+    <estimated-effort>1 day</estimated-effort>
+    <actual-effort>~1h (sub-agent code authoring; main session handles build/commit/push)</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G4 (parallel with task 017 `StructuredOutputStreamWidget`)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>013 (RichFilePreview renderer extracted), 016 (additive PaneEventBus event types incl. `context.file_selected`)</dependencies>
+    <tags>frontend, widget, context-pane, fluent-ui, react-19</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Build the `FilePreviewContextWidget` — a NEW Context-pane widget that renders
+    inline (non-modal) file previews for the R5 chat-driven Summarize vertical
+    slice. The widget WRAPS the extracted `RichFilePreview` renderer (produced by
+    task 013); it MUST NOT rebuild iframe/metadata/navigation/menu logic. In
+    single-file mode the widget renders the active file inline. In multi-file
+    mode the widget renders a list of file cards above the active preview;
+    clicking a card swaps the active file and emits a `context.file_selected`
+    PaneEventBus event (additive type added by task 016).
+
+    The per-file 3-dot menu reuses the existing `DocumentRowMenu` shared
+    component (12 actions in canonical FR-DOC-01 order). For R5 the relevant
+    actions are `aiSummary` (triggers Summarize playbook), `toggleWorkspace`
+    (pin to Workspace), and `findSimilar` (existing RAG flow). Other actions
+    are wired through `onAction` to the host's dispatcher; non-applicable
+    actions may be passed via `disabledActions`.
+
+    This widget is the Context-pane counterpart to the upgraded
+    `DocumentViewerWidget` (Workspace destination, task 022) — both consume the
+    same extracted `RichFilePreview` renderer; the existing
+    `RichFilePreviewDialog` continues to wrap it for modal use cases. Per R5
+    CLAUDE.md §3.1 reuse mandate: NO parallel preview renderer, NO parallel
+    row-action menu.
+  </prompt>
+
+  <role>
+    Senior frontend engineer with Fluent UI v9 + React 19 expertise, deep
+    familiarity with the `@spaarke/ai-widgets` Context-pane widget pattern
+    (`PlaybookGalleryWidget`, `EntityInfoWidget`, `FindingsWidget`),
+    `ContextWidgetRegistry` lazy-factory registration, the
+    `useDispatchPaneEvent`/`usePaneEvent` PaneEventBus hooks, and the
+    `DocumentRowMenu` 12-action contract.
+  </role>
+
+  <goal>
+    `FilePreviewContextWidget.tsx` is committed to
+    `src/client/shared/Spaarke.AI.Widgets/src/widgets/context/` and exports a
+    default `ContextWidgetComponent<FilePreviewContextData>` that satisfies
+    these acceptance criteria:
+    (1) Single-file mode (`files.length === 1`) renders the file inline using
+    the extracted `RichFilePreview` renderer (iframe + metadata + prev/next
+    controls hidden when N=1 + 3-dot `DocumentRowMenu`).
+    (2) Multi-file mode (`files.length &gt; 1`) renders a vertical list of
+    Fluent v9 file cards above the active preview; clicking a card sets that
+    file active and dispatches `context.file_selected` to the `context` channel
+    via `useDispatchPaneEvent`.
+    (3) Per-file 3-dot menu uses `DocumentRowMenu` (12 actions in canonical
+    order); `aiSummary`, `toggleWorkspace`, `findSimilar` dispatch to the
+    correct PaneEventBus channels / host callback; non-applicable actions are
+    passed via `disabledActions`.
+    (4) Widget is registered in `register-context-widgets.ts` with type string
+    `'file-preview'` using the lazy-factory pattern that mirrors
+    `playbook-gallery` / `entity-info` / `findings`.
+    (5) Dark-mode parity verified (Fluent v9 semantic tokens only; zero
+    hard-coded hex/rgb).
+    (6) Loading + empty + error states render gracefully (never a blank pane).
+    (7) Existing subscribers ignore the new `context.file_selected` event
+    (additive type already validated by task 016).
+    (8) `code-review` + `adr-check` quality gates pass at Step 9.5.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="dependency-output-task-013">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx</file>
+    <file purpose="dependency-output-task-016">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    <file purpose="canonical-context-widget">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/PlaybookGalleryWidget.tsx</file>
+    <file purpose="canonical-row-menu">src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</file>
+    <file purpose="canonical-row-menu-types">src/client/shared/Spaarke.UI.Components/src/types/DocumentRowMenu.ts</file>
+    <file purpose="modal-wrapper-reference">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+    <file purpose="registry-target">src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts</file>
+    <file purpose="widget-types">src/client/shared/Spaarke.AI.Widgets/src/types/widget-types.ts</file>
+    <file purpose="dispatch-hook">src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1">REUSE MANDATE — MUST wrap the extracted `RichFilePreview` renderer (task 013) for inline preview. MUST NOT rebuild iframe/metadata/prev-next/menu UI. MUST reuse `DocumentRowMenu` (12 actions) for the 3-dot menu. NO parallel file-preview component to `RichFilePreviewDialog`.</constraint>
+    <constraint source="R5 CLAUDE.md §3.4">PaneEventBus channels are closed at 4 per ADR-030. The widget uses ONLY the existing `context` channel and dispatches the additive `context.file_selected` event type added by task 016. NO new channel.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens only — zero hard-coded hex/rgb. Dark-mode parity by construction. Loading state uses Fluent v9 `Skeleton`. Empty state renders meaningful affordance (never blank pane). Pattern: mirror `PlaybookGalleryWidget` styles.</constraint>
+    <constraint source="ADR-022">React 19 functional components. Hooks only — no class components. NOT PCF-safe (this widget runs in the SpaarkeAi Code Page shell, not PCF).</constraint>
+    <constraint source="ADR-012">New code lives in `@spaarke/ai-widgets` (widget) + reuses `@spaarke/ui-components` (`RichFilePreview`, `DocumentRowMenu`). Component library boundaries respected.</constraint>
+    <constraint source="ADR-030">Additive event-type discipline — `context.file_selected` is a new discriminant on the existing `context` channel. Existing subscribers MUST ignore unknown types and continue functioning (no breakage of citation-highlight, entity-update, etc.).</constraint>
+    <constraint source="ADR-018">R5 introduces NO new feature flags. The widget is registered unconditionally in `register-context-widgets.ts`. No `if (flag)` registration blocks.</constraint>
+    <constraint source="spec FR-08">"Summarize this only" per-file affordance is wired in task 021 (D2-12); this task creates the per-file card UI surface that task 021 extends. Keep the per-file card component composable (extract a `FilePreviewCard` sub-component) so task 021 can add the affordance without rewriting markup.</constraint>
+    <constraint source="spec NFR-02">ChatSession.UploadedFiles hard cap = 20 files. Multi-file list MUST handle up to 20 cards without performance degradation. Pattern: virtualization not required at N≤20; basic vertical flex list is acceptable.</constraint>
+    <constraint source="spec NFR-07 / ADR-029">BFF publish-size — this task is frontend-only. Confirm `dotnet publish` delta = 0 MB in task notes (no BFF code changed).</constraint>
+    <constraint source="project">Widget registry type string is `'file-preview'` (matches BFF widget payload key). If the BFF emits a different key during integration, surface the mismatch in task notes and request alignment — do NOT silently rename.</constraint>
+    <constraint source="project">Per-file 3-dot menu hides `preview` action (the widget IS the preview); other irrelevant actions (e.g. `rename` if no handler) are passed via `disabledActions` per `DocumentRowMenu` contract.</constraint>
+    <constraint source="project">When `files.length === 0`, render an empty state ("No files attached") — never a blank pane. When `error` prop set, render the error inline using Fluent v9 `MessageBar`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/context-pane-widget</topic>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/context/PlaybookGalleryWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/widget-types.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/DocumentRowMenu.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-030-paneeventbus-closed-channels.md</file>
+    </files>
+    <patterns>
+      <pattern name="Context widget skeleton + empty state" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/context/PlaybookGalleryWidget.tsx">
+        Copy the structure: `makeStyles` + Fluent v9 tokens, `<ContextWidgetProps<T>>` typing, `useDispatchPaneEvent` hook for outbound events, Skeleton/EmptyState/Error sub-components, top-level `useStyles()`/`dispatch`/local state, `mergeClasses` for className merging. Mirror styles for visual consistency (header titles, card border tokens, brand-stroke focus/hover, dark-mode token usage).
+      </pattern>
+      <pattern name="Lazy registration" location="src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts">
+        Add `registerContextWidget('file-preview', { factory: () =&gt; import('../widgets/context/FilePreviewContextWidget').then(m =&gt; ({ default: m.default as unknown as ContextWidgetComponent })) });`. Use the same type-erasure cast as `playbook-gallery` / `entity-info` / `findings`. Add an inline registration block in the registry's index file ONLY if `index.ts` mirrors the other inline registrations (verify at task time).
+      </pattern>
+      <pattern name="DocumentRowMenu reuse" location="src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx">
+        Render `&lt;DocumentRowMenu document={{ id, name, documentType }} onAction={handleAction} disabledActions={['preview', 'rename']} /&gt;` per file card. `handleAction(action: DocumentRowAction)` switch dispatches: `aiSummary` → trigger Summarize playbook via PaneEventBus; `toggleWorkspace` → dispatch widget_load to `workspace` channel (R5 pattern in `register-document-viewer-widget.ts`); `findSimilar` → existing RAG flow (host callback or PaneEventBus); other actions → bubble to host via `onFileAction` callback prop for parent-controlled handling.
+      </pattern>
+      <pattern name="RichFilePreview wrapping" location="src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx">
+        The extracted renderer (task 013 output) exposes the same iframe + metadata + prev/next + 3-dot menu primitives. The Context-pane widget passes inline-mode props (no Dialog wrapper). When `files.length &gt; 1`, also render the file card list above the renderer. Hide prev/next when N=1. Forward AI-summary / find-similar / workspace-pin callbacks from the host.
+      </pattern>
+      <pattern name="PaneEventBus dispatch" location="src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts">
+        `const dispatch = useDispatchPaneEvent(); dispatch('context', { type: 'file_selected', fileId, fileName, sequence });`. The `context.file_selected` discriminant comes from task 016. Existing subscribers (entity-info, findings, etc.) ignore unknown discriminants.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5's chat-driven Summarize vertical slice lets users upload up to 20 files
+      per chat session, then ask the assistant to summarize one, several, or all
+      of them. The Context pane needs an in-place file preview surface so users
+      can: (a) inspect what they uploaded without modal interruption, (b) switch
+      between files in a multi-file session, (c) act per-file (summarize this
+      only, find similar, pin to workspace) via the canonical 12-action menu.
+      The Workspace pane gets a parallel destination via the upgraded
+      `DocumentViewerWidget` (task 022). Both surfaces share the
+      `RichFilePreview` extracted renderer (task 013) — single source of truth
+      for iframe + metadata + prev/next + 3-dot menu UI. Modal use cases keep
+      consuming `RichFilePreviewDialog`.
+    </background>
+    <dependencies>
+      <dependency task="013" status="not-started">
+        Task 013 (D2-08) extracts the `RichFilePreview` renderer core from
+        `RichFilePreviewDialog`. This widget WRAPS that extracted component.
+        If task 013 has not landed, this task is blocked.
+      </dependency>
+      <dependency task="016" status="not-started">
+        Task 016 (D2-06) adds 5 additive PaneEventBus event types per ADR-030,
+        including `context.file_selected`. This widget dispatches that event
+        on file selection in multi-file mode. If task 016 has not landed, the
+        event-type discriminant is undefined.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 017 (D2-07) `StructuredOutputStreamWidget` — Workspace pane
+        widget that subscribes to `workspace.streaming_started/field_delta/
+        streaming_complete`. Parallel-safe with this task (independent widgets).</item>
+      <item>Task 021 (D2-12) "Summarize this only" per-file affordance —
+        extends this widget's per-file card with a button that dispatches
+        directly to the Summarize orchestrator with `fileIds: [singleFile]`.
+        Keep the per-file card composable.</item>
+      <item>Task 022 (D2-08 Workspace half) upgrades the R4 stub
+        `DocumentViewerWidget` to consume the same extracted renderer for
+        Workspace-destination previews.</item>
+      <item>`@spaarke/ui-components` `RichFilePreviewDialog` continues to
+        serve modal preview use cases (e.g. SemanticSearchControl PCF,
+        DocumentRelationshipViewer). Refactor in task 013 must not break it.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request
+      `/compact`. Output the mandatory rigor declaration per CLAUDE.md §8:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend widget creation in @spaarke/ai-widgets;
+                 React 19 + Fluent v9 + new event-type wiring;
+                 reuses extracted renderer + canonical 3-dot menu.
+      📖 PROTOCOL STEPS TO EXECUTE: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 9.5 → 10
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`; confirm task 018 status is 🔲 and that
+      dependencies 013 + 016 are ✅. If either dependency is incomplete,
+      report blocker + STOP. Read `current-task.md` to verify no conflicting
+      R5 task is in flight in the same `Spaarke.AI.Widgets` area.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; + &lt;knowledge&gt;. In particular:
+      (a) the extracted `RichFilePreview` renderer (task 013 output) — note
+      its props surface (inline vs modal mode flags, callback shapes,
+      navigation-control visibility props);
+      (b) the `context.file_selected` discriminant added by task 016 — confirm
+      payload shape (fileId, fileName, sequence?, source?);
+      (c) `PlaybookGalleryWidget` style + sub-component pattern;
+      (d) `DocumentRowMenu` 12-action contract + `disabledActions` semantics.
+      Extract the props surface needed for the widget.
+    </step>
+    <step order="3" name="Plan Implementation">
+      Decompose into sub-tasks: (a) define `FilePreviewContextData` payload
+      shape (`{ files: ChatSessionFile[], activeFileId?: string }`); (b)
+      author `FilePreviewContextWidget.tsx` skeleton — `useStyles`,
+      `useDispatchPaneEvent`, local active-file state, single vs multi mode
+      branching; (c) author `FilePreviewCard` sub-component for multi-file
+      list; (d) wire `DocumentRowMenu` per card with `aiSummary` /
+      `toggleWorkspace` / `findSimilar` dispatch + `disabledActions` for
+      `preview` (and others as needed); (e) extend `register-context-widgets.ts`
+      with the `'file-preview'` registration; (f) add inline registration in
+      registry `index.ts` if mirroring (verify pattern at task time); (g) add
+      loading + empty + error states; (h) dark-mode verification.
+    </step>
+    <step order="4" name="Define Data Payload Type">
+      In `FilePreviewContextWidget.tsx`, export `FilePreviewContextData`
+      shape: `{ files: Array&lt;{ fileId: string; fileName: string;
+      documentType?: string; previewUrl: string; sizeBytes?: number;
+      createdBy?: string; createdOn?: string }&gt;, activeFileId?: string }`.
+      Align with `ChatSession.UploadedFiles[]` model (task 004 / D1-04 — if
+      already landed, mirror its shape; otherwise define here and reconcile
+      during integration).
+    </step>
+    <step order="5" name="Implement Single-File Mode">
+      Implement the `files.length === 1` branch: render extracted
+      `RichFilePreview` inline (no dialog wrapper); prev/next controls
+      hidden; metadata pane visible; 3-dot `DocumentRowMenu` rendered with
+      `disabledActions={['preview', 'rename']}`. Wire `onAction` to handle
+      `aiSummary` (dispatch to host callback or PaneEventBus per integration
+      pattern from `register-document-viewer-widget.ts`), `toggleWorkspace`
+      (dispatch `workspace.widget_load`), `findSimilar` (host callback / RAG
+      flow). Other actions bubble via host-supplied `onFileAction` prop.
+    </step>
+    <step order="6" name="Implement Multi-File List Mode">
+      Implement the `files.length &gt; 1` branch: render a vertical list of
+      `FilePreviewCard` sub-components ABOVE the active preview. Each card
+      shows file name + type chip + per-file 3-dot menu. Clicking the card
+      body (NOT the menu trigger — `stopPropagation` in menu trigger is
+      already handled by `DocumentRowMenu`) sets that file active AND
+      dispatches `context.file_selected` to the `context` channel via
+      `useDispatchPaneEvent`. The active file's preview renders via the
+      same extracted `RichFilePreview` below the list. Use Fluent v9
+      `Card` + brand-stroke selected state (mirror `PlaybookCard`
+      selected style).
+    </step>
+    <step order="7" name="Wire 3-Dot Menu Per-File Actions">
+      For both modes, render `&lt;DocumentRowMenu&gt;` per file with the
+      following action wiring:
+        - `aiSummary` → dispatch to host callback (`onFileAction?.('aiSummary', fileId)`) for parent-controlled Summarize-this-only routing (task 021 will deepen this)
+        - `toggleWorkspace` → dispatch `workspace` channel `widget_load` event with `widgetType: 'document-viewer'` + `widgetData: { fileId, fileName, previewUrl }`
+        - `findSimilar` → dispatch to host callback (`onFileAction?.('findSimilar', fileId)`)
+        - All other actions → bubble to host via `onFileAction(action, fileId)` for parent-controlled handling
+        - `disabledActions={['preview']}` always (the widget IS the preview); add `rename` if no host handler available
+    </step>
+    <step order="8" name="Register Widget + Wire PaneEventBus Dispatch">
+      Extend `src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts`
+      with a `registerContextWidget('file-preview', ...)` entry using the
+      lazy-factory pattern (type-erasure cast mirroring `playbook-gallery`).
+      If the registry's `index.ts` mirrors inline registrations for other
+      widgets (verify at task time per `register-context-widgets.ts` header
+      comment), add the same inline call there. Confirm `useDispatchPaneEvent`
+      is called at the component top level (not inside event handlers) per
+      React 19 hook rules.
+    </step>
+    <step order="9" name="Loading / Empty / Error States + Dark-Mode Verification">
+      Implement Fluent v9 `Skeleton`-based loading state (mirror
+      `PlaybookGallerySkeletons`). Empty state for `files.length === 0`
+      renders an icon + "No files attached" message. Error state uses
+      `MessageBar` (intent="error") inline. Manually verify dark-mode
+      parity by toggling the SpaarkeAi shell theme (light → dark) and
+      confirming no hard-coded colors leak. Confirm `mergeClasses` is used
+      for className composition.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new `FilePreviewContextWidget.tsx`,
+      `FilePreviewCard` sub-component (if extracted to its own file), and
+      the `register-context-widgets.ts` extension. Run `adr-check` skill;
+      verify ADR-012 (component library boundaries), ADR-021 (Fluent v9
+      tokens + dark mode), ADR-022 (React 19), ADR-030 (additive event
+      types — no new channels), ADR-018 (no new feature flags). Both gates
+      MUST pass. Record results in task notes.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`:
+      018 🔲 → ✅. Reset `current-task.md` to the next pending task per
+      CLAUDE.md §7. Record in task notes: BFF publish-size delta = 0 MB
+      (frontend-only change); per-file 3-dot menu wiring decisions
+      (`aiSummary` / `toggleWorkspace` / `findSimilar` dispatches);
+      `disabledActions` set (`preview` always; `rename` situationally); any
+      open integration points for task 021 (D2-12 "Summarize this only"
+      affordance). Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + lint the `@spaarke/ai-widgets` library (Vite TS check + unit test runner)</tool>
+    <tool name="git">Stage + commit the new widget + registry extension on the R5 branch</tool>
+    <tool name="code-review">Skill invocation at Step 9.5</tool>
+    <tool name="adr-check">Skill invocation at Step 9.5</tool>
+    <tool name="dotnet">Not used directly (no BFF code change) — available for verification builds if requested</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts (EXTEND — add `file-preview` registration)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/index.ts (EXTEND — inline registration if registry's pattern requires; verify at task time)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 018 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-018-widget-wiring-notes.md (per-file 3-dot menu dispatch decisions, `disabledActions` rationale, dark-mode verification screenshots, integration-point handoffs for task 021)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="Canonical Context-pane widget structure" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/context/PlaybookGalleryWidget.tsx">
+      Copy the file-header doc-comment shape (data contract, design constraints,
+      React 19 / NOT PCF-safe note, task tag); the `makeStyles` + token usage;
+      the `Skeleton` / EmptyState / ErrorText sub-component triad; the local-state
+      + `useDispatchPaneEvent` hook usage at the component top level; the
+      `mergeClasses` pattern for className composition.
+    </example>
+    <example name="Lazy registration with type-erasure cast" location="src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts">
+      Add the new entry below `findings`:
+      ```ts
+      registerContextWidget('file-preview', {
+        factory: () =&gt;
+          import('../widgets/context/FilePreviewContextWidget').then(m =&gt; ({
+            default: m.default as unknown as ContextWidgetComponent,
+          })),
+      });
+      ```
+    </example>
+    <example name="DocumentRowMenu wiring per file" location="src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx">
+      Render `&lt;DocumentRowMenu document={{ id: f.fileId, name: f.fileName, documentType: f.documentType }} onAction={(action) =&gt; handleFileAction(action, f.fileId)} disabledActions={['preview', 'rename']} /&gt;` per file card.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx` exists, exports a default `ContextWidgetComponent&lt;FilePreviewContextData&gt;`, and compiles cleanly under the project's TS config (strict mode).</criterion>
+    <criterion testable="true">Single-file mode (`files.length === 1`) renders inline preview using the extracted `RichFilePreview` renderer (task 013) — verified by inspecting imports (NO local re-implementation of iframe / metadata / prev-next UI).</criterion>
+    <criterion testable="true">Multi-file mode (`files.length &gt; 1`) renders a vertical Fluent v9 card list above the active preview; clicking a card swaps the active preview AND dispatches `context.file_selected` with `{ fileId, fileName }` payload (additive event type from task 016).</criterion>
+    <criterion testable="true">Per-file 3-dot menu is `DocumentRowMenu` (verified by import); `disabledActions` includes `'preview'`; `aiSummary` / `toggleWorkspace` / `findSimilar` actions dispatch to the documented destinations (host callback for `aiSummary` + `findSimilar`; `workspace.widget_load` for `toggleWorkspace`).</criterion>
+    <criterion testable="true">Widget is registered with type string `'file-preview'` in `register-context-widgets.ts` using the lazy-factory pattern (matches `playbook-gallery` / `entity-info` / `findings` structure).</criterion>
+    <criterion testable="true">Loading state renders Fluent v9 `Skeleton`s; empty state (`files.length === 0`) renders an icon + "No files attached" message; error state renders an inline `MessageBar` — verified by manually toggling `isLoading` / `error` / empty `files` props in the storybook or shell harness.</criterion>
+    <criterion testable="true">Dark-mode parity verified by toggling SpaarkeAi shell theme; no hard-coded hex/rgb appears in the new files (regex audit: no `#[0-9a-fA-F]{3,8}` or `rgb(` outside Fluent token references).</criterion>
+    <criterion testable="true">Existing PaneEventBus `context` channel subscribers (entity-info, findings, citation-highlight) continue functioning when the new `file_selected` event type fires — verified by smoke-test in the SpaarkeAi shell (no console errors, existing widgets unaffected).</criterion>
+    <criterion testable="true">No new feature flags introduced; widget registration is unconditional (no `if (flag)` block).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (frontend-only change; confirmed in task notes).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>

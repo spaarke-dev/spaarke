@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>F-1: Retroactive BFF placement-justification memo for R3 attachment feature</title>
+    <phase>0: R3 wrap-up + retroactive memo</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, documentation, governance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation memo only — no src/ code, no DI/endpoint changes. STANDARD rigor (load-bearing knowledge files + checkpointing + current-task.md tracking); memo IS the deliverable.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Publish/finalize `projects/spaarke-ai-platform-unification-r3/notes/bff-placement-justification-retroactive.md`
+    — a LIGHT retroactive memo answering CLAUDE.md §10 decision criteria for the R3
+    attachment-payload feature (chat-message `attachments[]` in `ChatEndpoints.cs`). MUST be
+    scoped to R3 only and MUST include "one-time retroactive close-out; rule applies
+    prospectively from 2026-05-19." Independent of task 001 — both Phase 0 tasks may run in
+    parallel.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with BFF governance familiarity. Bias toward §10
+    decision-criteria template: placement justification, AI-coupling assessment,
+    publish-size impact, CVE check. Keep memo LIGHT — one-time retroactive close-out for an
+    already-shipped feature, not a forward audit. Do NOT touch `.claude/` paths or expand
+    scope beyond R3 attachment feature.
+  </role>
+
+  <goal>
+    Finalized memo at `projects/spaarke-ai-platform-unification-r3/notes/bff-placement-justification-retroactive.md`
+    that: (a) answers §10 decision criteria from `.claude/constraints/bff-extensions.md`
+    for the R3 attachment-payload feature; (b) cites the 2026-05-20 BFF AI extraction
+    assessment; (c) references refined ADR-013 (2026-05-20); (d) explicitly states the
+    one-time retroactive scope; (e) cross-linked from R3 lessons-learned and R4 spec.md /
+    CLAUDE.md. NFR-02 acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      CLAUDE.md §10 BFF Hygiene (binding 2026-05-19, refined per ADR-013 on 2026-05-20)
+      requires every BFF-touching task to record a Placement Justification citing
+      `.claude/constraints/bff-extensions.md`. R3 shipped the attachment-payload feature
+      (FR-07: `attachments[]` on chat messages) BEFORE the rule was binding. F-1 is a LIGHT
+      one-time retroactive memo to close the audit trail — NOT a blanket back-audit.
+      Operator decision OC-R4-03 (2026-05-25) finalized this scope. Memo file likely
+      already exists (115 lines per recent commit `4a877b1e`); this task
+      verifies/finalizes.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/bff-placement-justification-retroactive.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI features extend BFF in-process. Memo MUST cite ADR-013 (refined 2026-05-20) as canonical justification. CRUD code MUST NOT directly inject AI-internal types (`IOpenAiClient` / `IPlaybookService`); use `Services/Ai/PublicContracts/` facade. Memo MUST note whether the R3 feature complies (it should — text extraction does not require AI-internal types).</constraint>
+    <constraint source="project">Memo scope STRICTLY the R3 attachment-payload feature (OC-R4-03). MUST include literal phrase: "one-time retroactive close-out; rule applies prospectively from 2026-05-19" (or near-identical per NFR-02). Edits limited to R3 `notes/` and cross-link updates in R3 lessons-learned + R4 spec/CLAUDE.md — do NOT modify `.claude/`, root CLAUDE.md, or `src/`. VERIFY-then-amend if memo already exists with substantive content.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load §10 decision criteria">Read `.claude/constraints/bff-extensions.md` end-to-end. Enumerate criteria the memo must answer. Read root CLAUDE.md §10 and the 2026-05-20 BFF AI extraction assessment.</step>
+    <step order="2" name="Audit existing memo">Read existing memo (likely 115 lines per commit `4a877b1e`). Verify coverage of: (a) each §10 criterion; (b) ADR-013 (refined) citation; (c) BFF AI extraction assessment cross-reference; (d) one-time retroactive scope statement; (e) R3-feature specifics (endpoint, DTO, what changed). Note gaps.</step>
+    <step order="3" name="Inspect R3 feature surface">Briefly read `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` to confirm what shipped: endpoint path, request DTO (likely contains `attachments: List&lt;AttachmentDto&gt;`), text-content handling. Do NOT modify code.</step>
+    <step order="4" name="Fill memo gaps">Amend (do not rewrite) the memo to close §10-criterion gaps. Each amendment 1-3 sentences, evidence-cited, scoped to R3 attachment feature. Confirm one-time-retroactive scope statement is present and prominent.</step>
+    <step order="5" name="Cross-link">Ensure R3 lessons-learned.md references the memo (one line). Ensure R4 spec NFR-02 entry and/or CLAUDE.md Decisions Made cross-links the memo. Do NOT touch root CLAUDE.md.</step>
+    <step order="6" name="Verify acceptance">Confirm memo satisfies all NFR-02 acceptance from R4 spec.md: (a) published; (b) answers §10 decision criteria; (c) explicitly scoped to R3 (one-time, no precedent). Cross-links resolve.</step>
+    <step order="7" name="Update R4 TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 002 from 🔲 → ✅ completed.</step>
+    <step order="8" name="Document deviations">If anything deviated, record in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Shell commands (light — only path verification)</tool>
+    <tool name="Read">Read constraint, assessment, ADR-013, ChatEndpoints.cs, existing memo</tool>
+    <tool name="Edit">Amend memo + cross-links</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/bff-placement-justification-retroactive.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given §10 requires Placement Justification for BFF additions, When this task completes, Then the memo answers every §10 decision criterion from `.claude/constraints/bff-extensions.md` for the R3 attachment-payload feature.</criterion>
+    <criterion testable="true">Given OC-R4-03 finalized this as one-time retroactive close-out, When the memo is read, Then it explicitly states "one-time retroactive close-out; rule applies prospectively from 2026-05-19" and limits scope to the R3 attachment feature only.</criterion>
+    <criterion testable="true">Given ADR-013 (refined 2026-05-20) is canonical citation, When the memo is read, Then it cites ADR-013 and the 2026-05-20 BFF AI extraction assessment as evidence base for keeping the feature in BFF in-process.</criterion>
+    <criterion testable="true">Given the memo must be discoverable, When R3 lessons-learned.md and R4 spec.md / CLAUDE.md are inspected, Then each contains a cross-link to the memo.</criterion>
+    <criterion testable="true">Given task 002 is being executed, When this task completes, Then R4 TASK-INDEX.md shows task 002 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Memo file already exists (115 lines, commit `4a877b1e`). Treat as VERIFY-AND-AMEND, not create-from-scratch. The §10 / ADR-013 / 2026-05-20-assessment trio is the only evidence base needed; do NOT expand to a forward audit or pull in unrelated R3 BFF surface. The "one-time retroactive close-out" disclaimer is load-bearing — verify it is present and prominent.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply STANDARD rigor (no Step 9.5 gates; checkpointing every 3 steps; current-task.md tracking). `.claude/constraints/bff-extensions.md` is LOAD-BEARING for §10 — read in full before drafting amendments.</protocol>
+  </execution>
+</task>

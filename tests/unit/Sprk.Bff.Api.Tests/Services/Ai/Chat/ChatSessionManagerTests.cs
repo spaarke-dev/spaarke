@@ -343,6 +343,74 @@ public class ChatSessionManagerTests
     }
 
     // =========================================================================
+    // R5 task 007 (D1-07) — Session-files cleanup signal integration
+    // =========================================================================
+
+    /// <summary>
+    /// R5 task 007 / D1-07 (spec NFR-02 "Aggressive cleanup on session-end"):
+    /// <see cref="ChatSessionManager.DeleteSessionAsync"/> must raise a single
+    /// fire-and-forget signal to the cleanup hosted service at the end of its
+    /// existing logic.
+    /// </summary>
+    [Fact]
+    public async Task DeleteSessionAsync_FiresCleanupSignal_ExactlyOnce_WithTenantAndSessionIds()
+    {
+        // Arrange
+        var cleanupSignalMock = new Mock<Sprk.Bff.Api.Services.Ai.Chat.ISessionFilesCleanupSignal>();
+        var sut = new ChatSessionManager(
+            _cacheMock.Object,
+            _repoMock.Object,
+            _loggerMock.Object,
+            persistence: null,
+            cleanupSignal: cleanupSignalMock.Object);
+
+        _cacheMock
+            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _repoMock
+            .Setup(r => r.ArchiveSessionAsync(TenantId, "session-r5-signal", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await sut.DeleteSessionAsync(TenantId, "session-r5-signal");
+
+        // Assert — signal invoked exactly once with the expected tenant + session.
+        cleanupSignalMock.Verify(
+            s => s.SignalSessionEnded(TenantId, "session-r5-signal"),
+            Times.Once,
+            "DeleteSessionAsync must raise the cleanup signal at the end of the existing logic " +
+            "(spec NFR-02 aggressive cleanup-on-session-end contract)");
+    }
+
+    /// <summary>
+    /// R5 task 007 / D1-07 back-compat: <see cref="ChatSessionManager.DeleteSessionAsync"/>
+    /// must succeed when the cleanup signal is absent (null) — back-compat for
+    /// callers that don't register the service (compound-AI-OFF code path,
+    /// pre-R5 unit tests).
+    /// </summary>
+    [Fact]
+    public async Task DeleteSessionAsync_SucceedsWhenCleanupSignalIsNull_BackCompat()
+    {
+        // Arrange — SUT uses the original 4-param constructor; cleanup signal defaults to null.
+        _cacheMock
+            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _repoMock
+            .Setup(r => r.ArchiveSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act + Assert — no exception, no dependency on the cleanup signal.
+        var act = async () => await _sut.DeleteSessionAsync(TenantId, "session-no-cleanup-signal");
+        await act.Should().NotThrowAsync(
+            "the cleanup-signal injection is nullable + the call is fire-and-forget — " +
+            "DeleteSessionAsync must continue to work when the signal is not registered");
+
+        // Cache + Dataverse paths still fire normally.
+        _cacheMock.Verify(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        _repoMock.Verify(r => r.ArchiveSessionAsync(TenantId, "session-no-cleanup-signal", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
     // Cache key and TTL constants
     // =========================================================================
 
@@ -412,13 +480,13 @@ public class ChatSessionManagerTests
         // Cosmos holds the session
         var storedSession = new StoredSession
         {
-            Id          = "session-cold-cosmos",
-            SessionId   = "session-cold-cosmos",
-            TenantId    = TenantId,
-            PlaybookId  = PlaybookId,
-            Messages    = [],
+            Id = "session-cold-cosmos",
+            SessionId = "session-cold-cosmos",
+            TenantId = TenantId,
+            PlaybookId = PlaybookId,
+            Messages = [],
             WidgetStates = [],
-            CreatedAt   = DateTimeOffset.UtcNow.AddMinutes(-30),
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-30),
             LastActivity = DateTimeOffset.UtcNow.AddMinutes(-5)
         };
         _persistenceMock

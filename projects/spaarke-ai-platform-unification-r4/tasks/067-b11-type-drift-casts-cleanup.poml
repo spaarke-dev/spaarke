@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-11: Tighten type-drift casts (IEventRecord index sig, Combobox onInput drift, etc.) bottom-up</title>
+    <phase>Phase 6 — Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>063, 064</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, typescript, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code refactor on .ts/.tsx files (type tightening); each cast removed in its own commit; downstream-revealing nature requires quality gate. FULL per Step 3.5.5 (modifies code in multiple packages + cascade-risk + ADR-022 React 19 type-system invariant).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>depends on events-components stabilization from 063 and 064; revealed casts often live across the same files</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-12 / plan B-11: tighten type-drift casts bottom-up across the codebase.
+    Known anchors: `IEventRecord` index-signature cast (lets arbitrary string keys read
+    from a record without type-safe access), Combobox `onInput` shape drift (Fluent v9
+    Combobox event type vs ad-hoc handler), and any residual casts surfaced by tasks 063
+    (B-7) and 064 (B-8). Fix each cast in its own commit; typecheck passes after each.
+    0 type errors on `tsc --noEmit` across affected packages.
+  </prompt>
+
+  <role>
+    SPAARKE TypeScript developer with type-system literacy. Bias toward upstream
+    type-shape fixes (define the right interface; surface the cast as obviously-wrong)
+    rather than downstream cast removal that papers over the shape mismatch. Per-cast
+    commit discipline is non-negotiable — when one cast cleanup reveals two more, fix
+    them in dedicated commits, not in a single mega-commit.
+  </role>
+
+  <goal>
+    (1) 0 type errors on `tsc --noEmit` across `@spaarke/events-components`, `@spaarke/ai-widgets`,
+    `@spaarke/ui-components`, `src/solutions/EventsPage/`, `src/solutions/SpaarkeAi/`,
+    `src/solutions/CalendarSidePane/`. (2) Each cast cleanup is a dedicated commit (one
+    cast or one cast-family per commit) with the build/typecheck green after each. (3) No
+    remaining intentional `as any` / `as unknown as X` casts that paper over real type
+    issues — if a cast is genuinely necessary (e.g., external SDK boundary), it MUST have
+    a code comment explaining why. (4) Carry-over notes for any cast that couldn't be
+    fixed within budget (per R-8 — cascade risk). FR-12 acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      Per backlog B-11 + risk R-8 (plan.original.md §8): type-drift casts accumulated
+      during R3 + earlier projects. Common offenders: `IEventRecord` index-signature use
+      `(record as any)[fieldName]` pattern; Combobox `onInput={(e) =&gt; { ... }}` where
+      event shape doesn't match Fluent v9's `ComboboxInputEvent`; ad-hoc casts in widget
+      registrations. R-8 warns: fixing one cast often reveals others. Cluster fixes within
+      this task; if budget overflows, document discovered casts as carry-overs to a future
+      project. Depends on 063 + 064 (B-7, B-8) because they restructure
+      `@spaarke/events-components` and any residual casts revealed are easier to fix once
+      that lib is stable.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Events.Components/src/types/index.ts</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/CalendarDrawer.tsx</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/CalendarSection/CalendarSection.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/</file>
+      <file>src/solutions/EventsPage/src/App.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Each cast fix is its own commit with `tsc --noEmit` clean after each. NO mega-commits.</constraint>
+    <constraint source="project">Bottom-up: fix shared-lib casts first (Spaarke.Events.Components, Spaarke.UI.Components), then consumers. This minimizes cascade re-work.</constraint>
+    <constraint source="project">If a cast is genuinely unavoidable (external SDK shape, runtime-only knowledge), it MUST have a comment `// SDK boundary cast: {SDK name} {reason}` — no silent casts.</constraint>
+    <constraint source="project">No `// @ts-ignore` / `// @ts-nocheck` substitution. If a cast can't be fixed, leave it but document why.</constraint>
+    <constraint source="project">Budget: ~4h. Per R-8: if cascade reveals significantly more casts, document remaining as carry-over to a future project — do NOT blow past budget.</constraint>
+    <constraint source="ADR-012">Type fixes in shared libs MUST keep the lib context-agnostic. Do NOT introduce host-specific types into shared lib to fix a cast.</constraint>
+    <constraint source="ADR-022">React 19 types — ensure all React event handler types are React 19+ compatible.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/types/index.ts</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Cast inventory">Run a sweep: `grep -rn "as any\\|as unknown as" --include="*.ts" --include="*.tsx" src/client/shared/Spaarke.Events.Components/ src/client/shared/Spaarke.AI.Widgets/ src/client/shared/Spaarke.UI.Components/ src/solutions/EventsPage/ src/solutions/SpaarkeAi/ src/solutions/CalendarSidePane/`. Catalog every match. Bucket by: (a) IEventRecord index signature, (b) Combobox/Fluent event drift, (c) cross-package type drift, (d) genuine SDK boundary. Write to `notes/b11-cast-inventory.md`.</step>
+    <step order="2" name="Prioritize">Order the buckets bottom-up: shared lib types first (a + c), then consumer event handlers (b), then SDK-boundary annotations (d — these get comments, not removal). Estimate effort per bucket.</step>
+    <step order="3" name="Fix IEventRecord index sig">Open `src/client/shared/Spaarke.Events.Components/src/types/index.ts`. Find the `IEventRecord` definition. If it uses `[key: string]: unknown` or similar broad index sig, the consumer casts to `(record as any)[field]` to access typed fields. Fix: define explicit field properties OR use a discriminated union OR introduce typed accessor helpers. Update consumers to use the typed accessor. Commit with message `fix(events): tighten IEventRecord index access (B-11)`.</step>
+    <step order="4" name="Verify typecheck after step 3">Run `npx tsc --noEmit -p src/client/shared/Spaarke.Events.Components/tsconfig.json` + consumer typechecks. 0 errors before proceeding.</step>
+    <step order="5" name="Fix Combobox onInput drift">Find `onInput` handlers on Fluent v9 `Combobox` (or `Input`) components. Replace ad-hoc types with the v9 event type (`React.FormEvent&lt;HTMLInputElement&gt;` or the Fluent v9-published handler type). Commit with message `fix(ui): align Combobox onInput handlers with Fluent v9 types (B-11)`.</step>
+    <step order="6" name="Verify typecheck after step 5">Run `npx tsc --noEmit` across affected packages. 0 errors.</step>
+    <step order="7" name="Fix residual casts revealed">For each remaining cast in the step-1 inventory, do a tight fix-and-commit cycle. STOP at ~4h budget; record carry-overs in `notes/b11-cast-inventory.md` with file:line references.</step>
+    <step order="8" name="Annotate SDK-boundary casts">For genuine SDK casts (e.g., Xrm.WebApi response shapes that TypeScript can't statically narrow), add a `// SDK boundary: ...` comment. Commit `chore(types): annotate SDK-boundary casts (B-11)`.</step>
+    <step order="9" name="Final verification">Run `npx tsc --noEmit` on every package in scope. 0 errors total. Run `npm run lint` on Spaarke.UI.Components (if 065 already landed). 0 lint errors.</step>
+    <step order="10" name="UI smoke test">Run the &lt;ui-tests&gt; below. Confirm no behavioral regression from type tightening. (Type changes shouldn't affect runtime, but cross-checking is cheap.)</step>
+    <step order="11" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 067 from 🔲 → ✅ completed.</step>
+    <step order="12" name="Document deviations + carry-overs">Finalize `notes/b11-cast-inventory.md` with: (a) casts fixed (count + file refs), (b) casts annotated (SDK boundary, count), (c) carry-overs (count + file:line refs, for future projects). Note actual effort vs ~4h estimate.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">grep, npx tsc --noEmit, npm run lint, git commit (per-cast commits)</tool>
+    <tool name="Read">Inspect types + consumers</tool>
+    <tool name="Edit">Tighten types + update consumers</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Events.Components/src/types/index.ts (modified — IEventRecord tightening)</output>
+    <output type="code">(multiple consumer files) — cast removal + type alignment, one commit per cast-family</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b11-cast-inventory.md (inventory + carry-overs)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="EventsPage smoke after type tightening">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_eventspage</url>
+      <steps>
+        <step>Open EventsPage standalone</step>
+        <step>Apply a filter via the AssignedTo dropdown (exercises Combobox onInput)</step>
+        <step>Select an event row</step>
+        <step>Verify event details render correctly (exercises IEventRecord field access)</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>No regression from type tightening; filters apply; events render; no console errors.</expected>
+    </test>
+
+    <test name="SpaarkeAi Calendar widget smoke">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi; mount Calendar widget</step>
+        <step>Interact with CalendarDrawer + filter dropdowns</step>
+        <step>Verify identical behavior to pre-type-tightening</step>
+        <step>Check console</step>
+      </steps>
+      <expected>No behavioral regression in Calendar widget; no console errors.</expected>
+    </test>
+
+    <test name="Dark mode smoke (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Exercise both EventsPage and Calendar widget</step>
+        <step>Verify visual parity with light mode (just inverted)</step>
+      </steps>
+      <expected>Dark mode unchanged; type tightening did not affect rendering.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the cast cleanup, When `npx tsc --noEmit` runs on every affected package, Then 0 type errors total.</criterion>
+    <criterion testable="true">Given the per-cast commit discipline, When `git log --oneline` is inspected, Then each cast-family fix is a separate commit with a "B-11" reference.</criterion>
+    <criterion testable="true">Given the SDK-boundary annotations, When `grep -rn "SDK boundary"` is run, Then every remaining `as any` / `as unknown as` cast has an accompanying comment OR is removed.</criterion>
+    <criterion testable="true">Given the smoke test, When EventsPage + SpaarkeAi Calendar are exercised, Then no behavioral regression appears and no new console errors surface.</criterion>
+    <criterion testable="true">Given the carry-over note, When `notes/b11-cast-inventory.md` is read, Then it lists casts fixed, casts annotated, and casts deferred (with file:line refs for future projects).</criterion>
+    <criterion testable="true">Given task 067 is being executed, When this task completes, Then TASK-INDEX.md shows task 067 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Risk R-8 explicitly warns: fixing one cast reveals others. The ~4h budget is meaningful;
+    do NOT push past it. The carry-over note in `notes/b11-cast-inventory.md` is the
+    pressure-relief valve — discovered-but-unfixed casts are catalogued for a future
+    project, not silently left in the codebase. Per-cast commit discipline matters because
+    it lets the operator revert a single tightening if it causes downstream pain without
+    losing the others. Coordinate with tasks 063 + 064 — they reshape
+    `@spaarke/events-components`, and starting B-11 before they merge would mean
+    re-doing work.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol — Step 9.5 quality gates (code-review + adr-check) run after implementation. Checkpointing every 3 steps. current-task.md tracking. UI tests via ui-test skill at Step 9.7 if Chrome integration enabled. R-8 buffer: ~4h hard cap; carry-overs documented if exceeded.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Audit untested workflows + draft dispositions</title>
+    <phase>2: Rationalization</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>021, 022</blocks>
+    <tags>ci-cd, github-actions, devops, workflow-audit, decision-record</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Decision-record production from inventory; produces 8 decision records (NFR-06) and a ledger</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Produces ledgers/workflow-disposition-ledger.md and 8 decisions/ records — single-task sequential ledger build avoids merge conflicts</parallel-reason>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    For each of the 8 P5 untested workflows (`deploy-bff-api`, `deploy-platform`, `deploy-slot-swap`, `deploy-office-addins`, `provision-customer`, `weekly-quality`, `insights-eval`, `auto-add-to-project`), audit declared purpose, search recent project history for usage in last 90 days, and make a keep / delete / consolidate recommendation per D-03 (delete-by-default) and D-04 (consolidate overlapping). Produce one decision record per workflow PLUS a rollup ledger. The execution of each decision happens in tasks 021/022.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Comfortable with `gh run list`, `git log --grep`, and authoring decision records that withstand "speak now or it goes" review.
+  </role>
+
+  <goal>
+    Nine artifacts exist:
+    - 8 decision records at `decisions/D-NN-disposition-{workflow}.md` (one per untested workflow), each with KEEP / DELETE / CONSOLIDATE recommendation, evidence, and rationale (NFR-06)
+    - 1 rollup at `ledgers/workflow-disposition-ledger.md` with all 8 dispositions tabulated
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-06: workflow count must drop to ≤8 (down from 13) with per-workflow disposition recorded. NFR-06 requires a `decisions/` record for every keep-vs-delete decision (minimum 1-paragraph rationale). This task PRODUCES the recommendations; tasks 021 and 022 EXECUTE them.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/deploy-bff-api.yml</file>
+      <file>.github/workflows/deploy-platform.yml</file>
+      <file>.github/workflows/deploy-slot-swap.yml</file>
+      <file>.github/workflows/deploy-office-addins.yml</file>
+      <file>.github/workflows/provision-customer.yml</file>
+      <file>.github/workflows/weekly-quality.yml</file>
+      <file>.github/workflows/insights-eval.yml</file>
+      <file>.github/workflows/auto-add-to-project.yml</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+      <file>projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-06: Total workflow count must drop to ≤8 (after tasks 021/022 execute)</constraint>
+    <constraint source="spec">NFR-06: Decision record per workflow with minimum 1-paragraph rationale</constraint>
+    <constraint source="design">D-03: Delete-by-default for never-used workflows; burden of proof on retention</constraint>
+    <constraint source="design">D-04: Consolidate overlapping deploys liberally</constraint>
+    <constraint source="project">For each workflow, check `git log -- .github/workflows/{name}.yml` for recent contributors who may have context</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/github-actions-rationalization-r1/baseline/workflow-inventory-2026-06-01.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load inventory from `baseline/workflow-inventory-2026-06-01.md` — that's the input. Confirm the 8 P5 candidates are listed.</step>
+    <step order="2">For each of the 8 workflows: review last-30-day runs from inventory; if 0 successful runs in 30 days, default → DELETE per D-03. Override only if there's documented value (e.g., manual-only workflow waiting for trigger).</step>
+    <step order="3">Identify consolidation candidates per D-04: which deploy-* workflows overlap? Likely candidates:
+      - `deploy-bff-api.yml` vs `deploy-slot-swap.yml` (both deploy BFF; slot-swap is a deployment STRATEGY)
+      - `weekly-quality.yml` vs `nightly-quality.yml` (cadence variants — may merge with conditional)
+      Document overlaps with evidence (line-level comparison).
+    </step>
+    <step order="4">For each of the 8 workflows: write `decisions/D-NN-disposition-{workflow-name}.md` containing: Context, Evidence (30-day runs, last meaningful commit, recent contributors from `git log`), Recommendation (KEEP/DELETE/CONSOLIDATE), Rationale (≥1 paragraph), Owner sign-off note (none required by D-03, but list recent contributors).</step>
+    <step order="5">Write rollup `ledgers/workflow-disposition-ledger.md` with table: Workflow | Recommendation | Decision Record | Resulting Workflow Count Change.</step>
+    <step order="6">Verify target outcome: ledger shows final workflow count after dispositions executed will be ≤8 (FR-06). If math doesn't add up, revisit recommendations.</step>
+    <step order="7">Update TASK-INDEX.md: change task 020 status to ✅ completed. Tasks 021 and 022 may now proceed in parallel.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">Run history lookups</tool>
+    <tool name="git">log + grep for recent commits + contributors</tool>
+    <tool name="Read">Workflow files + inventory</tool>
+    <tool name="Write">Decision records + ledger</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/github-actions-rationalization-r1/decisions/D-NN-disposition-{8 workflows}.md (×8)</output>
+    <output type="docs">projects/github-actions-rationalization-r1/ledgers/workflow-disposition-ledger.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">8 decision records exist in `decisions/`, one per P5 untested workflow.</criterion>
+    <criterion testable="true">Each decision record has Context, Evidence, Recommendation (KEEP/DELETE/CONSOLIDATE), and ≥1-paragraph Rationale (NFR-06).</criterion>
+    <criterion testable="true">`ledgers/workflow-disposition-ledger.md` exists with rollup table showing final workflow count after execution ≤8 (FR-06).</criterion>
+    <criterion testable="true">TASK-INDEX.md task 020 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task RECOMMENDS, it does NOT execute deletions. Tasks 021 (deploy-related) and 022 (non-deploy) will execute the recommendations. If a workflow has zero 30-day runs but a recent thoughtful commit (within 14 days), give the author a 1-line "speak now" mention in the decision record before proceeding to deletion.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Must complete before 021 and 022.</protocol>
+  </execution>
+</task>

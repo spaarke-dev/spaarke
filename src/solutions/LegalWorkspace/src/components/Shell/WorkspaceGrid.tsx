@@ -51,6 +51,19 @@ const LazyCloseProjectDialog = React.lazy(
   () => import("../CreateProject/CloseProjectDialog")
 );
 
+// SmartToDoDialog — inline replacement for the retired
+// `Xrm.Navigation.navigateTo` to `sprk_corporateworkspace?mode=todo` handler
+// (W-6 retirement; task 044). Lazy-loaded so the SmartToDo Kanban subtree is
+// not in the initial bundle chunk; users click "Open To Do Dialog" to fetch
+// the chunk on demand. The dialog renders inside the SpaarkeAi shell (no
+// navigation away) and inherits the FeedTodoSyncProvider already mounted at
+// App.tsx — full behavior parity with the retired page.
+const LazySmartToDoDialog = React.lazy(() =>
+  import("../SmartToDo/SmartToDoDialog").then((m) => ({
+    default: m.SmartToDoDialog,
+  }))
+);
+
 // ---------------------------------------------------------------------------
 // Suspense fallback: Fluent Spinner shown while lazy chunk loads
 // ---------------------------------------------------------------------------
@@ -214,6 +227,26 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const [isDashboardOpen, setIsDashboardOpen] = React.useState(false);
   const handleDashboardOpen = React.useCallback(() => setIsDashboardOpen(true), []);
   const handleDashboardClose = React.useCallback(() => setIsDashboardOpen(false), []);
+
+  // -------------------------------------------------------------------------
+  // SmartToDo dialog state (W-6 / task 044)
+  //
+  // Replaces the previous `Xrm.Navigation.navigateTo` to
+  // `sprk_corporateworkspace?mode=todo`, which 404s after W-6 retired the
+  // standalone web resource. The dialog renders inline within the active
+  // host (LegalWorkspace embedded in the SpaarkeAi shell) — no navigation
+  // away from the host page. Behavior parity with the retired ?mode=todo
+  // branch: same SmartToDo Kanban + FeedTodoSyncProvider scope (already
+  // mounted at App.tsx). On close, the workspace Kanban refetches so any
+  // edits made inside the dialog sync back to the inline glance.
+  // -------------------------------------------------------------------------
+
+  const [isTodoDialogOpen, setIsTodoDialogOpen] = React.useState(false);
+  const handleTodoDialogClose = React.useCallback(() => {
+    setIsTodoDialogOpen(false);
+    // Refetch workspace Kanban to pick up any changes made in the dialog.
+    todoRefetchRef.current?.();
+  }, []);
 
   // -------------------------------------------------------------------------
   // Create New Matter — opens Code Page dialog via navigateTo (UDSS-009)
@@ -418,29 +451,14 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // -------------------------------------------------------------------------
 
   const handleOpenTodoDialog = React.useCallback(() => {
-    // Open the workspace web resource in dialog mode with full Kanban + inline detail panel
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any =
-        (window as any)?.Xrm ??
-        (window.parent as any)?.Xrm ??
-        (window.top as any)?.Xrm;
-      if (xrm?.Navigation?.navigateTo) {
-        xrm.Navigation.navigateTo(
-          {
-            pageType: "webresource",
-            webresourceName: "sprk_corporateworkspace",
-            data: "mode=todo",
-          },
-          { target: 2, width: { value: 90, unit: "%" }, height: { value: 90, unit: "%" } }
-        ).then(() => {
-          // Dialog closed — refetch workspace Kanban to sync any changes made in dialog
-          todoRefetchRef.current?.();
-        }).catch(() => { /* user cancelled or navigation failed */ });
-      }
-    } catch (err) {
-      console.error("[WorkspaceGrid] Failed to open To Do dialog:", err);
-    }
+    // W-6 / task 044: open the SmartToDo Kanban in an inline Fluent v9 Dialog
+    // rather than navigating to the retired `sprk_corporateworkspace` web
+    // resource (which would 404 post-retirement). Behavior parity with the
+    // retired `?mode=todo` branch: same SmartToDo component, same data, same
+    // FeedTodoSyncProvider scope (already mounted at App.tsx). Close handler
+    // (handleTodoDialogClose) issues the workspace Kanban refetch that the
+    // previous navigateTo promise resolution used to issue.
+    setIsTodoDialogOpen(true);
   }, []);
 
   const handleOpenDocumentsDialog = React.useCallback((viewId?: string) => {
@@ -904,6 +922,21 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
           <LazyQuickSummaryDashboardDialog
             open={isDashboardOpen}
             onClose={handleDashboardClose}
+          />
+        </React.Suspense>
+      )}
+
+      {/* SmartToDo dialog — full Kanban view triggered from the "Open To Do
+          Dialog" handler. Replaces the retired `sprk_corporateworkspace`
+          navigateTo (W-6 / task 044). Lazy-loaded so the SmartToDo subtree
+          ships in a separate chunk fetched on first open. */}
+      {isTodoDialogOpen && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazySmartToDoDialog
+            open={isTodoDialogOpen}
+            onClose={handleTodoDialogClose}
+            webApi={webApi}
+            userId={userId}
           />
         </React.Suspense>
       )}

@@ -1,8 +1,5 @@
-export { ColumnHeaderMenu } from "./ColumnHeaderMenu";
-export type {
-  ColumnHeaderMenuProps,
-  SortDirection,
-} from "./ColumnHeaderMenu";
+export { ColumnHeaderMenu } from './ColumnHeaderMenu';
+export type { ColumnHeaderMenuProps, SortDirection } from './ColumnHeaderMenu';
 
 // Re-export ColumnHeaderMenu's types under menu-specific alias names to
 // avoid clashes with ColumnFilterHeader's same-named exports when the
@@ -12,4 +9,4 @@ export type {
 export type {
   ColumnFilterType as ColumnMenuFilterType,
   ColumnFilterOption as ColumnMenuFilterOption,
-} from "./ColumnHeaderMenu";
+} from './ColumnHeaderMenu';

@@ -32,9 +32,7 @@ interface RecordTypeReference {
   entityLogicalName?: string;
 }
 
-function getRecordTypeReference(
-  context: ComponentFramework.Context<IInputs>
-): RecordTypeReference | null {
+function getRecordTypeReference(context: ComponentFramework.Context<IInputs>): RecordTypeReference | null {
   const rawValue = context.parameters.regardingRecordType?.raw;
   if (!rawValue) return null;
   const ref = Array.isArray(rawValue) ? rawValue[0] : rawValue;

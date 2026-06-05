@@ -1,0 +1,57 @@
+<task id="090" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>Wrap-up — Lessons learned + Phase 2 priority outline + archive</title>
+    <status>completed</status>
+    <wave>wrap-up</wave>
+    <estimated-effort>4h</estimated-effort>
+    <tags>wrap-up, lessons-learned, archive, phase-2-handoff</tags>
+    <dependencies>all-prior</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    Close out the r2 project: author lessons-learned (what worked, what didn't, what to do differently next phase), outline Phase 2 priorities based on Phase 1.5 findings, update README status to Complete, and archive ephemeral notes per repo-cleanup conventions.
+  </prompt>
+
+  <role>Project closer + retrospective facilitator.</role>
+
+  <goal>
+    Lessons-learned doc published at projects/ai-spaarke-insights-engine-r2/notes/lessons-learned.md. Phase 2 priority outline at projects/ai-spaarke-insights-engine-r2/PHASE-2-OUTLINE.md (or appended to design.md). README status flipped to "Complete (Phase 1.5)" with link to merged PR. Ephemeral notes folder cleaned (handoffs/, debug/, spikes/, drafts/) per repo-cleanup skill. r1 wrap-up remains separately owned (per R1-1).
+  </prompt>
+
+  <inputs>
+    <file purpose="all-wave-handoffs">projects/ai-spaarke-insights-engine-r2/notes/handoffs/ (Wave B5, B6, and any others)</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (all SCs verified)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r2/design.md</file>
+    <file purpose="r1-wrap-up-model">projects/ai-spaarke-insights-engine-r1/tasks/ (look for wrap-up task — likely 090 in r1 if present)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R1-1">r1 wrap-up NOT in r2 scope</constraint>
+    <constraint source="repo-cleanup skill">Use the skill to clean ephemeral notes</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Verify all 15 SCs">Confirm every spec.md success criterion is met (or explicitly carried to Phase 2)</step>
+    <step order="2" name="Author lessons-learned">What worked (terminology section, Wave B sequencing, BFF placement review), what didn't, what we'd do differently</step>
+    <step order="3" name="Outline Phase 2 priorities">Based on Q-A4-1 if any open subquestions remain; based on E3 deferred bidirectional; Cosmos NoSQL graph (D-P17 originally promised, deferred); customer playbook authoring UI; field auto-populations; MCP server contract; embedding-based intent classifier</step>
+    <step order="4" name="Update README">Status: Complete (Phase 1.5)</step>
+    <step order="5" name="Invoke repo-cleanup skill">Clean ephemeral notes folder</step>
+    <step order="6" name="Final commit + push">"docs(insights-engine-r2): Phase 1.5 wrap-up + lessons-learned + Phase 2 outline"</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-insights-engine-r2/notes/lessons-learned.md</output>
+    <output type="docs">projects/ai-spaarke-insights-engine-r2/PHASE-2-OUTLINE.md</output>
+    <output type="docs">README.md status updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 15 spec.md SCs verified or explicitly carried to Phase 2</criterion>
+    <criterion testable="true">Lessons-learned authored</criterion>
+    <criterion testable="true">Phase 2 outline authored</criterion>
+    <criterion testable="true">README status = Complete (Phase 1.5)</criterion>
+    <criterion testable="true">Ephemeral notes cleaned per repo-cleanup</criterion>
+  </acceptance-criteria>
+</task>

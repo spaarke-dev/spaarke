@@ -1,0 +1,60 @@
+<task id="001" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Refresh upstream provenance + baseline diff</title>
+    <phase>1</phase>
+    <tags>knowledge-base, agent-framework, provenance, refresh</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Refresh provenance for knowledge/agent-framework/ — re-clone microsoft/agent-framework at HEAD, capture new commit SHA + date + subject, diff against the 4 currently-curated samples, and update SOURCE.md baseline so subsequent tasks add files against a current snapshot.</goal>
+    <context>The current knowledge/agent-framework/SOURCE.md pins SHA 3256550c5503daef28510d9cbf3f6662f5c1c86c from 2026-05-14. The platform was released early 2026 and ships releases frequently. Before adding any new curated samples, the SHA must be brought current so all new curation lines up against a single pinned commit.</context>
+    <constraints>
+      - Do NOT modify any Spaarke runtime code
+      - Do NOT add or remove curated sample files in this task — that's task 002
+      - Pin the new SHA explicitly in SOURCE.md; record date + subject from `git log -1`
+      - If upstream has renamed or moved any of the 4 existing curated sample directories, log to SOURCE.md GAPs and propose a substitution path (do not auto-substitute)
+      - Use `c:/tmp/agent-framework/` for the shallow clone; delete after the task
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>knowledge/REFRESH-PROCEDURE.md</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+      <file>projects/agent-framework-knowledge-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current knowledge/agent-framework/SOURCE.md to capture the existing pinned SHA + the 4 curated sample paths</step>
+    <step>Shallow clone microsoft/agent-framework to c:/tmp/agent-framework via `git clone --depth 1 https://github.com/microsoft/agent-framework c:/tmp/agent-framework`</step>
+    <step>Run `git -C c:/tmp/agent-framework log -1 --format="%H%n%ci%n%s"` and capture: new SHA, commit date, commit subject</step>
+    <step>For each of the 4 curated sample paths (01-get-started/02_add_tools, 02-agents/Agents/Agent_Step05_Observability, 03-workflows/_StartHere/01_Streaming, 03-workflows/Orchestration/Handoff): verify the path still exists upstream via `Test-Path c:/tmp/agent-framework/dotnet/samples/&lt;path&gt;`</step>
+    <step>For each existing sample: diff curated copy against fresh clone (`diff -rq knowledge/agent-framework/dotnet/samples/&lt;path&gt;/ c:/tmp/agent-framework/dotnet/samples/&lt;path&gt;/`). Note any non-trivial differences in SOURCE.md (whitespace-only diffs may be ignored)</step>
+    <step>Update knowledge/agent-framework/SOURCE.md: replace the "Source repository" table's SHA, date, subject, and "Pulled" date with the new values. Add a "Refresh history" subsection if not already present, with a one-line entry: `&lt;new-SHA-short&gt; (&lt;date&gt;) — provenance baseline for project agent-framework-knowledge-r1`</step>
+    <step>If any of the 4 existing samples no longer exist upstream OR diffs reveal substantive content drift: add a GAP entry to SOURCE.md "GAPs" section describing what changed and proposing whether to replace, archive, or carry forward the curated copy</step>
+    <step>Verify the docs section of SOURCE.md (the 3 Microsoft Learn snapshots) still has accurate URLs — re-WebFetch each to confirm 200, log any 404 to GAPs for task 003-005 to handle</step>
+    <step>Delete c:/tmp/agent-framework</step>
+    <step>Commit: `chore(knowledge): refresh agent-framework provenance baseline for project R1` referencing the new SHA</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Bash</tool>
+    <tool>Edit</tool>
+    <tool>WebFetch</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>knowledge/agent-framework/SOURCE.md (updated SHA + diff notes + GAPs)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>SOURCE.md shows current upstream HEAD SHA + commit date + subject + "Pulled" date</criterion>
+    <criterion>All 4 existing curated sample paths verified against the new SHA (existence + diff result documented)</criterion>
+    <criterion>All 3 existing reference doc URLs verified 200 (or 404s logged as GAPs)</criterion>
+    <criterion>c:/tmp/agent-framework removed</criterion>
+    <criterion>Commit message references the new SHA and the project name</criterion>
+  </acceptance-criteria>
+</task>

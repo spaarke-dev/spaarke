@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Text.Json;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
@@ -45,6 +45,13 @@ public sealed class AgentConfigurationService
         string tenantId,
         CancellationToken cancellationToken = default)
     {
+        // RB-T034-01 (LOW; repaired 2026-06-01): honor CancellationToken before cache lookup.
+        // MemoryDistributedCache (unit-test seam) and Redis fast-path do not raise
+        // OperationCanceledException synchronously on pre-cancelled tokens; without this
+        // ThrowIfCancellationRequested call, the documented `CancellationToken` contract is
+        // unobserved. Canonical .NET defensive-cancellation pattern for async public APIs.
+        cancellationToken.ThrowIfCancellationRequested();
+
         var cacheKey = $"{CacheKeyPrefix}{tenantId}:exposed-playbooks";
         var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
 
@@ -72,6 +79,9 @@ public sealed class AgentConfigurationService
         AgentCapability capability,
         CancellationToken cancellationToken = default)
     {
+        // RB-T034-01 (LOW; repaired 2026-06-01): defensive CancellationToken honor — same gap as sibling.
+        cancellationToken.ThrowIfCancellationRequested();
+
         var cacheKey = $"{CacheKeyPrefix}{tenantId}:capabilities";
         var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
 
@@ -102,6 +112,9 @@ public sealed class AgentConfigurationService
         string userRole,
         CancellationToken cancellationToken = default)
     {
+        // RB-T034-01 (LOW; repaired 2026-06-01): defensive CancellationToken honor — same gap as sibling.
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_options.AllowedRoles is null || _options.AllowedRoles.Count == 0)
             return true; // No role restrictions configured
 
@@ -115,6 +128,9 @@ public sealed class AgentConfigurationService
         string tenantId,
         CancellationToken cancellationToken = default)
     {
+        // RB-T034-01 (LOW; repaired 2026-06-01): defensive CancellationToken honor — same gap as sibling.
+        cancellationToken.ThrowIfCancellationRequested();
+
         await _cache.RemoveAsync($"{CacheKeyPrefix}{tenantId}:exposed-playbooks", cancellationToken);
         await _cache.RemoveAsync($"{CacheKeyPrefix}{tenantId}:capabilities", cancellationToken);
 

@@ -51,12 +51,7 @@ describe('PaneHeader', () => {
 
   describe('Icon prop', () => {
     it('render_WithIcon_RendersIconWrapper', () => {
-      renderWithProviders(
-        <PaneHeader
-          title="Workspace"
-          icon={<span data-testid="custom-icon">icon-glyph</span>}
-        />
-      );
+      renderWithProviders(<PaneHeader title="Workspace" icon={<span data-testid="custom-icon">icon-glyph</span>} />);
 
       expect(screen.getByTestId('pane-header-icon')).toBeInTheDocument();
       expect(screen.getByTestId('custom-icon')).toBeInTheDocument();
@@ -64,12 +59,7 @@ describe('PaneHeader', () => {
     });
 
     it('render_WithIcon_IconWrapperIsAriaHidden', () => {
-      renderWithProviders(
-        <PaneHeader
-          title="Workspace"
-          icon={<span data-testid="custom-icon">icon-glyph</span>}
-        />
-      );
+      renderWithProviders(<PaneHeader title="Workspace" icon={<span data-testid="custom-icon">icon-glyph</span>} />);
 
       // Icon is decorative — the title text already conveys the pane identity
       const iconWrapper = screen.getByTestId('pane-header-icon');
@@ -84,10 +74,7 @@ describe('PaneHeader', () => {
   describe('RightSlot prop', () => {
     it('render_WithRightSlot_RendersRightSlotWrapper', () => {
       renderWithProviders(
-        <PaneHeader
-          title="Assistant"
-          rightSlot={<button data-testid="right-action">Action</button>}
-        />
+        <PaneHeader title="Assistant" rightSlot={<button data-testid="right-action">Action</button>} />
       );
 
       expect(screen.getByTestId('pane-header-right-slot')).toBeInTheDocument();

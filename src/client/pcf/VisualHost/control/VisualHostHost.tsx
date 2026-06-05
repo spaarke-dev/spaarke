@@ -24,10 +24,7 @@ export interface IVisualHostHostProps {
   notifyOutputChanged: () => void;
 }
 
-export const VisualHostHost: React.FC<IVisualHostHostProps> = ({
-  context,
-  notifyOutputChanged,
-}) => {
+export const VisualHostHost: React.FC<IVisualHostHostProps> = ({ context, notifyOutputChanged }) => {
   const [theme, setTheme] = useState(() => resolveTheme(context));
 
   // Theme listener — fires on localStorage events + spaarke-theme-change custom events

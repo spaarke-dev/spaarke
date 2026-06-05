@@ -136,7 +136,7 @@ const useStyles = makeStyles({
 export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
   title,
   subtitle,
-  emailTo,
+  emailTo: _emailTo,
   onEmailToChange,
   emailSubject,
   onEmailSubjectChange,

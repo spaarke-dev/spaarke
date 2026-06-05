@@ -24,8 +24,16 @@ function resolveClientUrl(): string {
     throw new Error('[authInit] window is undefined — cannot resolve Xrm context');
   }
   const frames: Window[] = [window];
-  try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-  try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top); } catch { /* cross-origin */ }
+  try {
+    if (window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top);
+  } catch {
+    /* cross-origin */
+  }
   for (const frame of frames) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,7 +43,9 @@ function resolveClientUrl(): string {
         const url = ctx.getClientUrl() as string;
         if (url) return url;
       }
-    } catch { /* cross-origin */ }
+    } catch {
+      /* cross-origin */
+    }
   }
   throw new Error('[authInit] Xrm.Utility.getGlobalContext().getClientUrl() not available');
 }
@@ -47,11 +57,7 @@ function resolveClientUrl(): string {
  * @param bffAppId BFF API Application ID (from manifest property, for scope construction)
  * @param bffApiUrl BFF API base URL (from manifest property)
  */
-export async function initializeAuth(
-  clientAppId: string,
-  bffAppId: string,
-  bffApiUrl: string
-): Promise<void> {
+export async function initializeAuth(clientAppId: string, bffAppId: string, bffApiUrl: string): Promise<void> {
   console.info('[authInit] Initializing @spaarke/auth for EmailProcessingMonitor...');
 
   const config: IAuthConfig = {

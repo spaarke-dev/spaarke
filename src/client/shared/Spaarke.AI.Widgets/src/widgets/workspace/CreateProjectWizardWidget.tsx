@@ -54,18 +54,8 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Button,
-  Spinner,
-  Text,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  FolderAddRegular,
-  OpenRegular,
-} from '@fluentui/react-icons';
+import { Button, Spinner, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { FolderAddRegular, OpenRegular } from '@fluentui/react-icons';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
@@ -233,9 +223,7 @@ const CreateProjectWizardWidget: React.FC<WorkspaceWidgetProps<CreateProjectWiza
   const styles = useStyles();
 
   /** UI state. */
-  const [launchState, setLaunchState] = useState<'launching' | 'opened' | 'error' | 'unavailable'>(
-    'launching'
-  );
+  const [launchState, setLaunchState] = useState<'launching' | 'opened' | 'error' | 'unavailable'>('launching');
   const [launchError, setLaunchError] = useState<string | null>(null);
 
   /** Guard against double-launch in React 19 StrictMode (effects run twice in dev). */
@@ -296,8 +284,8 @@ const CreateProjectWizardWidget: React.FC<WorkspaceWidgetProps<CreateProjectWiza
           {DISPLAY_NAME}
         </Text>
         <Text size={300} className={styles.subtitle}>
-          The Create Project wizard is only available inside a Dataverse host.
-          Open this page from within Power Apps to create a new project.
+          The Create Project wizard is only available inside a Dataverse host. Open this page from within Power Apps to
+          create a new project.
         </Text>
       </div>
     );
@@ -311,9 +299,7 @@ const CreateProjectWizardWidget: React.FC<WorkspaceWidgetProps<CreateProjectWiza
         <Text as="h2" size={500} weight="semibold" className={styles.title}>
           {DISPLAY_NAME}
         </Text>
-        <Text className={styles.errorText}>
-          {launchError ?? 'Failed to open the Create Project wizard.'}
-        </Text>
+        <Text className={styles.errorText}>{launchError ?? 'Failed to open the Create Project wizard.'}</Text>
         <Button
           appearance="primary"
           icon={<OpenRegular />}

@@ -224,10 +224,16 @@ export function SourceViewerPanel({
   // are stubbed with no-ops so FilePreviewDialog can still render the iframe preview.
   const previewServices = useMemo<IFilePreviewServices>(
     () => ({
-      getDocumentPreviewUrl: async (_documentId: string) =>
-        documentMetadata?.viewUrl ?? null,
+      getDocumentPreviewUrl: async (_documentId: string) => documentMetadata?.viewUrl ?? null,
       getDocumentOpenLinks: async (_documentId: string) => null,
-      navigateToEntity: (_params: { action: 'openRecord'; entityName: string; entityId: string; openInNewWindow?: boolean }) => { /* not available in AnalysisWorkspace context */ },
+      navigateToEntity: (_params: {
+        action: 'openRecord';
+        entityName: string;
+        entityId: string;
+        openInNewWindow?: boolean;
+      }) => {
+        /* not available in AnalysisWorkspace context */
+      },
       copyDocumentLink: async (_documentId: string) => false,
       setWorkspaceFlag: async (_documentId: string, _flag: boolean) => false,
     }),

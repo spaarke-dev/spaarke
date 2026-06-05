@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Verify branch-protection gate end-to-end (deliberate-fail PR)</title>
+    <phase>5: Validate the Gate</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>032, 040, 041, 042, 043</dependencies>
+    <blocks>090</blocks>
+    <tags>ci-cd, github-actions, devops, branch-protection, smoke-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end verification PR; FR-13 acceptance; produces evidence file</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final verification gate; depends on all of Phase 3 + Phase 4</parallel-reason>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Open a deliberate-fail PR that BOTH fails `Build &amp; Test (Release)` AND `actionlint` simultaneously. Confirm the PR is blocked by multiple required-status-checks AND by `enforce_admins: true`. Close without merging. Capture evidence. This is the project's final verification gate.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Final verification of the protection-gate-works-end-to-end claim.
+  </role>
+
+  <goal>
+    Evidence file `baseline/branch-protection-verification-{date}.md` exists with:
+    1. PR URL
+    2. Output of `gh pr checks {pr-num}` showing multiple required checks failing
+    3. Output confirming `enforce_admins: true` is blocking merge even with admin privileges
+    4. Conclusion: PASS — branch protection works as designed
+  </goal>
+
+  <context>
+    <background>
+      Per FR-13: deliberate-fail PR is blocked by `Build &amp; Test (Release)` failing AND by `actionlint` failing AND by `enforce_admins: true`. This is the project's culmination — the original problem was that the gate was theater; this verifies it isn't anymore.
+    </background>
+    <relevant-files>
+      <file>projects/github-actions-rationalization-r1/baseline/branch-protection-verification-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-13: PR blocked by ≥3 mechanisms (test failure + actionlint + enforce_admins)</constraint>
+    <constraint source="spec">FR-14: At project close, rolling 7-day success rate ≥90% — measured by the report from FR-11; this task does NOT cause regressions in that metric (deliberate-fail PR is on a test branch, doesn't affect master CI)</constraint>
+    <constraint source="project">PR closed WITHOUT merging</constraint>
+    <constraint source="project">Test branch named `test/branch-protection-verification-{date}` (clearly throwaway)</constraint>
+    <constraint source="spec">NFR-03: Do NOT disable enforce_admins during this verification</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>projects/github-actions-rationalization-r1/baseline/actionlint-smoke-test-{date}.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create branch `test/branch-protection-verification-{date}` from current master. Make two changes:
+      a. A deliberate test failure (or build failure) — e.g., introduce a syntax error in a low-impact test file
+      b. A deliberate actionlint failure — e.g., introduce a duplicate key in any workflow file
+    </step>
+    <step order="2">Commit + push. Open PR against master.</step>
+    <step order="3">Wait for all checks to run. Verify:
+      - `Build &amp; Test (Release)` = FAIL
+      - `actionlint` = FAIL
+      - PR shows "Required status checks failing" merge-block
+    </step>
+    <step order="4">Attempt to merge as admin (if you have admin rights): `gh pr merge {num} --admin`. With `enforce_admins: true`, this MUST be denied. Capture the denial message.</step>
+    <step order="5">Author `baseline/branch-protection-verification-{date}.md` with: PR URL, `gh pr checks {num}` output, admin-merge-attempt denial output, conclusion.</step>
+    <step order="6">Close PR without merging: `gh pr close {num}`. Delete test branch.</step>
+    <step order="7">Update TASK-INDEX.md: change task 050 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Branch + commit + push</tool>
+    <tool name="gh">PR open + checks + merge attempt + close</tool>
+    <tool name="Write">Evidence document</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/github-actions-rationalization-r1/baseline/branch-protection-verification-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PR is blocked by ≥2 required-status-checks failing (Build &amp; Test (Release) AND actionlint).</criterion>
+    <criterion testable="true">Admin-merge attempt is denied by `enforce_admins: true` (FR-13).</criterion>
+    <criterion testable="true">Evidence file exists with all 4 required elements (PR URL, checks output, denial output, conclusion).</criterion>
+    <criterion testable="true">PR closed without merging; test branch deleted.</criterion>
+    <criterion testable="true">TASK-INDEX.md task 050 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the project's PASS-WITH-PROOF moment. If any of the 3 blocking mechanisms fails to engage, escalate immediately — that's a serious regression in the protection setup. Don't merge under any circumstance.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Final task before wrap-up.</protocol>
+  </execution>
+</task>

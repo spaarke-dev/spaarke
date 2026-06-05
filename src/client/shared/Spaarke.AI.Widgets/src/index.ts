@@ -8,6 +8,28 @@ import { registerWorkspaceWidgets } from './widgets/workspace/register-workspace
 registerWorkspaceWidgets();
 
 // ---------------------------------------------------------------------------
+// Side-effect: register DocumentViewerWidget (R4 task 042 / W-4)
+// First end-to-end Assistant → Workspace `widget_load` demo (FR-02).
+// ---------------------------------------------------------------------------
+import { registerDocumentViewerWidget } from './widgets/workspace/register-document-viewer-widget';
+registerDocumentViewerWidget();
+
+// ---------------------------------------------------------------------------
+// Side-effect: register SearchCriteriaResultWidget (R4 task 043 / W-5)
+// First end-to-end Context → Workspace `widget_load` demo (FR-03).
+// ---------------------------------------------------------------------------
+import { registerSearchCriteriaResultWidget } from './widgets/workspace/register-search-criteria-result-widget';
+registerSearchCriteriaResultWidget();
+
+// ---------------------------------------------------------------------------
+// Side-effect: register StructuredOutputStreamWidget (R5 task 017 / D2-07)
+// Schema-driven structured AI output renderer — destination for Summarize
+// streaming (FR-02) AND Insights playbook static rendering (FR-13 via D2-16).
+// ---------------------------------------------------------------------------
+import { registerStructuredOutputStreamWidget } from './widgets/workspace/register-structured-output-stream-widget';
+registerStructuredOutputStreamWidget();
+
+// ---------------------------------------------------------------------------
 // Side-effect: register all 6 R1 source widgets into ContextWidgetRegistry
 // (AIPU2-081 — migrate source widgets to context pane)
 // ---------------------------------------------------------------------------
@@ -75,6 +97,65 @@ export type { ContextWidgetRegistration } from './registry/ContextWidgetRegistry
 // ---------------------------------------------------------------------------
 
 export { default as GenericTextWidget } from './widgets/GenericTextWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: DocumentViewerWidget — Assistant pane mount-source demo (R4 task 042)
+//
+// First end-to-end PaneEventBus `widget_load` demo (FR-02): when the user
+// attaches a file in the Assistant chat input, ConversationPane dispatches
+// `widget_load` on the workspace channel and this widget mounts as a new
+// workspace tab showing the file's extracted text preview.
+// Registered under 'document-viewer' via register-document-viewer-widget.ts.
+// ---------------------------------------------------------------------------
+
+export { default as DocumentViewerWidget } from './widgets/workspace/DocumentViewerWidget';
+export type { DocumentViewerWidgetData } from './widgets/workspace/DocumentViewerWidget';
+export { DOCUMENT_VIEWER_WIDGET_TYPE } from './widgets/workspace/register-document-viewer-widget';
+
+// ---------------------------------------------------------------------------
+// Widgets: SearchCriteriaResultWidget — Context pane mount-source demo (R4 task 043)
+//
+// First end-to-end Context → Workspace PaneEventBus `widget_load` demo (FR-03):
+// when the user checks "Also add to Workspace" in the Semantic Search criteria
+// tool and clicks Search, SemanticSearchCriteriaTool dispatches `widget_load`
+// on the workspace channel and this widget mounts as a new workspace tab
+// showing the captured search criteria summary.
+// Registered under 'search-criteria-result' via
+// register-search-criteria-result-widget.ts.
+// ---------------------------------------------------------------------------
+
+export { default as SearchCriteriaResultWidget } from './widgets/workspace/SearchCriteriaResultWidget';
+export type { SearchCriteriaResultWidgetData } from './widgets/workspace/SearchCriteriaResultWidget';
+export { SEARCH_CRITERIA_RESULT_WIDGET_TYPE } from './widgets/workspace/register-search-criteria-result-widget';
+
+// ---------------------------------------------------------------------------
+// Widgets: StructuredOutputStreamWidget — schema-driven AI output (R5 task 017)
+//
+// Workspace widget that renders structured AI output PROGRESSIVELY via
+// `FieldDelta` SSE events (FR-02 — Summarize streaming) OR statically from a
+// pre-filled envelope (FR-13 — Insights playbook rendering via D2-16 / task
+// 026). The same widget serves both consumers via different schemas — that
+// "schema-driven" design is the load-bearing reuse claim of R5's platform
+// extensibility story (risk UR-02 mitigation).
+//
+// Two CONCRETE schemas are exported (SUMMARIZE_SCHEMA, INSIGHTS_PLAYBOOK_SCHEMA)
+// so downstream consumers (chat-pane dispatcher, InsightsResponseRenderer) do
+// not redeclare them. Per task 006 spike: schema declaration order = stream
+// arrival order = render order (TL;DR first for Summarize).
+//
+// Registered under 'structured-output-stream' via
+// register-structured-output-stream-widget.ts.
+// ---------------------------------------------------------------------------
+
+export { default as StructuredOutputStreamWidget } from './widgets/workspace/StructuredOutputStreamWidget';
+export type {
+  StructuredOutputStreamWidgetData,
+  StructuredOutputSchema,
+  StructuredOutputField,
+  StructuredOutputDisplayHint,
+} from './widgets/workspace/StructuredOutputStreamWidget';
+export { SUMMARIZE_SCHEMA, INSIGHTS_PLAYBOOK_SCHEMA } from './widgets/workspace/StructuredOutputStreamWidget';
+export { STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE } from './widgets/workspace/register-structured-output-stream-widget';
 
 // ---------------------------------------------------------------------------
 // Widgets: RedlineViewerWidget — side-by-side document comparison (AIPU2-085)
@@ -223,16 +304,12 @@ export { serializeFindSimilarWizardState } from './widgets/workspace/FindSimilar
 // ---------------------------------------------------------------------------
 
 export { default as ProgressTrackerWidget } from './widgets/context/ProgressTrackerWidget';
-export type {
-  ProgressTrackerData,
-  WorkflowStep,
-} from './widgets/context/ProgressTrackerWidget';
+export type { ProgressTrackerData, WorkflowStep } from './widgets/context/ProgressTrackerWidget';
 
 import { registerContextWidget } from './registry/ContextWidgetRegistry';
 import type { ContextWidgetComponent } from './types/widget-types';
 registerContextWidget('progress-tracker', {
-  factory: () =>
-    import('./widgets/context/ProgressTrackerWidget').then((m) => ({ default: m.default })),
+  factory: () => import('./widgets/context/ProgressTrackerWidget').then(m => ({ default: m.default })),
 });
 
 // ---------------------------------------------------------------------------
@@ -243,14 +320,17 @@ registerContextWidget('progress-tracker', {
 // ---------------------------------------------------------------------------
 
 export { default as PlaybookGalleryWidget } from './widgets/context/PlaybookGalleryWidget';
-export type {
-  PlaybookGalleryData,
-  PlaybookSummary,
-} from './widgets/context/PlaybookGalleryWidget';
+export type { PlaybookGalleryData, PlaybookSummary } from './widgets/context/PlaybookGalleryWidget';
 
 registerContextWidget('playbook-gallery', {
   factory: () =>
-    import('./widgets/context/PlaybookGalleryWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
+    // widget's default export is typed ContextWidgetComponent<PlaybookGalleryData>.
+    // The generic variance is unavoidable at the registry boundary — at render
+    // time the widget receives its typed data via the registry contract.
+    import('./widgets/context/PlaybookGalleryWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------
@@ -274,14 +354,11 @@ registerContextWidget('playbook-gallery', {
 // ---------------------------------------------------------------------------
 
 export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
-export type {
-  GetStartedCardId,
-  GetStartedCardsWidgetProps,
-} from './widgets/context/GetStartedCardsWidget';
+export type { GetStartedCardId, GetStartedCardsWidgetProps } from './widgets/context/GetStartedCardsWidget';
 
 registerContextWidget('get-started-cards', {
   factory: () =>
-    import('./widgets/context/GetStartedCardsWidget').then((m) => ({
+    import('./widgets/context/GetStartedCardsWidget').then(m => ({
       // Intentional cast: GetStartedCardsWidget's prop shape differs from
       // ContextWidgetComponent's (it takes `onCardClick` + `className` instead
       // of `data` + `widgetType` + `isLoading`). The registry entry exists
@@ -301,17 +378,76 @@ registerContextWidget('get-started-cards', {
 // ---------------------------------------------------------------------------
 
 export { default as FindingsWidget } from './widgets/context/FindingsWidget';
-export type {
-  FindingsData,
-  Finding,
-  Citation,
-  RiskLevel,
-} from './widgets/context/FindingsWidget';
+export type { FindingsData, Finding, Citation, RiskLevel } from './widgets/context/FindingsWidget';
 
 registerContextWidget('findings', {
   factory: () =>
-    import('./widgets/context/FindingsWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
+    // widget's default export is typed ContextWidgetComponent<FindingsData>.
+    // Generic variance at the registry boundary — see PlaybookGalleryWidget
+    // registration above for the same pattern.
+    import('./widgets/context/FindingsWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
+
+// ---------------------------------------------------------------------------
+// Widgets: FilePreviewContextWidget (context pane — chat-driven Summarize)
+//
+// R5 task 018 / D2-09. Inline (non-modal) file preview for files uploaded
+// into the active chat session. Wraps the extracted `RichFilePreview`
+// renderer (task 013 / D2-08) instead of rebuilding iframe/metadata/menu
+// UI (R5 CLAUDE.md §3.1 reuse mandate). Per-file 3-dot menu reuses the
+// canonical `DocumentRowMenu` 12-action component. Dispatches additive
+// `context.file_selected` events on the `context` channel (R5 task 016 /
+// D2-06; ADR-030 additive-types rule). Registered under 'file-preview'.
+// ---------------------------------------------------------------------------
+
+export { default as FilePreviewContextWidget } from './widgets/context/FilePreviewContextWidget';
+export type {
+  FilePreviewContextData,
+  FilePreviewContextFile,
+  FilePreviewContextRenderProps,
+  FilePreviewContextWidgetProps,
+  FilePreviewFileActionHandler,
+  UseSummarizeOnlyResult,
+  DispatchSummarizeOnlyResult,
+} from './widgets/context/FilePreviewContextWidget';
+export {
+  FILE_PREVIEW_CONTEXT_WIDGET_TYPE,
+  useSummarizeOnly,
+  dispatchSummarizeOnly,
+} from './widgets/context/FilePreviewContextWidget';
+
+registerContextWidget('file-preview', {
+  factory: () =>
+    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
+    // widget's default export is typed ContextWidgetComponent<FilePreviewContextData>.
+    // Generic variance at the registry boundary — see PlaybookGalleryWidget
+    // registration above for the same pattern.
+    import('./widgets/context/FilePreviewContextWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
+// Hooks: useWorkspaceLayouts (R4 task 051 / C-3 — consolidated workspace-layouts hook)
+//
+// Single shared-lib hook replacing the two divergent copies that previously
+// lived in src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts and
+// src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts. Both consumers
+// now import from here per FR-13 + ADR-012 (shared lib) + ADR-028 (function-
+// based auth, injected deps).
+// ---------------------------------------------------------------------------
+
+export { useWorkspaceLayouts, invalidateLayoutCache } from './hooks/useWorkspaceLayouts';
+export type {
+  WorkspaceLayoutDto,
+  WorkspaceLoadingStatus,
+  AuthenticatedFetch,
+  UseWorkspaceLayoutsOptions,
+  UseWorkspaceLayoutsResult,
+} from './hooks/useWorkspaceLayouts';
 
 // ---------------------------------------------------------------------------
 // Providers: AiSessionProvider (R2 session state + PaneEventBus routing)
@@ -319,11 +455,7 @@ registerContextWidget('findings', {
 
 // AiSessionProvider — replaces R1 StandaloneAiProvider; routes SSE events to PaneEventBus
 export { AiSessionProvider } from './providers/AiSessionProvider';
-export type {
-  AiSessionContextValue,
-  AiSessionProviderProps,
-  AiContextMapping,
-} from './providers/AiSessionProvider';
+export type { AiSessionContextValue, AiSessionProviderProps, AiContextMapping } from './providers/AiSessionProvider';
 export { AI_SESSION_CHAT_SESSION_KEY, AI_SESSION_PLAYBOOK_KEY } from './providers/AiSessionProvider';
 
 // useAiSession — consumer hook for AiSessionContext (replaces R1 useStandaloneAi)
@@ -382,6 +514,7 @@ export type {
   PaneChannelEventMap,
   PaneEventHandler,
   WorkspacePaneEvent,
+  WorkspaceWidgetLoadEvent,
   ContextPaneEvent,
   ConversationPaneEvent,
   SafetyPaneEvent,
@@ -419,10 +552,7 @@ export type { DispatchPaneEvent } from './events/useDispatchPaneEvent';
 
 export { default as SafetyAnnotationOverlay } from './components/SafetyAnnotationOverlay';
 export { AnnotatedMessageContent } from './components/SafetyAnnotationOverlay';
-export type {
-  SafetyAnnotationOverlayProps,
-  AnnotatedMessageContentProps,
-} from './components/SafetyAnnotationOverlay';
+export type { SafetyAnnotationOverlayProps, AnnotatedMessageContentProps } from './components/SafetyAnnotationOverlay';
 
 export { CitationBadge } from './components/CitationBadge';
 export type {
@@ -432,10 +562,7 @@ export type {
 } from './components/CitationBadge';
 
 export { GroundednessHighlight } from './components/GroundednessHighlight';
-export type {
-  GroundednessHighlightProps,
-  GroundednessSegment,
-} from './components/GroundednessHighlight';
+export type { GroundednessHighlightProps, GroundednessSegment } from './components/GroundednessHighlight';
 
 // ---------------------------------------------------------------------------
 // Interactions: TabContextMapping (AIPU2-103 — cross-pane tab/context adapter)

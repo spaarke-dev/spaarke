@@ -57,7 +57,16 @@ public static class SystemWorkspaceLayouts
             """,
         IsDefault = false,
         SortOrder = 0,
-        IsSystem = true
+        IsSystem = true,
+        // R4 task 053 (B-4 / FR-07): hard-coded system layouts never persist
+        // in Dataverse and therefore have no real modifiedon. We surface a
+        // stable, well-known sentinel timestamp (Unix epoch in UTC) so the
+        // wire shape stays valid ISO-8601 and the client can detect "system
+        // layout — no modified-date" with a simple equality check rather than
+        // a null guard. The Manage Workspaces pane treats this sentinel as
+        // "—" / "n/a" in the rendered date column (see
+        // ManageWorkspacesPane.tsx).
+        ModifiedOn = DateTimeOffset.UnixEpoch
     };
 
     /// <summary>

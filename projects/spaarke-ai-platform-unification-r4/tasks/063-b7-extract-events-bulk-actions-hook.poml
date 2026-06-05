@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B-7: Extract useEventsBulkActions hook into @spaarke/events-components</title>
+    <phase>Phase 6 — Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>064, 067</blocks>
+    <tags>frontend, react, refactoring, hooks</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation refactor on .ts/.tsx files; modifies shared library + two consumers; tagged `react` (UI behavior parity required). FULL per Step 3.5.5 (modifies code with cross-package reuse + ADR-012 constraint + behavior-parity requirement).</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-10 / plan B-7: extract the `useEventsBulkActions` hook (currently expressed
+    as inline `executeBulkStatusUpdate` / `executeBulkArchive` functions in
+    `src/solutions/EventsPage/src/App.tsx`) into a new shared hook at
+    `src/client/shared/Spaarke.Events.Components/src/hooks/useEventsBulkActions.ts`. Both
+    `EventsPage` and the embedded Calendar widget (via `CalendarWorkspaceWidget`) MUST
+    consume the same hook — single source of truth. Behavior MUST be identical in both
+    surfaces. Per ADR-012, the hook is context-agnostic: dependencies (auth, webApi shim,
+    notification dispatch) are injected, not imported from host code.
+  </prompt>
+
+  <role>
+    SPAARKE React/TypeScript developer with shared-component (ADR-012) and hooks-extraction
+    experience. Bias toward minimum-surface API: the hook takes deps as arguments, returns
+    a small typed action API. No host-knowledge inside the hook. The Calendar widget's
+    R3 task 115 "Pattern D" (shared-lib widget + thin LegalWorkspace shim) is the canonical
+    reference for the consumption pattern.
+  </role>
+
+  <goal>
+    (1) New hook file `src/client/shared/Spaarke.Events.Components/src/hooks/useEventsBulkActions.ts`
+    exporting a typed `useEventsBulkActions(deps)` hook with `updateStatus`, `closeEvents`,
+    `cancelEvents`, `holdEvents`, `archiveEvents` actions (or equivalent — match the actual
+    EventsPage surface). (2) `Spaarke.Events.Components/src/hooks/index.ts` re-exports it.
+    (3) `Spaarke.Events.Components/src/index.ts` re-exports from the hooks barrel. (4)
+    `EventsPage/src/App.tsx` consumes the hook — old inline `executeBulkStatusUpdate` /
+    `executeBulkArchive` removed. (5) Calendar widget consumer (likely
+    `CalendarWorkspaceWidget.tsx` or its parent) wired to use the hook for parity. (6)
+    Behavior MUST be identical to today in both surfaces — manual smoke test plus the
+    UI tests below pass. FR-10 acceptance satisfied.
+  </goal>
+
+  <context>
+    <background>
+      Per backlog B-7 + plan §6 B-7: bulk-action logic for events (status update, archive,
+      close, cancel, hold) is currently inline in `src/solutions/EventsPage/src/App.tsx`
+      (~lines 718-1000). The Calendar widget (Pattern D dual-use, shipped R3 task 115)
+      either duplicates this or doesn't yet expose bulk actions — confirm during step 1.
+      Extracting to a shared hook removes the duplication risk and establishes the canonical
+      pattern for Calendar to opt into bulk operations. Task 064 (B-8) follows immediately
+      and works in the same package; this task's hook is the foundation it depends on.
+    </background>
+    <relevant-files>
+      <file>src/solutions/EventsPage/src/App.tsx</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/hooks/index.ts</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/hooks/useEventsBulkActions.ts</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared hook MUST be context-agnostic. Dependencies (auth, webApi, notification dispatch, eventId-list source) are passed via the hook's argument; NO host-specific imports inside the hook.</constraint>
+    <constraint source="ADR-021">Any UI surfaces touched MUST use Fluent UI v9 tokens only — no hex/rgba/v8. The hook itself is non-UI, but consumer wiring MUST preserve v9 token usage.</constraint>
+    <constraint source="ADR-022">React 19 only for Code Pages; the hook MUST be compatible (no React 16/17/18-only patterns like deprecated `useEffect` cleanup variants).</constraint>
+    <constraint source="ADR-028">If the hook needs a BFF call (it shouldn't — bulk actions are Dataverse Xrm.WebApi today), it MUST take `authenticatedFetch` as an injected dep, NOT import from `@spaarke/auth` directly. NO token snapshots.</constraint>
+    <constraint source="project">Behavior MUST be identical to today's `EventsPage` inline implementation. NO bug fixes / refactors smuggled in — pure code-move. Defects discovered are captured as carry-over notes, not addressed here.</constraint>
+    <constraint source="project">Hook MUST be typed (no `any` for the deps argument or the action return). Use the existing `EventStatus` enum + the `IEventRecord` (or equivalent) types from `@spaarke/events-components/src/types/`.</constraint>
+    <constraint source="project">EventsPage redeploy is NOT part of this task — that lives in task 066 (B-10). This task only does the lib + consumer rewire.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/Spaarke.Events.Components/README.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pattern D dual-use widget" location="src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx">Reference for thin-shim consumption pattern (R3 task 115). The Calendar widget composes shared components; the bulk-actions hook follows the same shared/context-agnostic placement.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inventory inline bulk-action logic">Read `EventsPage/src/App.tsx` lines ~700-1000 (functions: `executeBulkStatusUpdate`, `executeBulkArchive`, the EventStatus enum usage, the toast/notification calls). Catalog: function signatures, deps actually used (Xrm.WebApi or BFF? notification dispatch?), error-handling shape. Confirm Calendar widget consumer does or doesn't currently expose bulk actions.</step>
+    <step order="2" name="Design hook API">Sketch `useEventsBulkActions(deps)` signature: deps shape (e.g., `{ webApi, notify, refreshEvents }`), return shape (e.g., `{ closeEvents, cancelEvents, holdEvents, archiveEvents, updateStatus, isProcessing }`). Verify the API supports both EventsPage and Calendar widget needs. Write to `notes/b7-hook-api-sketch.md` for review.</step>
+    <step order="3" name="Implement hook">Create `src/client/shared/Spaarke.Events.Components/src/hooks/useEventsBulkActions.ts`. Copy logic verbatim from inline functions; replace direct globals with the injected deps. Export the hook + a `useEventsBulkActionsDeps` type. NO host-specific code.</step>
+    <step order="4" name="Wire barrel exports">Add to `Spaarke.Events.Components/src/hooks/index.ts`: `export * from "./useEventsBulkActions";`. Add to `Spaarke.Events.Components/src/index.ts`: `export * from "./hooks";` (if not already exporting hooks barrel). Verify with a small grep.</step>
+    <step order="5" name="Rewire EventsPage consumer">Edit `EventsPage/src/App.tsx`: import `useEventsBulkActions` from `@spaarke/events-components` (or relative path if alias not set). Call the hook at the top of the component with the right deps (xrm shim, notification handler, refresh callback). Replace each call site of `executeBulkStatusUpdate` / `executeBulkArchive` with the hook's exported actions. Delete the old inline implementations.</step>
+    <step order="6" name="Wire Calendar widget consumer">If Calendar widget currently exposes bulk actions (verify in step 1), wire it the same way. If not, ensure the hook is *callable* from CalendarWorkspaceWidget — at minimum, prove parity by writing a small smoke component or test (do NOT add a UI surface that doesn't exist in Calendar today; this task is hook extraction, not Calendar feature addition).</step>
+    <step order="7" name="Build verification">Run `npm run build` on `src/client/shared/Spaarke.Events.Components/`. Run `npm run build` on `src/solutions/EventsPage/`. 0 errors. Type-check `tsc --noEmit` on both — clean.</step>
+    <step order="8" name="Lint clean">Run `npm run lint` on both packages (if scripts exist). 0 errors. If lint surfaces previously-hidden warnings, do NOT bundle the fixes here — record carry-overs to task 067 (B-11 type-drift).</step>
+    <step order="9" name="UI smoke + parity test">Run the &lt;ui-tests&gt; below. Confirm bulk actions behave identically in EventsPage. (Calendar parity test deferred to manual operator check unless Calendar already exposed bulk actions.)</step>
+    <step order="10" name="Update TASK-INDEX">Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 063 from 🔲 → ✅ completed.</step>
+    <step order="11" name="Document deviations">If hook API needed adjustment from sketch, or if Calendar consumer wiring was deferred (no current Calendar bulk-action surface), record in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">npm run build, npm run lint, npx tsc --noEmit</tool>
+    <tool name="Read">Inspect EventsPage/App.tsx, CalendarWorkspaceWidget.tsx, Spaarke.Events.Components types</tool>
+    <tool name="Edit">Create hook + update barrels + rewire consumers</tool>
+    <tool name="Write">New hook file</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Events.Components/src/hooks/useEventsBulkActions.ts (new)</output>
+    <output type="code">src/client/shared/Spaarke.Events.Components/src/hooks/index.ts (barrel update)</output>
+    <output type="code">src/client/shared/Spaarke.Events.Components/src/index.ts (barrel update if needed)</output>
+    <output type="code">src/solutions/EventsPage/src/App.tsx (modified — uses shared hook)</output>
+    <output type="code">src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx (modified if Calendar uses bulk actions)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/b7-hook-api-sketch.md (design record)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="EventsPage bulk status update behavior unchanged">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_eventspage</url>
+      <steps>
+        <step>Open EventsPage standalone web resource</step>
+        <step>Select 2-3 events in the grid</step>
+        <step>Trigger "Close Events" bulk action from CommandBar</step>
+        <step>Confirm dialog appears + accept</step>
+        <step>Verify status updates to "Closed" on selected events</step>
+        <step>Verify success toast appears</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>Bulk status update completes identically to pre-extraction behavior; no console errors; toast shows count.</expected>
+    </test>
+
+    <test name="EventsPage bulk archive behavior unchanged">
+      <steps>
+        <step>Select 2-3 events</step>
+        <step>Trigger "Archive" bulk action</step>
+        <step>Verify events removed from active view</step>
+        <step>Verify success toast appears</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Bulk archive completes identically; no console errors.</expected>
+    </test>
+
+    <test name="Calendar widget behavior unchanged (if applicable)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi page</step>
+        <step>Mount Calendar widget into a workspace tab</step>
+        <step>If bulk actions surface present, exercise one bulk action</step>
+        <step>Verify behavior identical to pre-change</step>
+      </steps>
+      <expected>Calendar widget either (a) has unchanged bulk-action behavior, or (b) does not yet expose bulk actions (parity = no regression).</expected>
+    </test>
+
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Open EventsPage; trigger bulk action</step>
+        <step>Verify toast + dialog colors adapt (no hardcoded white/black)</step>
+        <step>Verify icons use currentColor or v9 semantic tokens</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the extraction, When `src/client/shared/Spaarke.Events.Components/src/hooks/useEventsBulkActions.ts` is read, Then it exports a hook with no host-specific imports (deps injected via argument).</criterion>
+    <criterion testable="true">Given `EventsPage/src/App.tsx`, When grepped, Then it imports `useEventsBulkActions` from `@spaarke/events-components` and no longer declares the inline `executeBulkStatusUpdate` / `executeBulkArchive` functions.</criterion>
+    <criterion testable="true">Given the EventsPage UI smoke test, When a bulk status update / archive is exercised, Then the behavior is identical to pre-extraction (events update; toast displays; no console errors).</criterion>
+    <criterion testable="true">Given `npm run build` runs on `Spaarke.Events.Components` and `EventsPage`, When the build completes, Then both succeed with 0 errors.</criterion>
+    <criterion testable="true">Given `tsc --noEmit` runs on both packages, When the check completes, Then 0 type errors.</criterion>
+    <criterion testable="true">Given task 063 is being executed, When this task completes, Then TASK-INDEX.md shows task 063 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 064 (B-8 CalendarDrawer.eventDates upgrade) depends on this task because both modify
+    files in `@spaarke/events-components` and 064 needs this hook's shared placement to be
+    in place. Task 067 (B-11 type-drift) also depends — fixing casts is easier once the
+    bulk-action surface is in the shared lib with explicit types. The redeploy of EventsPage
+    is task 066 (B-10) and stays separate. Pattern D reference (Calendar widget R3 task 115)
+    is the canonical model for shared-lib-first.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol — Step 9.5 quality gates (code-review + adr-check) run after implementation. Checkpointing every 3 steps. current-task.md tracking. UI tests via ui-test skill at Step 9.7 if Chrome integration enabled.</protocol>
+  </execution>
+</task>

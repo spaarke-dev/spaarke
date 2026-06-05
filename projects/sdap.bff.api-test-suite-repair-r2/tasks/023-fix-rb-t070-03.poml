@@ -1,0 +1,129 @@
+<task id="023" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P2.W1 — Fix RB-T070-03: AnalysisChatContextResolver dead-path (owner decision: restore stub OR archive 7 tests)</title>
+    <phase>Phase 2</phase>
+    <status>not-started</status>
+    <estimated-effort>2-8 hours (depends on chosen path)</estimated-effort>
+    <dependencies>013</dependencies>
+    <blocks>029</blocks>
+    <tags>phase-2, bff-api, real-bug-ledger, medium-severity, production-fix, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code change in `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs` (if path 1 chosen) OR test archive (if path 2). FULL rigor + Step 9.5 mandatory regardless of path.</rigor-reason>
+    <parallel-group>P2-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Disjoint file (`AnalysisChatContextResolver.cs` in `Services/Ai/Chat/`) vs Wave 1 peers. Task 024 also touches `Services/Ai/Chat/` (`AnalysisContextBuilder.cs`) but they are DIFFERENT files within the module — parallel-safe.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close real-bug-ledger entry **RB-T070-03** by resolving the dead-path coverage gap in `AnalysisChatContextResolver`. The 7 affected tests were written against a stub path that returned a non-null default `AnalysisChatContextResponse` for any string `analysisId`; production removed the stub and now requires `Guid.TryParse(analysisId)` + a successful Dataverse retrieval, both of which fail in the in-process `CustomWebAppFactory`. So the tests assert behavior that no longer exists.
+
+    🚨 **OWNER DECISION REQUIRED AT TASK START** — the ledger surfaces 2 viable paths (lines 573-577):
+
+    1. **Restore stub for tests** (~2-4h): re-introduce a feature flag / test seam in `AnalysisChatContextResolver` so the unit-test factory can inject a fake that returns canned responses for `"analysis-stub-*"` IDs. Preserves the existing 7 tests with minimal change. Production path unaffected.
+    2. **Wire a real Dataverse mock** (~6-8h): extend `CustomWebAppFactory` (with §4.5 owner approval) to mock `IDataverseEntityService.RetrieveAsync` returning synthetic `sprk_analysisoutput` / `sprk_analysisplaybook` rows. Removes stub dependency.
+
+    The alternate resolution mode `archived-as-dead-target` (delete the 7 tests as documenting dead behavior) is ALSO viable if the owner judges the tests not worth restoring — production coverage continues via the AnalysisWorkspace Code Page integration tests + the 3 still-passing endpoint-mapping tests in the same class.
+
+    Surface 🔔 **Human Input Required** with the 3 paths. Wait for owner ACK before implementing. Per NFR-04 cite `RB-T070-03` + chosen resolution mode (`repaired` OR `archived-as-dead-target`).
+  </prompt>
+
+  <role>Backend AI agent resolving a dead-path coverage gap; owner-decision-gated implementation across 3 paths.</role>
+
+  <goal>
+    EITHER `AnalysisChatContextResolver.cs` gains a test-seam stub (path 1; 7 tests Skip→Pass) OR `CustomWebAppFactory` gains a Dataverse mock (path 2; 7 tests Skip→Pass) OR the 7 tests are archived as dead-target (path 3; 0 tests flip). RB-T070-03 transitions to `repaired` (paths 1, 2) or `archived-as-dead-target` (path 3).
+  </goal>
+
+  <inputs>
+    <file purpose="target-production-file-path-1">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+    <file purpose="target-test-infrastructure-path-2">tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs</file>
+    <file purpose="target-test-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/AnalysisChatContextResolverTests.cs (or equivalent — verify path)</file>
+    <file purpose="ledger-entry">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T070-03 section, lines 551-585)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">AnalysisChatContextResolver part of AI Chat extension; refined ADR-013 keeps in-process</constraint>
+    <constraint source="ADR-010">DI minimalism — path 1 stub MUST NOT add new DI registrations; use existing test-seam pattern (e.g., factory-config key)</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2 inverts r1); tests modified ONLY for Skip→Pass OR archive-with-rename if path 3</constraint>
+    <constraint source="NFR-02"><50% line replacement per file; path 2 (factory extension) requires §4.5 owner approval per predecessor pattern</constraint>
+    <constraint source="NFR-04">Commit message cites `RB-T070-03` + resolution mode (`repaired` / `archived-as-dead-target`)</constraint>
+    <constraint source="D-02">One production fix = one ledger entry closed</constraint>
+    <constraint source="root CLAUDE.md §6">Owner-decision-gated: MUST request human input before implementing path choice</constraint>
+    <constraint source="predecessor NFR-06">MUST NOT delete tests outright; path 3 archives via `*.cs.archived-YYYY-MM-DD` rename</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per ledger §579-581: production traffic always sends real Dataverse-bound GUIDs against live data; the `AnalysisWorkspace` Code Page exercises the resolver end-to-end. The stub-resolver unit tests existed only to spot-check the endpoint mapping + response shape in unit isolation — which the 3 still-passing class members (`MapAnalysisChatContextEndpoints_MethodExists_AndIsStatic`, `GetAnalysisChatContext_WithoutAuth_ReturnsUnauthorized`, `GetAnalysisChatContext_WithAuth_DoesNotReturn404`) continue to cover at a coarser level. This is the load-bearing fact for path 3: integration coverage is intact.
+
+      Path 1 (restore stub) is the lower-cost option and preserves the test contract. Path 2 (real mock) raises factory complexity but is closer to production behavior. Path 3 (archive) is the lowest-cost outcome but reduces unit-test surface area.
+    </background>
+    <dependencies>
+      <dependency task="013" status="required">Phase 1 exit triple-run validated</dependency>
+      <dependency task="owner-decision" status="required">Owner ACK on path choice before implementation</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/AnalysisChatContextResolverTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs (if path 2)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load RB-T070-03 ledger entry (lines 551-585 in real-bug-ledger.md). Confirm Status is `open` or `assigned-to-r2`.</step>
+    <step order="2">🔔 **Human Input Required** — surface the 3 paths (restore stub / real mock / archive) with effort estimates + tradeoffs. Recommend path 1 (lowest cost, preserves unit-test surface). WAIT for owner ACK.</step>
+    <step order="3">If path 1 (restore stub) chosen: read `AnalysisChatContextResolver.cs` `ResolveAsync` (line 127) + `ResolveFromDataverseAsync` (line 189). Add a test-seam: e.g., an `IAnalysisChatContextStub` interface (or feature flag via `IConfiguration`) that allows the factory to inject canned responses for `"analysis-stub-*"` prefixed IDs. Production behavior unchanged when stub not configured.</step>
+    <step order="4">If path 2 (real mock) chosen: extend `CustomWebAppFactory` ConfigureServices to register a mock `IDataverseEntityService.RetrieveAsync` for `sprk_analysisoutput` + `sprk_analysisplaybook` entity types — requires §4.5 owner approval recorded BEFORE editing. Per ADR-010 NFR-03 do NOT add new DI registrations beyond the existing baseline.</step>
+    <step order="5">If path 3 (archive) chosen: rename `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/AnalysisChatContextResolverTests.cs` (the 7 tests) → `AnalysisChatContextResolverTests.cs.archived-YYYY-MM-DD` per predecessor NFR-06. The 3 still-passing tests in the same file stay in their current location (or split out before archive if same file).</step>
+    <step order="6">For paths 1/2: remove `Skip = "..."` + per-test traits on the 7 affected tests. For path 3: no test change (archived).</step>
+    <step order="7">Build: `dotnet build src/server/api/Sprk.Bff.Api/`. Verify 0 errors.</step>
+    <step order="8">Run targeted tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~AnalysisChatContextResolver"`. For paths 1/2: confirm 7 tests pass + 3 existing tests remain green. For path 3: confirm 3 remaining tests still pass.</step>
+    <step order="9">Step 9.5 quality gates: `code-review` + `adr-check`. Verify <50% line replacement; no new DI registrations (ADR-010 NFR-03); AI Chat stays in-process (ADR-013).</step>
+    <step order="10">Update RB-T070-03 ledger: Status → `repaired` (path 1/2) or `archived-as-dead-target` (path 3); record chosen path in Notes + decision record `decisions/D-09-rb-t070-03-resolution.md`. Commit message reflects chosen mode: `fix(ai/chat): restore test seam in AnalysisChatContextResolver (RB-T070-03; repaired)` OR `test(ai/chat): archive AnalysisChatContextResolverTests as dead-target (RB-T070-03; archived-as-dead-target)`. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">AnalysisChatContextResolver.cs + test file + ledger entry</tool>
+    <tool name="Edit">Production fix (paths 1, 2) or test Skip removal (paths 1, 2)</tool>
+    <tool name="Bash">`git mv` for path 3 archive; `dotnet build` + targeted `dotnet test`</tool>
+    <tool name="Write">`decisions/D-09-rb-t070-03-resolution.md`</tool>
+    <tool name="Skill">Step 9.5 quality gate via `code-review` + `adr-check` skills (ADR-010 / ADR-013)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">If path 1: src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs (test seam added). If path 2: tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs (Dataverse mock).</output>
+    <output type="test">If paths 1/2: tests/unit/.../AnalysisChatContextResolverTests.cs (7 Skip→Pass). If path 3: AnalysisChatContextResolverTests.cs.archived-YYYY-MM-DD</output>
+    <output type="ledger">RB-T070-03 status: `repaired` (paths 1, 2) OR `archived-as-dead-target` (path 3)</output>
+    <output type="decision">decisions/D-09-rb-t070-03-resolution.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Owner-selected resolution path documented in `decisions/D-09-rb-t070-03-resolution.md` BEFORE code change applied</criterion>
+    <criterion testable="true">If path 1/2 chosen: all 7 affected tests pass (no Skip); if path 3 chosen: test file renamed to `*.archived-YYYY-MM-DD`</criterion>
+    <criterion testable="true">3 existing passing tests (`MapAnalysisChatContextEndpoints_MethodExists_AndIsStatic`, etc.) remain green in their location</criterion>
+    <criterion testable="true">RB-T070-03 ledger Status transitions to `repaired` or `archived-as-dead-target` matching chosen path</criterion>
+    <criterion testable="true">Commit message includes `RB-T070-03` + correct resolution mode</criterion>
+    <criterion testable="true">No new DI registrations beyond CustomWebAppFactory baseline (NFR-03 in `bff-extensions.md`; ADR-010)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <approach>Owner-gated decision at Step 2; path-specific FULL-rigor implementation. Path 3 invokes predecessor NFR-06 archive pattern.</approach>
+  </execution>
+</task>

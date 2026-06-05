@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="github-actions-rationalization-r1">
+  <metadata>
+    <title>Add weekly workflow-health-report workflow</title>
+    <phase>4: Observability + Docs</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>050</blocks>
+    <tags>ci-cd, github-actions, devops, observability</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New workflow file with scheduled cron + issue creation; FR-11 acceptance</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Author `.github/workflows/report-workflow-health.yml`. Weekly schedule (Mondays 09:00 UTC per D-02 assumption): queries last 7 days of workflow runs, computes per-workflow success rates, and creates or updates a single ongoing GitHub issue titled "CI Health Report". Trigger one successful run during this task to satisfy FR-11.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps engineer. Comfortable scripting `gh run list` + `jq` + `gh issue` calls inside a GitHub Actions job.
+  </role>
+
+  <goal>
+    `.github/workflows/report-workflow-health.yml` exists and:
+    1. Runs on `schedule: cron: '0 9 * * 1'` and `workflow_dispatch`
+    2. Computes per-workflow 7-day success rate using `gh run list --json`
+    3. Creates a new issue (or updates existing) titled "CI Health Report" with current snapshot as a comment
+    4. Has been triggered once successfully via `gh workflow run`; resulting issue exists with ≥1 snapshot comment
+  </goal>
+
+  <context>
+    <background>
+      Per FR-11: weekly report runs once successfully; issue exists with at least one snapshot. Per D-02: GitHub-issue-based reporting; no Slack/Teams bridge. Per Assumption-1: Mondays 09:00 UTC cadence.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/report-workflow-health.yml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-11: Workflow runs once + issue created with ≥1 snapshot</constraint>
+    <constraint source="spec">FR-14: Report measures rolling 7-day success rate (required ≥90% by project close)</constraint>
+    <constraint source="design">D-02: GitHub issue based reporting, single ongoing issue with weekly comments</constraint>
+    <constraint source="project">MUST run `actionlint` locally on the new file before push</constraint>
+    <constraint source="project">Issue title: "CI Health Report" (single ongoing issue, NOT one per week)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/github-actions-rationalization-r1/CLAUDE.md</file>
+      <file>projects/github-actions-rationalization-r1/spec.md</file>
+      <file>projects/github-actions-rationalization-r1/design.md</file>
+      <file>docs/guides/MONITORING-AND-ALERTING-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `.github/workflows/report-workflow-health.yml` with:
+      - `on: schedule: cron: '0 9 * * 1'` + `workflow_dispatch:`
+      - Permissions: `issues: write`
+      - Single job that:
+        a. Lists workflows via `gh workflow list --json id,name`
+        b. For each workflow, lists last-7-day runs via `gh run list --workflow={id} --created='>7 days ago' --json conclusion`
+        c. Computes success rate per workflow (and total)
+        d. Searches for existing "CI Health Report" issue: `gh issue list --search 'in:title "CI Health Report"'`
+        e. If exists: `gh issue comment {num} --body "{snapshot}"`. If not: `gh issue create --title "CI Health Report" --body "{snapshot}"`
+    </step>
+    <step order="2">Run `actionlint` locally. Commit. Push.</step>
+    <step order="3">Trigger manually: `gh workflow run report-workflow-health.yml`. Wait for completion.</step>
+    <step order="4">Verify issue exists: `gh issue list --search 'in:title "CI Health Report"' --json number,title,createdAt`. Confirm a snapshot comment is present.</step>
+    <step order="5">Update TASK-INDEX.md: change task 040 status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="actionlint">Validate new workflow</tool>
+    <tool name="gh">workflow run + issue list/create/comment</tool>
+    <tool name="Write">Create new workflow file</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/report-workflow-health.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.github/workflows/report-workflow-health.yml` exists and passes `actionlint`.</criterion>
+    <criterion testable="true">Manual trigger via `gh workflow run` succeeds.</criterion>
+    <criterion testable="true">An open GitHub issue titled "CI Health Report" exists with at least one snapshot comment containing per-workflow success rates (FR-11).</criterion>
+    <criterion testable="true">Snapshot includes total rolling 7-day success rate (FR-14 input).</criterion>
+    <criterion testable="true">TASK-INDEX.md task 040 status updated to ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` for gh CLI inside the job. Don't use a personal access token. The cron `0 9 * * 1` is Monday 09:00 UTC (per Assumption-1); override if owner specifies different timing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Rigor: STANDARD. Parallel-safe with 041, 042, 043.</protocol>
+  </execution>
+</task>

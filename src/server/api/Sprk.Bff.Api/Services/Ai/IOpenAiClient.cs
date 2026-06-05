@@ -157,4 +157,36 @@ public interface IOpenAiClient
         string? model = null,
         int? maxOutputTokens = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stream a structured completion (json_schema strict mode + streaming). Yields raw content-token
+    /// strings as Azure OpenAI emits them; the caller accumulates and feeds tokens to
+    /// <see cref="Streaming.IncrementalJsonParser"/> for FieldDelta extraction.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added to the interface in R5 task 012 (D2-03 <c>SessionSummarizeOrchestrator</c>) so that
+    /// the orchestrator can be unit-tested against a mocked <see cref="IOpenAiClient"/> while still
+    /// honoring ADR-010 (concrete-by-default consumer; interface kept only because OpenAiClient
+    /// was already an interface for the same testability reason). Live implementation lives on
+    /// <see cref="OpenAiClient.StreamStructuredCompletionAsync"/>.
+    /// </para>
+    /// <para>
+    /// Per the R5 task 006 spike, Azure OpenAI streams JSON in property-declaration order with
+    /// ~3-8 char per-token granularity; first content event arrives within NFR-01's TTFB ceiling.
+    /// </para>
+    /// </remarks>
+    /// <param name="messages">Conversation messages (system + user prompts).</param>
+    /// <param name="jsonSchema">JSON schema the response must conform to (strict mode enforced).</param>
+    /// <param name="schemaName">Schema name identifier (e.g., <c>DocumentSummary</c>).</param>
+    /// <param name="model">Optional model override; defaults to configured SummarizeModel.</param>
+    /// <param name="maxOutputTokens">Optional max-output-tokens override.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    IAsyncEnumerable<string> StreamStructuredCompletionAsync(
+        IEnumerable<ChatMessage> messages,
+        BinaryData jsonSchema,
+        string schemaName,
+        string? model = null,
+        int? maxOutputTokens = null,
+        CancellationToken cancellationToken = default);
 }

@@ -1,0 +1,128 @@
+<task id="033" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P3 — Fix RB-T044-05: CitationExtractor.RegulationPattern accept documented `CFR` (no-period) form</title>
+    <phase>Phase 3: LOW Severity + Integration Stability</phase>
+    <status>completed-2026-06-01</status>
+    <estimated-effort>30-60 minutes</estimated-effort>
+    <dependencies>029, 032</dependencies>
+    <blocks>038</blocks>
+    <tags>phase-3, bff-api, real-bug-ledger, low-severity, production-fix, ai-safety, citations</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code modification in src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/; FULL rigor required for .cs changes (code-review + adr-check at Step 9.5).</rigor-reason>
+    <parallel-group>P3-W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>File overlap with task 032 (both touch `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`). Serialize after 032 to avoid merge conflict / corrupted state.</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close ledger entry RB-T044-05 by repairing `CitationExtractor.RegulationPattern` in
+    `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs`. The current regex requires the period
+    form `C.F.R.`; the class XML doc explicitly lists `21 CFR Part 312` (no-period form) as supported, so the implementation
+    contradicts the documented contract.
+
+    Production fix per ledger Recommended Fix section: loosen the inter-letter periods to optional:
+
+    ```
+    @"\b(?<title>\d{1,3})\s+C\.?F\.?R\.?(?:\s+(?:Part|§)\s*)(?<part>\d[\d\-\.]*)"
+    ```
+
+    Test impact: 1 Skip'd test (`ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized` Fact) flips Skip -> Pass.
+    Per NFR-04: commit message MUST cite "RB-T044-05" + resolution mode `repaired`.
+
+    Coordination: `CitationExtractor.cs` is SHARED with task 032 (RB-T044-03 NormalizeStatute). This task waits for 032 to land first.
+  </prompt>
+
+  <role>BFF production-fix engineer closing a LOW-severity real-bug ledger entry under repair-not-rewrite discipline.</role>
+
+  <goal>
+    `RegulationPattern()` regex (~line 74) accepts both `C.F.R.` and `CFR` forms. 1 Skip'd test passes when re-enabled.
+    Ledger row RB-T044-05 → `repaired`. Existing Regulation Theory cases continue to pass.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="r1-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="production-target">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs</file>
+    <file purpose="unit-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/Citations/CitationExtractorTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013-refined">AI extends BFF; fix is in-process under BFF Services/Ai/Safety; no extraction</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2); tests modified ONLY for Skip→Pass transitions</constraint>
+    <constraint source="NFR-02">&lt;50% line replacement per file; targeted single regex literal edit</constraint>
+    <constraint source="NFR-04">Commit cites ledger entry ID + resolution mode</constraint>
+    <constraint source="D-02">One fix = one ledger entry closed</constraint>
+    <constraint source="D-05">Real-bug ledger source of truth; transition RB-T044-05 → `repaired`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per r1 ledger entry RB-T044-05 (filed 2026-05-31, fix-by 2026-07-31): LLM outputs commonly use the period form `C.F.R.`; the no-period `CFR` form is a corner case but documented at the class XML doc line 15 (`21 CFR Part 312` example). The regex repair makes inter-letter periods optional. This is a non-invasive change to a single regex literal.
+
+      File-overlap discipline: task 032 (RB-T044-03 NormalizeStatute) lands first. After 032 commits, re-base / pull and apply this regex change to the now-current `CitationExtractor.cs`.
+    </background>
+    <dependencies>
+      <dependency task="029" status="must-be-complete">Phase 2 exit triple-run validation (zero failures) before Phase 3 starts</dependency>
+      <dependency task="032" status="must-be-complete">RB-T044-03 NormalizeStatute fix lands first — shared file (CitationExtractor.cs)</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/Citations/CitationExtractorTests.cs</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load r1 ledger entry RB-T044-05 (lines ~396-425) for documented bug + recommended fix.</step>
+    <step order="2">Verify task 032 commit has landed (file `CitationExtractor.cs` reflects RB-T044-03 NormalizeStatute fix).</step>
+    <step order="3">Read `src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs` focusing on `RegulationPattern()` (~line 74).</step>
+    <step order="4">Update the regex literal to make the inter-letter periods optional per ledger Recommended Fix; preserve named groups (`title`, `part`).</step>
+    <step order="5">Build BFF: `dotnet build src/server/api/Sprk.Bff.Api/`. Zero new warnings.</step>
+    <step order="6">Edit `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/Citations/CitationExtractorTests.cs`: remove `Skip = "..."` on `ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized`; remove per-test `[Trait("status","real-bug-pending-fix")]`.</step>
+    <step order="7">Run targeted tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~CitationExtractorTests"`. Re-enabled test must pass; existing Regulation Theory cases must still pass.</step>
+    <step order="8">Update ledger row RB-T044-05: status → `repaired`, fix-commit SHA placeholder + today's date.</step>
+    <step order="9">Commit: `fix(bff-api): RegulationPattern accepts CFR no-period form (RB-T044-05; repaired)` per NFR-04.</step>
+    <step order="10">Update `projects/sdap.bff.api-test-suite-repair-r2/current-task.md` with completion + commit SHA.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">CitationExtractor.cs + test file + ledger</tool>
+    <tool name="Edit">Production file (single regex literal edit) + test file (Skip removal) + ledger row</tool>
+    <tool name="Bash">`dotnet build`, `dotnet test --filter`, `git status`, `git commit`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/CitationExtractor.cs (RegulationPattern regex relaxed)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Safety/Citations/CitationExtractorTests.cs (1 test un-Skip'd)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T044-05 row → `repaired`)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CitationExtractor.cs builds successfully with zero new warnings</criterion>
+    <criterion testable="true">`RegulationPattern()` regex matches both `21 CFR Part 312` and `21 C.F.R. Part 312` inputs</criterion>
+    <criterion testable="true">`ExtractCitations_Regulation_NoPeriodForm_MatchedAndNormalized` passes when Skip removed</criterion>
+    <criterion testable="true">Existing Regulation Theory cases (period form) still pass — no regression</criterion>
+    <criterion testable="true">Commit message contains "RB-T044-05" + word "repaired" (NFR-04)</criterion>
+    <criterion testable="true">Ledger entry RB-T044-05 row status updated to `repaired`</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Invoke `task-execute` skill with this POML. Wave 2 of Phase 3 (file overlap with task 032). Step 9.5 quality gate runs code-review + adr-check (FULL rigor).
+  </execution>
+</task>

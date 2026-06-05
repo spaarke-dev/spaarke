@@ -33,7 +33,7 @@ export type { LegalLibraryData };
  */
 const LegalLibraryContextWidget = createContextWidgetAdapter<LegalLibraryData>(
   LegalLibraryWidget,
-  createLegalLibraryHighlighter<LegalLibraryData>(),
+  createLegalLibraryHighlighter<LegalLibraryData>()
 );
 
 LegalLibraryContextWidget.displayName = 'LegalLibraryContextWidget';

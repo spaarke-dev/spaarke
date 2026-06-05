@@ -270,6 +270,58 @@ export interface IBadgeConfig {
 }
 
 /**
+ * Chart legend configuration (v1.4.4 — currently consumed by DonutChart's
+ * matrixRight path; schema is generic so future visual types may adopt it).
+ *
+ * All fields are optional; missing fields fall back to documented defaults.
+ * See docs/guides/VISUALHOST-SETUP-GUIDE.md §"Chart Legend Configuration"
+ * for authoring guidance.
+ */
+export interface IChartLegendConfig {
+  /**
+   * Where the legend sits relative to the visual.
+   *  - "right" (default for back-compat with `donutLayout: "matrixRight"`)
+   *  - "left"
+   *  - "top"
+   *  - "bottom"
+   *  - "hidden" (renders the visual full-bleed, no legend)
+   */
+  placement?: 'right' | 'left' | 'top' | 'bottom' | 'hidden';
+
+  /**
+   * Layout of legend items.
+   *  - "rows" (default for right/left placement): one item per row, vertical stack
+   *  - "inline" (default for top/bottom placement): horizontal flow with wrap
+   */
+  orientation?: 'rows' | 'inline';
+
+  /**
+   * What each legend item shows.
+   *  - "swatchLabelValue" (default): colored square + category label + measured value
+   *  - "swatchLabel": colored square + category label only
+   *  - "labelValue": category label + measured value (no swatch)
+   *  - "labelOnly": category label only
+   */
+  itemFormat?: 'swatchLabelValue' | 'swatchLabel' | 'labelValue' | 'labelOnly';
+
+  /**
+   * Horizontal alignment of the value column relative to labels.
+   * Applies only to `orientation: "rows"` with `itemFormat` that includes a value.
+   *  - "near" (default, v1.4.3 behavior): values sit just to the right of the
+   *    widest label (CSS grid `auto auto auto`)
+   *  - "far": values pushed to the far edge of the legend cell (grid `auto auto 1fr`
+   *    with value column right-aligned)
+   */
+  valueAlignment?: 'near' | 'far';
+
+  /**
+   * Override for the swatch size in pixels. Default: 10.
+   * Ignored for itemFormats that don't render a swatch.
+   */
+  swatchSize?: number;
+}
+
+/**
  * Resolved card configuration — merged from Chart Definition fields,
  * Configuration JSON, and PCF property overrides.
  */
@@ -374,10 +426,68 @@ export interface ICardConfig {
    * - "score": Round to integer (e.g., 85)
    * - "scoreOver100": "85/100" style
    * - "percentage": "85%" (value is 0-1 decimal, multiplied by 100)
+   * - "percentScore": "85%" (value is already on a 0-100 scale, no multiplication)
    * - "ratio": "0.85" (two decimals)
    * Default: "score".
    */
-  breakdownValueFormat?: 'score' | 'scoreOver100' | 'percentage' | 'ratio';
+  breakdownValueFormat?: 'score' | 'scoreOver100' | 'percentage' | 'percentScore' | 'ratio';
+
+  // ===== Chart legend configuration (v1.4.4) =====
+  // Generic legend schema consumed by DonutChart's matrixRight path and
+  // extensible to other visual types. Backward compat (NFR-05): when `legend`
+  // is absent, DonutChart preserves its pre-v1.4.4 behavior — the existing
+  // `donutLayout: "matrixRight"` + `showBreakdownRows: true` keys derive an
+  // equivalent default `{ placement: "right", orientation: "rows",
+  // itemFormat: "swatchLabelValue", valueAlignment: "near", swatchSize: 10 }`
+  // internally, so every existing chart def renders identically.
+
+  /**
+   * Chart legend configuration. Today consumed by DonutChart's matrixRight
+   * layout; the schema is intentionally generic so future visual types
+   * (BarChart, HSBar, etc.) can adopt it.
+   *
+   * @see docs/guides/VISUALHOST-SETUP-GUIDE.md §"Chart Legend Configuration"
+   */
+  legend?: IChartLegendConfig;
+
+  /**
+   * Suppress the chart card's toolbar title text (v1.4.6).
+   *
+   * Default behavior (`undefined` or `true`): the legacy toolbar above the
+   * chart renders the chart's `sprk_name` on the left side, alongside the
+   * sparkle / expand icons on the right (v1.4.3 layout).
+   *
+   * When set to `false`: the toolbar renders ONLY the icons (right-aligned),
+   * with no title text. Useful when the host form section already provides
+   * the same name as a section heading and you want to avoid two visually
+   * identical headers stacked. Has no effect when CardChrome is active
+   * (`showTitle` PCF property = true) — CardChrome owns its own header.
+   *
+   * @example
+   * ```json
+   * { "showCardTitle": false }
+   * ```
+   */
+  showCardTitle?: boolean;
+
+  /**
+   * Dataverse column on the chart's parent record (typically `sprk_matter`)
+   * that holds the pre-computed AI summary text for this chart. When set,
+   * VisualHostRoot renders an `AiSummaryPopover` (sparkle icon) in the
+   * toolbar; clicking it shows the summary.
+   *
+   * Takes precedence over the PCF `aiSummaryField` property. This lets a
+   * single chart definition map to its own summary column without each form
+   * placement having to wire the property.
+   *
+   * Examples:
+   *   - Matter Health Composite → "sprk_performancesummary"
+   *   - Financial               → "sprk_financialsummary"
+   *   - Task                    → "sprk_tasksummary"
+   *
+   * @see docs/guides/VISUALHOST-SETUP-GUIDE.md §"AI Summary Field Configuration"
+   */
+  aiSummaryField?: string;
 
   // ===== MetricCard badge slot (FR-VH-02 / task 021) =====
   // Generic addition consumed by MetricCard.tsx. Backward compat (NFR-05):

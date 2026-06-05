@@ -82,8 +82,17 @@ import {
 // library in Phase A task 010 (ADR-012). It owns the icon brand-color treatment
 // and the right-slot container — see PaneHeader.tsx in @spaarke/ui-components.
 import { PaneHeader, SprkChat } from "@spaarke/ui-components";
+import type { AttachmentChip, IChatMessage } from "@spaarke/ui-components";
 import { useAiSession, usePaneEvent, useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+import type { WorkspacePaneEvent, ContextPaneEvent } from "@spaarke/ai-widgets";
+// R4 task 042 (W-4): symbolic widget type ID + payload shape for the
+// Assistant-pane PDF-upload → DocumentViewer demo. We import the constant
+// (NOT the literal "document-viewer") so a rename in the registration file
+// surfaces at compile time.
+import {
+  DOCUMENT_VIEWER_WIDGET_TYPE,
+  type DocumentViewerWidgetData,
+} from "@spaarke/ai-widgets";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 import {
@@ -101,6 +110,155 @@ import { HistoryMenu } from "./HistoryOverlay";
 // model was removed when the Chat/History tab buttons were replaced by the
 // shared <PaneHeader>. History becomes a side-overlay (OC-01) wired in task 022.
 
+// ---------------------------------------------------------------------------
+// /summarize tri-mode intent routing (R5 task 019 / D2-10)
+// ---------------------------------------------------------------------------
+//
+// R5 turns the `/summarize` slash command into a tri-mode dispatcher per FR-03.
+// The routing decision is a PURE function of the input message + the host
+// context the ConversationPane already knows about:
+//   1. Has the active chat session received uploaded files this session?
+//   2. Does the host have an active workspace document context (R3 wizard)?
+//
+// The helper returns a stable, testable decision shape that the dispatcher
+// site consumes. The actual orchestrator wiring for branches (a) and (b) is
+// owned by sibling tasks 014 (POST /api/ai/chat/sessions/{id}/summarize
+// endpoint), 015 (InvokeSummarizePlaybookTool agent-tool), and 020 (chat-pane
+// orchestration UX — the dispatch wiring site that consumes the routing
+// decision). Branch (c) is owned end-to-end by THIS task — the interjection
+// text is rendered as an Assistant message via the existing predefinedPrompts
+// suggestion surface (no SprkChat API change required).
+//
+// Spec wording (NFR-12 + plan D2-10):
+//   - description: "Summarize uploaded files or the active document"
+//   - interjection: "Upload the file(s) you'd like me to summarize"
+// Both strings are spec-driven; do NOT change them without updating spec.md.
+
+/**
+ * Trigger prefix for the /summarize slash command. Lowercased; the slash
+ * command menu writes the canonical trigger verbatim into the textarea so
+ * a case-sensitive prefix match is safe.
+ */
+export const SUMMARIZE_SLASH_PREFIX = '/summarize';
+
+/**
+ * Deterministic Assistant interjection emitted on branch (c) — the FR-03
+ * prompt-first ordering. Rendered locally as an Assistant message; NO
+ * playbook invocation, NO BFF round-trip.
+ */
+export const SUMMARIZE_PROMPT_FIRST_INTERJECTION =
+  "Upload the file(s) you'd like me to summarize";
+
+/**
+ * Discriminated routing decision returned by {@link routeSummarizeIntent}.
+ *
+ * - `session-files`  → branch (a). The active session has uploaded files. The
+ *   dispatcher invokes the session-files Summarize path: either the agent-
+ *   tool path (LLM tool-call via InvokeSummarizePlaybookTool, task 015) for
+ *   natural-language flows, or the direct endpoint path (POST /api/ai/chat/
+ *   sessions/{id}/summarize, task 014) for explicit slash dispatch.
+ *
+ * - `active-document` → branch (b). No uploaded files but the host has an
+ *   active workspace document context. Falls through to the existing R3
+ *   SummarizeFilesDialog wizard flow (back-compat). The dispatcher opens the
+ *   wizard the same way it does today; this routing helper just signals the
+ *   decision.
+ *
+ * - `prompt-first` → branch (c). Neither uploaded files nor active workspace
+ *   document. Renders the deterministic Assistant interjection inline in the
+ *   chat thread; NO playbook invocation. Owned end-to-end by task 019 via
+ *   the `predefinedPrompts` surface.
+ *
+ * - `not-summarize` → the message is not a /summarize invocation; the
+ *   dispatcher MUST pass the message through unchanged to the default
+ *   SprkChat send funnel. This lets the helper sit on the hot path without
+ *   forcing every send through tri-mode logic.
+ */
+export type SummarizeRouteDecision =
+  | { kind: 'session-files'; messageText: string }
+  | { kind: 'active-document'; messageText: string }
+  | { kind: 'prompt-first'; messageText: string; interjection: string }
+  | { kind: 'not-summarize'; messageText: string };
+
+/**
+ * Minimal host-context inputs for {@link routeSummarizeIntent}.
+ *
+ * Decoupled from `IChatSession` (frontend session shape) and `entityContext`
+ * (host workspace context) so the helper is trivially testable with plain
+ * objects. The dispatcher binds these from `useAiSession()` + SprkChat's
+ * internal attachment state (the task-004 bridge analog — see notes/
+ * task-019-slash-command-evidence.md for the bridge decision).
+ */
+export interface SummarizeIntentInputs {
+  /**
+   * Count of files uploaded into THIS chat session. Maps to
+   * `ChatSession.UploadedFiles.length` on the BFF model (task 004). Until
+   * the frontend AiSessionProvider surfaces that property end-to-end (task
+   * 020 territory), the dispatcher passes the closest analog — the count of
+   * `chatAttachments` chips in SprkChat's local in-memory state. Both yield
+   * the same routing decision for the operator-visible flow.
+   */
+  uploadedFileCount: number;
+
+  /**
+   * Whether the host has an active workspace document context. True when
+   * SpaarkeAi's host context carries an entity/document the existing R3
+   * wizard would consume. The dispatcher binds this from `entityContext`
+   * + any `documentId` surfaced through SprkChat props.
+   */
+  hasActiveWorkspaceDocument: boolean;
+}
+
+/**
+ * Pure tri-mode routing decision for `/summarize` per FR-03.
+ *
+ * Inputs are positional and side-effect-free; the helper performs no IO and
+ * no state mutation. The caller is responsible for executing the chosen
+ * branch.
+ *
+ * Test contract: this function MUST be deterministic and total — every
+ * combination of inputs yields exactly one of the four decision kinds.
+ */
+export function routeSummarizeIntent(
+  messageText: string,
+  inputs: SummarizeIntentInputs
+): SummarizeRouteDecision {
+  // Normalize once; the slash command menu writes the trigger in lower case
+  // and the user CAN type it manually, so accept the canonical lowercase
+  // form OR a case-insensitive variant ("/Summarize", "/SUMMARIZE"). The
+  // textarea is whitespace-trimmed at the dispatcher edge; we re-trim here
+  // so the helper is robust on its own.
+  const trimmed = messageText.trim();
+  const isSummarize =
+    trimmed.length >= SUMMARIZE_SLASH_PREFIX.length &&
+    trimmed.slice(0, SUMMARIZE_SLASH_PREFIX.length).toLowerCase() ===
+      SUMMARIZE_SLASH_PREFIX;
+
+  if (!isSummarize) {
+    return { kind: 'not-summarize', messageText };
+  }
+
+  // Branch (a): uploaded files take precedence — the user expressed intent
+  // by uploading files into the chat session before invoking the command.
+  if (inputs.uploadedFileCount > 0) {
+    return { kind: 'session-files', messageText };
+  }
+
+  // Branch (b): no uploaded files but an active workspace document is the
+  // R3 wizard's natural input. Fall through to the existing flow unchanged.
+  if (inputs.hasActiveWorkspaceDocument) {
+    return { kind: 'active-document', messageText };
+  }
+
+  // Branch (c) — FR-03 prompt-first path: no uploads, no document; emit the
+  // deterministic interjection so the user knows what to do next.
+  return {
+    kind: 'prompt-first',
+    messageText,
+    interjection: SUMMARIZE_PROMPT_FIRST_INTERJECTION,
+  };
+}
+
 /**
  * State for the "Refine this?" selection chip shown above the SprkChat input.
  *
@@ -113,6 +271,94 @@ interface SelectionChipState {
   selectedText: string;
   /** Human-readable origin label from the widget (e.g. "Document viewer"). */
   contextLabel: string;
+}
+
+// ---------------------------------------------------------------------------
+// Inline confirmation + interjection helpers (R5 task 020 / D2-11)
+// ---------------------------------------------------------------------------
+//
+// All three helpers below are PURE functions exported at module scope so the
+// chat-pane orchestration UX is trivially testable with plain inputs (no React
+// testing infrastructure required). The ConversationPane component composes
+// them with effects + refs to produce the operator-visible behaviour.
+
+/**
+ * Maximum number of filenames listed inline in the file-confirmation message.
+ * Names beyond this cap collapse into "...and N more" suffix to avoid blowing
+ * out the chat message width on long file lists.
+ */
+export const FILE_CONFIRMATION_MAX_NAMES = 3;
+
+/**
+ * Build the deterministic inline file-confirmation message body emitted when
+ * one or more files transition to `status === 'ready'`. The string format is
+ * spec-driven (R5 task 020 POML goal §4 example: "I have your 3 files: a.pdf,
+ * b.docx, c.md"):
+ *
+ *   1 file  → "I have your file: a.pdf"
+ *   2+ files → "I have your N files: a.pdf, b.docx, c.md"
+ *   >FILE_CONFIRMATION_MAX_NAMES files → "...and N more" suffix
+ *
+ * Pure / total: every non-empty filename list yields exactly one message body.
+ * Returns `null` when the filenames array is empty so callers can short-circuit.
+ */
+export function buildFileConfirmationMessage(filenames: readonly string[]): string | null {
+  if (filenames.length === 0) return null;
+  if (filenames.length === 1) {
+    return `I have your file: ${filenames[0]}`;
+  }
+  const visible = filenames.slice(0, FILE_CONFIRMATION_MAX_NAMES);
+  const remaining = filenames.length - visible.length;
+  const list = visible.join(", ");
+  if (remaining > 0) {
+    return `I have your ${filenames.length} files: ${list}, and ${remaining} more`;
+  }
+  return `I have your ${filenames.length} files: ${list}`;
+}
+
+/**
+ * Build the deterministic Assistant interjection emitted on a multi-file
+ * combined-summary turn (R5 task 020 POML goal §5; R5 FR-03 prompt-first
+ * semantics extended to the session-files branch). The string format is
+ * spec-driven (POML example: "I'll combine all 3 files into a single
+ * summary."):
+ *
+ *   N=2 → "I'll combine all 2 files into a single summary."
+ *   N>=3 → "I'll combine all 3 files into a single summary."
+ *
+ * The helper does NOT fire for N=1 — single-file Summarize uses the per-file
+ * affordance (R5 task 021) and does NOT emit a combined-summary interjection.
+ * Returns `null` when fileCount &lt; 2 so callers can short-circuit.
+ *
+ * Pure / total / deterministic across renders so a `useRef`-based once-per-turn
+ * guard at the call site produces exactly-once semantics.
+ */
+export function buildMultiFileSummarizeInterjection(fileCount: number): string | null {
+  if (fileCount < 2) return null;
+  return `I'll combine all ${fileCount} files into a single summary.`;
+}
+
+/**
+ * Wrap a plain text body in an `IChatMessage` shape suitable for the
+ * `injectLocalMessage` prop on SprkChat (R5 task 020 / D2-11).
+ *
+ * Convention:
+ *   - `role: 'Assistant'` — renders in the assistant message slot with the
+ *     existing styles + a11y treatment.
+ *   - `metadata.responseType: 'markdown'` — plain-text rendering (no card).
+ *   - `timestamp` — current ISO timestamp (matches the streamed-turn shape).
+ *
+ * Per R5 spec FR-03 + ADR-012 these messages are CLIENT-RENDERED only — they
+ * are NOT persisted server-side as model-generated turns. The host emits them
+ * deterministically; the BFF chat history does NOT contain them.
+ */
+export function makeLocalAssistantMessage(content: string): IChatMessage {
+  return {
+    role: "Assistant",
+    content,
+    timestamp: new Date().toISOString(),
+    metadata: { responseType: "markdown" },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +542,37 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
     overflow: "hidden",
+  },
+
+  // ── R5 task 020 / D2-11: "N files attached" indicator strip ──────────────
+  //
+  // Persistent indicator rendered ABOVE the SprkChat chip strip (which sits
+  // inside SprkChat's input zone). Visible whenever the session has one or
+  // more uploaded files (chip count > 0). Fluent v9 semantic tokens only —
+  // no hard-coded colors (ADR-021). Hidden via conditional render when
+  // `uploadedFileCount === 0`.
+  filesAttachedIndicator: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  filesAttachedIndicatorText: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  filesAttachedIndicatorHint: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
 
   // ── Conversation restore summary block (AIPU2-106) ──────────────────────
@@ -533,6 +810,317 @@ export function ConversationPane(): React.JSX.Element {
   // as a predefined prompt. Cleared once onSessionCreated fires.
   const [pendingMessage, setPendingMessage] = React.useState<string | null>(null);
 
+  // ── R5 task 020 / D2-11: chat-pane orchestration UX state ──────────────
+  //
+  // The chat-pane orchestration UX builds on the existing
+  // `useChatFileAttachment` chip lifecycle (in SprkChat) by adding:
+  //   - A persistent "N files attached" indicator (count derived here from
+  //     the SprkChat `onAttachmentsChanged` callback).
+  //   - A per-file remove cascade (via `onAttachmentRemoved` callback) that
+  //     calls the cleanup pathway (manifest + AI Search index).
+  //   - Debounced inline file-confirmation messages on ready transitions.
+  //   - A deterministic multi-file combined-summary interjection emitted
+  //     exactly once per multi-file Summarize turn (via `onBeforeSendMessage`).
+  //   - A `context.files_staged` PaneEventBus dispatch on ready transitions.
+  //
+  // The chip state mirror is `AttachmentChip[]`. We DON'T duplicate the chip
+  // lifecycle here — SprkChat still owns it via `useChatFileAttachment`. We
+  // just maintain a local read-only copy keyed off the `onAttachmentsChanged`
+  // callback so the indicator + dispatchSummarizeIntent + ready-transition
+  // tracking can react to chip lifecycle events.
+  const [attachmentChips, setAttachmentChips] = React.useState<AttachmentChip[]>([]);
+
+  // Inline-confirmation injection state. SprkChat watches `pendingInjection`
+  // and appends to its thread on null→non-null transition. `onLocalMessageInjected`
+  // clears the prop back to null so re-renders do not re-inject.
+  const [pendingInjection, setPendingInjection] = React.useState<IChatMessage | null>(null);
+
+  // Per-id tracking of which chip IDs have already triggered an inline
+  // file-confirmation message — guarantees one consolidated confirmation
+  // per ready batch (debounced) and prevents re-emission on re-render.
+  const confirmedReadyIdsRef = React.useRef<Set<string>>(new Set());
+
+  // Debounce timer for ready-batch coalescing — files that arrive within
+  // ~250ms of each other (the operator-visible "I uploaded a batch" gesture)
+  // produce a single consolidated "I have your N files: ..." message rather
+  // than N separate single-file confirmations.
+  const readyConfirmationTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingConfirmFilenamesRef = React.useRef<string[]>([]);
+  const READY_CONFIRMATION_DEBOUNCE_MS = 250;
+
+  // Per-id tracking of which chip IDs have already been dispatched on the
+  // `context.files_staged` PaneEventBus channel — prevents re-dispatch on
+  // chip status mutations unrelated to the ready transition.
+  const dispatchedReadyIdsRef = React.useRef<Set<string>>(new Set());
+
+  // Per-turn tracking of multi-file combined-summary interjection emission.
+  // Keyed by a stable hash of the chip IDs + message text so retries /
+  // stream-resumption of the SAME turn do not re-emit the interjection. The
+  // ref is reset on session change (handleSessionCreated below).
+  const emittedSummarizeInterjectionKeysRef = React.useRef<Set<string>>(new Set());
+
+  // FR-03 prompt-first interjection state (R5 task 019). Surfaced via the
+  // existing predefinedPrompts chip surface when no files are uploaded and
+  // no active document is in scope. Cleared on session creation.
+  const [pendingSummarizeInterjection, setPendingSummarizeInterjection] =
+    React.useState<string | null>(null);
+
+  // Derived: count of chips that are present (extracting + ready + error).
+  // Mirrors the SprkChat chip strip's visible count. NOT just ready chips —
+  // the indicator surfaces "files attached" intent immediately so the user
+  // knows the session has them before extraction completes.
+  const uploadedFileCount = attachmentChips.length;
+
+  // Cleanup the debounce timer + interjection ref set on unmount.
+  React.useEffect(() => {
+    return () => {
+      if (readyConfirmationTimerRef.current !== null) {
+        clearTimeout(readyConfirmationTimerRef.current);
+      }
+    };
+  }, []);
+
+  /**
+   * onAttachmentsChanged — SprkChat fires this on every chip lifecycle change
+   * (add, remove, status transition). The host (this component) mirrors the
+   * chip array locally so the indicator + tri-mode routing input
+   * + ready-transition tracking can react.
+   */
+  const handleAttachmentsChanged = React.useCallback(
+    (chips: AttachmentChip[]) => {
+      setAttachmentChips(chips);
+
+      // Detect ready transitions for inline confirmation + PaneEventBus dispatch.
+      // We can't observe transitions purely from the chip array (a chip is
+      // 'ready' from this callback's perspective on its FIRST ready render);
+      // the per-id ref sets handle the once-per-id semantics.
+      const readyChipsThisTick: AttachmentChip[] = [];
+      for (const chip of chips) {
+        if (chip.status !== "ready") continue;
+        if (dispatchedReadyIdsRef.current.has(chip.id)) continue;
+        readyChipsThisTick.push(chip);
+        dispatchedReadyIdsRef.current.add(chip.id);
+      }
+
+      // Prune dispatched IDs for chips that have been removed so re-add re-fires.
+      const currentIds = new Set(chips.map(c => c.id));
+      for (const id of Array.from(dispatchedReadyIdsRef.current)) {
+        if (!currentIds.has(id)) dispatchedReadyIdsRef.current.delete(id);
+      }
+      for (const id of Array.from(confirmedReadyIdsRef.current)) {
+        if (!currentIds.has(id)) confirmedReadyIdsRef.current.delete(id);
+      }
+
+      // Side effect 1: inline confirmation message (debounced).
+      // Queue the filenames; on debounce expiry emit one consolidated message.
+      if (readyChipsThisTick.length > 0) {
+        for (const chip of readyChipsThisTick) {
+          if (confirmedReadyIdsRef.current.has(chip.id)) continue;
+          confirmedReadyIdsRef.current.add(chip.id);
+          pendingConfirmFilenamesRef.current.push(chip.filename);
+        }
+
+        // Reset the debounce timer — coalesce arrivals within the window.
+        if (readyConfirmationTimerRef.current !== null) {
+          clearTimeout(readyConfirmationTimerRef.current);
+        }
+        readyConfirmationTimerRef.current = setTimeout(() => {
+          const filenames = pendingConfirmFilenamesRef.current;
+          pendingConfirmFilenamesRef.current = [];
+          readyConfirmationTimerRef.current = null;
+          const body = buildFileConfirmationMessage(filenames);
+          if (body !== null) {
+            setPendingInjection(makeLocalAssistantMessage(body));
+          }
+        }, READY_CONFIRMATION_DEBOUNCE_MS);
+      }
+
+      // Side effect 2: PaneEventBus dispatch on the `context` channel
+      // (R5 task 016 additive event type). Carries the session-scoped file
+      // IDs so subscribers (FilePreviewContextWidget — task 018) can surface
+      // preview affordances for the newly-available files. NOT the same as
+      // the existing R4 `workspace.widget_load` dispatch (handleAttachmentReady
+      // below) — both fire on the SAME trigger but on DIFFERENT channels per
+      // the typed PaneEventBus contract (ADR-030).
+      if (readyChipsThisTick.length > 0) {
+        // Typed cast to the additive context-channel discriminant from
+        // task 016's PaneEventTypes. The `as ContextPaneEvent` cast at the
+        // dispatch boundary is the ADR-030 prescribed shape (no `any`).
+        const payload: ContextPaneEvent = {
+          type: "files_staged",
+          stagedFileIds: readyChipsThisTick.map(c => c.id),
+        };
+        dispatch("context", payload);
+      }
+    },
+    [dispatch]
+  );
+
+  /**
+   * onAttachmentRemoved — host cascade for a per-file dismiss click.
+   *
+   * Step 3 cleanup pathway decision (per task 020 POML):
+   *   - Manifest removal (`ChatSession.UploadedFiles[]`): NO BFF endpoint
+   *     exists yet at task 004's landing scope. Task 020 surfaces this as a
+   *     deferred-to-Phase-3 backlog item (R5 lessons-learned candidate).
+   *     For now the host LOGS the intent and relies on the session-end
+   *     cleanup HostedService (R5 task 007) to reconcile the manifest at
+   *     session lifecycle end. Orphaned manifest entries are BOUNDED by
+   *     session lifetime, so the user-visible state remains consistent
+   *     within a session even though a stricter per-file cleanup endpoint
+   *     would be preferred.
+   *   - Index removal (`spaarke-session-files` AI Search index): same
+   *     cascade — R5 task 007's HostedService is the authoritative cleanup
+   *     path. Per-file index-document removal endpoint is NOT exposed.
+   *     RagIndexingPipeline.DeleteSessionFileChunksAsync exists as a private
+   *     helper for the indexing idempotency path; exposing it would require
+   *     a small endpoint addition (BFF publish-size delta) which task 020
+   *     defers per the BFF hygiene rule (no BFF code in this task).
+   *
+   * The host therefore:
+   *   1. Captures the chip metadata for telemetry / future endpoint wiring.
+   *   2. Updates the local PaneEventBus dispatched-IDs ref so a future
+   *      re-add of the same file re-fires the staging event.
+   *   3. Logs a structured warning so the gap is observable in dev tools +
+   *      analytics during Phase 2 evaluation.
+   *
+   * The local chip removal proceeds immediately (SprkChat splices on
+   * `removeFile(index)` after this callback returns) — the user-visible UX
+   * is unaffected by the deferred backend cleanup.
+   */
+  const handleAttachmentRemoved = React.useCallback(
+    (chip: AttachmentChip, _index: number) => {
+      // Free the per-id ref entries so re-adding the same file re-fires
+      // ready-transition + confirmation + dispatch logic.
+      dispatchedReadyIdsRef.current.delete(chip.id);
+      confirmedReadyIdsRef.current.delete(chip.id);
+
+      // TODO(r5/phase-3-backend): wire DELETE /api/ai/chat/sessions/{sessionId}/files/{fileId}
+      // when the endpoint exists; until then session-end cleanup
+      // (R5 task 007 HostedService) reconciles the manifest + index.
+      // Logged so the gap is observable + measurable.
+      if (chatSessionId !== null) {
+        // eslint-disable-next-line no-console
+        console.info(
+          "[ConversationPane] file-chip dismissed; awaiting per-file cleanup endpoint",
+          { sessionId: chatSessionId, fileId: chip.id, filename: chip.filename }
+        );
+      }
+    },
+    [chatSessionId]
+  );
+
+  /**
+   * onLocalMessageInjected — SprkChat fires this after `pendingInjection`
+   * has been appended to the thread. The host clears the prop back to null
+   * so re-renders do not re-inject the same message.
+   */
+  const handleLocalMessageInjected = React.useCallback(() => {
+    setPendingInjection(null);
+  }, []);
+
+  /**
+   * onBeforeSendMessage — fires synchronously BEFORE SprkChat starts a
+   * stream. The host inspects the message text + the current chip state to
+   * decide whether to emit a deterministic interjection (multi-file
+   * combined-summary case, R5 FR-03).
+   *
+   * The interjection emission is guarded by `emittedSummarizeInterjectionKeysRef`
+   * so retries / stream-resumption of the SAME turn do not re-emit. The key
+   * is a stable hash of the message text + ready chip IDs.
+   */
+  const handleBeforeSendMessage = React.useCallback(
+    (messageText: string): void => {
+      // Tri-mode router: deterministic, side-effect-free decision.
+      const hasActiveWorkspaceDocument = entityContext !== null;
+      const decision = routeSummarizeIntent(messageText, {
+        uploadedFileCount,
+        hasActiveWorkspaceDocument,
+      });
+
+      // Only the session-files branch (a) with multi-file payload emits the
+      // combined-summary interjection. Single-file Summarize uses the
+      // per-file affordance (R5 task 021) and does NOT emit this interjection.
+      if (decision.kind !== "session-files") return;
+      if (uploadedFileCount < 2) return;
+
+      // Build the once-per-turn key — stable across retries / resumption of
+      // the SAME submission.
+      const readyIds = attachmentChips
+        .filter(c => c.status === "ready")
+        .map(c => c.id)
+        .sort()
+        .join("|");
+      const turnKey = `${messageText.trim().toLowerCase()}::${readyIds}`;
+      if (emittedSummarizeInterjectionKeysRef.current.has(turnKey)) return;
+      emittedSummarizeInterjectionKeysRef.current.add(turnKey);
+
+      const interjectionBody = buildMultiFileSummarizeInterjection(uploadedFileCount);
+      if (interjectionBody === null) return;
+
+      setPendingInjection(makeLocalAssistantMessage(interjectionBody));
+    },
+    [entityContext, uploadedFileCount, attachmentChips]
+  );
+
+  /**
+   * dispatchSummarizeIntent — pure routing decision helper, retained from
+   * task 019 as a public surface for tests + future call sites. Branch (c)
+   * (FR-03 prompt-first) is emitted via the predefinedPrompts surface;
+   * branches (a) + (b) fall through to the default SprkChat send funnel
+   * because the existing send path routes correctly:
+   *
+   *   - Branch (a) (session-files): SprkChat sends the message with the
+   *     ready attachments in the outbound payload (FR-07 attachments
+   *     contract). The BFF chat agent has access to task 015's
+   *     `InvokeSummarizePlaybookTool` and will route the LLM call through
+   *     the session-files Summarize path. The deterministic interjection
+   *     (multi-file case) is emitted by `handleBeforeSendMessage` ABOVE.
+   *
+   *   - Branch (b) (active-document): the SpaarkeAi shell currently does
+   *     NOT host the R3 SummarizeFilesDialog wizard (LegalWorkspace owns
+   *     it). Falling through to the default SprkChat send funnel produces
+   *     a sensible chat response via the default playbook routing for the
+   *     active document context — back-compat preserved for LegalWorkspace
+   *     consumers (they invoke the wizard outside the SpaarkeAi shell).
+   *
+   *   - Branch (c) (prompt-first): owned end-to-end by task 019 — surface
+   *     the deterministic interjection via the existing predefinedPrompts
+   *     suggestion surface.
+   */
+  const dispatchSummarizeIntent = React.useCallback(
+    (messageText: string): boolean => {
+      const hasActiveWorkspaceDocument = entityContext !== null;
+      const decision = routeSummarizeIntent(messageText, {
+        uploadedFileCount,
+        hasActiveWorkspaceDocument,
+      });
+
+      switch (decision.kind) {
+        case "not-summarize":
+        case "session-files":
+        case "active-document":
+          // Branches (a) + (b): fall through to the default SprkChat send.
+          // Branch (a) multi-file interjection is emitted by
+          // `handleBeforeSendMessage` (synchronously, before the user's
+          // message is appended).
+          return false;
+
+        case "prompt-first":
+          // Branch (c): surface interjection via predefinedPrompts.
+          setPendingSummarizeInterjection(decision.interjection);
+          return true;
+      }
+    },
+    [entityContext, uploadedFileCount]
+  );
+
+  // Mark `dispatchSummarizeIntent` as referenced so the TypeScript no-unused-
+  // locals rule does not flag it. It is a stable public surface for module-
+  // level tests + future direct call sites (e.g., a future slash-command
+  // suggestion chip click handler).
+  void dispatchSummarizeIntent;
+
   // ── Refinement prompts (AIPU2-101) ──────────────────────────────────────
   //
   // Set when the user clicks the "Refine this?" chip. SprkChat renders these
@@ -559,6 +1147,21 @@ export function ConversationPane(): React.JSX.Element {
         // Clear refinement prompts once a session is established — the
         // suggestion chip in SprkChat is no longer needed.
         setRefinementPrompts([]);
+        // R5 task 019 / D2-10: clear the FR-03 prompt-first interjection
+        // once the user has acted on it (sending any message creates the
+        // session). The chip should not linger across turns.
+        setPendingSummarizeInterjection(null);
+        // R5 task 020 / D2-11: reset per-session refs so the same chat
+        // surface in a new session does not carry stale interjection /
+        // dispatch / confirmation guards from the prior session.
+        emittedSummarizeInterjectionKeysRef.current.clear();
+        dispatchedReadyIdsRef.current.clear();
+        confirmedReadyIdsRef.current.clear();
+        pendingConfirmFilenamesRef.current = [];
+        if (readyConfirmationTimerRef.current !== null) {
+          clearTimeout(readyConfirmationTimerRef.current);
+          readyConfirmationTimerRef.current = null;
+        }
       }
     },
     [setChatSessionId]
@@ -574,6 +1177,50 @@ export function ConversationPane(): React.JSX.Element {
       setPlaybookId(newPlaybookId);
     },
     [setPlaybookId]
+  );
+
+  /**
+   * onAttachmentReady — R4 task 042 (W-4) Assistant → Workspace mount source.
+   *
+   * Demo scenario per OC-R4-07 (2026-05-26 operator confirmation): when the
+   * user attaches a file in the chat input and SprkChat's
+   * `useChatFileAttachment` hook finishes client-side text extraction, this
+   * callback fires once per ready file. We dispatch a typed `widget_load`
+   * event on the `workspace` PaneEventBus channel, which the WorkspacePane
+   * (subscribed via usePaneEvent) resolves through WorkspaceWidgetRegistry
+   * and mounts as a new tab.
+   *
+   * Per Risk R-7 in plan.original.md §8: dispatch + ONE viewer widget only;
+   * broader coverage (image preview, RecordViewer, etc.) is deferred to a
+   * follow-up. The PDF case is the primary path; non-PDF MIME types still
+   * open as workspace tabs but the DocumentViewerWidget falls back to the
+   * extracted text preview (no PDF binary render — see widget docstring).
+   *
+   * Per ADR-030: the payload is typed end-to-end. `widgetData` is cast to
+   * `DocumentViewerWidgetData` at the dispatch boundary (NOT `any`). The
+   * payload shape is reusable for W-5 (task 043 Context-pane dispatch).
+   *
+   * Per ADR-028: no auth context flows through this callback — text was
+   * extracted client-side before this point. NO BFF call is made here.
+   */
+  const handleAttachmentReady = React.useCallback(
+    (attachment: { filename: string; contentType: string; textContent: string }) => {
+      const widgetData: DocumentViewerWidgetData = {
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        textContent: attachment.textContent,
+      };
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: DOCUMENT_VIEWER_WIDGET_TYPE,
+        widgetData,
+        // Use the filename as the tab label — operator-visible behaviour per
+        // OC-R4-07. WorkspacePane.tsx prefers event.displayName over the
+        // registry metadata's generic "Document Viewer" label.
+        displayName: attachment.filename,
+      });
+    },
+    [dispatch]
   );
 
   // ── WelcomePanel callbacks ──────────────────────────────────────────────
@@ -702,18 +1349,37 @@ export function ConversationPane(): React.JSX.Element {
 
   // Build predefinedPrompts for SprkChat.
   //
-  // Two sources can contribute:
+  // Three sources can contribute:
   //   1. pendingMessage  — from the WelcomePanel prompt-button click
   //   2. refinementPrompts — from the "Refine this?" chip click (AIPU2-101)
+  //   3. pendingSummarizeInterjection — from the /summarize tri-mode router's
+  //      branch (c) FR-03 prompt-first path (R5 task 019 / D2-10). Surfaces
+  //      "Upload the file(s) you'd like me to summarize" as a clickable chip
+  //      above the input bar so the user knows what to do next. No playbook
+  //      invocation; pure chat-layer interjection.
   //
   // SprkChat shows these as clickable suggestion chips above the input bar.
   // The welcome prompt takes priority (index 0) so it is always visible first.
-  // Refinement prompts follow. An undefined value means no chips (SprkChat
-  // does not render the chip bar when predefinedPrompts is undefined or empty).
+  // The Summarize interjection follows; refinement prompts last. An undefined
+  // value means no chips (SprkChat does not render the chip bar when
+  // predefinedPrompts is undefined or empty).
   const welcomePromptEntry = pendingMessage
     ? [{ key: "welcome-prompt", label: pendingMessage, prompt: pendingMessage }]
     : [];
-  const allPredefinedPrompts = [...welcomePromptEntry, ...refinementPrompts];
+  const summarizeInterjectionEntry = pendingSummarizeInterjection
+    ? [
+        {
+          key: "summarize-interjection",
+          label: pendingSummarizeInterjection,
+          prompt: pendingSummarizeInterjection,
+        },
+      ]
+    : [];
+  const allPredefinedPrompts = [
+    ...welcomePromptEntry,
+    ...summarizeInterjectionEntry,
+    ...refinementPrompts,
+  ];
   const predefinedPrompts = allPredefinedPrompts.length > 0 ? allPredefinedPrompts : undefined;
 
   // Build SprkChat hostContext from entityContext (same mapping as R1 ChatPanel.tsx).
@@ -875,12 +1541,56 @@ export function ConversationPane(): React.JSX.Element {
             </div>
           )}
 
+          {/* ── R5 task 020 / D2-11: "N files attached" indicator ────── */}
+          {/*
+            Persistent indicator rendered ABOVE the SprkChat chip strip
+            whenever the session has one or more uploaded files. Drives off
+            the local `attachmentChips` mirror state populated via SprkChat's
+            `onAttachmentsChanged` callback. Hidden when count = 0 to keep
+            the input area uncluttered.
+
+            Accessibility: `role="status"` + `aria-live="polite"` so screen
+            readers announce count changes without interrupting the user's
+            current focus.
+          */}
+          {uploadedFileCount > 0 && (
+            <div
+              className={styles.filesAttachedIndicator}
+              role="status"
+              aria-live="polite"
+              data-testid="files-attached-indicator"
+            >
+              <Text className={styles.filesAttachedIndicatorText}>
+                {uploadedFileCount === 1
+                  ? "1 file attached"
+                  : `${uploadedFileCount} files attached`}
+              </Text>
+              <Text className={styles.filesAttachedIndicatorHint}>
+                {uploadedFileCount === 1
+                  ? "available for this session"
+                  : "available for this session — combined Summarize will fold all into one"}
+              </Text>
+            </div>
+          )}
+
           {/* ── SprkChat — fills remaining height below the chip bar ── */}
           {/*
             Spaarke Auth v2 §H-4: pass `authenticatedFetch` (for one-shot BFF
             calls) and `getAccessToken` (escape hatch for SSE ReadableStream)
             instead of a snapshotted `accessToken: string`. Task 023 owns the
             SprkChat API change that consumes these props.
+
+            R5 task 020 / D2-11 wires the new chat-pane orchestration UX
+            props (all optional; existing consumers ignore them):
+              - onAttachmentsChanged → mirror chip lifecycle for indicator +
+                routing + ready-transition tracking
+              - onAttachmentRemoved → per-file cleanup cascade (manifest +
+                AI Search index — see handleAttachmentRemoved docstring for
+                Phase 3 backend gap rationale)
+              - injectLocalMessage + onLocalMessageInjected → deterministic
+                inline file-confirmation + multi-file Summarize interjection
+              - onBeforeSendMessage → synchronous interjection emission point
+                for FR-03 multi-file combined-summary semantics
           */}
           <div className={mergeClasses(styles.sprkChatFlex)}>
             <SprkChat
@@ -894,6 +1604,12 @@ export function ConversationPane(): React.JSX.Element {
               predefinedPrompts={predefinedPrompts}
               hostContext={hostContext}
               onPaneEvent={streaming.onPaneEvent ?? null}
+              onAttachmentReady={handleAttachmentReady}
+              onAttachmentsChanged={handleAttachmentsChanged}
+              onAttachmentRemoved={handleAttachmentRemoved}
+              injectLocalMessage={pendingInjection}
+              onLocalMessageInjected={handleLocalMessageInjected}
+              onBeforeSendMessage={handleBeforeSendMessage}
             />
           </div>
         </div>

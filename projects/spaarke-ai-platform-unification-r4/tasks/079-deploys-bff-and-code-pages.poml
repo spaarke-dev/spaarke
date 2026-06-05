@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="079" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>Phase 7 deploy batch — BFF API + SpaarkeAi + LegalWorkspace + CalendarSidePane + EventsPage</title>
+    <phase>7: R4 deploy + wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>072, 073, 074, 075, 076, 077, 078</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, bff-api, code-page, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deploy task touching Azure App Service + Dataverse Code Pages. Requires sequencing + smoke verification. FULL per Step 3.5.5.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys are sequential by nature; sub-agents lack deploy credentials. Main session executes.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-27. R4 deploys were deferred until close-out per operator decision 2026-05-26
+    (deploy batch in Phase 7). Now execute. Order: BFF first, then 4 Code Pages. Smoke each
+    after deploy.
+
+    This task MUST run in the main session (not sub-agent) — deploys require credentials and
+    interaction.
+  </prompt>
+
+  <role>
+    Spaarke deploy operator. Sequenced executor. Skill-driven (bff-deploy, code-page-deploy).
+  </role>
+
+  <goal>
+    All R4 code changes deployed to dev environment:
+    (1) Sprk.Bff.Api → Azure App Service (A-4 chat cap, B-4 modifiedOn, B-5 PUT+ETag, 044 webhook rename, 070 test-infra cleanup)
+    (2) SpaarkeAi Code Page (W-3, W-4 DocumentViewer, W-5 SemanticSearchCriteriaTool, B-3 telemetry, 031 tab persistence, 042/043/044 widget/dialog, C-3, C-4 + add-on tasks 072/073/074/075)
+    (3) LegalWorkspace web resource (044 SmartToDoDialog inline modal)
+    (4) CalendarSidePane (B-6 CalendarFilterPane + UTC fix + 076 shape migration)
+    (5) EventsPage (B-7 + B-8 + 067 + 074)
+
+    Smoke each deploy. Document successful smoke results in `notes/079-deploy-verification.md`.
+  </prompt>
+
+  <context>
+    <background>
+      All R4 code changes have been committed but NOT deployed. Operator decision (2026-05-26):
+      batch deploys to a single Phase 7 window to minimize disruption and enable cohesive smoke
+      verification. Now executing.
+
+      Key risk areas requiring smoke focus:
+      - **SpaarkeAi**: lots of surfaces changed. Workspace builder (W-3), Assistant→Workspace mount (W-4), Context→Workspace mount (W-5), tab persistence (031), hook consolidation (C-3), renderer interface (C-4), widget catalog. Smoke: cold load, create workspace, mount widgets via both mount sources, refresh page to verify tab restore, dark mode parity.
+      - **BFF**: chat attachment 25 MB cap (A-4), layout PUT+ETag (B-5), modifiedOn (B-4). Smoke: chat with 20 MB attachment, update workspace layout twice with stale ETag (expect 412), verify modifiedOn returns ISO-8601 camelCase.
+      - **CalendarSidePane**: new CalendarFilterPane with UTC fix. Smoke: filter by date range across DST boundary.
+      - **LegalWorkspace**: SmartToDoDialog inline modal (044). Smoke: open from Matter form, verify modal renders inline (not in iframe), submit + close.
+
+      Pre-flight requirements:
+      - Working tree clean (commit all 072-078 first)
+      - Build green on all packages
+      - Lint green
+      - Operator confirmation of dev environment target (default: dev)
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>src/solutions/LegalWorkspace/</file>
+      <file>src/solutions/CalendarSidePane/</file>
+      <file>src/solutions/EventsPage/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10">BFF publish size MUST be ≤60 MB compressed. Verify before deploy. Current baseline ~43.88 MB.</constraint>
+    <constraint source="CLAUDE.md §10">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and verify compressed output size. Document in deploy memo.</constraint>
+    <constraint source="project">Deploy in sequence (BFF first, then Code Pages). Do NOT parallelize — sequential is safer + each step's smoke can detect breakage before the next.</constraint>
+    <constraint source="project">If ANY smoke fails, STOP. Document the failure. Do not continue with remaining deploys until operator triage.</constraint>
+    <constraint source="project">Use the existing skills: `bff-deploy` for BFF, `code-page-deploy` for Code Pages.</constraint>
+    <constraint source="project">DO NOT push or deploy to prod / demo from this task. Dev environment only unless operator says otherwise.</constraint>
+    <constraint source="project">User confirmation required before each deploy step (operator visibility).</constraint>
+    <constraint source="ADR-029">BFF publish hygiene: verify no new HIGH-severity CVEs from `dotnet list package --vulnerable --include-transitive`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Pre-flight">Verify working tree clean. Verify all task POMLs are status=completed for 072–078. Verify last commit pushed.</step>
+    <step order="2" name="Build verify">Run BFF + each Code Page build. All 0 errors. (BFF + SpaarkeAi + LegalWorkspace + CalendarSidePane + EventsPage)</step>
+    <step order="3" name="BFF publish size check">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Verify compressed size ≤60 MB. Document size.</step>
+    <step order="4" name="BFF CVE check">`dotnet list package --vulnerable --include-transitive`. No new HIGH-severity. Document any findings.</step>
+    <step order="5" name="Operator gate: BFF deploy approval">Pause. Present BFF deploy plan + sizes + CVE check. Wait for operator approval before deploying BFF.</step>
+    <step order="6" name="Deploy BFF">Invoke `bff-deploy` skill. Target: dev environment. Capture deploy output + URL.</step>
+    <step order="7" name="BFF smoke">Hit `/healthz`. Hit `/api/workspace/layouts` (verify modifiedOn in response). PUT a layout with stale ETag (verify 412). Chat with a 20 MB attachment (verify accepted, 26 MB rejected). Document.</step>
+    <step order="8" name="Operator gate: Code Page deploys">Pause. Confirm BFF smoke green. Get operator approval to proceed with Code Page deploys.</step>
+    <step order="9" name="Deploy SpaarkeAi">Invoke `code-page-deploy` skill for `sprk_spaarkeai`. Smoke: cold load, create workspace tab, mount via Assistant (W-4), mount via Context (W-5), reload to verify tab persists (031), dark mode toggle.</step>
+    <step order="10" name="Deploy LegalWorkspace">Invoke `code-page-deploy` skill for `sprk_corporateworkspace` (legacy name) OR appropriate LegalWorkspace web resource. Smoke: open SmartToDoDialog from Matter form (044), verify inline render (not iframe).</step>
+    <step order="11" name="Deploy CalendarSidePane">Invoke `code-page-deploy` skill. Smoke: open side pane, filter by date range across DST boundary, verify Apply works, verify no UTC drift on filter dates.</step>
+    <step order="12" name="Deploy EventsPage">Invoke `code-page-deploy` skill. Smoke: open page, exercise bulk actions (B-7), verify Calendar widget renders correctly with rich badges (064 + 067).</step>
+    <step order="13" name="Final verification">Run full smoke checklist from `docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md` on SpaarkeAi.</step>
+    <step order="14" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/079-deploy-verification.md` with: each deploy's URL/version, smoke results, BFF publish size, any anomalies, sign-off.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">dotnet publish, dotnet list package, git status, npm run build</tool>
+    <tool name="Read">Inspect deploy outputs</tool>
+    <tool name="Skill">bff-deploy, code-page-deploy</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Sprk.Bff.Api → Azure App Service (dev)</output>
+    <output type="deploy">SpaarkeAi → Dataverse web resource (dev)</output>
+    <output type="deploy">LegalWorkspace SmartToDoDialog → Dataverse web resource (dev)</output>
+    <output type="deploy">CalendarSidePane → Dataverse web resource (dev)</output>
+    <output type="deploy">EventsPage → Dataverse web resource (dev)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/079-deploy-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the BFF deploy, When `/healthz` is hit, Then 200 OK.</criterion>
+    <criterion testable="true">Given the BFF deploy, When publish size is measured, Then ≤60 MB compressed.</criterion>
+    <criterion testable="true">Given the BFF deploy, When a layout PUT with stale ETag is sent, Then 412 Precondition Failed.</criterion>
+    <criterion testable="true">Given the SpaarkeAi deploy, When a workspace tab is mounted via Assistant W-4 path, Then DocumentViewerWidget renders.</criterion>
+    <criterion testable="true">Given the SpaarkeAi deploy, When the page is reloaded after creating a tab, Then the tab persists (031).</criterion>
+    <criterion testable="true">Given the LegalWorkspace deploy, When SmartToDoDialog is opened from Matter form, Then it renders as inline modal (044).</criterion>
+    <criterion testable="true">Given the CalendarSidePane deploy, When filter is applied across DST boundary, Then dates are not shifted (UTC fix from B-6 Option B).</criterion>
+    <criterion testable="true">Given the deploy memo exists, When inspected, Then each deploy has a URL/version + smoke result + sign-off.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    THE OPERATOR GATE FOR R4 WRAP-UP (090) IS AFTER THIS TASK COMPLETES. After 079 ✅, present
+    final review with full deploy verification, then await operator approval before executing
+    090.
+
+    Per CLAUDE.md §10 (BFF Hygiene): publish size measured + recorded; no new CVE; placement
+    justification was done at task time for each BFF-touching change. This deploy is the
+    aggregate go-live event.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor — Step 9.5 quality gates apply. This is a main-session deploy task; sub-agents cannot execute.</protocol>
+  </execution>
+</task>

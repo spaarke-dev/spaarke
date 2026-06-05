@@ -437,10 +437,7 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /** Return the section-level header style modifier based on change type. */
-function sectionHeaderClass(
-  styles: ReturnType<typeof useStyles>,
-  changeType: DiffChangeType
-): string {
+function sectionHeaderClass(styles: ReturnType<typeof useStyles>, changeType: DiffChangeType): string {
   switch (changeType) {
     case 'Addition':
       return styles.sectionHeaderAddition;
@@ -454,10 +451,7 @@ function sectionHeaderClass(
 }
 
 /** Return the cell modifier class based on change type. */
-function cellClass(
-  styles: ReturnType<typeof useStyles>,
-  changeType: DiffChangeType
-): string {
+function cellClass(styles: ReturnType<typeof useStyles>, changeType: DiffChangeType): string {
   switch (changeType) {
     case 'Addition':
       return styles.cellAddition;
@@ -471,10 +465,7 @@ function cellClass(
 }
 
 /** Return the change entry modifier class. */
-function changeEntryClass(
-  styles: ReturnType<typeof useStyles>,
-  changeType: DiffChangeType
-): string {
+function changeEntryClass(styles: ReturnType<typeof useStyles>, changeType: DiffChangeType): string {
   switch (changeType) {
     case 'Addition':
       return styles.changeEntryAddition;
@@ -502,9 +493,7 @@ function changeTypeLabel(changeType: DiffChangeType): string {
 }
 
 /** Fluent Badge appearance for the change type. */
-function changeTypeBadgeColor(
-  changeType: DiffChangeType
-): 'success' | 'danger' | 'warning' | 'subtle' {
+function changeTypeBadgeColor(changeType: DiffChangeType): 'success' | 'danger' | 'warning' | 'subtle' {
   switch (changeType) {
     case 'Addition':
       return 'success';
@@ -518,10 +507,7 @@ function changeTypeBadgeColor(
 }
 
 /** Dot CSS class for nav sidebar indicator. */
-function navDotClass(
-  styles: ReturnType<typeof useStyles>,
-  changeType: DiffChangeType
-): string {
+function navDotClass(styles: ReturnType<typeof useStyles>, changeType: DiffChangeType): string {
   switch (changeType) {
     case 'Addition':
       return styles.navDotAddition;
@@ -591,11 +577,7 @@ const SectionRow: React.FC<SectionRowProps> = ({
   const headerModifier = sectionHeaderClass(styles, changeType);
 
   return (
-    <div
-      className={styles.section}
-      ref={sectionRef}
-      aria-label={`Section: ${sectionTitle}`}
-    >
+    <div className={styles.section} ref={sectionRef} aria-label={`Section: ${sectionTitle}`}>
       {/* Section header — click to toggle expand/collapse */}
       <div
         className={mergeClasses(styles.sectionHeader, headerModifier)}
@@ -603,7 +585,7 @@ const SectionRow: React.FC<SectionRowProps> = ({
         role="button"
         aria-expanded={isExpanded}
         tabIndex={0}
-        onKeyDown={(e) => {
+        onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             onToggle(index);
@@ -618,50 +600,31 @@ const SectionRow: React.FC<SectionRowProps> = ({
         <Text className={styles.sectionTitle} title={sectionTitle}>
           {sectionTitle}
         </Text>
-        <Badge
-          appearance="tint"
-          color={changeTypeBadgeColor(changeType)}
-          size="small"
-        >
+        <Badge appearance="tint" color={changeTypeBadgeColor(changeType)} size="small">
           {changeTypeLabel(changeType)}
         </Badge>
       </div>
 
       {/* Section body — two-column grid */}
-      <div
-        className={mergeClasses(
-          styles.sectionBody,
-          !isExpanded && styles.sectionBodyHidden
-        )}
-      >
+      <div className={mergeClasses(styles.sectionBody, !isExpanded && styles.sectionBodyHidden)}>
         {/* Original (left) column */}
         <div
           className={mergeClasses(
             styles.cell,
             changeType !== 'Unchanged' && cellClass(styles, changeType),
-            originalParts.length === 0 &&
-              changeType !== 'Unchanged' &&
-              styles.cellEmpty
+            originalParts.length === 0 && changeType !== 'Unchanged' && styles.cellEmpty
           )}
           aria-label="Original text"
         >
           {changeType === 'Unchanged' ? (
-            <Text style={{ color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}>
-              — Unchanged —
-            </Text>
+            <Text style={{ color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}>— Unchanged —</Text>
           ) : originalParts.length === 0 ? (
             <Text style={{ color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}>
               (not present in original)
             </Text>
           ) : (
             originalParts.map((change, i) => (
-              <div
-                key={i}
-                className={mergeClasses(
-                  styles.changeEntry,
-                  changeEntryClass(styles, change.changeType)
-                )}
-              >
+              <div key={i} className={mergeClasses(styles.changeEntry, changeEntryClass(styles, change.changeType))}>
                 {change.originalText ?? ''}
               </div>
             ))
@@ -673,29 +636,17 @@ const SectionRow: React.FC<SectionRowProps> = ({
           className={mergeClasses(
             styles.cell,
             changeType !== 'Unchanged' && cellClass(styles, changeType),
-            modifiedParts.length === 0 &&
-              changeType !== 'Unchanged' &&
-              styles.cellEmpty
+            modifiedParts.length === 0 && changeType !== 'Unchanged' && styles.cellEmpty
           )}
           aria-label="Modified text"
         >
           {changeType === 'Unchanged' ? (
-            <Text style={{ color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}>
-              — Unchanged —
-            </Text>
+            <Text style={{ color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}>— Unchanged —</Text>
           ) : modifiedParts.length === 0 ? (
-            <Text style={{ color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}>
-              (not present in revised)
-            </Text>
+            <Text style={{ color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}>(not present in revised)</Text>
           ) : (
             modifiedParts.map((change, i) => (
-              <div
-                key={i}
-                className={mergeClasses(
-                  styles.changeEntry,
-                  changeEntryClass(styles, change.changeType)
-                )}
-              >
+              <div key={i} className={mergeClasses(styles.changeEntry, changeEntryClass(styles, change.changeType))}>
                 {change.modifiedText ?? change.originalText ?? ''}
               </div>
             ))
@@ -746,7 +697,7 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
   const sectionRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const handleToggleSection = useCallback((index: number) => {
-    setExpandedSections((prev) => {
+    setExpandedSections(prev => {
       const next = new Set(prev);
       if (next.has(index)) {
         next.delete(index);
@@ -757,24 +708,21 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
     });
   }, []);
 
-  const handleNavClick = useCallback(
-    (index: number) => {
-      setActiveSection(index);
-      // Ensure the section is expanded
-      setExpandedSections((prev) => {
-        if (prev.has(index)) return prev;
-        const next = new Set(prev);
-        next.add(index);
-        return next;
-      });
-      // Scroll to the section
-      const el = sectionRefs.current[index];
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    },
-    []
-  );
+  const handleNavClick = useCallback((index: number) => {
+    setActiveSection(index);
+    // Ensure the section is expanded
+    setExpandedSections(prev => {
+      if (prev.has(index)) return prev;
+      const next = new Set(prev);
+      next.add(index);
+      return next;
+    });
+    // Scroll to the section
+    const el = sectionRefs.current[index];
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Loading state
@@ -805,11 +753,7 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
                   Document comparison failed
                 </Text>
               }
-              description={
-                <Text style={{ color: tokens.colorNeutralForeground3 }}>
-                  {displayError}
-                </Text>
-              }
+              description={<Text style={{ color: tokens.colorNeutralForeground3 }}>{displayError}</Text>}
             />
           </Card>
         </div>
@@ -824,9 +768,7 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
     return (
       <div className={mergeClasses(styles.root, className)}>
         <div className={styles.emptyContainer}>
-          <ColumnDoubleCompareRegular
-            style={{ fontSize: '48px', color: tokens.colorNeutralForeground4 }}
-          />
+          <ColumnDoubleCompareRegular style={{ fontSize: '48px', color: tokens.colorNeutralForeground4 }} />
           <Text style={{ color: tokens.colorNeutralForeground3 }}>
             No sections to display. Both documents may be identical.
           </Text>
@@ -835,8 +777,7 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
     );
   }
 
-  const { sections, additions, deletions, modifications, totalSections, totalChanges, comparedAt } =
-    data;
+  const { sections, additions, deletions, modifications, totalSections, totalChanges, comparedAt } = data;
 
   // Filter to only changed sections for the nav sidebar
   const changedSections = sections
@@ -897,24 +838,18 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
         <div className={styles.headerSpacer} />
 
         {comparedAtLabel && (
-          <Text
-            size={200}
-            style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}
-          >
+          <Text size={200} style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}>
             Compared {comparedAtLabel}
           </Text>
         )}
 
-        <Tooltip
-          content={navVisible ? 'Hide section navigation' : 'Show section navigation'}
-          relationship="label"
-        >
+        <Tooltip content={navVisible ? 'Hide section navigation' : 'Show section navigation'} relationship="label">
           <Button
             className={styles.navToggle}
             appearance="subtle"
             size="small"
             icon={<Navigation20Regular />}
-            onClick={() => setNavVisible((v) => !v)}
+            onClick={() => setNavVisible(v => !v)}
             aria-label={navVisible ? 'Hide navigation' : 'Show navigation'}
           />
         </Tooltip>
@@ -925,46 +860,29 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
       {/* Main content: nav sidebar + diff columns */}
       <div className={styles.contentArea}>
         {/* Section navigation sidebar */}
-        <nav
-          className={mergeClasses(styles.nav, !navVisible && styles.navHidden)}
-          aria-label="Section navigation"
-        >
-          <Text className={styles.navHeading}>
-            Changed Sections ({changedSections.length})
-          </Text>
+        <nav className={mergeClasses(styles.nav, !navVisible && styles.navHidden)} aria-label="Section navigation">
+          <Text className={styles.navHeading}>Changed Sections ({changedSections.length})</Text>
           {changedSections.length === 0 && (
-            <Text
-              size={200}
-              style={{ color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}
-            >
+            <Text size={200} style={{ color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}>
               All sections unchanged
             </Text>
           )}
           {changedSections.map(({ section, index }) => (
             <div
               key={index}
-              className={mergeClasses(
-                styles.navItem,
-                activeSection === index && styles.navItemActive
-              )}
+              className={mergeClasses(styles.navItem, activeSection === index && styles.navItemActive)}
               onClick={() => handleNavClick(index)}
               role="button"
               tabIndex={0}
               aria-label={`Navigate to ${section.sectionTitle}`}
-              onKeyDown={(e) => {
+              onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   handleNavClick(index);
                 }
               }}
             >
-              <div
-                className={mergeClasses(
-                  styles.navDot,
-                  navDotClass(styles, section.changeType)
-                )}
-                aria-hidden
-              />
+              <div className={mergeClasses(styles.navDot, navDotClass(styles, section.changeType))} aria-hidden />
               <span className={styles.navLabel} title={section.sectionTitle}>
                 {section.sectionTitle}
               </span>
@@ -989,7 +907,7 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
               isExpanded={expandedSections.has(index)}
               onToggle={handleToggleSection}
               isActive={activeSection === index}
-              sectionRef={(el) => {
+              sectionRef={el => {
                 sectionRefs.current[index] = el;
               }}
               styles={styles}

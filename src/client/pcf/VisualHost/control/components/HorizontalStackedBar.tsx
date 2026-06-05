@@ -26,8 +26,9 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import type { IAggregatedDataPoint, ICardConfig, ColorTokenSet } from '../types';
+import type { IAggregatedDataPoint, ICardConfig } from '../types';
 import { formatValue } from '../utils/valueFormatters';
+import { getTokenSetColors } from '../utils/tokenSetColors';
 
 // ============= Props =============
 
@@ -44,40 +45,29 @@ export interface IHorizontalStackedBarProps {
 
 // ============= Constants =============
 
-const DEFAULT_BAR_HEIGHT = 20;
+// v1.4.7 — bar height 24 → 32 to read closer to the donut arc thickness
+// (donut at innerRadius 0.62 has ~38% of radius as arc width; on a typical
+// 200px donut that's ~38px). The two visualizations now feel coordinated.
+const DEFAULT_BAR_HEIGHT = 32;
 const FILL_TRANSITION_MS = 400;
 
 // ============= Color Token Resolution =============
 
 /**
- * Map a ColorTokenSet name to Fluent UI v9 semantic token values.
- * Mirrors the pattern in MetricCardMatrix for consistency.
- */
-function getTokenSetColors(tokenSet: ColorTokenSet): { borderAccent?: string } {
-  switch (tokenSet) {
-    case 'brand':
-      return { borderAccent: tokens.colorBrandBackground };
-    case 'warning':
-      return { borderAccent: tokens.colorPaletteYellowBorderActive };
-    case 'danger':
-      return { borderAccent: tokens.colorPaletteRedBorderActive };
-    case 'success':
-      return { borderAccent: tokens.colorPaletteGreenBorderActive };
-    case 'neutral':
-    default:
-      return { borderAccent: tokens.colorNeutralStroke1 };
-  }
-}
-
-/**
  * Resolve bar fill color based on fill ratio and optional color thresholds.
- * Falls back to brand blue when no thresholds match.
+ *
+ * v1.4.6 — uses the shared `getTokenSetColors().donutSegment` (Foreground2-tier
+ * tokens) so HSBar uses the same softer palette as the Donut chart segments,
+ * matching the SemanticSearchControl chip pattern. Falls back to `borderAccent`
+ * for back-compat with any token set that hasn't been updated to include a
+ * `donutSegment`. Falls back to brand blue when no thresholds match at all.
  */
 function resolveBarColor(fillRatio: number, config?: ICardConfig): string {
   if (config?.colorThresholds) {
     for (const threshold of config.colorThresholds) {
       if (fillRatio >= threshold.range[0] && fillRatio <= threshold.range[1]) {
-        return getTokenSetColors(threshold.tokenSet).borderAccent || tokens.colorBrandBackground;
+        const set = getTokenSetColors(threshold.tokenSet);
+        return set.donutSegment ?? set.borderAccent ?? tokens.colorBrandBackground;
       }
     }
   }
@@ -113,6 +103,21 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground3,
+    position: 'relative', // anchor for the budget marker (v1.4.6)
+  },
+  // v1.4.7 — Over-budget marker: small diamond (rotated 45° square) anchored
+  // at the boundary between the in-budget (green) and over-budget (red)
+  // segments inside the actual-amount bar. Replaces the v1.4.6 line+label.
+  budgetMarker: {
+    position: 'absolute',
+    top: '50%',
+    width: '14px',
+    height: '14px',
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `2px solid ${tokens.colorNeutralForeground1}`,
+    transform: 'translate(-50%, -50%) rotate(45deg)',
+    pointerEvents: 'none',
+    boxSizing: 'border-box',
   },
   barFill: {
     height: '100%',
@@ -121,6 +126,23 @@ const useStyles = makeStyles({
     transitionDuration: `${FILL_TRANSITION_MS}ms`,
     transitionTimingFunction: 'ease-in-out',
     minWidth: 0,
+  },
+  // v1.4.7 — Two-segment fill for over-budget visualization. The bar fills
+  // 100% of the container width, divided into:
+  //   - in-budget segment (left): success/green, sized to (total/current)*100%
+  //   - over-budget segment (right): danger/red, fills the remainder
+  // Sub-elements share the bar's height and inherit the container's overflow:hidden.
+  segmentRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    width: '100%',
+    height: '100%',
+  },
+  segmentInBudget: {
+    height: '100%',
+  },
+  segmentOver: {
+    height: '100%',
   },
   footerRow: {
     display: 'flex',
@@ -227,8 +249,21 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
   const hasTotalValue = totalPoint !== undefined && totalValue > 0;
 
   const remaining = hasTotalValue ? totalValue - currentValue : 0;
-  const fillRatio = hasTotalValue ? Math.min(Math.max(currentValue / totalValue, 0), 1) : 0;
+  // v1.4.6 — track BOTH unclamped (for text display + over-budget detection)
+  // and clamped (for bar fill width, since the bar can't exceed 100% of its
+  // container).
+  const rawRatio = hasTotalValue ? Math.max(currentValue / totalValue, 0) : 0;
+  const isOverTotal = rawRatio > 1;
+  const fillRatio = Math.min(rawRatio, 1);
   const fillPercent = fillRatio * 100;
+  // Display percent in the sub-line text — uncamped, so $250K of $150K shows
+  // as "167%", not "100%". Color thresholds still match on `fillRatio` (which
+  // is clamped) so the [0.85, 1.0] danger band fires correctly when over.
+  const displayPercentText = hasTotalValue ? `${Math.round(rawRatio * 100)}` : '0';
+  // When over the total, render a vertical marker at the position where the
+  // budget WOULD fall (100% line within the actual-amount bar). For $250K of
+  // $150K: marker at (150/250)*100 = 60% from the left.
+  const budgetMarkerLeftPercent = isOverTotal && currentValue > 0 ? (totalValue / currentValue) * 100 : null;
 
   // --- Resolve colors ---
   const barColor = resolveBarColor(fillRatio, cardConfig);
@@ -264,9 +299,7 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
     const headlineField = cardConfig?.headlineFromField;
     let headlinePoint: IAggregatedDataPoint | undefined = currentPoint;
     if (headlineField) {
-      const matched = dataPoints.find(
-        dp => dp.fieldValue === headlineField || dp.label === headlineField
-      );
+      const matched = dataPoints.find(dp => dp.fieldValue === headlineField || dp.label === headlineField);
       if (matched) {
         headlinePoint = matched;
       }
@@ -277,7 +310,10 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
       ? nullDisplay
       : formatValue(headlineValue, headlinePoint?.valueFormat ?? valueFormat, nullDisplay);
 
-    const percentText = hasTotalValue ? `${Math.round(fillPercent)}` : '0';
+    // v1.4.6 — use the UNCAMPED displayPercentText so "167% of $150,000" is
+    // shown when the actual exceeds the total (the prior `fillPercent`-based
+    // text capped at 100% which masked over-budget conditions).
+    const percentText = displayPercentText;
     const remainingText = formattedRemaining ?? nullDisplay;
     const totalText = formattedTotal ?? nullDisplay;
     const template = cardConfig?.subLineTemplate ?? '';
@@ -328,14 +364,45 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
         aria-valuemax={100}
         aria-label={ariaLabel}
       >
-        {(hasTotalValue || currentValue > 0) && (
-          <div
-            className={styles.barFill}
-            style={{
-              width: hasTotalValue ? `${fillPercent}%` : '100%',
-              backgroundColor: barColor,
-            }}
-          />
+        {/* v1.4.7 — Two rendering paths:
+            (a) UNDER or AT budget: single fill segment using color thresholds
+                (back-compat with chart def's `colorThresholds` semantics).
+            (b) OVER budget: two segments — green (in-budget) on the left,
+                red (over-budget) on the right — divided at the position where
+                the budget falls inside the actual-amount bar. Diamond marker
+                sits at the segment boundary. */}
+        {isOverTotal && budgetMarkerLeftPercent !== null ? (
+          <div className={styles.segmentRow}>
+            <div
+              className={styles.segmentInBudget}
+              style={{
+                width: `${budgetMarkerLeftPercent}%`,
+                backgroundColor: getTokenSetColors('success').donutSegment,
+              }}
+            />
+            <div
+              className={styles.segmentOver}
+              style={{
+                width: `${100 - budgetMarkerLeftPercent}%`,
+                backgroundColor: getTokenSetColors('danger').donutSegment,
+              }}
+            />
+          </div>
+        ) : (
+          (hasTotalValue || currentValue > 0) && (
+            <div
+              className={styles.barFill}
+              style={{
+                width: hasTotalValue ? `${fillPercent}%` : '100%',
+                backgroundColor: barColor,
+              }}
+            />
+          )
+        )}
+        {/* Diamond marker — only rendered when over budget, positioned at
+            the in-budget/over-budget segment boundary. */}
+        {budgetMarkerLeftPercent !== null && (
+          <div className={styles.budgetMarker} style={{ left: `${budgetMarkerLeftPercent}%` }} aria-hidden={true} />
         )}
       </div>
 

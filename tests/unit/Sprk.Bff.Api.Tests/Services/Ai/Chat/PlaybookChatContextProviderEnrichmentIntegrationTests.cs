@@ -25,6 +25,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 /// clauses, these tests exercise the complete pipeline with realistic
 /// multi-section system prompts and verify enrichment coexists correctly.
 /// </summary>
+[Trait("status", "repaired")]
 public class PlaybookChatContextProviderEnrichmentIntegrationTests
 {
     private static readonly Guid TestPlaybookId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -178,9 +179,11 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
             TestDocumentId, TestTenantId, playbookId: null, hostContext,
             cancellationToken: CancellationToken.None);
 
-        // Assert — default prompt present (generic mode uses BuildDefaultSystemPrompt)
-        context.SystemPrompt.Should().Contain("You are an AI assistant",
-            "generic mode should use the default system prompt");
+        // Assert — default prompt present (generic mode uses BuildDefaultSystemPrompt).
+        // The default prompt was updated from "You are an AI assistant" to "You are Spaarke AI"
+        // when the assistant identity block was tightened to the Spaarke legal-workspace persona.
+        context.SystemPrompt.Should().Contain("You are Spaarke AI",
+            "generic mode should use the default Spaarke AI system prompt");
 
         // Assert — enrichment block still appended
         context.SystemPrompt.Should().Contain(

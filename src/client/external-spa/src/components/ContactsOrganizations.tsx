@@ -1,4 +1,4 @@
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -17,13 +17,10 @@ import {
   TableCellLayout,
   Badge,
   Tooltip,
-} from "@fluentui/react-components";
-import {
-  PeopleRegular,
-  BuildingRegular,
-} from "@fluentui/react-icons";
-import { getContacts, getOrganizations, ODataContact, ODataOrganization } from "../api/web-api-client";
-import { SectionCard } from "./SectionCard";
+} from '@fluentui/react-components';
+import { PeopleRegular, BuildingRegular } from '@fluentui/react-icons';
+import { getContacts, getOrganizations, ODataContact, ODataOrganization } from '../api/web-api-client';
+import { SectionCard } from './SectionCard';
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021, no hard-coded colors)
@@ -31,38 +28,38 @@ import { SectionCard } from "./SectionCard";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalL,
   },
   loadingContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalXL,
     gap: tokens.spacingHorizontalS,
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalXL,
     gap: tokens.spacingVerticalS,
     color: tokens.colorNeutralForeground3,
-    minHeight: "120px",
+    minHeight: '120px',
   },
   emptyIcon: {
-    fontSize: "32px",
+    fontSize: '32px',
     color: tokens.colorNeutralForeground4,
   },
   tableContainer: {
-    overflowX: "auto",
-    width: "100%",
+    overflowX: 'auto',
+    width: '100%',
   },
   dataGrid: {
-    width: "100%",
-    minWidth: "400px",
+    width: '100%',
+    minWidth: '400px',
   },
 });
 
@@ -73,28 +70,26 @@ const useStyles = makeStyles({
 function getAccessLevelLabel(value: number): string {
   switch (value) {
     case 100000000:
-      return "View Only";
+      return 'View Only';
     case 100000001:
-      return "Collaborate";
+      return 'Collaborate';
     case 100000002:
-      return "Full Access";
+      return 'Full Access';
     default:
-      return "Participant";
+      return 'Participant';
   }
 }
 
-function getAccessLevelColor(
-  value: number
-): "brand" | "success" | "informative" | "warning" {
+function getAccessLevelColor(value: number): 'brand' | 'success' | 'informative' | 'warning' {
   switch (value) {
     case 100000000:
-      return "informative";
+      return 'informative';
     case 100000001:
-      return "brand";
+      return 'brand';
     case 100000002:
-      return "success";
+      return 'success';
     default:
-      return "informative";
+      return 'informative';
   }
 }
 
@@ -104,54 +99,45 @@ function getAccessLevelColor(
 
 const contactColumns: TableColumnDefinition<ODataContact>[] = [
   createTableColumn<ODataContact>({
-    columnId: "name",
-    renderHeaderCell: () => "Name",
-    renderCell: (contact) => (
+    columnId: 'name',
+    renderHeaderCell: () => 'Name',
+    renderCell: contact => (
       <TableCellLayout>
         <Text size={300}>
-          {contact.fullname ??
-            (`${contact.firstname ?? ""} ${contact.lastname ?? ""}`.trim() || "—")}
+          {contact.fullname ?? (`${contact.firstname ?? ''} ${contact.lastname ?? ''}`.trim() || '—')}
         </Text>
       </TableCellLayout>
     ),
   }),
   createTableColumn<ODataContact>({
-    columnId: "email",
-    renderHeaderCell: () => "Email",
-    renderCell: (contact) => (
+    columnId: 'email',
+    renderHeaderCell: () => 'Email',
+    renderCell: contact => (
       <TableCellLayout>
-        <Text size={300}>
-          {contact.emailaddress1 ?? "—"}
-        </Text>
+        <Text size={300}>{contact.emailaddress1 ?? '—'}</Text>
       </TableCellLayout>
     ),
   }),
   createTableColumn<ODataContact>({
-    columnId: "role",
-    renderHeaderCell: () => "Role",
-    renderCell: (contact) => (
+    columnId: 'role',
+    renderHeaderCell: () => 'Role',
+    renderCell: contact => (
       <TableCellLayout>
-        <Text size={300}>
-          {contact.jobtitle ?? "—"}
-        </Text>
+        <Text size={300}>{contact.jobtitle ?? '—'}</Text>
       </TableCellLayout>
     ),
   }),
   createTableColumn<ODataContact>({
-    columnId: "accessLevel",
-    renderHeaderCell: () => "Access Level",
-    renderCell: (_contact) => (
+    columnId: 'accessLevel',
+    renderHeaderCell: () => 'Access Level',
+    renderCell: _contact => (
       <TableCellLayout>
         {/* Access level is scoped by Power Pages table permissions —
             all contacts returned by the API are active participants.
             Default display as Collaborate since the filter ensures
             they have an active sprk_externalrecordaccess record. */}
         <Tooltip content="Project participant access level" relationship="label">
-          <Badge
-            appearance="tint"
-            color={getAccessLevelColor(100000001)}
-            size="small"
-          >
+          <Badge appearance="tint" color={getAccessLevelColor(100000001)} size="small">
             {getAccessLevelLabel(100000001)}
           </Badge>
         </Tooltip>
@@ -199,7 +185,7 @@ const ContactsGrid: React.FC<ContactsGridProps> = ({ contacts, loading, error })
       <DataGrid
         items={contacts}
         columns={contactColumns}
-        getRowId={(contact) => contact.contactid}
+        getRowId={contact => contact.contactid}
         className={styles.dataGrid}
         aria-label="Project contacts"
       >
@@ -217,9 +203,7 @@ const ContactsGrid: React.FC<ContactsGridProps> = ({ contacts, loading, error })
         <DataGridBody<ODataContact>>
           {({ item, rowId }) => (
             <DataGridRow<ODataContact> key={rowId}>
-              {({ renderCell }) => (
-                <DataGridCell>{renderCell(item)}</DataGridCell>
-              )}
+              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
             </DataGridRow>
           )}
         </DataGridBody>
@@ -243,21 +227,21 @@ interface ODataOrganizationWithCount extends ODataOrganization {
 
 const organizationColumns: TableColumnDefinition<ODataOrganizationWithCount>[] = [
   createTableColumn<ODataOrganizationWithCount>({
-    columnId: "name",
-    renderHeaderCell: () => "Name",
-    renderCell: (org) => (
+    columnId: 'name',
+    renderHeaderCell: () => 'Name',
+    renderCell: org => (
       <TableCellLayout>
         <Text size={300}>{org.name}</Text>
       </TableCellLayout>
     ),
   }),
   createTableColumn<ODataOrganizationWithCount>({
-    columnId: "location",
-    renderHeaderCell: () => "Location",
-    renderCell: (org) => {
-      const city = org.address1_city ?? "";
-      const country = org.address1_country ?? "";
-      const location = [city, country].filter(Boolean).join(", ") || "—";
+    columnId: 'location',
+    renderHeaderCell: () => 'Location',
+    renderCell: org => {
+      const city = org.address1_city ?? '';
+      const country = org.address1_country ?? '';
+      const location = [city, country].filter(Boolean).join(', ') || '—';
       return (
         <TableCellLayout>
           <Text size={300}>{location}</Text>
@@ -266,15 +250,15 @@ const organizationColumns: TableColumnDefinition<ODataOrganizationWithCount>[] =
     },
   }),
   createTableColumn<ODataOrganizationWithCount>({
-    columnId: "contactCount",
-    renderHeaderCell: () => "Contacts",
-    renderCell: (org) => (
+    columnId: 'contactCount',
+    renderHeaderCell: () => 'Contacts',
+    renderCell: org => (
       <TableCellLayout>
         <Badge
           appearance="tint"
           color="informative"
           size="small"
-          aria-label={`${org._contactCount} contact${org._contactCount !== 1 ? "s" : ""}`}
+          aria-label={`${org._contactCount} contact${org._contactCount !== 1 ? 's' : ''}`}
         >
           {org._contactCount}
         </Badge>
@@ -289,11 +273,7 @@ interface OrganizationsGridProps {
   error: string | null;
 }
 
-const OrganizationsGrid: React.FC<OrganizationsGridProps> = ({
-  organizations,
-  loading,
-  error,
-}) => {
+const OrganizationsGrid: React.FC<OrganizationsGridProps> = ({ organizations, loading, error }) => {
   const styles = useStyles();
 
   if (loading) {
@@ -326,7 +306,7 @@ const OrganizationsGrid: React.FC<OrganizationsGridProps> = ({
       <DataGrid
         items={organizations}
         columns={organizationColumns}
-        getRowId={(org) => org.accountid}
+        getRowId={org => org.accountid}
         className={styles.dataGrid}
         aria-label="Project organisations"
       >
@@ -344,9 +324,7 @@ const OrganizationsGrid: React.FC<OrganizationsGridProps> = ({
         <DataGridBody<ODataOrganizationWithCount>>
           {({ item, rowId }) => (
             <DataGridRow<ODataOrganizationWithCount> key={rowId}>
-              {({ renderCell }) => (
-                <DataGridCell>{renderCell(item)}</DataGridCell>
-              )}
+              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
             </DataGridRow>
           )}
         </DataGridBody>
@@ -389,9 +367,7 @@ export interface ContactsOrganizationsProps {
  *           @spaarke/ui-components GridView internally) for standalone SPA
  *           context where PCF ComponentFramework is not available.
  */
-export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({
-  projectId,
-}) => {
+export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ projectId }) => {
   const styles = useStyles();
 
   // ---------------------------------------------------------------------------
@@ -430,8 +406,8 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({
         }
       } catch (err) {
         if (!cancelled) {
-          console.error("[ContactsOrganizations] Failed to load contacts:", err);
-          setContactsError("Could not load contacts. Please refresh and try again.");
+          console.error('[ContactsOrganizations] Failed to load contacts:', err);
+          setContactsError('Could not load contacts. Please refresh and try again.');
         }
       } finally {
         if (!cancelled) {
@@ -465,20 +441,16 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({
         if (!cancelled) {
           // Compute contact count per organisation from the already-fetched contacts list.
           // This avoids a second round-trip for count data.
-          const withCounts: ODataOrganizationWithCount[] = data.map((org) => ({
+          const withCounts: ODataOrganizationWithCount[] = data.map(org => ({
             ...org,
-            _contactCount: contacts.filter(
-              (c) => c._parentcustomerid_value === org.accountid
-            ).length,
+            _contactCount: contacts.filter(c => c._parentcustomerid_value === org.accountid).length,
           }));
           setOrganizations(withCounts);
         }
       } catch (err) {
         if (!cancelled) {
-          console.error("[ContactsOrganizations] Failed to load organisations:", err);
-          setOrganizationsError(
-            "Could not load organisations. Please refresh and try again."
-          );
+          console.error('[ContactsOrganizations] Failed to load organisations:', err);
+          setOrganizationsError('Could not load organisations. Please refresh and try again.');
         }
       } finally {
         if (!cancelled) {
@@ -507,20 +479,12 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({
     <div className={styles.root}>
       {/* Contacts section */}
       <SectionCard title="Contacts">
-        <ContactsGrid
-          contacts={contacts}
-          loading={loadingContacts}
-          error={contactsError}
-        />
+        <ContactsGrid contacts={contacts} loading={loadingContacts} error={contactsError} />
       </SectionCard>
 
       {/* Organisations section */}
       <SectionCard title="Organisations">
-        <OrganizationsGrid
-          organizations={organizations}
-          loading={loadingOrganizations}
-          error={organizationsError}
-        />
+        <OrganizationsGrid organizations={organizations} loading={loadingOrganizations} error={organizationsError} />
       </SectionCard>
     </div>
   );

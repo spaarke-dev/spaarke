@@ -23,7 +23,8 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
 
     return dataset.columns.map(col => {
       // Extract field security from column metadata
-      const colSecurity = (col as any).security;
+      const colSecurity = (col as { security?: { secured?: boolean; readable?: boolean; editable?: boolean } })
+        .security;
 
       return {
         name: col.name,

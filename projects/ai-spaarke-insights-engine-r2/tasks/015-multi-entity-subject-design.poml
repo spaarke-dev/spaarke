@@ -1,0 +1,82 @@
+<task id="015" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>A6 — Multi-entity subject design (scheme parsing, resolver pattern, index scope evolution)</title>
+    <status>completed</status>
+    <wave>A</wave>
+    <estimated-effort>6h</estimated-effort>
+    <tags>design, multi-entity, ILiveFactResolver, subject-scheme, index-shape</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>A6</wave-item>
+  </metadata>
+
+  <prompt>
+    Author the multi-entity subject design. Currently subject = "matter:&lt;guid&gt;" only. Phase 1.5 generalizes to "&lt;entityType&gt;:&lt;guid&gt;" where entityType ∈ {matter, project, invoice, …}. Decide: (a) subject parser shape; (b) ILiveFactResolver registration pattern (dictionary vs registry service vs CanResolve iteration — see Q-A6-1); (c) spaarke-insights-index scope shape evolution (Q-D6-1); (d) migration plan for Phase 1 Observations (preserve backward compat).
+  </prompt>
+
+  <role>Information architect + service-design specialist.</role>
+
+  <goal>
+    Design doc projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md authored with: (1) Subject parser shape (validation, supported schemes from config-driven catalog); (2) ILiveFactResolver registration pattern (chosen + reasoning) — initial leaning: dictionary keyed by entityType (simplest, per spec.md assumption); (3) spaarke-insights-index scope shape — add scope.entityType + scope.entityId alongside existing scope.matterId (hybrid for backward compat per Q-D6-1 option c); (4) Migration plan; (5) Per-entity resolver responsibilities (matter, project, invoice).
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-live-fact-resolver">src/server/api/Sprk.Bff.Api/Services/Insights/Graph/DataverseLiveFactResolver.cs (current single-entity matter implementation)</file>
+    <file purpose="r1-index-schema">infra/insights/schemas/ (current spaarke-insights-index schema)</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (Wave D5 + D6; Q-A6-1; Q-D6-1)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — chosen resolver pattern must not blow the ≤15 non-framework registration target across project</constraint>
+    <constraint source="spec.md NFR-08">Phase 1 Observations (with scope.matterId only) must remain queryable after Wave D6 migration</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read current resolver">DataverseLiveFactResolver.cs — understand query patterns</step>
+    <step order="2" name="Read current index schema">infra/insights/schemas/ — identify scope fields</step>
+    <step order="3" name="Subject parser design">Format (validation, scheme catalog), error handling for unknown schemes</step>
+    <step order="4" name="Resolver registration pattern">Pick (a) IDictionary&lt;string, ILiveFactResolver&gt; (simplest), (b) registry service, (c) CanResolve iteration. Initial leaning: (a). Document reasoning.</step>
+    <step order="5" name="Index scope shape">Hybrid: keep scope.matterId; add scope.entityType + scope.entityId (Q-D6-1 option c — preserves Phase 1 backward compat)</step>
+    <step order="6" name="Migration plan">Index re-create vs in-place add nullable fields; coordinate with infra team; plan for Phase 1 Observation queryability</step>
+    <step order="7" name="Per-entity resolver responsibilities">matter (existing); project (new — sprk_project queries); invoice (new — sprk_invoice queries)</step>
+    <step order="8" name="Publish design-a6-multi-entity.md">In project root; feeds D5 + D6</step>
+  </steps>
+
+  <outputs>
+    <output type="design-doc">projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Subject parser shape defined with config-driven scheme catalog</criterion>
+    <criterion testable="true">ILiveFactResolver registration pattern picked with reasoning</criterion>
+    <criterion testable="true">Index scope shape evolution chosen (hybrid backward-compat)</criterion>
+    <criterion testable="true">Migration plan for Phase 1 Observations included</criterion>
+    <criterion testable="true">Per-entity resolver responsibilities documented</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-02 via task-execute (STANDARD rigor).
+
+    **Output**: `projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md` (11 sections, ~360 lines).
+
+    **Key decisions made (8 — A6-D1..A6-D8 in design doc §9)**:
+    - Q-A6-1 resolved: Option (a) `IDictionary&lt;string, ILiveFactResolver&gt;` keyed by entity-type name (matches spec.md §Assumptions default; reuses r1's `NodeExecutorRegistry`-style pattern; minimal DI surface).
+    - Q-D6-1 resolved: Option (c) Hybrid — keep `scope.matterId` + add `scope.entityType` + `scope.entityId` (preserves NFR-08 backward-compat).
+    - Subject parser is **config-catalog-driven** via `IOptions&lt;SubjectSchemeCatalogOptions&gt;` so adding `client:` or `contract:` later doesn't require a code deploy.
+    - Index migration: re-create as `spaarke-insights-index-v2` with back-fill of Phase 1 Observations (`entityType="matter"` + `entityId=&lt;matterGuid&gt;`); dual-read filter logic in v2 readers preserves Phase 1 `scope.matterId`-only queries.
+    - r1's `DataverseLiveFactResolver` → renamed to `MatterLiveFactResolver`; behavior preserved 1:1.
+    - All 3 resolvers registered unconditionally in D5 (no ADR-030 gate by default — cost is minimal; revisit if needed via P3 Null-Object).
+    - Inter-entity references (e.g., `invoice.relatedMatter`) return `EntityReference {id, name}`; do NOT recurse — playbooks compose multi-entity fact-gathering.
+
+    **DI cost analysis**: Net +4 registrations (parser + dict factory + 3 concrete - 1 r1 single). Stays within ADR-010 ≤15 target per NFR-05.
+
+    **Backward-compat (NFR-08)**: Phase 1 Observations preserved via (1) `scope.matterId` field kept in record + index; (2) Phase 1 v1 → v2 back-fill sets `entityType="matter"`; (3) v2 readers use dual-read filter (`scope.matterId` OR `scope.entityType + scope.entityId`); (4) explicit D6 acceptance test #3 replays Phase 1 matterId-only RAG query against v2.
+
+    **Open implementation-time questions deferred to D5/D6 task authors**: D5-Q1 (initial project predicate set), D5-Q2 (invoice→matter lookup field name), D6-Q1 (soak period), D6-Q2 (back-fill batching).
+
+    **Files modified**: `projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md` (created), this POML (status + notes), `tasks/TASK-INDEX.md` (🔲 → ✅ for 015).
+
+    **No `.claude/` writes attempted**.
+  </notes>
+</task>

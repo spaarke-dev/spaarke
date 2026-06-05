@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Concurrent;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
@@ -43,6 +43,8 @@ public sealed class AgentConversationService
         string userId,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var cacheKey = BuildCacheKey(tenantId, conversationId);
         var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
 
@@ -70,6 +72,8 @@ public sealed class AgentConversationService
         AgentConversationContext context,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var cacheKey = BuildCacheKey(context.TenantId, context.ConversationId);
         var json = JsonSerializer.Serialize(context);
 
@@ -123,6 +127,8 @@ public sealed class AgentConversationService
         string conversationId,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var cacheKey = BuildCacheKey(tenantId, conversationId);
         await _cache.RemoveAsync(cacheKey, cancellationToken);
 
@@ -132,12 +138,12 @@ public sealed class AgentConversationService
 
     private static AgentConversationContext CreateNewContext(
         string tenantId, string conversationId, string userId) => new()
-    {
-        TenantId = tenantId,
-        ConversationId = conversationId,
-        UserId = userId,
-        CreatedAt = DateTimeOffset.UtcNow
-    };
+        {
+            TenantId = tenantId,
+            ConversationId = conversationId,
+            UserId = userId,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
 
     // Keys scoped by tenant per ADR-014
     private static string BuildCacheKey(string tenantId, string conversationId) =>

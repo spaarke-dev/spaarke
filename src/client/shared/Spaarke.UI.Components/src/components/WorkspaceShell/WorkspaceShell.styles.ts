@@ -7,7 +7,7 @@
  * Standards: ADR-021 (Fluent v9 tokens, no hard-coded colors, dark mode)
  */
 
-import { makeStyles, tokens } from "@fluentui/react-components";
+import { makeStyles, tokens } from '@fluentui/react-components';
 
 /**
  * Styles for the WorkspaceShell outer container and row layout.
@@ -18,12 +18,12 @@ export const useWorkspaceShellStyles = makeStyles({
    * Scrolls vertically when content exceeds available height.
    */
   shell: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXL,
-    flex: "1 1 auto",
+    flex: '1 1 auto',
     minHeight: 0,
-    overflow: "auto",
+    overflow: 'auto',
   },
 
   /**
@@ -31,7 +31,7 @@ export const useWorkspaceShellStyles = makeStyles({
    * Column layout is supplied inline via `style.gridTemplateColumns`.
    */
   row: {
-    display: "grid",
+    display: 'grid',
     gap: tokens.spacingHorizontalL,
   },
 });
@@ -53,8 +53,8 @@ export const useSectionContentPaddingStyles = makeStyles({
  */
 export const useToolbarDividerStyles = makeStyles({
   divider: {
-    width: "1px",
-    height: "20px",
+    width: '1px',
+    height: '20px',
     backgroundColor: tokens.colorNeutralStroke2,
     marginLeft: tokens.spacingHorizontalXS,
     marginRight: tokens.spacingHorizontalXS,

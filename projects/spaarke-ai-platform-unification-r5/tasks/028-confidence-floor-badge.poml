@@ -1,0 +1,588 @@
+<task id="028" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-18 Confidence floor badge (D5 R5 client-side; `&lt;0.6` threshold, configurable)</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~1h (sub-agent, code-authoring scope only; main session owns build / code-review / adr-check / commit / push)</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G6 (parallel-safe; runs alongside 024/025/026/027 — last of the Insights tool integration suite)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>026 (D2-16 — `InsightsResponseRenderer` two-path component MUST exist; this task EXTENDS the renderer with a low-confidence badge sub-component)</dependencies>
+    <tags>frontend, insights, confidence, react-19</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Implement the **client-side low-confidence badge** on `InsightsResponseRenderer`
+    (built by task 026). This is the R5 client-side resolution of Insights contract
+    v1.1 decision **D5** (spec §8.2 / plan.md D2-18) — instead of accepting the
+    Insights team's default (no badge), R5 surfaces a low-confidence UX hint *purely
+    in the renderer*, requiring **zero Insights contract change**.
+
+    Behavior is mechanical and small:
+
+    1. The renderer receives a response payload that includes a `confidence` field
+       (number in `[0, 1]`) on both the playbook structured envelope and the RAG
+       prose envelope per integration brief v1.0 §4.
+    2. When `confidence < threshold` (default `0.6`, configurable via R5 frontend
+       settings), render a Fluent v9 `Badge` (preferred for compact placement
+       alongside the response header) OR `MessageBar` (preferred if the renderer's
+       layout calls for a banner) with the **exact** text:
+       **"Low confidence — verify before relying"**.
+    3. When `confidence &gt;= threshold`, the badge is absent (no DOM node rendered).
+    4. The threshold MUST be configurable via R5 settings (read from app config /
+       feature config — see Step 3 for the exact location to verify). Default
+       `0.6` per spec FR-15 Acceptance + spec.md Assumptions §"Confidence threshold
+       default".
+    5. The badge MUST pass dark-mode visual check against `webDarkTheme` per
+       ADR-021.
+
+    Per R5 §3.2 (CLAUDE.md): **no new feature flag**. The threshold is a
+    *configuration value*, not a kill-switch. Per R5 §3.1 reuse mandate: use the
+    EXISTING Fluent v9 `Badge` (or `MessageBar`) primitives from
+    `@fluentui/react-components`; do NOT build a parallel UI component. Per R5
+    §3.6: this task is **pure frontend** — no BFF code change, no
+    `dotnet publish` measurement, BFF publish-size delta = 0 MB.
+
+    The visual placement decision (header-adjacent `Badge` vs banner
+    `MessageBar`) is delegated to the renderer's layout — Step 4 documents the
+    chosen primitive in task notes for cross-reference with task 026's
+    `InsightsResponseRenderer` design. Either primitive satisfies FR-15 per spec
+    text "Fluent v9 `Badge` **or** `MessageBar`".
+  </prompt>
+
+  <role>
+    Senior React 19 + Fluent UI v9 component developer with experience extending an
+    existing renderer with a small typed sub-component. Familiar with Spaarke's
+    `@spaarke/ai-widgets` package (where `InsightsResponseRenderer` lives per task
+    026), R5 frontend settings conventions (app config / feature config), Fluent
+    v9 semantic-token + dark-mode discipline (ADR-021), and React 19 hooks +
+    typed prop interfaces (ADR-022). Understands ADR-018 §"Flag Scope Discipline"
+    — configuration value vs feature flag distinction.
+  </role>
+
+  <goal>
+    `InsightsResponseRenderer` is extended with a `LowConfidenceBadge` sub-component
+    (or inline JSX block — Step 4 picks the cleaner of the two) that renders a
+    Fluent v9 `Badge` or `MessageBar` with the exact text **"Low confidence —
+    verify before relying"** when the response payload's `confidence &lt; threshold`.
+    The threshold is read from an R5 frontend settings source (a `useSettings()`
+    hook, a config module, or the existing settings-loading pattern used elsewhere
+    in `@spaarke/ai-widgets` — Step 3 verifies the exact location); default value
+    is `0.6`. When `confidence &gt;= threshold`, NO badge DOM node is rendered (not
+    a hidden node).
+
+    Both renderer paths (`path: "playbook"` and `path: "rag"`) honor the badge
+    consistently — same threshold, same text, same primitive choice.
+
+    Dark mode passes for both render states (badge visible / badge absent). The
+    component is typed (no `any` in public exports). Unit tests cover threshold
+    boundary (just below / at / just above), threshold reconfiguration, both
+    response paths, and absent / null confidence handling.
+
+    Per FR-15 / SC-14: badge appears for `confidence &lt; threshold`; absent for
+    `confidence &gt;= threshold`; threshold configurable; both verified by tests
+    and by smoke-test screenshots. BFF publish-size delta = 0 MB.
+
+    The `code-review` + `adr-check` FULL-rigor quality gates at Step 9.5 pass.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="binding-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="v1.1-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="dependency-task-026">projects/spaarke-ai-platform-unification-r5/tasks/026-two-path-insights-response-renderer.poml</file>
+    <file purpose="sibling-pattern">projects/spaarke-ai-platform-unification-r5/tasks/017-structured-output-stream-widget.poml</file>
+    <file purpose="adr-fluent">.claude/adr/ADR-021-fluent-ui-v9-semantic-tokens-dark-mode.md</file>
+    <file purpose="adr-react19">.claude/adr/ADR-022-react-19.md</file>
+    <file purpose="adr-feature-flags">.claude/adr/ADR-018-feature-flag-scope-discipline.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-15">Render Fluent v9 `Badge` OR `MessageBar` with exact text "Low confidence — verify before relying" when `confidence &lt; threshold`. Threshold configurable; default 0.6. Badge appears for confidence below threshold; absent for confidence at or above threshold.</constraint>
+    <constraint source="spec SC-14">Verified by: hit low-confidence response → badge visible; hit high-confidence response → badge absent. Confirmed by unit tests + smoke-test screenshots.</constraint>
+    <constraint source="spec.md Assumptions">Default threshold = 0.6. Configurable via R5 settings if operator preference shifts. Affects FR-15.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">MUST use the EXISTING Fluent v9 `Badge` or `MessageBar` primitives from `@fluentui/react-components`. MUST NOT build a parallel UI component. Cite the chosen primitive in code comments + task notes.</constraint>
+    <constraint source="R5 CLAUDE.md §3.2 / ADR-018 Flag Scope Discipline">NO new feature flag. The threshold is a *configuration value* (numeric), not a kill-switch. Threshold lives in R5 frontend settings alongside other configurable values. Verified by reviewer inspection (no `Feature:...` or `Enabled` flag added).</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 / ADR-029">BFF publish-size — N/A; this task adds frontend code only. Confirm publish-size delta = 0 MB in task notes. NO `dotnet publish` run required.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens ONLY — no hex/rgba/Fluent v8 imports. Dark mode MUST be tested and pass; badge MUST be legible against both `webLightTheme` and `webDarkTheme`. Use semantic intent (`appearance="filled"` / `color="warning"` for `Badge`, or `intent="warning"` for `MessageBar`) consistent with low-confidence semantics.</constraint>
+    <constraint source="ADR-022">React 19 only — functional component (or inline JSX), typed props, no `any` in exports. Hooks-only state management.</constraint>
+    <constraint source="ADR-012">Lives in `@spaarke/ai-widgets` shared library adjacent to (or inside) `InsightsResponseRenderer`. Context-agnostic — no `Xrm` references, no PCF-specific imports, no SpaarkeAi-shell-specific imports.</constraint>
+    <constraint source="ADR-010">DI minimalism — N/A for frontend component. Confirm in task notes.</constraint>
+    <constraint source="ADR-013 §3.5 Zone B boundary">R5 is a Zone B consumer of the Insights contract. This task does NOT modify any Insights-internal type; it consumes the `confidence` field from the renderer's already-parsed response payload (produced upstream by task 024's `InsightsQueryToolHandler` + task 026's renderer). NO new BFF code, NO new HTTP call, NO Insights-internal type referenced.</constraint>
+    <constraint source="ADR-030">PaneEventBus is closed at 4 channels — N/A for this task (no new event types). Confirm in task notes.</constraint>
+    <constraint source="contract v1.0 §4 (response schema)">`confidence` field is a `number` in `[0, 1]` on both `path: "playbook"` and `path: "rag"` envelopes per integration brief. Tool MUST handle absent / null / out-of-range values gracefully (treat as "no confidence signal" → no badge rendered, defensive default).</constraint>
+    <constraint source="project">Exact badge text MUST be "Low confidence — verify before relying" (en-dash; case-sensitive; no trailing punctuation). The text is FR-15 and SC-14 prose; deviations are spec violations.</constraint>
+    <constraint source="project">When `confidence &gt;= threshold`, NO badge DOM node is rendered (not a hidden node with `display: none`). Verified by unit test asserting `queryByText("Low confidence — verify before relying") === null`.</constraint>
+    <constraint source="project">Threshold reconfiguration MUST be reactive — if R5 settings change at runtime (e.g., operator updates feature config), subsequent renders honor the new threshold. Most likely no-op given component re-renders on prop / context change; verify in test.</constraint>
+    <constraint source="CLAUDE.md §10 / bff-extensions §F test obligation">N/A for the BFF test obligation (this is frontend-only). Frontend tests required: at minimum the 5 unit tests in Step 6.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent-ui-v9/badge-messagebar-semantic-warning</topic>
+    <topic>spaarke-ai-widgets/insights-response-renderer-extension</topic>
+    <topic>r5-frontend-settings/configurable-thresholds</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9-semantic-tokens-dark-mode.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-018-feature-flag-scope-discipline.md</file>
+      <file>.claude/adr/ADR-012-component-libraries.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/026-two-path-insights-response-renderer.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 `Badge` for compact inline status" location="@fluentui/react-components (Badge)">
+        Compact inline status pill — preferred for header-adjacent placement next
+        to response title or correlation-id. Use `appearance="filled"` and
+        `color="warning"` (Fluent v9 semantic color slot — maps to amber tones in
+        light, muted amber in dark per semantic-token discipline). Renders ~20px
+        tall; suitable for response-header rows. Example shape:
+        `&lt;Badge appearance="filled" color="warning"&gt;Low confidence — verify before relying&lt;/Badge&gt;`.
+      </pattern>
+      <pattern name="Fluent v9 `MessageBar` for banner-style status" location="@fluentui/react-components (MessageBar)">
+        Full-width banner — preferred when the renderer's layout calls for a
+        visually prominent advisory above the response body. Use `intent="warning"`
+        for semantic styling. Renders as a single horizontal row with icon + body
+        text. Example shape:
+        `&lt;MessageBar intent="warning"&gt;&lt;MessageBarBody&gt;Low confidence — verify before relying&lt;/MessageBarBody&gt;&lt;/MessageBar&gt;`.
+      </pattern>
+      <pattern name="Configurable threshold via R5 settings" location="src/client/shared/Spaarke.AI.Widgets/src/ (R5 settings convention — verify at Step 3)">
+        R5 frontend settings convention is the existing config-loading pattern in
+        `@spaarke/ai-widgets` or the SpaarkeAi shell. Likely candidates: a
+        `useSettings()` / `useConfig()` hook, a `widgetConfig` module, or a
+        context provider. Step 3 verifies the exact location. Read the threshold
+        as `settings.insights?.confidenceThreshold ?? 0.6`. Default is hard-coded
+        in the renderer alongside the read so it works even if settings are not
+        provided.
+      </pattern>
+      <pattern name="Conditional rendering — no DOM node when absent" location="N/A — React 19 idiom">
+        Use a conditional expression returning `null` rather than a hidden element:
+        `{confidence != null &amp;&amp; confidence &lt; threshold ? &lt;Badge ...&gt;...&lt;/Badge&gt; : null}`.
+        Verified by `queryByText` returning `null` in absent case (NOT a
+        `getByText` with `style.display === 'none'` check, which would still find
+        the node).
+      </pattern>
+      <pattern name="Defensive handling of confidence field" location="N/A — input-validation idiom">
+        The `confidence` field may be: a number in [0, 1] (normal); `null` (some
+        Insights paths may omit); `undefined` (response shape variation); out of
+        range (defensive — treat as "no signal"). Render the badge ONLY when
+        `confidence` is a finite number in [0, 1] AND `confidence &lt; threshold`.
+        All other cases → no badge. Document this in code comments.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships the Insights tool integration (`insights.query`) through the
+      SpaarkeAi three-pane shell. Task 026 (D2-16) builds `InsightsResponseRenderer`
+      — a React component that renders both Insights response paths (playbook
+      structured envelope + RAG citation-grounded prose). This task (028) extends
+      that renderer with a small client-side advisory: when the response's
+      `confidence` is below a configurable threshold (default 0.6), surface a
+      "Low confidence — verify before relying" badge.
+
+      Per spec §8.2 D5 + spec.md Open Decisions row "Insights v1.1 D5
+      (confidence floor)": R5 explicitly chose to implement this *client-side*
+      instead of asking the Insights team to add a server-side badge. This is
+      "pure R5 work; no contract change" — preserves the v1.0 / v1.1 contract
+      surface and isolates UX policy from the Insights server.
+
+      The 0.6 threshold default comes from spec.md Assumptions §"Confidence
+      threshold default" and is configurable via R5 settings to allow operator
+      tuning post-launch without code change. Per ADR-018 Flag Scope Discipline
+      and R5 CLAUDE.md §3.2: this is a *configuration value* (numeric), not a
+      feature flag. The badge is unconditional UX surface area; only the
+      threshold is tunable.
+
+      This task is the LAST of P2-G6 (Insights tool integration suite — 024 tool
+      handler, 025 subject resolution, 026 renderer, 027 clickable citations,
+      028 confidence badge). It is small (~2h estimated), parallel-safe with
+      siblings 024/025/027, and depends only on 026 because the badge is a
+      sub-component of (or inline JSX block within) `InsightsResponseRenderer`.
+
+      The renderer is in `@spaarke/ai-widgets` per ADR-012 + R5 CLAUDE.md §8
+      ("Frontend `InsightsResponseRenderer` component (NEW)"). Exact file path
+      verified at Step 1 against task 026's outputs.
+    </background>
+    <dependencies>
+      <dependency task="026" status="required-blocking">
+        D2-16 — `InsightsResponseRenderer` two-path React component. This task
+        EXTENDS that renderer with the low-confidence badge. Task 026 MUST be ✅
+        before task 028 implementation; if 026 is 🔲 or 🔄, STOP and report.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 024 (D2-14) — `InsightsQueryToolHandler` produces the response
+        payload (including `confidence`) that the renderer consumes. Sibling in
+        P2-G6 — independent of this task.</item>
+      <item>Task 025 (D2-15) — Subject resolution + HTTP client. Sibling in
+        P2-G6 — independent of this task.</item>
+      <item>Task 026 (D2-16) — `InsightsResponseRenderer` two-path component. DIRECT
+        BLOCKING DEPENDENCY. This task is a small extension of 026.</item>
+      <item>Task 027 (D2-17) — Clickable citations. Sibling in P2-G6 — also extends
+        the renderer (task 026); coordinate via single PR or sequential commits
+        within the renderer file to avoid merge conflicts.</item>
+      <item>Spec.md Open Decisions row "Insights v1.1 D5" — the design decision
+        that motivated this task. R5 chose client-side over server-side.</item>
+      <item>Integration brief §4 — response schema definitions for both paths
+        (playbook + RAG); `confidence` field shape verification.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare RIGOR LEVEL explicitly per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend component change (React 19 + Fluent v9), modifies
+                 `InsightsResponseRenderer` (a renderer on the R5 user-visible
+                 surface), dark-mode test required, configurable threshold needs
+                 verification, 6+ steps. Tags: frontend + insights + confidence
+                 + react-19. Qualifies for FULL per task-execute decision tree.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 with Step 9.5 quality gates.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`. Confirm task 028 status is 🔲, dependency 026 is
+      ✅ (BLOCKING — if 026 is 🔲 or 🔄, STOP and report; do not begin
+      implementation), parallel-safe = true (P2-G6), siblings 024/025/027 may be
+      in flight. Read `current-task.md` to verify no conflicting R5 task is in
+      flight modifying `InsightsResponseRenderer`. If task 027 is in flight on
+      the same renderer file, coordinate (single PR or sequential commits per
+      P2-G6 note in TASK-INDEX.md). Read project README for project status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      (a) Read task 026's POML in full to confirm the exact file path of
+          `InsightsResponseRenderer` (likely
+          `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/InsightsResponseRenderer.tsx`
+          or `src/client/shared/Spaarke.AI.Widgets/src/components/InsightsResponseRenderer.tsx`
+          — verify against task 026's `&lt;outputs&gt;`).
+      (b) Read `notes/insights-engine-assistant-integration-brief.md` §4 to
+          confirm the `confidence` field shape on both response paths (playbook
+          + RAG). Document the exact JSON path (e.g., `response.confidence` vs
+          `response.structuredResult.confidence`) in task notes.
+      (c) Read ADR-021 (Fluent v9 semantic tokens + dark mode), ADR-022 (React 19),
+          ADR-018 (Flag Scope Discipline — verify configurable threshold is NOT a
+          feature flag) in full.
+      (d) Read spec.md FR-15 + SC-14 + Assumptions §"Confidence threshold default"
+          to confirm exact text + default + configurability requirements.
+      (e) Skim `BUILD-A-NEW-WORKSPACE-WIDGET.md` only for Fluent v9 +
+          semantic-token discipline reference (not strictly applicable since this
+          is a sub-component, but worth a glance).
+    </step>
+    <step order="3" name="Locate R5 frontend settings convention">
+      Search `src/client/shared/Spaarke.AI.Widgets/src/` (and adjacent
+      `src/client/shared/Spaarke.UI.Components/src/`) for existing configurable
+      settings patterns. Likely candidates:
+      - A `useSettings()` / `useConfig()` / `useFeatureConfig()` hook
+      - A `widgetConfig` / `appConfig` module exposing typed config values
+      - A React context provider for runtime configuration
+      - An environment-variable-backed config object
+
+      Strategy:
+      (a) `grep -r "confidenceThreshold\|threshold" src/client/shared/Spaarke.AI.Widgets/`
+          and `src/client/shared/Spaarke.UI.Components/` to find existing
+          threshold-shaped settings.
+      (b) `grep -r "useSettings\|useConfig\|useFeatureConfig" src/client/shared/`
+          to find settings hooks.
+      (c) `grep -r "appConfig\|widgetConfig" src/client/shared/` to find config
+          modules.
+      (d) Inspect `src/solutions/SpaarkeAi/src/` for shell-level config patterns
+          (the renderer may inherit config from a context provider mounted at
+          the shell).
+
+      Outcomes:
+      - **If an existing settings convention exists**: use it. Add a typed entry
+        for `insights.confidenceThreshold: number` with default `0.6`. Document
+        the chosen location (file path + property path) in task notes.
+      - **If no existing convention is found**: create a minimal config module at
+        `src/client/shared/Spaarke.AI.Widgets/src/config/insightsRendererConfig.ts`
+        exporting `{ confidenceThreshold: number }` with default `0.6`. Read the
+        value at the renderer-consumption site via a simple typed import. Document
+        rationale in task notes. (Preferred fallback — avoid inventing a context
+        provider just for one value.)
+      - **Forbidden**: do NOT add a `Feature:Insights:ConfidenceBadge:Enabled`
+        flag or any boolean-typed kill-switch. Per ADR-018 Flag Scope Discipline +
+        R5 §3.2: threshold is a configuration value, not a flag.
+    </step>
+    <step order="4" name="Choose `Badge` vs `MessageBar` + design sub-component">
+      Inspect `InsightsResponseRenderer` (from task 026's output) to determine
+      the cleaner placement:
+      - If the renderer has a compact header row (title + correlation-id + path
+        indicator) → `Badge appearance="filled" color="warning"` fits inline.
+      - If the renderer has prominent vertical space above the response body
+        suited to a banner → `MessageBar intent="warning"` fits as a banner.
+
+      Either primitive satisfies FR-15 ("Fluent v9 `Badge` **or** `MessageBar`").
+      Document the chosen primitive + placement rationale in task notes for
+      cross-reference with task 027 (clickable citations — sibling renderer
+      extension; should coordinate visual hierarchy).
+
+      Design the sub-component shape:
+      ```typescript
+      interface LowConfidenceBadgeProps {
+        confidence: number | null | undefined;
+        threshold?: number;  // optional — defaults to settings value or 0.6
+      }
+      ```
+
+      Decision: implement as **either** (a) a small named component
+      `LowConfidenceBadge` in a sibling file
+      (`src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/LowConfidenceBadge.tsx`)
+      OR (b) an inline JSX block within `InsightsResponseRenderer.tsx` with a
+      private helper function `shouldShowLowConfidenceBadge(confidence, threshold)`.
+      Prefer (b) for cohesion if the renderer is &lt; 300 LOC; prefer (a) if the
+      renderer is large and the badge logic warrants isolation. Step 5 implements
+      whichever is chosen.
+    </step>
+    <step order="5" name="Implement the badge logic + render">
+      Implementation steps:
+
+      (a) Read the threshold from the R5 settings location identified at Step 3:
+          ```typescript
+          const threshold = props.threshold
+            ?? settings?.insights?.confidenceThreshold
+            ?? 0.6;
+          ```
+          (Or the equivalent shape per the chosen convention.)
+
+      (b) Defensive guard on `confidence`:
+          ```typescript
+          const shouldRender =
+            typeof confidence === 'number'
+            &amp;&amp; Number.isFinite(confidence)
+            &amp;&amp; confidence &gt;= 0
+            &amp;&amp; confidence &lt;= 1
+            &amp;&amp; confidence &lt; threshold;
+          ```
+
+      (c) Render the chosen primitive when `shouldRender === true`; otherwise
+          return `null` (NOT a hidden node — verified by Step 6 Test 2):
+          ```typescript
+          // Option A — Badge
+          return shouldRender
+            ? &lt;Badge appearance="filled" color="warning"&gt;Low confidence — verify before relying&lt;/Badge&gt;
+            : null;
+
+          // Option B — MessageBar
+          return shouldRender
+            ? &lt;MessageBar intent="warning"&gt;&lt;MessageBarBody&gt;Low confidence — verify before relying&lt;/MessageBarBody&gt;&lt;/MessageBar&gt;
+            : null;
+          ```
+
+      (d) Mount the badge/banner at the chosen placement inside
+          `InsightsResponseRenderer.tsx`. Both response paths
+          (`path: "playbook"` and `path: "rag"`) MUST receive the badge — place
+          it in shared code BEFORE the path-specific branching, or duplicate at
+          each path's render block. Prefer shared code to avoid drift.
+
+      (e) Verify the badge text is **exact**: `"Low confidence — verify before relying"`
+          (en-dash U+2014; no trailing punctuation; no period). Encode as a
+          named constant for test reuse:
+          ```typescript
+          export const LOW_CONFIDENCE_BADGE_TEXT = 'Low confidence — verify before relying';
+          ```
+
+      (f) Confirm the implementation does NOT introduce a new feature flag.
+          Search the diff for any `Feature:`, `Enabled`, or boolean kill-switch —
+          should find none. If a flag was accidentally introduced, remove it
+          (per ADR-018 + R5 §3.2).
+    </step>
+    <step order="6" name="Author unit tests (5+ tests)">
+      Add a unit test file alongside the renderer's existing tests (or create
+      `LowConfidenceBadge.test.tsx` if a sibling component was chosen at Step 4):
+
+      - **Test 1 (below threshold — badge visible)**:
+        Render `InsightsResponseRenderer` with response payload containing
+        `confidence: 0.5` and default threshold (0.6). Assert
+        `getByText(LOW_CONFIDENCE_BADGE_TEXT)` succeeds. Cover both
+        `path: "playbook"` and `path: "rag"` (parametrize the test).
+
+      - **Test 2 (at threshold — badge absent)**:
+        Render with `confidence: 0.6` and default threshold (0.6). Assert
+        `queryByText(LOW_CONFIDENCE_BADGE_TEXT) === null` (no DOM node).
+        Boundary: `confidence === threshold` is NOT &lt; threshold.
+
+      - **Test 3 (above threshold — badge absent)**:
+        Render with `confidence: 0.85` and default threshold. Assert
+        `queryByText(LOW_CONFIDENCE_BADGE_TEXT) === null`.
+
+      - **Test 4 (threshold reconfiguration)**:
+        Render with `confidence: 0.7` and a passed-in `threshold: 0.8`.
+        Assert badge visible (0.7 &lt; 0.8). Re-render with `threshold: 0.6`.
+        Assert badge absent (0.7 &gt;= 0.6). Reactive reconfiguration honored.
+
+      - **Test 5 (defensive handling)**:
+        Parametrize over `confidence` values: `null`, `undefined`, `NaN`,
+        `-0.1`, `1.5`, `'low'` (string). Each case → no badge rendered.
+        Assert `queryByText(...) === null` for each.
+
+      - **Test 6 (dark mode — basic accessibility)** (optional / lightweight):
+        Mount with `webDarkTheme` provider. Assert badge renders without
+        throwing; assert no hex/rgba leaked into styles (inspect computed
+        styles or trust ADR-021 semantic-token discipline + visual verification
+        at Step 7).
+
+      Test framework: use the existing test setup in
+      `src/client/shared/Spaarke.AI.Widgets/src/` (likely Vitest + React Testing
+      Library — verify by inspecting existing `*.test.tsx` files at Step 2).
+    </step>
+    <step order="7" name="Dark mode visual verification">
+      Verify the badge renders correctly against both `webLightTheme` and
+      `webDarkTheme`. Use the existing test harness or Storybook story for
+      `InsightsResponseRenderer` if available; otherwise run the renderer in the
+      SpaarkeAi shell with a mocked low-confidence response and toggle dark
+      mode. Confirm:
+      - Badge background color uses Fluent v9 `color="warning"` semantic slot
+        (Badge) or `intent="warning"` semantic styling (MessageBar) — both
+        adapt to dark theme automatically via semantic tokens.
+      - No hex / rgba / `#fff` / Fluent v8 imports in the new code.
+      - Badge text "Low confidence — verify before relying" is legible against
+        the warning-tone background in BOTH themes (contrast ratio passes
+        WCAG AA — verify visually; in dark mode, warning slots tend toward
+        muted amber on dark background).
+      - Badge placement does not introduce layout shift when toggling
+        confidence below/above threshold (the conditional returns `null`,
+        which removes the node entirely — confirm the renderer's layout
+        handles this gracefully, e.g., flex-gap absorbs the absent node).
+
+      Capture visual evidence (screenshot reference or harness output path) for
+      task notes.
+    </step>
+    <step order="8" name="Smoke test against a real Insights response">
+      With the renderer running in the SpaarkeAi shell (local dev with Spaarke
+      Dev BFF), exercise both response paths and confirm the badge behaves
+      correctly:
+
+      Positive (badge expected):
+      - Trigger an Insights query that returns a low-confidence response (mock
+        the response if a natural low-confidence prompt is hard to construct;
+        or use the Wave D7 synthetic test entities and override the response
+        in browser DevTools to set `confidence: 0.4`).
+      - Confirm badge appears alongside the response.
+
+      Negative (badge absent):
+      - Trigger a high-confidence response (or override to `confidence: 0.9`).
+      - Confirm no badge in DOM.
+
+      Boundary (badge absent at exact threshold):
+      - Override to `confidence: 0.6` (exact threshold).
+      - Confirm no badge (0.6 is NOT &lt; 0.6).
+
+      Both paths:
+      - Verify the badge appears for both `path: "playbook"` and `path: "rag"`
+        when confidence is below threshold.
+
+      Capture browser DevTools screenshots / console traces for task notes.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is
+      testable + passing. Record evidence per criterion in task notes
+      (`notes/task-028-evidence.md`). Specifically verify:
+      - Exact badge text matches "Low confidence — verify before relying"
+        (en-dash; no trailing punctuation).
+      - Threshold configurable via R5 settings (location documented at Step 3).
+      - No new feature flag introduced (grep diff for `Feature:` / `Enabled`).
+      - BFF publish-size delta = 0 MB (no BFF code touched).
+      - Dark mode passes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the renderer modifications + any new
+      sibling component file + tests. Run `adr-check` skill against the same;
+      verify:
+      - **ADR-021 (Fluent v9 semantic tokens + dark mode)**: badge uses
+        `color="warning"` (Badge) or `intent="warning"` (MessageBar) semantic
+        slot; no hex / rgba; dark mode verified at Step 7. PASS.
+      - **ADR-022 (React 19)**: functional component / inline JSX; hooks-only;
+        typed props; no `any`. PASS.
+      - **ADR-018 (Flag Scope Discipline)**: threshold is a configuration value
+        (numeric), not a feature flag. No `Feature:...:Enabled` added. PASS.
+      - **ADR-012 (component libraries)**: change is inside `@spaarke/ai-widgets`;
+        context-agnostic. PASS.
+      - **ADR-010 (DI minimalism)**: N/A (frontend). Confirmed.
+      - **ADR-029 (BFF publish hygiene)**: N/A (frontend-only); BFF publish-size
+        delta = 0 MB. Confirmed.
+      - **ADR-030 (PaneEventBus closed channels)**: N/A (no new event types).
+        Confirmed.
+      - **ADR-013 §3.5 (Zone B boundary)**: no Insights-internal type touched;
+        consumes already-parsed response payload only. PASS.
+
+      Both gates MUST pass before marking the task complete. If either fails,
+      fix and re-run.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 028 🔲 → ✅.
+      Reset `current-task.md` to the next pending task per CLAUDE.md §7 (likely
+      029 / D2-19 error codes — last serial task in Phase 2; or 030 / D2-20
+      smoke tests if 029 has shipped via a sibling parallel run).
+
+      Record in task notes (`notes/task-028-evidence.md`):
+      - Chosen primitive (`Badge` vs `MessageBar`) + placement rationale +
+        cross-reference to task 027 (clickable citations — sibling renderer
+        extension).
+      - R5 settings location identified at Step 3 (file path + property path);
+        OR new minimal config module path + rationale.
+      - Threshold default = 0.6 confirmed.
+      - Exact badge text verified ("Low confidence — verify before relying";
+        en-dash U+2014; no trailing punctuation).
+      - 5 unit test results (below / at / above threshold; reconfiguration;
+        defensive handling) — all pass.
+      - Dark mode evidence (screenshot reference or harness output path).
+      - Smoke test screenshots / DevTools traces.
+      - Grep result confirming no new feature flag introduced.
+      - BFF publish-size delta = 0 MB (no BFF code changed by this task).
+      - `code-review` + `adr-check` quality-gate results.
+
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + lint the `@spaarke/ai-widgets` package; run unit tests (Vitest or repo convention)</tool>
+    <tool name="git">Stage + commit the renderer extension + sibling component (if any) + tests + notes on the R5 branch (one logical commit, coordinated with task 027 if sibling in flight)</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 (FULL rigor) — verify ADR-021, ADR-022, ADR-018, ADR-012, ADR-013 §3.5</tool>
+    <tool name="context-handoff">Checkpointing per R5 CLAUDE.md §5 (after Step 3 and Step 6; verbose at &gt;60%)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/InsightsResponseRenderer.tsx (EXTEND — add low-confidence badge logic + render; exact path verified against task 026's output at Step 2)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/LowConfidenceBadge.tsx (OPTIONAL NEW — only if Step 4 chooses the sibling-component option vs inline JSX)</output>
+    <output type="code">R5 settings entry for `insights.confidenceThreshold: number` (default 0.6) — exact location depends on Step 3 outcome (existing settings convention extended OR new minimal config module at `src/client/shared/Spaarke.AI.Widgets/src/config/insightsRendererConfig.ts`)</output>
+    <output type="test">Unit tests for the badge logic — file location depends on existing test convention (likely `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/InsightsResponseRenderer.lowConfidenceBadge.test.tsx` or `LowConfidenceBadge.test.tsx`)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 028 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-028-evidence.md (primitive choice + placement rationale, R5 settings location identified, default 0.6 confirmed, exact badge text verified, 5 unit test results, dark-mode evidence, smoke-test traces, no-flag grep result, BFF publish-size delta = 0 MB, quality-gate results)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InsightsResponseRenderer` renders a Fluent v9 `Badge` (with `color="warning"`) OR `MessageBar` (with `intent="warning"`) containing the EXACT text "Low confidence — verify before relying" (en-dash U+2014; no trailing punctuation) when the response payload's `confidence` field is a finite number in [0, 1] and `confidence &lt; threshold`. Confirmed by unit Test 1 (below threshold) covering both `path: "playbook"` and `path: "rag"` response shapes.</criterion>
+    <criterion testable="true">When `confidence &gt;= threshold`, NO badge DOM node is rendered (returns `null`, not a hidden node). Confirmed by unit Test 2 (at threshold) + Test 3 (above threshold) asserting `queryByText("Low confidence — verify before relying") === null`.</criterion>
+    <criterion testable="true">Threshold default = 0.6 per spec FR-15 + spec.md Assumptions. Confirmed by unit Test 1 (confidence 0.5 with no explicit threshold prop → badge visible).</criterion>
+    <criterion testable="true">Threshold is configurable via R5 settings. The exact settings location is documented in task notes (either an existing convention extended OR a new minimal config module at a documented path). Reactive reconfiguration honored — re-rendering with a new threshold immediately updates badge visibility. Confirmed by unit Test 4.</criterion>
+    <criterion testable="true">Defensive handling — when `confidence` is `null`, `undefined`, `NaN`, out of [0, 1] range, or not a number, NO badge is rendered. Confirmed by unit Test 5 (parametrized over edge values).</criterion>
+    <criterion testable="true">NO new feature flag introduced (per R5 CLAUDE.md §3.2 + ADR-018 Flag Scope Discipline). Threshold is a configuration value (numeric), not a kill-switch. Confirmed by diff inspection / grep — no `Feature:...:Enabled` boolean added.</criterion>
+    <criterion testable="true">Dark mode passes — badge renders legibly against `webDarkTheme` using only Fluent v9 semantic tokens (no hex / rgba / Fluent v8 imports). Evidence captured in task notes (screenshot reference or harness output path).</criterion>
+    <criterion testable="true">Smoke test against the SpaarkeAi shell with low-confidence + high-confidence + boundary (= threshold) responses confirms behavior end-to-end on both response paths (playbook + RAG). Confirmed by smoke-test screenshots / DevTools traces in task notes.</criterion>
+    <criterion testable="true">No BFF code changed by this task — pure frontend. BFF publish-size delta = 0 MB. Confirmed in task notes (no `dotnet publish` run required; `git diff src/server/` shows no changes).</criterion>
+    <criterion testable="true">Zone B boundary preserved — no Insights-internal type referenced; consumes the already-parsed response payload only. Confirmed by reviewer inspection at Step 9.5 + `adr-check` (ADR-013 §3.5) pass.</criterion>
+    <criterion testable="true">Build passes: `npm run build` in `Spaarke.AI.Widgets` succeeds with no TypeScript errors and no new lint warnings. Tests pass.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 (ADR-021, ADR-022, ADR-018, ADR-012, ADR-013 §3.5 confirmed; ADR-010, ADR-029, ADR-030 N/A confirmed).</criterion>
+  </acceptance-criteria>
+</task>

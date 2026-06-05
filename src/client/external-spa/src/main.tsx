@@ -1,8 +1,8 @@
-import * as React from "react";
-import { createRoot } from "react-dom/client";
-import { MsalProvider } from "@azure/msal-react";
-import { msalInstance } from "./auth/msal-config";
-import { App } from "./App";
+import * as React from 'react';
+import { createRoot } from 'react-dom/client';
+import { MsalProvider } from '@azure/msal-react';
+import { msalInstance } from './auth/msal-config';
+import { App } from './App';
 
 // Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
 // External users authenticate via Entra B2B — they are guest accounts in the main
@@ -12,16 +12,16 @@ import { App } from "./App";
 // See notes/auth-migration-b2b-msal.md for auth architecture details.
 
 async function main() {
-  if (import.meta.env.VITE_DEV_MOCK !== "true") {
+  if (import.meta.env.VITE_DEV_MOCK !== 'true') {
     // MSAL v3 requires explicit initialization before any token operations or rendering.
     // This processes any auth redirect response (auth code → tokens) before the app mounts.
     // Skipped in mock mode — MSAL can hang/error on localhost without a registered redirect URI.
     await msalInstance.initialize();
   }
 
-  const rootElement = document.getElementById("root");
+  const rootElement = document.getElementById('root');
   if (!rootElement) {
-    console.error("[SecureProjectWorkspace] Root element not found");
+    console.error('[SecureProjectWorkspace] Root element not found');
     return;
   }
 

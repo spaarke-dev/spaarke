@@ -32,12 +32,7 @@ import {
   mergeClasses,
   Divider,
 } from '@fluentui/react-components';
-import {
-  CalendarRegular,
-  MoneyRegular,
-  PersonRegular,
-  BuildingRegular,
-} from '@fluentui/react-icons';
+import { CalendarRegular, MoneyRegular, PersonRegular, BuildingRegular } from '@fluentui/react-icons';
 import { usePaneEvent } from '../../events/usePaneEvent';
 import type { ContextWidgetProps } from '../../types/widget-types';
 import type { ContextPaneEvent } from '../../events/PaneEventTypes';
@@ -385,9 +380,7 @@ function BudgetBar({ budget, styles }: BudgetBarProps): React.JSX.Element {
           aria-label={`Budget: ${Math.round(pct)}% used`}
         />
       </div>
-      {isOver && (
-        <Text className={styles.budgetSubtext}>Over budget by {formatCurrency(spent - total, currency)}</Text>
-      )}
+      {isOver && <Text className={styles.budgetSubtext}>Over budget by {formatCurrency(spent - total, currency)}</Text>}
     </div>
   );
 }
@@ -485,21 +478,10 @@ const EntityInfoWidget: React.FC<ContextWidgetProps<EntityInfoData>> = ({
     );
   }
 
-  const {
-    entityType,
-    displayName,
-    status,
-    clientName,
-    ownerName,
-    keyDates,
-    budget,
-    customFields,
-  } = data;
+  const { entityType, displayName, status, clientName, ownerName, keyDates, budget, customFields } = data;
 
   // Build non-empty custom field entries once to avoid multiple Object.entries calls.
-  const customFieldEntries = customFields
-    ? Object.entries(customFields).filter(([, v]) => v != null && v !== '')
-    : [];
+  const customFieldEntries = customFields ? Object.entries(customFields).filter(([, v]) => v != null && v !== '') : [];
 
   // Determine which key-field section rows to render (only non-empty values).
   const hasKeyFields = status || clientName || ownerName;
@@ -530,22 +512,8 @@ const EntityInfoWidget: React.FC<ContextWidgetProps<EntityInfoData>> = ({
           <Divider />
           <div className={styles.section}>
             <Text className={styles.sectionLabel}>Details</Text>
-            {clientName && (
-              <KeyFieldRow
-                label="Client"
-                value={clientName}
-                icon={<BuildingRegular />}
-                styles={styles}
-              />
-            )}
-            {ownerName && (
-              <KeyFieldRow
-                label="Owner"
-                value={ownerName}
-                icon={<PersonRegular />}
-                styles={styles}
-              />
-            )}
+            {clientName && <KeyFieldRow label="Client" value={clientName} icon={<BuildingRegular />} styles={styles} />}
+            {ownerName && <KeyFieldRow label="Owner" value={ownerName} icon={<PersonRegular />} styles={styles} />}
           </div>
         </>
       )}
@@ -557,7 +525,7 @@ const EntityInfoWidget: React.FC<ContextWidgetProps<EntityInfoData>> = ({
           <div className={styles.section}>
             <Text className={styles.sectionLabel}>Key Dates</Text>
             <div className={styles.dateList}>
-              {keyDates!.map((kd) => (
+              {keyDates!.map(kd => (
                 <div key={`${kd.label}-${kd.date}`} className={styles.dateRow}>
                   <CalendarRegular className={styles.dateIcon} />
                   <Text className={styles.dateLabel}>{kd.label}</Text>

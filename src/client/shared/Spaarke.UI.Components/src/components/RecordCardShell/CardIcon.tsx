@@ -50,13 +50,7 @@ const useStyles = makeStyles({
 // CardIcon
 // ---------------------------------------------------------------------------
 
-export const CardIcon: React.FC<ICardIconProps> = ({
-  children,
-  size = 40,
-  backgroundColor,
-  iconColor,
-  className,
-}) => {
+export const CardIcon: React.FC<ICardIconProps> = ({ children, size = 40, backgroundColor, iconColor, className }) => {
   const styles = useStyles();
 
   return (

@@ -13,7 +13,7 @@
  * @see projects/events-workspace-apps-UX-r1/tasks/094-add-column-filters-to-grid.poml
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -26,18 +26,14 @@ import {
   Checkbox,
   Text,
   Divider,
-} from "@fluentui/react-components";
-import {
-  Filter20Regular,
-  Filter20Filled,
-  Dismiss16Regular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { Filter20Regular, Filter20Filled, Dismiss16Regular } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ColumnFilterType = "text" | "choice" | "date" | "lookup";
+export type ColumnFilterType = 'text' | 'choice' | 'date' | 'lookup';
 
 export interface ColumnFilterOption {
   /** Value to filter by */
@@ -71,28 +67,28 @@ export interface ColumnFilterHeaderProps {
 
 const useStyles = makeStyles({
   th: {
-    ...shorthands.padding("10px", "12px"),
-    textAlign: "left",
+    ...shorthands.padding('10px', '12px'),
+    textAlign: 'left',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
-    whiteSpace: "nowrap",
-    position: "relative",
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    whiteSpace: 'nowrap',
+    position: 'relative',
   },
   headerContent: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.gap("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.gap('8px'),
   },
   filterButton: {
-    minWidth: "24px",
-    width: "24px",
-    height: "24px",
-    ...shorthands.padding("0"),
+    minWidth: '24px',
+    width: '24px',
+    height: '24px',
+    ...shorthands.padding('0'),
     // Always visible - hover-based visibility doesn't work reliably in makeStyles
     opacity: 0.6,
-    ":hover": {
+    ':hover': {
       opacity: 1,
     },
   },
@@ -101,39 +97,39 @@ const useStyles = makeStyles({
     color: tokens.colorBrandForeground1,
   },
   popoverSurface: {
-    ...shorthands.padding("12px"),
-    minWidth: "200px",
-    maxWidth: "280px",
+    ...shorthands.padding('12px'),
+    minWidth: '200px',
+    maxWidth: '280px',
   },
   filterHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "12px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '12px',
   },
   filterTitle: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
   searchInput: {
-    width: "100%",
-    marginBottom: "8px",
+    width: '100%',
+    marginBottom: '8px',
   },
   optionsList: {
-    maxHeight: "200px",
-    overflowY: "auto",
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("4px"),
+    maxHeight: '200px',
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('4px'),
   },
   optionItem: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.padding("4px", "0"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.padding('4px', '0'),
   },
   clearButton: {
-    marginTop: "8px",
-    width: "100%",
+    marginTop: '8px',
+    width: '100%',
   },
 });
 
@@ -150,7 +146,7 @@ const useStyles = makeStyles({
 export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
   title,
   filterType,
-  filterValue = "",
+  filterValue = '',
   selectedValues = [],
   options = [],
   onFilterChange,
@@ -194,7 +190,7 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
    * Handle clear filter
    */
   const handleClear = React.useCallback(() => {
-    setLocalFilterValue("");
+    setLocalFilterValue('');
     onFilterChange(null);
     setIsOpen(false);
   }, [onFilterChange]);
@@ -204,7 +200,7 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
    */
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Enter") {
+      if (e.key === 'Enter') {
         handleTextFilterApply();
       }
     },
@@ -214,8 +210,8 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
   // Render filter content based on type
   const renderFilterContent = () => {
     switch (filterType) {
-      case "text":
-      case "lookup":
+      case 'text':
+      case 'lookup':
         return (
           <>
             <Input
@@ -226,12 +222,8 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
               onKeyDown={handleKeyDown}
               appearance="outline"
             />
-            <div style={{ display: "flex", gap: "8px" }}>
-              <Button
-                appearance="primary"
-                size="small"
-                onClick={handleTextFilterApply}
-              >
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Button appearance="primary" size="small" onClick={handleTextFilterApply}>
                 Apply
               </Button>
               <Button
@@ -246,23 +238,21 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
           </>
         );
 
-      case "choice":
+      case 'choice':
         return (
           <>
             <div className={styles.optionsList}>
-              {options.map((option) => (
+              {options.map(option => (
                 <div key={String(option.value)} className={styles.optionItem}>
                   <Checkbox
                     checked={selectedValues.includes(option.value)}
-                    onChange={(_, data) =>
-                      handleChoiceToggle(option.value, data.checked === true)
-                    }
+                    onChange={(_, data) => handleChoiceToggle(option.value, data.checked === true)}
                     label={option.label}
                   />
                 </div>
               ))}
             </div>
-            <Divider style={{ margin: "8px 0" }} />
+            <Divider style={{ margin: '8px 0' }} />
             <Button
               appearance="subtle"
               size="small"
@@ -275,12 +265,12 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
           </>
         );
 
-      case "date":
+      case 'date':
         // For now, use text input for date filtering
         // Future: Implement date range picker
         return (
           <>
-            <Text size={200} style={{ marginBottom: "8px", display: "block" }}>
+            <Text size={200} style={{ marginBottom: '8px', display: 'block' }}>
               Date filters coming soon
             </Text>
             <Input
@@ -291,19 +281,11 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
               onKeyDown={handleKeyDown}
               appearance="outline"
             />
-            <div style={{ display: "flex", gap: "8px" }}>
-              <Button
-                appearance="primary"
-                size="small"
-                onClick={handleTextFilterApply}
-              >
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Button appearance="primary" size="small" onClick={handleTextFilterApply}>
                 Apply
               </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                onClick={handleClear}
-              >
+              <Button appearance="subtle" size="small" onClick={handleClear}>
                 Clear
               </Button>
             </div>
@@ -316,22 +298,16 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
   };
 
   return (
-    <th className={`${styles.th} ${className || ""}`}>
+    <th className={`${styles.th} ${className || ''}`}>
       <div className={styles.headerContent}>
         <span>{title}</span>
-        <Popover
-          open={isOpen}
-          onOpenChange={(_, data) => setIsOpen(data.open)}
-          positioning="below-end"
-        >
+        <Popover open={isOpen} onOpenChange={(_, data) => setIsOpen(data.open)} positioning="below-end">
           <PopoverTrigger>
             <Button
               appearance="subtle"
               size="small"
               icon={hasActiveFilter ? <Filter20Filled /> : <Filter20Regular />}
-              className={`${styles.filterButton} ${
-                hasActiveFilter ? styles.filterButtonActive : ""
-              }`}
+              className={`${styles.filterButton} ${hasActiveFilter ? styles.filterButtonActive : ''}`}
               aria-label={`Filter ${title}`}
             />
           </PopoverTrigger>

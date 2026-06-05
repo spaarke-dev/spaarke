@@ -41,6 +41,16 @@ public class ChatSessionManager
     /// </summary>
     private readonly ISessionPersistenceService? _persistence;
 
+    /// <summary>
+    /// R5 task 007 (D1-07) — optional fire-and-forget signal to the session-files cleanup
+    /// <see cref="SessionFilesCleanupJob"/>. Null when AI is disabled (compound gate OFF) so
+    /// pre-R5 callers + the AI-OFF code path continue to work unchanged. When non-null,
+    /// <see cref="DeleteSessionAsync"/> raises a session-end signal at the end of its
+    /// existing logic so the cleanup job evicts session-files index documents immediately
+    /// (spec NFR-02 "Aggressive cleanup on session-end").
+    /// </summary>
+    private readonly ISessionFilesCleanupSignal? _cleanupSignal;
+
     // ADR-014: centralise key pattern in one place
     internal static string BuildCacheKey(string tenantId, string sessionId)
         => $"chat:session:{tenantId}:{sessionId}";
@@ -49,12 +59,14 @@ public class ChatSessionManager
         IDistributedCache cache,
         IChatDataverseRepository dataverseRepository,
         ILogger<ChatSessionManager> logger,
-        ISessionPersistenceService? persistence = null)
+        ISessionPersistenceService? persistence = null,
+        ISessionFilesCleanupSignal? cleanupSignal = null)
     {
         _cache = cache;
         _dataverseRepository = dataverseRepository;
         _logger = logger;
         _persistence = persistence;
+        _cleanupSignal = cleanupSignal;
     }
 
     /// <summary>
@@ -229,6 +241,21 @@ public class ChatSessionManager
                     sessionId, tenantId);
             }
         }
+
+        // R5 task 007 — fire-and-forget signal to the session-files cleanup hosted service
+        // (spec NFR-02 "Aggressive cleanup on session-end"). Mirrors the Cosmos
+        // fire-and-forget convention above: log-and-swallow on failure; never throws.
+        // Null when AI compound gate is OFF — existing behaviour preserved.
+        try
+        {
+            _cleanupSignal?.SignalSessionEnded(tenantId, sessionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Session-files cleanup signal failed for session {SessionId} (tenant={TenantId}) — eviction will run on the next scheduled scan",
+                sessionId, tenantId);
+        }
     }
 
     /// <summary>
@@ -299,27 +326,27 @@ public class ChatSessionManager
         var messages = session.Messages
             .Select(m => new SessionMessage
             {
-                MessageId  = m.MessageId,
-                Role       = m.Role.ToString().ToLowerInvariant(),
-                Content    = m.Content,
-                Timestamp  = m.CreatedAt,
-                Metadata   = new Dictionary<string, string>
+                MessageId = m.MessageId,
+                Role = m.Role.ToString().ToLowerInvariant(),
+                Content = m.Content,
+                Timestamp = m.CreatedAt,
+                Metadata = new Dictionary<string, string>
                 {
-                    ["tokenCount"]      = m.TokenCount.ToString(),
-                    ["sequenceNumber"]  = m.SequenceNumber.ToString()
+                    ["tokenCount"] = m.TokenCount.ToString(),
+                    ["sequenceNumber"] = m.SequenceNumber.ToString()
                 }
             })
             .ToList();
 
         return new StoredSession
         {
-            Id           = session.SessionId,
-            SessionId    = session.SessionId,
-            TenantId     = session.TenantId,
-            PlaybookId   = session.PlaybookId,
-            Messages     = messages,
+            Id = session.SessionId,
+            SessionId = session.SessionId,
+            TenantId = session.TenantId,
+            PlaybookId = session.PlaybookId,
+            Messages = messages,
             WidgetStates = [],
-            CreatedAt    = session.CreatedAt,
+            CreatedAt = session.CreatedAt,
             LastActivity = session.LastActivity
         };
     }
@@ -347,24 +374,24 @@ public class ChatSessionManager
                     m.Metadata.GetValueOrDefault("sequenceNumber", index.ToString()), out var seqNum);
 
                 return new ChatMessage(
-                    MessageId:      m.MessageId,
-                    SessionId:      stored.SessionId,
-                    Role:           role,
-                    Content:        m.Content,
-                    TokenCount:     tokenCount,
-                    CreatedAt:      m.Timestamp,
+                    MessageId: m.MessageId,
+                    SessionId: stored.SessionId,
+                    Role: role,
+                    Content: m.Content,
+                    TokenCount: tokenCount,
+                    CreatedAt: m.Timestamp,
                     SequenceNumber: seqNum);
             })
             .ToList()
             .AsReadOnly();
 
         return new ChatSession(
-            SessionId:    stored.SessionId,
-            TenantId:     stored.TenantId,
-            DocumentId:   null,          // Not stored in Cosmos — Dataverse is authoritative for document associations
-            PlaybookId:   stored.PlaybookId,
-            CreatedAt:    stored.CreatedAt,
+            SessionId: stored.SessionId,
+            TenantId: stored.TenantId,
+            DocumentId: null,          // Not stored in Cosmos — Dataverse is authoritative for document associations
+            PlaybookId: stored.PlaybookId,
+            CreatedAt: stored.CreatedAt,
             LastActivity: stored.LastActivity,
-            Messages:     messages);
+            Messages: messages);
     }
 }

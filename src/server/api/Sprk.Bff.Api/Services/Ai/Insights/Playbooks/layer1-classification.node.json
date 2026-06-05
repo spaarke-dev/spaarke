@@ -1,0 +1,48 @@
+{
+  "$comment": "D-P5 Layer 1 document classification — Spaarke Insights Engine Phase 1. Realized via AiAnalysisNodeExecutor per Q5 audit (no new node executor). Runs unconditionally on every SPE upload (D-P7 ingest playbook, task 040). Output gates Layer 2 (D-P6) per D-59 cheap-gates-expensive economics: Layer 2 fires only when classification in {closing_letter, settlement_agreement, opinion_judgment} AND confidence >= 0.7. Output ALSO produces one Classification Observation per SPEC-phase-1-minimum.md §3.3 via Layer1ClassificationEmitter (task 030).",
+  "id": "layer1-classification",
+  "name": "Layer 1 — Document Classification",
+  "version": "v1",
+  "producedBy": "playbook://classification@v1",
+  "actionType": "AiAnalysis",
+  "executor": "AiAnalysisNodeExecutor",
+  "promptTemplate": "classification.v1.txt",
+  "promptVersion": "v1",
+  "outputVariable": "layer1_classification",
+  "modelDeploymentId": "gpt-4o-mini",
+  "$comment-model": "Cheap model per D-59 Layer 1 economics: single typed-enum output runs on every SPE upload; gpt-4o-mini class is the cost-target. Layer 2 (the expensive call) only fires for outcome-bearing classifications, so Layer 1 is the gate that keeps universal ingest economical.",
+  "temperature": 0.0,
+  "maxTokens": 200,
+  "$comment-tokens": "Layer 1 output is at most a 3-field JSON (classification enum + confidence number + one-sentence reasoning). 200 tokens is generous for the response; cap is tight to fail-fast on runaway generations.",
+  "knowledgeRetrieval": {
+    "mode": "Never",
+    "topK": 0,
+    "includeDocumentContext": false,
+    "includeEntityContext": false,
+    "$comment-mode": "Never per task 030 acceptance: classification is a self-contained decision over the document content alone — no reference rubric, no similar documents, no parent-entity metadata. All three retrieval tiers (L1 RagIndex, L2 customer documents, L3 records-index entity) are off. Keeps the per-upload latency + cost minimal."
+  },
+  "outputSchema": {
+    "schemaName": "ClassificationResponse",
+    "schemaFile": "classification.v1.schema.json",
+    "retryOnce": true,
+    "$comment-retry": "One retry on schema-validation failure (matches IOpenAiClient.GetStructuredCompletionAsync constrained-decoding semantics). The 8-value enum + numeric confidence + non-empty reasoning shape is small enough that constrained decoding should succeed first-try; the retry exists for the rare model deviation."
+  },
+  "downstreamGates": [
+    {
+      "gate": "Layer1ClassificationEmitter",
+      "source": "D-P5 / task 030",
+      "$comment": "Single emission step (NOT the per-field ObservationEmitter from D-P10 — Layer 1 produces exactly one Observation per document, not one-per-field). Subject = the source document; predicate = 'classification'; value = the enum; confidence = as returned; evidence = the source document ref; producedBy.Id = 'playbook://classification@v1', version = 'v1'."
+    }
+  ],
+  "downstreamGating": {
+    "$comment-gates-layer2": "Per SPEC-phase-1-minimum.md §3.3 + D-59: this node's output gates Layer 2 invocation. Layer 2 fires only when classification in {closing_letter, settlement_agreement, opinion_judgment} AND confidence >= 0.7. Other classifications (decision_memo, deal_document, pleading, correspondence, other) skip Layer 2 entirely. The conditional is owned by the D-P7 ingest playbook (task 040), not by this node config; documented here as the contract this node fulfills.",
+    "gatesLayer2": {
+      "classificationIn": ["closing_letter", "settlement_agreement", "opinion_judgment"],
+      "minConfidence": 0.7
+    }
+  },
+  "inputSanitization": {
+    "source": "D-50 / D-A25",
+    "$comment": "Document content MUST pass through ISanitizer (D-A25) before reaching this node. Sanitization is wired at the SpeContentRetrieve stage in the D-P7 ingest playbook (task 040), upstream of this node. Per task 030 acceptance, sanitization wiring is documented here but enforced in task 040 — task 030 ships the config + prompt + emitter and the integration test confirms producedBy propagation."
+  }
+}

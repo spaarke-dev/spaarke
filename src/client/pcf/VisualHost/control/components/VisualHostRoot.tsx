@@ -43,6 +43,12 @@ const useStyles = makeStyles({
     width: '100%',
     minWidth: 0, // Allow shrinking below intrinsic content width
     padding: '2px',
+    // v1.4.11 — paddingTop kept minimal (2px) so CardChrome's title sits flush
+    // with the top of the form section, matching the OOTB section banner
+    // position of standard form sections like "MATTER INFORMATION". The
+    // "below header" breathing room is handled inside CardChrome itself
+    // (its header has a 12px bottom margin → consistent across all 5 cards).
+    paddingTop: '2px',
     paddingBottom: '14px', // Minimal space for version badge
     boxSizing: 'border-box',
     position: 'relative',
@@ -50,12 +56,45 @@ const useStyles = makeStyles({
   },
   toolbar: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    // v1.4.3 — switched from `flex-end` to `space-between` so the chart name
+    // sits left-aligned in this row while the action icons stay right-aligned.
+    // Matches the CardChrome layout for the chrome-opt-in path.
+    justifyContent: 'space-between',
     alignItems: 'center',
     minHeight: '28px',
     flexShrink: 0,
     marginBottom: '10px',
     gap: '10px',
+  },
+  // v1.4.8 — Toolbar variant for `showCardTitle:false`. Positioned absolutely
+  // in the top-right of the container so the icons remain visible without the
+  // toolbar reserving a 32px row of vertical space. Used when the host form
+  // section already provides the chart name as a section heading.
+  toolbarFloat: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '4px',
+    zIndex: 1,
+  },
+  toolbarTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    // Truncate long titles instead of pushing icons off-screen.
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  toolbarIcons: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    flexShrink: 0,
   },
   chartContainer: {
     display: 'flex',
@@ -151,6 +190,20 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       return (config.aiSummaryField as string) || null;
     } catch {
       return null;
+    }
+  }, [chartDefinition?.sprk_configurationjson]);
+
+  // v1.4.6: Parse showCardTitle from chart definition config JSON. When
+  // explicitly `false`, the toolbar suppresses the chart name (icons only)
+  // so it doesn't duplicate a form section heading that already names the
+  // same chart. Undefined/missing defaults to true (legacy behavior).
+  const showCardTitleInToolbar = React.useMemo(() => {
+    if (!chartDefinition?.sprk_configurationjson) return true;
+    try {
+      const config = JSON.parse(chartDefinition.sprk_configurationjson);
+      return typeof config.showCardTitle === 'boolean' ? config.showCardTitle : true;
+    } catch {
+      return true;
     }
   }, [chartDefinition?.sprk_configurationjson]);
 
@@ -373,42 +426,80 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
 
     try {
       if (drillThroughTarget) {
-        // Drill-through target is a web resource name (e.g. "sprk_eventspage.html").
-        // Use pageType "webresource" to open it in a dialog.
-        logger.info('VisualHostRoot', 'Opening web resource drill-through dialog', {
-          webresource: drillThroughTarget,
-          entityName,
-          filterField: filterField || '(none)',
-          filterValue: filterValue || '(none)',
-        });
+        // v1.4.13 — `sprk_drillthroughtarget` may be either:
+        //   (a) a web resource name ending in `.html` / `.htm`
+        //       (e.g., "sprk_eventspage.html") → opens via pageType:'webresource'
+        //   (b) an entity logical name (e.g., "sprk_event", "sprk_invoice",
+        //       "sprk_kpiassessment") → opens via pageType:'entitylist' for that
+        //       entity. This lets a single chart query one entity (sprk_matter)
+        //       but drill into related child records of a different entity
+        //       (sprk_invoice etc.) without authoring a web resource per case.
+        const isWebResource =
+          drillThroughTarget.toLowerCase().endsWith('.html') || drillThroughTarget.toLowerCase().endsWith('.htm');
 
-        // Build query string to pass context to the web resource
-        const params = new URLSearchParams();
-        if (entityName) params.set('entityName', entityName);
-        if (filterField) params.set('filterField', filterField);
-        if (filterValue) params.set('filterValue', filterValue);
-        if (viewId) params.set('viewId', viewId.replace(/[{}]/g, ''));
-        params.set('mode', 'dialog');
+        if (isWebResource) {
+          logger.info('VisualHostRoot', 'Opening web resource drill-through dialog', {
+            webresource: drillThroughTarget,
+            entityName,
+            filterField: filterField || '(none)',
+            filterValue: filterValue || '(none)',
+          });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const pageInput: any = {
-          pageType: 'webresource',
-          webresourceName: drillThroughTarget,
-          data: params.toString(),
-        };
+          // Build query string to pass context to the web resource
+          const params = new URLSearchParams();
+          if (entityName) params.set('entityName', entityName);
+          if (filterField) params.set('filterField', filterField);
+          if (filterValue) params.set('filterValue', filterValue);
+          if (viewId) params.set('viewId', viewId.replace(/[{}]/g, ''));
+          params.set('mode', 'dialog');
 
-        const navOptions = {
-          target: 2 as const,
-          position: 1 as const,
-          width: { value: 90, unit: '%' as const },
-          height: { value: 85, unit: '%' as const },
-        };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const pageInput: any = {
+            pageType: 'webresource',
+            webresourceName: drillThroughTarget,
+            data: params.toString(),
+          };
 
-        try {
-          await xrm.Navigation.navigateTo(pageInput, navOptions);
-        } catch {
-          logger.info('VisualHostRoot', 'Dialog not supported, navigating inline');
-          await xrm.Navigation.navigateTo(pageInput, { target: 1 });
+          const navOptions = {
+            target: 2 as const,
+            position: 1 as const,
+            width: { value: 90, unit: '%' as const },
+            height: { value: 85, unit: '%' as const },
+          };
+
+          try {
+            await xrm.Navigation.navigateTo(pageInput, navOptions);
+          } catch {
+            logger.info('VisualHostRoot', 'Dialog not supported, navigating inline');
+            await xrm.Navigation.navigateTo(pageInput, { target: 1 });
+          }
+        } else {
+          // Drill-through target is an entity logical name. Open that entity's
+          // list as a dialog. `sprk_baseviewid` (if set) selects a specific
+          // view — otherwise the entity's default view is used.
+          logger.info('VisualHostRoot', 'Opening entity list dialog for drill-through entity', {
+            drillEntity: drillThroughTarget,
+            viewId: viewId || '(default)',
+          });
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const pageInput: any = {
+            pageType: 'entitylist',
+            entityName: drillThroughTarget,
+          };
+          if (viewId) pageInput.viewId = viewId.replace(/[{}]/g, '');
+
+          try {
+            await xrm.Navigation.navigateTo(pageInput, {
+              target: 2,
+              position: 1,
+              width: { value: 90, unit: '%' },
+              height: { value: 85, unit: '%' },
+            });
+          } catch {
+            logger.info('VisualHostRoot', 'Dialog not supported, navigating full page');
+            await xrm.Navigation.navigateTo(pageInput, { target: 1 });
+          }
         }
       } else {
         // Fallback: entitylist dialog (unfiltered — filterXml not supported by navigateTo)
@@ -520,9 +611,13 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     // caller explicitly sets showTitle=true (Phase 3+ Matter cards), CardChrome
     // takes over both the title bar AND the expand icon.
     const chromeOptIn = showTitlePcf === true;
-    const chromeTitle: string | undefined = chromeOptIn
-      ? (chartDefinition.sprk_name || undefined)
-      : undefined;
+    // v1.4.10 — CardChrome ALWAYS renders its title when `chromeOptIn` is
+    // true. The chart-def-level `showCardTitle` option ONLY affects the
+    // legacy toolbar's title (it was never meant to also hide CardChrome's
+    // title — v1.4.9 misapplied it and the result was that Matter Next Date
+    // lost its only header). CardChrome is the canonical title surface for
+    // all 5 Matter chart cards, matching FR-VH-05.
+    const chromeTitle: string | undefined = chromeOptIn ? chartDefinition.sprk_name || undefined : undefined;
 
     // Wire expand to existing handleExpandClick so chart-def Drill Through
     // Settings continue to apply (no new ClickActionHandler).
@@ -533,11 +628,24 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           }
         : undefined;
 
+    // v1.4.3 — Tell ChartRenderer that the host (CardChrome OR the legacy
+    // toolbar above) is rendering the title so each chart visual can suppress
+    // its own internal title and avoid double-rendering.
+    //
+    // Legacy toolbar renders the title when ALL of these are true:
+    //   - showToolbar (PCF property, defaults true)
+    //   - chartDefinition has a sprk_name
+    //   - the toolbar itself is visible (aiSummaryField OR enableDrillThrough)
+    const legacyToolbarTitle =
+      !chromeOptIn && showToolbar === true && !!chartDefinition.sprk_name && (!!aiSummaryField || enableDrillThrough);
+    const hostRenderedTitle = chromeOptIn || legacyToolbarTitle;
+
     return (
       <CardChrome
         title={chromeTitle}
         onExpand={chromeOnExpand}
-        showAiSparkle={false}
+        showAiSparkle={chromeOptIn && !!aiSummaryField}
+        onAiSummary={aiSummaryField ? handleFetchAiSummary : undefined}
       >
         <ChartRenderer
           chartDefinition={chartDefinition}
@@ -555,6 +663,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           columns={columns || undefined}
           showTitle={showTitlePcf ?? undefined}
           titleFontSize={titleFontSizePcf || undefined}
+          hostRenderedTitle={hostRenderedTitle}
         />
       </CardChrome>
     );
@@ -576,35 +685,87 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
 
   return (
     <div className={styles.container} style={containerStyle}>
-      {/* Toolbar row — AI Summary (left) + View Details (right), above the visual */}
-      {showToolbar && chartDefinition && (aiSummaryField || enableDrillThrough) && (
-        <div className={styles.toolbar}>
-          {aiSummaryField && (
-            <AiSummaryPopover
-              trigger={
-                <Tooltip content="AI Summary" relationship="label">
-                  <Button appearance="subtle" icon={<SparkleRegular />} aria-label="View AI summary" />
+      {/* Toolbar row — Chart name (left) + AI Summary / View Details (right), above the visual.
+          v1.4.3: Title is now rendered here (legacy path) instead of being duplicated inside
+          each chart's centered header. When this toolbar renders, ChartRenderer suppresses
+          the chart's internal title via the `hostRenderedTitle` prop. */}
+      {/* v1.4.8.1 — Toolbar is fully suppressed when CardChrome is active
+          (`showTitlePcf === true`). CardChrome owns its own title row + icons,
+          so any legacy toolbar render here produces stacked duplicate icons.
+          For chart defs without CardChrome opt-in, the toolbar renders in one
+          of two modes (see comment below). */}
+      {showToolbar &&
+        chartDefinition &&
+        (aiSummaryField || enableDrillThrough) &&
+        showTitlePcf !== true &&
+        // Two render modes when CardChrome is NOT active:
+        //   showCardTitle:false → float variant. Icons absolutely positioned in
+        //     top-right corner; toolbar reserves zero vertical space. Used when
+        //     a form section heading already provides the chart name.
+        //   else                → inline variant. Title (left) + icons (right)
+        //     occupy a 32px row above the chart content (v1.4.3 layout).
+        (showCardTitleInToolbar && chartDefinition.sprk_name ? (
+          <div className={styles.toolbar}>
+            <Text
+              size={300}
+              className={styles.toolbarTitle}
+              title={chartDefinition.sprk_name}
+              aria-label={chartDefinition.sprk_name}
+            >
+              {chartDefinition.sprk_name}
+            </Text>
+            <div className={styles.toolbarIcons}>
+              {aiSummaryField && (
+                <AiSummaryPopover
+                  trigger={
+                    <Tooltip content="AI Summary" relationship="label">
+                      <Button appearance="subtle" icon={<SparkleRegular />} aria-label="View AI summary" />
+                    </Tooltip>
+                  }
+                  onFetchSummary={handleFetchAiSummary}
+                  positioning="below"
+                />
+              )}
+              {enableDrillThrough && (
+                <Tooltip content="View details" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    icon={<OpenRegular />}
+                    onClick={handleExpandClick}
+                    aria-label="View details in expanded workspace"
+                  />
                 </Tooltip>
-              }
-              onFetchSummary={handleFetchAiSummary}
-              positioning="below"
-            />
-          )}
-          {enableDrillThrough && (
-            <Tooltip content="View details" relationship="label">
-              <Button
-                appearance="subtle"
-                icon={<OpenRegular />}
-                onClick={handleExpandClick}
-                aria-label="View details in expanded workspace"
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className={styles.toolbarFloat}>
+            {aiSummaryField && (
+              <AiSummaryPopover
+                trigger={
+                  <Tooltip content="AI Summary" relationship="label">
+                    <Button appearance="subtle" icon={<SparkleRegular />} aria-label="View AI summary" />
+                  </Tooltip>
+                }
+                onFetchSummary={handleFetchAiSummary}
+                positioning="below"
               />
-            </Tooltip>
-          )}
-        </div>
-      )}
+            )}
+            {enableDrillThrough && (
+              <Tooltip content="View details" relationship="label">
+                <Button
+                  appearance="subtle"
+                  icon={<OpenRegular />}
+                  onClick={handleExpandClick}
+                  aria-label="View details in expanded workspace"
+                />
+              </Tooltip>
+            )}
+          </div>
+        ))}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.1 • 2026-05-27</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.16 • 2026-06-01</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

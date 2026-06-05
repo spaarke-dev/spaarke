@@ -295,6 +295,42 @@ if (-not $definition.nodes -or $definition.nodes.Count -eq 0) {
     throw "Playbook definition must have at least one node."
 }
 
+# ===========================================================================
+# Lint: action-code wiring per node (Wave B B3 per Insights Engine r2 D-01)
+# ===========================================================================
+# Every node must carry an `actionCode` so this script can resolve it to a
+# sprk_analysisaction row at line 701-704 and set sprk_playbooknode.sprk_actionid.
+# Without sprk_actionid, the orchestrator at PlaybookOrchestrationService.cs:920
+# falls into the "structural node" path and dispatches based on
+# __actionType in sprk_configjson — which is overwritten by the Make Designer
+# UI on save (D-01 §2.4). The actionCode binding is the load-bearing dispatch
+# mechanism for Insights playbooks per D-01 + owner direction 2026-06-02.
+
+$nodesMissingActionCode = @()
+foreach ($lintNode in $definition.nodes) {
+    if (-not $lintNode.actionCode) {
+        $nodesMissingActionCode += $lintNode.name
+    }
+}
+if ($nodesMissingActionCode.Count -gt 0) {
+    Write-Host ''
+    Write-Host '❌ LINT FAILED — action-code wiring missing' -ForegroundColor Red
+    Write-Host ('The following nodes lack `actionCode` references:') -ForegroundColor Red
+    foreach ($missingName in $nodesMissingActionCode) {
+        Write-Host "  - $missingName" -ForegroundColor Red
+    }
+    Write-Host ''
+    Write-Host 'Why this matters:' -ForegroundColor Yellow
+    Write-Host '  Every node MUST reference a sprk_analysisaction row via `actionCode`.' -ForegroundColor Yellow
+    Write-Host '  Without it, this script cannot set sprk_playbooknode.sprk_actionid,' -ForegroundColor Yellow
+    Write-Host '  and the orchestrator dispatch falls back to canvas-Designer configjson' -ForegroundColor Yellow
+    Write-Host '  (which gets clobbered if the playbook is opened in the Designer).' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host 'Reference: projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md' -ForegroundColor Gray
+    throw "Playbook lint failed: $($nodesMissingActionCode.Count) of $($definition.nodes.Count) nodes missing actionCode."
+}
+Write-Host "  Lint    : ✅ all $($definition.nodes.Count) nodes have actionCode wiring" -ForegroundColor Green
+
 $playbookName = $definition.playbook.name
 $playbookDescription = if ($definition.playbook.description) { $definition.playbook.description } else { '' }
 $playbookIsPublic = if ($null -ne $definition.playbook.isPublic) { $definition.playbook.isPublic } else { $true }
@@ -688,6 +724,7 @@ foreach ($node in $definition.nodes) {
             sprk_name           = $nodeName
             sprk_nodetype       = $nodeTypeValue
             sprk_executionorder = $nodeIndex
+            sprk_isactive       = $true   # MUST set explicitly — Dataverse column default is false, so omitting this causes PlaybookOrchestrationService.ExecutionGraph to filter out the node ("0 active nodes"). Surfaced during 2026-05-30 live smoke of predict-matter-cost@v1.
             'sprk_playbookid@odata.bind' = "sprk_analysisplaybooks($playbookId)"
         }
 

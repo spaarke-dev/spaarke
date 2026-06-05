@@ -1,0 +1,160 @@
+{
+  "version": "1.0",
+  "schemaNote": "R5 task 030 (D2-20) — Insights tool smoke matrix. 15 questions = 5 per practice area (CTRNS / IPPAT / BNKF) per integration brief §8. Diversified across the 3 Wave D7 synthetic GUIDs (matter / project / invoice). Mix of forceMode (~10 null = classifier, ~3 explicit playbook, ~2 explicit rag) and expectedPath (~6 playbook, ~7 rag, ~2 decline/empty-results). expectedPath is INFORMATIONAL — tests assert STRUCTURAL conformance only (HTTP 200 + envelope shape + correlationId echoed). Verbatim response content is NEVER asserted (ADR-018).",
+  "waveFStatus": "to-be-recorded-at-execution-time",
+  "synthetic-guids": {
+    "matter": "da116923-d65a-f111-a825-3833c5d9bcb1",
+    "project": "27845394-8e5f-f111-a825-70a8a59455f4",
+    "invoice": "05c8ef8d-8e5f-f111-a825-70a8a59455f4"
+  },
+  "matrix": [
+    {
+      "id": "ctrns-001",
+      "practiceArea": "CTRNS",
+      "subject": "matter:da116923-d65a-f111-a825-3833c5d9bcb1",
+      "query": "What are the closing conditions in this matter?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Citations grounded in matter documents; [n] tokens match citations; no fabrication"
+    },
+    {
+      "id": "ctrns-002",
+      "practiceArea": "CTRNS",
+      "subject": "matter:da116923-d65a-f111-a825-3833c5d9bcb1",
+      "query": "What is the predicted cost of this matter?",
+      "forceMode": "playbook",
+      "expectedPathHint": "playbook",
+      "rubricHint": "predict-matter-cost@v1 envelope; structuredResult.kind = inference; numeric envelope"
+    },
+    {
+      "id": "ctrns-003",
+      "practiceArea": "CTRNS",
+      "subject": "matter:da116923-d65a-f111-a825-3833c5d9bcb1",
+      "query": "Who are the parties to this transaction?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Citation-grounded parties extraction; display-name citations resolve"
+    },
+    {
+      "id": "ctrns-004",
+      "practiceArea": "CTRNS",
+      "subject": "project:27845394-8e5f-f111-a825-70a8a59455f4",
+      "query": "What's the tail policy obligation here?",
+      "forceMode": "rag",
+      "expectedPathHint": "rag",
+      "rubricHint": "RAG path forced; decline OR empty-results legitimate per FR-04 if matter lacks tail-policy docs"
+    },
+    {
+      "id": "ctrns-005",
+      "practiceArea": "CTRNS",
+      "subject": "matter:da116923-d65a-f111-a825-3833c5d9bcb1",
+      "query": "Is there a regulatory approval requirement in this matter?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Citation-grounded approval-requirement extraction"
+    },
+
+    {
+      "id": "ippat-001",
+      "practiceArea": "IPPAT",
+      "subject": "matter:da116923-d65a-f111-a825-3833c5d9bcb1",
+      "query": "What patents are claimed in this matter?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Citation-grounded patent enumeration; decline legitimate if no IP docs on synthetic matter"
+    },
+    {
+      "id": "ippat-002",
+      "practiceArea": "IPPAT",
+      "subject": "project:27845394-8e5f-f111-a825-70a8a59455f4",
+      "query": "What's the priority date for the parent application?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Specific factual extraction with citation requirement; decline legitimate if absent"
+    },
+    {
+      "id": "ippat-003",
+      "practiceArea": "IPPAT",
+      "subject": "project:27845394-8e5f-f111-a825-70a8a59455f4",
+      "query": "Who are the named inventors on this project?",
+      "forceMode": "rag",
+      "expectedPathHint": "rag",
+      "rubricHint": "RAG forced; cited inventor names OR empty-results per FR-04 anti-hallucination"
+    },
+    {
+      "id": "ippat-004",
+      "practiceArea": "IPPAT",
+      "subject": "project:27845394-8e5f-f111-a825-70a8a59455f4",
+      "query": "What's the prosecution strategy here?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Subjective synthesis; low-confidence likely (badges per task 028 confidence floor); citations grounded"
+    },
+    {
+      "id": "ippat-005",
+      "practiceArea": "IPPAT",
+      "subject": "project:27845394-8e5f-f111-a825-70a8a59455f4",
+      "query": "Are there any pending office actions on this project?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "RAG retrieval; empty-results legitimate if no OA docs on synthetic project"
+    },
+
+    {
+      "id": "bnkf-001",
+      "practiceArea": "BNKF",
+      "subject": "invoice:05c8ef8d-8e5f-f111-a825-70a8a59455f4",
+      "query": "What's the total billed on this invoice?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Single-value extraction from invoice document; citation-grounded; classifier routes appropriately"
+    },
+    {
+      "id": "bnkf-002",
+      "practiceArea": "BNKF",
+      "subject": "matter:da116923-d65a-f111-a825-3833c5d9bcb1",
+      "query": "What's the average matter cost across similar transactions?",
+      "forceMode": "playbook",
+      "expectedPathHint": "playbook",
+      "rubricHint": "predict-matter-cost@v1 with comparableMatters envelope; structuredResult.envelope non-empty"
+    },
+    {
+      "id": "bnkf-003",
+      "practiceArea": "BNKF",
+      "subject": "matter:da116923-d65a-f111-a825-3833c5d9bcb1",
+      "query": "What collateral securitization is documented here?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Citation-grounded collateral extraction; decline OR empty-results legitimate"
+    },
+    {
+      "id": "bnkf-004",
+      "practiceArea": "BNKF",
+      "subject": "matter:da116923-d65a-f111-a825-3833c5d9bcb1",
+      "query": "What's the loan covenant compliance status?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Status-derivation question; decline legitimate per §4.5 if evidence insufficient"
+    },
+    {
+      "id": "bnkf-005",
+      "practiceArea": "BNKF",
+      "subject": "invoice:05c8ef8d-8e5f-f111-a825-70a8a59455f4",
+      "query": "Are there any outstanding fee disputes on this invoice?",
+      "forceMode": null,
+      "expectedPathHint": "rag",
+      "rubricHint": "Boolean-style RAG question; empty-results legitimate; no fabricated 'yes' if no docs"
+    }
+  ],
+  "diversificationCheck": {
+    "byPracticeArea": { "CTRNS": 5, "IPPAT": 5, "BNKF": 5, "total": 15 },
+    "bySubject": {
+      "matter:da116923-d65a-f111-a825-3833c5d9bcb1": 8,
+      "project:27845394-8e5f-f111-a825-70a8a59455f4": 5,
+      "invoice:05c8ef8d-8e5f-f111-a825-70a8a59455f4": 2,
+      "total": 15
+    },
+    "byForceMode": { "null (classifier)": 10, "playbook": 3, "rag": 2, "total": 15 },
+    "byExpectedPathHint": { "rag": 12, "playbook": 3, "total": 15 }
+  }
+}

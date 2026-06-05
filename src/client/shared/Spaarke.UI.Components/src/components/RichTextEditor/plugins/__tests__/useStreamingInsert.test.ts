@@ -406,8 +406,12 @@ describe('useStreamingInsert', () => {
         });
       });
 
+      // Task 071: FR-06 — cancelled stream writes PRESERVE partial content, so
+      // the handler always calls `endStream(false)` regardless of the incoming
+      // `cancelled` flag (see useStreamingInsert.ts:161-166). User-driven undo
+      // via useDocumentHistory is the cancellation surface, not the plugin.
       const endCall = mockHandle.calls.find(c => c.method === 'endStream');
-      expect(endCall!.args).toEqual([true]);
+      expect(endCall!.args).toEqual([false]);
     });
 
     it('should handle document_replace event without error (no-op)', () => {

@@ -31,3 +31,6 @@ export type { IPriorityScoreCardProps } from './PriorityScoreCard';
 
 export { EffortScoreCard } from './EffortScoreCard';
 export type { IEffortScoreCardProps } from './EffortScoreCard';
+
+export { SmartToDoDialog } from './SmartToDoDialog';
+export type { ISmartToDoDialogProps } from './SmartToDoDialog';

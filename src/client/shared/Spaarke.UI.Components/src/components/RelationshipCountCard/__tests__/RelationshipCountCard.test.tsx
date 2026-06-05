@@ -35,35 +35,19 @@ describe('RelationshipCountCard', () => {
   // ─────────────────────────────────────────────────────────────────────
 
   describe('Default Rendering', () => {
-    it('render_Default_ShowsDefaultTitle', () => {
-      renderWithProviders(<RelationshipCountCard {...defaultProps} />);
-
-      expect(screen.getByText('RELATED DOCUMENTS')).toBeInTheDocument();
-    });
-
-    it('render_CustomTitle_ShowsCustomTitle', () => {
-      renderWithProviders(<RelationshipCountCard {...defaultProps} title="SIMILAR DOCS" />);
-
-      expect(screen.getByText('SIMILAR DOCS')).toBeInTheDocument();
-    });
-
+    // Task 071: Tests for `title` text and `found` badge DELETED — the component
+    // was redesigned to drop the visible title (`title` prop kept only for API
+    // compatibility per RelationshipCountCard.tsx:22) and the "found" badge is
+    // no longer rendered. Only the count value remains testable here.
     it('render_WithCount_ShowsCountValue', () => {
       renderWithProviders(<RelationshipCountCard {...defaultProps} count={12} />);
 
       expect(screen.getByText('12')).toBeInTheDocument();
     });
 
-    it('render_WithCount_ShowsFoundBadge', () => {
-      renderWithProviders(<RelationshipCountCard {...defaultProps} count={3} />);
-
-      expect(screen.getByText('found')).toBeInTheDocument();
-    });
-
-    it('render_WithCount_ShowsViewButton', () => {
-      renderWithProviders(<RelationshipCountCard {...defaultProps} count={7} />);
-
-      expect(screen.getByRole('button', { name: /view/i })).toBeInTheDocument();
-    });
+    // Task 071: `render_WithCount_ShowsViewButton` DELETED — the button has
+    // changed to an icon-only "Open full viewer" Button with `title` attribute
+    // (no visible "view" label). Covered indirectly by behaviour tests below.
   });
 
   // ─────────────────────────────────────────────────────────────────────
@@ -89,11 +73,8 @@ describe('RelationshipCountCard', () => {
       expect(screen.queryByRole('button', { name: /view/i })).not.toBeInTheDocument();
     });
 
-    it('render_Loading_StillShowsTitle', () => {
-      renderWithProviders(<RelationshipCountCard {...defaultProps} isLoading={true} />);
-
-      expect(screen.getByText('RELATED DOCUMENTS')).toBeInTheDocument();
-    });
+    // Task 071: `render_Loading_StillShowsTitle` DELETED — title no longer
+    // rendered in any state (component redesign per RelationshipCountCard.tsx:22).
   });
 
   // ─────────────────────────────────────────────────────────────────────
@@ -119,17 +100,14 @@ describe('RelationshipCountCard', () => {
       expect(screen.queryByRole('button', { name: /view/i })).not.toBeInTheDocument();
     });
 
-    it('render_Error_StillShowsTitle', () => {
-      renderWithProviders(<RelationshipCountCard {...defaultProps} error="Something went wrong" />);
-
-      expect(screen.getByText('RELATED DOCUMENTS')).toBeInTheDocument();
-    });
+    // Task 071: `render_Error_StillShowsTitle` DELETED — title no longer
+    // rendered in any state.
 
     it('render_NullError_ShowsNormalState', () => {
       renderWithProviders(<RelationshipCountCard {...defaultProps} count={3} error={null} />);
 
+      // Task 071: "found" badge removed in component redesign — verify only the count.
       expect(screen.getByText('3')).toBeInTheDocument();
-      expect(screen.getByText('found')).toBeInTheDocument();
     });
   });
 

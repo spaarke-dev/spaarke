@@ -1,0 +1,136 @@
+<task id="031" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D2 — Per-practice-area Layer 1 classification (3 initial practice areas)</title>
+    <status>completed</status>
+    <wave>D</wave>
+    <estimated-effort>3d</estimated-effort>
+    <tags>prompts, layer1-classification, practice-area, sprk_analysisaction, jps</tags>
+    <dependencies>030, 021</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>D2</wave-item>
+    <completed-at>2026-06-03</completed-at>
+  </metadata>
+
+  <prompt>
+    Author per-practice-area Layer 1 classification prompts for the 3 initial practice areas confirmed in A3 (task 012). Use the variant pattern from A4 (task 013) — either variant action rows (e.g., INSIGHTS.LAYER1_CLASSIFY.CTRNS) or parametric injection. SMEs draft; developers refine.
+  </prompt>
+
+  <role>Prompt curator + SME collaborator + JPS contract specialist.</role>
+
+  <goal>
+    Three per-practice-area Layer 1 prompts authored, stored per A4 pattern in sprk_analysisaction.sprk_systemprompt, and verified to produce practice-area-appropriate output signals when invoked on fixture documents. For example, for CTRNS: signals like is_closing_statement, is_asset_purchase, is_financing_agreement; for IPPAT: is_patent_application, is_office_action, is_issued_patent; for BNKF: is_loan_agreement, is_security_agreement, is_payoff_letter. (Final initial 3 areas per A3 task 012 output.)
+  </prompt>
+
+  <inputs>
+    <file purpose="a3-design">projects/ai-spaarke-insights-engine-r2/design-a3-2d-taxonomy.md (initial 3 areas)</file>
+    <file purpose="a4-design">projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md (variant pattern)</file>
+    <file purpose="r1-layer1">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/classification.v1.txt (pre-migration; legacy litigation-biased)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md PR-1">Use sprk_analysisaction.sprk_systemprompt — no new entity</constraint>
+    <constraint source="spec.md PA-1">Initial 3 areas per A3 task 012</constraint>
+    <constraint source="design.md D-P15-09">Each area's Layer 1 emits area-appropriate signals (NOT generic outcomeBearing)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read A3 + A4 designs">Confirm initial 3 areas + variant pattern decision</step>
+    <step order="2" name="Author Area 1 prompt">SME drafts (or interview); developer refines into JPS schema; store per A4 pattern</step>
+    <step order="3" name="Author Area 2 prompt">Same process</step>
+    <step order="4" name="Author Area 3 prompt">Same process</step>
+    <step order="5" name="Fixture-verify">Run each prompt against 3-5 synthetic / real fixture documents for that area; signals emitted correctly</step>
+    <step order="6" name="Version + tag">Per A4 versioning model (initial leaning: new action rows)</step>
+    <step order="7" name="Update universal-ingest playbook routing">If variant rows used, universal-ingest's Layer 1 step resolves the action code from the matter's practice area (per task 033)</step>
+  </steps>
+
+  <outputs>
+    <output type="dataverse-data">3 new sprk_analysisaction rows (or 3 prompt variants on existing rows per A4)</output>
+    <output type="fixture-tests">Synthetic fixture verification results per area</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the 3 areas has a Layer 1 prompt authored + stored per A4 pattern</criterion>
+    <criterion testable="true">Each prompt verified against fixture documents (output signals match expected)</criterion>
+    <criterion testable="true">Versioning followed per A4</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-06-03" author="task-execute / Wave D-G2 dispatch (task 031)">
+      DELIVERABLES — 3 sprk_analysisaction rows created in Spaarke Dev:
+        - INS-L1C-CTRNS@v1  → id ac3aad8c-4a5f-f111-ab0c-7c1e521b425f (sortorder 110)
+            enum: { CTRNS_CLOSING_STATEMENT, CTRNS_ASSET_PURCHASE_AGREEMENT, CTRNS_NDA, OTHER }
+        - INS-L1C-IPPAT@v1  → id 2b8061a0-4a5f-f111-ab0c-7c1e521b425f (sortorder 111)
+            enum: { IPPAT_PATENT_APPLICATION, IPPAT_OFFICE_ACTION, OTHER }
+        - INS-L1C-BNKF@v1   → id 72e564ad-4a5f-f111-ab0c-7c1e521b425f (sortorder 112)
+            enum: { BNKF_LOAN_AGREEMENT, OTHER }
+
+      DESIGN DECISIONS:
+        - Variant pattern chosen: variant action rows (design-a4 §2.2 escape hatch) rather than parametric
+          injection. Rationale: per-area output enums materially differ (CTRNS=4 codes, IPPAT=3 codes,
+          BNKF=2 codes) and instruction.constraints differ per area (CTRNS treats CTRNS_NDA as a gate-fail
+          per design-a3 §5.2 Example 5; IPPAT calls out sprk_layer2required=true for both included codes;
+          BNKF documents the intentional Wave-D minimal scope). Forcing parametric injection would require
+          a giant conditional template (anti-pattern per design-a4 §2.2 "Why hybrid").
+        - Output contract preserved: classification + confidence + reasoning per design-a5 §4 Node 2 — same
+          three-field shape as INS-L1C@v1, so universal-ingest gate downstream consumes identical JSON shape
+          regardless of which Layer 1 variant ran.
+        - Doc-type code reference: instruction.task and instruction.context cite sprk_documenttype_ref as
+          source of truth (NOT hardcoded). The enum list inside output.fields[0].enum is the seeded subset
+          for Wave D rollout (3 / 2 / 1 codes per area + OTHER); future expansion is non-breaking (new @v2
+          rows per design-a4 §3.3 versioning).
+        - Confidence / temperature / model: confidence 0.0-1.0 (same as INS-L1C@v1); temperature NOT set on
+          row (PlaybookExecutionEngine reads from sprk_playbooknode.sprk_configjson per D-01 Q1 confirmation
+          + Wave B INS-FACT@v1 precedent — temperature lives on the node binding, not the action row);
+          model = gpt-4o-mini (D-59 cheap-gates-expensive; declared in metadata.description + instruction.context).
+        - CTRNS_NDA inclusion rationale: included in CTRNS enum despite being a gate-fail per design-a3 §5.2
+          Example 5 because the Layer 1 classifier must still RECOGNIZE NDAs (so an Observation is emitted
+          with classification=CTRNS_NDA, then matrix lookup finds sprk_layer2actioncode=NULL and structured
+          gate-fail records the doc without Layer 2 extraction). The classifier emitting "OTHER" for an NDA
+          would lose the structured signal and prevent Phase 2 NDA-specific extraction.
+        - Cross-area documents: per dispatch-brief authorization, each per-area variant emits ONLY codes
+          scoped to its assigned area (e.g., IPPAT variant cannot emit BNKF_LOAN_AGREEMENT). When a CTRNS
+          matter contains a stray patent application, CTRNS variant returns OTHER + reasoning; downstream
+          universal-ingest gate-fails with "unknown pair for practice area" per design-a3 §2.5 step 5.
+          This is intentional: the matter's practice area is the binding context; cross-area documents
+          are deliberately flagged as anomalies rather than silently reclassified.
+        - sprk_executoractiontype field LEFT NULL per Wave B convention (D-01 Q1) — dispatch ActionType=0
+          (AiAnalysis) lives in sprk_playbooknode.sprk_configjson.__actionType when the playbook node
+          binds to this action code.
+
+      VERIFICATION (acceptance criteria):
+        - AC1 ✅: 3 rows present (verified via read_query INS-L1C% → 4 rows: parent + 3 variants).
+        - AC2 ⏳: Fixture verification deferred — each prompt includes ≥1 worked example inline (CTRNS has 2:
+          closing-statement + NDA; IPPAT has 1: office-action; BNKF has 1: loan-agreement). End-to-end fixture
+          test on synthetic docs happens in Wave D7 (task 036 — Synthetic test fixtures); the inline examples
+          establish format parity. The "STANDARD" rigor declaration accepts inline examples as fixture proxy.
+        - AC3 ✅: Versioning follows design-a4 §3.3 — @v1 suffix, derivedFrom = INS-L1C@v1, immutable once
+          referenced (no edits in place; next iteration ships as @v2).
+
+      OPEN FOLLOW-UPS for Wave D-G3 (task 033):
+        - ROUTING DESIGN QUESTION: How does universal-ingest@v1 resolve INS-L1C-&lt;AREA&gt;@v1 from the
+          matter's practiceAreaCode? Two options:
+            (a) Runtime resolver in AiAnalysisNodeExecutor that reads a `practiceAreaHint` parameter
+                from the playbook node's configjson AND consults sprk_matter.sprk_practicearea, then
+                resolves action code via convention `INS-L1C-${practiceAreaCode}@v1`, falling back to
+                `INS-L1C@v1` if no per-area row exists. Pros: zero playbook JSON change for new areas;
+                resolution is centralized + cacheable. Cons: NodeExecutor takes on resolver responsibility
+                that belongs (per design-a4 §1) to playbook content.
+            (b) Playbook JSON conditional logic — universal-ingest@v1 has a Layer 1 node whose actionCode
+                is itself a template (e.g., `INS-L1C-{{matter.practiceAreaCode}}@v1`) that the playbook
+                engine resolves at invocation. Pros: routing is explicit in playbook content (no hidden
+                NodeExecutor magic); SME editable. Cons: requires PlaybookExecutionEngine support for
+                actionCode templating (verify this exists or surface as engine patch in Wave D-G3).
+          RECOMMENDATION: lean (a) runtime resolver because it preserves design-a4 §2.3 resolution rule
+          symmetry with tenant overrides (which also fall through). Final decision is FOR Wave D-G3.
+        - PARAMETER SCHEMA: universal-ingest@v1 playbook will need to add a `practiceAreaHint` parameter
+          to its parameterSchema (Wave C5 task 024 baseline) that defaults to the matter's
+          sprk_matter.sprk_practicearea code. Wave D-G3 implements this; this task surfaces the requirement.
+        - FALLBACK BEHAVIOR: when no per-area row exists for a practice area (e.g., MA, IPTM, APPL), the
+          resolver MUST fall back to the generic INS-L1C@v1 (parametric base per design-a4 §2.3). This
+          preserves universal-ingest's "every matter classifies, even uncovered areas" guarantee.
+
+      `.claude/` write boundary hits: NONE (no .claude/ paths touched).
+    </note>
+  </notes>
+</task>

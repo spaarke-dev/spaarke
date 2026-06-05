@@ -19,22 +19,11 @@
  * imports are used.
  */
 import * as React from 'react';
-import {
-  Button,
-  MessageBar,
-  MessageBarBody,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
-import type {
-  IWizardShellHandle,
-  IWizardStepConfig,
-  IWizardSuccessConfig,
-} from '../Wizard/wizardShellTypes';
+import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
 import { FileUploadZone } from '../FileUpload/FileUploadZone';
@@ -49,11 +38,7 @@ import {
   FOLLOW_ON_CANONICAL_ORDER,
 } from './SummaryNextStepsStep';
 import type { SummaryActionId } from './SummaryNextStepsStep';
-import {
-  SummarizeSendEmailStep,
-  buildSummaryEmailSubject,
-  buildSummaryEmailBody,
-} from './SummarizeSendEmailStep';
+import { SummarizeSendEmailStep, buildSummaryEmailSubject, buildSummaryEmailBody } from './SummarizeSendEmailStep';
 import { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
 import { streamSummarize } from './summarizeService';
@@ -103,12 +88,8 @@ type FileAction =
 function fileReducer(state: IFileState, action: FileAction): IFileState {
   switch (action.type) {
     case 'ADD_FILES': {
-      const existing = new Set(
-        state.uploadedFiles.map((f) => `${f.name}::${f.sizeBytes}`),
-      );
-      const newFiles = action.files.filter(
-        (f) => !existing.has(`${f.name}::${f.sizeBytes}`),
-      );
+      const existing = new Set(state.uploadedFiles.map(f => `${f.name}::${f.sizeBytes}`));
+      const newFiles = action.files.filter(f => !existing.has(`${f.name}::${f.sizeBytes}`));
       return {
         ...state,
         uploadedFiles: [...state.uploadedFiles, ...newFiles],
@@ -118,7 +99,7 @@ function fileReducer(state: IFileState, action: FileAction): IFileState {
     case 'REMOVE_FILE':
       return {
         ...state,
-        uploadedFiles: state.uploadedFiles.filter((f) => f.id !== action.fileId),
+        uploadedFiles: state.uploadedFiles.filter(f => f.id !== action.fileId),
       };
     case 'SET_VALIDATION_ERRORS':
       return { ...state, validationErrors: action.errors };
@@ -180,7 +161,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
   // ── SSE progress step state (driven by real backend events) ──────────
-  const ALL_STEP_IDS = React.useMemo(() => DOCUMENT_ANALYSIS_STEPS.map((s) => s.id), []);
+  const ALL_STEP_IDS = React.useMemo(() => DOCUMENT_ANALYSIS_STEPS.map(s => s.id), []);
   const [activeStepId, setActiveStepId] = React.useState<string | null>(null);
   const [completedStepIds, setCompletedStepIds] = React.useState<string[]>([]);
 
@@ -242,24 +223,18 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   // ── File handlers ─────────────────────────────────────────────────────
   const handleFilesAccepted = React.useCallback(
     (files: IUploadedFile[]) => fileDispatch({ type: 'ADD_FILES', files }),
-    [],
+    []
   );
   const handleValidationErrors = React.useCallback(
     (errors: IFileValidationError[]) => fileDispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
-    [],
+    []
   );
-  const handleRemoveFile = React.useCallback(
-    (fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }),
-    [],
-  );
-  const handleClearErrors = React.useCallback(
-    () => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }),
-    [],
-  );
+  const handleRemoveFile = React.useCallback((fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }), []);
+  const handleClearErrors = React.useCallback(() => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }), []);
 
   // ── Stable search callback ────────────────────────────────────────────
   const handleSearchUsers = React.useCallback(
-    (query: string) => dataService ? searchUsersAsLookup(dataService, query) : Promise.resolve([]),
+    (query: string) => (dataService ? searchUsersAsLookup(dataService, query) : Promise.resolve([])),
     [dataService]
   );
 
@@ -280,10 +255,10 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       const result = await streamSummarize(
         fileState.uploadedFiles,
         {
-          onProgress: (stepId) => {
+          onProgress: stepId => {
             if (controller.signal.aborted) return;
             setActiveStepId(stepId);
-            setCompletedStepIds((prev) => {
+            setCompletedStepIds(prev => {
               const idx = ALL_STEP_IDS.indexOf(stepId);
               return idx > 0 ? ALL_STEP_IDS.slice(0, idx) : prev;
             });
@@ -291,7 +266,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         },
         controller.signal,
         authenticatedFetch,
-        bffBaseUrl,
+        bffBaseUrl
       );
       if (!controller.signal.aborted) {
         setSummarizeResult(result);
@@ -324,12 +299,9 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   // ── Skip handler for follow-on steps ────────────────────────────────
   // Deselecting the action removes the dynamic step, causing the shell
   // to advance to the next remaining step automatically.
-  const handleSkipAction = React.useCallback(
-    (actionId: SummaryActionId) => {
-      setSelectedActions((prev) => prev.filter((a) => a !== actionId));
-    },
-    []
-  );
+  const handleSkipAction = React.useCallback((actionId: SummaryActionId) => {
+    setSelectedActions(prev => prev.filter(a => a !== actionId));
+  }, []);
 
   // ── Sync dynamic steps with selected action cards (via shellRef) ──────
   const prevSelectedActionsRef = React.useRef<SummaryActionId[]>([]);
@@ -339,7 +311,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     const next = selectedActions;
 
     // Add newly selected follow-on steps
-    next.forEach((actionId) => {
+    next.forEach(actionId => {
       if (!prev.includes(actionId)) {
         const stepId = FOLLOW_ON_STEP_ID_MAP[actionId];
         const stepLabel = FOLLOW_ON_STEP_LABEL_MAP[actionId];
@@ -349,9 +321,11 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
           label: stepLabel,
           canAdvance: () => {
             if (stepId === 'followon-send-email') {
-              return emailToRef.current.trim() !== '' &&
+              return (
+                emailToRef.current.trim() !== '' &&
                 emailSubjectRef.current.trim() !== '' &&
-                emailBodyRef.current.trim() !== '';
+                emailBodyRef.current.trim() !== ''
+              );
             }
             if (stepId === 'followon-create-project') {
               return projectFormValidRef.current;
@@ -359,10 +333,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
             return true; // work-on-analysis has no hard requirement
           },
           footerActions: (
-            <Button
-              appearance="subtle"
-              onClick={() => handleSkipAction(actionId)}
-            >
+            <Button appearance="subtle" onClick={() => handleSkipAction(actionId)}>
               Skip
             </Button>
           ),
@@ -413,7 +384,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     });
 
     // Remove deselected follow-on steps
-    prev.forEach((actionId) => {
+    prev.forEach(actionId => {
       if (!next.includes(actionId)) {
         shellRef.current?.removeDynamicStep(FOLLOW_ON_STEP_ID_MAP[actionId]);
       }
@@ -424,35 +395,19 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
 
   // ── Pre-fill email fields when send-email is selected ─────────────────
   React.useEffect(() => {
-    if (
-      selectedActions.includes('send-email') &&
-      summarizeResult &&
-      !emailSubject
-    ) {
+    if (selectedActions.includes('send-email') && summarizeResult && !emailSubject) {
       setEmailSubject(buildSummaryEmailSubject());
-      setEmailBody(
-        buildSummaryEmailBody(
-          summarizeResult.summary,
-          summarizeResult.shortSummary,
-          includeShortSummary,
-        )
-      );
+      setEmailBody(buildSummaryEmailBody(summarizeResult.summary, summarizeResult.shortSummary, includeShortSummary));
     }
   }, [selectedActions, summarizeResult, emailSubject, includeShortSummary]);
 
   // ── Update email body when short summary toggle changes ───────────────
   React.useEffect(() => {
     if (selectedActions.includes('send-email') && summarizeResult) {
-      setEmailBody(
-        buildSummaryEmailBody(
-          summarizeResult.summary,
-          summarizeResult.shortSummary,
-          includeShortSummary,
-        )
-      );
+      setEmailBody(buildSummaryEmailBody(summarizeResult.summary, summarizeResult.shortSummary, includeShortSummary));
     }
-  // Only re-run when the toggle changes, not on every render
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Only re-run when the toggle changes, not on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includeShortSummary]);
 
   // ── handleFinish ──────────────────────────────────────────────────────
@@ -472,23 +427,25 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     if (currentSelectedActions.includes('send-email') && currentEmailTo.trim()) {
       try {
         if (!authenticatedFetch) {
-          throw new Error('[SummarizeFilesDialog] authenticatedFetch is required — unauthenticated BFF calls are not permitted.');
+          throw new Error(
+            '[SummarizeFilesDialog] authenticatedFetch is required — unauthenticated BFF calls are not permitted.'
+          );
         }
         const fetchFn = authenticatedFetch;
         const baseUrl = bffBaseUrl ?? '';
-        const response = await fetchFn(
-          `${baseUrl}/api/communications/send`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              to: currentEmailTo.split(/[;,]/).map((a: string) => a.trim()).filter(Boolean),
-              subject: currentEmailSubject,
-              body: currentEmailBody,
-              bodyFormat: 'PlainText', // BFF enum is BodyFormat.{PlainText,HTML} — 'Text' is rejected (2026-05-25)
-            }),
-          }
-        );
+        const response = await fetchFn(`${baseUrl}/api/communications/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: currentEmailTo
+              .split(/[;,]/)
+              .map((a: string) => a.trim())
+              .filter(Boolean),
+            subject: currentEmailSubject,
+            body: currentEmailBody,
+            bodyFormat: 'PlainText', // BFF enum is BodyFormat.{PlainText,HTML} — 'Text' is rejected (2026-05-25)
+          }),
+        });
 
         if (response.ok) {
           completedActions.push('Email sent');
@@ -524,24 +481,19 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       completedActions.push('Analysis step viewed');
     }
 
-    const actionSummary = completedActions.length > 0
-      ? completedActions.join(', ')
-      : 'No follow-on actions';
+    const actionSummary = completedActions.length > 0 ? completedActions.join(', ') : 'No follow-on actions';
 
-    const viewProject = createdProjectId ? () => {
-      if (navigationService) {
-        void navigationService.openRecord('sprk_project', createdProjectId!);
-      }
-      onClose();
-    } : undefined;
+    const viewProject = createdProjectId
+      ? () => {
+          if (navigationService) {
+            void navigationService.openRecord('sprk_project', createdProjectId!);
+          }
+          onClose();
+        }
+      : undefined;
 
     return {
-      icon: (
-        <CheckmarkCircleFilled
-          fontSize={64}
-          style={{ color: tokens.colorPaletteGreenForeground1 }}
-        />
-      ),
+      icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
       title: warnings.length > 0 ? 'Summary Complete (with warnings)' : 'Summary Complete',
       body: (
         <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
@@ -551,11 +503,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       actions: (
         <>
           {viewProject && (
-            <Button
-              appearance="primary"
-              onClick={viewProject}
-              aria-label={`View project: ${createdProjectName}`}
-            >
+            <Button appearance="primary" onClick={viewProject} aria-label={`View project: ${createdProjectName}`}>
               View Project
             </Button>
           )}
@@ -584,17 +532,13 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
                 Upload file(s)
               </Text>
               <Text size={200} className={styles.stepSubtitle}>
-                Upload one or more documents to summarize. The AI will analyze and extract
-                key information from your files.
+                Upload one or more documents to summarize. The AI will analyze and extract key information from your
+                files.
               </Text>
             </div>
 
             {fileState.validationErrors.length > 0 && (
-              <MessageBar
-                intent="error"
-                className={styles.errorBar}
-                onMouseEnter={handleClearErrors}
-              >
+              <MessageBar intent="error" className={styles.errorBar} onMouseEnter={handleClearErrors}>
                 <MessageBarBody>
                   {fileState.validationErrors.map((err, i) => (
                     <div key={i}>
@@ -605,16 +549,10 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
               </MessageBar>
             )}
 
-            <FileUploadZone
-              onFilesAccepted={handleFilesAccepted}
-              onValidationErrors={handleValidationErrors}
-            />
+            <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={handleValidationErrors} />
 
             {fileState.uploadedFiles.length > 0 && (
-              <UploadedFileList
-                files={fileState.uploadedFiles}
-                onRemove={handleRemoveFile}
-              />
+              <UploadedFileList files={fileState.uploadedFiles} onRemove={handleRemoveFile} />
             )}
           </>
         ),
@@ -675,7 +613,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       handleRemoveFile,
       handleClearErrors,
       runAnalysis,
-    ],
+    ]
   );
 
   // ── Render ────────────────────────────────────────────────────────────

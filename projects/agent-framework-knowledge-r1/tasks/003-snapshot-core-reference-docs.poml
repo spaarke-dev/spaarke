@@ -1,0 +1,66 @@
+<task id="003" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Snapshot core reference docs (chat client, tools, providers, structured outputs, sessions)</title>
+    <phase>2</phase>
+    <tags>knowledge-base, agent-framework, documentation, microsoft-learn, snapshot</tags>
+    <estimate>1.5h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Snapshot the core Microsoft Learn reference docs for Agent Framework into knowledge/agent-framework/docs/, with YAML provenance frontmatter on each. Cover the foundational concepts Spaarke's BFF code depends on: IChatClient (chat-client), function-tool definitions (tools), provider options (providers), structured outputs, and session/state.</goal>
+    <context>Spaarke uses Microsoft.Extensions.AI IChatClient as the foundation (see SprkChatAgent.cs). The existing 3 reference docs (overview, agents, workflows) skip the intermediate plumbing that Spaarke's code lives in. These core docs encode the abstractions Claude needs to modify SprkChatAgent and its tool registration patterns correctly.</context>
+    <constraints>
+      - Every doc MUST have YAML frontmatter: source URL + fetched date + (optional) note line for any 404 substitutions
+      - Microsoft Learn URLs under /en-us/agent-framework/ have moved before (see SOURCE.md GAPs from coding-knowledge-base-setup-r1 — /concepts/agents → /agents/). Verify each URL via WebFetch before fetching; if 404, search for canonical replacement under learn.microsoft.com/en-us/agent-framework/, log substitution in frontmatter AND in SOURCE.md GAPs
+      - Capture content verbatim — preserve headings, tables, code blocks; do not summarize
+      - Filename convention: snake-case-with-hyphens.md (matches existing overview.md / agents.md / workflows.md)
+      - Sub-agents may write to knowledge/ but NOT to .claude/
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>knowledge/agent-framework/docs/overview.md</file>
+      <file>knowledge/agent-framework/docs/agents.md</file>
+      <file>knowledge/fluent-ui-v9/docs/INDEX.md</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>For each of the 5 target docs below, WebFetch the listed URL. If 404, search via WebSearch for the canonical replacement under learn.microsoft.com/en-us/agent-framework/ and log substitution</step>
+    <step>chat-client.md ← https://learn.microsoft.com/en-us/agent-framework/agents/chat-client (foundation: IChatClient abstraction Spaarke wraps)</step>
+    <step>tools.md ← https://learn.microsoft.com/en-us/agent-framework/agents/tools/ (function tools, AIFunctionFactory, [Description] attributes — direct Spaarke pattern)</step>
+    <step>providers.md ← https://learn.microsoft.com/en-us/agent-framework/agents/providers/ (Azure OpenAI focus — Spaarke uses this)</step>
+    <step>structured-outputs.md ← https://learn.microsoft.com/en-us/agent-framework/agents/structured-outputs (Spaarke uses for compound intent detection schema)</step>
+    <step>sessions-and-state.md ← https://learn.microsoft.com/en-us/agent-framework/agents/sessions-and-state (or fallback /agents/state if 404) — context_providers.md is a related fetch if a separate page exists</step>
+    <step>For each successful fetch: write knowledge/agent-framework/docs/&lt;name&gt;.md with YAML frontmatter (`source: &lt;url&gt;`, `fetched: 2026-MM-DD`, optional `note:`) and the verbatim content</step>
+    <step>Update knowledge/agent-framework/SOURCE.md "Reference docs snapshot" table with one row per new doc</step>
+    <step>For each 404: log a GAP entry in SOURCE.md (URL, date checked, substitution used or "no canonical replacement found")</step>
+    <step>Commit: `docs(knowledge): snapshot agent-framework core reference docs (R1 task 003)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>WebFetch</tool>
+    <tool>WebSearch</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>knowledge/agent-framework/docs/chat-client.md</output>
+    <output>knowledge/agent-framework/docs/tools.md</output>
+    <output>knowledge/agent-framework/docs/providers.md</output>
+    <output>knowledge/agent-framework/docs/structured-outputs.md</output>
+    <output>knowledge/agent-framework/docs/sessions-and-state.md</output>
+    <output>knowledge/agent-framework/SOURCE.md (updated Reference docs table + any GAPs)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>5 new .md docs under knowledge/agent-framework/docs/, each with YAML provenance frontmatter</criterion>
+    <criterion>Every URL substitution recorded in both the doc's frontmatter and SOURCE.md GAPs</criterion>
+    <criterion>SOURCE.md Reference docs table lists every new doc</criterion>
+    <criterion>Content is verbatim from the source, not summarized</criterion>
+  </acceptance-criteria>
+</task>

@@ -94,7 +94,9 @@ export function markdownToHtml(markdown: string): string {
         htmlParts.push('</ul>');
         inList = false;
       }
-      htmlParts.push(`<p style="color:var(--colorNeutralForeground3);font-style:italic;">${escapeHtml(line.trim())}</p>`);
+      htmlParts.push(
+        `<p style="color:var(--colorNeutralForeground3);font-style:italic;">${escapeHtml(line.trim())}</p>`
+      );
       continue;
     }
 

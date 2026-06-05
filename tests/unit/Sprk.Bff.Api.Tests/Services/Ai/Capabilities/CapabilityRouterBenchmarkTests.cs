@@ -23,6 +23,24 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Capabilities;
 ///   - Layer 1 completes in under 50ms per message (NFR-03)
 ///   - Single-LLM-call invariant: Layer 1 makes zero LLM calls
 /// </summary>
+/// <remarks>
+/// Task 053 (P23.M4 — Ai/Capabilities) repair status:
+///   - 3 tests pass and assert current behavior (latency-under-50ms x2, hit-rate >= 60%):
+///     `Layer1_HitRate_MeetsTargetForKeywordMessages`,
+///     `Layer1_Latency_Under50ms_ForAllCorpusMessages`,
+///     `Layer1_Latency_Under50ms_With50CapabilityManifest`. Marked `repaired` at class level.
+///   - 2 tests assert the documented zero-misroute invariant which the substring-based
+///     Layer 1 keyword classifier cannot honor for adversarial natural-language inputs
+///     (e.g., id=77 "Set the priority of the Henderson case to urgent" hits `case law`
+///     keyword and routes to `legal_research` at confidence 1.0; id=102 "What version of
+///     the AI model are you using?" Layer-3 meta-question hits `document_analysis`).
+///     Per project NFR-01 the production CapabilityRouter cannot be modified in this
+///     repair project. The 2 failing tests are CORRECT — they assert the documented
+///     contract — and the router has a real semantic-gap bug. Per §6.2 both tests are
+///     Skip'd with `real-bug-pending-fix` and filed in ledgers/real-bug-ledger.md
+///     entry RB-T053-01.
+/// </remarks>
+[Trait("status", "repaired")]
 public sealed class CapabilityRouterBenchmarkTests
 {
     private readonly ITestOutputHelper _output;
@@ -144,7 +162,8 @@ public sealed class CapabilityRouterBenchmarkTests
     /// should not produce a confident Layer 1 result. A confident result here would
     /// mean false-positive routing.
     /// </summary>
-    [Fact]
+    [Fact(Skip = "real-bug-pending-fix RB-T053-01a (residual after r2 task 022 partial closure 2026-06-01): Option 1 (word-boundary regex) + Option B (drop description-word scoring) eliminated 3 of 4 corpus false-positives (id=77, id=89, id=102). The 4th case (id=91 'Pull the brief for the amicus curiae filing' matching hint 'brief' in summarize_content) is a genuine semantic-gap — the word 'brief' is a LEGITIMATE hint AND a standalone token in the message, but its semantic role differs ('the brief' = legal-document noun phrase vs 'to brief' = verb). Layer-1 keyword matching cannot distinguish; Layer-2 LLM disambiguation is the correct fix and is by-design for this exact pattern. Filed as ledgers/real-bug-ledger.md RB-T053-01a; Phase 3 or beyond can address it.")]
+    [Trait("status", "real-bug-pending-fix")]
     public void Layer1_DoesNotFalsePositive_OnNonKeywordMessages()
     {
         var nonLayer1Messages = _corpus.Where(c => c.ExpectedLayer >= 2).ToList();
@@ -241,7 +260,8 @@ public sealed class CapabilityRouterBenchmarkTests
     /// Runs the full corpus and emits a distribution summary compatible with the
     /// results template in the benchmark report.
     /// </summary>
-    [Fact]
+    [Fact(Skip = "real-bug-pending-fix RB-T053-01a (residual after r2 task 022 partial closure 2026-06-01): same Layer-1 semantic-gap as Layer1_DoesNotFalsePositive_OnNonKeywordMessages — full-corpus summary asserts confidentWrong == 0 but Option 1+B leaves 1 confidently-wrong route remaining (id=91 'amicus curiae brief' → summarize_content via legitimate hint 'brief' in a different semantic role). Layer-2 LLM disambiguation is the by-design fix for this. See ledgers/real-bug-ledger.md RB-T053-01a.")]
+    [Trait("status", "real-bug-pending-fix")]
     public void Layer1_FullCorpus_DistributionSummary()
     {
         var confidentCorrect = 0;

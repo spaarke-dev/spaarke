@@ -60,8 +60,8 @@ public sealed class GroundednessCheckService : IGroundednessCheckService
         GroundednessCheckTelemetry telemetry)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _logger     = logger    ?? throw new ArgumentNullException(nameof(logger));
-        _telemetry  = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     }
 
     // -------------------------------------------------------------------------
@@ -190,10 +190,10 @@ public sealed class GroundednessCheckService : IGroundednessCheckService
         var body = new GroundednessApiRequest
         {
             Domain = "Generic",
-            Task   = "QnA",
-            Qna    = new QnaPayload
+            Task = "QnA",
+            Qna = new QnaPayload
             {
-                Query  = request.Query ?? string.Empty,
+                Query = request.Query ?? string.Empty,
                 Answer = request.LlmResponse,
             },
             GroundingSources = request.SourceDocuments,
@@ -222,7 +222,7 @@ public sealed class GroundednessCheckService : IGroundednessCheckService
     private GroundednessResult BuildResult(GroundednessApiResponse apiResponse, double latencyMs)
     {
         var ungroundedDetected = apiResponse.UngroundedDetected;
-        var details            = apiResponse.UngroundedDetails ?? [];
+        var details = apiResponse.UngroundedDetails ?? [];
 
         var segments = details
             .Where(d => !string.IsNullOrEmpty(d.Text))

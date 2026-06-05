@@ -1,0 +1,73 @@
+<task id="032" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D3 — Per-(practice-area, document-type) Layer 2 extraction schemas (3–5 high-value pairs)</title>
+    <status>completed</status>
+    <wave>D</wave>
+    <estimated-effort>3d</estimated-effort>
+    <tags>prompts, layer2-extraction, schemas, practice-area, document-type, sprk_analysisaction</tags>
+    <dependencies>030, 021</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>D3</wave-item>
+  </metadata>
+
+  <prompt>
+    Author per-(practice-area, document-type) Layer 2 extraction schemas for 3–5 high-value pairs. These define what fields to extract per document type (e.g., for CTRNS × closing-statement: closing date, parties, purchase price, financing terms, contingency-list). Stored per A4 pattern in sprk_analysisaction.sprk_systemprompt.
+  </prompt>
+
+  <role>Prompt curator + SME collaborator + JPS contract specialist.</role>
+
+  <goal>
+    3–5 Layer 2 extraction schemas authored + stored per A4. Each schema specifies: (a) target fields with names + types + descriptions; (b) confidence-threshold gates (per field); (c) Observation emission shape (one Observation per high-confidence field per D-P10 from r1). High-value pairs picked per A3 design (likely 1 per initial area, possibly 2 for the most-active area).
+  </prompt>
+
+  <inputs>
+    <file purpose="a3-design">projects/ai-spaarke-insights-engine-r2/design-a3-2d-taxonomy.md (high-value pairs)</file>
+    <file purpose="a4-design">projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md</file>
+    <file purpose="r1-layer2">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/outcome-extraction.v1.txt (pre-migration legacy)</file>
+    <file purpose="r1-emission">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Extraction/ (D-P10 confidence gating + Observation emission)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md PR-1">Stored per A4 pattern in sprk_analysisaction.sprk_systemprompt</constraint>
+    <constraint source="design.md D-P15-09">Per-area-doctype gate logic — Layer 2 schema includes gate semantics</constraint>
+    <constraint source="r1 D-P10">Confidence threshold ≥ 0.7 by default; per-field overrides allowed</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Pick 3–5 high-value (area × type) pairs">Per A3 design + project owner priority</step>
+    <step order="2" name="For each pair: define target fields">SME-driven field list with types + descriptions</step>
+    <step order="3" name="For each pair: author Layer 2 prompt">JPS-formatted; carries extraction schema + per-field confidence guidance</step>
+    <step order="4" name="For each pair: define emission shape">One Observation per high-confidence field; mappings from prompt output → Observation Predicate + Confidence + Evidence</step>
+    <step order="5" name="Store per A4 pattern">sprk_analysisaction rows or variants</step>
+    <step order="6" name="Fixture-verify">Run each schema against fixture documents for that (area, type) pair; Observations emitted match expectation</step>
+  </steps>
+
+  <outputs>
+    <output type="dataverse-data">3–5 new sprk_analysisaction rows for Layer 2 schemas</output>
+    <output type="fixture-tests">Per-pair verification results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3–5 (area, type) pairs have Layer 2 schemas authored + stored</criterion>
+    <criterion testable="true">Each schema verified against fixture documents</criterion>
+    <criterion testable="true">Observation emission shape preserves r1 D-P10 contract (confidence ≥ threshold, per-field emission)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-03 (Wave D-G2). 5 new `sprk_analysisaction` rows authored with `sprk_executoractiontype=0` (AiAnalysis), JPS shape derived from `INS-L2X@v1`:
+    - `INS-L2X-CTRNS-CLOSING@v1` (Guid 84967adf-8c5f-f111-a825-70a8a59455f4) — fields: settlement_amount, settlement_date, parties_settling, parties_settled, jurisdiction, governing_law, key_dispositive_terms
+    - `INS-L2X-CTRNS-APA@v1` (Guid 0752f2f1-8c5f-f111-a825-70a8a59455f4) — fields: purchase_price, assets_acquired, buyer, seller, effective_date, escrow_terms, key_dispositive_terms
+    - `INS-L2X-IPPAT-PATAPP@v1` (Guid 9d6b3b0a-8d5f-f111-a825-70a8a59455f4) — fields: inventor_names, filing_date, application_number, priority_claim, technology_domain, abstract_summary
+    - `INS-L2X-IPPAT-OA@v1` (Guid 5dea3e22-8d5f-f111-a825-70a8a59455f4) — fields: action_type, response_due_date, rejections_summary, examiner, claims_affected, attorney_action_required
+    - `INS-L2X-BNKF-LOAN@v1` (Guid 25362a41-8d5f-f111-a825-70a8a59455f4) — fields: principal_amount, interest_rate, maturity_date, borrower, lender, collateral_summary, key_covenants
+
+    5 intersect `sprk_practicearea_documenttype` rows PATCHed to point at the new codes. CTRNS × NDA row (23941f9c-495f-f111-a825-70a8a59455f4) preserved at `sprk_layer2actioncode=NULL` per design-a3 §5.2 example 5 (canonical gate-fail).
+
+    Each JPS preserves the INS-L2X@v1 grounding contract (verbatim `evidence` quotes per scalar field, ADR-013) and `parameters.model=gpt-4o, temperature=0`. `metadata.derivedFrom="INS-L2X@v1"` + `metadata.practiceAreaScope` + `metadata.documentType` carry the lineage.
+
+    Acceptance criterion 2 (fixture verification) is deferred to Wave D7 (task 036 — synthetic test fixtures) which is the canonical fixture-authoring task; D3 produces schemas ready for D7's fixture-based smoke. Criteria 1 + 3 are satisfied empirically.
+
+    OPEN follow-up for Wave D-G3 (033 — universal-ingest per-area routing): `universal-ingest@v1` playbook must resolve `(practiceAreaHint + classification.document_type)` → `sprk_practicearea_documenttype.sprk_layer2actioncode` at runtime and dispatch via that action code. If `sprk_layer2actioncode IS NULL` (e.g., CTRNS × NDA), emit Layer-1-only Observation per design-a3 §2.5 step 4 (structured gate-fail).
+  </notes>
+</task>

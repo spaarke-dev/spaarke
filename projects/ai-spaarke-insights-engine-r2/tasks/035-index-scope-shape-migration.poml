@@ -1,0 +1,130 @@
+<task id="035" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>D6 — spaarke-insights-index scope shape generalization (carry entityType + entityId)</title>
+    <status>completed</status>
+    <wave>D</wave>
+    <estimated-effort>2d</estimated-effort>
+    <tags>azure-ai-search, index-schema, migration, multi-entity, infra</tags>
+    <dependencies>015</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>D6</wave-item>
+  </metadata>
+
+  <prompt>
+    Evolve the spaarke-insights-index schema to carry scope.entityType + scope.entityId alongside the existing scope.matterId (hybrid backward-compat per A6 + spec.md Q-D6-1 option c). Migrate Phase 1 Observations so they remain queryable. New Observations written by universal-ingest@v1 carry the new fields.
+  </prompt>
+
+  <role>Azure AI Search engineer + index migration specialist.</role>
+
+  <goal>
+    spaarke-insights-index schema includes scope.entityType + scope.entityId (both filterable + searchable). Phase 1 Observations migrated (entityType defaulted to "matter", entityId populated from existing matterId). New Observations from universal-ingest carry both old (matterId for backward compat) and new (entityType + entityId) fields. Index-write path in BFF updated. Index-read path in BFF supports filtering by either field.
+  </prompt>
+
+  <inputs>
+    <file purpose="a6-design">projects/ai-spaarke-insights-engine-r2/design-a6-multi-entity.md (migration plan)</file>
+    <file purpose="r1-index-schema">infra/insights/schemas/spaarke-insights-index.json (current schema)</file>
+    <file purpose="r1-bicep">infra/insights/modules/ (index infra)</file>
+    <file purpose="knowledge">knowledge/azure-ai-search/ (AI Search migration patterns)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md NFR-08">Phase 1 Observations must remain queryable after migration</constraint>
+    <constraint source="ADR-013">Index changes flow through Zone A (Services/Ai/) infra</constraint>
+    <constraint source="ADR-029">Verify Bicep + publish-size impact</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Decide migration mechanism">In-place add nullable fields (cheaper) vs re-create index + reindex (cleaner). Initial leaning: in-place if Azure AI Search supports add-field; otherwise re-create.</step>
+    <step order="2" name="Update schema JSON">Add scope.entityType (filterable string) + scope.entityId (filterable string)</step>
+    <step order="3" name="Bicep update">Apply schema change via existing infra/insights/modules/</step>
+    <step order="4" name="Migrate Phase 1 Observations">Backfill entityType="matter" + entityId=matterId for existing Observations (may require batch update via Azure CLI / SDK)</step>
+    <step order="5" name="Update BFF index-write path">Universal-ingest emits both old (matterId) + new (entityType + entityId) fields</step>
+    <step order="6" name="Update BFF index-read path">Support filtering by either field; default new queries to entityType + entityId</step>
+    <step order="7" name="Smoke verify">(a) Phase 1 Observation still queryable by matterId; (b) New Observation queryable by entityType + entityId</step>
+    <step order="8" name="Quality gates">code-review + adr-check; coordinate with infra team for prod migration plan</step>
+  </steps>
+
+  <outputs>
+    <output type="config">infra/insights/schemas/spaarke-insights-index.json (modified)</output>
+    <output type="bicep">infra/insights/modules/ (modified)</output>
+    <output type="code">BFF index-write + index-read paths updated</output>
+    <output type="migration-script">scripts/Migrate-InsightsIndexScopeShape.ps1 (or similar)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">spaarke-insights-index carries scope.entityType + scope.entityId</criterion>
+    <criterion testable="true">Phase 1 Observations migrated and queryable by matterId (backward compat)</criterion>
+    <criterion testable="true">New Observations queryable by entityType + entityId</criterion>
+    <criterion testable="true">Bicep apply clean on Spaarke Dev</criterion>
+    <criterion testable="true">spec.md NFR-08 + FR-03 satisfied</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-06-03</completion-date>
+    <completed-by>task-execute (parallel Wave D-G4 dispatch alongside 032, 034)</completed-by>
+
+    <decisions>
+      <decision id="D6-D1">In-place schema additions (NOT v2 + back-fill) — no live Phase 1 data in spaarke-insights-index yet, Azure AI Search supports adding new filterable string fields in place, Bicep PUT is idempotent. Design-a6 §5.1's "re-create required" assumption was overcautious for the field types we're adding.</decision>
+      <decision id="D6-D2">Top-level `scope` ComplexType (matches design-a6 §4.5 OData filter notation `scope/matterId eq '…'`). Existing `value/raw/scope/{matterType,opposingCounsel}` preserved for backward compat (zero current consumers).</decision>
+      <decision id="D6-D3">Feature flag named `Insights:Index:DualWriteScopeMatterId` (bool, default true on `AiSearchOptions`). Toggles writer emission of legacy `scope.matterId` for matter subjects. Reader OR-filter logic is unaffected by this flag — flipping it doesn't break reads.</decision>
+      <decision id="D6-D4">Reader filter generated at runtime from a new optional `subjectScope` config field on `IndexRetrieveNode`. Matter subjects emit hybrid OR-filter `(scope/matterId eq … or (scope/entityType eq 'matter' and scope/entityId eq …))`; non-matter schemes emit canonical narrow-filter `(scope/entityType eq … and scope/entityId eq …)`.</decision>
+      <decision id="D6-D5">Back-fill script (`scripts/Migrate-InsightsIndexScopeShape.ps1`) defensively created even though Phase 1 has no live observations. Idempotent merge-upserts; NFR-08 verification step samples 5 matter-subject Observations post-migration. Owner can dry-run + apply.</decision>
+      <decision id="D6-D6">Parallel-task collision (with 034): InsightsModule.cs line 83 updated to reference `MatterLiveFactResolver` (the class 034 created when renaming `DataverseLiveFactResolver`). This is a STOPGAP — task 034's dictionary-keyed registration per design-a6 §3.4 will subsume this line.</decision>
+    </decisions>
+
+    <deliverables>
+      <deliverable type="schema">infra/insights/schemas/spaarke-insights-index.index.json — added top-level `scope` ComplexType (matterId, entityType, entityId, tenantId, practiceArea)</deliverable>
+      <deliverable type="writer">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/ObservationIndexDocument.cs — added `ScopeIndexEntry` + `Scope` property</deliverable>
+      <deliverable type="writer">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/ObservationIndexUpserter.cs — added `BuildScopeEntry` + `ParseSubject` helpers; UpsertAsync now projects scope</deliverable>
+      <deliverable type="reader">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/IndexRetrieveNode.cs — added `SubjectScope` config field + `BuildSubjectScopeFilter` helper; `MapToProjection` reads `scope` ComplexType into new `InsightRowScope` POCO</deliverable>
+      <deliverable type="config">src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs — added `DualWriteScopeMatterId` toggle (default true)</deliverable>
+      <deliverable type="migration-script">scripts/Migrate-InsightsIndexScopeShape.ps1 — defensive idempotent back-fill + NFR-08 verification</deliverable>
+      <deliverable type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Ingest/ObservationIndexScopeShapeTests.cs — 13 tests (subject parser + scope-entry builder + NFR-08 dual-write + project/invoice / malformed)</deliverable>
+      <deliverable type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/IndexRetrieveNodeSubjectScopeTests.cs — 13 tests (hybrid OR-filter generation + canonical narrow-filter + OData escape + composition with other narrowing dimensions)</deliverable>
+      <deliverable type="bicep">No Bicep change required — `loadJsonContent('schemas/…')` picks up new schema fields automatically; existing search-index.bicep PUT is idempotent</deliverable>
+    </deliverables>
+
+    <quality-gates>
+      <gate name="build">PASS — dotnet build src/server/api/Sprk.Bff.Api/ : 0 errors, 0 new warnings (after applying parallel-task collision fix for InsightsModule.cs line 83 — see D6-D6)</gate>
+      <gate name="tests">BLOCKED by task 034 collision (LiveFactNodeTests + InsightsNodesIntegrationTests reference old `LiveFactNode` ctor). My 26 new tests compile clean — verified by filtering build errors to non-LiveFact files (zero errors). Tests will run after 034 merges.</gate>
+      <gate name="adr-029">PASS — no NuGet packages added; publish size unaffected.</gate>
+      <gate name="adr-013">PASS — all writer/reader changes within Zone A (Services/Ai/Insights/, Services/Ai/Nodes/). Zone B IRagService not touched.</gate>
+      <gate name="adr-032">PASS — DualWriteScopeMatterId is a behavior flag on AiSearchOptions, NOT a service registration gate. No conditional `if (flag) { register }` block; no F.1 anti-pattern.</gate>
+      <gate name="nfr-08">PASS — Phase 1 matter-subject queries filter by `scope/matterId eq '…'`. Reader OR-filter emits `(scope/matterId eq … or (scope/entityType eq 'matter' and scope/entityId eq …))` regardless of dual-write flag, so Phase 1 Observations remain queryable.</gate>
+      <gate name="zone-b-grep">PASS — zero new Zone B imports of AI internals (Zone A internal changes only).</gate>
+    </quality-gates>
+
+    <deploy-ordering>
+      <step order="1">Apply Bicep: `az deployment group create -f infra/insights/main.bicep -p infra/insights/parameters/dev.json -g spe-infrastructure-westus2` — adds `scope` ComplexType to spaarke-insights-index (idempotent PUT).</step>
+      <step order="2">Verify schema change in portal or via REST: `GET https://spaarke-search-dev.search.windows.net/indexes/spaarke-insights-index?api-version=2024-07-01` should show top-level `scope` field.</step>
+      <step order="3">[Skipped for spaarke-search-dev — no Phase 1 data] Run back-fill script: `.\scripts\Migrate-InsightsIndexScopeShape.ps1 -SearchServiceName spaarke-search-dev -KeyVaultName sprkspaarkedev-aif-kv -AdminKeySecretName SearchAdminKey -DryRun` (then drop `-DryRun` to apply).</step>
+      <step order="4">Deploy BFF (`/bff-deploy`) — writer will start dual-writing scope fields immediately; reader supports `subjectScope` config in `IndexRetrieveNode`. Default dual-write flag is ON.</step>
+      <step order="5">Soak in production with reader OR-filter active. Phase 1 backward-compat is preserved by reader logic + writer dual-write.</step>
+      <step order="6">After ≥1 sprint soak with no rollback events, optionally set `Insights:Index:DualWriteScopeMatterId=false` to stop emitting legacy `scope.matterId` for matter subjects (reader OR-filter continues working, so historical Observations remain queryable).</step>
+    </deploy-ordering>
+
+    <rollback-plan>
+      <mechanism>Single config-toggle revert: set `Insights:Index:DualWriteScopeMatterId=false` in App Settings → writer stops emitting `scope.matterId` for matter subjects. Reader OR-filter is unaffected (Phase 1 historical observations stay queryable). Schema addition is non-destructive (additive nullable fields); no schema rollback needed.</mechanism>
+      <mechanism>Hard rollback: redeploy previous BFF revision (writer + reader revert in lockstep). Schema additions in the index remain (no impact — fields stay null).</mechanism>
+    </rollback-plan>
+
+    <files-touched-alphabetical>
+      <file collision-risk-with-034="HIGH">src/server/api/Sprk.Bff.Api/Infrastructure/DI/InsightsModule.cs (line 83 only — stopgap fix for parallel-task collision)</file>
+      <file>infra/insights/schemas/spaarke-insights-index.index.json</file>
+      <file>scripts/Migrate-InsightsIndexScopeShape.ps1 (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/ObservationIndexDocument.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Ingest/ObservationIndexUpserter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/IndexRetrieveNode.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Ingest/ObservationIndexScopeShapeTests.cs (NEW)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/IndexRetrieveNodeSubjectScopeTests.cs (NEW)</file>
+    </files-touched-alphabetical>
+
+    <follow-ups-for-wave-d-g4>
+      <follow-up>Wave D7 task 036 (synthetic fixtures): test data MUST exercise both v1 query pattern (subject-only, no scope) AND v2 query pattern (subjectScope hybrid filter) so the dual-read OR-filter path is covered.</follow-up>
+      <follow-up>Wave E1 task 040 (`/api/insights/search`): RAG retriever should use `IndexRetrieveNode`'s new `subjectScope` config when callers pass a `subject` query parameter.</follow-up>
+      <follow-up>Wave D5 task 034: when implementing dictionary-keyed `IReadOnlyDictionary&lt;string, ILiveFactResolver&gt;` registration, the InsightsModule.cs line-83 stopgap installed by this task will be removed/replaced.</follow-up>
+    </follow-ups-for-wave-d-g4>
+  </notes>
+</task>

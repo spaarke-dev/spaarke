@@ -4,9 +4,8 @@ using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Telemetry;
-
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Jobs;
 

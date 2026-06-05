@@ -1,0 +1,315 @@
+<task id="041" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D3-02 Get Started welcome card "Summarize a Document"</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 3 — Polish + Future-Use Validation</phase>
+    <wave>P3-2 (parallel-safe with 042; depends on Phase 2 ✅)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Phase 2 (D2-* tasks: chat-pane file UX, `/summarize` slash command, upload dialog, `SessionSummarizeOrchestrator`)</dependencies>
+    <tags>frontend, widget, get-started, discoverability</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Add a "Summarize a Document" entry to the existing `GetStartedCardsWidget` catalog
+    so users discover the R5 chat-driven Summarize flow from the welcome-stage Context
+    pane — not only via the `/summarize` slash command in the chat input. Clicking the
+    card MUST open the file-upload dialog directly AND pre-fill the chat input with
+    `/summarize ` (with trailing space) so the user can immediately type qualifiers and
+    send, or send-with-empty-suffix to invoke the playbook. This is the discoverable
+    parallel entry to the slash command per design.md §3.2 / spec FR-19+.
+
+    This task is **REUSE-ONLY**: extend the existing `GetStartedCardsWidget` catalog
+    array; do NOT introduce a parallel welcome system, do NOT add a new shell stage,
+    do NOT add a new PaneEventBus channel. R5 reuse mandate (CLAUDE.md §3.1) and ADR-030
+    (4-channel close) bind. R5 also introduces NO new feature flag for this entry —
+    visibility derives from `useShellStage()` returning the welcome stage per ADR-031.
+
+    NO BFF code is changed by this task. BFF publish-size delta = 0 MB (confirm in
+    notes). Fluent UI v9 semantic tokens + dark mode required per ADR-021. React 19
+    only (ADR-022).
+  </prompt>
+
+  <role>
+    Senior frontend engineer with Fluent UI v9 + React 19 expertise and prior R3/R4
+    work on the SpaarkeAi Context pane. Familiar with `GetStartedCardsWidget`,
+    `ContextPaneController`, the `widget_load` PaneEventBus event flow, the
+    `useShellStage()` lifecycle hook (ADR-031), and the existing `/summarize` slash
+    command + chat-input pre-fill pathway shipped in Phase 2.
+  </role>
+
+  <goal>
+    The `GetStartedCardsWidget` catalog includes a "Summarize a Document" card visible
+    on the welcome stage of the Context pane. Activating the card (click, Enter, or
+    Space) does TWO things atomically: (1) opens the chat-pane file-upload dialog (the
+    same dialog Phase 2 wired for the `/summarize` slash command and chat-pane paperclip
+    affordance); (2) pre-fills the chat input with `/summarize ` (trailing space).
+    Visibility is conditional on `useShellStage() === welcome` per ADR-031 — the card
+    does NOT appear on non-welcome stages. Dark mode renders correctly (Fluent v9
+    semantic tokens only; no hex / rgba literals). Existing 7-card layout + arrow-key
+    navigation + tabbing + screen-reader announcement extend cleanly to the 8th card.
+    `code-review` + `adr-check` quality gates pass at Step 9.5. BFF publish-size delta
+    = 0 MB (confirmed in task notes).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="widget-to-extend">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/GetStartedCardsWidget.tsx</file>
+    <file purpose="consumer-wiring">src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</file>
+    <file purpose="actioncard-primitive">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx</file>
+    <file purpose="widgets-barrel">src/client/shared/Spaarke.AI.Widgets/src/index.ts</file>
+    <file purpose="event-types">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 reuse mandate (CLAUDE.md §3.1 + project CLAUDE.md §3.1)">MUST extend the existing `GetStartedCardsWidget` catalog; MUST NOT introduce a parallel welcome system, a parallel cards widget, a new shell stage, or a fork of `ContextPaneController` welcome-stage rendering.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens only. No hex literals, no rgba literals. Dark-mode rendering MUST be visually correct — verify via `prefers-color-scheme: dark` or shell theme toggle.</constraint>
+    <constraint source="ADR-022">React 19 only. Use hooks; no class components; no React 18-only APIs.</constraint>
+    <constraint source="ADR-025">All Fluent icons sourced from `@fluentui/react-icons` v9. Reuse `DocumentMultipleRegular` if appropriate or pick a v9 icon distinct from the existing "Summarize Files" card per design intent (a separate visual entry).</constraint>
+    <constraint source="ADR-028">No `accessToken` props or state in this widget. The widget invokes only the existing `onCardClick` callback; chat-pane handlers own auth.</constraint>
+    <constraint source="ADR-030">PaneEventBus closed at 4 channels. Adding the new card MUST NOT introduce a 5th channel. Existing event types (`widget_load`, additive R5 event types per project CLAUDE.md §3.4) are sufficient.</constraint>
+    <constraint source="ADR-031">Card visibility is gated by `useShellStage()` returning the welcome stage. The card MUST NOT render on non-welcome stages. Verify via the existing `ContextPaneController` welcome-stage branch — no new stage logic required.</constraint>
+    <constraint source="project CLAUDE.md §3.2">R5 introduces NO new feature flag for this card. Visibility derives from existing stage logic, not from a configuration toggle.</constraint>
+    <constraint source="spec NFR-07 / CLAUDE.md §10">BFF publish-size delta = 0 MB. No BFF code is changed. Confirm in task notes; do NOT run `dotnet publish` (frontend-only change).</constraint>
+    <constraint source="project">Click handler MUST open the chat-pane file upload dialog AND pre-fill the chat input with `/summarize ` (with trailing space). Both effects MUST be observable in a single user gesture.</constraint>
+    <constraint source="project">MUST NOT regress the existing 7-card `GetStartedCardsWidget` behavior — keyboard navigation (arrow keys + Enter/Space), 2-col-at-narrow / auto-fill-at-wide responsive grid, ARIA `role="grid"` + `role="gridcell"`, ActionCard primitive reuse, screen-reader card descriptions.</constraint>
+    <constraint source="project">Discoverable parallel entry — the card is an ADDITIVE discovery affordance for the same flow `/summarize` ships. Click semantics MUST mirror what typing `/summarize` followed by a paperclip click would do in the chat pane.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/get-started-cards</topic>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/context/GetStartedCardsWidget.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/index.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-tokens.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-030-panebus-channels.md</file>
+      <file>.claude/adr/ADR-031-shell-stage-lifecycle.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="GetStartedCards catalog extension" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/context/GetStartedCardsWidget.tsx">
+        Add an 8th entry to the frozen `CARDS` readonly array (lines ~163–206). New
+        entry shape: `{ id: 'summarize-document-chat', label: 'Summarize a Document',
+        description: 'Open chat, upload a document, generate an AI summary.', icon:
+        DocumentBulletListRegular }` (or another distinct Fluent v9 icon). Extend the
+        `GetStartedCardId` union type accordingly. Frozen array reference + per-card
+        stable click handlers continue to work unchanged.
+      </pattern>
+      <pattern name="onCardClick wiring in ContextPaneController" location="src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx">
+        Add a new `case 'summarize-document-chat':` branch to the existing
+        `onCardClick` switch in `ContextPaneController` (~line 571–620). The branch
+        dispatches: (a) the existing chat-pane upload-dialog open action (mirror what
+        the Phase 2 `/summarize` slash command + paperclip path uses — likely a
+        PaneEventBus `chat` channel event or a direct ConversationPane handle); (b)
+        the chat-input pre-fill with `/summarize ` (with trailing space) via the same
+        mechanism the slash-command menu uses when the user selects `/summarize` from
+        the menu. Inspect Phase 2 wiring in `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` and the slash command menu integration before authoring this branch.
+      </pattern>
+      <pattern name="useShellStage() visibility gate" location="src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx">
+        `GetStartedCardsWidget` is rendered ONLY when `useShellStage()` returns the
+        welcome stage per the existing `shellStageToContextStage()` mapping. The new
+        card inherits this gate automatically by being a catalog entry — no new
+        visibility logic is needed. Verify the welcome-stage render branch is the
+        only path that reaches the widget.
+      </pattern>
+      <pattern name="Dark-mode token discipline" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx">
+        `ActionCard` already handles all color tokens via `@fluentui/react-components`
+        v9 semantic tokens — extending the catalog entries does NOT require any new
+        style code, and the new card inherits the existing dark-mode-safe rendering.
+        Verify via the SpaarkeAi shell's theme toggle (or `prefers-color-scheme: dark`)
+        that the new card renders without hardcoded colors.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice in Phase 2. The
+      primary entry is the `/summarize` slash command in the chat input, paired with
+      the paperclip upload affordance. Phase 3 task 041 adds the DISCOVERABLE parallel
+      entry: a "Summarize a Document" card on the welcome-stage Context pane, alongside
+      the existing 7 Get Started cards shipped in R3 (FR-18 / FR-19). The card lowers
+      the discovery barrier for users who have not learned the slash command, and
+      reinforces the chat-pane file-upload UX as the canonical Summarize entry point.
+
+      The card differs from the existing R3 "Summarize Files" card (which targets the
+      legacy LegalWorkspace `document-upload-wizard` Workspace widget path): the R5
+      card targets the new chat-driven flow that uses `SessionSummarizeOrchestrator`,
+      `spaarke-session-files` index, and the `StructuredOutputStreamWidget`. Two
+      coexisting cards is intentional during R5 — Phase 3 / R6 may consolidate after
+      operator feedback.
+    </background>
+    <dependencies>
+      <dependency task="Phase 2 (D2-*)" status="required-complete">
+        Phase 2 must have shipped `/summarize` slash command wiring, file-upload
+        dialog, chat-input pre-fill mechanism, and `SessionSummarizeOrchestrator`
+        end-to-end. Card click reuses these existing Phase 2 mechanisms — task 041
+        does NOT build any of them.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>R3 task 041 (in `projects/spaarke-ai-platform-unification-r3/`) created
+        `GetStartedCardsWidget` with the original 7 cards (FR-18 / FR-19). R5 task 041
+        extends that catalog additively.</item>
+      <item>R5 task 042 (D3-03 Telemetry dashboards) is parallel-safe with this task
+        per TASK-INDEX P3-2.</item>
+      <item>Phase 2 wiring in `ConversationPane.tsx` + the slash-command menu defines
+        the chat-input pre-fill API surface this task consumes.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Declare RIGOR LEVEL: FULL per CLAUDE.md §8 (frontend code change in shared lib
+      + reuse-mandate-sensitive + dark-mode + ADR-031 stage gate). Output the
+      mandatory rigor declaration per project CLAUDE.md §4.1.
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 041 status is 🔲, wave is P3-2,
+      parallel-safe = true with 042, dependency is Phase 2 ✅. Read `current-task.md`
+      to verify no conflicting R5 task is in flight. Read project README for status.
+      Confirm Phase 2 deliverables (D2-*) are all ✅ — STOP if any are not.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract:
+      (a) the `CARDS` array shape + `GetStartedCardId` union type from
+      `GetStartedCardsWidget.tsx`; (b) the `onCardClick` switch from
+      `ContextPaneController.tsx` and the existing branches' dispatch semantics;
+      (c) the `ConversationPane.tsx` file-upload-dialog API + chat-input pre-fill
+      mechanism wired by Phase 2 for `/summarize`; (d) the `useShellStage()` welcome-
+      stage branch confirming where `GetStartedCardsWidget` is rendered; (e) the
+      ADR-031 lifecycle stage contract.
+    </step>
+    <step order="3" name="Locate Phase 2 chat-input pre-fill mechanism">
+      Search `src/solutions/SpaarkeAi/src/components/conversation/` and the slash
+      command menu code for the API that pre-fills the chat input with `/summarize `.
+      Confirm it is callable from `ContextPaneController` (or via a PaneEventBus event
+      type Phase 2 introduced). Document the exact mechanism + signature in task notes
+      so the new `case 'summarize-document-chat':` branch can call it correctly.
+    </step>
+    <step order="4" name="Extend GetStartedCardsWidget catalog">
+      In `src/client/shared/Spaarke.AI.Widgets/src/widgets/context/GetStartedCardsWidget.tsx`:
+      (a) extend the `GetStartedCardId` union type with `'summarize-document-chat'`;
+      (b) add an 8th frozen entry to the `CARDS` array with `label: 'Summarize a
+      Document'`, a description suitable for the ARIA label
+      (e.g. "Open chat, upload a document, and generate an AI summary."), and a
+      distinct Fluent v9 icon (e.g. `DocumentBulletListRegular`, `DocumentSparkleRegular`,
+      or `BotRegular` — pick one not already used by the existing 7 cards); (c)
+      preserve grid layout + arrow-key navigation behavior unchanged (the responsive
+      grid auto-handles the 8th card). Update the file's JSDoc header to reflect the
+      8-card catalog and reference R5 task 041.
+    </step>
+    <step order="5" name="Wire onCardClick branch in ContextPaneController">
+      In `src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx`,
+      add a new branch to the `onCardClick` switch:
+      ```
+      case 'summarize-document-chat':
+        // 1. Open chat-pane file upload dialog (Phase 2 mechanism)
+        // 2. Pre-fill chat input with '/summarize ' (trailing space)
+        break;
+      ```
+      Reuse the Phase 2 mechanisms identified in Step 3. The branch MUST NOT introduce
+      new PaneEventBus channels (ADR-030 closed at 4). It MAY use the additive R5
+      event types per project CLAUDE.md §3.4 if Phase 2 routes the upload dialog open
+      that way. Add a JSDoc comment on the branch citing R5 task 041 + spec FR
+      reference + design.md §3.2.
+    </step>
+    <step order="6" name="Verify welcome-stage visibility via useShellStage">
+      Inspect the `ContextPaneController` welcome-stage render branch and confirm:
+      (a) `GetStartedCardsWidget` is rendered only when `useShellStage()` returns the
+      welcome stage per ADR-031; (b) the new card is NOT visible on non-welcome stages
+      (it inherits the existing widget-level gate); (c) no new visibility logic is
+      added. Document the verification path in task notes — explicit trace from
+      `useShellStage()` value through `shellStageToContextStage()` to the welcome-stage
+      rendering of `GetStartedCardsWidget`.
+    </step>
+    <step order="7" name="Dark mode + Fluent v9 token verification">
+      Run the SpaarkeAi shell locally (or in the Code Pages dev harness), toggle dark
+      mode (shell theme toggle or `prefers-color-scheme: dark`), and confirm: (a) the
+      new card renders with correct semantic tokens (border, background, icon color,
+      label color); (b) no hex / rgba literals were introduced in this task's diff;
+      (c) the card's focus ring is visible in dark mode; (d) hover + active states
+      render correctly. Capture screenshot references in task notes. Verify the
+      existing 7 cards are visually unchanged (no regression).
+    </step>
+    <step order="8" name="Manual end-to-end smoke test">
+      In the SpaarkeAi shell on the welcome stage: (a) confirm the "Summarize a
+      Document" card renders alongside the existing 7 cards; (b) click the card and
+      verify the chat-pane file upload dialog opens AND the chat input is pre-filled
+      with `/summarize ` (with trailing space, cursor positioned after the space);
+      (c) confirm keyboard activation (Enter + Space) produces the same dual-effect;
+      (d) confirm Tab + arrow keys still navigate the now-8-card grid correctly;
+      (e) confirm screen-reader announces the card's ARIA label correctly; (f)
+      confirm card does NOT render on Conversation / Findings / Quick-start stages.
+      Capture screenshots / observations in task notes.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is testable +
+      passing. Record evidence per criterion in task notes. Confirm BFF publish-size
+      delta = 0 MB (no BFF code changed; no `dotnet publish` needed).
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the changed files (`GetStartedCardsWidget.tsx`,
+      `ContextPaneController.tsx`, and any Phase 2 mechanism imports updated). Run
+      `adr-check` skill against the changed files; verify ADR-021 (Fluent v9 tokens),
+      ADR-022 (React 19), ADR-025 (Fluent v9 icons), ADR-028 (no token snapshots —
+      N/A for this widget), ADR-030 (no new PaneEventBus channels), ADR-031
+      (`useShellStage()` gate). Both gates MUST pass before marking the task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 041 🔲 → ✅.
+      Reset `current-task.md` to the next pending task per CLAUDE.md §7. Record in
+      task notes: (a) the icon chosen + rationale; (b) the Phase 2 pre-fill mechanism
+      called; (c) dark-mode verification screenshot references; (d) BFF publish-size
+      delta = 0 MB (no BFF code changed); (e) confirmation that no new PaneEventBus
+      channel was added, no new feature flag was added, no parallel welcome system
+      was introduced. Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + lint the Spaarke.AI.Widgets shared lib + SpaarkeAi Code Page</tool>
+    <tool name="code-page-deploy">Skill — deploy the SpaarkeAi Code Page if local smoke test needs Dataverse-hosted environment</tool>
+    <tool name="git">Stage + commit the frontend changes on the R5 branch</tool>
+    <tool name="code-review">Skill — quality gate at Step 9.5</tool>
+    <tool name="adr-check">Skill — ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/GetStartedCardsWidget.tsx (extend catalog + union type)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx (add `summarize-document-chat` switch branch)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 041 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-041-implementation-evidence.md (Phase 2 mechanism identified, icon choice rationale, dark-mode screenshot references, smoke-test observations, ADR-030/031 verification trace, publish-size delta confirmation)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The "Summarize a Document" card is visible on the welcome stage of the SpaarkeAi Context pane, alongside the existing 7 Get Started cards.</criterion>
+    <criterion testable="true">The card is NOT visible on non-welcome stages — verified by trace from `useShellStage()` through `shellStageToContextStage()` to the welcome-stage render branch of `GetStartedCardsWidget` per ADR-031.</criterion>
+    <criterion testable="true">Clicking the card (or activating via Enter / Space) opens the chat-pane file-upload dialog AND pre-fills the chat input with `/summarize ` (with a trailing space). Both effects fire from a single user gesture.</criterion>
+    <criterion testable="true">Card click reuses the Phase 2 chat-input pre-fill mechanism and the Phase 2 file-upload dialog open mechanism — no new mechanism is introduced.</criterion>
+    <criterion testable="true">The `GetStartedCardId` union type is extended with `'summarize-document-chat'` and the frozen `CARDS` array contains an 8th entry with label "Summarize a Document".</criterion>
+    <criterion testable="true">Dark mode renders correctly — Fluent v9 semantic tokens only; no hex / rgba literals introduced in this task's diff; focus ring + hover + active states visible in dark mode.</criterion>
+    <criterion testable="true">Existing 7-card behavior is unchanged — keyboard arrow-key navigation, Tab activation, ARIA `role="grid"` + `role="gridcell"`, ActionCard primitive reuse, screen-reader card descriptions all extend cleanly to the 8th card.</criterion>
+    <criterion testable="true">No new PaneEventBus channel is added (ADR-030 closed at 4). No new feature flag is added (project CLAUDE.md §3.2). No parallel welcome system is introduced (R5 reuse mandate §3.1).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (no BFF code changed by this task — confirmed in task notes; no `dotnet publish` run).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>

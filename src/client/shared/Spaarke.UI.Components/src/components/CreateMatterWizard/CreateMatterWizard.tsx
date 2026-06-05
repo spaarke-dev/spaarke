@@ -27,11 +27,7 @@ import * as React from 'react';
 import { Button, Text, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
-import {
-  CreateRecordWizard,
-  type ICreateRecordWizardConfig,
-  type IFinishContext,
-} from '../CreateRecordWizard';
+import { CreateRecordWizard, type ICreateRecordWizardConfig, type IFinishContext } from '../CreateRecordWizard';
 
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
@@ -102,10 +98,7 @@ async function associateToRecord(
       await dataService.updateRecord('sprk_matter', matterId, {
         'sprk_Account@odata.bind': `/accounts(${recordId})`,
       });
-      console.info(
-        '[CreateMatterWizard] Account association set:',
-        `account(${recordId}) -> sprk_matter(${matterId})`
-      );
+      console.info('[CreateMatterWizard] Account association set:', `account(${recordId}) -> sprk_matter(${matterId})`);
       return { success: true };
     }
 
@@ -253,13 +246,13 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         id: 'create-record',
         label: 'Enter Info',
         canAdvance: () => step2Valid,
-        renderContent: (wizardFiles) => (
+        renderContent: wizardFiles => (
           <CreateRecordStep
             dataService={dataService}
-            uploadedFileNames={wizardFiles.map((f) => f.name)}
+            uploadedFileNames={wizardFiles.map(f => f.name)}
             uploadedFiles={wizardFiles}
             onValidChange={setStep2Valid}
-            onSubmit={(values) => setStep2FormValues(values)}
+            onSubmit={values => setStep2FormValues(values)}
             initialFormValues={step2FormValues}
             authenticatedFetch={authenticatedFetch}
             bffBaseUrl={bffBaseUrl}
@@ -281,9 +274,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         assignWorkPracticeAreaName: step2FormValuesRef.current.practiceAreaName,
       }),
 
-      resolveSpeContainerId: resolveSpeContainerId
-        ? resolveSpeContainerId
-        : () => Promise.resolve(''),
+      resolveSpeContainerId: resolveSpeContainerId ? resolveSpeContainerId : () => Promise.resolve(''),
 
       buildEmailSubject: (entityName: string) => `New Matter: ${entityName}`,
       buildEmailBody: (fields: Record<string, string>) => {
@@ -385,7 +376,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
             const message = err instanceof Error ? err.message : 'Unknown error';
             result.warnings.push(
               `Work assignment could not be created (${message}). ` +
-              'You can create it manually from the matter record.'
+                'You can create it manually from the matter record.'
             );
           }
         }
@@ -412,14 +403,13 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
             } else {
               result.warnings.push(
                 `Event could not be created (${eventResult.errorMessage ?? 'unknown error'}). ` +
-                'You can create it manually from the matter record.'
+                  'You can create it manually from the matter record.'
               );
             }
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Unknown error';
             result.warnings.push(
-              `Event could not be created (${message}). ` +
-              'You can create it manually from the matter record.'
+              `Event could not be created (${message}). ` + 'You can create it manually from the matter record.'
             );
           }
         }
@@ -428,15 +418,11 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         // If the user selected an association in step 1, create the link now.
         // This is a non-blocking operation -- failure produces a warning, not an error.
         if (context.association?.recordId) {
-          const assocResult = await associateToRecord(
-            dataService,
-            matterId,
-            context.association
-          );
+          const assocResult = await associateToRecord(dataService, matterId, context.association);
           if (!assocResult.success) {
             result.warnings.push(
               `Matter created, but could not link to "${context.association.recordName}". ` +
-              'You can associate them manually from the matter record.'
+                'You can associate them manually from the matter record.'
             );
           }
         }
@@ -456,50 +442,68 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
           body: (
             <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
               <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{matterName}&rdquo;</span>{' '}
-              has been created{hasWarnings ? ', though some follow-on actions could not complete. See details below.' : ' and is ready to use.'}
+              has been created
+              {hasWarnings
+                ? ', though some follow-on actions could not complete. See details below.'
+                : ' and is ready to use.'}
             </Text>
           ),
           actions: (
             <>
-              <Button appearance="primary" onClick={viewMatter} aria-label={`View matter: ${matterName}`}>View Matter</Button>
-              <Button appearance="secondary" onClick={onClose}>Close</Button>
+              <Button appearance="primary" onClick={viewMatter} aria-label={`View matter: ${matterName}`}>
+                View Matter
+              </Button>
+              <Button appearance="secondary" onClick={onClose}>
+                Close
+              </Button>
             </>
           ),
           warnings: result.warnings,
         };
       },
     }),
-    [step2Valid, step2FormValues, dataService, authenticatedFetch, bffBaseUrl, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, handleSearchMatterTypes, handleSearchPracticeAreas, onClose, navigationService, resolveSpeContainerId]
+    [
+      step2Valid,
+      step2FormValues,
+      dataService,
+      authenticatedFetch,
+      bffBaseUrl,
+      handleSearchContacts,
+      handleSearchOrganizations,
+      handleSearchUsers,
+      handleSearchMatterTypes,
+      handleSearchPracticeAreas,
+      onClose,
+      navigationService,
+      resolveSpeContainerId,
+    ]
   );
 
   // Adapt IDataService to the IWebApi shape that CreateRecordWizard expects
-  const webApiAdapter = React.useMemo(() => ({
-    createRecord: async (entityName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityName, data);
-      return { id };
-    },
-    retrieveRecord: (entityName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityName, id, options),
-    retrieveMultipleRecords: (entityName: string, options?: string, maxPageSize?: number) =>
-      dataService.retrieveMultipleRecords(entityName, options),
-    updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-      await dataService.updateRecord(entityName, id, data);
-      return { id };
-    },
-    deleteRecord: async (entityName: string, id: string) => {
-      await dataService.deleteRecord(entityName, id);
-      return { id };
-    },
-  }), [dataService]);
+  const webApiAdapter = React.useMemo(
+    () => ({
+      createRecord: async (entityName: string, data: Record<string, unknown>) => {
+        const id = await dataService.createRecord(entityName, data);
+        return { id };
+      },
+      retrieveRecord: (entityName: string, id: string, options?: string) =>
+        dataService.retrieveRecord(entityName, id, options),
+      retrieveMultipleRecords: (entityName: string, options?: string, _maxPageSize?: number) =>
+        dataService.retrieveMultipleRecords(entityName, options),
+      updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
+        await dataService.updateRecord(entityName, id, data);
+        return { id };
+      },
+      deleteRecord: async (entityName: string, id: string) => {
+        await dataService.deleteRecord(entityName, id);
+        return { id };
+      },
+    }),
+    [dataService]
+  );
 
   return (
-    <CreateRecordWizard
-      open={open}
-      onClose={onClose}
-      webApi={webApiAdapter}
-      config={config}
-      embedded={embedded}
-    />
+    <CreateRecordWizard open={open} onClose={onClose} webApi={webApiAdapter} config={config} embedded={embedded} />
   );
 };
 
