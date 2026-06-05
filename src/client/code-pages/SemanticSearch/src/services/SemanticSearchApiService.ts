@@ -9,7 +9,8 @@
  * @see types/index.ts — DocumentSearchRequest, DocumentSearchResponse
  */
 
-import { getBffBaseUrl, buildAuthHeaders, handleApiResponse } from './apiBase';
+import { authenticatedFetch } from '@spaarke/auth';
+import { getBffBaseUrl, handleApiResponse } from './apiBase';
 import type { DocumentSearchRequest, DocumentSearchResponse } from '../types';
 
 /**
@@ -21,12 +22,12 @@ import type { DocumentSearchRequest, DocumentSearchResponse } from '../types';
  * @throws Error on network failure or MSAL token acquisition failure
  */
 export async function search(request: DocumentSearchRequest): Promise<DocumentSearchResponse> {
-  const endpoint = `${getBffBaseUrl()}/api/ai/search`;
-  const headers = await buildAuthHeaders();
-
-  const response = await fetch(endpoint, {
+  // Canonical Spaarke auth pattern: authenticatedFetch attaches the Bearer token,
+  // guards against empty tokens, and retries 401s with cache invalidation.
+  // Do NOT replace with raw fetch() + buildAuthHeaders() — see backlog #9.
+  const response = await authenticatedFetch(`${getBffBaseUrl()}/api/ai/search`, {
     method: 'POST',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   });
 
