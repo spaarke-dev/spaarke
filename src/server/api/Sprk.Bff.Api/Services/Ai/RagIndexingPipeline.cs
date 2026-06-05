@@ -455,6 +455,13 @@ public sealed partial class RagIndexingPipeline
                 ChunkIndex = chunk.Index,
                 ChunkCount = chunks.Count,
                 ContentVector = i < embeddings.Count ? embeddings[i] : ReadOnlyMemory<float>.Empty,
+                // Initialize collection fields to empty (NOT null). Azure Search rejects
+                // null values for Collection(Edm.String) fields with default Nullable=False
+                // semantics — observed as a 400 on the spaarke-session-files index upload
+                // during R5 SC-18 walkthrough 2026-06-05. Existing customer-corpus indexes
+                // (knowledge/discovery) accept empty lists fine; this keeps the same
+                // behavior across all three target indexes.
+                Tags = Array.Empty<string>(),
                 CreatedAt = now,
                 UpdatedAt = now
             });
