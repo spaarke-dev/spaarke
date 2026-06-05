@@ -400,7 +400,6 @@ public sealed class InsightsActionRouter : IInsightsActionRouter
 
     /// <summary>
     /// Normalize a code value for cache keys + Dataverse equality: trim + upper.
-    /// Mirrors <c>ActionLookupService.GetCacheKey</c> casing semantics.
     /// </summary>
     private static string NormalizeCode(string code) => code.Trim().ToUpperInvariant();
 

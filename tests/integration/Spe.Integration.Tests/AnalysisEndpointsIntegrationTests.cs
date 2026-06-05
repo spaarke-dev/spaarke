@@ -735,9 +735,7 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IIntentClassificationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IEntityResolutionService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IClarificationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<ISemanticSearchService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IRecordSearchService>(MockBehavior.Loose).Object);
 
