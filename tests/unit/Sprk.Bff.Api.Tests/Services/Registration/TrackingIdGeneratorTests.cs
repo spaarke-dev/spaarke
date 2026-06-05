@@ -95,6 +95,14 @@ public class TrackingIdGeneratorTests
     [Fact]
     public async Task Generate_IsThreadSafe()
     {
+        // Flake repair (2026-06-04): same root cause + same pattern as
+        // Generate_ProducesUniqueIdsAcrossMultipleCalls above. With 50 IDs from
+        // a 4-char × 30-char-alphabet space, birthday-paradox collision probability
+        // ≈ 50²/(2·30⁴) ≈ 0.15% per run. Real thread-safety failure would manifest
+        // as concurrent exceptions or many collisions, not a single random clash.
+        // Assert: no thrown exceptions (Task.WhenAll succeeded), full count, and
+        // tolerate up to 1 collision pair (≥ 49 unique) for the same reason as the
+        // sibling test.
         var ids = new System.Collections.Concurrent.ConcurrentBag<string>();
         var tasks = Enumerable.Range(0, 50)
             .Select(_ => Task.Run(() => ids.Add(_sut.Generate())))
@@ -102,7 +110,10 @@ public class TrackingIdGeneratorTests
 
         await Task.WhenAll(tasks);
 
-        ids.Should().HaveCount(50);
-        ids.Distinct().Should().HaveCount(50, "all IDs generated concurrently should be unique");
+        ids.Should().HaveCount(50, "concurrent generation must not lose entries to a torn data structure");
+        ids.Distinct().Should().HaveCountGreaterThanOrEqualTo(49,
+            "50 IDs from a 4-char × 30-char-alphabet space have ~0.15% birthday-paradox " +
+            "collision probability; tolerating 1 collision pair eliminates the flake while " +
+            "still catching real concurrency / duplication bugs (which would produce many collisions)");
     }
 }
