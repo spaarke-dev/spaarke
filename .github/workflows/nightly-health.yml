@@ -1,0 +1,426 @@
+name: nightly-health
+
+# Nightly health checks for the Spaarke repo. Runs on master, reports to a
+# tracking issue. Catches problems that the per-PR SDAP CI doesn't surface:
+#   - flake-hunt:    runs unit tests 3x sequentially; flags tests that didn't
+#                    pass all 3 runs (intermittent failures = flakes)
+#   - bundle-size:   builds key client artifacts; flags >10% size regressions
+#                    vs the recorded baseline in .github/baseline-bundle-sizes.json
+#   - vuln-scan:     dotnet list package --vulnerable + npm audit per client pkg
+#
+# Reports as a single rolling issue titled "Nightly Health — YYYY-MM-DD".
+# Failures stay open; clean nights close it. No Slack/Teams bridge by design.
+#
+# Operator notes:
+#   - To temporarily silence a specific flake: add a [Trait("Category","Flaky")]
+#     on the test and rerun nightly. The flake-hunt step will skip Flaky-tagged
+#     tests in its triple-run analysis.
+#   - To update the bundle-size baseline after an intentional bundle change:
+#     workflow_dispatch this with update_baseline=true.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # daily 06:00 UTC (~02:00 ET, ~23:00 PT prev day)
+  workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: 'Update .github/baseline-bundle-sizes.json with current sizes (commit to master)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # for optional baseline update commit
+  issues: write     # for tracking issue
+  pull-requests: read
+
+concurrency:
+  group: nightly-health
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # -------------------------------------------------------------------------
+  # flake-hunt: run unit tests 3x; surface any test that didn't pass all 3
+  # -------------------------------------------------------------------------
+  flake-hunt:
+    name: Flake hunt (3x unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      flakes_found: ${{ steps.analyze.outputs.flakes_found }}
+      flake_summary: ${{ steps.analyze.outputs.flake_summary }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore + build
+        run: |
+          dotnet restore
+          dotnet build -c Release --no-restore
+
+      - name: Run unit tests 3x
+        run: |
+          set +e  # don't abort on test failure
+          mkdir -p flake-runs
+          for run in 1 2 3; do
+            echo "::group::Run $run / 3"
+            dotnet test tests/unit/Sprk.Bff.Api.Tests/ \
+              -c Release --no-build \
+              --filter "Category!=Flaky" \
+              --logger "trx;LogFileName=flake-run-${run}.trx" \
+              --results-directory flake-runs/ \
+              || echo "Run $run had test failures (expected for flake hunt)"
+            echo "::endgroup::"
+          done
+
+      - name: Analyze for flakes
+        id: analyze
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Parse the 3 TRX files; identify tests that PASSED in some runs and FAILED in others
+          python3 <<'PY'
+          import xml.etree.ElementTree as ET
+          import json
+          import os
+          from collections import defaultdict
+          from pathlib import Path
+
+          runs = {}
+          for trx in sorted(Path("flake-runs").glob("flake-run-*.trx")):
+              tree = ET.parse(trx)
+              ns = {"x": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+              run_id = trx.stem
+              outcomes = {}
+              for r in tree.findall(".//x:UnitTestResult", ns):
+                  name = r.get("testName") or ""
+                  outcome = r.get("outcome") or "Unknown"
+                  outcomes[name] = outcome
+              runs[run_id] = outcomes
+
+          if not runs:
+              print("::warning::No TRX files found; skipping flake analysis")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write("flakes_found=0\nflake_summary=No TRX files found\n")
+              raise SystemExit(0)
+
+          all_tests = set()
+          for outcomes in runs.values():
+              all_tests.update(outcomes.keys())
+
+          flakes = []
+          for test in sorted(all_tests):
+              results = [runs[r].get(test, "NotRun") for r in runs]
+              passed = sum(1 for r in results if r == "Passed")
+              failed = sum(1 for r in results if r == "Failed")
+              if passed > 0 and failed > 0:
+                  flakes.append({"name": test, "runs": results})
+
+          summary_lines = []
+          if flakes:
+              summary_lines.append(f"Found {len(flakes)} flaky test(s):")
+              for f in flakes[:30]:  # cap at 30 to avoid issue body length issues
+                  summary_lines.append(f"- `{f['name']}` runs={'/'.join(f['runs'])}")
+              if len(flakes) > 30:
+                  summary_lines.append(f"...and {len(flakes) - 30} more")
+          else:
+              summary_lines.append("No flakes detected ✅")
+
+          summary = "\n".join(summary_lines)
+          # Escape for GITHUB_OUTPUT (multi-line)
+          delimiter = f"NIGHTLY_FLAKE_EOF_{os.urandom(4).hex()}"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"flakes_found={len(flakes)}\n")
+              f.write(f"flake_summary<<{delimiter}\n{summary}\n{delimiter}\n")
+          PY
+
+      - name: Upload TRX artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-trx
+          path: flake-runs/
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # bundle-size: build key client artifacts, check vs baseline
+  # -------------------------------------------------------------------------
+  bundle-size:
+    name: Bundle size drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      drift_summary: ${{ steps.measure.outputs.drift_summary }}
+      regressions_found: ${{ steps.measure.outputs.regressions_found }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build SemanticSearch Code Page
+        run: |
+          cd src/client/code-pages/SemanticSearch
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+          pwsh -File build-webresource.ps1 || powershell -File build-webresource.ps1 || true
+          ls -la out/ || true
+
+      - name: Build CreateMatterWizard solution
+        run: |
+          cd src/solutions/CreateMatterWizard
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+          ls -la dist/ || true
+
+      - name: Measure + compare to baseline
+        id: measure
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASELINE=".github/baseline-bundle-sizes.json"
+          THRESHOLD_PCT=10
+
+          declare -A current
+          current["SemanticSearch_code_page"]=$(stat -c%s src/client/code-pages/SemanticSearch/out/sprk_semanticsearch.html 2>/dev/null || echo 0)
+          current["CreateMatterWizard_solution"]=$(stat -c%s src/solutions/CreateMatterWizard/dist/index.html 2>/dev/null || echo 0)
+
+          summary=""
+          regressions=0
+
+          if [ ! -f "$BASELINE" ]; then
+            echo "::warning::Baseline file $BASELINE missing; nothing to compare against"
+            summary="No baseline file ($BASELINE) — to seed, workflow_dispatch with update_baseline=true."
+          else
+            for key in "${!current[@]}"; do
+              cur=${current[$key]}
+              base=$(jq -r --arg k "$key" '.[$k] // empty' "$BASELINE")
+              if [ -z "$base" ] || [ "$base" = "null" ]; then
+                summary+=$'\n'"⚠️ \`$key\`: $cur bytes (no baseline)"
+                continue
+              fi
+              if [ "$cur" -eq 0 ]; then
+                summary+=$'\n'"❌ \`$key\`: build produced no artifact"
+                regressions=$((regressions+1))
+                continue
+              fi
+              # Compute pct change
+              pct=$(( (cur - base) * 100 / base ))
+              abs_pct=${pct#-}
+              if [ "$abs_pct" -ge "$THRESHOLD_PCT" ]; then
+                arrow="🔺"; [ "$pct" -lt 0 ] && arrow="🔻"
+                summary+=$'\n'"$arrow \`$key\`: $cur bytes vs baseline $base (${pct}%)"
+                regressions=$((regressions+1))
+              else
+                summary+=$'\n'"✅ \`$key\`: $cur bytes (within ±${THRESHOLD_PCT}% of baseline)"
+              fi
+            done
+          fi
+
+          # Optional baseline update on workflow_dispatch
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.update_baseline }}" = "true" ]; then
+            echo "Updating baseline..."
+            python3 -c "
+          import json, os
+          data = {}
+          for k, v in [('SemanticSearch_code_page', $(echo ${current[SemanticSearch_code_page]})), ('CreateMatterWizard_solution', $(echo ${current[CreateMatterWizard_solution]}))]:
+              data[k] = v
+          with open('$BASELINE', 'w') as f:
+              json.dump(data, f, indent=2)
+              f.write('\n')
+          "
+            git config user.name "nightly-health-bot"
+            git config user.email "noreply@spaarke.com"
+            git add "$BASELINE"
+            git commit -m "chore(ci): update bundle-size baseline (nightly-health)" || true
+            git push || true
+            summary+=$'\n'$'\n'"📌 Baseline updated and committed."
+          fi
+
+          # Emit multi-line output
+          delimiter="DRIFT_EOF_$RANDOM"
+          {
+            echo "regressions_found=$regressions"
+            echo "drift_summary<<$delimiter"
+            echo "$summary"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
+  # -------------------------------------------------------------------------
+  # vuln-scan: dotnet + npm audit
+  # -------------------------------------------------------------------------
+  vuln-scan:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      vuln_summary: ${{ steps.scan.outputs.vuln_summary }}
+      high_or_critical: ${{ steps.scan.outputs.high_or_critical }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: dotnet vulnerable scan
+        id: dotnet_vuln
+        shell: bash
+        run: |
+          set +e
+          dotnet restore > /dev/null
+          out=$(dotnet list package --vulnerable --include-transitive 2>&1)
+          echo "$out" > dotnet-vuln.txt
+          high=$(echo "$out" | grep -c "High" || true)
+          crit=$(echo "$out" | grep -c "Critical" || true)
+          echo "dotnet_high=$high" >> "$GITHUB_OUTPUT"
+          echo "dotnet_crit=$crit" >> "$GITHUB_OUTPUT"
+
+      - name: npm audit (key client packages)
+        id: npm_vuln
+        shell: bash
+        run: |
+          set +e
+          total_high=0; total_crit=0
+          for pkg in src/client/code-pages/SemanticSearch src/solutions/CreateMatterWizard src/client/shared/Spaarke.UI.Components; do
+            if [ -f "$pkg/package.json" ]; then
+              cd "$pkg"
+              if [ -f package-lock.json ]; then
+                json=$(npm audit --omit=dev --json 2>/dev/null || true)
+                h=$(echo "$json" | jq -r '.metadata.vulnerabilities.high // 0' 2>/dev/null || echo 0)
+                c=$(echo "$json" | jq -r '.metadata.vulnerabilities.critical // 0' 2>/dev/null || echo 0)
+                total_high=$((total_high + h))
+                total_crit=$((total_crit + c))
+              fi
+              cd - > /dev/null
+            fi
+          done
+          echo "npm_high=$total_high" >> "$GITHUB_OUTPUT"
+          echo "npm_crit=$total_crit" >> "$GITHUB_OUTPUT"
+
+      - name: Compose summary
+        id: scan
+        shell: bash
+        run: |
+          dh=${{ steps.dotnet_vuln.outputs.dotnet_high }}
+          dc=${{ steps.dotnet_vuln.outputs.dotnet_crit }}
+          nh=${{ steps.npm_vuln.outputs.npm_high }}
+          nc=${{ steps.npm_vuln.outputs.npm_crit }}
+          total=$((dh + dc + nh + nc))
+
+          summary="dotnet: High=$dh Critical=$dc / npm: High=$nh Critical=$nc"
+          if [ "$total" -gt 0 ]; then
+            summary+=$'\n'"See workflow logs for package details."
+          else
+            summary+=$'\n'"No HIGH or CRITICAL vulnerabilities ✅"
+          fi
+
+          delimiter="VULN_EOF_$RANDOM"
+          {
+            echo "high_or_critical=$total"
+            echo "vuln_summary<<$delimiter"
+            echo "$summary"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
+  # -------------------------------------------------------------------------
+  # report: create/update single tracking issue
+  # -------------------------------------------------------------------------
+  report:
+    name: Update tracking issue
+    needs: [flake-hunt, bundle-size, vuln-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Compose + post report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FLAKE_SUMMARY: ${{ needs.flake-hunt.outputs.flake_summary }}
+          FLAKES_FOUND: ${{ needs.flake-hunt.outputs.flakes_found }}
+          DRIFT_SUMMARY: ${{ needs.bundle-size.outputs.drift_summary }}
+          REGRESSIONS_FOUND: ${{ needs.bundle-size.outputs.regressions_found }}
+          VULN_SUMMARY: ${{ needs.vuln-scan.outputs.vuln_summary }}
+          HIGH_OR_CRITICAL: ${{ needs.vuln-scan.outputs.high_or_critical }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          today=$(date -u +%Y-%m-%d)
+          title="Nightly Health — $today"
+
+          # Status emoji
+          status="✅"
+          if [ "${FLAKES_FOUND:-0}" -gt 0 ] || [ "${REGRESSIONS_FOUND:-0}" -gt 0 ] || [ "${HIGH_OR_CRITICAL:-0}" -gt 0 ]; then
+            status="⚠️"
+          fi
+
+          body=$(cat <<EOF
+          # ${status} Nightly Health Report — ${today}
+
+          Workflow run: [#${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ## Flake hunt (unit tests 3x)
+          - Flakes found: **${FLAKES_FOUND:-?}**
+
+          ${FLAKE_SUMMARY:-(no summary)}
+
+          ## Bundle size drift
+          - Regressions: **${REGRESSIONS_FOUND:-?}** (threshold: ±10% vs baseline)
+
+          ${DRIFT_SUMMARY:-(no summary)}
+
+          ## Vulnerability scan
+          - HIGH/CRITICAL: **${HIGH_OR_CRITICAL:-?}**
+
+          ${VULN_SUMMARY:-(no summary)}
+
+          ---
+          _Generated by \`.github/workflows/nightly-health.yml\`. Each night a new comment is appended; the issue stays open until a clean night._
+          EOF
+          )
+
+          # Find or create the tracking issue for today
+          existing=$(gh issue list --search "$title in:title" --state open --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1 || echo "")
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "Appended to issue #$existing"
+          else
+            # Look for any open Nightly Health issue (last few days) to consolidate
+            old=$(gh issue list --search "Nightly Health in:title" --state open --json number,title --jq '.[0].number' || echo "")
+            if [ -n "$old" ] && [ "$old" != "null" ]; then
+              gh issue edit "$old" --title "$title"
+              gh issue comment "$old" --body "$body"
+              echo "Updated rolling issue #$old"
+            else
+              gh issue create --title "$title" --body "$body" --label "nightly-health"
+              echo "Created new tracking issue"
+            fi
+          fi
+
+          # Close the issue automatically if everything was clean
+          if [ "$status" = "✅" ]; then
+            issue=$(gh issue list --search "Nightly Health in:title" --state open --json number --jq '.[0].number' || echo "")
+            if [ -n "$issue" ] && [ "$issue" != "null" ]; then
+              gh issue close "$issue" --comment "All checks clean ✅ — closing."
+            fi
+          fi
