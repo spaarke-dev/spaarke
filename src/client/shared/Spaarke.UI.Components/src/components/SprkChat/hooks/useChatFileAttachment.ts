@@ -55,6 +55,17 @@ export interface ChatAttachment {
   filename: string;
   contentType: string;
   textContent: string;
+  /**
+   * Original File reference, retained for binary-upload paths (R5 task 036 —
+   * POST /documents requires multipart binary, not extracted text).
+   *
+   * OPTIONAL + ADDITIVE: existing consumers that only read filename /
+   * contentType / textContent are unaffected. Hosts implementing binary
+   * promotion (e.g. ConversationPane's `executeSummarizeIntent`) should
+   * prefer this field over reconstructing a synthetic File from textContent
+   * because PDF/DOCX bytes do NOT round-trip through extracted text.
+   */
+  file?: File;
 }
 
 /**
@@ -70,6 +81,16 @@ export interface AttachmentChip {
   status: AttachmentChipStatus;
   textContent?: string;
   error?: string;
+  /**
+   * Original File reference, retained for binary-upload paths (R5 task 036 —
+   * POST /documents requires multipart binary, not extracted text).
+   *
+   * Populated during `addFiles` when the chip is created. The File reference
+   * remains readable even after `pdfjs` / `mammoth` consume the
+   * `arrayBuffer()` — browser File objects are reference-counted Blobs and
+   * the underlying bytes stay available for re-reads (e.g. multipart upload).
+   */
+  file?: File;
 }
 
 export type AttachmentChipStatus = 'extracting' | 'ready' | 'error';
@@ -394,12 +415,20 @@ export function useChatFileAttachment(options: UseChatFileAttachmentOptions = {}
         }
 
         // Accept — create chip in `extracting` state.
+        //
+        // R5 task 036: retain the original File on the chip so downstream
+        // binary-upload paths (e.g. ConversationPane `executeSummarizeIntent`
+        // → POST /documents) can re-read the bytes. Extraction below also
+        // reads `file.arrayBuffer()` / `file.text()` but those calls do NOT
+        // invalidate the File — browser File objects are reference-counted
+        // Blobs and remain readable across calls.
         const chip: AttachmentChip = {
           id: idFactoryRef.current(),
           filename: file.name,
           sizeBytes: file.size,
           mimeType,
           status: 'extracting',
+          file,
         };
         newChips.push(chip);
         acceptedForExtraction.push(chip);
@@ -534,12 +563,18 @@ export function useChatFileAttachment(options: UseChatFileAttachmentOptions = {}
 
   // Derive `attachments` from chips with `status === 'ready'`. Cheap O(n)
   // filter; the alternative (separate state) would invite drift.
+  //
+  // R5 task 036: forward the retained File reference so downstream binary-
+  // upload paths (e.g. `executeSummarizeIntent` → POST /documents) can post
+  // the original bytes rather than a synthetic File reconstructed from
+  // extracted text (which fails for PDF/DOCX BFF Document Intelligence).
   const attachments: ChatAttachment[] = files
     .filter(chip => chip.status === 'ready' && chip.textContent !== undefined)
     .map(chip => ({
       filename: chip.filename,
       contentType: chip.mimeType,
       textContent: chip.textContent ?? '',
+      file: chip.file,
     }));
 
   return {

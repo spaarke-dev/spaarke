@@ -1,0 +1,172 @@
+<task id="038" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>P2-CLOSEOUT-07 Register existing StructuredOutputStreamWidget as a Workspace-pane "Summary" tab in SpaarkeAi + auto-focus on streaming_started</title>
+    <status>🔲</status>
+    <status-note>Closeout task added 2026-06-05 after SC-18 walkthrough cycle 4. Verified 2026-06-05: the StructuredOutputStreamWidget already EXISTS (task 017 ✅) and correctly subscribes to `workspace.streaming_*` PaneEventBus events. It is NOT registered as a tab in the SpaarkeAi Workspace pane, which is why the operator saw the summary stream into the chat pane instead of the workspace pane during the SC-18 cycle-4 retry. This task is registration + auto-focus only — NO widget development needed.</status-note>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>TBD</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>TBD</started>
+    <completed>TBD</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration (CLOSEOUT)</phase>
+    <wave>P2-G10-CLOSEOUT (parallel-safe with 037; depends on 036)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>036 (provides PaneEventBus publisher); 017 (StructuredOutputStreamWidget already built ✅)</dependencies>
+    <tags>spaarke-ai, frontend, widgets, workspace-pane, registration, closeout</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    The R5 Workspace-pane structured-output widget already exists
+    (`StructuredOutputStreamWidget` at
+    `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/`, built in
+    R5 task 017) and correctly subscribes to `workspace.streaming_started`,
+    `workspace.field_delta`, and `workspace.streaming_complete` PaneEventBus
+    events.
+
+    What is MISSING is registration of this widget as a tab in the SpaarkeAi
+    Workspace pane (which currently shows Calendar / Daily Briefing /
+    Documents / Smart To Do List tabs per the 2026-06-05 SC-18 walkthrough
+    screenshot). The operator observed the summary streaming into the chat
+    pane instead of the workspace pane — this is because no workspace
+    widget was subscribed to receive the events.
+
+    Implementation:
+
+    1. **Register the widget as a Workspace-pane tab labeled "Summary"** in
+       the SpaarkeAi shell's workspace pane controller. Locate the
+       workspace-pane registration site (likely
+       `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePaneController.tsx`
+       or similar; if naming differs, find via Grep on the tab labels
+       "Daily Briefing" / "Smart To Do List").
+
+    2. **Wire correlation propagation** — the StructuredOutputStreamWidget
+       accepts an optional `correlationId` prop (per its existing API, see
+       lines ~205+ of StructuredOutputStreamWidget.tsx). Pass the active
+       chat sessionId as the correlationId so the widget only renders
+       events for the current session.
+
+    3. **Auto-focus the Summary tab when streaming_started fires** — add a
+       lightweight effect at the WorkspacePaneController level (or wherever
+       the tab-selection state lives) that subscribes to
+       `workspace.streaming_started` events and switches the active tab to
+       "Summary" when one fires for the active correlationId. Do NOT
+       auto-focus on every event — only on `streaming_started` (the
+       summary just began). The user can still manually click back to
+       another tab if they want.
+
+    4. **Idle-state behavior** — when no streaming is in progress, the
+       Summary tab renders the StructuredOutputStreamWidget's empty state
+       (it already implements one — see its widget source). Tab remains
+       clickable; user is not forced away.
+
+    5. **Tab ordering** — place "Summary" as the FIRST tab (leftmost) so it's
+       the default-visible tab. The next-most-relevant tabs (Daily Briefing,
+       Documents, Calendar, Smart To Do List) follow in their existing order.
+
+    6. **Visual tab icon** — use a Fluent v9 icon appropriate for "summary"
+       (DocumentBulletList, TextSummary, or similar — check the Fluent v9
+       icon catalog). Match the icon-style of existing tabs.
+
+    Tests (Vitest + React Testing Library):
+      - Workspace pane renders 5 tabs in order: Summary, Calendar, Daily
+        Briefing, Documents, Smart To Do List.
+      - Summary tab is the default-visible tab on shell mount.
+      - When `workspace.streaming_started` event fires with the active
+        correlationId, the tab strip auto-focuses Summary (if not already
+        active).
+      - Manual click on a different tab while streaming is in progress
+        is RESPECTED (no forced refocus on subsequent field_delta events;
+        only initial streaming_started auto-focuses).
+      - When correlationId changes (new session), the auto-focus behavior
+        resets — next streaming_started in the new session triggers it again.
+      - Mismatched correlationId streaming_started events do NOT trigger
+        auto-focus.
+
+    Out of scope:
+      - Widget development (StructuredOutputStreamWidget already exists per
+        task 017).
+      - Backend changes.
+      - New widgets for other AI outputs (Insights response renderer is
+        owned by tasks 026 + 027; out of scope here).
+      - Workspace-pane layout refactor (Wave-D R6 backlog if needed).
+
+    Acceptance: after this task ships, when the operator triggers Summarize
+    via task 036's deterministic intent flow, the structured output
+    (TL;DR / Summary / Keywords / Entities) streams into the Workspace
+    pane's "Summary" tab — NOT into the chat pane. This closes the cycle-4
+    SC-18 UX gap ("the summary went to the chat pane instead of the
+    workspace pane as I would expect").
+  </prompt>
+
+  <context>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/task-036-design-2026-06-05.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-dark-mode.md</file>
+      <file>.claude/adr/ADR-030-pane-eventbus-channels.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint>R5 reuse mandate (spec §2.11): use the EXISTING StructuredOutputStreamWidget — do NOT create a new widget.</constraint>
+    <constraint>ADR-030: events used (`workspace.streaming_*`) are additive within an existing channel per task 016; this task adds NO new channels and NO new event types.</constraint>
+    <constraint>ADR-021 Fluent v9: tab styling uses semantic tokens; dark-mode tested.</constraint>
+    <constraint>Auto-focus triggers ONLY on `streaming_started` events for the active correlationId — never on field_delta or streaming_complete (those flow into the already-active tab).</constraint>
+    <constraint>User can override auto-focus by clicking another tab; subsequent field_delta events MUST NOT pull focus back.</constraint>
+    <constraint>Tab ordering: Summary is FIRST (default tab); existing tabs follow in their current order.</constraint>
+    <constraint>ADR-028 client contract: registration uses the existing widget's API; no token snapshots, no authenticatedFetch wiring (the widget is a pure subscriber).</constraint>
+  </constraints>
+
+  <steps>
+    <step>Verify task 036 is complete + merged (events being published). If not, BLOCK on 036.</step>
+    <step>Read StructuredOutputStreamWidget.tsx and its register-* sibling to understand the registration signature (lines ~205+ for correlationId prop; lines ~879+ for subscription).</step>
+    <step>Locate the SpaarkeAi WorkspacePaneController (Grep on "Daily Briefing" tab label or "Smart To Do List" tab label to find the registration site).</step>
+    <step>Read the WorkspacePaneController to understand: the existing tab definition shape, the active-tab state mechanism, the icon convention.</step>
+    <step>Add a "Summary" tab as the FIRST entry; mount StructuredOutputStreamWidget with correlationId={activeChatSessionId}.</step>
+    <step>Add auto-focus effect: subscribe to `workspace.streaming_started` events; if event correlation matches active session AND user has not manually overridden in the current streaming cycle, switch active tab to "Summary".</step>
+    <step>Implement user-override tracking: a ref or state that flips to "manual" when the user clicks a different tab during an active stream; resets on streaming_complete.</step>
+    <step>Write tests: 5 tabs in order, default-visible Summary tab, auto-focus on streaming_started, manual override respected, correlationId mismatch ignored.</step>
+    <step>Build @spaarke/ai-widgets (if any export change) + SpaarkeAi shell — verify 0 errors.</step>
+    <step>Run frontend test suites — verify 0 regressions.</step>
+    <step>Local smoke test: trigger summarize via task 036's flow against deployed BFF; verify summary appears in Workspace → Summary tab and tab auto-focuses. Capture screenshot.</step>
+    <step>Deploy SpaarkeAi shell to Spaarke Dev per code-page-deploy skill.</step>
+    <step>Commit with conventional message.</step>
+    <step>Update TASK-INDEX.md status 🔲 → ✅.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Workspace pane has 5 tabs in order: Summary (first), Calendar, Daily Briefing, Documents, Smart To Do List.</criterion>
+    <criterion>Summary tab is the default-visible tab on shell mount.</criterion>
+    <criterion>Summary tab mounts the existing StructuredOutputStreamWidget with correlationId set to the active chat sessionId.</criterion>
+    <criterion>When `workspace.streaming_started` fires with the active correlationId, the workspace pane auto-focuses the Summary tab (if not already active).</criterion>
+    <criterion>Manual click on a different tab during an active stream is RESPECTED — subsequent field_delta events do NOT pull focus back.</criterion>
+    <criterion>Correlation isolation: streaming_started events with mismatched correlationId do NOT trigger auto-focus.</criterion>
+    <criterion>Auto-focus override resets on streaming_complete (next streaming_started can again auto-focus).</criterion>
+    <criterion>No new widget created; no widget code modified.</criterion>
+    <criterion>No new PaneEventBus event types introduced.</criterion>
+    <criterion>All new tests pass; 0 regressions.</criterion>
+    <criterion>Bundle-size delta &lt; 5 KB for SpaarkeAi shell (registration is small).</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>Modified file: SpaarkeAi workspace-pane controller (registration + auto-focus effect)</output>
+    <output>Modified file: tests for the workspace-pane controller (5 tabs, auto-focus behavior)</output>
+    <output>New file: projects/spaarke-ai-platform-unification-r5/notes/task-038-evidence.md (screenshot + bundle delta)</output>
+    <output>TASK-INDEX.md row 038 flipped 🔲 → ✅</output>
+  </outputs>
+</task>
