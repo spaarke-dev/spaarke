@@ -8,6 +8,203 @@
 
 ## Active Referrals
 
+### 11. Production builds are non-deterministic across worktrees (silent code drop)
+
+**Surfaced**: 2026-06-05 during a multi-hour Semantic Search Code Page auth-broken investigation.
+
+**Status**: not started — empirical fix-by-rebuild applied; root cause needs proper diagnosis + prevention
+
+#### Problem
+
+Two worktrees with **byte-identical source** for every relevant file produced bundles of dramatically different sizes:
+
+| Worktree | Build output | Bundle hash |
+|---|---|---|
+| `spaarke-wt-spaarke-datagrid-framework-r1` | 861,041 bytes (841 KB) | `6324BE09...` |
+| `c:/code_files/spaarke` (this one) | 1,109,829 bytes (1.06 MB) | `AC6B14A7...` |
+
+**~250 KB of code missing** from the smaller build, despite identical source on disk. The smaller build had silently broken auth: `SpaarkeAuthProvider.getAccessToken()` returned `""` because the underlying MSAL strategy code had been tree-shaken out of the bundle. The runtime then correctly skipped the `Authorization` header (per the `if (token)` guard in `authenticatedFetch`), and the BFF returned 401.
+
+The likely cause is environment drift between the two worktrees:
+- Different `node_modules/` install state (lockfile resolution, npm install vs npm ci, partial installs after rebase)
+- Different `src/client/shared/Spaarke.Auth/dist/` state (compiled output for the shared lib — pinned to whatever the wt last built)
+- Webpack + Terser tree-shake aggressively on `passes: 2` with `sideEffects: false` style packages; any difference in the module graph cascades
+
+This is a **silent-failure class** — both builds run cleanly, both report success, only one works at runtime. The deploy script's hash-verify caught that the bundle was uploaded correctly; nothing exists today to catch that the bundle itself was incomplete.
+
+#### Recommended approach
+
+1. **Add a clean-build verification step to `Deploy-WebResourceInline.ps1` / `Deploy-WizardCodePages.ps1`**: before npm run build, force `rm -rf node_modules/.cache out/ dist/` in the target solution + `rm -rf dist/` in any consumed shared lib (`@spaarke/auth`, `@spaarke/ui-components`); then `npm ci` (not `npm install`) for deterministic lockfile resolution.
+2. **Bundle-size sanity check** in the deploy script: compare new bundle size against a recorded baseline (e.g., from the last known-good deploy in master CI); warn / abort if >10% smaller or >25% larger. Catches both silent drop and accidental fat-build.
+3. **Source-of-truth shared lib**: instead of each consumer having its own `dist/` symlinked, build shared libs once in CI / from a single canonical source. The current `"main": "dist/index.js"` + `file:` workspace dep + per-wt `dist/` rebuild is the fragility surface.
+4. **Reproducibility check across two clean worktrees** in CI for any code-page-deploy PR: build same source from two fresh clones, hash output, fail if mismatch. Slow but definitive.
+
+#### Impact / consumers
+
+- Every Code Page deploy (`src/client/code-pages/SemanticSearch`, `src/client/code-pages/DocumentRelationshipViewer`, `src/client/code-pages/PlaybookBuilder`, ...)
+- Every Vite-based solution deploy (`src/solutions/CreateMatterWizard`, etc. — same risk class via Vite tree-shake)
+- Anyone running PCFs through `pcf-deploy` — same webpack/terser config family
+
+#### Risks / considerations
+
+- Fix #1 (clean rebuild before deploy) increases deploy time from ~20s to ~60-90s. Acceptable trade for determinism.
+- Fix #2 (bundle-size sanity check) needs a baseline value per surface. Where to store: probably a `.bundle-size-baseline.json` per Code Page checked into the repo, updated on successful deploys.
+- Fix #3 (single shared-lib source-of-truth) is architectural; would need ADR-level decision.
+
+#### Scope estimate
+
+- Fix #1: 1 task, ~1 day (modify deploy scripts + verify against all current code pages).
+- Fix #2: 1 task, ~half a day (baseline file format + script logic + first-time baseline capture).
+- Fix #3: project-level, ~1-2 weeks (architectural change touching every consumer).
+
+#### Out of scope
+
+- Today's deploy was patched by rebuilding from a known-good worktree. No code change needed; the source was always correct. This referral is about preventing recurrence.
+
+---
+
+### 10. Production bundles strip all `console.*` calls — blinds runtime diagnostics
+
+**Surfaced**: 2026-06-05 during the same Semantic Search auth investigation as #11.
+
+**Status**: not started — recommended fix is small but pattern review affects ~10 build configs
+
+#### Problem
+
+The Code Page webpack config at [`src/client/code-pages/SemanticSearch/webpack.config.js:47-54`](../../src/client/code-pages/SemanticSearch/webpack.config.js#L47-L54) (and almost certainly other Code Pages + PCFs) sets Terser with:
+
+```js
+new TerserPlugin({
+  terserOptions: {
+    compress: {
+      drop_console: true,
+      drop_debugger: true,
+      pure_funcs: ['console.debug', 'console.info'],
+      passes: 2,
+    },
+    ...
+  }
+})
+```
+
+This **strips every `console.*` call from production bundles**, including the canonical `@spaarke/auth` diagnostic logs:
+- `console.info('[SpaarkeAuth] Token acquired via ...')`
+- `console.warn('[SpaarkeAuth] ${cache.name} failed: ...')`
+- `console.error('[SpaarkeAuth] All token acquisition exhausted. Config: ...')`
+
+So when production auth (or anything else) fails, there is **zero runtime signal in the browser console** to diagnose with. We discovered this only after multiple hours of asking for console output that physically did not exist in the bundle.
+
+#### Recommended approach
+
+Pick a strategy and apply consistently:
+
+- **Option A (simplest)**: Drop `drop_console` entirely. Keep `console.error` (and possibly `console.warn`) in production. Strip `console.debug` and `console.info` only. Cost: ~5-10 KB bundle bloat per Code Page. Benefit: real production diagnostics.
+- **Option B (most flexible)**: Two-mode build — `mode: 'production'` strips everything (current behavior, for size-sensitive cases), new `mode: 'diagnostic'` strips only `console.debug`. A query-string param or feature flag in the deployed page toggles which bundle is loaded. Cost: doubled build output, extra ops complexity. Benefit: prod stays small, ops can capture a diagnostic build on demand.
+- **Option C (Spaarke-specific)**: Keep `drop_console` for general code but preserve `[SpaarkeAuth]`/`[Spaarke*]` namespaced logs via Terser's `keep_fnames` or a custom `pure_funcs` exclusion list. Cost: brittle. Benefit: targeted.
+
+Recommendation: **Option A**, repo-wide. Pair with a documented logging convention (only `console.error` and `console.warn` in production paths; everything else uses a wrapper that's a no-op in prod). The bundle cost is negligible at our scale; the debugging cost of the current setup is enormous.
+
+#### Impact / consumers
+
+Per quick grep, the same Terser config (or near-identical) appears in:
+- `src/client/code-pages/*/webpack.config.js` (~5 code pages)
+- `src/client/pcf/*/webpack.config.js` (~10+ PCFs)
+- Some `src/solutions/*/vite.config.ts` (different tool, equivalent setting: `esbuild.drop = ['console', 'debugger']`)
+
+Migration is mechanical: update each config, no source changes needed.
+
+#### Risks / considerations
+
+- Some teams may have intentionally added `drop_console` for size budget. Verify total bundle delta per Code Page after enabling — should be 5-10 KB at worst, but confirm.
+- Keeping `console.error` exposes any error log content to anyone with DevTools. Audit existing `console.error` calls for sensitive data leakage before flipping the switch (e.g., tokens, PII).
+
+#### Scope estimate
+
+1 task, ~half a day if Option A. ~1-2 days if Option B. Includes auditing existing console.error calls for sensitive data and updating each build config.
+
+#### Out of scope
+
+- Migrating to a structured logging library (winston/pino-style) — overkill for now; just keeping `console.error` available is the high-value step.
+
+---
+
+### 9. Standardize all client surfaces on `@spaarke/auth` + `authenticatedFetch`
+
+**Surfaced**: 2026-06-04 fixing the Semantic Search Code Page 401 — the Code Page sent `Authorization: Bearer ` (empty token) because it used a hand-rolled `buildAuthHeaders()` helper that didn't guard against `getAccessToken()` returning an empty string. The PCF SemanticSearchControl, using the canonical `authenticatedFetch`, doesn't have this bug.
+
+**Status**: not started — Semantic Search Code Page fixed via PR #352; remaining ~12 surfaces / ~20 source files identified
+
+#### Problem
+
+`@spaarke/auth` provides a canonical `authenticatedFetch` function that:
+1. Acquires a token via the centralized provider
+2. **Guards against empty tokens** (skips the Authorization header entirely rather than sending `Bearer `)
+3. Retries 401s once with cache invalidation
+4. Resolves relative URLs against the configured BFF base URL
+
+But many surfaces bypass this and do one of:
+- **Pattern B (fragile)** — call raw browser `fetch()` with a hand-rolled `buildAuthHeaders()` helper that string-interpolates `\`Bearer ${token}\``. When the token is empty, this sends `Authorization: Bearer ` and the BFF returns 401. **This is the exact bug found in the Semantic Search Code Page (fixed PR #352).**
+- **Pattern C (deprecated)** — have their own local `MsalAuthProvider.ts` from the pre-v2 era. Bypasses `@spaarke/auth` entirely → separate MSAL `PublicClientApplication` instances → separate token caches → violates the SSO invariants documented in [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) (INV-1 through INV-8).
+- **Pattern D (bespoke)** — invents its own `TokenProvider` abstraction unrelated to `@spaarke/auth`.
+
+Inventory of non-conformant surfaces (audited 2026-06-04, source only, excluding tests / bundles / storybook):
+
+| Surface | Pattern | Files |
+|---|---|---|
+| Semantic Search Code Page | B → CANONICAL | ✅ FIXED via PR #352 (2026-06-04) |
+| DocumentRelationshipViewer Code Page | C | `services/auth/MsalAuthProvider.ts`, `services/authInit.ts`, `types/auth.ts` |
+| PlaybookBuilder Code Page | D | `services/authService.ts` |
+| UniversalQuickCreate PCF | C | `services/auth/MsalAuthProvider.ts`, `services/SdapApiClientFactory.ts`, `services/useRecordMatch.ts`, `components/DocumentUploadForm.tsx`, `index.ts` |
+| UniversalDatasetGrid PCF | C? | `control/types/auth.ts` |
+| DocumentRelationshipViewer PCF | C? | `DocumentRelationshipViewer/types/auth.ts` |
+| Spaarke.SdapClient lib | D | `auth/TokenProvider.ts`, `SdapApiClient.ts`, `operations/{Upload,Download,Delete}Operation.ts` |
+| Shared `useAiSummary` hook | C | `src/hooks/useAiSummary.ts` |
+
+Some surfaces *appear* to work because the BFF happens to accept their token shape. But every one is one config drift away from the same silent-failure mode the Semantic Search Code Page hit on 2026-06-04.
+
+#### Recommended approach
+
+Treat as a real project (not a small fix). Outline:
+
+1. **Decide the contract**. Update `.claude/patterns/auth/spaarke-sso-binding.md` to explicitly forbid Patterns B/C/D. Standardize on `authenticatedFetch` for all BFF calls; for cases where the consumer needs the raw token (e.g., SSE/XHR/EventSource), `useAuth().getAccessToken()` only (and with explicit empty-token guards).
+2. **Audit every surface**. The table above is a starting point but probably incomplete. Grep for `getAccessToken`, `new PublicClientApplication`, `MsalAuthProvider`, `buildAuthHeaders`, `getAuthHeader`, `TokenProvider`. Confirm each surface's current state with the user.
+3. **Migrate surface by surface**. For each:
+   - Remove the local MSAL provider / token helper.
+   - Replace `fetch + manual headers` with `authenticatedFetch`.
+   - Test against the BFF.
+   - Rebuild + deploy.
+4. **Add a lint rule or codeowner check** so new code can't introduce raw `fetch(/api/...)` patterns. Forbid bare `new PublicClientApplication` outside `@spaarke/auth`.
+5. **Add an "AuthSurfaceMatrix" doc** listing every PCF / Code Page / shared lib that talks to the BFF, what auth it uses, last test date, current health.
+6. **Defect fix in `@spaarke/auth`** (independent but related): `SpaarkeAuthProvider.getAccessToken()` returns `''` on failure rather than throwing. Change to `throw new AuthError(...)` so consumers can't accidentally build `"Bearer "`.
+
+#### Impact / consumers
+
+- All client surfaces talking to the BFF (~12 surfaces, ~20+ files).
+- Spaarke.SdapClient lib consumers — likely the biggest scope; this lib is used across multiple PCFs.
+- Existing consumer tests will need updating (mocks of `MsalAuthProvider` etc. become mocks of `authenticatedFetch`).
+- Documentation: ADR-028 already declares the contract but enforcement is missing.
+
+#### Risks / considerations
+
+- Some surfaces may rely on Pattern C/D for reasons (e.g., custom audiences, specific token claims). Audit motivation before removing.
+- Migration order matters: do the actively-used / customer-facing surfaces first (CodePages on dashboards, PCFs on main forms).
+- ~27 consumers were flagged in May 2026 (per memory `project_auth-sso-email-wizard.md`) — only 3 rebuilt then. This referral is the systematic completion of that work.
+- For each migrated surface, must rebuild + redeploy. Wizard solutions and Code Pages can be rebuilt fast; PCFs require solution import. Spaarke.SdapClient migration ripples to every PCF using it.
+
+#### Scope estimate
+
+- Per-surface migration: ~1-3 tasks each, ~half day per surface.
+- Total: ~12 surfaces × half day = ~6 working days for migration. + 1-2 days for contract docs, lint rule, AuthSurfaceMatrix doc.
+- **~2 weeks** total. Definitely a project, not a small fix.
+
+#### Out of scope
+
+- Semantic Search Code Page migration (FIXED 2026-06-04 via PR #352).
+- Wizard solutions (CreateMatter/Project/WorkAssignment — fixed 2026-06-04 to use `WorkAssignmentService` etc.).
+- The `@spaarke/auth` library itself (already canonical — this referral is about consumer adoption).
+
+---
+
 ### 8. Document-relationship visualization for work-assignment records
 
 **Surfaced**: 2026-06-04 while fixing SemanticSearch on work-assignment forms.
