@@ -540,3 +540,47 @@ Each of Categories 1-11 should get a dedicated Phase 2 brief. Recommended order 
 6. **Category 6 (Public Contracts)** — small surface; close out Null-Object gap quickly.
 7. **DI + Configuration (Q-001 expansion)** — touches every other category; should be LAST.
 8. **Categories 7-11** — each needs its own Phase 2 brief but can run in parallel.
+
+---
+
+## §9 Post-audit corrections (retroactive — Migration PR #3)
+
+> Authored 2026-06-05 by Migration PR #3 per [`canonical-architecture-decisions.md` §6](canonical-architecture-decisions.md#6-inventory-corrections-consolidated-for-inventory-correction-pr).
+>
+> **Pin note**: this inventory was pinned to commit `357e6936`. Counts below reflect the corrections surfaced by W2/W3/W4 cross-validation against the pinned snapshot. Subsequent migration PRs (#351 LATENT BUG fix, #353 Bundled DELETE, #357 PR #2b extract) have further shifted the in-tree counts — see commit-history diff against HEAD for current state. This section is **historical fix** of the pinned snapshot's inaccuracies, NOT a refresh.
+
+### §9.1 18 inventory accuracy corrections
+
+| # | Inventory location (above) | Original claim | Correction at snapshot `357e6936` | Source |
+|---|---|---|---|---|
+| 1 | §3.1 module count | "34 DI modules" | **31 modules** (29 in `Infrastructure/DI/` + 1 in `Api/Reporting/` + 1 in `Workers/Office/`) | W4 §2.2 |
+| 2 | §4.3 namespace split | "`Sprk.Bff.Api.Options` (2 classes)" | **Namespace does NOT exist.** `Options/` directory uses `Sprk.Bff.Api.Configuration` namespace; issue is directory location only. (Resolved by PR #3 directory `git mv`.) | W4 §2.3 |
+| 3 | §4.1 per-dir count | "`Configuration/` (25 files)" | **21 files** in `Configuration/` at snapshot. (Now 23 after PR #3 `git mv` of `AiSearchOptions.cs` + `LlamaParseOptions.cs`.) | W4 §2.3 |
+| 4 | §2.5.4 explicit prompt count | "3 explicit builders + many inline" | **5 explicit prompt sources** — adds `AnalysisContextBuilder` (Scoped) + `FallbackPrompts` (static). Inline count 7 → 3-5 (post-mislabel removal). | W3 Cat 5 §2.1 |
+| 5 | §2.5.4 PromptLibrary framing | "limited adoption" | **Architecturally misleading.** PromptLibrary is a user-facing CRUD facade for end-user-managed templates (Mustache substitution, Cosmos + Dataverse tiers, per-user/team/tenant authz). ZERO non-endpoint consumers — exactly as designed. Reframe as user-managed-template layer, NOT LLM-call-site layer. | W3 Cat 5 §4.3 |
+| 6 | §2.1 IntentClassification types | "2 `IntentClassificationResult` types" | **3 related types**: Type A (`Services.Ai.IntentClassificationResult`, DELETED PR #353), Type B (`Services.Ai.Insights.Routing.IntentClassificationResult`, RENAME-LOW), Type C (`Services.Ai.IntentClassification` in PlaybookBuilderService, KEEP). | W2 Cat 1 §2.4 |
+| 7 | §2.7 executor count | "16 registered concrete executors" | **18 confirmed** (Foundry + Insights Engine blocks miscounted) | W1 Cat 7 §2.1 |
+| 8 | §2.7 ActionType labels | "(default)" on first 9 executors | **Explicit numerics** (`AiAnalysis = 0`, `CreateTask = 20`, etc.) | W1 Cat 7 §2.1 |
+| 9 | §2.7 AgentServiceNodeExecutor | "Singleton (kill-switched)" | **Runtime kill-switch, NOT DI**: DI unconditional; kill-switch at `AgentServiceNodeExecutor.cs:198-212` | W1 Cat 7 |
+| 10 | §2.3.2 DocumentClassifierHandler | "consumer of `ISemanticSearchService`" | **Imports `IRagService`** at snapshot, NOT `ISemanticSearchService` | W2 Cat 3 §2.3.2 |
+| 11 | §2.3.3 AiAnalysisNodeExecutor | (not listed as `IRecordSearchService` consumer) | **NEW consumer**: lines 37, 44 in `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` inject `IRecordSearchService` | W1 Cat 7 + W2 Cat 3 §2.3.3 |
+| 12 | §2.1 CapabilityRouter consumers | "4 production" | **2 behavioral + 2 sentinel/telemetry** | W2 Cat 1 §2.3.1 |
+| 13 | §2.1 PlaybookDispatcher consumers | "4 production via factory" | **3 behavioral + 1 sentinel** | W2 Cat 1 §2.3.2 |
+| 14 | §6.2 orphan list | "4 confirmed UNUSED orphans" | **5 orphans** — adds `BuildPlanGenerationService.cs` (~530 LOC, 5th NEW orphan; DELETED PR #353) | W3 Cat 5 §2.3 |
+| 15 | §2.2.1 PlaybookLookupService consumers | "2 consumers" | **1 production consumer** (the 2nd was a doc-cref only in `DefaultPlaybookConstants.cs`) | W1 Cat 2 §2.3 |
+| 16 | §2.5 explicit builders | "3 explicit builders" | **4 formally registered/instantiable** + 1 static fallback const = 5 sources (missed `AnalysisContextBuilder` + `FallbackPrompts`) | W3 Cat 5 §2.1 |
+| 17 | §2.4.2 cache consumer table | 32 inline cache consumers | 32 confirmed; 2 unclassified (`StandaloneChatContextProvider`, `AnalysisChatContextResolver`) need reconciliation | W1 Cat 4 §6.4 |
+| 18 | §2.6 facade Null-peer claim | "1 has Null peer; the other 4 do NOT" | **Framing incomplete**: 4 facades affected by §F.1 in TWO distinct manifestations (latent transitive-conditional for `IInsightsAi`; visible defensive-nullable for others). (Resolved by PR #351 LATENT BUG fix + 4 Null peers.) | W1 Cat 6 §4.1 |
+
+### §9.2 Migration PR impact on inventory (post-audit)
+
+Migration PRs landing after the audit completed have further shifted in-tree counts:
+
+| PR | Impact on inventory counts |
+|---|---|
+| #351 (LATENT BUG fix) | +4 new files in `Services/Ai/PublicContracts/` (NullInsightsAi, NullInvoiceAi, NullWorkspacePrefillAi, NullRecordMatchingAi); +280 LOC |
+| #353 (Bundled DELETE) | −12 source files (.cs) + −7 unit test files; ~−2400 LOC; corrects §6.2 orphan list to ZERO orphans for the bundled targets |
+| #357 (PR #2b extract) | +1 new file (`BuilderAgentSystemPrompt.cs`); −1 deleted (`PlaybookBuilderSystemPrompt.cs`); `Prompts/` directory removed; ~−740 LOC |
+| #358 (this PR — PR #3 doc-corrections) | +2 files relocated `Options/` → `Configuration/` (namespace unchanged); +0 LOC source; this section added to inventory |
+
+**Cumulative effect**: ~−3140 LOC net code reduction from the audit's recommendations. Inventory at HEAD is structurally simpler than the pinned snapshot.

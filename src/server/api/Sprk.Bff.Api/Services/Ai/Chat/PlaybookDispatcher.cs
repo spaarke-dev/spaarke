@@ -97,8 +97,24 @@ public sealed class PlaybookDispatcher
     /// <param name="tenantId">Tenant ID for cache key scoping (ADR-014).</param>
     /// <param name="logger">Logger instance.</param>
     /// <remarks>
-    /// ADR-010: This class is factory-instantiated, NOT DI-registered.
-    /// Callers (SprkChatAgentFactory) create instances directly with resolved dependencies.
+    /// <para>
+    /// <b>Factory instantiation rationale</b>: this class is factory-instantiated by
+    /// <c>SprkChatAgentFactory</c> (NOT DI-registered) BECAUSE the <c>tenantId</c> ctor
+    /// parameter must be resolved per-request from the calling agent's session context.
+    /// DI registration would have to choose a single lifetime — Singleton would pin the
+    /// first-seen tenant into shared state (tenant-leak risk), and Scoped would still
+    /// require a per-request factory to supply <c>tenantId</c>, defeating the registration.
+    /// Factory instantiation makes the per-tenant binding explicit at the call site.
+    /// </para>
+    /// <para>
+    /// ADR-010 DI minimalism is a secondary benefit (avoids inflating the DI graph for a
+    /// type that needs runtime-resolved arguments), but the LOAD-BEARING reason is the
+    /// per-request tenantId binding above.
+    /// </para>
+    /// <para>
+    /// Amended 2026-06-05 by <c>bff-ai-architecture-audit-r1</c> Migration PR #3 per
+    /// W1 Cat 4 §9 SprkChat row.
+    /// </para>
     /// </remarks>
     public PlaybookDispatcher(
         PlaybookEmbeddingService embeddingService,
