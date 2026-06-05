@@ -543,9 +543,7 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService, Sprk.Bff.Api.Services.Ai.Builder.BuilderAgentService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
         services.AddSingleton<IModelSelector, ModelSelector>();
-        services.AddScoped<IIntentClassificationService, IntentClassificationService>();
         services.AddScoped<IEntityResolutionService, EntityResolutionService>();
-        services.AddScoped<IClarificationService, ClarificationService>();
     }
 
     private static void AddTestingServices(IServiceCollection services, IConfiguration configuration)
