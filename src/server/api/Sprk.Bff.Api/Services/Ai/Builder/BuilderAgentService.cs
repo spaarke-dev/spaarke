@@ -1,6 +1,5 @@
 using System.Text.Json;
 using OpenAI.Chat;
-using Sprk.Bff.Api.Services.Ai.Prompts;
 
 namespace Sprk.Bff.Api.Services.Ai.Builder;
 
@@ -267,7 +266,7 @@ public class BuilderAgentService : IBuilderAgentService
             dataverseActions.Count == 0);
 
         // Build the system prompt with scope catalog
-        return PlaybookBuilderSystemPrompt.Build(actions, skills, knowledge);
+        return BuilderAgentSystemPrompt.Build(actions, skills, knowledge);
     }
 
     /// <summary>
