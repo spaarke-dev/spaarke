@@ -13,10 +13,7 @@
  * pattern.
  */
 
-export {
-  sendSidePaneFilter,
-  subscribeSidePaneFilter,
-} from './SidePaneFilterChannel';
+export { sendSidePaneFilter, subscribeSidePaneFilter } from './SidePaneFilterChannel';
 export type { SidePaneFilterMessage } from './SidePaneFilterChannel';
 
 export { useSidePaneFilter } from './useSidePaneFilter';

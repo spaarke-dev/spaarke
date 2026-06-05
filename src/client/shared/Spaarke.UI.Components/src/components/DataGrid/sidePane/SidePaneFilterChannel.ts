@@ -53,10 +53,7 @@ export interface SidePaneFilterMessage<TPayload = unknown> {
   readonly payload: TPayload;
 }
 
-function isMatchingMessage<TPayload>(
-  data: unknown,
-  paneId: string
-): data is SidePaneFilterMessage<TPayload> {
+function isMatchingMessage<TPayload>(data: unknown, paneId: string): data is SidePaneFilterMessage<TPayload> {
   return (
     typeof data === 'object' &&
     data !== null &&
@@ -132,10 +129,7 @@ export function sendSidePaneFilter<TPayload>(args: { paneId: string; payload: TP
  * @param onPayload Callback fired with the payload portion of every matching message.
  * @returns Cleanup function.
  */
-export function subscribeSidePaneFilter<TPayload>(
-  paneId: string,
-  onPayload: (payload: TPayload) => void
-): () => void {
+export function subscribeSidePaneFilter<TPayload>(paneId: string, onPayload: (payload: TPayload) => void): () => void {
   const handle = (data: unknown) => {
     if (isMatchingMessage<TPayload>(data, paneId)) {
       onPayload(data.payload);
@@ -170,10 +164,7 @@ export function subscribeSidePaneFilter<TPayload>(
     }
     if (typeof window !== 'undefined') {
       window.removeEventListener('message', onMessage);
-      window.removeEventListener(
-        CUSTOM_EVENT_TYPE as keyof WindowEventMap,
-        onCustomEvent as EventListener
-      );
+      window.removeEventListener(CUSTOM_EVENT_TYPE as keyof WindowEventMap, onCustomEvent as EventListener);
     }
   };
 }

@@ -765,7 +765,14 @@ export const DataGrid: React.FC<DataGridProps> = props => {
       fetchXml: xml,
     });
     return xml;
-  }, [loadState.savedQuery, resolved?.behavior?.parentContextFilter, parentContext, hostFilters, chipDescriptors, chipState]);
+  }, [
+    loadState.savedQuery,
+    resolved?.behavior?.parentContextFilter,
+    parentContext,
+    hostFilters,
+    chipDescriptors,
+    chipState,
+  ]);
   const entityNameForLoad = resolved?.entityName ?? '';
   const pageSize = resolved?.behavior.pageSize ?? 100;
 

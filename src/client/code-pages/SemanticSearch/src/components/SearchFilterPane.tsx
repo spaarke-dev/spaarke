@@ -18,10 +18,7 @@
 
 import { useState, useCallback } from 'react';
 import { makeStyles, tokens, mergeClasses, Textarea, Button, Label, Text } from '@fluentui/react-components';
-import {
-  ChevronDoubleLeft20Regular,
-  ChevronDoubleRight20Regular,
-} from '@fluentui/react-icons';
+import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular } from '@fluentui/react-icons';
 import type { SearchDomain, SearchFilters, FilterOption, SavedSearch } from '../types';
 import { SearchDomainTabs } from './SearchDomainTabs';
 import { FilterDropdown } from './FilterDropdown';
@@ -379,20 +376,10 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
           flagged that the prior default-sized + iconed version didn't
           match standard. */}
       <div className={styles.actionRow}>
-        <Button
-          appearance="primary"
-          size="small"
-          onClick={handleSearch}
-          disabled={isLoading}
-        >
+        <Button appearance="primary" size="small" onClick={handleSearch} disabled={isLoading}>
           Search
         </Button>
-        <Button
-          appearance="subtle"
-          size="small"
-          onClick={onCancel}
-          aria-label="Clear search criteria"
-        >
+        <Button appearance="subtle" size="small" onClick={onCancel} aria-label="Clear search criteria">
           Cancel
         </Button>
       </div>

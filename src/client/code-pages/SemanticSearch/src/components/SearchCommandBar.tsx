@@ -177,10 +177,7 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
           2026-06-04). Implemented as a Menu wrapping a ToolbarButton so the
           checkbox behavior works without leaving the Fluent v9 Toolbar's
           visual style. */}
-      <Menu
-        checkedValues={columnCheckedValues}
-        onCheckedValueChange={handleColumnsCheckedChange}
-      >
+      <Menu checkedValues={columnCheckedValues} onCheckedValueChange={handleColumnsCheckedChange}>
         <MenuTrigger disableButtonEnhancement>
           <ToolbarButton icon={<ColumnTriple20Regular />} aria-label="Choose columns">
             Columns
@@ -197,10 +194,7 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
         </MenuPopover>
       </Menu>
 
-      <Tooltip
-        content={hasSelection ? 'Delete selected' : 'Select items to delete'}
-        relationship="label"
-      >
+      <Tooltip content={hasSelection ? 'Delete selected' : 'Select items to delete'} relationship="label">
         <ToolbarButton icon={<DeleteRegular />} disabled={!hasSelection} onClick={handleDelete}>
           Delete
         </ToolbarButton>
@@ -213,42 +207,22 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
         </MenuTrigger>
         <MenuPopover>
           <MenuList>
-            <MenuItem
-              icon={<MailRegular />}
-              disabled={!isSingle}
-              onClick={handleEmailLink}
-            >
+            <MenuItem icon={<MailRegular />} disabled={!isSingle} onClick={handleEmailLink}>
               Email a Link
             </MenuItem>
 
             {isDocumentDomain && (
               <>
-                <MenuItem
-                  icon={<OpenRegular />}
-                  disabled={!isSingle}
-                  onClick={handleOpenInWeb}
-                >
+                <MenuItem icon={<OpenRegular />} disabled={!isSingle} onClick={handleOpenInWeb}>
                   Open in Web
                 </MenuItem>
-                <MenuItem
-                  icon={<DesktopRegular />}
-                  disabled={!isSingle}
-                  onClick={handleOpenInDesktop}
-                >
+                <MenuItem icon={<DesktopRegular />} disabled={!isSingle} onClick={handleOpenInDesktop}>
                   Open in Desktop
                 </MenuItem>
-                <MenuItem
-                  icon={<ArrowDownloadRegular />}
-                  disabled={!isSingle}
-                  onClick={handleDownload}
-                >
+                <MenuItem icon={<ArrowDownloadRegular />} disabled={!isSingle} onClick={handleDownload}>
                   Download
                 </MenuItem>
-                <MenuItem
-                  icon={<DatabaseSearchRegular />}
-                  disabled={!hasSelection}
-                  onClick={handleSendToIndex}
-                >
+                <MenuItem icon={<DatabaseSearchRegular />} disabled={!hasSelection} onClick={handleSendToIndex}>
                   Send to Index
                 </MenuItem>
               </>

@@ -46,11 +46,7 @@ export {
   useSidePaneFilter,
   DataGridSidePaneOrchestrator,
 } from './sidePane';
-export type {
-  SidePaneFilterMessage,
-  SidePaneFilterTranslator,
-  SidePaneSpec,
-} from './sidePane';
+export type { SidePaneFilterMessage, SidePaneFilterTranslator, SidePaneSpec } from './sidePane';
 
 export { useLazyLoad } from './useLazyLoad';
 export type { UseLazyLoadOptions, UseLazyLoadResult } from './useLazyLoad';
@@ -61,11 +57,7 @@ export type { DataGridOverrides, ResolvedConfig, ResolvedColumn } from './config
 // ─── Parent-context FetchXML overlay (task 020 D-020-02 follow-up) ───
 // + Host-filters overlay (task 033a — third permanent composition layer)
 export { overlayParentContextFilter, overlayHostFilters } from './fetchXmlOverlay';
-export type {
-  DataGridParentContextLike,
-  HostFilterCondition,
-  HostFilterOperator,
-} from './fetchXmlOverlay';
+export type { DataGridParentContextLike, HostFilterCondition, HostFilterOperator } from './fetchXmlOverlay';
 
 // ─── Column header primitives (task 004) ───
 export { ColumnHeaderMenu } from './columnHeader/ColumnHeaderMenu';

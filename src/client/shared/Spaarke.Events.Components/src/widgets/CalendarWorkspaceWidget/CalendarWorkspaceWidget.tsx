@@ -848,9 +848,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
 // Top-level widget component — provides EventsPageProvider (Q4 sign-off)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const CalendarWorkspaceWidget: React.FC<CalendarWorkspaceWidgetProps> = ({
-  initialDateField = '',
-}) => {
+export const CalendarWorkspaceWidget: React.FC<CalendarWorkspaceWidgetProps> = ({ initialDateField = '' }) => {
   const handleOpenEvent = React.useCallback((eventId: string, _eventTypeId?: string) => {
     const xrm = getXrm();
     if (!xrm?.Navigation?.navigateTo) {

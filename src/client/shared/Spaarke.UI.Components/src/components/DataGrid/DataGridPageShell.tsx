@@ -180,8 +180,10 @@ export interface DataGridPageShellSidePaneFilter<TPayload = unknown> {
  * Most DataGrid props pass through unchanged. The shell adds opinionated
  * defaults for theme + dataverseClient + parentContext + hostFilters.
  */
-export interface DataGridPageShellProps
-  extends Omit<DataGridProps, 'parentContext' | 'hostFilters' | 'theme' | 'dataverseClient'> {
+export interface DataGridPageShellProps extends Omit<
+  DataGridProps,
+  'parentContext' | 'hostFilters' | 'theme' | 'dataverseClient'
+> {
   /**
    * Optional explicit `parentContext`. Takes precedence over `useUrlParentContext`.
    * Pass when the host has its own parsing logic.

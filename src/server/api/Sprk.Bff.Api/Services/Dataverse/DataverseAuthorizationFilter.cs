@@ -183,60 +183,60 @@ internal sealed class DataverseAuthorizationFilter : IEndpointFilter
         {
             case EntitySource.FromRouteValue:
             case EntitySource.FromRouteValueWithRecord:
-            {
-                var entityLogicalName = routeValues[_options.RouteKey]?.ToString();
-                if (string.IsNullOrWhiteSpace(entityLogicalName))
                 {
-                    throw new InvalidOperationException(
-                        $"Route value '{_options.RouteKey}' is missing or empty");
+                    var entityLogicalName = routeValues[_options.RouteKey]?.ToString();
+                    if (string.IsNullOrWhiteSpace(entityLogicalName))
+                    {
+                        throw new InvalidOperationException(
+                            $"Route value '{_options.RouteKey}' is missing or empty");
+                    }
+                    return new[] { entityLogicalName.Trim().ToLowerInvariant() };
                 }
-                return new[] { entityLogicalName.Trim().ToLowerInvariant() };
-            }
 
             case EntitySource.FromSavedQueryEntity:
-            {
-                // The savedquery→entity lookup happens inside the endpoint handler (SavedQueryService
-                // already caches savedquery payloads, including the EntityName). To keep the filter
-                // synchronous and avoid a second cache lookup, the savedquery endpoints use
-                // FromRouteValue with the entity-list endpoint OR rely on per-handler privilege checks
-                // for the by-id endpoint.
-                //
-                // For the by-id endpoint, the filter cannot resolve the entity without a Dataverse
-                // round-trip. The chosen design (per task 010 §4 Step 2) is to defer the resolution to
-                // the handler: the filter validates identity + tenant, the handler calls
-                // SavedQueryService.GetSavedQueryAsync (which is cached), and the handler performs the
-                // privilege check using IDataversePrivilegeChecker once the entityName is known.
-                //
-                // Returning a marker entity here would be a leaky abstraction. Instead we mark this
-                // path as "deferred-to-handler" by returning a synthetic placeholder that the handler
-                // recognises and replaces. The filter's job for FromSavedQueryEntity is reduced to
-                // identity check + audit logging; the actual privilege gate lives in the handler.
-                //
-                // Implementation choice (recorded as a deviation in 011-deviations.md): the filter
-                // is NOT applied to the by-id endpoint with FromSavedQueryEntity. The handler calls
-                // IDataversePrivilegeChecker directly after loading the savedquery. Tasks 015-016
-                // integration tests will validate this path.
-                throw new InvalidOperationException(
-                    "EntitySource.FromSavedQueryEntity must be handled by the endpoint (see handler-side privilege check)");
-            }
+                {
+                    // The savedquery→entity lookup happens inside the endpoint handler (SavedQueryService
+                    // already caches savedquery payloads, including the EntityName). To keep the filter
+                    // synchronous and avoid a second cache lookup, the savedquery endpoints use
+                    // FromRouteValue with the entity-list endpoint OR rely on per-handler privilege checks
+                    // for the by-id endpoint.
+                    //
+                    // For the by-id endpoint, the filter cannot resolve the entity without a Dataverse
+                    // round-trip. The chosen design (per task 010 §4 Step 2) is to defer the resolution to
+                    // the handler: the filter validates identity + tenant, the handler calls
+                    // SavedQueryService.GetSavedQueryAsync (which is cached), and the handler performs the
+                    // privilege check using IDataversePrivilegeChecker once the entityName is known.
+                    //
+                    // Returning a marker entity here would be a leaky abstraction. Instead we mark this
+                    // path as "deferred-to-handler" by returning a synthetic placeholder that the handler
+                    // recognises and replaces. The filter's job for FromSavedQueryEntity is reduced to
+                    // identity check + audit logging; the actual privilege gate lives in the handler.
+                    //
+                    // Implementation choice (recorded as a deviation in 011-deviations.md): the filter
+                    // is NOT applied to the by-id endpoint with FromSavedQueryEntity. The handler calls
+                    // IDataversePrivilegeChecker directly after loading the savedquery. Tasks 015-016
+                    // integration tests will validate this path.
+                    throw new InvalidOperationException(
+                        "EntitySource.FromSavedQueryEntity must be handled by the endpoint (see handler-side privilege check)");
+                }
 
             case EntitySource.FromFetchXmlBody:
-            {
-                if (_fetchXmlExtractor is null)
                 {
-                    throw new InvalidOperationException(
-                        "EntitySource.FromFetchXmlBody requires IFetchXmlEntityExtractor to be DI-registered");
-                }
+                    if (_fetchXmlExtractor is null)
+                    {
+                        throw new InvalidOperationException(
+                            "EntitySource.FromFetchXmlBody requires IFetchXmlEntityExtractor to be DI-registered");
+                    }
 
-                var fetchXml = ExtractFetchXmlFromArguments(context);
-                if (string.IsNullOrWhiteSpace(fetchXml))
-                {
-                    throw new InvalidOperationException("FetchXML payload not found in request");
-                }
+                    var fetchXml = ExtractFetchXmlFromArguments(context);
+                    if (string.IsNullOrWhiteSpace(fetchXml))
+                    {
+                        throw new InvalidOperationException("FetchXML payload not found in request");
+                    }
 
-                var extracted = _fetchXmlExtractor.ExtractEntities(fetchXml);
-                return extracted.ToList();
-            }
+                    var extracted = _fetchXmlExtractor.ExtractEntities(fetchXml);
+                    return extracted.ToList();
+                }
 
             default:
                 throw new InvalidOperationException(

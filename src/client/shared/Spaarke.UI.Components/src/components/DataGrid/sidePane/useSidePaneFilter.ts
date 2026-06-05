@@ -34,9 +34,7 @@ import type { HostFilterCondition } from '../fetchXmlOverlay';
  * Hook signature for the translator parameter — converts a pane's payload
  * into framework `HostFilterCondition[]`.
  */
-export type SidePaneFilterTranslator<TPayload> = (
-  payload: TPayload
-) => ReadonlyArray<HostFilterCondition>;
+export type SidePaneFilterTranslator<TPayload> = (payload: TPayload) => ReadonlyArray<HostFilterCondition>;
 
 /**
  * Subscribe to a side pane's filter messages and translate them into
