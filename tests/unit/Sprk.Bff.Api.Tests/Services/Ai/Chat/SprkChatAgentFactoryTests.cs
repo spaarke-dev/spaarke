@@ -40,7 +40,7 @@ public class SprkChatAgentFactoryTests
 
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedContext);
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -69,6 +69,7 @@ public class SprkChatAgentFactoryTests
                 It.IsAny<Guid>(),
                 It.IsAny<ChatHostContext?>(),
                 It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
@@ -80,7 +81,7 @@ public class SprkChatAgentFactoryTests
 
         // Assert
         contextProviderMock.Verify(
-            p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()),
+            p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -90,7 +91,7 @@ public class SprkChatAgentFactoryTests
         // Arrange
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -115,10 +116,10 @@ public class SprkChatAgentFactoryTests
 
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(doc1, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(doc1, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatContext(prompt1, null, null, TestPlaybookId));
         contextProviderMock
-            .Setup(p => p.GetContextAsync(doc2, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(doc2, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatContext(prompt2, null, null, TestPlaybookId));
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -156,7 +157,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
@@ -198,7 +199,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
@@ -229,7 +230,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
@@ -269,7 +270,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         // Previous turn had a tool called "OldTool" that no longer appears in the current set.
@@ -312,7 +313,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         // Use the original service provider (no router registration)
@@ -349,7 +350,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProviderWithSummarizeOrchestrator(contextProviderMock.Object);
@@ -411,7 +412,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProviderWithInsightsQueryTool(contextProviderMock.Object);
@@ -523,6 +524,176 @@ public class SprkChatAgentFactoryTests
         services.AddSingleton<SprkChatAgentFactory>();
 
         return services.BuildServiceProvider();
+    }
+
+    // ── R5 task 033 — Session Files manifest suffix on system prompt ──────────
+
+    /// <summary>
+    /// When <see cref="ChatContext.UploadedFiles"/> is non-empty, the factory MUST append a
+    /// compact "Session Files" manifest suffix to <see cref="ChatContext.SystemPrompt"/>
+    /// so the LLM's tool-call reasoning sees the files. Verifies the binding contract for
+    /// the Summarize convergence path (FR-01 + FR-08).
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_AppendsSessionFilesNoteToSystemPrompt_WhenUploadedFilesPresent()
+    {
+        // Arrange
+        const string basePrompt = "You are Spaarke AI.";
+        var manifest = new List<ChatSessionFile>
+        {
+            new("file-001", "contract.pdf", "application/pdf", 1234, "idx-001", DateTimeOffset.UtcNow),
+            new("file-002", "schedule.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 5678, "idx-002", DateTimeOffset.UtcNow)
+        };
+
+        var contextWithFiles = new ChatContext(
+            SystemPrompt: basePrompt,
+            DocumentSummary: null,
+            AnalysisMetadata: null,
+            PlaybookId: TestPlaybookId,
+            KnowledgeScope: null,
+            UploadedFiles: manifest);
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contextWithFiles);
+
+        var services = BuildServiceProvider(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId,
+            TestDocumentId,
+            TestPlaybookId,
+            TestTenantId,
+            uploadedFiles: manifest);
+
+        // Assert — suffix appended; tool-name binding present; both file names + IDs visible.
+        agent.Context.SystemPrompt.Should().StartWith(basePrompt,
+            because: "the original system prompt must be preserved (suffix is additive)");
+        agent.Context.SystemPrompt.Should().Contain("Session Files:",
+            because: "the manifest suffix is keyed by 'Session Files:' so the LLM can recognize it");
+        agent.Context.SystemPrompt.Should().Contain("contract.pdf");
+        agent.Context.SystemPrompt.Should().Contain("schedule.docx");
+        agent.Context.SystemPrompt.Should().Contain("file-001");
+        agent.Context.SystemPrompt.Should().Contain("file-002");
+        agent.Context.SystemPrompt.Should().Contain("invoke_summarize_playbook",
+            because: "the suffix MUST name the exact tool the LLM should invoke to summarize");
+        agent.Context.SystemPrompt.Should().Contain("2 uploaded file",
+            because: "the suffix announces the file count so the LLM can reason about cardinality");
+    }
+
+    /// <summary>
+    /// When <see cref="ChatContext.UploadedFiles"/> is null or empty, the factory MUST NOT
+    /// append any manifest suffix — backward compatible with pre-R5 sessions.
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_DoesNotAppendSessionFilesNote_WhenUploadedFilesEmpty()
+    {
+        // Arrange
+        const string basePrompt = "You are Spaarke AI.";
+
+        var contextWithoutFiles = new ChatContext(
+            SystemPrompt: basePrompt,
+            DocumentSummary: null,
+            AnalysisMetadata: null,
+            PlaybookId: TestPlaybookId,
+            KnowledgeScope: null,
+            UploadedFiles: null);
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contextWithoutFiles);
+
+        var services = BuildServiceProvider(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId,
+            TestDocumentId,
+            TestPlaybookId,
+            TestTenantId);
+
+        // Assert — base prompt preserved; no suffix injected.
+        agent.Context.SystemPrompt.Should().Be(basePrompt,
+            because: "no manifest = no suffix appended (backward-compatible behavior)");
+        agent.Context.SystemPrompt.Should().NotContain("Session Files:");
+        agent.Context.SystemPrompt.Should().NotContain("invoke_summarize_playbook",
+            because: "the tool-name binding only appears via the manifest suffix");
+    }
+
+    /// <summary>
+    /// ADR-015 + R5 task 033 invariant: the manifest suffix MUST NOT include any extracted
+    /// text content, chunk text, MIME, or size info — only fileId + fileName + count.
+    /// Pinning this as a regression guard so future refactors can't accidentally leak.
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_SystemPromptSuffixDoesNotIncludeExtractedTextContent()
+    {
+        // Arrange — a sentinel value that a buggy implementation might leak.
+        const string sentinelContentType = "application/x-leak-sentinel";
+        const long sentinelSize = 999_999_999L;
+
+        var manifest = new List<ChatSessionFile>
+        {
+            new(
+                FileId: "file-leak-001",
+                FileName: "leak.pdf",
+                ContentType: sentinelContentType,
+                SizeBytes: sentinelSize,
+                SearchDocumentIdsCsv: "idx-leak-sentinel-chunk-csv",
+                UploadedAt: DateTimeOffset.UtcNow)
+        };
+
+        var contextWithFile = new ChatContext(
+            SystemPrompt: "Base.",
+            DocumentSummary: null,
+            AnalysisMetadata: null,
+            PlaybookId: TestPlaybookId,
+            KnowledgeScope: null,
+            UploadedFiles: manifest);
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contextWithFile);
+
+        var services = BuildServiceProvider(contextProviderMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId,
+            TestDocumentId,
+            TestPlaybookId,
+            TestTenantId,
+            uploadedFiles: manifest);
+
+        // Assert — fileId + fileName are present (manifest); content-type, size, and
+        // search-document IDs MUST NOT be in the prompt (ADR-015 no-leakage).
+        agent.Context.SystemPrompt.Should().Contain("file-leak-001",
+            because: "fileId is part of the canonical manifest");
+        agent.Context.SystemPrompt.Should().Contain("leak.pdf",
+            because: "fileName is part of the canonical manifest");
+
+        agent.Context.SystemPrompt.Should().NotContain(sentinelContentType,
+            because: "MIME content type MUST NOT leak into the system prompt (ADR-015)");
+        agent.Context.SystemPrompt.Should().NotContain(sentinelSize.ToString(),
+            because: "raw byte size MUST NOT leak into the system prompt (ADR-015)");
+        agent.Context.SystemPrompt.Should().NotContain("idx-leak-sentinel-chunk-csv",
+            because: "AI Search document/chunk IDs MUST NOT leak into the system prompt (ADR-015)");
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

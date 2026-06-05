@@ -193,6 +193,7 @@ public static class AgentEndpoints
                 httpContext,
                 noOpSseWriter,
                 latestUserMessage: request.Message,
+                uploadedFiles: session.UploadedFiles,
                 cancellationToken: cancellationToken);
 
             // Build AI history from existing session messages

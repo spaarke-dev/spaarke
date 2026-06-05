@@ -68,11 +68,17 @@ public class PlaybookChatContextProvider : IChatContextProvider
         Guid? playbookId,
         ChatHostContext? hostContext = null,
         IReadOnlyList<string>? additionalDocumentIds = null,
+        IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
-            "Building ChatContext for document {DocumentId}, tenant {TenantId}, playbook {PlaybookId}",
-            documentId, tenantId, playbookId);
+            "Building ChatContext for document {DocumentId}, tenant {TenantId}, playbook {PlaybookId}, uploadedFileCount={UploadedFileCount}",
+            documentId, tenantId, playbookId, uploadedFiles?.Count ?? 0);
+
+        // R5 task 033 — normalize uploadedFiles to null-or-non-empty so all downstream
+        // consumers (factory system-prompt suffix, tool reasoning) can use a single
+        // `is { Count: > 0 }` check. ADR-015: manifest only — never enrich here.
+        var normalizedUploadedFiles = uploadedFiles is { Count: > 0 } ? uploadedFiles : null;
 
         // When no playbook is specified (generic chat mode), return a default context
         // with no playbook-specific scoping. The agent will use a generic system prompt.
@@ -143,7 +149,8 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 DocumentSummary: defaultDocSummary,
                 AnalysisMetadata: defaultMetadata,
                 PlaybookId: null,
-                KnowledgeScope: defaultKnowledgeScope);
+                KnowledgeScope: defaultKnowledgeScope,
+                UploadedFiles: normalizedUploadedFiles);
         }
 
         // 1. Load playbook to get ActionIds
@@ -231,7 +238,8 @@ public class PlaybookChatContextProvider : IChatContextProvider
             DocumentSummary: documentSummary,
             AnalysisMetadata: analysisMetadata,
             PlaybookId: playbookId,
-            KnowledgeScope: knowledgeScope);
+            KnowledgeScope: knowledgeScope,
+            UploadedFiles: normalizedUploadedFiles);
     }
 
     /// <summary>
