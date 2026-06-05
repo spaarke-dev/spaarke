@@ -1,21 +1,42 @@
 # Current Task — BFF AI Architecture Audit r1
 
 > **Purpose**: Active task state tracker.
-> **Status**: **PHASE 2 COMPLETE 2026-06-04**. Phase 3 (Canonical Stack naming + migration plan) is the next step.
+> **Status**: **PHASE 3 COMPLETE 2026-06-04**. Phase 4 (single end-of-audit owner review per Q-002) is the next step.
 
 ---
 
-## 🎯 Active task — Phase 3 (Canonical Stack naming + migration plan)
+## 🎯 Active task — Phase 4: Q-002 single end-of-audit owner review
 
-**PHASE 2 IS COMPLETE.** All 4 waves landed: W1 (Cat 4 Cache + Cat 2 Lookup + Cat 6 Public Contracts + Cat 7 Node executors), W2 (Cat 1 Intent + Cat 3 Search), W3 (Cat 5 Prompts), W4 (DI + Configuration). 8 analysis docs + 4 wave summaries on master. **34 ADR candidates** surfaced. 4 canonical reference impls + 2 new W4 canonical patterns designated.
+**PHASE 3 IS COMPLETE.** Three sequential/parallel sub-agents (I → J + K) produced 12 synthesis files totaling ~2814 lines:
+- 1 primary canonical-architecture decision doc (Sub-Agent I)
+- 1 migration plan + 1 r3 scope recommendations doc (Sub-Agent J)
+- 8 per-category DR-### records + 1 README (Sub-Agent K)
 
-**Next action**: Owner approves W4 PR merge, then dispatch Phase 3 sub-agent(s) to:
-1. Author "Spaarke Canonical AI Stack" naming document — folds 4 reference impls + 2 W4 patterns into a single coherent canonical-architecture artifact
-2. Author migration plan with effort estimates per Q-001 + per audit design.md §3.1
-3. Bundle inventory corrections (7+ findings across waves)
-4. Prepare consolidated open-questions list for Q-002 single end-of-audit owner review
+**Next action**: Owner reads Phase 3 deliverables and makes binding decisions per Q-002 lock. Recommended owner reading order (per Sub-Agent K §8):
 
-After Phase 3 lands → Phase 4 = owner review.
+1. **`notes/canonical-architecture-decisions.md` §1 Executive Summary** — locks the framing (~50 lines)
+2. **`decisions/README.md`** — 41-line index to navigate the 8 DRs
+3. **`DR-003` (Public Contracts Facade)** FIRST — highest-priority single finding (LATENT BUG); owner adjudication of Option A remediation is the highest-leverage decision
+4. **`DR-008` (DI + Configuration)** — codifies the Endpoint↔DI Symmetry Rule (load-bearing NEW pattern); pairs with DR-003 as the structural-rule + canonical-instance dyad
+5. **`DR-005` + `DR-007` + `DR-001`** — bundled-DELETE-PR triad (~2000 LOC cascade); review together
+6. **`DR-002` (Cache)** + **`DR-006` (Search)** — pattern-canonicalization decisions with phased adoption
+7. **`DR-004` (Node Executors)** — light-touch KEEP verdict with documentation deliverable
+8. **`notes/migration-plan.md`** — 8 PRs sequenced; LATENT BUG fix is PR #1
+9. **`notes/r3-scope-recommendations.md`** — r3 Wave 2 timeline reduced ~50-66% (~2-3 weeks → ~1 week)
+
+**Owner decisions to make** (consolidated from 31 questions in canonical §11 + 26 questions across 8 DRs):
+- Confirm REJECT-consolidation verdicts across 8 categories (LOCKED if no override)
+- Confirm DELETE verdicts (3 lookup orphans + intent cascade + 5th orphan)
+- **Pick Option A or Option B** for `PlaybookBuilderSystemPrompt.cs` (Option B = EXTRACT-THEN-DELETE recommended)
+- **Approve LATENT BUG Option A remediation** (move IInsightsAi + add NullInsightsAi) as Migration PR #1
+- **Lock canonical naming** (Q-004): "Spaarke Public-Contracts Facade DI Fascia" + "Spaarke Endpoint↔DI Symmetry Rule" recommended for owner lock
+- Approve 8 PR sequencing in migration-plan.md
+- Approve r3 Wave 2 scope reduction (~1 week reconciliation, not ~2-3 weeks rebuild)
+- Adjudicate 3 security surfaces (RecordSearchService, SemanticSearchService, PrivilegeGroupResolver) — route to Security team
+- Confirm Q-005 ADR-deferral (34 ADR candidates → follow-on phase ~2-3 weeks)
+- Confirm Q-006 Quarterly Skill deferral
+
+After Phase 4 owner review → follow-on phase begins (ADR authoring + Quarterly Skill institutionalization per Q-005/Q-006 DEFERRED).
 
 ---
 
@@ -25,72 +46,76 @@ After Phase 3 lands → Phase 4 = owner review.
 |---|---|
 | Project initialized | ✅ 2026-06-04 |
 | Initial findings captured | ✅ [`notes/initial-findings.md`](notes/initial-findings.md) |
-| Design discussion | ✅ Q-001 through Q-006 locked (recovery memory) |
+| Design discussion | ✅ Q-001 through Q-006 locked |
 | Phase 1 Inventory | ✅ [`notes/inventory.md`](notes/inventory.md) (merged PR #343) |
-| Phase 2 Wave 1 — Cat 4 + Cat 2 + Cat 6 + Cat 7 | ✅ (merged PR #344) |
-| Phase 2 Wave 2 — Cat 1 + Cat 3 | ✅ (bundled in PR #344) |
-| Phase 2 Wave 3 — Cat 5 Prompts | ✅ (merged PR #346) |
-| Phase 2 Wave 4 — DI + Configuration | ✅ 2026-06-04 (this commit) |
-| **PHASE 2 COMPLETE** | **✅ 2026-06-04** |
-| Phase 3 Canonical Stack naming + migration plan | 🔲 next |
-| Phase 4 owner review (Q-002 single end-of-audit) | 🔲 |
+| Phase 2 Wave 1+2 (Cat 2+4+6+7 + Cat 1+3) | ✅ (merged PR #344) |
+| Phase 2 Wave 3 (Cat 5 Prompts) | ✅ (merged PR #346) |
+| Phase 2 Wave 4 (DI + Configuration) | ✅ (merged PR #347) |
+| **PHASE 2 COMPLETE** | ✅ 2026-06-04 |
+| Phase 3 — Canonical Stack synthesis (Sub-Agent I) | ✅ 2026-06-04 ([`notes/canonical-architecture-decisions.md`](notes/canonical-architecture-decisions.md), 815 lines) |
+| Phase 3 — Migration plan + r3 recommendations (Sub-Agent J) | ✅ 2026-06-04 ([`notes/migration-plan.md`](notes/migration-plan.md), 730 lines + [`notes/r3-scope-recommendations.md`](notes/r3-scope-recommendations.md), 325 lines) |
+| Phase 3 — 8 DR-### records + README (Sub-Agent K) | ✅ 2026-06-04 ([`decisions/`](decisions/), 949 lines) |
+| **PHASE 3 COMPLETE** | ✅ 2026-06-04 (this commit) |
+| Phase 4 — Q-002 single end-of-audit owner review | 🔲 next |
 | Follow-on phase — ADRs (Q-005) + Quarterly Skill (Q-006) | 🔲 DEFERRED |
 
 ---
 
-## Phase 2 cumulative headline findings
+## Phase 3 deliverables summary
 
-### HIGH severity
-- **LATENT BUG** — `IInsightsAi` 500 instead of 503 under compound-AI-OFF (W1 Cat 6); structural remediation pattern (Option A) defined by W4 §4.5: move `IInsightsAi` + `IPlaybookExecutionEngine` to `AddPublicContractsFacade`; add `NullInsightsAi`; register in `AddNullObjectsForCompoundOff`; fix misleading comment at `AnalysisServicesModule.cs:75-79`; add integration test asserting 503 from 3 Insights endpoints.
-- **Endpoint↔DI Registration Conditionality Symmetry Rule** (W4 §4.1) — generalizes Cat 6 §F.1 into a binding architectural constraint; closes the structural root cause of LATENT BUG; recommended as binding ADR.
-- **§F.1 detection MUST become runtime-verifiable** (W4 §4.2) — comment-block discipline is inadequate; integration-test fixture probing 4 compound-gate combinations recommended.
+| File | Lines | Size | Author |
+|---|---|---|---|
+| `notes/canonical-architecture-decisions.md` | 815 | 65 KB | Sub-Agent I |
+| `notes/migration-plan.md` | 730 | 47 KB | Sub-Agent J |
+| `notes/r3-scope-recommendations.md` | 325 | 27 KB | Sub-Agent J |
+| `decisions/README.md` | 41 | 4 KB | Sub-Agent K |
+| `decisions/DR-001-lookup-services.md` | 81 | 6 KB | Sub-Agent K |
+| `decisions/DR-002-cache-patterns.md` | 94 | 8 KB | Sub-Agent K |
+| `decisions/DR-003-public-contracts-facade.md` | 119 | 12 KB | Sub-Agent K |
+| `decisions/DR-004-node-executors.md` | 96 | 9 KB | Sub-Agent K |
+| `decisions/DR-005-intent-classifier.md` | 114 | 11 KB | Sub-Agent K |
+| `decisions/DR-006-search-substrates.md` | 132 | 12 KB | Sub-Agent K |
+| `decisions/DR-007-prompt-construction.md` | 125 | 13 KB | Sub-Agent K |
+| `decisions/DR-008-di-configuration.md` | 147 | 14 KB | Sub-Agent K |
+| **TOTAL** | **2819 lines** | **228 KB** | 3 sub-agents |
 
-### MEDIUM severity
-- **Bundled orphan DELETE PR** (~2000 LOC corrected): 3 lookup orphans + IntentClassificationService cascade + ClarificationService + PlaybookBuilderSystemPrompt prune (Option B) + BuildPlanGenerationService NEW orphan. Owner picks Option A vs Option B for PlaybookBuilderSystemPrompt.
-- **4 Public Contracts facades missing Null peer** (W1 Cat 6 §F.1 gap): bundled with LATENT BUG fix.
-- **Canonical `DistributedCacheExtensions.GetOrCreateAsync<T>` 0% adoption** in `Services/Ai/` (26 sites total per W2 expansions): promote opt-in → MUST.
-- **2 security adjudication surfaces** (W2 Cat 3): RecordSearchService tenant-isolation; SemanticSearchService privilege-filter gap.
-- **1 security adjudication surface** (W1 Cat 4): PrivilegeGroupResolver ADR-009 compliance.
+---
 
-### LOCKED architectural verdicts (universal across 8 categories)
-- **REJECT** forced consolidation behind generic interfaces (Cat 1, Cat 3, Cat 5, W4 modules + options + compound-gate). The "Spaarke Canonical AI Stack" framing MUST be descriptive pattern documentation, NOT binding interfaces.
-- **Null-peer asymmetry (1-of-4 search services) is ARCHITECTURALLY CORRECT** (W2 Cat 3) — endpoint-mapping conditionality is the rule.
-- **Compound AI gate is the right structural choice** (W4 §4.3) — DO NOT distribute per-service.
+## Migration plan headlines (per `migration-plan.md`)
 
-### Canonical reference impls designated
-- `EmbeddingCache` (binary specialist) + `DistributedCacheExtensions.GetOrCreateAsync<T>` (generic helper) — W1 Cat 4
-- `InsightsIntentClassifier` — W2 Cat 1
-- `RagService`/`NullRagService` (gold-standard for ADR-032 double-gate) — W2 Cat 3
-- `OrchestratorPromptBuilder` (gold-standard for ADR-009 exception) + `CapabilityClassificationPromptBuilder` — W3 Cat 5
+| PR | Priority | Scope | Effort |
+|---|---|---|---|
+| **PR #1** | HIGH | LATENT BUG Option A remediation + 4 facade Null peers | ~280 LOC; ~1 week |
+| **PR #2** | HIGH | Bundled orphan DELETE (3 lookup + intent cascade + Option B prompt + 5th orphan) | ~2000 LOC removed; ~1 week |
+| PR #3 | LOW | Inventory corrections + `Options/` → `Configuration/` mv + doc bug fixes | small; 1-2 days |
+| PR #4 | MEDIUM | `ACTION-TYPE-REGISTRY.md` authoring | small doc; 1-2 days |
+| PR #5+ | MEDIUM phased | Cache adoption migration (26 sites) | phased; 3-5 weeks |
+| PR #6 | MEDIUM time-boxed | InsightsIntentClassifier.BuildPrompt() extraction | small; Insights team owns trigger |
+| PR #7+ | LOW | 8 canonical pattern docs | 600-800 LOC docs; 1-2 weeks |
+| PR #8 | MEDIUM | Runtime §F.1 detection fixture | 1-2 days; Insights team owns |
 
-### Inventory corrections (7+ items)
-- Module count 34 → 31 (W4)
-- `Sprk.Bff.Api.Options` namespace does NOT exist (W4)
-- `Configuration/` per-dir count 25 → 21 (W4)
-- 5 explicit prompt sources (not 3): adds AnalysisContextBuilder + FallbackPrompts (W3)
-- 18 node executors (not 16); ActionType labels (W1 Cat 7)
-- 3 IntentClassification-named types (not 2); classifier consumer counts (W2 Cat 1)
-- DocumentClassifierHandler is IRagService consumer (not ISemanticSearchService) (W2 Cat 3)
-- AiAnalysisNodeExecutor is IRecordSearchService consumer (W2 Cat 3 + W1 Cat 7)
-- PromptLibrary mis-framed: user-CRUD layer (W3 Cat 5)
-- NEW 5th orphan: BuildPlanGenerationService.cs (W3 Cat 5)
+**Aggregate**:
+- **Code delta**: NET ~-2280 LOC (net code reduction)
+- **Docs delta**: ~1200-1800 LOC
+- **Effort**: ~9-13 weeks aggregate across 13 teams; ~4-5 weeks audit-team direct PRs
 
-### Cross-sub-agent validation worked
-- W2 Cat 1 corrected 2 W1 Sub-Agent A false positives
-- W3 Cat 5 corrected 3 W2 Cat 1 errors (cascade DELETE was wrong by 10×)
-- W4 corrected 3 inventory errors
+## r3 unblock (per `r3-scope-recommendations.md`)
 
-**Total ADR candidates surfaced**: **34** (14 W1 + 8 W2 + 5 W3 + 7 W4), deferred to follow-on phase per Q-005.
+- **r3 Wave 1**: confirmed consistent with audit; LOCKED (~5d)
+- **r3 Wave 2**: timeline **~2-3 weeks → ~1 week (5 days)** — ~50-66% reduction
+- Driven by leveraging existing `PlaybookDispatcher` + `playbook-embeddings` (renamed `spaarke-playbook-index`) infrastructure
+- **r3 Wave 1.1 (NullInsightsAi) → SUPERSEDED** by audit Migration PR #1 (avoids duplicate work)
+- Total r3 short-term timeline: ~3-4 weeks → **~1.9 weeks (~9.5 days)**
 
 ---
 
 ## Downstream projects waiting on this audit
 
-| Project | What's blocked | What's NOT blocked |
+| Project | What's blocked | What's now UNBLOCKED |
 |---|---|---|
-| `ai-spaarke-insights-engine-r3` | Wave 2 (Tier 2.5 reconciliation scope) — UNBLOCKED after Phase 3 lands | Wave 1 cleanup (Tier 1 + Tier 1.5 index rename) safe to proceed |
-| `spaarke-ai-platform-unification-r5` | Nothing explicitly | Heads-up to audit own chat-agent layer for similar parallel-build risk |
+| `ai-spaarke-insights-engine-r3` | Wave 2 (Tier 2.5 reconciliation scope) — was PROVISIONAL | **NOW UNBLOCKED** by `r3-scope-recommendations.md` |
+| `spaarke-ai-platform-unification-r5` | Nothing explicitly | Heads-up still applies; R5 doc deferred per owner choice |
 
 ---
 
-*Phase 2 complete 2026-06-04. Updated by main session after final W4 sub-agent analysis + Phase 2 aggregation.*
+*Phase 3 complete 2026-06-04. Updated by main session after Sub-Agents I + J + K produced 12 synthesis files totaling 2819 lines.*
