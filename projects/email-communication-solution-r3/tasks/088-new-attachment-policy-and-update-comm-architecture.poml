@@ -1,0 +1,146 @@
+<task id="088" project="email-communication-solution-r3">
+  <metadata>
+    <title>NEW `docs/standards/COMMUNICATION-ATTACHMENT-POLICY.md` + UPDATE `docs/architecture/communication-service-architecture.md` (client-side section)</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>077</dependencies>
+    <blocks>093</blocks>
+    <tags>docs, standards, architecture, attachments</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Two binding docs — one new standards file analogous to CHAT-ATTACHMENT-POLICY, one architecture update with client-side surface. Both must reflect as-built behavior accurately</rigor-reason>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Land TWO documentation deliverables per FR-27 items #3 and #8.
+
+    (a) Create NEW `docs/standards/COMMUNICATION-ATTACHMENT-POLICY.md` — the canonical attachment policy for Communication (email) attachments. Analog to the existing `docs/standards/CHAT-ATTACHMENT-POLICY.md`. Document: 35 MB total cap (server-enforced per NFR-04), 150 attachments cap, 25 MB client warn threshold, MIME allow-list, 4 source types (local/spe/related/wizard).
+
+    (b) UPDATE `docs/architecture/communication-service-architecture.md` — add a client-side section describing the canonical engine + 3 wrappers + Code Page. The doc historically covered only server-side (R2). R3 client-side architecture is now complete and must be reflected.
+
+    **⚠ PR #360 COLLISION WARNING**: Active PR #360 touches `docs/architecture/`. CHECK FOR REBASE NEED before editing communication-service-architecture.md.
+  </prompt>
+
+  <role>
+    Spaarke standards + architecture documentation author. Familiar with the CHAT-ATTACHMENT-POLICY structure (CLAUDE.md §16 pointer table cites it as canonical) and the communication-service-architecture document.
+  </role>
+
+  <goal>
+    Two docs landed:
+    (a) `docs/standards/COMMUNICATION-ATTACHMENT-POLICY.md` exists with the same structural sections as CHAT-ATTACHMENT-POLICY.md adapted to Communication: binary caps, MIME allow-list, attachment count cap, total-text/binary single-call invariant, source types, upgrade path.
+    (b) `docs/architecture/communication-service-architecture.md` updated with a new "Client-Side Architecture" section covering EmailComposer engine + 3 wrappers + Code Page + 3 entry surfaces. Original server-side content preserved.
+  </goal>
+
+  <context>
+    <background>
+      The chat-side analog `CHAT-ATTACHMENT-POLICY.md` was established as the canonical attachment policy form (CLAUDE.md §16). Communication needs its own analog because the limits + MIME allow-list differ. Per NFR-04: 150 attachments max, 35 MB total, client warns at 25 MB.
+
+      `communication-service-architecture.md` was last updated in R2 and covers server-side only. R3 client-side architecture is now production-ready and the architecture doc must reflect the full picture (client + server).
+
+      Active PR #360 touches `docs/architecture/` — verify it does not target `communication-service-architecture.md` before editing.
+    </background>
+    <relevant-files>
+      <file>docs/standards/COMMUNICATION-ATTACHMENT-POLICY.md</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-27 #3">COMMUNICATION-ATTACHMENT-POLICY.md MUST exist; analog of CHAT-ATTACHMENT-POLICY.md</constraint>
+    <constraint source="FR-27 #8">communication-service-architecture.md MUST gain a client-side section</constraint>
+    <constraint source="NFR-04">Attachment caps in policy: 150 attachments, 35 MB total, 25 MB client warn</constraint>
+    <constraint source="ADR-033">Both docs MUST reference ADR-033 as binding architecture</constraint>
+    <constraint source="project">PR #360 collision: `docs/architecture/` is in scope; check rebase need before editing communication-service-architecture.md</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/</file>
+    </files>
+    <patterns>
+      <pattern name="standards doc exemplar" location="docs/standards/CHAT-ATTACHMENT-POLICY.md">
+        Existing attachment policy — direct structural model for the new communication policy.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">**Rebase check (for doc b)**: `gh pr view 360 --json files` — confirm whether PR #360 touches `docs/architecture/communication-service-architecture.md` specifically. If yes: coordinate; if no: proceed.</step>
+    <step order="2">Read `docs/standards/CHAT-ATTACHMENT-POLICY.md` to extract the structural model.</step>
+    <step order="3">Read NFR-04 + FR-07 + spec acceptance criteria for the canonical caps + MIME rules.</step>
+    <step order="4">Read existing `docs/architecture/communication-service-architecture.md` to find the right insertion point for client-side section.</step>
+    <step order="5">Read EmailComposer source files + Code Page source for accurate client-side architecture description.</step>
+    <step order="6">**Author (a)** `docs/standards/COMMUNICATION-ATTACHMENT-POLICY.md` with sections:
+      - Purpose + scope (Communication = email; sibling policy to chat)
+      - Binary caps (35 MB total, 25 MB client warn, 150 attachments max)
+      - MIME allow-list (define explicitly; cite server enforcement in `CommunicationService.cs`)
+      - Source types (local/spe/related/wizard per FR-07)
+      - Single-server-call invariant (one POST to `/api/communications/send` per email)
+      - Upgrade path (R4+ may relax caps; current policy is R3-binding)
+      - Related: ADR-033, EMAIL-COMPOSER-COMPONENT-GUIDE.md, CHAT-ATTACHMENT-POLICY.md
+    </step>
+    <step order="7">**Update (b)** `docs/architecture/communication-service-architecture.md`: add a new "Client-Side Architecture" section covering:
+      - Engine: `<EmailComposer />` (5 modes × 3 mounts × imperative handle)
+      - 3 wrappers: SendEmailStep / SendEmailDialog / SendEmailPage
+      - Code Page: `sprk_emailcomposer` (3 entry surfaces per FR-19)
+      - Client wrapper: `sendCommunication()` + `SendCommunicationError`
+      - Boundary with server pipeline (this doc's existing content)
+      - ADR-033 reference
+    </step>
+    <step order="8">Cross-link the two new/updated docs (policy → architecture; architecture → policy).</step>
+    <step order="9">Verify CLAUDE.md §16 pointer table can reach both docs (existing pointer rows likely cover them via `docs/standards/` and `docs/architecture/`).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 088 ✅ completed.</step>
+    <step order="11">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh-pr">Check PR #360 collision for communication-service-architecture.md</tool>
+    <tool name="read">Read CHAT-ATTACHMENT-POLICY exemplar + existing architecture doc + EmailComposer code</tool>
+    <tool name="write">Create policy file</tool>
+    <tool name="edit">Update architecture file</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/standards/COMMUNICATION-ATTACHMENT-POLICY.md (NEW)</output>
+    <output type="docs">docs/architecture/communication-service-architecture.md (UPDATED — client-side section added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/standards/COMMUNICATION-ATTACHMENT-POLICY.md` exists with the 7 sections in step 6.</criterion>
+    <criterion testable="true">Policy documents 35 MB / 25 MB / 150 caps + MIME allow-list + 4 source types.</criterion>
+    <criterion testable="true">`docs/architecture/communication-service-architecture.md` has a "Client-Side Architecture" section.</criterion>
+    <criterion testable="true">Both docs cite ADR-033.</criterion>
+    <criterion testable="true">Cross-links between the two new/updated docs exist.</criterion>
+    <criterion testable="true">PR #360 rebase check explicitly performed for doc (b).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **PR #360 COLLISION**: This task's doc (b) touches `docs/architecture/` which is in scope of PR #360. The step 1 rebase check is non-negotiable. Doc (a) is NEW — no collision risk.
+
+    Empirical findings from project pipeline (relevant here):
+    - Caps per NFR-04 (server-enforced in `CommunicationService.cs` — verify before documenting).
+    - Client-side architecture sections must match what shipped in Waves 1+2, not spec assumptions.
+
+    Parallel-safe with tasks 085, 089, 090, 091 (different files, all in `docs/`).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Step 1 PR #360 rebase check is binding for doc (b) only.
+    </protocol>
+  </execution>
+</task>

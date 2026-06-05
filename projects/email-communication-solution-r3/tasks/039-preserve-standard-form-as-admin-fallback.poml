@@ -1,0 +1,112 @@
+<task id="039" project="email-communication-solution-r3">
+  <metadata>
+    <title>Document standard form as admin fallback (NFR-07 reversibility)</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>038</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, docs</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task; no code changes; outcome is a research note describing the admin fallback mechanism</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent of Wave 2 entry-surface tasks; documentation only</parallel-reason>
+    <fr-refs>NFR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Per NFR-07, the standard `sprk_communication` form must remain available as an admin/debug fallback after task 038's Form Component Control swap. Document:
+    1. How to switch back to the standard form WITHOUT code changes (form order toggle, security role assignment, or similar mechanism)
+    2. Which admin role(s) currently have access to the standard form
+    3. The step-by-step procedure for an admin to access a `sprk_communication` record via the standard form when needed (e.g., for troubleshooting a record the Code Page cannot display)
+
+    Produce `projects/email-communication-solution-r3/notes/research/039-admin-fallback-procedure.md`.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse administrator documentation author. Familiar with form security role assignment, form order management, and admin troubleshooting workflows.
+  </role>
+
+  <goal>
+    Research note describing the admin fallback procedure: anyone with admin access can recover the standard `sprk_communication` form view without engineering involvement. NFR-07 reversibility documented.
+  </goal>
+
+  <context>
+    <background>
+      Task 038 swapped the default form for the Code Page-bound form. NFR-07 binds R3 to keep the standard form accessible to admins as a debug/fallback. This task captures the operational procedure so the swap doesn't trap users when the Code Page is unavailable (e.g., during outage or for a record with corrupt data the Code Page can't render).
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/research/039-admin-fallback-procedure.md (NEW)</file>
+      <file>projects/email-communication-solution-r3/notes/research/038-form-swap-deploy.md (INPUT — task 038 deploy notes)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-07">Reversibility without code changes</constraint>
+    <constraint source="project">Documentation lives in `notes/research/` (project-internal); Wave 6 task 084 produces customer-facing `docs/data-model/sprk_communication-form.md`</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/email-communication-solution-r3/notes/research/038-form-swap-deploy.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 038's deploy note to confirm the exact mechanism used (Form Component Control vs primary form replacement) and how standard form was retained.</step>
+    <step order="2">Inventory admin security roles in dev environment with access to the standard form post-swap.</step>
+    <step order="3">Document the toggle-back procedure:
+      - Step 1: open the form order configuration (path in Maker portal)
+      - Step 2: change form order or visibility flags
+      - Step 3: publish customizations
+      - Step 4: verify by opening a record
+    </step>
+    <step order="4">Document the admin-access procedure (without toggle):
+      - Admins assigned the appropriate security role can navigate to a `sprk_communication` record and select the standard form from the form switcher dropdown (if available in the UI)
+    </step>
+    <step order="5">Write `notes/research/039-admin-fallback-procedure.md` with:
+      - Summary
+      - Toggle-back procedure (full reversibility)
+      - Admin-access procedure (per-record fallback)
+      - Security role inventory
+      - Troubleshooting scenarios (when to use the fallback)
+    </step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: mark task 039 ✅ completed.</step>
+    <step order="7">Update `current-task.md` per task-execute protocol: status → completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read task 038 notes + spec NFR-07</tool>
+    <tool name="write">Create research note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/039-admin-fallback-procedure.md (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Research note exists at `projects/email-communication-solution-r3/notes/research/039-admin-fallback-procedure.md`.</criterion>
+    <criterion testable="true">Note documents the toggle-back procedure (reversibility without code change).</criterion>
+    <criterion testable="true">Note documents the admin-access procedure (per-record fallback).</criterion>
+    <criterion testable="true">Note inventories admin security roles with fallback access.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This note is project-internal. The customer-facing equivalent lives in Wave 6 task 084 (`docs/data-model/sprk_communication-form.md` per spec FR-27 item 4).
+
+    If task 038 chose a mechanism where standard-form access requires more than security role assignment (e.g., a one-time form-order revert), document that limitation explicitly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply MINIMAL rigor per `<rigor-hint>`. Quality gates at Step 9.5 are SKIPPED for MINIMAL rigor.
+    </protocol>
+  </execution>
+</task>

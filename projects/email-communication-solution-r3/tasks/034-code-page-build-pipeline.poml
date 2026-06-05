@@ -1,0 +1,129 @@
+<task id="034" project="email-communication-solution-r3">
+  <metadata>
+    <title>Configure EmailComposer Code Page build pipeline (self-contained HTML artifact)</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>033</dependencies>
+    <blocks>036</blocks>
+    <tags>code-page, build, frontend, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Build config follows exemplar; no business logic changes; measurable success criterion (single HTML, &lt; 2 MB)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Must run after 033 (full integration) and before 036 (deploy)</parallel-reason>
+    <fr-refs>FR-18</fr-refs>
+  </metadata>
+
+  <prompt>
+    Configure the EmailComposer Code Page build pipeline to produce a single self-contained HTML artifact (per the `code-page-deploy` skill convention and matching DocumentRelationshipViewer's pipeline). `build-webresource.ps1` must run end-to-end and produce a deployable `.html` file ready for upload as Dataverse web resource `sprk_emailcomposer`.
+
+    Critical: the bundler config (webpack or vite, matching exemplar) must INLINE all assets (JS, CSS, images, fonts where reasonable). The Dataverse web resource is a single file; no external asset references allowed.
+
+    Verify the bundle size is reasonable. Target: < 2 MB compressed for the single HTML artifact. If bundle is significantly larger, investigate tree-shaking, dynamic imports, and exclude dev-only deps.
+  </prompt>
+
+  <role>
+    Spaarke frontend build engineer. Familiar with webpack/vite inlining patterns + the `code-page-deploy` skill conventions + the DocumentRelationshipViewer build script.
+  </role>
+
+  <goal>
+    Running `pwsh ./build-webresource.ps1` produces a single self-contained HTML artifact at the expected output path (e.g., `dist/sprk_emailcomposer.html`). The artifact is loadable in a browser without any network dependency on local files. Bundle size measured and reported; < 2 MB target enforced or escalated.
+  </goal>
+
+  <context>
+    <background>
+      Dataverse web resources are atomic — a JavaScript web resource is one file. The Code Page is published as a single HTML web resource (`sprk_emailcomposer` of type Web Page (HTML)) containing inline `<script>` and `<style>` tags with all bundled JS/CSS, fetched at runtime by the Dataverse host.
+
+      Per `code-page-deploy` skill conventions, the build pipeline is webpack with `HtmlInlineScriptPlugin` (or vite equivalent with `vite-plugin-singlefile`). Exemplar configuration lives in `DocumentRelationshipViewer/webpack.config.js`.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/EmailComposer/webpack.config.js (or vite.config.ts) (UPDATED)</file>
+      <file>src/client/code-pages/EmailComposer/build-webresource.ps1 (UPDATED — verify it produces single HTML)</file>
+      <file>src/client/code-pages/EmailComposer/package.json (UPDATED — add inline plugins if needed)</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/webpack.config.js (EXEMPLAR)</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/build-webresource.ps1 (EXEMPLAR)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="code-page-deploy skill">Single self-contained HTML artifact — no external references at runtime</constraint>
+    <constraint source="ADR-026">Code Page architecture follows full-page custom page standard; deployable as web resource</constraint>
+    <constraint source="project">Bundle target: &lt; 2 MB compressed HTML output</constraint>
+    <constraint source="project">Mirror exemplar's bundler choice — do not introduce divergence</constraint>
+    <constraint source="project">Web resource name: `sprk_emailcomposer`</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/webpack.config.js</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/build-webresource.ps1</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/package.json</file>
+    </files>
+    <patterns>
+      <pattern name="Single-HTML bundling for Code Pages" location="src/client/code-pages/DocumentRelationshipViewer/webpack.config.js">
+        Webpack `HtmlWebpackPlugin` + `HtmlInlineScriptPlugin` (or `script-ext-html-webpack-plugin`) inline all JS into the HTML. CSS via `style-loader` (no extract). Images base64-encoded or inlined.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read exemplar `webpack.config.js` (or vite config) + `build-webresource.ps1` end-to-end.</step>
+    <step order="2">Compare to EmailComposer's current bundler config (from task 030 scaffold); identify gaps (missing inline plugins, output path, asset handling).</step>
+    <step order="3">Update bundler config to mirror exemplar:
+      - Single entry → single output HTML
+      - All scripts inlined (HtmlInlineScriptPlugin or equivalent)
+      - All styles inlined (style-loader, no MiniCssExtractPlugin)
+      - Images as data URIs (asset/inline) or fonts as base64
+      - Production mode optimizations (terser, tree-shake)
+    </step>
+    <step order="4">Update `build-webresource.ps1` if needed — confirm output filename `sprk_emailcomposer.html`, output dir consistent with deploy script expectations.</step>
+    <step order="5">Run `pwsh ./build-webresource.ps1`; confirm artifact emits to expected path.</step>
+    <step order="6">Measure bundle size: `Get-Item dist/sprk_emailcomposer.html | Select-Object Length` (uncompressed); `Compress-Archive` test for compressed estimate. Report both in task notes.</step>
+    <step order="7">If bundle > 2 MB, investigate: (a) verify `@spaarke/ui-components` is tree-shaken correctly; (b) check if dev-only deps leaked into bundle; (c) consider dynamic import for rich-text editor or other large sub-components. Document any size optimization applied.</step>
+    <step order="8">Open the built HTML directly in a browser (file:// URL) and confirm it renders the App tree (will fail at auth bootstrap since not hosted in Dataverse — that's expected; just confirm bundle loads + React mounts).</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 034 ✅ completed; record bundle size in task notes.</step>
+    <step order="10">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task (035).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read exemplar build configs</tool>
+    <tool name="edit">Update webpack.config.js (or vite.config.ts) + build-webresource.ps1</tool>
+    <tool name="bash">Run build script + measure bundle size</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/EmailComposer/webpack.config.js (UPDATED — inline plugins configured)</output>
+    <output type="code">src/client/code-pages/EmailComposer/build-webresource.ps1 (UPDATED — produces single HTML)</output>
+    <output type="code">src/client/code-pages/EmailComposer/package.json (UPDATED — inline plugin deps added)</output>
+    <output type="artifact">dist/sprk_emailcomposer.html (build output — verified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`pwsh ./build-webresource.ps1` produces `dist/sprk_emailcomposer.html` (or exemplar-equivalent path) without errors.</criterion>
+    <criterion testable="true">Output is a single HTML file with no external asset references at runtime.</criterion>
+    <criterion testable="true">Bundle size measured + reported in task notes (target &lt; 2 MB compressed).</criterion>
+    <criterion testable="true">Browser-load test: opening the HTML file directly mounts the React app (auth will fail outside Dataverse, that's expected).</criterion>
+    <criterion testable="true">Bundler config mirrors DocumentRelationshipViewer (same plugin set + inline behavior).</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If bundle exceeds 2 MB significantly (e.g., 3+ MB), it usually indicates Fluent UI v9 not tree-shaken or the rich-text editor too large. Two mitigation options: (a) dynamic-import the `<BodyEditor />` HTML mode (lazy load); (b) confirm production mode is enabled.
+
+    The `build-webresource.ps1` script should be idempotent — running it twice produces the same artifact byte-for-byte (modulo timestamps). Deploy task 036 may re-invoke it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 are SKIPPED for STANDARD rigor.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,107 @@
+<task id="091" project="email-communication-solution-r3">
+  <metadata>
+    <title>Fix `sprk_email*` field references on `sprk_document` in `docs/architecture/sdap-overview.md`</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>077</dependencies>
+    <blocks>093</blocks>
+    <tags>docs, architecture</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Targeted doc update fixing stale field references; small surface, no architectural decision</rigor-reason>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Update `docs/architecture/sdap-overview.md` to fix stale `sprk_email*` field references on `sprk_document`. Per R2 lessons-learned, these fields were renamed (likely to canonical `sprk_communication*` references aligned with the Communication Service rename). Update to current canonical names by reading the as-built data model.
+
+    **⚠ PR #360 COLLISION WARNING**: Active PR #360 touches `docs/architecture/`. CHECK FOR REBASE NEED before editing sdap-overview.md.
+  </prompt>
+
+  <role>
+    Spaarke documentation maintainer with familiarity for the sdap-overview structure + the `sprk_document` data model + R2's field rename history.
+  </role>
+
+  <goal>
+    `docs/architecture/sdap-overview.md` updated: every stale `sprk_email*` reference on `sprk_document` replaced with the current canonical field name. No remaining `sprk_email*` field references that fail to resolve against the current `sprk_document` schema.
+  </goal>
+
+  <context>
+    <background>
+      During R2, several `sprk_document` fields originally named `sprk_email*` were renamed to align with the broader Communication Service rename (Communication > Email). The R2 lessons-learned doc captures this. `sdap-overview.md` was not updated at the time and now has stale references.
+
+      This task is a surgical text update — find references, replace with current canonical names per the as-built `sprk_document` schema.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/sdap-overview.md</file>
+      <file>docs/data-model/sprk_document.md</file>
+      <file>projects/email-communication-solution-r2/notes/lessons-learned.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-27 #12">sdap-overview.md MUST be updated to fix stale `sprk_email*` field references on `sprk_document`</constraint>
+    <constraint source="project">Replacements MUST use current canonical names per as-built `sprk_document` data model</constraint>
+    <constraint source="project">PR #360 collision: `docs/architecture/` is in scope; check rebase need</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>docs/architecture/sdap-overview.md</file>
+      <file>docs/data-model/sprk_document.md</file>
+      <file>projects/email-communication-solution-r2/notes/lessons-learned.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">**Rebase check**: `gh pr view 360 --json files` — confirm whether PR #360 touches `docs/architecture/sdap-overview.md` specifically. If yes: coordinate; if no: proceed.</step>
+    <step order="2">Read R2 `notes/lessons-learned.md` to find the documented field rename mapping (old `sprk_email*` → new canonical names).</step>
+    <step order="3">Read `docs/data-model/sprk_document.md` for the current canonical field inventory on `sprk_document`.</step>
+    <step order="4">Grep `docs/architecture/sdap-overview.md` for every `sprk_email*` reference: `grep -n "sprk_email" docs/architecture/sdap-overview.md`. List each line.</step>
+    <step order="5">For each match, determine the canonical replacement (using the R2 mapping + current schema). If a reference does not have a clear replacement (e.g., truly retired), use a footnote or strike-through with explanation.</step>
+    <step order="6">Apply replacements via Edit.</step>
+    <step order="7">Re-run grep to confirm zero `sprk_email*` field references remain on `sprk_document` (allowing only retirement-banner mentions OR explicit historical context).</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 091 ✅ completed.</step>
+    <step order="9">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh-pr">Check PR #360 collision</tool>
+    <tool name="grep">Find stale references</tool>
+    <tool name="read">Read R2 lessons-learned + current schema</tool>
+    <tool name="edit">Apply text replacements</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/sdap-overview.md (UPDATED — stale field refs fixed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for `sprk_email` in `docs/architecture/sdap-overview.md` returns zero stale field references on `sprk_document` (or only historical/intentional mentions).</criterion>
+    <criterion testable="true">Every replacement uses a canonical field name verified against current `sprk_document` schema.</criterion>
+    <criterion testable="true">PR #360 rebase check explicitly performed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **PR #360 COLLISION**: This task touches `docs/architecture/` which is in scope of PR #360. Step 1 rebase check is non-negotiable.
+
+    Empirical findings from project pipeline (relevant here):
+    - R2 renamed `sprk_email*` fields on `sprk_document` per lessons-learned doc — verify the mapping before applying replacements.
+    - If a stale reference has no clear replacement, prefer transparency (footnote or explicit retirement note) over silently dropping the reference.
+
+    Parallel-safe with tasks 085, 088, 089, 090 (different files in `docs/`).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply MINIMAL rigor per `<rigor-hint>`. Quality gates SKIPPED for MINIMAL rigor.
+    </protocol>
+  </execution>
+</task>

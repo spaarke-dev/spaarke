@@ -1,0 +1,118 @@
+<task id="016" project="email-communication-solution-r3">
+  <metadata>
+    <title>SpeAttachmentSource — SPE document browser picker</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>020</blocks>
+    <tags>react, frontend, fluent-ui, spe, communication</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Source-specific picker; SPE container browsing is a known pattern in the lib; no architecture decisions. STANDARD covers it.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build `SpeAttachmentSource.tsx` at `subcomponents/sources/SpeAttachmentSource.tsx`. Opens a Fluent `<Dialog>` showing a browseable SPE container picker — user navigates the container hierarchy and selects driveItems to attach.
+
+    On selection, produces `IAttachment[]` with `source='spe'`, `driveItemId: <selected driveItemId>` (canonical per FR-21), `name`, `sizeBytes`, `mimeType` from the SPE driveItem metadata. No local file content — server resolves the driveItem at send time.
+
+    The SPE browser primitive likely already exists in the shared lib (`SpeDocumentViewer` / `SpeContainerBrowser` style component). Audit + reuse — do NOT build a new SPE browser. If no reusable primitive exists, fall back to a minimal `<input>` accepting a driveItemId GUID with a deferred TODO for Wave 6.
+  </prompt>
+
+  <role>
+    Frontend developer with SPE integration awareness; familiar with the shared lib's existing SPE browser primitives.
+  </role>
+
+  <goal>
+    `SpeAttachmentSource.tsx` compiles + lint-clean. Clicking Add opens an SPE browser; selecting one or more driveItems adds them to AttachmentList with `driveItemId` populated.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-07, SPE is one of 4 sources. SPE containers hold the documents associated with sprk_documents/sprk_matters etc. User picks from a container's contents.
+
+      `driveItemId` is the canonical attachment reference (FR-21 / Wave 0). Server (`CommunicationService.cs`) resolves driveItemId to the actual content via the existing SPE facade (ADR-007) at send time. Client never reaches SPE directly.
+
+      Look for existing browser primitives in `src/client/shared/Spaarke.UI.Components/src/components/SpeDocumentViewer/`, `SpeContainerBrowser/`, or similar. Reuse what's there.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/sources/SpeAttachmentSource.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx (UPDATE — wire SPE picker)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ (READ — find existing SPE browser primitive)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">SPE access via existing facade only — client never directly hits SharePoint Embedded APIs</constraint>
+    <constraint source="ADR-021">Fluent v9 only — `Dialog`, `Button`, `Tree` / `List`</constraint>
+    <constraint source="ADR-028">No direct `@spaarke/auth` import — use injected `authenticatedFetch`</constraint>
+    <constraint source="ADR-033">Single canonical SPE picker for email attachments — replaces ad-hoc impls</constraint>
+    <constraint source="project">Selected items produce `IAttachment` with `source: 'spe'` and `driveItemId` populated</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-007-spe-filestore.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.types.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep `src/client/shared/Spaarke.UI.Components/src/components/` for existing SPE browser primitive (e.g., `SpeContainerBrowser`, `SpeDocumentViewer`). Document what's found in task notes.</step>
+    <step order="2">If a reusable primitive exists, author `SpeAttachmentSource.tsx`:
+      - Props: `{ onAdd: (attachments: IAttachment[]) =&gt; void; containerId?: string; authenticatedFetch: typeof fetch; disabled?: boolean }`
+      - Renders a Button "Add from SPE" that opens a Dialog with the existing browser primitive inside
+      - On selection, maps driveItems → `IAttachment[]` and calls `onAdd`</step>
+    <step order="3">If no reusable primitive exists, ship a minimal driveItem-ID-input picker as a v1 with a CLEAR TODO to replace with a real browser. Note the gap in PR description.</step>
+    <step order="4">Wire into AttachmentList — when `attachmentSources` includes `{ kind: 'spe', config: { containerId } }`, render this picker.</step>
+    <step order="5">Update `EmailComposer/index.ts` — export `SpeAttachmentSource`.</step>
+    <step order="6">Smoke test: open picker, select a known driveItem, verify it appears in AttachmentList with source badge "SPE" + driveItemId set.</step>
+    <step order="7">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="8">Update `TASK-INDEX.md`: 016 ✅.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Find existing SPE browser primitives</tool>
+    <tool name="write">SpeAttachmentSource.tsx</tool>
+    <tool name="edit">AttachmentList.tsx, index.ts</tool>
+    <tool name="bash">npm run build + lint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/subcomponents/sources/SpeAttachmentSource.tsx (NEW)</output>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.tsx (UPDATED — SPE picker wired)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SpeAttachmentSource.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">Picker opens; selecting a driveItem adds it to AttachmentList with source badge "SPE" + `driveItemId` populated.</criterion>
+    <criterion testable="true">No direct `@spaarke/auth` import — uses injected `authenticatedFetch` (NFR-02).</criterion>
+    <criterion testable="true">No direct SPE/Graph API calls — uses existing facade per ADR-007.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If no reusable browser primitive exists, the v1 fallback (driveItemId text input) is acceptable for Wave 1 — it lets the engine compile + tests run. Wave 6 can fold in a proper browser separately. Note the gap clearly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor. Step 9.5 skipped.
+    </protocol>
+  </execution>
+</task>

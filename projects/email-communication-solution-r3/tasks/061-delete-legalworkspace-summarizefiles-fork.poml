@@ -1,0 +1,130 @@
+<task id="061" project="email-communication-solution-r3">
+  <metadata>
+    <title>Delete LegalWorkspace `SummarizeFiles/` fork (9 files)</title>
+    <phase>Wave 4 — SummarizeFiles Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>062</blocks>
+    <tags>refactoring, cleanup, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Mechanical fork-deletion task; downstream impact handled by task 062 (re-exports). No ADR-bearing decisions beyond what 060 already locked in. STANDARD covers the cleanup + consumer-impact check.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential: depends on 060 (shared canonical fix shipped) so deletion doesn't strand LegalWorkspace consumers. Blocks 062 (re-export shim) and 064 (LegalWorkspace deploy). Cannot parallelize within Wave 4.</parallel-reason>
+    <fr-refs>FR-15, FR-25</fr-refs>
+  </metadata>
+
+  <prompt>
+    Delete the LegalWorkspace fork at `src/solutions/LegalWorkspace/src/components/SummarizeFiles/` (9 files per empirical pre-flight). All 9 files exist as a near-copy of `@spaarke/ui-components/.../SummarizeFilesWizard/` and one of them — `SummarizeSendEmailStep.tsx` — uses `sendCommunication()` (NOT inline fetch — but is still a fork to delete per FR-15/25).
+
+    Before deletion: ensure no LegalWorkspace consumer breaks. Any import referencing `src/solutions/LegalWorkspace/src/components/SummarizeFiles/...` MUST be retargeted to `@spaarke/ui-components` (this is task 062's job — coordinate sequencing).
+
+    Approach: this task DELETES the fork files only. Task 062 handles the consumer-side retargeting. To allow them to be done as a sequenced pair without breaking the LegalWorkspace build in between:
+    1. THIS task: grep all consumers, document them in `current-task.md` for task 062
+    2. THIS task: delete the 9 fork files
+    3. Task 062 immediately follows: re-targets consumers OR adds a re-export shim
+    4. Task 064 deploys
+
+    The build WILL be temporarily broken between this task and task 062 — that is the expected handoff state. Do not deploy LegalWorkspace until task 064 (after 062).
+  </prompt>
+
+  <role>
+    Frontend developer authoritative on LegalWorkspace component layout and the canonical re-export pattern. Familiar with the fork-vs-canonical distinction (per FR-25), the 9-file SummarizeFiles fork structure, and the LegalWorkspace consumer import patterns.
+  </role>
+
+  <goal>
+    `src/solutions/LegalWorkspace/src/components/SummarizeFiles/` directory deleted (all 9 files). Consumer audit list produced in `current-task.md` for task 062. LegalWorkspace build is expected to FAIL after this task (broken consumers) — that is the intentional handoff state, repaired by task 062.
+  </goal>
+
+  <context>
+    <background>
+      Per CLAUDE.md empirical findings: `src/solutions/LegalWorkspace/src/components/SummarizeFiles/` is a fork (9 files) of `@spaarke/ui-components/.../SummarizeFilesWizard/`. The fork's `SummarizeSendEmailStep.tsx` uses `sendCommunication()` (canonical typed wrapper, NOT inline fetch) — but it is still a fork per spec FR-15 (the directory exists as a duplicate) and FR-25 (LegalWorkspace must not fork shared-lib components).
+
+      Forks exist because LegalWorkspace was developed before the shared lib had a SummarizeFiles equivalent. Now that the canonical lives in `@spaarke/ui-components`, the LegalWorkspace fork is dead weight + maintenance liability — every shared-lib fix has to be back-ported to the fork (which has happened inconsistently per the assessment).
+
+      Deletion strategy: DELETE the fork files outright; rely on the canonical from `@spaarke/ui-components`. Consumer retargeting (task 062) is the immediate follow-on.
+
+      Why not delete + retarget in one task: separation of concerns. THIS task is reversible (one `git revert` restores the 9 files). Task 062 is a separate atomic change (retarget imports). Keeping them split makes either reversible independently.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/ (PRIMARY — DELETE all 9 files)</file>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/SummarizeSendEmailStep.tsx (fork uses sendCommunication(); not inline fetch but is a fork)</file>
+      <file>src/solutions/LegalWorkspace/src/ (audit for consumer imports referencing the fork)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/ (canonical — task 060 migrated to canonical pattern)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-15">LegalWorkspace fork DELETED.</constraint>
+    <constraint source="spec FR-25">No email-touching forks remain in LegalWorkspace post-Waves 3–6.</constraint>
+    <constraint source="ADR-033">Re-exports MUST be from `@spaarke/ui-components` (canonical), not from local fork (which no longer exists).</constraint>
+    <constraint source="project">Consumer audit list produced for task 062 — every file in `src/solutions/LegalWorkspace/` that imports from the deleted directory.</constraint>
+    <constraint source="project">Build break between this task and 062 is EXPECTED. Document in task notes. Do not deploy until 062 completes.</constraint>
+    <constraint source="project">Use `git rm -r` (not file-system delete) so the change is tracked and reversible via `git revert`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">List the 9 files in `src/solutions/LegalWorkspace/src/components/SummarizeFiles/`. Verify count matches empirical pre-flight (CLAUDE.md row 9 implies "9 files"). If count diverges, document the delta and proceed with whatever is there.</step>
+    <step order="2">Grep audit consumers BEFORE deletion. Find every file in `src/solutions/LegalWorkspace/` that imports from the fork:
+      <code>
+      grep -rn 'from .*components/SummarizeFiles' src/solutions/LegalWorkspace/
+      grep -rn 'from .*SummarizeFiles/SummarizeSendEmailStep\|from .*SummarizeFiles/SummarizeFilesDialog' src/solutions/LegalWorkspace/
+      grep -rn 'import.*SummarizeFiles' src/solutions/LegalWorkspace/
+      </code>
+      Produce a deduplicated list of consumer files. Note: every consumer becomes task 062's retarget candidate.
+    </step>
+    <step order="3">Inspect each consumer briefly to understand: what symbol is being imported? (`SummarizeFilesDialog`, `SummarizeSendEmailStep`, both, or a transitive sub-component?) Record in audit list.</step>
+    <step order="4">Append the audit list to `current-task.md` with a section heading `## Wave 4 SummarizeFiles fork consumers (for task 062 retarget)` — format as a checklist task 062 ticks off.</step>
+    <step order="5">Delete the directory with `git rm -r src/solutions/LegalWorkspace/src/components/SummarizeFiles/` (or equivalent). Confirm: directory gone, 9 files removed from git tracking.</step>
+    <step order="6">DO NOT attempt to build LegalWorkspace from this task — build break is expected. Document the expected break in task notes.</step>
+    <step order="7">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 061 ✅ completed.</step>
+    <step order="8">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (062 — which immediately repairs the break).</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">List files + run `git rm -r`</tool>
+    <tool name="grep">Consumer audit before deletion</tool>
+    <tool name="edit">Update current-task.md with consumer audit list</tool>
+  </tools>
+
+  <outputs>
+    <output type="delete">src/solutions/LegalWorkspace/src/components/SummarizeFiles/ (DELETED — 9 files)</output>
+    <output type="notes">current-task.md (UPDATED — consumer audit list for task 062)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/solutions/LegalWorkspace/src/components/SummarizeFiles/` directory does not exist.</criterion>
+    <criterion testable="true">`git status` shows 9 files staged for deletion.</criterion>
+    <criterion testable="true">Consumer audit list (every LegalWorkspace file that imported from the deleted directory) appended to `current-task.md`.</criterion>
+    <criterion testable="true">Task notes document the expected build break + handoff to task 062.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 061 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Expected build break: LegalWorkspace will not compile between this task and task 062. This is intentional and documented. The temporary break window MUST be short (sequential tasks 061 → 062 in same session). Do NOT merge a PR that contains only 061 — task 062 must land in the same PR or sequentially without merge intervening.
+
+    File count delta: if the actual file count is not 9, that does not block this task — record the actual count in notes. The 9-file count from CLAUDE.md is empirical pre-flight; pre-existing file changes between pre-flight and execution may have shifted it.
+
+    Reversibility: this entire task is reversible via `git revert`. The file deletion is the only physical state change — the audit list lives in `current-task.md` and survives revert.
+
+    If a consumer in step 2's audit is found to reference a symbol that LegalWorkspace adds on top of the shared lib's component (i.e., LegalWorkspace had legitimate value-add code, not just a copy), document it in task notes and escalate to project owner. The default assumption is the fork is pure duplication.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 (adr-check + code-review) SKIPPED for STANDARD rigor.
+    </protocol>
+  </execution>
+</task>

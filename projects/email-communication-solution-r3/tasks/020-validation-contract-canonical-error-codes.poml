@@ -1,0 +1,174 @@
+<task id="020" project="email-communication-solution-r3">
+  <metadata>
+    <title>Validation contract — canonical error codes + screen-reader live region</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>012, 013, 014, 015, 016, 017, 018</dependencies>
+    <blocks>024, 025, 026, 027, 028</blocks>
+    <tags>react, frontend, validation, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Validation contract is canonical — all canonical error codes (10) must be implemented correctly; consumer code (wrappers, wizard steps, future surfaces) depends on the typed contract; NFR-09 a11y (live region) is load-bearing for screen-reader users. FULL guards against contract drift.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Aggregates validation from all 5 sub-components (012-018) into a single contract; must be implemented after sub-components land; downstream tasks (024-028) consume the contract.</parallel-reason>
+    <fr-refs>FR-08, FR-09</fr-refs>
+  </metadata>
+
+  <prompt>
+    Implement the canonical validation contract in `EmailComposer.tsx` + `EmailComposer.reducer.ts`. Replace the stub `validate()` (from task 011) with the real implementation. Wire sub-component validation events (RecipientField, AttachmentList) through the reducer.
+
+    Required canonical error codes (FR-08):
+    | Code | Field | Triggered by |
+    |---|---|---|
+    | `TO_REQUIRED` | `to` | No recipients on send/saveDraft |
+    | `TO_INVALID_EMAIL` | `to` | Recipient added with malformed address |
+    | `TO_TOO_MANY` | `to` | More than 500 recipients (server cap) |
+    | `SUBJECT_REQUIRED` | `subject` | Empty subject on send (not blocking saveDraft) |
+    | `BODY_REQUIRED` | `body` | Empty body on send (not blocking saveDraft) |
+    | `ATTACHMENT_TOO_LARGE` | `attachments` | Single attachment &gt; 25 MB OR total &gt; 35 MB |
+    | `ATTACHMENTS_TOO_MANY` | `attachments` | More than 150 attachments |
+    | `ATTACHMENT_BLOCKED_TYPE` | `attachments` | MIME blocked per policy (Wave 6 wires policy; for Wave 1, no blocks) |
+    | `FROM_REQUIRED` | `from` | No From address resolved |
+    | `FROM_NOT_APPROVED` | `from` | From address not in approved sender list (Wave 2+ enforcement) |
+
+    Return shape: `IValidationResult[] = [{ field, code, message }, ...]` — empty array on success.
+
+    Screen-reader live region (NFR-09): engine renders a hidden `<div aria-live="polite" aria-atomic="true">` near the top. When `validationErrors` populate, populate this region with the error messages (e.g., "Recipients required. Subject required."). Screen reader announces on every change.
+
+    `validate()` is called by:
+    - `send()` — blocks on any error
+    - `saveDraft()` — blocks on `TO_INVALID_EMAIL` only (allows empty subject/body for drafts)
+    - External callers via imperative handle (wizards on step-change)
+
+    Files:
+    - Update `EmailComposer.reducer.ts` — `VALIDATION_ERRORS` action, validator function
+    - Update `EmailComposer.tsx` — wire `validate()` imperative handle method, render live region, propagate sub-component validation events
+    - Update `RecipientField.tsx`, `AttachmentList.tsx` to emit canonical codes via their `onValidationError` callbacks
+  </prompt>
+
+  <role>
+    Senior React + TypeScript developer; familiar with form-validation patterns + ARIA live regions + typed error contracts.
+  </role>
+
+  <goal>
+    Engine's `validate()` returns the correct `IValidationResult[]` for all 10 canonical codes. Live region announces validation errors. Send/Save Draft blocked accordingly. Sub-components emit canonical codes (no string-only errors).
+  </goal>
+
+  <context>
+    <background>
+      Per FR-08 + spec MUST rules: NO string-only errors anywhere. Every error has a code from the canonical set.
+
+      Per FR-09 + ADR-019: server-side errors (from `send()` failures) come back as `SendCommunicationError` (Wave 0 task 005) parsed from ProblemDetails. This task handles CLIENT-side pre-send validation only; server-side errors flow separately.
+
+      Per NFR-09: screen-reader live region is a binding accessibility requirement. Live regions use `aria-live="polite"` (or `assertive` if the spec demands immediate announce). Polite is appropriate for validation summaries.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts (UPDATE — add ValidationCode type)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.tsx (UPDATE — emit canonical codes)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx (UPDATE — emit canonical codes)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">Server-side errors flow via `SendCommunicationError` (separate from client validation); client validation uses canonical codes</constraint>
+    <constraint source="ADR-021">Live region uses Fluent v9 semantics; visually hidden but screen-reader accessible</constraint>
+    <constraint source="ADR-033">Canonical validation contract — all 10 codes implemented, no ad-hoc string errors anywhere</constraint>
+    <constraint source="NFR-06">Uniform error contract — client validation always returns IValidationResult[]; server errors throw SendCommunicationError</constraint>
+    <constraint source="NFR-09">Screen-reader live region `aria-live="polite"` for validation summaries</constraint>
+    <constraint source="project">`validate()` blocks `send()` on ANY error; blocks `saveDraft()` only on TO_INVALID_EMAIL</constraint>
+    <constraint source="project">Canonical codes: TO_REQUIRED, TO_INVALID_EMAIL, TO_TOO_MANY, SUBJECT_REQUIRED, BODY_REQUIRED, ATTACHMENT_TOO_LARGE, ATTACHMENTS_TOO_MANY, ATTACHMENT_BLOCKED_TYPE, FROM_REQUIRED, FROM_NOT_APPROVED</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update `EmailComposer.types.ts`:
+      - Add `EmailComposerValidationCode = 'TO_REQUIRED' | 'TO_INVALID_EMAIL' | 'TO_TOO_MANY' | 'SUBJECT_REQUIRED' | 'BODY_REQUIRED' | 'ATTACHMENT_TOO_LARGE' | 'ATTACHMENTS_TOO_MANY' | 'ATTACHMENT_BLOCKED_TYPE' | 'FROM_REQUIRED' | 'FROM_NOT_APPROVED'`
+      - Tighten `IValidationResult.code: EmailComposerValidationCode`</step>
+    <step order="2">Update `EmailComposer.reducer.ts`:
+      - Add `validateState(state, options: { forSend: boolean }): IValidationResult[]` — pure function returning the array
+      - Implements all 10 canonical checks; `forSend=false` skips SUBJECT_REQUIRED + BODY_REQUIRED (allows draft)
+      - Add `SET_VALIDATION_ERRORS` action (idempotent set)</step>
+    <step order="3">Update `EmailComposer.tsx`:
+      - `useImperativeHandle` — `validate: () =&gt; validateState(state, { forSend: true })`; called internally on send
+      - `send()` real implementation: run `validateState({forSend: true})`; if errors, dispatch SET_VALIDATION_ERRORS + throw / return early; else call communicationApi `sendCommunication()` with state mapped to request shape
+      - `saveDraft()` real implementation: run `validateState({forSend: false})`; if errors, dispatch + return; else POST to draft endpoint or upsert via `sprk_communication` (statuscode=Draft)
+      - Render live region: `&lt;div aria-live="polite" aria-atomic="true" style={visuallyHidden}&gt;{validationErrors.map(e =&gt; e.message).join('. ')}&lt;/div&gt;` near top of composer
+      - Visible error display: each validation error rendered next to the relevant field (sub-components consume `validationErrors` filtered by `field`)</step>
+    <step order="4">Update `RecipientField.tsx`:
+      - When commit produces a TO_INVALID_EMAIL → call `props.onValidationError('TO_INVALID_EMAIL', '...')` with canonical code
+      - When recipient count &gt; 500 → emit TO_TOO_MANY</step>
+    <step order="5">Update `AttachmentList.tsx`:
+      - On cap breach → emit canonical codes (ATTACHMENTS_TOO_MANY, ATTACHMENT_TOO_LARGE)
+      - Per-file size &gt; 25 MB → emit ATTACHMENT_TOO_LARGE</step>
+    <step order="6">Wire engine's `onValidationError` aggregation to dispatch SET_VALIDATION_ERRORS (merge/dedupe by code).</step>
+    <step order="7">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="7.5">Step 9.5 quality gates — code-review + adr-check (ADR-019, ADR-021, ADR-033).</step>
+    <step order="8">Update `TASK-INDEX.md`: 020 ✅.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="edit">EmailComposer.types.ts, EmailComposer.reducer.ts, EmailComposer.tsx, RecipientField.tsx, AttachmentList.tsx</tool>
+    <tool name="bash">npm run build + lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/EmailComposer.types.ts (UPDATED — canonical code union)</output>
+    <output type="file">EmailComposer/EmailComposer.reducer.ts (UPDATED — validateState fn + action)</output>
+    <output type="file">EmailComposer/EmailComposer.tsx (UPDATED — real validate/send/saveDraft, live region)</output>
+    <output type="file">EmailComposer/subcomponents/RecipientField.tsx (UPDATED — canonical codes)</output>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.tsx (UPDATED — canonical codes)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 10 canonical codes implemented and exercised by at least one validator branch.</criterion>
+    <criterion testable="true">`validate()` returns `IValidationResult[]` shape; empty array on success.</criterion>
+    <criterion testable="true">`send()` blocks on ANY validation error.</criterion>
+    <criterion testable="true">`saveDraft()` blocks on TO_INVALID_EMAIL only (allows empty subject/body).</criterion>
+    <criterion testable="true">Live region `aria-live="polite"` renders concatenated error messages — NFR-09.</criterion>
+    <criterion testable="true">No string-only validation errors anywhere in EmailComposer.</criterion>
+    <criterion testable="true">RecipientField + AttachmentList emit canonical codes (no inline strings).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The validation contract is the CONSUMER CONTRACT for wizard hosts. A wizard's "Finish" handler:
+    ```
+    const errors = composerRef.current.validate();
+    if (errors.length) { showErrors(errors); return; }
+    await composerRef.current.send();
+    ```
+
+    Server-side errors (e.g., daily-send-cap hit, Graph rate-limit) come back as `SendCommunicationError` per FR-09 — orthogonal to this client-side contract.
+
+    For Wave 1, ATTACHMENT_BLOCKED_TYPE has no triggers (MIME allow-list ships in Wave 6 task 088). The code is reserved in the union for future enforcement.
+
+    FROM_REQUIRED + FROM_NOT_APPROVED similarly reserved for Wave 2+ approved-sender enforcement; for Wave 1, the From field defaults to the authenticated user and these codes are wire-only (no logic yet).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 9.5 mandatory.
+    </protocol>
+  </execution>
+</task>

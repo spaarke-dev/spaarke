@@ -1,0 +1,156 @@
+<task id="075" project="email-communication-solution-r3">
+  <metadata>
+    <title>Migrate DocumentEmailWizard to attachmentDriveItemIds — fix latent bug at line 494</title>
+    <phase>Wave 5 — 5-Wizard Migration + DocumentEmailWizard Fix + Forks</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>070, 005, 002</dependencies>
+    <blocks>076</blocks>
+    <tags>react, frontend, refactoring, communication, bug-fix</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Fixes a latent production bug (`sprk_document` GUIDs passed as `attachmentDocumentIds` instead of driveItem IDs) and migrates the wizard to canonical `attachmentDriveItemIds`; communication tag + bug-fix + behavior change triggers FULL rigor; downstream attachment success depends on correct payload</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx` only — different file from 072 (CreateMatter step), 073 (WorkAssignmentDialog), 074 (LegalWorkspace delete). All concurrent after 070 (EntityCreationService adapter) lands.</parallel-reason>
+    <fr-refs>FR-17</fr-refs>
+  </metadata>
+
+  <prompt>
+    Migrate `src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx` to the canonical `attachmentDriveItemIds` payload field.
+
+    LATENT BUG (per CLAUDE.md empirical finding DELTA #5; spec FR-17): line 494 currently reads:
+
+    ```
+    attachmentDocumentIds: currentAttach ? currentKept.map(d => d.documentId) : undefined
+    ```
+
+    This passes `sprk_document` GUIDs (`d.documentId`) as `attachmentDocumentIds`, but the BFF expects driveItem IDs for that field (the field name is "document IDs" only by legacy naming — the underlying contract is driveItem IDs). The result: attachments silently fail to attach when sending email from DocumentEmailWizard.
+
+    FIX per UQ5 resolution + Wave 0 task 002 (BFF DTO non-breaking alias) + Wave 0 task 005 (client wrapper `attachmentDriveItemIds`):
+
+    1. Source `driveItemId` from `wizardContext.uploadedFiles` instead of `d.documentId` (per UQ5 — the wizard's `uploadedFiles` shape includes BOTH `documentId` and `driveItemId`).
+    2. Use the canonical field name `attachmentDriveItemIds`, not the legacy `attachmentDocumentIds`.
+    3. Confirm the BFF (task 002 alias) accepts the new field; the wrapper (task 005) types it correctly.
+
+    Replace line 494 (or the structurally equivalent line if it has drifted) with:
+
+    ```
+    attachmentDriveItemIds: currentAttach ? currentKept.map(d => d.driveItemId) : undefined
+    ```
+
+    Verify `d.driveItemId` is actually populated for kept documents — trace the source through `wizardContext.uploadedFiles` and confirm the field is set during upload (Wave 0 task 005 enforces the shape). If the wrapper still requires `attachmentDocumentIds` as a legacy compatibility field, this task removes the legacy caller from this file (per the acceptance criterion below).
+
+    Acceptance: emails sent from DocumentEmailWizard with attachments must successfully attach the files end-to-end in dev (regression test for the latent bug, verified in task 077). `attachmentDocumentIds` is removed from this caller entirely.
+
+    NOTE per Owner Clarification: All Wave 5 changes ship as a single PR (task 076). Do not push as standalone.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer. Authoritative on the DocumentEmailWizard send-email flow, the canonical `sendCommunication()` wrapper (Wave 0 task 005), and the BFF DTO contract (Wave 0 task 002).
+  </role>
+
+  <goal>
+    DocumentEmailWizard uses `attachmentDriveItemIds` (sourced from `wizardContext.uploadedFiles[].driveItemId`) in its send payload. The latent bug at line 494 is fixed. `attachmentDocumentIds` is removed from this caller. Manual smoke test in task 077 verifies attachments succeed end-to-end.
+  </goal>
+
+  <context>
+    <background>
+      DocumentEmailWizard is the most-used email-send surface in production legal-ops workflows. The latent bug at line 494 (confirmed at pre-flight per CLAUDE.md DELTA #5) means attachments silently fail to attach because the BFF receives `sprk_document` GUIDs in a field expecting driveItem IDs. The fix is mechanical (correct source field) but high-leverage because it closes a known production bug.
+
+      Wave 0 dependencies satisfied:
+      - Task 002: BFF DTO now accepts `AttachmentDriveItemIds` (canonical) AND `AttachmentDocumentIds` (alias) — non-breaking
+      - Task 005: client `communicationApi.ts` now types `attachmentDriveItemIds` field + exports `SendCommunicationError`
+      - Task 070: `EntityCreationService.sendEmail()` is a thin adapter over `sendCommunication()`
+
+      Per UQ5 resolution, `wizardContext.uploadedFiles` items carry BOTH `documentId` (Dataverse `sprk_document` GUID) and `driveItemId` (SharePoint Embedded driveItem ID). The fix sources from `driveItemId`.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">Client send-email paths use `sendCommunication()` typed wrapper with canonical `attachmentDriveItemIds`</constraint>
+    <constraint source="ADR-019">Errors surface as `SendCommunicationError` from ProblemDetails</constraint>
+    <constraint source="spec FR-17">DocumentEmailWizard migrates to canonical `attachmentDriveItemIds`; latent bug at line 494 fixed</constraint>
+    <constraint source="spec NFR-05">Non-breaking server change — BFF accepts both fields during R3; this caller uses only the canonical name</constraint>
+    <constraint source="UQ5">`wizardContext.uploadedFiles` shape includes both `documentId` and `driveItemId`; source attachments from `driveItemId`</constraint>
+    <constraint source="project">Remove `attachmentDocumentIds` from this caller entirely; do not leave legacy compatibility code in DocumentEmailWizard</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+    <patterns>
+      <pattern name="canonical sendCommunication wrapper with driveItem IDs" location="src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts">
+        Wave 0 task 005 added `attachmentDriveItemIds` field + `SendCommunicationError` export.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load spec.md FR-17, CLAUDE.md empirical findings (DELTA #5), plan.md Wave 5, ADR-033, FAILURE-MODES.md (AP-4 — attachment ID confusion).</step>
+    <step order="2">Read `DocumentEmailWizard.tsx`; locate the line currently at line 494 (may have drifted). Confirm the bug: `attachmentDocumentIds: currentAttach ? currentKept.map(d => d.documentId) : undefined`.</step>
+    <step order="3">Trace `wizardContext.uploadedFiles` shape: confirm items carry both `documentId` and `driveItemId` (per UQ5). If `driveItemId` is not yet populated for kept documents, fix the upstream upload flow first.</step>
+    <step order="4">Verify `communicationApi.ts` (Wave 0 task 005) types `attachmentDriveItemIds` correctly; confirm the BFF DTO (Wave 0 task 002) accepts it.</step>
+    <step order="5">Replace the bug line with: `attachmentDriveItemIds: currentAttach ? currentKept.map(d => d.driveItemId) : undefined`. Remove `attachmentDocumentIds` field from this caller entirely.</step>
+    <step order="6">Grep the rest of the file for any other `attachmentDocumentIds` references; remove or update them to `attachmentDriveItemIds`.</step>
+    <step order="7">If the file has additional inline send logic that should now route through `EntityCreationService.sendEmail()` (the task-070 adapter) or `sendCommunication()` directly, refactor accordingly.</step>
+    <step order="8">Run `npm run lint` + `npm run build` in shared lib.</step>
+    <step order="9">Run unit tests for DocumentEmailWizard. Update any test assertions that asserted the old `attachmentDocumentIds` payload field.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 075 ✅ completed.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Locate bug line + audit for other `attachmentDocumentIds` references</tool>
+    <tool name="read">Inspect `DocumentEmailWizard.tsx`, `communicationApi.ts`, wizardContext shape</tool>
+    <tool name="edit">Apply the fix at line 494 + remove legacy field references</tool>
+    <tool name="bash">`npm run lint`, `npm run build`, `npm test` in shared lib</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx (UPDATED — bug fix + canonical field)</output>
+    <output type="test">Unit test updates where assertions targeted old field</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The line currently at ~line 494 uses `attachmentDriveItemIds` not `attachmentDocumentIds`.</criterion>
+    <criterion testable="true">The mapped source is `d.driveItemId` not `d.documentId`.</criterion>
+    <criterion testable="true">Repo-wide grep `attachmentDocumentIds` in `DocumentEmailWizard.tsx` returns ZERO matches.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` succeed in shared lib.</criterion>
+    <criterion testable="true">Unit tests for DocumentEmailWizard pass.</criterion>
+    <criterion testable="true">In task 077 dev smoke test: emails sent from DocumentEmailWizard with attachments successfully attach the files end-to-end (regression for the latent bug).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Single-PR scope (Owner Clarification): consolidated Wave 5 PR (task 076).
+
+    Parallel group K (with 072, 073, 074).
+
+    Empirical:
+    - CLAUDE.md DELTA #5: bug confirmed at line 494 at pipeline pre-flight (2026-06-05). Line number may drift if other Wave 5 tasks landed first; use grep to relocate.
+    - This is the regression-test target for task 077's "DocumentEmailWizard with attachments" smoke test.
+
+    `.claude/FAILURE-MODES.md` AP-4 documents the broader attachment-ID-confusion failure mode; Wave 6 task 087 updates AP-4 to note that the canonical `attachmentDriveItemIds` rename + this fix closes the latent bug class.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>`. Apply FULL rigor per `<rigor-hint>` — code-review + adr-check quality gates at Step 9.5 REQUIRED. Verify the bug fix is exact, no `attachmentDocumentIds` references remain in the file, and the payload type-checks against the canonical wrapper signature.
+    </protocol>
+  </execution>
+</task>

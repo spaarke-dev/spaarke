@@ -1,0 +1,124 @@
+<task id="021" project="email-communication-solution-r3">
+  <metadata>
+    <title>SendEmailStep wrapper — thin inline-mount wrapper for wizard step usage</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>071, 072</blocks>
+    <tags>react, frontend, communication</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Thin wrapper (~30-60 LOC); semantic prop API translation; no new architecture. STANDARD is appropriate; the engine + validation contract carry the heavy lifting.</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-02</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build the canonical `<SendEmailStep />` wrapper at `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx`. Thin (~30-60 LOC). Locks `mount='inline'`. Exposes a semantic prop API tailored to wizard-step usage.
+
+    Wizard owns the "Send" / "Finish" button — wrapper just renders the composer; wizard calls `composerRef.current.send()` on Finish. Wrapper does NOT render its own action bar (the engine's ComposerActionBar returns null on `mount='inline'` per task 019).
+
+    Props (FR-02):
+    - `composerRef: React.Ref<IEmailComposerHandle>` — wizard holds the ref to drive imperative methods
+    - `initialTo?: IRecipient[] | string` — initial recipient list (string for paste-from-Outlook source)
+    - `initialSubject?: string`
+    - `initialBody?: string`
+    - `initialBodyFormat?: 'html' | 'plaintext'`
+    - `associations?: IComposerAssociation[]` — record refs to stamp on the sprk_communication
+    - `attachmentSources?: IComposerAttachmentSource[]` — wizards typically configure `['wizard', 'related']`
+    - `wizardContext?: { uploadedFiles?: ... }` — passes through to WizardAttachmentSource
+    - `authenticatedFetch: typeof fetch` — injected by host (NFR-02)
+    - `onStateChange?: (state: EmailComposerState) => void` — wizard listens to update its Finish button enabled state
+
+    Implementation: `forwardRef` → render `<EmailComposer mount='inline' mode='compose' ref={composerRef} ... />`. Forwards `composerRef` through.
+  </prompt>
+
+  <role>
+    Frontend developer comfortable with thin-wrapper-with-forwardRef pattern.
+  </role>
+
+  <goal>
+    `SendEmailStep.tsx` compiles + lint-clean. ~30-60 LOC. Locks `mount='inline'`. Passes through ref so wizard hosts can call imperative methods. Wave 5 wizard migrations (tasks 071, 072) consume this.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-02 + Owner Clarification: thin wrappers, not direct engine usage. Each wrapper carries the semantic prop API for its mount context.
+
+      Wave 5 consumers (after this lands):
+      - `CreateRecordWizard/steps/SendEmailStep.tsx` (canonical wizard step shared by Project/Event/Todo/WorkAssignment per CLAUDE.md Empirical Finding #12)
+      - `CreateMatterWizard/SendEmailStep.tsx` (separate file; consumed by LegalWorkspace)
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE — export SendEmailStep)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only (inherited from engine)</constraint>
+    <constraint source="ADR-028">No `@spaarke/auth` import — `authenticatedFetch` injected via props (NFR-02)</constraint>
+    <constraint source="ADR-033">Thin wrapper (~30-60 LOC); engine is the only place mounting EmailComposer logic</constraint>
+    <constraint source="NFR-03">Locks `mount='inline'` — wrapper sets it, host cannot override</constraint>
+    <constraint source="project">Forward ref so wizard hosts hold `IEmailComposerHandle`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `SendEmailStep.tsx`:
+      - `forwardRef&lt;IEmailComposerHandle, ISendEmailStepProps&gt;((props, ref) =&gt; ...)`
+      - Render `&lt;EmailComposer mount='inline' mode='compose' ref={ref} ...props /&gt;` — pass through initialX, associations, attachmentSources, wizardContext, authenticatedFetch, onStateChange</step>
+    <step order="2">Define `ISendEmailStepProps` type — re-use `IComposerAssociation`, `IComposerAttachmentSource`, `IRecipient` from engine types.</step>
+    <step order="3">Update `EmailComposer/index.ts` — export `SendEmailStep` + `ISendEmailStepProps`.</step>
+    <step order="4">Verify file is ≤60 LOC.</step>
+    <step order="5">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="6">Update `TASK-INDEX.md`: 021 ✅.</step>
+    <step order="7">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="write">SendEmailStep.tsx</tool>
+    <tool name="edit">index.ts barrel</tool>
+    <tool name="bash">npm run build + lint + wc -l check</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/wrappers/SendEmailStep.tsx (NEW)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED — export SendEmailStep + props type)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SendEmailStep.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">File ≤60 LOC (FR-02 thin-wrapper requirement).</criterion>
+    <criterion testable="true">Locks `mount='inline'` — engine prop hard-coded.</criterion>
+    <criterion testable="true">`forwardRef` exposes `IEmailComposerHandle` — wizard calls `composerRef.current.send()`.</criterion>
+    <criterion testable="true">Semantic props (composerRef, initialTo, initialSubject, etc.) all forwarded.</criterion>
+    <criterion testable="true">No `@spaarke/auth` import — uses injected `authenticatedFetch` (NFR-02).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5 task 071 (shared wizard step) and 072 (CreateMatter step) consume this. PR description for those tasks will demo the imperative-handle pattern: wizard holds `composerRef`, on Finish calls `validate()` then `send()`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor. Step 9.5 skipped.
+    </protocol>
+  </execution>
+</task>

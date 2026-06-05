@@ -1,0 +1,144 @@
+<task id="062" project="email-communication-solution-r3">
+  <metadata>
+    <title>Retarget LegalWorkspace SummarizeFiles consumers to `@spaarke/ui-components`</title>
+    <phase>Wave 4 — SummarizeFiles Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>061</dependencies>
+    <blocks>063, 064</blocks>
+    <tags>refactoring, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Mechanical import-path retargeting; rebuilds the LegalWorkspace consumer surface using canonical imports. No new architectural decisions. Repairs the intentional build break from task 061.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential: depends on 061 (fork deleted; consumer audit list ready). Blocks 063 (SummarizeFilesWizard deploy) and 064 (LegalWorkspace deploy). Cannot parallelize — the consumer audit list ordering matters.</parallel-reason>
+    <fr-refs>FR-15, FR-25</fr-refs>
+  </metadata>
+
+  <prompt>
+    Retarget every LegalWorkspace consumer that previously imported from the deleted fork at `src/solutions/LegalWorkspace/src/components/SummarizeFiles/` to import directly from `@spaarke/ui-components`. Use the consumer audit list produced by task 061 (recorded in `current-task.md`).
+
+    Two retarget approaches available:
+
+    **Approach A — Direct import retargeting (PREFERRED):**
+    For each consumer, change the import statement from `from '../SummarizeFiles/...'` to `from '@spaarke/ui-components'`. Clean, no extra files, follows the spec FR-25 intent ("re-export from shared lib").
+
+    **Approach B — Local shim file:**
+    Add a single shim at `src/solutions/LegalWorkspace/src/components/SummarizeFiles/index.ts` that re-exports from `@spaarke/ui-components`. Consumers keep their existing import paths unchanged.
+
+    Default to Approach A unless the consumer audit reveals deeply-nested consumer trees where a shim would be lower-churn. Document the choice in task notes.
+
+    Post-task: LegalWorkspace `npm run build` is clean. All consumers reference the canonical `@spaarke/ui-components` exports. The `SummarizeFiles/` directory either remains deleted (Approach A) OR contains ONLY a 5-line re-export shim (Approach B) — no legacy fork code returns.
+  </prompt>
+
+  <role>
+    Frontend developer authoritative on LegalWorkspace consumer import patterns + the `@spaarke/ui-components` public-export surface. Familiar with the trade-off between direct-import retargeting and re-export shims.
+  </role>
+
+  <goal>
+    LegalWorkspace consumers of the previously-deleted SummarizeFiles fork all reference `@spaarke/ui-components` directly (Approach A) OR via a thin re-export shim (Approach B). LegalWorkspace `npm run build` exits 0. `npm run lint` exits 0. Wave 4 deploy (tasks 063 + 064) can proceed.
+  </goal>
+
+  <context>
+    <background>
+      Task 061 deleted the LegalWorkspace SummarizeFiles fork (9 files) and produced a consumer audit list. THIS task uses that list to retarget every consumer.
+
+      The Spaarke convention per FR-25 ("re-export from shared lib") leaves the implementation choice open. Approach A (direct import retargeting) is preferred when:
+      - Consumer count is small (≤5 files)
+      - Import paths are easy to update mechanically
+      - We want to maximize visibility of canonical-source-of-truth in consumer code
+
+      Approach B (shim) is preferred when:
+      - Consumer count is large or deeply nested
+      - Changing import paths everywhere would balloon the PR diff
+      - A future LegalWorkspace-specific augmentation might re-emerge (less common)
+
+      For Wave 4 SummarizeFiles, expected consumer count is small (LegalWorkspace likely had 1-3 places that imported the fork — typically the parent component that mounted the wizard). Approach A is the default.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/ (consumers to retarget — list from task 061)</file>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/ (already DELETED by task 061; recreated only if Approach B chosen)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (verify canonical exports — `SummarizeFilesDialog`, etc.)</file>
+      <file>projects/email-communication-solution-r3/current-task.md (consumer audit list from task 061)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-25">No new fork created during retargeting; only re-exports from `@spaarke/ui-components`.</constraint>
+    <constraint source="ADR-033">All consumer imports MUST trace to the canonical `@spaarke/ui-components` source (either direct or via thin shim).</constraint>
+    <constraint source="project">Document Approach A vs Approach B choice in task notes with reasoning. Default to A.</constraint>
+    <constraint source="project">If Approach B chosen, the shim file MUST be ≤10 lines, contain ONLY `export * from '@spaarke/ui-components';` or named re-exports — NO original logic.</constraint>
+    <constraint source="repo">LegalWorkspace `npm run build` MUST exit 0 at end of task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/email-communication-solution-r3/current-task.md (audit list from 061)</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the consumer audit list from `current-task.md` (produced by task 061). For each consumer, note: file path, imported symbol, import statement shape.</step>
+    <step order="2">Verify `@spaarke/ui-components/src/index.ts` exports the symbols consumers need (`SummarizeFilesDialog`, `SummarizeFilesWizard`, and any sub-components like `SummarizeSendEmailStep` if the LegalWorkspace consumer used them).</step>
+    <step order="3">If a required symbol is NOT exported from the canonical lib top-level barrel, escalate — Wave 1 task 020-029 may have missed an export. Add the missing export FROM THIS TASK only if the symbol exists in the canonical lib but isn't barreled (mechanical addition); escalate if the symbol genuinely needs to be authored.</step>
+    <step order="4">Make the Approach A vs Approach B decision per the consumer count + tree shape. Document choice + reasoning in task notes.</step>
+    <step order="5">Apply the chosen approach:
+      - **A**: Update each consumer's import statement to reference `@spaarke/ui-components`. Use named imports matching what the consumer actually uses. Do NOT use `import *` patterns.
+      - **B**: Recreate `src/solutions/LegalWorkspace/src/components/SummarizeFiles/index.ts` as a thin re-export shim. Do NOT recreate any of the 9 deleted fork files.
+    </step>
+    <step order="6">Verify no LegalWorkspace file still references the deleted fork path. Grep:
+      <code>
+      grep -rn 'from .*solutions/LegalWorkspace.*SummarizeFiles' src/solutions/LegalWorkspace/
+      </code>
+      Should return zero results (Approach A) OR only the shim file itself (Approach B).
+    </step>
+    <step order="7">Run `npm install --legacy-peer-deps --no-audit --no-fund` if dependencies are stale, then `npm run build` in `src/solutions/LegalWorkspace/`. Verify clean.</step>
+    <step order="8">Run `npm run lint`. Verify clean.</step>
+    <step order="9">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 062 ✅ completed.</step>
+    <step order="10">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (063 or 064).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Consumer audit list + canonical barrel</tool>
+    <tool name="grep">Verify retarget complete</tool>
+    <tool name="edit">Update consumer import paths (A) OR write shim file (B)</tool>
+    <tool name="bash">Run `npm run build` + `npm run lint`</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/solutions/LegalWorkspace/src/ (one or more consumer files UPDATED with retargeted imports)</output>
+    <output type="file">src/solutions/LegalWorkspace/src/components/SummarizeFiles/index.ts (NEW — ONLY if Approach B chosen; otherwise directory remains deleted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every consumer from task 061's audit list now imports from `@spaarke/ui-components` (directly or via shim).</criterion>
+    <criterion testable="true">Grep for `from .*solutions/LegalWorkspace.*SummarizeFiles` returns ZERO non-shim hits.</criterion>
+    <criterion testable="true">If Approach B: shim file is ≤10 lines and contains ONLY re-exports — no original logic.</criterion>
+    <criterion testable="true">LegalWorkspace `npm run build` exits 0.</criterion>
+    <criterion testable="true">LegalWorkspace `npm run lint` exits 0.</criterion>
+    <criterion testable="true">Approach choice (A or B) documented in task notes.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 062 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Approach A vs B is a stylistic choice with same end-state guarantee. Approach A is preferred for the FR-25 "zero forks" cleanliness — consumers explicitly reference canonical source. Approach B is preferred when retargeting effort dominates (many consumers).
+
+    Empirical pre-flight: LegalWorkspace likely has only 1-2 consumers of the deleted SummarizeFiles fork (the parent component(s) that mounted the wizard). Approach A is straightforward at that scale. Verify via task 061's audit list before deciding.
+
+    If the canonical lib's top-level barrel does NOT export a symbol the LegalWorkspace consumer needs (step 3), the cleanest fix is to add the export — but only if the symbol already exists somewhere in the lib. If the symbol genuinely doesn't exist in `@spaarke/ui-components`, that signals Wave 1 missed a symbol — escalate to project owner. Do NOT recreate fork logic to fill the gap.
+
+    Smoke testing of the migrated flow happens in task 065. This task's deploy gating is via build/lint only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 (adr-check + code-review) SKIPPED for STANDARD rigor.
+    </protocol>
+  </execution>
+</task>

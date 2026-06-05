@@ -1,0 +1,130 @@
+<task id="017" project="email-communication-solution-r3">
+  <metadata>
+    <title>RelatedRecordAttachmentSource — related-record document picker</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>020</blocks>
+    <tags>react, frontend, fluent-ui, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Source-specific picker; queries `sprk_document` related to a parent (e.g., Matter) and resolves driveItemId for canonical attachment. STANDARD covers it; no new patterns.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build `RelatedRecordAttachmentSource.tsx` at `subcomponents/sources/RelatedRecordAttachmentSource.tsx`. Lets the user pick from documents related to the email's host record (e.g., on a Matter's email send, pick from that matter's `sprk_document` records).
+
+    Behavior:
+    - Receives `relatedRecord: { entityName: string; recordId: string }` from props (engine forwards from host)
+    - Queries Dataverse for `sprk_document` records where `_sprk_parent_value = relatedRecord.recordId` (parent lookup matches that entity)
+    - Renders a Dialog with a Fluent `<List>` or `<DataGrid>` of matching documents (name, type, size)
+    - On selection, resolves each `sprk_document` GUID → its `driveItemId` (`sprk_document.sprk_driveitemid` field per Dataverse schema)
+    - Produces `IAttachment[]` with `source='related'`, `driveItemId: <resolved>`, `name`, `sizeBytes`, `mimeType`
+
+    Use `Xrm.WebApi.retrieveMultipleRecords` in Code Page context (per DATA-ACCESS-DECISION-CRITERIA.md — host-context API is preferred for direct Dataverse reads). In wizard contexts (no Xrm), fall back to BFF via `authenticatedFetch`.
+
+    Per CLAUDE.md Empirical Finding: Spaarke's `sprk_document` records have both a Dataverse GUID and a `sprk_driveitemid` field — the SPE driveItem ID. The canonical attachment id is the driveItem ID, NOT the sprk_document GUID. This is the latent bug fix from FR-17 / DocumentEmailWizard line 494.
+  </prompt>
+
+  <role>
+    Frontend developer with Dataverse `Xrm.WebApi` + BFF fallback experience. Familiar with `sprk_document` schema (`sprk_driveitemid` field present per R1+R2 work).
+  </role>
+
+  <goal>
+    `RelatedRecordAttachmentSource.tsx` compiles + lint-clean. Opens a dialog listing parent's `sprk_document` records; selecting them produces `IAttachment[]` with `driveItemId` correctly populated (NOT the document GUID — the SPE driveItem ID from `sprk_document.sprk_driveitemid`).
+  </goal>
+
+  <context>
+    <background>
+      Per FR-07 + FR-17 + CLAUDE.md Empirical Finding #5: latent bug at DocumentEmailWizard:494 was sending `sprk_document` GUIDs instead of driveItem IDs. This component (R3) fixes that class of bug by hard-coding the resolution: pick a sprk_document → read its `sprk_driveitemid` field → use THAT as the canonical attachment reference.
+
+      `Xrm.WebApi.retrieveMultipleRecords` is the right tool for Code Page direct-Dataverse reads per `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`. For wizard contexts inside shared lib, the BFF fallback uses an existing endpoint or the typed `documentApi.ts` if available — audit at task start.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/sources/RelatedRecordAttachmentSource.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx (UPDATE — wire related picker)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE)</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md (READ — Xrm.WebApi vs BFF guidance)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">SPE access via facade — driveItemId is just an identifier; actual content fetch happens server-side</constraint>
+    <constraint source="ADR-021">Fluent v9 only</constraint>
+    <constraint source="ADR-028">No direct `@spaarke/auth` import — inject `authenticatedFetch`</constraint>
+    <constraint source="ADR-033">Canonical related-record picker</constraint>
+    <constraint source="project">DriveItem ID resolution: `sprk_document.sprk_driveitemid` — NOT the Dataverse GUID</constraint>
+    <constraint source="project">Xrm.WebApi preferred in Code Page context; BFF fallback in wizard contexts per DATA-ACCESS-DECISION-CRITERIA.md</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.types.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm `sprk_document.sprk_driveitemid` schema field present (grep existing code or read docs/data-model/sprk_document.md if exists).</step>
+    <step order="2">Audit existing Dataverse-query helpers (`documentApi.ts` or similar) for reuse.</step>
+    <step order="3">Author `RelatedRecordAttachmentSource.tsx`:
+      - Props: `{ relatedRecord: { entityName: string; recordId: string }; onAdd: (attachments: IAttachment[]) =&gt; void; authenticatedFetch: typeof fetch; disabled?: boolean }`
+      - Detect host: `typeof Xrm !== 'undefined' &amp;&amp; Xrm.WebApi` — use `Xrm.WebApi.retrieveMultipleRecords('sprk_document', $filter: \`_sprk_parent_value eq ${recordId}\`, $select: \`sprk_documentid,sprk_name,sprk_driveitemid,sprk_mimetype,sprk_sizebytes\`)`
+      - Otherwise: BFF fallback via `authenticatedFetch` to the document-list endpoint (audit for existing API)
+      - Render Dialog with Fluent `&lt;DataGrid&gt;` listing returned docs
+      - On selection: map docs → `IAttachment[]` with `driveItemId: doc.sprk_driveitemid` (NOT `doc.sprk_documentid` — that's the latent bug)
+      - Filter out any doc whose `sprk_driveitemid` is null/empty (cannot attach without driveItem)</step>
+    <step order="4">Wire into AttachmentList — when `attachmentSources` includes `{ kind: 'related' }`, render this picker; `relatedRecord` comes from engine's `associations` or a dedicated prop.</step>
+    <step order="5">Update `EmailComposer/index.ts` — export `RelatedRecordAttachmentSource`.</step>
+    <step order="6">Smoke test: on a Matter Code Page, open picker, pick a known document, verify `driveItemId` field populated (NOT GUID).</step>
+    <step order="7">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="8">Update `TASK-INDEX.md`: 017 ✅.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify sprk_document.sprk_driveitemid usage</tool>
+    <tool name="write">RelatedRecordAttachmentSource.tsx</tool>
+    <tool name="edit">AttachmentList.tsx, index.ts</tool>
+    <tool name="bash">npm run build + lint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/subcomponents/sources/RelatedRecordAttachmentSource.tsx (NEW)</output>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.tsx (UPDATED — related picker wired)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RelatedRecordAttachmentSource.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">Picker queries `sprk_document` where `_sprk_parent_value = relatedRecord.recordId`.</criterion>
+    <criterion testable="true">`IAttachment.driveItemId` is set to `sprk_document.sprk_driveitemid` (NOT the document GUID — fixes latent bug class).</criterion>
+    <criterion testable="true">Documents with null `sprk_driveitemid` are filtered out.</criterion>
+    <criterion testable="true">Source badge displays "Related" in AttachmentList.</criterion>
+    <criterion testable="true">Xrm.WebApi used when available; BFF fallback otherwise.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical finding: `sprk_document` GUID ≠ driveItem ID. This task hard-codes the correct resolution. Wave 5 task 075 (DocumentEmailWizard fix) is the analog for the wizard surface.
+
+    `_sprk_parent_value` is a polymorphic / customer-specific field — adjust the actual field name based on the real Dataverse schema. The point is "filter sprk_document by parent record reference".
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor. Step 9.5 skipped.
+    </protocol>
+  </execution>
+</task>

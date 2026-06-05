@@ -1,0 +1,130 @@
+<task id="071" project="email-communication-solution-r3">
+  <metadata>
+    <title>Migrate shared CreateRecordWizard/steps/SendEmailStep.tsx to canonical &lt;SendEmailStep /&gt; wrapper</title>
+    <phase>Wave 5 — 5-Wizard Migration + DocumentEmailWizard Fix + Forks</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>070, 021</dependencies>
+    <blocks>072, 076</blocks>
+    <tags>react, frontend, refactoring, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>This single file's body change migrates 4 create-record wizards (Project, Event, Todo, WorkAssignment) at once because they all consume this shared file via a single source path; behavior change must preserve wizard-context contract for 4 downstream surfaces; communication tag triggers FULL rigor</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocks task 072 (CreateMatter step migration shares pattern) and task 076 (deploy). The canonical wrapper consumption pattern established here is the template task 072 will follow on its separate file. Must complete first to validate the pattern before parallel work on CreateMatter + other files in group K.</parallel-reason>
+    <fr-refs>FR-16</fr-refs>
+  </metadata>
+
+  <prompt>
+    Replace the BODY of `src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx` with the canonical `<SendEmailStep />` wrapper (built in Wave 1 task 021). This single file change migrates CreateProject, CreateEvent, CreateTodo, and CreateWorkAssignment wizards in one shot — per empirical scan (CLAUDE.md DELTA #12), all four wizards consume this shared file from the canonical source path.
+
+    The exported component must preserve its current public prop API so callers do not need to change. Internally it now mounts `<SendEmailStep />` from the canonical wrapper, passing through the wizard-context-shaped props (recipients, subject, body, associatedTo, onSent, etc.) translated to the canonical wrapper's prop API.
+
+    EMPIRICAL NOTE: Per CLAUDE.md DELTA #9, the spec's FR-16 phrasing "5 wizards migrate" overstates the per-file count. Only 2 files contain the per-wizard SendEmailStep: this shared file (consumed by Project/Event/Todo/WorkAssignment) AND `CreateMatterWizard/SendEmailStep.tsx` (task 072). LegalWorkspace's Project/Event/Todo/WorkAssignment dirs have NO SendEmailStep file. Wave 5 scope is correspondingly smaller than FR-16/FR-25 phrasing implied.
+
+    NOTE per Owner Clarification: All Wave 5 changes ship as a single PR (task 076). Do not push as standalone.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer. Authoritative on shared library wizard step contracts and the canonical `<SendEmailStep />` wrapper signature. Familiar with FR-16, ADR-033, and the canonical wrapper API from Wave 1 task 021.
+  </role>
+
+  <goal>
+    The shared `CreateRecordWizard/steps/SendEmailStep.tsx` file is now a thin transformation layer that mounts the canonical `<SendEmailStep />` from `@spaarke/ui-components`. All 4 consuming wizards (Project, Event, Todo, WorkAssignment) build and pass smoke tests with no behavior change. The file no longer contains any inline composer logic, validation, recipient parsing, or `fetch` calls.
+  </goal>
+
+  <context>
+    <background>
+      The shared file at `src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx` is the single source consumed by 4 of the 5 create-record wizards (Project, Event, Todo, WorkAssignment). The 5th (Matter) has its own file at `CreateMatterWizard/SendEmailStep.tsx` for historical reasons (migrated in task 072).
+
+      Replacing only this one file's body is the highest-leverage migration in Wave 5 — 4 wizards migrate with a single edit.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateProjectWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateEventWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateTodoWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateWorkAssignmentWizard/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">Use canonical `<SendEmailStep />` wrapper; no direct `<EmailComposer />` usage in wizard surfaces</constraint>
+    <constraint source="ADR-021">All Fluent v9 styling from the canonical wrapper; do not add inline styles in the shared file</constraint>
+    <constraint source="ADR-028">Shared lib component MUST NOT directly import `@spaarke/auth`; `authenticatedFetch` is injected via props</constraint>
+    <constraint source="spec NFR-03">Inline mount variant required (wizard step) — canonical wrapper renders `<EmailComposer mount='inline' />`</constraint>
+    <constraint source="project">Public prop API of the file's exported component must be preserved (4 wizard callers depend on it)</constraint>
+    <constraint source="project">No inline `fetch` to `/api/communications/send`; all sends go through `EntityCreationService.sendEmail()` adapter (task 070) or the wrapper's internal `sendCommunication()`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="canonical SendEmailStep wrapper" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx">
+        Built in Wave 1 task 021. Mounts `<EmailComposer mount='inline' />` with wizard-step semantic prop API.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load spec.md FR-16, CLAUDE.md empirical findings (DELTA #9, #12), plan.md Wave 5 section, ADR-033, and ADR-021.</step>
+    <step order="2">Read the current `CreateRecordWizard/steps/SendEmailStep.tsx` to catalog its exported props and behavior contract.</step>
+    <step order="3">Read the canonical `<SendEmailStep />` wrapper from Wave 1 task 021 to confirm prop API.</step>
+    <step order="4">Identify the 4 wizard consumers (Project, Event, Todo, WorkAssignment) via grep on `import { SendEmailStep }` or relative imports; catalog the prop shapes they pass.</step>
+    <step order="5">Rewrite the file body: keep export name + props identical; internally render `<SendEmailStep />` from `@spaarke/ui-components` canonical export, translating wizard-context props to the wrapper's API. Remove all inline composer/validation/fetch logic.</step>
+    <step order="6">Run `npm run lint` + `npm run build` in `src/client/shared/Spaarke.UI.Components/`.</step>
+    <step order="7">Run unit tests for the wizard steps; update assertions if they targeted now-removed internals.</step>
+    <step order="8">Manually verify each of the 4 wizard mounts compiles by reading their import + render statements (no behavior change expected).</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 071 ✅ completed; verify tasks 072 and 076 are no longer blocked by 071.</step>
+    <step order="10">Update `current-task.md` per task-execute protocol: status → completed, advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Find 4 wizard consumers + catalog prop shapes</tool>
+    <tool name="read">Inspect current file + canonical wrapper</tool>
+    <tool name="edit">Replace file body</tool>
+    <tool name="bash">`npm run lint`, `npm run build`, `npm test` in shared lib</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx (REWRITTEN — thin wrapper over canonical)</output>
+    <output type="test">Unit test updates where assertions targeted old internals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File body contains no inline composer, validation, or `fetch` logic.</criterion>
+    <criterion testable="true">File renders `<SendEmailStep />` from the canonical wrapper (Wave 1 task 021).</criterion>
+    <criterion testable="true">Public prop API of the exported component is unchanged (4 wizard callers compile without edits).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` succeed in `@spaarke/ui-components`.</criterion>
+    <criterion testable="true">Unit tests for affected wizard steps pass.</criterion>
+    <criterion testable="true">No direct `@spaarke/auth` import; `authenticatedFetch` flows through props.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Single-PR scope (Owner Clarification): this task's diff ships in the consolidated Wave 5 PR (task 076).
+
+    Empirical findings relevant here (per CLAUDE.md):
+    - DELTA #12: This shared file is the source for Project/Event/Todo/WorkAssignment wizards' SendEmailStep. CreateMatter has its own separate file (task 072).
+    - DELTA #9: LegalWorkspace forks of Project/Event/Todo/WorkAssignment do NOT have a SendEmailStep file; no forks to migrate or delete for those 4 wizards in LegalWorkspace.
+    - This single-file change is the highest-leverage migration in Wave 5 — 4 wizards in one edit.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor — code-review + adr-check quality gates at Step 9.5 are REQUIRED. Verify the file mounts the canonical wrapper, all 4 wizard consumers' import statements still resolve, and no inline composer/fetch logic remains.
+    </protocol>
+  </execution>
+</task>

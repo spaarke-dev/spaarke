@@ -1,0 +1,137 @@
+<task id="038" project="email-communication-solution-r3">
+  <metadata>
+    <title>Swap `sprk_communication` default form with Form Component Control → EmailComposer Code Page (Surface 2)</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>035, 036</dependencies>
+    <blocks>039, 042</blocks>
+    <tags>dataverse, deploy, code-page</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse customization change; reversible per NFR-07; tested via dev smoke test; gated by UQ1 audit in task 035</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel-safe with 037 (ribbon) and 040 (embeddable docs) — independent Dataverse customizations and independent outputs</parallel-reason>
+    <fr-refs>FR-19 (Surface 2), NFR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Configure a Form Component Control (or equivalent custom-page form binding) that replaces the default `sprk_communication` standard form. Navigating to a `sprk_communication` record opens the EmailComposer Code Page in `mode=view&id={recordGuid}`.
+
+    Per NFR-07 (reversibility), the standard form MUST be retained as a hidden/admin-only fallback. Task 039 documents the fallback access mechanism. Per task 035 (UQ1 audit), confirm the audit's recommendation supports proceeding — if escalated, do not proceed without owner sign-off.
+
+    The swap should be reversible: an admin can switch back to the standard form by changing form order / form visibility without code changes.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse customization engineer. Familiar with Form Component Control (or Custom Page form binding), form order / form visibility / security role assignment, and reversibility patterns.
+  </role>
+
+  <goal>
+    Opening any `sprk_communication` record in the unified interface (model-driven app) loads the EmailComposer Code Page with `mode=view&id={recordGuid}` instead of the standard form. Standard form retained as the second (hidden) form, available to admin/debug roles only. NFR-07 (reversibility) verified by toggle-back smoke test.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-19 Surface 2, navigating to a `sprk_communication` record should open the Code Page (the canonical Communication form per ADR-033). The mechanism in Dataverse: Form Component Control bound to a Custom Page web resource, OR primary form replacement with the Code Page hosted as the new "Information" form.
+
+      The exact mechanism depends on the empirical state of the dev environment + Dataverse capabilities at the time of execution. Two options:
+      - **Option A**: Form Component Control (preferred per FR-19 wording) — a control on the form binds to the Custom Page
+      - **Option B**: Replace primary form with a new custom form whose only content is an iframe/embed pointing to the Code Page
+
+      Choose the option that delivers FR-19 with least breakage to existing customizations (per task 035's audit). If both are viable, prefer Option A.
+    </background>
+    <relevant-files>
+      <file>(Dataverse) sprk_communication entity form definitions (UPDATED — add new form or modify primary form)</file>
+      <file>(Dataverse) Form order changed: new form primary; standard form hidden/admin-only</file>
+      <file>projects/email-communication-solution-r3/notes/research/035-form-customization-audit.md (INPUT — UQ1 audit findings)</file>
+      <file>projects/email-communication-solution-r3/notes/research/038-form-swap-deploy.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-19 Surface 2">Form Component Control or equivalent — opens Code Page with `mode=view&id={recordGuid}`</constraint>
+    <constraint source="spec NFR-07">Reversibility — standard form retained as admin fallback; swap reversible without code change</constraint>
+    <constraint source="UQ1 gate (task 035)">If audit recommendation is "escalate", BLOCK on owner sign-off before proceeding</constraint>
+    <constraint source="ADR-026">Code Page is full-page; the form binding hosts it in lieu of the standard form</constraint>
+    <constraint source="ADR-028">Auth bootstrap handled by Code Page; form binding does not interfere</constraint>
+    <constraint source="project">Dev environment only</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/email-communication-solution-r3/notes/research/035-form-customization-audit.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Custom page form replacement" location=".claude/skills/dataverse-deploy/SKILL.md">
+        Form Component Control binds to a Custom Page web resource; replaces standard form display while form record is still the data store.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 035's audit note (`notes/research/035-form-customization-audit.md`). If recommendation is "escalate", PAUSE this task and flag in `current-task.md` for owner sign-off.</step>
+    <step order="2">Confirm task 036 deployed `sprk_emailcomposer` web resource and smoke tests passed.</step>
+    <step order="3">Choose mechanism: Form Component Control (preferred) vs primary form replacement. Document choice in task notes.</step>
+    <step order="4">Create the new form binding in Dataverse:
+      - **Option A (Form Component Control)**: add a custom control on a new Main form whose source is `sprk_emailcomposer` web resource; pass record context as URL params
+      - **Option B (primary form replacement)**: create new Main form with embedded iframe/web resource control pointing to `sprk_emailcomposer?data=%7B%22mode%22%3A%22view%22%2C%22id%22%3A%22<recordId>%22%7D`
+    </step>
+    <step order="5">Set new form as primary (form order: new form first).</step>
+    <step order="6">Set standard form to hidden / admin-only (assigned to admin security role only) — preserving NFR-07 reversibility. Task 039 documents the admin access path.</step>
+    <step order="7">Publish customizations.</step>
+    <step order="8">Manual smoke test:
+      - Open an existing `sprk_communication` record from a view → confirm Code Page renders with view mode + correct record loaded
+      - Edit / Reply / Forward actions in Code Page work
+      - Switch to admin user role → confirm standard form accessible as fallback (per task 039's documented path)
+    </step>
+    <step order="9">Verify reversibility: temporarily restore standard form as primary (without code changes — purely form order toggle); confirm record still opens; restore swap.</step>
+    <step order="10">Document deploy + smoke test in `projects/email-communication-solution-r3/notes/research/038-form-swap-deploy.md`.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: mark task 038 ✅ completed.</step>
+    <step order="12">Update `current-task.md` per task-execute protocol: status → completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-deploy">Form / customization deploy</tool>
+    <tool name="dataverse-mcp-usage">Form metadata query if MCP available</tool>
+    <tool name="write">Smoke-test note</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Dataverse sprk_communication form customization (UPDATED — new form with Code Page binding)</output>
+    <output type="deploy">Form order updated: new form primary; standard form hidden/admin-only</output>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/038-form-swap-deploy.md (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Opening `sprk_communication` record loads EmailComposer Code Page in view mode (verified in dev).</criterion>
+    <criterion testable="true">Record ID correctly passed via `data=` URL param; Code Page loads correct record.</criterion>
+    <criterion testable="true">Standard form retained as fallback; accessible to admin role (per task 039 doc).</criterion>
+    <criterion testable="true">Swap reversibility verified: form order toggle restores standard form access without code change.</criterion>
+    <criterion testable="true">UQ1 audit recommendation honored (proceed / mitigations applied / escalation cleared).</criterion>
+    <criterion testable="true">Smoke-test note documents results.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-group H: 037 (ribbon) and 040 (docs) are safe to run alongside. None of the three modify the same Dataverse customization surface.
+
+    The Form Component Control mechanism may require a unified-interface-specific configuration that differs between dev tenants — adapt to the actual capabilities present in dev.
+
+    If Option A (Form Component Control) is not available in the dev environment, fall back to Option B (primary form with embed). Document the choice.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 are SKIPPED for STANDARD rigor. Confirm task 035's UQ1 audit before proceeding.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,150 @@
+<task id="042" project="email-communication-solution-r3">
+  <metadata>
+    <title>UI test — EmailComposer Code Page `mode=view` read-only display</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>038</dependencies>
+    <blocks>099</blocks>
+    <tags>ui-test, e2e-test, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Browser-based UI test using `ui-test` skill; deterministic scenario; gated by task 038 (Form Component Control swap so view mode reachable via record navigation)</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel-safe with 041, 043, 044, 045 — read-only test against an existing record; no mutation</parallel-reason>
+    <fr-refs>FR-10, FR-18, ADR-021</fr-refs>
+  </metadata>
+
+  <prompt>
+    Execute an end-to-end UI test for the EmailComposer Code Page in `mode=view`. Navigate to a Code Page URL with `mode=view&id={existing-record-guid}`, verify read-only display of all fields, verify action buttons (Edit, Reply, Forward, Close) are present and clickable, verify no editable controls are exposed.
+
+    Use the `ui-test` skill (Chrome integration). Verify ADR-021 dark mode smoke.
+  </prompt>
+
+  <role>
+    Spaarke UI test engineer. Familiar with `ui-test` skill, Fluent v9 read-only component patterns, and `sprk_communication` record schema.
+  </role>
+
+  <goal>
+    UI test pass for view mode. Test results in `projects/email-communication-solution-r3/notes/research/042-ui-test-view.md` with pass/fail per assertion, console-error inventory (target: zero), and dark mode smoke observations.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-10: view mode displays read-only From / To / Cc / Subject / Body / Attachments / Associations as Fluent labels and tags; no editable controls; action buttons Edit / Reply / Forward / Close in `<ComposerActionBar />`.
+
+      Test prerequisite: an existing `sprk_communication` record in dev with populated fields. Pick one created during Wave 0 or earlier.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/research/042-ui-test-view.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-10">View mode is read-only; action buttons Edit/Reply/Forward/Close present</constraint>
+    <constraint source="ADR-021">Dark mode compliance; Fluent v9 semantic tokens</constraint>
+    <constraint source="spec NFR-09">Keyboard navigation across action buttons</constraint>
+    <constraint source="project">Use `{org}` and `{existing-record-guid}` placeholders in test URL</constraint>
+    <constraint source="project">Dev environment only</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="UI test for read-only view" location=".claude/skills/ui-test/SKILL.md">
+        Read-only test: assert form fields render as labels (no input/textarea), action buttons clickable, no save/send.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <ui-tests>
+    <test name="View mode read-only display">
+      <navigation>
+        <url>https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22view%22%2C%22id%22%3A%22{existing-record-guid}%22%7D</url>
+        <description>Open EmailComposer Code Page in view mode for an existing `sprk_communication` record</description>
+      </navigation>
+      <steps>
+        <step order="1">Navigate to URL; wait for app mount + record load (max 5s)</step>
+        <step order="2">Verify zero console errors on cold load</step>
+        <step order="3">Verify From field rendered as read-only label (no editable input)</step>
+        <step order="4">Verify To field rendered as read-only labels / Fluent Tags (no editable input)</step>
+        <step order="5">Verify Cc field rendered as labels (if Cc populated; otherwise empty section)</step>
+        <step order="6">Verify Subject field rendered as label (no editable input)</step>
+        <step order="7">Verify Body section rendered as read-only HTML preview or text (no editor controls)</step>
+        <step order="8">Verify Attachments section: any attachments display name + size; no add/remove controls</step>
+        <step order="9">Verify Associations section: any associated records display as Fluent Tags (no add/remove controls)</step>
+        <step order="10">Verify `<ComposerActionBar />` present with buttons: Edit, Reply, Forward, Close</step>
+        <step order="11">Verify each action button is enabled (assuming user has appropriate permissions)</step>
+        <step order="12">Click Close button; verify graceful exit (back navigation or close dialog)</step>
+      </steps>
+      <expected-outcomes>
+        <outcome>Code Page loads in view mode with populated read-only fields</outcome>
+        <outcome>All fields are non-editable (no &lt;input&gt;, &lt;textarea&gt;, or editable contenteditable elements in the form body)</outcome>
+        <outcome>Edit, Reply, Forward, Close action buttons present in ComposerActionBar</outcome>
+        <outcome>Close action exits gracefully</outcome>
+        <outcome>Zero console errors throughout</outcome>
+      </expected-outcomes>
+      <dark-mode-check>
+        <step>Toggle dark mode; verify all read-only labels, tags, and action buttons adapt</step>
+        <step>Verify no white panels visible in dark mode</step>
+        <step>Smoke check only; comprehensive coverage in task 045</step>
+      </dark-mode-check>
+      <console-error-check>
+        <target>0 errors</target>
+        <description>Zero errors from cold load through Close. Warnings acceptable; errors fail the test.</description>
+      </console-error-check>
+    </test>
+  </ui-tests>
+
+  <steps>
+    <step order="1">Verify task 038 deployed Form Component Control swap successfully.</step>
+    <step order="2">Identify an existing `sprk_communication` record with populated To, Subject, Body fields for the test (or create one via the standard form fallback if none exist).</step>
+    <step order="3">Invoke `ui-test` skill — Chrome session, logged in.</step>
+    <step order="4">Execute view-mode test scenario per the `<ui-tests>` block above; substitute `{existing-record-guid}` with chosen record ID.</step>
+    <step order="5">Capture screenshots + console output.</step>
+    <step order="6">Toggle dark mode; smoke-verify rendering adapts.</step>
+    <step order="7">Document results in `projects/email-communication-solution-r3/notes/research/042-ui-test-view.md` with pass/fail per assertion, console errors, dark mode observations.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 042 ✅ completed.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol: status → completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="ui-test">Skill — Chrome browser automation</tool>
+    <tool name="write">Test results note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/042-ui-test-view.md (NEW)</output>
+    <output type="test-result">View mode test pass/fail logged</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UI test navigates to Code Page view mode URL successfully.</criterion>
+    <criterion testable="true">All fields rendered as read-only (no editable inputs).</criterion>
+    <criterion testable="true">Edit/Reply/Forward/Close action buttons present and clickable.</criterion>
+    <criterion testable="true">Zero console errors throughout.</criterion>
+    <criterion testable="true">Dark mode smoke check passes.</criterion>
+    <criterion testable="true">Test results documented in research note.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-group I: safe to run alongside 041, 043, 044, 045.
+
+    If no existing `sprk_communication` records have populated fields suitable for testing, create one via the standard form (admin fallback per task 039) BEFORE the swap, OR have task 041 (compose) create one as a precondition.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Invoke `ui-test` skill for browser automation.
+    </protocol>
+  </execution>
+</task>
