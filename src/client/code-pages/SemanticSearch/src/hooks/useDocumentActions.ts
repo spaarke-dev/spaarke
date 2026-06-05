@@ -63,7 +63,9 @@ async function deleteDocument(documentId: string): Promise<void> {
 }
 
 async function analyzeDocument(documentId: string): Promise<void> {
-  const response = await authenticatedFetch(`${getBffBaseUrl()}/api/documents/${documentId}/analyze`, { method: 'POST' });
+  const response = await authenticatedFetch(`${getBffBaseUrl()}/api/documents/${documentId}/analyze`, {
+    method: 'POST',
+  });
 
   if (!response.ok && response.status !== 202) {
     throw new Error(`Failed to send document to index: ${response.status}`);
