@@ -414,7 +414,7 @@ export const LookupMultiFilterChip: React.FC<LookupMultiFilterChipProps> = ({
   // Fluent v9 Combobox emits the full selection set on each toggle via
   // `onOptionSelect` (selectedOptions: string[]). We translate that to our
   // Set<string> contract for the parent.
-  const handleOptionSelect: ComboboxProps['onOptionSelect'] = React.useCallback(
+  const handleOptionSelect = React.useCallback<NonNullable<ComboboxProps['onOptionSelect']>>(
     (_event, data) => {
       const next = new Set<string>(data.selectedOptions);
       onChange(next);

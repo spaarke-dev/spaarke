@@ -994,8 +994,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     }));
   }, [records, resolved]);
 
-  const handleSelectionChange: FluentDataGridProps['onSelectionChange'] = React.useCallback(
-    (_ev, data: { selectedItems: Set<TableRowId> }) => {
+  const handleSelectionChange = React.useCallback<NonNullable<FluentDataGridProps['onSelectionChange']>>(
+    (_ev, data) => {
       setSelectedRowIds(data.selectedItems);
     },
     []

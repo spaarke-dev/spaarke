@@ -127,7 +127,7 @@ export const BoolFilterChip: React.FC<BoolFilterChipProps> = ({ value, onChange,
   const selectedKey = valueToKey(value);
   const displayValue: string = value === null ? labels.any : value === true ? labels.yes : labels.no;
 
-  const handleOptionSelect: DropdownProps['onOptionSelect'] = React.useCallback(
+  const handleOptionSelect = React.useCallback<NonNullable<DropdownProps['onOptionSelect']>>(
     (_event, data) => {
       // Fluent Dropdown emits `selectedOptions: string[]` even in single-select;
       // we take the first (and only) element.
