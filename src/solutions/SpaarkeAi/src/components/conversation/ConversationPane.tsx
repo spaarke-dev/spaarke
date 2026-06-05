@@ -82,7 +82,7 @@ import {
 // library in Phase A task 010 (ADR-012). It owns the icon brand-color treatment
 // and the right-slot container — see PaneHeader.tsx in @spaarke/ui-components.
 import { PaneHeader, SprkChat } from "@spaarke/ui-components";
-import type { AttachmentChip, IChatMessage } from "@spaarke/ui-components";
+import type { AttachmentChip, ChatAttachment, IChatMessage } from "@spaarke/ui-components";
 import { useAiSession, usePaneEvent, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent, ContextPaneEvent } from "@spaarke/ai-widgets";
 // R4 task 042 (W-4): symbolic widget type ID + payload shape for the
@@ -101,6 +101,15 @@ import {
   usePaneCollapseContext,
 } from "../shell/ThreePaneShell";
 import { HistoryMenu } from "./HistoryOverlay";
+// R5 task 036 / P2-CLOSEOUT-05: deterministic intent matching + Summarize
+// promotion. The matcher is a pure module; the executor handles atomic
+// /documents promotion + /summarize SSE streaming + PaneEventBus bridging.
+// See notes/task-036-design-2026-06-05.md for design rationale.
+import { matchIntent } from "./intentMatcher";
+import {
+  executeSummarizeIntent,
+  type HeldFile,
+} from "./executeSummarizeIntent";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -835,6 +844,31 @@ export function ConversationPane(): React.JSX.Element {
   // clears the prop back to null so re-renders do not re-inject.
   const [pendingInjection, setPendingInjection] = React.useState<IChatMessage | null>(null);
 
+  // ── R5 task 036 / P2-CLOSEOUT-05: held-files + promoted-chip tracking ─────
+  //
+  // `heldFilesRef` maps chip id → original `File` for chips that have reached
+  // `status === 'ready'`. The map is populated in `handleAttachmentReady`.
+  //
+  // CROSS-PACKAGE GAP (flagged in notes/task-036-implementation-notes.md):
+  //  SprkChat's `onAttachmentReady` callback today delivers
+  //  `{ filename, contentType, textContent }` — NOT the original `File`. The
+  //  shared lib's `useChatFileAttachment` hook consumes the File during
+  //  extraction and does NOT retain it. For atomic promotion of PDF/DOCX
+  //  binaries via `POST /documents` (multipart binary required) the shared
+  //  lib must forward the File reference too. Until that lands, we keep the
+  //  HeldFile capture sites here but the ref will be empty — the promotion
+  //  step will throw a descriptive error informing the user to retry via the
+  //  `[action:upload]` prompt-button flow (Path B). For TXT/MD files we
+  //  reconstruct a File from `textContent` as a best-effort fallback so the
+  //  end-to-end flow can be exercised in dev.
+  const heldFilesRef = React.useRef<Map<string, File>>(new Map());
+
+  // Chip ids that have been successfully promoted via `executeSummarizeIntent`.
+  // The render reads this to flip the per-chip status badge "Held" → "Indexed".
+  const [promotedChipIds, setPromotedChipIds] = React.useState<ReadonlySet<string>>(
+    () => new Set<string>()
+  );
+
   // Per-id tracking of which chip IDs have already triggered an inline
   // file-confirmation message — guarantees one consolidated confirmation
   // per ready batch (debounced) and prevents re-emission on re-render.
@@ -994,6 +1028,14 @@ export function ConversationPane(): React.JSX.Element {
       // ready-transition + confirmation + dispatch logic.
       dispatchedReadyIdsRef.current.delete(chip.id);
       confirmedReadyIdsRef.current.delete(chip.id);
+      // R5 task 036: release the captured File-ref + promoted-chip status.
+      heldFilesRef.current.delete(chip.filename);
+      setPromotedChipIds(prev => {
+        if (!prev.has(chip.id)) return prev;
+        const next = new Set(prev);
+        next.delete(chip.id);
+        return next;
+      });
 
       // TODO(r5/phase-3-backend): wire DELETE /api/ai/chat/sessions/{sessionId}/files/{fileId}
       // when the endpoint exists; until then session-end cleanup
@@ -1031,6 +1073,88 @@ export function ConversationPane(): React.JSX.Element {
    */
   const handleBeforeSendMessage = React.useCallback(
     (messageText: string): void => {
+      // ── R5 task 036 / P2-CLOSEOUT-05: deterministic intent dispatch ─────
+      //
+      // BEFORE the multi-file interjection block (existing task 020 logic):
+      // try to match a registered intent (slash / pattern / button-id). If a
+      // matcher returns 'summarize-session' AND we have ready files, we run
+      // the deterministic promote-and-execute orchestrator IN PARALLEL with
+      // the default SprkChat send. The default send still proceeds (per
+      // SprkChat contract, onBeforeSendMessage is INFORMATIONAL — it cannot
+      // cancel the send; see Spaarke.UI.Components/SprkChat/types.ts line
+      // 658-661). We acknowledge this via an inline Assistant chip so the
+      // user knows the deterministic action is in flight.
+      //
+      // This is the chat-pane half of the FR-03 / task-036 contract. The
+      // workspace-pane half (structured output → Summary tab) lives in
+      // tasks 037 + 038; this task is the publisher (PaneEventBus events).
+      const readyChips = attachmentChips.filter(c => c.status === "ready");
+      const intent = matchIntent(messageText, readyChips.length > 0, undefined);
+      if (intent && intent.id === "summarize-session" && chatSessionId !== null) {
+        // Build the HeldFile list from the ready chips. The File-equivalents
+        // were captured in handleAttachmentReady (keyed by filename). Chips
+        // without a captured File fall through — the orchestrator will throw
+        // with a descriptive error the user can act on.
+        const heldFiles: HeldFile[] = [];
+        for (const chip of readyChips) {
+          const file = heldFilesRef.current.get(chip.filename);
+          if (file) {
+            heldFiles.push({ id: chip.id, file });
+          }
+        }
+
+        if (heldFiles.length > 0) {
+          // Visual acknowledgement BEFORE the user's send lands (per task spec:
+          // "fall back to clearing the textarea + injecting a local assistant
+          // chip 'I'll summarize that for you' so the user sees the outbound
+          // message land"). The default SprkChat send still proceeds —
+          // suppression requires a cross-package change to SprkChat (flagged).
+          setPendingInjection(
+            makeLocalAssistantMessage(
+              `I'll summarize ${heldFiles.length === 1 ? "that file" : `those ${heldFiles.length} files`} for you.`
+            )
+          );
+
+          // Fire-and-await-internally — promote then stream. On success, mark
+          // the chips Indexed (badge flip). On failure, surface an inline
+          // error message. We don't await here because handleBeforeSendMessage
+          // is synchronous; the orchestrator runs in parallel with the chat
+          // send funnel.
+          void (async () => {
+            try {
+              const result = await executeSummarizeIntent({
+                bffBaseUrl,
+                sessionId: chatSessionId,
+                heldFiles,
+                authenticatedFetch,
+                getAccessToken,
+                publishPaneEvent: dispatch,
+              });
+              // Flip Held → Indexed badges on the promoted chip ids.
+              setPromotedChipIds(prev => {
+                const next = new Set(prev);
+                for (const chip of readyChips) {
+                  if (result.documentIds.length > 0) {
+                    next.add(chip.id);
+                  }
+                }
+                return next;
+              });
+            } catch (err) {
+              const message =
+                err instanceof Error
+                  ? `I couldn't summarize that — ${err.message}`
+                  : "I couldn't summarize that. Please try again.";
+              setPendingInjection(makeLocalAssistantMessage(message));
+            }
+          })();
+        }
+        // Fall through to the multi-file interjection block below (it's
+        // additive — if both apply we get the chip + the interjection).
+      }
+
+      // ── Existing task 020 multi-file interjection (untouched) ───────────
+      //
       // Tri-mode router: deterministic, side-effect-free decision.
       const hasActiveWorkspaceDocument = entityContext !== null;
       const decision = routeSummarizeIntent(messageText, {
@@ -1060,7 +1184,16 @@ export function ConversationPane(): React.JSX.Element {
 
       setPendingInjection(makeLocalAssistantMessage(interjectionBody));
     },
-    [entityContext, uploadedFileCount, attachmentChips]
+    [
+      entityContext,
+      uploadedFileCount,
+      attachmentChips,
+      chatSessionId,
+      bffBaseUrl,
+      authenticatedFetch,
+      getAccessToken,
+      dispatch,
+    ]
   );
 
   /**
@@ -1158,6 +1291,10 @@ export function ConversationPane(): React.JSX.Element {
         dispatchedReadyIdsRef.current.clear();
         confirmedReadyIdsRef.current.clear();
         pendingConfirmFilenamesRef.current = [];
+        // R5 task 036: reset held-file File-refs + promoted-chip set so a
+        // new session does not carry the previous session's promotion state.
+        heldFilesRef.current.clear();
+        setPromotedChipIds(new Set());
         if (readyConfirmationTimerRef.current !== null) {
           clearTimeout(readyConfirmationTimerRef.current);
           readyConfirmationTimerRef.current = null;
@@ -1204,7 +1341,7 @@ export function ConversationPane(): React.JSX.Element {
    * extracted client-side before this point. NO BFF call is made here.
    */
   const handleAttachmentReady = React.useCallback(
-    (attachment: { filename: string; contentType: string; textContent: string }) => {
+    (attachment: ChatAttachment) => {
       const widgetData: DocumentViewerWidgetData = {
         filename: attachment.filename,
         contentType: attachment.contentType,
@@ -1219,6 +1356,38 @@ export function ConversationPane(): React.JSX.Element {
         // registry metadata's generic "Document Viewer" label.
         displayName: attachment.filename,
       });
+
+      // R5 task 036: capture the File so the promote-and-execute
+      // orchestrator (`executeSummarizeIntent`) can POST multipart binary
+      // to `/api/ai/chat/sessions/{id}/documents`.
+      //
+      // PREFERRED PATH (R5 task 036 sub-task — additive shared-lib change):
+      // SprkChat now forwards the ORIGINAL `File` reference through
+      // `ChatAttachment.file`. Binary uploads (PDF/DOCX) round-trip
+      // correctly through BFF Document Intelligence using these bytes.
+      //
+      // FALLBACK PATH (defense in depth): if `attachment.file` is absent
+      // (older shared-lib build, edge case, or some upstream consumer that
+      // didn't populate it), reconstruct a synthetic File from
+      // `textContent`. This works for TXT/MD but NOT for PDF/DOCX — the
+      // promotion step will then surface a descriptive content-type error.
+      try {
+        const heldFile: File =
+          attachment.file ??
+          new File(
+            [attachment.textContent],
+            attachment.filename,
+            { type: attachment.contentType || "text/plain" }
+          );
+        // Match by filename — the chip id from `onAttachmentsChanged` arrives
+        // separately; we resolve the binding in `handleBeforeSendMessage`
+        // when assembling the HeldFile list.
+        heldFilesRef.current.set(attachment.filename, heldFile);
+      } catch {
+        // Defensive: if File construction fails (e.g. older runtime), the
+        // promotion step will throw a descriptive error and the user can
+        // fall back to the [action:upload] prompt-button path.
+      }
     },
     [dispatch]
   );
@@ -1570,6 +1739,16 @@ export function ConversationPane(): React.JSX.Element {
                   ? "available for this session"
                   : "available for this session — combined Summarize will fold all into one"}
               </Text>
+              {/* R5 task 036: surface Held vs Indexed counts so the operator
+                  sees promotion status without opening the workspace pane. */}
+              {promotedChipIds.size > 0 && (
+                <Text
+                  className={styles.filesAttachedIndicatorHint}
+                  data-testid="files-promoted-indicator"
+                >
+                  {`(${promotedChipIds.size} indexed)`}
+                </Text>
+              )}
             </div>
           )}
 

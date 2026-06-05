@@ -1,8 +1,8 @@
 # Current Task — Spaarke AI Platform Unification R5
 
 > **Purpose**: Active task state tracker. Managed by `task-execute` skill per CLAUDE.md §7.
-> **Status**: 🔴 **PHASE 2 CLOSEOUT REQUIRED** — SC-18 walkthrough surfaced Sev-1 integration gap; remediation tasks 032-035 added.
-> **Last updated**: 2026-06-04 (post-walkthrough, remediation plan authored)
+> **Status**: 🟡 **TASK 036 IN-PROGRESS** — frontend UX rework: inline file holding + extensible intent matcher + deterministic Summarize promotion.
+> **Last updated**: 2026-06-05 (task 036 started; FULL rigor; ~13 steps)
 
 ---
 
@@ -10,102 +10,98 @@
 
 | Field | Value |
 |---|---|
-| **State** | 🔴 BLOCKED on Phase 2 closeout. Backend + frontend integration gap identified during SC-18 walkthrough on Spaarke Dev. 4 new tasks (032-035) added to TASK-INDEX. |
-| **PR #345** | ✅ MERGED (commit `01359b36` on master, 2026-06-04 17:49 UTC) |
-| **PR #349** | ✅ MERGED (CD platform-test fixes — `Uri.TryCreate` + `Path.GetInvalidFileNameChars`) |
-| **R5 deployed to Spaarke Dev** | ✅ via `scripts/Deploy-BffApi.ps1` (manual deploy from operator's workstation). PLUS live-patched `ChatDocumentEndpoints.cs` tid-claim fix (NOT yet on master — needs follow-up PR). |
-| **SC-18 walkthrough verdict** | ❌ NOT-USABLE for Phase 1.5 acceptance. Sev-1 root cause: `ChatDocumentEndpoints.UploadDocumentAsync` writes to Redis only; never calls R5's `IndexSessionFileAsync` or populates `ChatSession.UploadedFiles[]`. Chat agent then doesn't see uploaded files. |
-| **Phase 2 closeout** | 4 tasks: **032** (wire upload→session-files), **033** (chat context surfaces UploadedFiles), **034** (frontend auto-trigger on upload), **035** (re-run walkthrough + signoff). Tasks 032+033 can run in parallel; 034 needs both deployed first; 035 needs all three. |
-| **Next action when resuming** | Execute task 032 (or 032+033 in parallel) via `task-execute` skill. See remediation plan for full context. |
+| **Task** | 036 — P2-CLOSEOUT-05 Inline file holding + intent matcher + Summarize promote-and-execute |
+| **Task file** | `projects/spaarke-ai-platform-unification-r5/tasks/036-inline-holding-intent-matcher-summarize-promote.poml` |
+| **Step** | Step 1 of 13 (starting Step 1: notes/task-036-design-2026-06-05.md) |
+| **Status** | in-progress |
+| **Rigor** | FULL |
+| **Phase** | Phase 2 — Vertical Slice (CLOSEOUT) |
+| **Branch** | `fix/r5-session-files-schema-conformance` (working on top of master after PR #361 merge) — may need to branch to `work/r5-task-036-inline-holding` |
+| **Next Action** | Step 1: Write `notes/task-036-design-2026-06-05.md` capturing SC-18 cycle-4 evidence + operator UX clarification + design choices (deterministic-vs-LLM, inline-vs-promoted, chip-in-thread vs above-input). |
+| **Pre-reqs** | ✅ Task 032 (upload→session-files), ✅ Task 033 (ChatContext.UploadedFiles), ✅ PR #361 (schema-conformance fix). Backend is correct; this is frontend-only work. |
 
 ---
 
-## Walkthrough findings (Sev-2 fixed + Sev-1 deferred to closeout)
+## Phase 2 closeout status (post-walkthrough remediation)
 
-### ✅ Sev-2 #1: tid claim-mapping fix in ChatDocumentEndpoints (LIVE-PATCHED on Dev)
-
-Root cause: `ChatDocumentEndpoints.cs:146` only checked `tid` claim form; Microsoft.Identity.Web renames `tid` → `http://schemas.microsoft.com/identity/claims/tenantid` on the ClaimsPrincipal in this environment. Other endpoints (e.g., `ChatEndpoints.cs:2012`) check both forms.
-
-**Fix applied** to lines 151-153 + 443-445: added schema URL fallback. Deployed via `Deploy-BffApi.ps1` mid-session. **MUST be promoted to master via small follow-up PR** (otherwise next deploy overwrites). Tracked as a non-numbered follow-up in [`notes/summarize-vertical-remediation-plan.md`](notes/summarize-vertical-remediation-plan.md) §4.
-
-### 🔴 Sev-1 #2: Summarize-vertical integration gap (REMEDIATION TASKS 032-035 FILED)
-
-R5 deployed the **complete backend** (orchestrator + endpoint + agent tool + telemetry + session-files index + indexing pipeline method) AND the deployed playbook (`summarize-document-for-chat@v1`). User-facing UX is broken because the wiring between three components was never authored. See [`notes/summarize-vertical-remediation-plan.md`](notes/summarize-vertical-remediation-plan.md) for full root-cause analysis + 4-task decomposition.
-
----
-
-## Resume protocol (when ready to continue)
-
-1. **Pull master** (it has R5 + PR #349 platform fixes). Stay on `work/spaarke-ai-platform-unification-r5` branch for the closeout tasks (or create a new closeout branch from master).
-2. **Promote the tid-claim fix** to master via small PR. Files: `src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs` lines 151-153 + 443-445 — replace the `tid`-only lookup with the dual-form lookup matching `ChatEndpoints.cs:2012`. See [`notes/summarize-vertical-remediation-plan.md`](notes/summarize-vertical-remediation-plan.md) §3.1 for exact diff context.
-3. **Execute closeout tasks** via `task-execute` skill — parallel-safe groups per `TASK-INDEX.md`:
-   - **Wave P2-G9-CLOSEOUT (parallel)**: spawn sub-agents for tasks 032 + 033 in ONE message
-   - Wait for both to commit; deploy via `scripts/Deploy-BffApi.ps1`
-   - **Wave P2-G10-CLOSEOUT (serial)**: execute task 034 (frontend auto-trigger) — needs 032+033 backend behavior to test against
-   - Deploy frontend via the appropriate code-page deploy script
-   - **Wave P2-G11-CLOSEOUT (serial)**: execute task 035 (SC-18 walkthrough re-run + signoff)
-4. **Capture signoff** in [`notes/task-030-summarize-walkthrough.md`](notes/task-030-summarize-walkthrough.md) §7.
-5. **Flip tasks 030, 031, 032, 033, 034, 035 → ✅** in `tasks/TASK-INDEX.md`.
-6. **Update plan.md** Phase 2 → ✅.
-7. **Start Phase 3** — Wave 8 from project-pipeline plan:
-   - 040 D3-01 `/analyze` proof point
-   - 041 D3-02 Get Started welcome card "Summarize a Document"
-   - 042 D3-03 Telemetry dashboards
-   - 043 D3-04 Operator-led end-to-end testing
-   - 044 D3-05 Lessons-learned + R6 backlog
-8. **Wrap-up task 090** — README → Complete; coordination doc §8 entry; final R5 merge ceremony.
+| Task | Status | What | When |
+|---|---|---|---|
+| 032 | ✅ | Wire `ChatDocumentEndpoints.UploadDocumentAsync` to call `IndexSessionFileAsync` + populate `ChatSession.UploadedFiles[]` | PR #354 merged 2026-06-04 |
+| 033 | ✅ | `PlaybookChatContextProvider` surfaces `UploadedFiles` in `ChatContext`; `SprkChatAgentFactory` system-prompt suffix | PR #354 merged 2026-06-04 |
+| 034 (frontend auto-trigger) | ⏭️ Deferred | Original "auto-trigger on upload" — REPLACED by tasks 036/037/038 with cleaner intent-driven design (operator decision 2026-06-05) | n/a |
+| 035 | ⏭️ Deferred until 036/037/038 | SC-18 walkthrough re-run + signoff | After 036/037/038 ship |
+| **036** | 🔄 in-progress | Inline holding + intent matcher + Summarize promote-and-execute | Now |
+| 037 | 🔲 | Context-pane execution-trace widget | After 036 |
+| 038 | 🔲 | Workspace-pane Summary tab registration | After 036 (parallel with 037) |
 
 ---
 
-## Pre-resume verification (validates fix expectations)
+## SC-18 cycle log (for posterity)
 
-When resuming, before executing any task:
+| Cycle | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 1 (2026-06-04) | Upload 401 "Tenant identity not found in token claims" | `ChatDocumentEndpoints.cs` only checked `tid` short claim form | PR #354 — schema URL fallback |
+| 2 (2026-06-04) | Upload 200 but agent says "I don't see the document" | Upload endpoint wrote only to Redis; never indexed | PR #354 tasks 032 + 033 |
+| 3 (2026-06-04) | After cycle-2 deploy: Azure Search 400 on session-files index — `tags` null | `BuildKnowledgeDocuments` left `Tags = null` | PR #359 — `Tags = Array.Empty<string>()` |
+| 4 (2026-06-05) | After cycle-3 deploy: Azure Search 400 — `deploymentId` does not exist in schema | 7 customer-corpus-only fields serialize when null; same root cause as cycle 3 | PR #361 — `[JsonIgnore(WhenWritingNull)]` on all 8 affected fields + regression test |
+| 5 (2026-06-05) | Indexing now succeeds; UX itself is broken: two upload paths producing two session states; summary in chat pane not workspace | Frontend architecture gap (paperclip uses FR-07 inline; `[action:upload]` button uses server-side path). Not a bug — a design problem. | **Tasks 036 + 037 + 038** (this task and its siblings) |
 
-```bash
-# 1. Verify R5 backend endpoints are still live on Dev (with bearer)
-curl -sS -w "summarize: HTTP %{http_code}\n" -X POST \
-  "https://spaarke-bff-dev.azurewebsites.net/api/ai/chat/sessions/00000000-0000-0000-0000-000000000000/summarize" \
-  -H "Authorization: Bearer x"
-# Expected: 401 (auth middleware rejects fake bearer; route exists)
-# NOTE: bearer is required — without it, BFF returns 404 for AI routes as a security pattern
+---
 
-# 2. Verify upload endpoint accepts authenticated requests (tid claim fix)
-curl -sS -X POST \
-  "https://spaarke-bff-dev.azurewebsites.net/api/ai/chat/sessions/<real-session-id>/documents" \
-  -H "Authorization: Bearer <real-jwt-from-DevTools>" \
-  --form "file=@/path/to/small.pdf"
-# Expected: 202 Accepted + DocumentUploadResponse JSON
-# If 401 with detail "Tenant identity not found in token claims" → live-patch was lost; re-apply per resume protocol step 2
+## Knowledge Files Loaded (Step 4)
+
+(To be populated during execution.)
+
+## Constraints Loaded (Step 4a)
+
+(To be populated.)
+
+## Patterns Loaded (Step 4b)
+
+(To be populated.)
+
+## Applicable ADRs (Step 5)
+
+(To be populated.)
+
+## Files Modified This Session
+
+(To be populated during execution.)
+
+## Completed Steps
+
+(To be populated.)
+
+## Decisions Made
+
+(To be populated.)
+
+---
+
+## Critical Context for Resume
+
+1. **Backend is correct**. All bug fixes from cycles 1-4 are merged and deployed. PR #354, PR #359, PR #361 all on master + Spaarke Dev. Hash verified 2026-06-05 14:54 UTC. This task is frontend-only.
+
+2. **Two upload paths exist in the chat shell, by accident not design**. Paperclip → `useChatFileAttachment` (client-side text extraction, FR-07 inline attachments). `[action:upload]` button → server-side `POST /api/ai/chat/sessions/{id}/documents` (indexes to session-files). Operator's intent-driven design (per 2026-06-05 chat) converges: file held inline until intent matches, THEN promoted server-side and executed deterministically.
+
+3. **Concordance-table for free-form-chat playbook routing is R6 backlog**, not in this task. For now: deterministic frontend matcher for slash + keyword + button. LLM fallback for ambiguous chat (existing tool registration).
+
+4. **Bypass LLM for playbook SELECTION** (operator explicit). LLM is only involved in playbook EXECUTION (generation). Slash `/summarize` + ready chip → direct POST `/summarize`.
+
+5. **PaneEventBus channels are CLOSED at 4 per ADR-030**. Only additive event types within existing channels (`workspace.streaming_*`, `context.files_staged` — both already registered per task 016).
+
+6. **Worktree is `c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r5`**. Master is checked out in another worktree (`spaarke-wt-ai-spaarke-insights-engine-r2`) — cannot `git checkout master` here.
+
+---
+
+## Resume protocol
+
+To resume: read this file's Quick Recovery section, then re-invoke task-execute on the same POML.
+
+```
+task-execute projects/spaarke-ai-platform-unification-r5/tasks/036-inline-holding-intent-matcher-summarize-promote.poml
 ```
 
 ---
 
-## Key commits this session
-
-| Commit | Description |
-|---|---|
-| `a9c7900f` | Pre-PR-#345 checkpoint (R5 work) |
-| `b4584774` | PR #345: Prettier fix + asymmetric-registration fix (`NullSessionSummarizeOrchestrator`) |
-| `6a8c96da` | PR #345: Code Quality whitespace + CRLF normalization |
-| **`01359b36`** | **PR #345 squash-merge to master** (R5 ships) |
-| `eeb5c929` | PR #349: 2 Linux/Windows platform-test fixes (Uri.TryCreate + GetInvalidFileNameChars) |
-| **(merged)** | **PR #349 squash-merge to master** (PROD CD unblocked) |
-| **(LIVE-PATCH, NO COMMIT)** | `ChatDocumentEndpoints.cs` tid-claim fallback — deployed via `Deploy-BffApi.ps1`; needs follow-up PR to master |
-
----
-
-## Reference materials
-
-- **PR #345** (R5 main): https://github.com/spaarke-dev/spaarke/pull/345
-- **PR #349** (CD platform fixes): https://github.com/spaarke-dev/spaarke/pull/349
-- **REMEDIATION PLAN**: [`projects/spaarke-ai-platform-unification-r5/notes/summarize-vertical-remediation-plan.md`](notes/summarize-vertical-remediation-plan.md) ← read this first
-- **Walkthrough findings**: [`notes/task-030-summarize-walkthrough.md`](notes/task-030-summarize-walkthrough.md)
-- **Insights walkthrough (deferred to Phase 3)**: [`notes/task-030-sme-walkthrough.md`](notes/task-030-sme-walkthrough.md)
-- **New task POMLs**: [`tasks/032-upload-endpoint-wire-session-files.poml`](tasks/032-upload-endpoint-wire-session-files.poml), [`tasks/033-chat-context-surfaces-uploaded-files.poml`](tasks/033-chat-context-surfaces-uploaded-files.poml), [`tasks/034-frontend-auto-trigger-summarize-on-upload.poml`](tasks/034-frontend-auto-trigger-summarize-on-upload.poml), [`tasks/035-sc18-walkthrough-rerun.poml`](tasks/035-sc18-walkthrough-rerun.poml)
-- **Spec**: [`spec.md`](spec.md) FR-01/FR-02/FR-04/FR-08/NFR-02/SC-08/SC-18
-- **CLAUDE**: [`CLAUDE.md`](CLAUDE.md)
-- **TASK-INDEX**: [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md)
-
----
-
-*Checkpoint authored 2026-06-04 immediately after SC-18 walkthrough surfaced Sev-1 integration gap. Resume by executing tasks 032+033 in parallel via `task-execute` skill.*
+*Maintained by task-execute skill. Resets on task transition per protocol §11.*

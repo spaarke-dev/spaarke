@@ -1,0 +1,244 @@
+<task id="036" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>P2-CLOSEOUT-05 Inline file holding in chat thread + extensible intent matcher + deterministic Summarize promotion</title>
+    <status>🔲</status>
+    <status-note>Closeout task added 2026-06-05 after SC-18 walkthrough cycle 4 surfaced that the chat shell has TWO upload paths producing TWO different session states (paperclip = inline FR-07 only; [action:upload] prompt-button = server-side session-files indexing). Operator UX feedback (2026-06-05 chat) confirmed the desired model: files held inline in the chat thread until an intent is matched, at which point they are promoted to the indexed path and the action runs deterministically (no LLM tool-call ambiguity). See notes/task-036-design-2026-06-05.md (to be created in Step 1) for the full SC-18 cycle-4 trace + design rationale.</status-note>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort>TBD</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>TBD</started>
+    <completed>TBD</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration (CLOSEOUT)</phase>
+    <wave>P2-G10-CLOSEOUT (sequential; gates 037 + 038)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>032 (upload endpoint wires session-files — already ✅), 033 (ChatContext surfaces UploadedFiles — already ✅), PR #361 (KnowledgeDocument schema-conformance fix — merged 2026-06-05)</dependencies>
+    <tags>spaarke-ai, frontend, chat-pane, intent-routing, summarize, sev-1-ux, closeout</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    The SpaarkeAi chat shell currently has TWO upload mechanisms that produce
+    DIFFERENT session states. This is the structural cause of the SC-18
+    walkthrough cycle-4 UX confusion:
+
+      Path A — Paperclip icon: SprkChat's `useChatFileAttachment` hook does
+      CLIENT-SIDE text extraction (pdfjs / mammoth) and rides the text along
+      with the next chat message as FR-07 inline `attachments: [...]`. No
+      server-side upload. No `spaarke-session-files` index entry. No
+      `ChatSession.UploadedFiles` entry.
+
+      Path B — `[action:upload]` prompt-button: POSTs to
+      `/api/ai/chat/sessions/{id}/documents`, which (after PR #354 task 032 +
+      PR #361 schema fix) correctly indexes to `spaarke-session-files` and
+      updates `ChatSession.UploadedFiles`.
+
+    Operator UX requirement (2026-06-05 SC-18 walkthrough chat): the path
+    should be INTENT-DRIVEN, not surface-driven.
+
+      • File uploaded + ambiguous message (e.g. "here's a file"):
+        file is HELD in the chat thread as a visible chip (icon + filename +
+        size + "Held" status badge). NOT indexed. User must type something
+        before anything else happens (mirrors Claude Code's "no upload without
+        a message" rule).
+
+      • File uploaded + intent-matching message (`/summarize`, "summarize",
+        `[action:summarize]` button click): the held file(s) are PROMOTED
+        via `POST /api/ai/chat/sessions/{id}/documents` (server-side indexing),
+        THEN the action runs deterministically via `POST /api/ai/chat/sessions/{id}/summarize`.
+        The LLM is BYPASSED for the playbook-selection decision (per operator
+        clarification: "this should be deterministic selection so LLM should
+        not be necessary at least for the playbook or action selection").
+
+      • File uploaded + NON-matching intent: file rides along inline (FR-07
+        attachments) and the chat agent receives it as before. This preserves
+        back-compat for free-form chat.
+
+    Implementation:
+
+    1. **Render held files INSIDE the conversation thread** (operator UX:
+       "it should go into the conversation thread so user sees 'its in the
+       thread'"). The current chip-strip-above-input-bar pattern is too easy
+       to miss. The new visual is a chip rendered as a user-message-style
+       bubble or banner inside the chat scroll area with:
+         - File icon (pdf / docx / xlsx / generic per fileType)
+         - File name (truncated if long)
+         - File size (formatted)
+         - Status badge: "Held" (Path 1) / "Indexed" (Path 2 after promotion)
+       Implement via `injectLocalMessage` (the SprkChat host-injection prop
+       SpaarkeAi already uses for the multi-file Summarize interjection —
+       see ConversationPane.handleAttachmentReady for the existing pattern).
+
+    2. **Extensible intent matcher** — new module
+       `src/solutions/SpaarkeAi/src/components/conversation/intentMatcher.ts`.
+       Export a config object `IntentMatchers: ReadonlyArray&lt;IntentMatcher&gt;`
+       where each entry has the shape:
+
+       ```ts
+       interface IntentMatcher {
+         readonly id: string;                // 'summarize-session' (stable; logged)
+         readonly slash?: string;            // '/summarize' (exact lowercase match)
+         readonly patterns?: RegExp[];       // [/^summari[sz]e\b/i, /please summari[sz]e/i]
+         readonly buttonIds?: string[];      // ['action:summarize']
+         readonly requiresFiles: boolean;    // Summarize requires ≥1 held file
+         readonly executor: 'POST /api/ai/chat/sessions/{id}/summarize';
+       }
+       ```
+
+       Initial registry contains exactly ONE entry: `summarize-session` (per
+       operator scope clarification: "let's keep this activity focused on the
+       summarize use case"). The registry is shaped to make adding additional
+       intents (create-matter, add-to-dms) a config-only change for future R5
+       closeout tasks or R6.
+
+       Pure function `matchIntent(messageText: string, hasFiles: boolean,
+       buttonId?: string): IntentMatch | null`.
+
+    3. **Promote-and-execute orchestrator** — new helper
+       `executeSummarizeIntent(sessionId, heldFiles, authenticatedFetch)`:
+         a. For each held file, POST FormData to
+            `/api/ai/chat/sessions/{sessionId}/documents` (the canonical
+            server-side path that already works per PRs #354 + #359 + #361).
+            Capture returned documentIds. On 4xx/5xx, emit a chat-thread error
+            chip and abort (do NOT call summarize with partial uploads).
+         b. POST JSON `{ documentIds: [...] }` to
+            `/api/ai/chat/sessions/{sessionId}/summarize`. Consume the SSE
+            stream of `AnalysisChunk` events.
+         c. **Bridge AnalysisChunk → PaneEventBus** (the missing piece per
+            2026-06-05 verification): map `AnalysisChunk.FromDelta(path, content, seq)`
+            to `workspace.field_delta` PaneEventBus events; map `Completed`
+            to `workspace.streaming_complete`; emit `workspace.streaming_started`
+            on first non-error chunk. This is the bridge that tasks 037 + 038
+            consume — task 036 builds the publisher; 037 + 038 build subscribers.
+         d. Update each held file's chip badge from "Held" → "Indexed" on
+            successful promotion (visual confirmation).
+         e. Emit `context.files_staged` PaneEventBus event after promotion
+            (already-existing additive event type per ADR-030 + task 016) so
+            the Context pane execution-trace widget (task 037) can render the
+            "promoted to session-files" line.
+
+    4. **Wire send funnel** — in ConversationPane.handleBeforeSendMessage:
+         - If matchIntent returns 'summarize-session' AND uploadedFileCount &gt; 0:
+           call executeSummarizeIntent; suppress the default SprkChat send (return
+           a sentinel that SprkChat treats as "host handled"; if no such sentinel
+           exists, fall back to clearing the textarea + injecting a local
+           assistant chip "I'll summarize that for you" so the user sees the
+           outbound message land).
+         - If matchIntent returns 'summarize-session' AND uploadedFileCount === 0:
+           current `prompt-first` branch (already implemented in task 019) handles
+           it — emit "Upload the file(s) you'd like me to summarize" interjection
+           with `[action:upload]` button.
+         - All other cases (no match, or match but no files): fall through to
+           the existing SprkChat send (unchanged behavior).
+
+    Tests (frontend, Vitest + React Testing Library):
+      - matchIntent unit tests: slash exact, slash with trailing args, keyword
+        regex variants, button-id match, no-match cases (table-driven)
+      - executeSummarizeIntent: mock authenticatedFetch with sequential
+        responses (N x 202 from /documents, then 200 SSE from /summarize);
+        assert each documentId is captured + the SSE bridge dispatches the
+        correct PaneEventBus events in order
+      - executeSummarizeIntent error path: one /documents call returns 400;
+        assert chat-thread error chip rendered + /summarize NOT called
+      - Visual: chip in thread renders with correct icon for pdf/docx; badge
+        flips Held → Indexed on promotion success
+
+    Out of scope for this task (explicit non-goals to prevent scope creep):
+      - Context pane execution-trace rendering (task 037)
+      - Workspace pane Summary tab registration (task 038)
+      - Additional intents beyond Summarize (R6 backlog: concordance table)
+      - Removing the FR-07 inline-attachments code path entirely (keep as
+        fallback for unmatched intents; revisit after summarize is stable)
+      - Backend changes (all backend pieces verified working 2026-06-05;
+        this is frontend-only)
+
+    Acceptance: after this task ships, the operator can: (a) click paperclip,
+    pick a file, see the file appear as a chip INSIDE the chat thread with
+    "Held" badge; (b) type `/summarize` (or "summarize") and press Enter;
+    (c) the held file is silently promoted to session-files, the badge
+    flips to "Indexed", and `/summarize` runs deterministically against it
+    without going through the LLM's tool-call decision. Tasks 037 + 038 then
+    surface the execution trace + structured output in the right panes.
+  </prompt>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeSessionEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/summarize-vertical-remediation-plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/task-030-summarize-walkthrough.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-zone-b.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-dark-mode.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-030-pane-eventbus-channels.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint>R5 reuse mandate (spec §2.11): use existing POST /documents endpoint + POST /summarize endpoint; do NOT introduce new BFF endpoints.</constraint>
+    <constraint>ADR-028 client contract: use `authenticatedFetch` + `getAccessToken` from `@spaarke/auth` — NEVER snapshot tokens; NEVER take `accessToken: string` prop.</constraint>
+    <constraint>ADR-030 PaneEventBus: only use the 4 canonical channels + additive event types (`workspace.streaming_*`, `context.files_staged` — both already exist per task 016). Do NOT add a 5th channel.</constraint>
+    <constraint>ADR-021 Fluent UI v9: chip rendering must use semantic tokens; dark-mode tested. No hard-coded colors.</constraint>
+    <constraint>ADR-022 React 19: new components must be React 19 compatible.</constraint>
+    <constraint>Intent matcher is PURE: no side effects, no IO. Deterministic given (messageText, hasFiles, buttonId).</constraint>
+    <constraint>Deterministic playbook selection: when intent matches, BYPASS LLM. Do NOT round-trip through chat agent for the routing decision (operator explicit requirement 2026-06-05).</constraint>
+    <constraint>Promotion is ATOMIC per session: if any /documents POST fails, do NOT call /summarize. Render an error chip in the chat thread.</constraint>
+    <constraint>No backend changes in this task. Backend already correct per PR #354/#359/#361.</constraint>
+    <constraint>Per R5 CLAUDE.md §3.4: this task adds NO new PaneEventBus channels. Event types used (`workspace.streaming_*`, `context.files_staged`) are additive within existing channels per task 016.</constraint>
+  </constraints>
+
+  <steps>
+    <step>Create notes/task-036-design-2026-06-05.md capturing the SC-18 cycle-4 evidence + operator UX clarification + design choices (deterministic-vs-LLM, inline-vs-promoted, chip-in-thread vs above-input).</step>
+    <step>Read ConversationPane.tsx fully focusing on: handleBeforeSendMessage, handleAttachmentsChanged, handleAttachmentReady, pendingInjection mechanism, routeSummarizeIntent.</step>
+    <step>Read useChatFileAttachment.ts fully to understand the chip lifecycle SprkChat owns and what `onAttachmentReady` fires on.</step>
+    <step>Read SummarizeSessionEndpoint.cs + SessionSummarizeOrchestrator.cs to confirm the request/response contract for POST /summarize (documentIds shape, SSE event stream format).</step>
+    <step>Write `intentMatcher.ts` (pure functions + IntentMatchers registry) with full unit-test coverage. Table-driven tests.</step>
+    <step>Write `executeSummarizeIntent.ts` orchestrator. Mock-based unit tests covering happy path + per-file 400 + summarize 500 + SSE parse error.</step>
+    <step>Write `sseToPaneEventBridge.ts` — pure transformer AnalysisChunk → PaneEventBus events. Unit-test event shape + ordering invariants.</step>
+    <step>Modify ConversationPane.handleBeforeSendMessage to invoke matchIntent + dispatch executeSummarizeIntent. Modify handleAttachmentReady to inject the in-thread chip via pendingInjection.</step>
+    <step>Build `npm run build` for @spaarke/ui-components (if changed) and SpaarkeAi shell. Verify 0 errors.</step>
+    <step>Run frontend test suites (Vitest). Verify 0 regressions.</step>
+    <step>Local smoke test: serve SpaarkeAi against deployed BFF; perform the 3 paperclip flows manually (Path 1 ambiguous, Path 2 slash, Path 2 button). Capture screenshots.</step>
+    <step>Deploy SpaarkeAi shell to Spaarke Dev per code-page-deploy skill. (No BFF deploy needed — backend is correct already.)</step>
+    <step>Commit with conventional message; reference notes/task-036-design-2026-06-05.md.</step>
+    <step>Update TASK-INDEX.md status 🔲 → ✅.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Paperclip → file picker → select file: file chip appears INSIDE the chat thread (not just above input) with icon + filename + size + "Held" badge.</criterion>
+    <criterion>User types `/summarize` (or "summarize this" / "summarize it") and sends with ≥1 held file: matchIntent returns 'summarize-session', files are promoted via POST /documents, badge flips Held → Indexed, POST /summarize is called, SSE events bridge to PaneEventBus.</criterion>
+    <criterion>User types ambiguous message (e.g. "here's a file") with held files: no promotion; default SprkChat send funnel handles it; files stay "Held".</criterion>
+    <criterion>User clicks `[action:summarize]` button (button-id intent match): same deterministic promotion + summarize as slash path.</criterion>
+    <criterion>If POST /documents fails for any file: error chip rendered in chat thread; POST /summarize is NOT called.</criterion>
+    <criterion>intentMatcher.ts is a pure module with 100% test coverage (table-driven).</criterion>
+    <criterion>executeSummarizeIntent.ts has unit tests for happy path + 2 error paths.</criterion>
+    <criterion>sseToPaneEventBridge.ts emits `workspace.streaming_started` on first non-error chunk, `workspace.field_delta` on each FromDelta, `workspace.streaming_complete` on Completed; emits `context.files_staged` after promotion completes.</criterion>
+    <criterion>No new PaneEventBus channel introduced (ADR-030).</criterion>
+    <criterion>No backend changes. No new BFF endpoint.</criterion>
+    <criterion>Frontend test suite passes; 0 regressions in ConversationPane existing tests.</criterion>
+    <criterion>Bundle-size delta &lt; 50 KB for SpaarkeAi shell (intent matcher + executor + bridge are small).</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>New file: src/solutions/SpaarkeAi/src/components/conversation/intentMatcher.ts + __tests__/intentMatcher.test.ts</output>
+    <output>New file: src/solutions/SpaarkeAi/src/components/conversation/executeSummarizeIntent.ts + __tests__/executeSummarizeIntent.test.ts</output>
+    <output>New file: src/solutions/SpaarkeAi/src/components/conversation/sseToPaneEventBridge.ts + __tests__/sseToPaneEventBridge.test.ts</output>
+    <output>Modified file: src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (handleBeforeSendMessage + handleAttachmentReady wired)</output>
+    <output>New file: projects/spaarke-ai-platform-unification-r5/notes/task-036-design-2026-06-05.md</output>
+    <output>New file: projects/spaarke-ai-platform-unification-r5/notes/task-036-evidence.md (smoke-test screenshots + bundle delta)</output>
+    <output>TASK-INDEX.md row 036 flipped 🔲 → ✅</output>
+  </outputs>
+</task>
