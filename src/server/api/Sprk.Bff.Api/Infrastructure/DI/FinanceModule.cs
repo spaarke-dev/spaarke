@@ -114,33 +114,6 @@ public static class FinanceModule
         services.AddScoped<IPlaybookLookupService, PlaybookLookupService>();
 
         // ============================================================================
-        // Action Lookup Service (cached alternate key lookups for SaaS portability)
-        // ============================================================================
-        // Scoped: retrieves AI actions by portable code (e.g., "ACT-001") instead of environment-specific GUIDs
-        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded action GUIDs
-        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries
-        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_actioncode alternate key
-        services.AddScoped<IActionLookupService, ActionLookupService>();
-
-        // ============================================================================
-        // Skill Lookup Service (cached alternate key lookups for SaaS portability)
-        // ============================================================================
-        // Scoped: retrieves AI skills by portable code (e.g., "SKILL-001") instead of environment-specific GUIDs
-        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded skill GUIDs
-        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries
-        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_skillcode alternate key
-        services.AddScoped<ISkillLookupService, SkillLookupService>();
-
-        // ============================================================================
-        // Tool Lookup Service (cached alternate key lookups for SaaS portability)
-        // ============================================================================
-        // Scoped: retrieves AI tools by portable code (e.g., "TL-001") instead of environment-specific GUIDs
-        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded tool GUIDs
-        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries
-        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_toolcode alternate key
-        services.AddScoped<IToolLookupService, ToolLookupService>();
-
-        // ============================================================================
         // Dataverse Update Handler (low-level update operations with concurrency control)
         // ============================================================================
         // Scoped: handles Dataverse entity updates with optimistic concurrency and retry logic
@@ -169,16 +142,6 @@ public static class FinanceModule
         // interface forwarding needed by playbook tool discovery (GetServices<IAiToolHandler>).
         services.AddScoped<FinancialCalculationToolHandler>();
         services.AddScoped<IAiToolHandler>(sp => sp.GetRequiredService<FinancialCalculationToolHandler>());
-
-        // DataverseUpdateToolHandler - generic entity record update from playbook context
-        // Allows playbooks to update arbitrary entity fields without custom handlers
-        // Handles type conversion for Money, EntityReference, and other Dataverse types
-        services.AddScoped<IAiToolHandler, DataverseUpdateToolHandler>();
-
-        // InvoiceExtractionToolHandler - wraps InvoiceAnalysisService for playbook workflows
-        // Extracts invoice facts, generates AI summary, serializes to JSON for storage
-        // Returns: aiSummary (5000 char limit), extractedJson (20000 char limit), facts object
-        services.AddScoped<IAiToolHandler, InvoiceExtractionToolHandler>();
 
         // ============================================================================
         // Attachment Classification Job Handler (ADR-013: AI via BFF, ADR-015: no content logging)

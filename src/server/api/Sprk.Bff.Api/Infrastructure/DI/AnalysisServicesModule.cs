@@ -83,9 +83,10 @@ public static class AnalysisServicesModule
             // consumed by InsightsOrchestrator (Scoped) and uses scoped delegate captures.
             // ADR-032 \u00a7F.1 inspection: the handler is consumed ONLY by InsightsOrchestrator
             // (an IInsightsAi impl registered behind the compound-AI-ON gate via
-            // AddPublicContractsFacade). When AI is OFF, IInsightsAi falls back to the Null
-            // facade in AddNullObjectsForCompoundOff and the handler is never resolved.
-            // No Null-Object mirror needed at this layer per the compound-gate isolation.
+            // AddPublicContractsFacade below). When the compound gate is OFF, IInsightsAi
+            // resolves to NullInsightsAi (registered in AddNullObjectsForCompoundOff per the
+            // 2026-06-04 audit Migration PR #1 LATENT BUG #1 remediation), so this handler
+            // is never resolved on the OFF path \u2014 no Null-Object mirror needed at this layer.
             services.AddScoped<Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler>();
             Console.WriteLine("\u2713 Spaarke Assistant tool-call handler enabled (Wave E3 task 042, FR-05)");
 
@@ -234,6 +235,43 @@ public static class AnalysisServicesModule
     {
         // L1 — IBriefingAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
         services.AddScoped<IBriefingAi, NullBriefingAi>();
+
+        // ── L1 (cont.) — 2026-06-04 audit Migration PR #1 ────────────────────────────────
+        // The four PublicContracts facade Null peers. Closes the LATENT BUG #1 gap
+        // (bff-ai-architecture-audit-r1 W4 §4.5 + DR-003) where IInsightsAi was registered
+        // unconditionally in InsightsFacadeModule while its transitive ctor deps were
+        // conditional, and the other three PublicContracts facades (IInvoiceAi,
+        // IWorkspacePrefillAi, IRecordMatchingAi) had no compound-OFF fallback at all.
+        // All four real impls are now registered in AddPublicContractsFacade (compound-ON
+        // only); the Null peers below complete the symmetric pair per the Endpoint↔DI
+        // Registration Conditionality Symmetry Rule (audit W4 §4.1).
+
+        // L1 — IInvoiceAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
+        // Consumed by Finance flows (InvoiceAnalysisService, InvoiceSearchService,
+        // InvoiceIndexingJobHandler) which are unconditional; this Null peer keeps their
+        // DI resolution green under compound-OFF and surfaces 503 ProblemDetails to callers.
+        services.AddScoped<IInvoiceAi, NullInvoiceAi>();
+
+        // L1 — IWorkspacePrefillAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
+        // Consumed by MatterPreFillService (Create-Matter wizard pre-fill). Stream-pre-stream
+        // invariant: NullWorkspacePrefillAi throws synchronously BEFORE returning the
+        // IAsyncEnumerable so the endpoint converts to 503 (no SSE body).
+        services.AddScoped<IWorkspacePrefillAi, NullWorkspacePrefillAi>();
+
+        // L1 — IRecordMatchingAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
+        // No CRUD-external consumers yet (per Phase 4 FR-C6 CI guard); pre-registered so the
+        // compound-OFF DI graph remains uniform across all four PublicContracts facades.
+        services.AddScoped<IRecordMatchingAi, NullRecordMatchingAi>();
+
+        // L1 — IInsightsAi (P3 Fail-Fast). Real impl (InsightsOrchestrator) registered in
+        // AddPublicContractsFacade. Consumed by /api/insights/ask + /api/insights/search +
+        // /api/insights/assistant/query endpoints (Zone B) AND by the D-P8 SPE-upload
+        // consumer + D-P4 Precedent projection sync (Zone B substrate writers). All callers
+        // are unconditional; this Null peer ensures they see a contract-specified 503
+        // FeatureDisabledException under compound-OFF instead of the prior 500
+        // InvalidOperationException at DI resolution time. Stream-pre-stream invariant on
+        // AssistantQueryStreamAsync per ADR-032 P3 kill-switch ordering.
+        services.AddScoped<IInsightsAi, NullInsightsAi>();
 
         // L3 — IPlaybookOrchestrationService (P3 Fail-Fast). Real impl registered in AddPlaybookServices.
         services.AddScoped<IPlaybookOrchestrationService, NullPlaybookOrchestrationService>();
@@ -477,6 +515,25 @@ public static class AnalysisServicesModule
         services.AddScoped<IInvoiceAi, InvoiceAi>();
         services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
         services.AddScoped<IRecordMatchingAi, RecordMatchingAi>();
+
+        // ── 2026-06-04 audit Migration PR #1 — relocated from InsightsFacadeModule ────────
+        // IPlaybookExecutionEngine — Scoped (transitively consumes Scoped
+        // IPlaybookOrchestrationService). Previously registered UNCONDITIONALLY in
+        // InsightsFacadeModule. Its only consumer (InsightsOrchestrator via IInsightsAi
+        // below) is conditional behind this compound-AI-ON gate, so the engine itself
+        // must also be conditional per the Endpoint↔DI Registration Conditionality
+        // Symmetry Rule (audit W4 §4.1).
+        services.AddScoped<IPlaybookExecutionEngine, PlaybookExecutionEngine>();
+
+        // IInsightsAi → InsightsOrchestrator — the only Zone-A surface Zone B code may
+        // import per SPEC §3.5. Wraps IPlaybookExecutionEngine (above) + IOpenAiClient +
+        // IInsightsPlaybookExecutionCache (D-P13) + IPlaybookOrchestrationService — all
+        // compound-AI-ON dependencies. Previously registered UNCONDITIONALLY in
+        // InsightsFacadeModule, which created the LATENT BUG #1 narrative: under compound-OFF,
+        // DI resolution threw InvalidOperationException at endpoint-handler invocation
+        // (500 instead of the contract-specified 503). Null peer (NullInsightsAi) is
+        // registered in AddNullObjectsForCompoundOff. Scoped to match transitive lifetime.
+        services.AddScoped<IInsightsAi, InsightsOrchestrator>();
     }
 
     private static void AddBuilderServices(IServiceCollection services)
@@ -486,9 +543,7 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService, Sprk.Bff.Api.Services.Ai.Builder.BuilderAgentService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
         services.AddSingleton<IModelSelector, ModelSelector>();
-        services.AddScoped<IIntentClassificationService, IntentClassificationService>();
         services.AddScoped<IEntityResolutionService, EntityResolutionService>();
-        services.AddScoped<IClarificationService, ClarificationService>();
     }
 
     private static void AddTestingServices(IServiceCollection services, IConfiguration configuration)

@@ -260,6 +260,62 @@ Run the standalone script when a new BU is created:
     -DataverseUrl "https://<env>.crm.dynamics.com"
 ```
 
+### Creating a Container Manually (Confidential Client Required — 2026-05-28)
+
+> ⚠️ **Both `Provision-Customer.ps1` Step 8 and `New-BusinessUnitContainer.ps1` use a delegated user token (`az account get-access-token --resource https://graph.microsoft.com`). This pattern fails with HTTP 403 "Container creation by a public client is not allowed" when run against the current SPE Graph API.** Microsoft now requires container creation to use a confidential client with an AppRole grant.
+>
+> The working pattern uses the **owning application's client secret** to acquire an app-only token via the client-credentials flow.
+
+```bash
+# Required inputs
+OWNING_APP_ID="170c98e1-d486-4355-bcbe-170454e0207c"    # the SPE owning app
+TENANT_ID="<tenant-guid>"
+CONTAINER_TYPE_ID="<container-type-guid>"
+DISPLAY_NAME="My New Container"
+DESCRIPTION="What this container is for"
+KV_NAME="spaarke-spekvcert"                             # your env's Key Vault
+SECRET_NAME="spe-owning-app-secret"                     # the owning app's secret in KV
+
+# Step 1: Get owning-app secret (do NOT echo the value)
+SECRET=$(az keyvault secret show --vault-name $KV_NAME --name $SECRET_NAME --query value -o tsv)
+
+# Step 2: Client-credentials flow → app-only token for owning app
+APP_TOKEN=$(curl -sS -X POST \
+  "https://login.microsoftonline.com/$TENANT_ID/oauth2/v2.0/token" \
+  -d "client_id=$OWNING_APP_ID" \
+  -d "client_secret=$SECRET" \
+  -d "scope=https://graph.microsoft.com/.default" \
+  -d "grant_type=client_credentials" | jq -r .access_token)
+unset SECRET
+
+# Step 3: Create the container (returns 201 + new container id, status=inactive)
+CONTAINER_ID=$(curl -sS -X POST \
+  "https://graph.microsoft.com/v1.0/storage/fileStorage/containers" \
+  -H "Authorization: Bearer $APP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"displayName\":\"$DISPLAY_NAME\",\"description\":\"$DESCRIPTION\",\"containerTypeId\":\"$CONTAINER_TYPE_ID\"}" | jq -r .id)
+
+# Step 4: Activate the container (required — new containers start inactive; returns 204)
+curl -sS -X POST \
+  "https://graph.microsoft.com/v1.0/storage/fileStorage/containers/$CONTAINER_ID/activate" \
+  -H "Authorization: Bearer $APP_TOKEN" \
+  -H "Content-Length: 0"
+
+# Step 5: Verify (status should be "active")
+curl -sS "https://graph.microsoft.com/v1.0/storage/fileStorage/containers/$CONTAINER_ID" \
+  -H "Authorization: Bearer $APP_TOKEN" | jq '{id, displayName, status, createdDateTime}'
+unset APP_TOKEN
+```
+
+### Error reference
+
+| Error | Cause | Fix |
+|---|---|---|
+| `403 accessDenied: Caller does not have required permissions for this API` | Delegated user token lacks `FileStorageContainer.Selected` scope | Use the confidential-client flow above |
+| `403 accessDenied: Container creation by a public client is not allowed` | Public client tried to create (e.g., Connect-MgGraph, az delegated token) | Use the confidential-client flow above |
+| `404 Not Found` on `/storage/fileStorage/containerTypes/{id}` | Container type not registered with calling app | See Pitfall #3 below |
+| Container created but status stays `inactive` | Activation POST never ran | Run Step 4 above |
+
 ### Automation Options
 
 ADR-002 prohibits Dataverse plugins, so automatic container creation on BU creation uses alternatives:

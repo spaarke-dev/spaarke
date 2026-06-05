@@ -33,6 +33,8 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-5: Dataverse Application User registration missing for Managed Identity](#g-5-dataverse-application-user-registration-missing-for-managed-identity)
 - [G-6: `Connect-ExchangeOnline -UserPrincipalName` mismatch failure](#g-6-connect-exchangeonline--userprincipalname-mismatch-failure)
 - [G-7: Git Bash MSYS path mangling on Azure resource IDs](#g-7-git-bash-msys-path-mangling-on-azure-resource-ids)
+- [G-8: SPE container creation requires confidential client; canonical scripts use public client](#g-8-spe-container-creation-requires-confidential-client-canonical-scripts-use-public-client)
+- [G-9: BFF AI Search has TWO index-name settings — `AiSearch:KnowledgeIndexName` (read) and `Analysis:SharedIndexName` (write)](#g-9-bff-ai-search-has-two-index-name-settings)
 
 ---
 
@@ -361,6 +363,64 @@ MSYS_NO_PATHCONV=1 az cosmosdb sql container create --partition-key-path /tenant
 - When adding `az` examples to runbooks, prefer PowerShell snippets; if Git Bash is used, include the `MSYS_NO_PATHCONV=1` prefix inline.
 
 **Evidence**: `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 5 task 060 "Critical lessons" §6.
+
+---
+
+### G-8: SPE container creation requires confidential client; canonical scripts use public client
+
+**Title**: `Provision-Customer.ps1` Step 8 and `New-BusinessUnitContainer.ps1` use a delegated user token (`az account get-access-token --resource https://graph.microsoft.com`); creating a container fails with `403: Container creation by a public client is not allowed`.
+
+**Date**: 2026-05-28
+
+**Classification**: Gotcha (platform change since these scripts were last validated)
+
+**What happened**: While bringing up the Spaarke AI Assistant in dev, needed to create a new SPE container. The canonical Spaarke scripts use a delegated user token via `az account get-access-token`. POST to `/v1.0/storage/fileStorage/containers` returned 403 with two distinct messages: first `accessDenied: Caller does not have required permissions for this API` (when the user's CLI token lacks `FileStorageContainer.Selected`), then `accessDenied: Container creation by a public client is not allowed` (when granted the scope via Connect-MgGraph). Microsoft now enforces confidential-client creation regardless of the calling user's scopes.
+
+**Root cause**: Microsoft hardened the SPE Graph API to require a confidential client (one with a registered client secret or certificate) for container CRUD. The owning application is a confidential client with the AppRole grant on the container type; standard CLI / PnP / Connect-MgGraph paths are public clients.
+
+**Fix (working pattern)**:
+1. Retrieve the owning app's secret from Key Vault (`spaarke-spekvcert/spe-owning-app-secret`).
+2. Acquire an app-only token via the client-credentials flow for the owning app.
+3. POST `/v1.0/storage/fileStorage/containers` with that token (returns 201, status=inactive).
+4. POST `/v1.0/storage/fileStorage/containers/{id}/activate` with same token (returns 204).
+
+Full working snippet documented in [`docs/guides/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md`](../docs/guides/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md) "Creating a Container Manually" section.
+
+**Prevention**:
+- Update `Provision-Customer.ps1` Step 8 and `New-BusinessUnitContainer.ps1` to use the client-credentials flow with the owning-app secret. Until that's done, the inline snippet in HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md is the operational fallback.
+- New env provisioning: ensure the owning app's secret is in Key Vault BEFORE attempting container creation.
+
+**Evidence**: 2026-05-28 chat — Phase 2 of `projects/spaarke-ai-assistant-new-resources-r1/`. Created `Spaarke Dev Container 2` (id `b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh`) successfully using the confidential-client flow.
+
+### G-9: BFF AI Search has TWO index-name settings
+
+**Title**: Pointing the BFF at a different AI Search index requires flipping BOTH `AiSearch:KnowledgeIndexName` and `Analysis:SharedIndexName` — flipping only one results in split-brain (reads from new index, writes to old).
+
+**Date**: 2026-05-28
+
+**Classification**: Gotcha (subtle config naming inconsistency)
+
+**What happened**: During the cutover from `spaarke-knowledge-index-v2` to `spaarke-file-index`, set `AiSearch__KnowledgeIndexName=spaarke-file-index` on the BFF, restarted, uploaded a test document. The document was indexed to `spaarke-knowledge-index-v2`, not the new index. Diagnosis: the indexing path (`RagIndexingJobHandler`) reads `_analysisOptions.SharedIndexName`, while the search path (`RagService.SearchAsync`, etc.) reads `_aiSearchOptions.KnowledgeIndexName`. Two different options classes, two different config keys, but both name "the index for customer documents".
+
+**Root cause**: Two options classes (`AiSearchOptions.KnowledgeIndexName` and `AnalysisOptions.SharedIndexName`) both refer to what should be the same index but bind from different config sections. Historical artifact of features added over time without consolidating the configuration model.
+
+**Fix**: Set BOTH:
+```bash
+az webapp config appsettings set --name <app> --resource-group <rg> --settings \
+  "AiSearch__KnowledgeIndexName=spaarke-file-index" \
+  "Analysis__SharedIndexName=spaarke-file-index"
+az webapp restart --name <app> --resource-group <rg>
+```
+
+Affected code paths:
+- Reads: [`RagService.cs`](../src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs), [`SemanticSearchService.cs`](../src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs) (use `AiSearchOptions.KnowledgeIndexName`)
+- Writes: [`RagIndexingJobHandler.cs`](../src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs), [`RagEndpoints.cs`](../src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs) (use `AnalysisOptions.SharedIndexName`)
+
+**Prevention**:
+- Long-term: consolidate to a single canonical setting (likely `AiSearch__KnowledgeIndexName`) and deprecate `Analysis__SharedIndexName`.
+- Short-term: always flip both. Any future env-provisioning runbook section that flips index names must include both.
+
+**Evidence**: 2026-05-28 chat — Phase 3 of `projects/spaarke-ai-assistant-new-resources-r1/`. First flip left `sprk_searchindexname` writing to `spaarke-knowledge-index-v2`; second flip (including `Analysis__SharedIndexName`) fixed it.
 
 ---
 

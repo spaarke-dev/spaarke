@@ -643,6 +643,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return await GetDocumentsByLookupAsync("sprk_invoice", invoiceId, excludeDocumentId, "Invoice", ct);
     }
 
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByWorkAssignmentAsync(Guid workAssignmentId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("sprk_workassignment", workAssignmentId, excludeDocumentId, "WorkAssignment", ct);
+    }
+
     private async Task<IEnumerable<DocumentEntity>> GetDocumentsByLookupAsync(
         string lookupField,
         Guid lookupValue,
