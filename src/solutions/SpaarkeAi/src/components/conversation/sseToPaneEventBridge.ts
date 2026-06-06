@@ -184,10 +184,20 @@ export function createSseToPaneEventBridge(streamId: string): SseToPaneEventBrid
           return [];
         }
 
+        // BFF's IncrementalJsonParser emits JSONPath-style keys ($.tldr,
+        // $.summary, $.keywords, $.entities) but the StructuredOutputStreamWidget's
+        // SUMMARIZE_SCHEMA declares bare top-level keys (tldr, summary, keywords,
+        // entities) — see Spaarke.AI.Widgets workspace/StructuredOutputStreamWidget.tsx
+        // SUMMARIZE_SCHEMA export. Without this normalization the widget can't
+        // map deltas to schema fields and sections render empty even though
+        // events ARE arriving. Observed in R5 SC-18 cycle 9 / 2026-06-05.
+        const normalizedPath = delta.path.startsWith('$.')
+          ? delta.path.slice(2)
+          : delta.path;
         mapped = {
           type: 'field_delta',
           streamId,
-          fieldPath: delta.path,
+          fieldPath: normalizedPath,
           fieldContent: delta.content,
           sequence: delta.sequence,
         };
