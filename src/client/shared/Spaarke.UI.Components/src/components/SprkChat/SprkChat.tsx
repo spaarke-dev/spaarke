@@ -1114,12 +1114,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       if (!list || list.length === 0) {
         return;
       }
+      // Snapshot to File[] BEFORE clearing — `input.files` is a live FileList
+      // and `input.value = ''` empties it. Without this, `addAttachmentFiles`
+      // receives a zero-length list.
+      const fileSnapshot: File[] = Array.from(list);
       // Reset input so re-picking the same file works.
       e.target.value = '';
       // Fire-and-forget; the hook updates `files` optimistically and patches
       // status as extraction resolves. We intentionally do not await here so
       // the UI thread stays responsive.
-      void addAttachmentFiles(list);
+      void addAttachmentFiles(fileSnapshot);
     },
     [addAttachmentFiles]
   );

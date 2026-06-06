@@ -334,12 +334,28 @@ export function useChatFileAttachment(options: UseChatFileAttachmentOptions = {}
       // chunk for `pdfjs-dist`, which is what task 061 / the bundle audit
       // verifies.
       pdfJsRef.current = import('pdfjs-dist').then(mod => {
-        // pdfjs-dist exports a `GlobalWorkerOptions` object in modern
-        // versions; if absent the worker is best-effort and may fall back to
-        // a same-thread mode in test environments. We leave the workerSrc
-        // unset here — consumers that need real worker isolation should set
-        // it during their bootstrap rather than coupling the hook to a
-        // particular bundler.
+        // pdfjs-dist v4+ REQUIRES `GlobalWorkerOptions.workerSrc` to be set
+        // or `getDocument` throws "No GlobalWorkerOptions.workerSrc specified".
+        // The previous "leave unset, let consumers configure" approach worked
+        // up to v3 but breaks v4/v5 (observed in R5 SC-18 walkthrough cycle 6,
+        // 2026-06-05 — pdfjs-dist 5.7.x installed via npm).
+        //
+        // Default behavior: if a consumer-supplied workerSrc isn't already
+        // populated (consumers CAN set it before this code runs by importing
+        // pdfjs-dist eagerly and writing GlobalWorkerOptions), point at a
+        // versioned jsdelivr CDN URL matching the installed major.minor.
+        // This works in browser contexts allowing external CDN (most Power
+        // Apps environments allow jsdelivr per default CSP). Consumers in
+        // CSP-restricted contexts should pre-set workerSrc to a same-origin
+        // bundled worker URL.
+        const modAny = mod as unknown as {
+          GlobalWorkerOptions?: { workerSrc?: string };
+          version?: string;
+        };
+        if (modAny.GlobalWorkerOptions && !modAny.GlobalWorkerOptions.workerSrc) {
+          const version = modAny.version ?? '5.7.76';
+          modAny.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
+        }
         return mod as unknown as PdfJsModule;
       });
     }

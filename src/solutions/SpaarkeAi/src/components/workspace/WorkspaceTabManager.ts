@@ -385,6 +385,71 @@ export class WorkspaceTabManager {
   }
 
   // -------------------------------------------------------------------------
+  // prependTab — add a widget tab at the FIRST position (R5 task 038)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Add a new widget tab AT THE FIRST POSITION (after the Home tab if one
+   * exists). Used by R5 task 038 to install the always-leftmost "Summary"
+   * tab that hosts `StructuredOutputStreamWidget` for chat-driven streaming
+   * AI output.
+   *
+   * Like `addTab`, this enforces `MAX_WORKSPACE_TABS` by FIFO-evicting the
+   * OLDEST non-Home tab — the newly prepended tab itself is exempt from the
+   * eviction-candidate set. Unlike `addTab`, the new tab does NOT auto-
+   * activate. Callers that want it active call `setActiveTab(newId)` after.
+   *
+   * @param widgetType   - Widget type string (e.g. `"structured-output-stream"`).
+   * @param widgetData   - Arbitrary payload to pass to the widget component.
+   * @param displayName  - Optional display label; defaults to widgetType.
+   * @returns The new tab's stable id.
+   */
+  prependTab(widgetType: string, widgetData: unknown, displayName?: string): string {
+    // Enforce MAX_WORKSPACE_TABS — evict the oldest non-Home tab when at cap.
+    // Note: identical policy to addTab(); the new prepended tab is exempt from
+    // the eviction candidate set because it is not yet in `_tabs`.
+    const nonHomeIndices = this._tabs
+      .map((t, i) => (t.kind === "widget" ? i : -1))
+      .filter((i) => i >= 0);
+
+    if (nonHomeIndices.length >= MAX_WORKSPACE_TABS) {
+      const oldestNonHomeIdx = nonHomeIndices[0];
+      this._tabs = [
+        ...this._tabs.slice(0, oldestNonHomeIdx),
+        ...this._tabs.slice(oldestNonHomeIdx + 1),
+      ];
+    }
+
+    const id = `wstab-${++this._nextSeq}-${widgetType}`;
+
+    const newTab: WorkspaceTab = {
+      id,
+      kind: "widget",
+      widgetType,
+      widgetData,
+      Component: null,
+      isLoading: true,
+      displayName: displayName ?? widgetType,
+    };
+
+    // Insert AFTER any Home tab (which by convention sits at index 0) so the
+    // new tab is the FIRST widget tab. With no Home, it goes to index 0.
+    const homeIdx = this._tabs.findIndex((t) => t.kind === "home");
+    const insertAt = homeIdx >= 0 ? homeIdx + 1 : 0;
+    this._tabs = [
+      ...this._tabs.slice(0, insertAt),
+      newTab,
+      ...this._tabs.slice(insertAt),
+    ];
+
+    // Persist the new state. Unlike addTab, do NOT auto-activate — callers
+    // (e.g. WorkspacePane's Summary-tab auto-install effect) decide whether
+    // the prepended tab should also become active.
+    this._notifyPersistChange();
+    return id;
+  }
+
+  // -------------------------------------------------------------------------
   // resolveTabComponent
   // -------------------------------------------------------------------------
 
