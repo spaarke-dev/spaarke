@@ -21,7 +21,7 @@ import { DataverseService } from '../services/DataverseService';
 import { computeTodoScore } from '../utils/todoScoreUtils';
 import type { IEvent } from '../types/entities';
 import type { TodoColumn } from '../types/enums';
-import type { IKanbanColumn } from '../components/shared/KanbanBoard';
+import type { IKanbanColumn } from '@spaarke/ui-components';
 import type { IWebApi } from '../types/xrm';
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-07 (wave 1 complete; wave 2 launching)
+> **Last Updated**: 2026-06-07 (wave 2 complete; awaiting human decisions on escalation + environment coordination)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 010 (in-progress in sub-agent) |
-| **Step** | Wave 2 launch |
-| **Status** | partial — wave 1 complete (001, 018, 084 ✅); wave 2 task 010 launched; escalation pending for task 004 prerequisites |
-| **Next Action** | Wait for task 010 (Kanban hoist) sub-agent. Then human decision needed on 4 escalation items from task 001 audit before tasks 002–005 can run. |
+| **Task** | none — autonomous progress blocked |
+| **Step** | Awaiting decisions |
+| **Status** | Wave 1 + Wave 2 complete (001 ✅ 010 ✅ 018 ✅ 084 ✅); no more autonomous-safe tasks remain. |
+| **Next Action** | Human decisions needed: (1) resolve 4 escalation items from task 001 audit; (2) select target Dataverse environment for tasks 002/003/017; (3) initiate AAD `Tasks.ReadWrite` consent (task 015) with deploy team. |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->

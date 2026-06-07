@@ -29,7 +29,7 @@
 | 003 | Register `sprk_todo` in `sprk_recordtype_ref` | 1 | STANDARD | 🔲 | 002 | P1-W3 | ✅ |
 | 004 | Remove four to-do fields from `sprk_event` | 1 | FULL | 🔲 | 001 | P1-W3 | ✅ |
 | 005 | Delete `sprk_eventtodo` entity | 1 | FULL | 🔲 | 001, 004 | P1-W4 | — |
-| 010 | Hoist Kanban primitives to `@spaarke/ui-components/Kanban/` | 2 | FULL | 🔲 | 001 | P2-W1 | — |
+| 010 | Hoist Kanban primitives to `@spaarke/ui-components/Kanban/` | 2 | FULL | ✅ | 001 | P2-W1 | — |
 | 011 | Simplify `TodoDetail` to single-entity load/save | 2 | FULL | 🔲 | 002, 010 | P2-W2 | — |
 | 012 | Update `@spaarke/ui-components` barrel + version bump | 2 | STANDARD | 🔲 | 010, 011 | P2-W3 | ✅ |
 | 015 | Add `Tasks.ReadWrite` delegated scope to AAD app | 6 | STANDARD | 🔲 | none | P6-W1 | ✅ |

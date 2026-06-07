@@ -45,7 +45,7 @@ import {
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import { KanbanBoard } from "./shared/KanbanBoard";
+import { KanbanBoard } from "@spaarke/ui-components";
 import { KanbanCard } from "./KanbanCard";
 import { KanbanHeader } from "./KanbanHeader";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";

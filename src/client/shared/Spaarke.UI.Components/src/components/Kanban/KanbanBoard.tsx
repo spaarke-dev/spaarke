@@ -5,6 +5,11 @@
  * This component has ZERO domain-specific logic — it can be used for
  * any Kanban-style UI (To Do, project tasks, document pipeline, etc.).
  *
+ * Hoisted from `src/solutions/SmartTodo/src/components/shared/KanbanBoard.tsx`
+ * per smart-todo-decoupling-r3 task 010 (NFR-02 + FR-08).
+ * Implementation preserved EXACTLY (zero behaviour or style changes) to
+ * lock the R2 a11y baseline (NFR-10).
+ *
  * Usage:
  *   <KanbanBoard<IEvent>
  *     columns={columns}
@@ -20,50 +25,14 @@
  *   - Keyboard accessible DnD (built into @hello-pangea/dnd)
  */
 
-import * as React from "react";
-import { makeStyles, tokens } from "@fluentui/react-components";
+import * as React from 'react';
+import { makeStyles, tokens } from '@fluentui/react-components';
 import {
   DragDropContext,
   Droppable,
   Draggable,
-  type DropResult,
-} from "@hello-pangea/dnd";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/** A single column in the Kanban board. */
-export interface IKanbanColumn<T> {
-  /** Unique column identifier (used as droppableId). */
-  id: string;
-  /** Display title for the column header. */
-  title: string;
-  /** Optional subtitle shown below the title (e.g., score criteria). */
-  subtitle?: string;
-  /** Items assigned to this column. */
-  items: T[];
-  /** Optional CSS colour for the column's top accent border. */
-  accentColor?: string;
-}
-
-/** Props for the generic KanbanBoard component. */
-export interface IKanbanBoardProps<T> {
-  /** Column definitions with their items. */
-  columns: IKanbanColumn<T>[];
-  /** Called when a drag operation completes (reorder or cross-column move). */
-  onDragEnd: (result: DropResult) => void;
-  /** Render function for each card. Receives the item and its index within the column. */
-  renderCard: (item: T, index: number, columnId: string) => React.ReactNode;
-  /** Extract a unique string ID from an item (used as draggableId). */
-  getItemId: (item: T) => string;
-  /** Optional aria-label for the board region. */
-  ariaLabel?: string;
-  /** Set of column IDs that are currently collapsed. */
-  collapsedColumns?: ReadonlySet<string>;
-  /** Called when a column header is clicked to toggle collapse. */
-  onToggleCollapse?: (columnId: string) => void;
-}
+} from '@hello-pangea/dnd';
+import type { IKanbanBoardProps } from './types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -71,27 +40,27 @@ export interface IKanbanBoardProps<T> {
 
 const useStyles = makeStyles({
   board: {
-    display: "flex",
-    flexDirection: "row",
+    display: 'flex',
+    flexDirection: 'row',
     gap: tokens.spacingHorizontalM,
-    flex: "1 1 0",
+    flex: '1 1 0',
     minHeight: 0,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   column: {
-    flex: "1 1 0",
-    display: "flex",
-    flexDirection: "column",
+    flex: '1 1 0',
+    display: 'flex',
+    flexDirection: 'column',
     minWidth: 0,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   columnHeader: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
@@ -110,8 +79,9 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
   },
   cardList: {
-    flex: "1 1 0",
-    overflowY: "hidden",
+    flex: '1 1 0',
+    overflowY: 'auto',
+    minHeight: 0,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
@@ -121,35 +91,35 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalXS,
   },
   emptyColumn: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "1 1 0",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: '1 1 0',
     color: tokens.colorNeutralForeground4,
     paddingTop: tokens.spacingVerticalXL,
     paddingBottom: tokens.spacingVerticalXL,
   },
   columnCollapsed: {
-    flex: "0 0 40px",
-    display: "flex",
-    flexDirection: "column",
-    minWidth: "40px",
+    flex: '0 0 40px',
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: '40px',
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
-    cursor: "pointer",
+    overflow: 'hidden',
+    cursor: 'pointer',
   },
   columnCollapsedHeader: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     gap: tokens.spacingVerticalXS,
   },
   columnCollapsedTitle: {
-    writingMode: "vertical-rl",
-    transform: "rotate(180deg)",
+    writingMode: 'vertical-rl',
+    transform: 'rotate(180deg)',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
@@ -172,7 +142,7 @@ function KanbanBoardInner<T>(
       <div
         className={styles.board}
         role="region"
-        aria-label={ariaLabel ?? "Kanban board"}
+        aria-label={ariaLabel ?? 'Kanban board'}
       >
         {columns.map((column) => {
           const isCollapsed = collapsedColumns?.has(column.id) ?? false;
@@ -185,7 +155,7 @@ function KanbanBoardInner<T>(
                 role="group"
                 aria-label={`${column.title} (collapsed)`}
                 onClick={() => onToggleCollapse?.(column.id)}
-                style={column.accentColor ? { borderTopWidth: "3px", borderTopStyle: "solid", borderTopColor: column.accentColor } : undefined}
+                style={column.accentColor ? { borderTopWidth: '3px', borderTopStyle: 'solid', borderTopColor: column.accentColor } : undefined}
               >
                 <div className={styles.columnCollapsedHeader}>
                   <span className={styles.columnCount}>{column.items.length}</span>
@@ -203,14 +173,14 @@ function KanbanBoardInner<T>(
               aria-label={column.title}
               style={
                 column.accentColor
-                  ? { borderTopWidth: "3px", borderTopStyle: "solid", borderTopColor: column.accentColor }
+                  ? { borderTopWidth: '3px', borderTopStyle: 'solid', borderTopColor: column.accentColor }
                   : undefined
               }
             >
               {/* Column header */}
               <div
                 className={styles.columnHeader}
-                style={onToggleCollapse ? { cursor: "pointer" } : undefined}
+                style={onToggleCollapse ? { cursor: 'pointer' } : undefined}
                 onClick={onToggleCollapse ? () => onToggleCollapse(column.id) : undefined}
               >
                 <div>
