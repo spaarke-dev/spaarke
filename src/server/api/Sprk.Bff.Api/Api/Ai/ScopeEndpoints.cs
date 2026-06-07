@@ -46,6 +46,20 @@ public static class ScopeEndpoints
             .Produces<ScopeListResult<AnalysisAction>>()
             .ProducesProblem(401);
 
+        // GET /api/ai/scopes/personas - List available personas (R6 Pillar 1, D-A-02).
+        // Mirrors the 4 sibling scope endpoints above: same group (RequireAuthorization +
+        // tag "AI Scopes"), same ScopeListResult<T> return type, same pagination/filtering/
+        // sorting query params. Authorization inherits the group-level filter per ADR-008.
+        // Registration is inside the same compound `Analysis:Enabled && DocumentIntelligence:Enabled`
+        // gate that wraps MapScopeEndpoints (per EndpointMappingExtensions.cs) — symmetric
+        // with the AnalysisPersonaService DI registration in AnalysisServicesModule.cs.
+        group.MapGet("/personas", ListPersonas)
+            .WithName("ListPersonas")
+            .WithSummary("List available analysis personas")
+            .WithDescription("Returns a paginated list of analysis personas (sprk_aipersona rows) visible to the calling tenant. Personas supply the system prompt and metadata that seed the chat agent (most-specific-wins resolution: global SYS- < tenant CUST- < playbook-attached, applied by the resolver — task 003).")
+            .Produces<ScopeListResult<AnalysisPersona>>()
+            .ProducesProblem(401);
+
         return app;
     }
 
@@ -208,6 +222,52 @@ public static class ScopeEndpoints
                 statusCode: 500,
                 title: "Internal Server Error",
                 detail: "Failed to list actions");
+        }
+    }
+
+    /// <summary>
+    /// List available analysis personas.
+    /// </summary>
+    /// <remarks>
+    /// R6 Pillar 1 (D-A-02). Clone of <see cref="ListActions"/> with the entity swapped to
+    /// <c>sprk_aipersona</c>. Same pagination/filter/sort contract; same group-level
+    /// authorization filter per ADR-008; routes through the existing
+    /// <see cref="IScopeResolverService"/> (NO AI internals injected per refined ADR-013).
+    /// </remarks>
+    private static async Task<IResult> ListPersonas(
+        IScopeResolverService scopeResolver,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken,
+        int page = 1,
+        int pageSize = 20,
+        string? nameFilter = null,
+        string sortBy = "name",
+        bool sortDescending = false)
+    {
+        var logger = loggerFactory.CreateLogger("ScopeEndpoints");
+
+        var options = new ScopeListOptions
+        {
+            Page = Math.Max(1, page),
+            PageSize = Math.Clamp(pageSize, 1, 100),
+            NameFilter = nameFilter,
+            SortBy = sortBy,
+            SortDescending = sortDescending
+        };
+
+        try
+        {
+            var result = await scopeResolver.ListPersonasAsync(options, cancellationToken);
+            logger.LogDebug("Listed {Count} personas (page {Page})", result.Items.Length, page);
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to list personas");
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to list personas");
         }
     }
 }

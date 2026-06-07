@@ -69,6 +69,76 @@ public interface IToolHandler
         ToolExecutionContext context,
         AnalysisTool tool,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets the invocation contexts in which this handler can be invoked.
+    /// Defaults to playbook-only for source compatibility — handlers that support chat
+    /// override this property to declare additional contexts.
+    /// </summary>
+    /// <remarks>
+    /// Introduced in R6 Pillar 2 task D-A-09 (FR-09) alongside the
+    /// <see cref="ToolExecutionContext"/> / <see cref="ChatInvocationContext"/> split.
+    /// The chat-driven adapter (task D-A-10 <c>ToolHandlerToAIFunctionAdapter</c>) consults
+    /// this flag plus the <c>AvailableInContexts</c> field on the <see cref="AnalysisTool"/>
+    /// row (added in task D-A-07) to gate which handlers it exposes to the LLM.
+    /// </remarks>
+    InvocationContextKind SupportedInvocationContexts => InvocationContextKind.Playbook;
+
+    /// <summary>
+    /// Validates that the chat invocation context and tool configuration are valid.
+    /// Default implementation rejects chat invocation; handlers that support chat override.
+    /// </summary>
+    /// <param name="context">The chat invocation context.</param>
+    /// <param name="tool">The tool configuration from Dataverse.</param>
+    /// <returns>Validation result with success/failure and any error messages.</returns>
+    ToolValidationResult ValidateChat(ChatInvocationContext context, AnalysisTool tool) =>
+        ToolValidationResult.Failure(
+            $"Handler '{HandlerId}' does not support chat invocation. Override SupportedInvocationContexts and ValidateChat/ExecuteChatAsync to opt in.");
+
+    /// <summary>
+    /// Executes the tool analysis from the chat-driven path asynchronously.
+    /// Default implementation throws — handlers that support chat override.
+    /// </summary>
+    /// <param name="context">The chat invocation context (chat session id, decision id, tool args).</param>
+    /// <param name="tool">The tool configuration from Dataverse.</param>
+    /// <param name="cancellationToken">Cancellation token for async operations.</param>
+    /// <returns>Tool execution result.</returns>
+    /// <remarks>
+    /// Default behavior: throw <see cref="NotSupportedException"/>. The
+    /// <c>ToolHandlerToAIFunctionAdapter</c> (task D-A-10) is expected to inspect
+    /// <see cref="SupportedInvocationContexts"/> before invoking this method, but the
+    /// throw provides a defensive guard if the adapter dispatches to a non-chat handler.
+    /// Existing playbook-only handlers (GenericAnalysisHandler, DocumentClassifierHandler,
+    /// SummaryHandler, SemanticSearchToolHandler) inherit this default and remain
+    /// unchanged.
+    /// </remarks>
+    Task<ToolResult> ExecuteChatAsync(
+        ChatInvocationContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken) =>
+        throw new NotSupportedException(
+            $"Handler '{HandlerId}' does not support chat invocation. Override SupportedInvocationContexts and ExecuteChatAsync to opt in.");
+}
+
+/// <summary>
+/// Invocation contexts in which a tool handler may be invoked.
+/// Used as a flag on <see cref="IToolHandler.SupportedInvocationContexts"/> and mirrored
+/// on the Dataverse-stored <c>AnalysisTool.AvailableInContexts</c> column (task D-A-07).
+/// </summary>
+[Flags]
+public enum InvocationContextKind
+{
+    /// <summary>No invocation supported (unusual; reserved for diagnostic states).</summary>
+    None = 0,
+
+    /// <summary>Playbook-node invocation (existing behavior). Default for backward compatibility.</summary>
+    Playbook = 1,
+
+    /// <summary>Chat-driven invocation (via LLM function calling through the adapter).</summary>
+    Chat = 2,
+
+    /// <summary>Handler supports both playbook and chat invocation contexts.</summary>
+    Both = Playbook | Chat
 }
 
 /// <summary>

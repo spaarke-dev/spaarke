@@ -54,6 +54,9 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
         var skillService = new AnalysisSkillService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisSkillService>>());
         var knowledgeService = new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisKnowledgeService>>());
         var toolService = new AnalysisToolService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisToolService>>());
+        // R6 Pillar 1 (D-A-02) — AnalysisPersonaService added to ctor; pass a real instance
+        // wired the same way as siblings. Token bypass below handles authentication.
+        var personaService = new AnalysisPersonaService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisPersonaService>>());
 
         _service = new ScopeResolverService(
             _playbookServiceMock.Object,
@@ -61,6 +64,7 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
             skillService,
             knowledgeService,
             toolService,
+            personaService,
             _httpClient,
             _configurationMock.Object,
             new DefaultAzureCredential(),
@@ -598,6 +602,9 @@ public class ScopeResolverServiceTests : IDisposable
         var skillService = new AnalysisSkillService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisSkillService>>());
         var knowledgeService = new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisKnowledgeService>>());
         var toolService = new AnalysisToolService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisToolService>>());
+        // R6 Pillar 1 (D-A-02) — AnalysisPersonaService added to ctor; pass a real instance
+        // wired the same way as siblings. Token bypass below handles authentication.
+        var personaService = new AnalysisPersonaService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisPersonaService>>());
 
         _service = new ScopeResolverService(
             _playbookServiceMock.Object,
@@ -605,6 +612,7 @@ public class ScopeResolverServiceTests : IDisposable
             skillService,
             knowledgeService,
             toolService,
+            personaService,
             _httpClient,
             _configurationMock.Object,
             new DefaultAzureCredential(),
@@ -1200,6 +1208,9 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var skillService = new AnalysisSkillService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisSkillService>>());
         var knowledgeService = new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisKnowledgeService>>());
         var toolService = new AnalysisToolService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisToolService>>());
+        // R6 Pillar 1 (D-A-02) — AnalysisPersonaService added to ctor; pass a real instance
+        // wired the same way as siblings. Token bypass below handles authentication.
+        var personaService = new AnalysisPersonaService(_httpClient, _configurationMock.Object, new DefaultAzureCredential(), Mock.Of<ILogger<AnalysisPersonaService>>());
 
         _service = new ScopeResolverService(
             _playbookServiceMock.Object,
@@ -1207,6 +1218,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
             skillService,
             knowledgeService,
             toolService,
+            personaService,
             _httpClient,
             _configurationMock.Object,
             new DefaultAzureCredential(),

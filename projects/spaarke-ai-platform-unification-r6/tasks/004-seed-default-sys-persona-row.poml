@@ -2,7 +2,42 @@
   <metadata>
     <title>D-A-04 Seed Default Global SYS- Persona Row (Pillar 1, FR-04)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Seed deployed to Spaarke Dev. Row id 4fe49430-aa62-f111-ab0c-70a8a58ae145.
+      Script: scripts/Seed-AiPersonaDefault.ps1 (cloned from Seed-KnowledgeScopes.ps1
+      canonical pattern; idempotent — re-run returns `unchanged`).
+
+      Canonical-text discovery: `BuildDefaultSystemPrompt()` is defined in
+      `PlaybookChatContextProvider.cs` (not `SprkChatAgentFactory.cs` as the POML
+      goal said — minor drift in the POML). The factory delegates to the context
+      provider which invokes the method. Captured the standalone-mode branch
+      (lines 541-569; playbookName == null), which is the FR-04 SYS-default
+      fallback. The named-playbook branch (lines 526-536) is a runtime-dynamic
+      template (string interpolation on playbookName) and is NOT the SYS-default;
+      it will continue to be produced by the playbook-attached resolution path.
+
+      Verbatim match: stored sprk_systemprompt is byte-identical to the C# 11
+      raw-string-normalized canonical text (2042 chars, LF). Verified via
+      independent Python diff against source — `c:\tmp\verify-persona-text.py`.
+
+      Row shape decisions:
+        - sprk_name           = "SYS-DEFAULT"   (per POML goal)
+        - sprk_personacode    = "SYS-DEF"       (10-char schema limit; the
+                                                 invocation argument suggested
+                                                 "SYS-DEFAULT-PERSONA@v1" which
+                                                 exceeds the limit deployed in
+                                                 task 001 — used short form)
+        - sprk_scopetype      = 100000000 (Global)   per Q1
+        - sprk_availableadhoc = true                 (resolver fallback)
+        - sprk_parentpersonaid = null                (root of inheritance chain)
+        - sprk_tags           = "system,default,fallback,chat"
+
+      BFF publish-size delta: 0 MB (no BFF code changed).
+      Verbatim reference: notes/task-004-system-prompt-source.txt
+      Evidence:           notes/task-004-completion.md
+    </completion-notes>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>001</dependencies>
     <blocks>005</blocks>

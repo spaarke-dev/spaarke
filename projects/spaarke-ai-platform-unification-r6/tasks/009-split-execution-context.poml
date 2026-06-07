@@ -2,7 +2,29 @@
   <metadata>
     <title>D-A-09 Split Execution Context: `ToolExecutionContext` (playbook) + `ChatInvocationContext` (chat) (Pillar 2)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Implemented `ToolInvocationContextBase` (abstract record with shared
+      InvocationId/TenantId/UserContext/MaxTokens/Temperature/ModelDeploymentId/CorrelationId/CreatedAt
+      fields). `ToolExecutionContext` refactored to derive from base; `AnalysisId` preserved via
+      delegating accessor (init forwards to base.InvocationId) so existing 4 handlers
+      (GenericAnalysisHandler, DocumentClassifierHandler, SummaryHandler, SemanticSearchToolHandler)
+      compile unchanged — verified by full BFF build (0 errors) + 85 passing tests.
+      `ChatInvocationContext` added with chat-session semantics (ChatSessionId delegates to
+      base.InvocationId symmetric to AnalysisId; DecisionId per-tool-call; ConversationHistoryRef
+      handle only per ADR-015; RequestedToolName + ToolArgumentsJson + MatterId).
+      `IToolHandler` extended via C# 8 default interface methods: SupportedInvocationContexts
+      (defaults to Playbook for backward compat), ValidateChat (defaults to Failure),
+      ExecuteChatAsync (defaults to throw NotSupportedException). Added InvocationContextKind
+      [Flags] enum (None/Playbook/Chat/Both). Existing 4 handlers do not implement chat methods
+      and inherit the safe defaults. Task 010 adapter pattern: inspect SupportedInvocationContexts
+      before invoking ExecuteChatAsync.
+      Publish-size delta: +0.027 MB (28 KB) — well under +5 MB R6 budget.
+      Unit tests added in InvocationContextTests.cs (9 tests, all passing): derivation,
+      field forwarding, default values preservation, polymorphic dispatch, ADR-015 reflection
+      check (no UserMessage/MessageBody/ConversationHistory content fields).
+    </completion-notes>
     <estimated-effort>5 hours</estimated-effort>
     <dependencies>006</dependencies>
     <blocks>010</blocks>

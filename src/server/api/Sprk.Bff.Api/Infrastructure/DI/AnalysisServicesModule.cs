@@ -352,6 +352,16 @@ public static class AnalysisServicesModule
         services.AddHttpClient<AnalysisSkillService>();
         services.AddHttpClient<AnalysisKnowledgeService>();
         services.AddHttpClient<AnalysisToolService>();
+        // R6 Pillar 1 (D-A-02) — AnalysisPersonaService registered as typed HttpClient
+        // sibling to the 4 canonical Analysis* services. Registration is INSIDE the compound
+        // `Analysis:Enabled && DocumentIntelligence:Enabled` gate that wraps this method, so
+        // it is symmetric with the consuming ScopeResolverService registration directly below
+        // AND symmetric with the GET /api/ai/scopes/personas endpoint, which is mapped INSIDE
+        // the same compound gate via EndpointMappingExtensions.MapScopeEndpoints. The
+        // asymmetric-registration anti-pattern (CLAUDE.md §10 F.1) is verified compliant —
+        // both the DI registration and the endpoint mapping share the same gate; no new
+        // unconditional consumer of AnalysisPersonaService exists.
+        services.AddHttpClient<AnalysisPersonaService>();
         services.AddHttpClient<IScopeResolverService, ScopeResolverService>();
         services.AddScoped<IScopeManagementService, ScopeManagementService>();
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();

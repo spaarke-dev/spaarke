@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 002 - D-A-02 Add `GET /api/ai/scopes/personas` BFF Endpoint (Pillar 1) |
+| **Task** | 005 - D-A-05 Wire `SprkChatAgentFactory.CreateAgentAsync` to scope persona (Pillar 1 completion) |
 | **Step** | — |
 | **Status** | not-started |
-| **Next Action** | Begin Step 1 of task 002. Task 001 (sprk_aipersona entity) complete + deployed. Tasks 002, 003, 004 now unblocked (Wave A-G1). Task 002 can run in parallel with 003 and 004. |
+| **Next Action** | Wave 2 (002 + 003 + 004 + 007 + 009) complete. Next available tasks: **005** (sequential gate for Pillar 1 closure), **008** (JsonSchema field — Pillar 2 same DTO as 007), **100** (handler infra gate — unblocks H-G1 handler workstream). Wave 3 candidates: 005 + 008 + 100 in parallel. |
 
 ### Files Modified This Session
 

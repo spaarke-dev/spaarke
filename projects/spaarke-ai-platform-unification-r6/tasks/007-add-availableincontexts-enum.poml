@@ -2,7 +2,25 @@
   <metadata>
     <title>D-A-07 Add `AvailableInContexts` Enum + Dataverse Column to `AnalysisTool` DTO (Pillar 2)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      DTO: Added `ToolAvailabilityContext` enum (Playbook=100000000, Chat=100000001, Both=100000002 — Spaarke canonical option-set values) + nullable `AvailableInContexts` property on `AnalysisTool` record in `IScopeResolverService.cs`. Plain enum (NOT [Flags]) — Dataverse single-select picklist semantics require explicit `Both` value.
+
+      Dataverse: Deployed `sprk_availableincontexts` option-set column to existing `sprk_analysistool` entity via new idempotent script `scripts/Add-AnalysisToolAvailableInContexts.ps1` (modeled on `Create-AiPersonaEntity.ps1`). DefaultFormValue=100000000 preserves Playbook behavior for all pre-R6 rows. Customizations published. Idempotency verified by post-deploy dry-run.
+
+      Service mapper: `AnalysisToolService.MapAvailableInContexts(int?)` converts raw Dataverse values to enum (null → null at DTO; null → Playbook semantics applied at downstream resolve time per FR-07 backward-compat). Updated `ToolEntity` JSON property + OData $select clause + 3 AnalysisTool construction sites (Get/List/Create).
+
+      Tests: 18 new tests in `AnalysisToolDtoTests.cs` cover enum value contract, default DTO state, round-trip JSON serialization for all 3 values + null, mapper for known/unknown/null raw values, record `with` expression preserves field. All 18 pass; full BFF unit suite 6141 pass / 0 fail.
+
+      Build: green (0 errors, 0 warnings). Publish-size delta: 0.00 MB compressed (baseline 45.5 → post 45.5; well within ≤+5 MB R6 budget and 60 MB hard ceiling).
+
+      ADR compliance: ADR-010 (zero DI changes), ADR-013 (no PublicContracts modifications), ADR-027 (sprk_ prefix + unmanaged), ADR-029 (delta verified). FR-07 backward-compat invariant honored. No new feature flags, no Agent Framework refs.
+
+      Decisions: (1) Plain enum vs Flags — chose plain because Dataverse single-select picklist + explicit Both value (FR-07 enumerates 3 values, not bit combinations). (2) Nullable DTO field — explicit nullable for migration safety; mapper preserves null and treats null-as-Playbook semantics at downstream resolve sites (per FR-07). (3) Field placed directly in AnalysisTool record (no separate Models/Ai/ file split) — record is already authoritative + co-located with related Tool* types in IScopeResolverService.cs; keeps task 008 (JsonSchema add) trivial without forcing a partial-class split.
+
+      Task 008 ready to proceed: same DTO + entity surface; pattern established (PicklistAttributeMetadata for option-set columns; this task can be MemoAttributeMetadata for JsonSchema string).
+    </completion-notes>
     <estimated-effort>5 hours</estimated-effort>
     <dependencies>006</dependencies>
     <blocks>010</blocks>

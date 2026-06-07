@@ -2,7 +2,8 @@
   <metadata>
     <title>D-A-02 Add `GET /api/ai/scopes/personas` BFF Endpoint (Pillar 1)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>001</dependencies>
     <blocks>005</blocks>
@@ -159,4 +160,28 @@
     <criterion testable="true">BFF publish-size delta reported in task notes; ≤+5 MB R6 total budget verified.</criterion>
     <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
   </acceptance-criteria>
+
+  <completion-notes date="2026-06-07">
+    Implemented `GET /api/ai/scopes/personas` mirroring the 4 canonical scope endpoints.
+    Created `AnalysisPersonaService` (sibling to `AnalysisActionService`/`AnalysisSkillService`).
+    Added `AnalysisPersona` record + `PersonaScopeType` enum + `ListPersonasAsync` to `IScopeResolverService`.
+    Registered service in `AnalysisServicesModule` (inside compound AI gate; symmetric with endpoint mapping).
+    12 new unit tests in `ScopePersonasEndpointTests` PASS; 19 existing `ScopeResolverServiceTests` PASS.
+
+    BFF publish-size: 45.50 MB (baseline 45.49 MB; delta +0.010 MB / +10 KB — well within +5 MB R6 budget).
+    Build: 0 errors, 16 warnings (all pre-existing in unrelated files).
+
+    ADR compliance: ✅ ADR-008 (auth filter inherited), ✅ ADR-010 (DI minimalism — no Program.cs lines),
+    ✅ ADR-013 (no AI internals injected), ⚠️ ADR-016 (rate-limit deviation: 4 canonical scope endpoints
+    don't apply `ai-context` policy; followed sibling parity per task POML `<pattern>` directive — flag
+    follow-up to apply atomically across all 5 scope endpoints if required), ✅ ADR-018 (no new flags),
+    ✅ ADR-029 (publish-size +10 KB).
+
+    Coordination with task 003: task 003 added `ResolvePersonaForChatAsync` + `GetEffectivePersonaAsync`
+    to the interface in parallel and implemented them on `AnalysisPersonaService`. I added throw-stub
+    delegations in `ScopeResolverService.cs` so the build stays green; task 003 must replace those with
+    `_personaService` delegation.
+
+    Full completion notes: `projects/spaarke-ai-platform-unification-r6/notes/task-002-completion.md`.
+  </completion-notes>
 </task>

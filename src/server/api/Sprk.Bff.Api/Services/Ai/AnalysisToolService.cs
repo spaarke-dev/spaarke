@@ -63,7 +63,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
             HandlerClass = handlerClass,
             Configuration = entity.Configuration,
             OwnerType = ScopeOwnerType.System,
-            IsImmutable = false
+            IsImmutable = false,
+            AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts)
         };
 
         var mappingSource = !string.IsNullOrEmpty(entity.HandlerClass) ? "HandlerClass" : "GenericAnalysisHandler (fallback)";
@@ -93,7 +94,7 @@ public class AnalysisToolService : DataverseHttpServiceBase
 
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration",
+            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration,sprk_availableincontexts",
             expandClause: "sprk_ToolTypeId($select=sprk_name)",
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
@@ -133,7 +134,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
                 HandlerClass = entity.HandlerClass,
                 Configuration = entity.Configuration,
                 OwnerType = ScopeOwnerType.System,
-                IsImmutable = false
+                IsImmutable = false,
+                AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts)
             };
         }).ToArray();
 
@@ -202,7 +204,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
             HandlerClass = entity.HandlerClass ?? request.HandlerClass,
             Configuration = entity.Configuration ?? request.Configuration,
             OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false
+            IsImmutable = false,
+            AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts)
         };
 
         Logger.LogInformation("[CREATE TOOL] Created tool '{ToolName}' with ID {ToolId}", tool.Name, tool.Id);
@@ -393,6 +396,24 @@ public class AnalysisToolService : DataverseHttpServiceBase
         };
     }
 
+    /// <summary>
+    /// Map nullable raw Dataverse option-set value (100000000/100000001/100000002) to
+    /// <see cref="ToolAvailabilityContext"/>. Returns <c>null</c> for unset/unknown values
+    /// — callers treat <c>null</c> as <see cref="ToolAvailabilityContext.Playbook"/> for
+    /// backward-compat per FR-07 (D-A-07). Unknown values are logged as warnings via
+    /// caller log context but do not throw.
+    /// </summary>
+    internal static ToolAvailabilityContext? MapAvailableInContexts(int? rawValue)
+    {
+        return rawValue switch
+        {
+            (int)ToolAvailabilityContext.Playbook => ToolAvailabilityContext.Playbook,
+            (int)ToolAvailabilityContext.Chat => ToolAvailabilityContext.Chat,
+            (int)ToolAvailabilityContext.Both => ToolAvailabilityContext.Both,
+            _ => null
+        };
+    }
+
     #endregion
 
     #region Private DTOs
@@ -416,6 +437,15 @@ public class AnalysisToolService : DataverseHttpServiceBase
 
         [JsonPropertyName("sprk_configuration")]
         public string? Configuration { get; set; }
+
+        /// <summary>
+        /// Option-set discriminator for invocation context — R6 Pillar 2 (FR-07; D-A-07).
+        /// Nullable in flight for backward-compat with pre-R6 rows whose column wasn't yet
+        /// populated; callers treat null as <see cref="ToolAvailabilityContext.Playbook"/>.
+        /// 100000000=Playbook, 100000001=Chat, 100000002=Both.
+        /// </summary>
+        [JsonPropertyName("sprk_availableincontexts")]
+        public int? AvailableInContexts { get; set; }
     }
 
     internal class ToolTypeReference
