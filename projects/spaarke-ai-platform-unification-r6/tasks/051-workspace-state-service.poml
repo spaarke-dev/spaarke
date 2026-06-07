@@ -1,0 +1,122 @@
+<task id="051" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-02 — `WorkspaceStateService.cs` BFF service (Redis hot + Cosmos durable, Q4 hybrid)</title>
+    <status>pending</status>
+    <estimated-effort>1 day</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6a)</phase>
+    <wave>C-G1 (sequential within Pillar 6a)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>050 (WorkspaceTab interface)</dependencies>
+    <tags>bff-api, services, cache, redis, workspace</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF service; multi-tier persistence; consumed by 6a endpoint + chat agent prompt builder. Architecture-defining work.</rigor-reason>
+    <parallel-group>C-G1</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build `WorkspaceStateService` in `src/server/api/Sprk.Bff.Api/Services/Workspace/`
+    implementing the Q4 hybrid persistence model: Redis hot tier (24h TTL) for active
+    session state, Cosmos durable tier on pin-or-matter-attach. Mirrors the canonical
+    workspace tab shape from task 050. Per-tenant cache key
+    `workspace:{tenantId}:{sessionId}` per ADR-014. Cosmos durable rows go to either the
+    existing `memory` container or a new `workspace_tabs` container (extend existing
+    pattern; do NOT introduce new container if `memory` suffices). Public API: `Task&lt;
+    IReadOnlyList&lt;WorkspaceTab&gt;&gt; GetTabsAsync(tenantId, sessionId, ct)`;
+    `Task UpsertTabAsync(tenantId, sessionId, WorkspaceTab tab, ct)`;
+    `Task PinTabAsync(tenantId, sessionId, tabId, matterId, ct)` (promotes Redis row to
+    Cosmos durable); `Task CloseTabAsync(tenantId, sessionId, tabId, ct)`. Service stays
+    in BFF per ADR-013 (no AI internal types injected — service is workspace-state
+    plumbing, not AI capability). Register in `AnalysisServicesModule` per ADR-010 (ZERO
+    new top-level Program.cs lines).
+  </prompt>
+
+  <role>
+    Senior BFF engineer with Redis + Cosmos write-through caching experience and
+    familiarity with the Spaarke BFF service-registration patterns + ADR-014 caching
+    contract.
+  </role>
+
+  <goal>
+    `WorkspaceStateService` registered + functional with both Redis hot and Cosmos durable
+    paths. Per-tenant cache key isolation verified. Pin operation correctly promotes the
+    Redis row to a Cosmos durable row tagged with matterId. Service is consumed only by
+    Pillar 6a endpoint (task 052) and the chat agent factory snapshot (task 053).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-extensions">.claude/constraints/bff-extensions.md</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="workspace-tab-type">src/client/shared/Spaarke.AI.Widgets/src/types/WorkspaceTab.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">AI as BFF extension; workspace-state plumbing stays in BFF. MUST NOT inject `IOpenAiClient`, `IPlaybookService`, or any AI-internal type into this service. Service is consumed by chat agent factory THROUGH the `WorkspaceStateService` interface — not vice versa.</constraint>
+    <constraint source="ADR-014">Redis hot tier cache key MUST include tenantId. Cosmos durable tier write-through pattern reused. Per-tenant isolation verified.</constraint>
+    <constraint source="ADR-010">Register inside existing `AnalysisServicesModule` (or a sibling module within the same `Infrastructure/DI/` folder). ZERO new top-level `Program.cs` lines.</constraint>
+    <constraint source="ADR-029">Verify publish-size delta; expect &lt;1 MB; report absolute MB + delta in task notes. Total R6 budget ≤+5 MB (NFR-02).</constraint>
+    <constraint source="spec FR-32">Redis hot 24h TTL; Cosmos durable on pin / matter-attach. Reuse `memory` container if patterns support; else add `workspace_tabs` container.</constraint>
+    <constraint source="spec NFR-16">Per-tenant cache key isolation — `workspace:{tenantId}:{sessionId}` MUST be enforced.</constraint>
+    <constraint source="project R6 Pillar 6a binding">Service interface consumed by 6a endpoint + chat factory snapshot. Cross-pillar contract — sign-off required if signature changes mid-Phase-C.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/services-cache</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      "🔒 RIGOR LEVEL: FULL — Reason: New BFF service with multi-tier persistence; consumed by endpoint + chat factory; per-tenant isolation critical."
+    </step>
+    <step order="1" name="Review Progress">Read TASK-INDEX.md; confirm 050 complete; load `WorkspaceTab` interface.</step>
+    <step order="2" name="Gather Resources">Read bff-extensions.md (binding placement justification) + ADR-014 caching pattern + existing Cosmos memory-container client.</step>
+    <step order="3" name="Author Service Interface">Create `IWorkspaceStateService` in `Services/Workspace/` with the public API above.</step>
+    <step order="4" name="Implement Service">Write `WorkspaceStateService.cs`: Redis client for hot tier (24h TTL, per-tenant key); Cosmos durable repo reused from `memory` container (or new `workspace_tabs` container — decide per existing pattern fit, document decision in task notes). Pin operation writes through.</step>
+    <step order="5" name="Register in Module">Add registration to `AnalysisServicesModule` (or sibling). ZERO Program.cs changes.</step>
+    <step order="6" name="Unit Tests">Add tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/`: tenant isolation, TTL behavior, pin promotes to Cosmos, close removes from Redis.</step>
+    <step order="7" name="Publish-Size Verification">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed size; record absolute MB + delta vs prior baseline in task notes. Confirm against NFR-02 ≤+5 MB total R6 budget.</step>
+    <step order="9.5" name="Quality Gates (FULL)">Run code-review skill; run adr-check skill — verify ADR-010, ADR-013, ADR-014, ADR-029 compliance. Verify NO HIGH-severity CVE via `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 051 🔲→✅; current-task → 052; placement-justification noted per bff-extensions.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish + vulnerable-package check</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/IWorkspaceStateService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceStateService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (registration added)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/WorkspaceStateServiceTests.cs (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-051-placement-justification.md</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IWorkspaceStateService` + `WorkspaceStateService` exist in `Services/Workspace/`; registered in `AnalysisServicesModule`; ZERO new Program.cs lines.</criterion>
+    <criterion testable="true">Redis cache key format `workspace:{tenantId}:{sessionId}`; per-tenant isolation verified by unit test.</criterion>
+    <criterion testable="true">Redis hot tier TTL = 24h.</criterion>
+    <criterion testable="true">Pin operation writes through to Cosmos durable tier with matterId tag.</criterion>
+    <criterion testable="true">Close operation removes from Redis without touching Cosmos durable rows.</criterion>
+    <criterion testable="true">Unit tests cover tenant isolation, TTL, pin write-through, close semantics.</criterion>
+    <criterion testable="true">Publish-size delta measured + recorded in task notes; respects ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">No HIGH-severity CVE; ADR-010/013/014/029 compliant.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

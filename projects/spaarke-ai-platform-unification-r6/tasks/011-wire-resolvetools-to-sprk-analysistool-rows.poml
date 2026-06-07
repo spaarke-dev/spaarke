@@ -1,0 +1,163 @@
+<task id="011" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-11 Wire `SprkChatAgentFactory.ResolveTools()` to Read `sprk_analysistool` Rows (Pillar 2)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>010</dependencies>
+    <blocks>012, 020, 024</blocks>
+    <tags>bff-api, ai, chat</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies chat-agent core tool-resolution path; NFR-01 conversational primacy bound; downstream blocker for batch migration + facade tasks; tags `bff-api`+`ai`+`chat`.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent file; gates downstream but no contention.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Replace `SprkChatAgentFactory.ResolveTools()` hardcoded tool-class wiring with a
+    data-driven query: read `sprk_analysistool` rows where `AvailableInContexts ∋ "Chat"`
+    (task 007 enum value Chat or Both), wrap each row + corresponding `IToolHandler` impl
+    via `ToolHandlerToAIFunctionAdapter` (task 010), and return the resulting
+    `AIFunction[]` to the chat-agent build.
+
+    Critical-path context: this task is the chat-side cutover for Pillar 2. Once it lands,
+    adding a Dataverse row exposes a new tool to the LLM next request — no code deploy
+    needed. Task 012 (batch migration) populates rows for the 10 pre-R5 chat tools. Tasks
+    020 (invoke_playbook facade) and 024 (FK fix) depend on this wiring.
+
+    BACKWARD COMPAT during migration: existing hardcoded tool classes (DocumentSearch,
+    AnalysisQuery, etc.) MUST continue to work during the Phase A migration window. The
+    factory MAY retain the hardcoded list as a feature-gated fallback during task
+    011-to-012 transition (gated by EXISTING capability flag — NO new feature flag per
+    ADR-018). Document the migration cutover plan in task notes.
+
+    NFR-01 binding: even with the new data-driven tool list, the LLM's conversational
+    ability is NEVER suppressed. Tool list is what's exposed for function-calling; the
+    underlying LLM still responds conversationally to every turn. Safety pipeline preserved
+    per NFR-13.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with `SprkChatAgentFactory` + `ResolveTools()` expertise. Familiar
+    with Dataverse query patterns + NFR-01 conversational primacy contract.
+  </role>
+
+  <goal>
+    `SprkChatAgentFactory.ResolveTools()` reads `sprk_analysistool` rows with
+    `AvailableInContexts ∋ "Chat"`, wraps via adapter, returns `AIFunction[]` to chat-agent.
+    Existing hardcoded tools continue to work during migration via feature-gated fallback
+    (existing flag, no new flag). Build green; publish-size delta reported; NFR-01
+    conversational regression test green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="adapter">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlerToAIFunctionAdapter.cs</file>
+    <file purpose="chat-architecture">docs/architecture/chat-architecture.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">No new top-level Program.cs lines; query service if needed registered inside `AnalysisServicesModule`.</constraint>
+    <constraint source="ADR-013">No CRUD-side injection of AI internals.</constraint>
+    <constraint source="ADR-014">Tool-list query cached per tenant; cache key includes `tenantId`.</constraint>
+    <constraint source="ADR-015">No user message content in telemetry; tool resolution emits tool count + tenant ID + timestamp only.</constraint>
+    <constraint source="ADR-018">No new feature flags. Use existing capability flag (if any) for fallback gating.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget per NFR-02.</constraint>
+    <constraint source="spec NFR-01">Conversational primacy — tool list restricts function-calling vocabulary but never prevents conversational responses.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline middleware chain unchanged.</constraint>
+    <constraint source="spec FR-11">Tool list is data-driven via `sprk_analysistool` query with `AvailableInContexts ∋ "Chat"` filter.</constraint>
+    <constraint source="spec NFR-11">Backward compatibility during migration: existing 10 hardcoded chat tools continue to work while migration proceeds.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/chat-tool-resolution</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — chat-agent core cutover + NFR-01 binding + downstream blocker".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 010 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Capture baseline publish size.
+    </step>
+    <step order="3" name="Inspect `ResolveTools()` Today">
+      Open `SprkChatAgentFactory.cs`. Identify the current hardcoded tool list (10 instances). Plan the swap: query → adapter → AIFunction[].
+    </step>
+    <step order="4" name="Implement Data-Driven Resolution">
+      Query `sprk_analysistool` rows filtered by tenant + `AvailableInContexts ∋ Chat`. Cache result with `tenantId`-keyed Redis key per ADR-014 (short TTL, e.g. 5 min, since data changes are infrequent). For each row: locate the corresponding `IToolHandler` implementation (via DI keyed lookup; pattern from existing handlers) and wrap via adapter.
+    </step>
+    <step order="5" name="Implement Fallback Strategy">
+      During migration window, retain a fallback path that returns the hardcoded tool list if the data-driven query returns ZERO tools (defensive). Gate via existing capability flag if one fits; document the choice. NO new feature flags.
+    </step>
+    <step order="6" name="Add Conversational-Primacy Test">
+      Test asserting: even when data-driven query returns ZERO tools, the chat agent still responds conversationally (NFR-01). Safety pipeline middleware chain still applied (NFR-13).
+    </step>
+    <step order="7" name="Add Backward-Compat Test">
+      Test asserting: with mocked data-driven query returning the 10 hardcoded tools as rows, the resolved AIFunction[] matches the prior hardcoded list semantically. This validates the migration path.
+    </step>
+    <step order="8" name="Build + Verify Publish Size">
+      `dotnet build` → 0 errors. `dotnet publish -c Release` → measure delta vs baseline; report ≤+5 MB R6 budget.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk each criterion; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-010 / ADR-013 / ADR-014 / ADR-015 / ADR-018 / ADR-029 + NFR-01 / NFR-11 / NFR-13 + FR-11 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 011 ✅. Reset `current-task.md`. Report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="git">stage + commit changes</tool>
+    <tool name="mcp__dataverse__read_query">MCP — verify `sprk_analysistool` queries</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (modified — data-driven ResolveTools)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryToolResolutionTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (011 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-011-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ResolveTools()` queries `sprk_analysistool` filtered by tenant + `AvailableInContexts ∋ Chat`.</criterion>
+    <criterion testable="true">Adapter wraps each row + `IToolHandler` impl; returns `AIFunction[]`.</criterion>
+    <criterion testable="true">Cache key includes `tenantId` (ADR-014).</criterion>
+    <criterion testable="true">Fallback to hardcoded list when query returns 0 tools — preserves NFR-11 backward-compat during migration window.</criterion>
+    <criterion testable="true">NO new feature flag introduced (ADR-018).</criterion>
+    <criterion testable="true">Conversational-primacy test: even with 0 tools, agent responds conversationally (NFR-01).</criterion>
+    <criterion testable="true">Safety pipeline middleware chain unchanged (NFR-13).</criterion>
+    <criterion testable="true">No user message content in telemetry (ADR-015).</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

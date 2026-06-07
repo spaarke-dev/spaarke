@@ -1,0 +1,123 @@
+<task id="050" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-01 — Canonical `WorkspaceTab` TypeScript interface (Pillar 6a gate)</title>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6a)</phase>
+    <wave>C-G1 (sequential within Pillar 6a; gates 6b/6c/7/9)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Phase B complete (049 exit gate)</dependencies>
+    <tags>frontend, typescript, ai-widgets, workspace</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Interface is consumed by Pillars 6b, 6c, 7, 9 — drift here breaks four downstream pillars. Contract-defining work.</rigor-reason>
+    <parallel-group>C-G1</parallel-group>
+  </metadata>
+
+  <prompt>
+    Define the canonical `WorkspaceTab` TypeScript interface that becomes the contract
+    shared by Pillars 6a (state model), 6b (chat tools that mutate tabs), 6c (workspace
+    events), 7 (memory composition reads tab content), and 9 (visibility contract per-tab
+    filter). This task ships interfaces only — no implementation. Required typed fields:
+    `id`, `widgetType` (string enum union), `widgetData` (per-widget-type discriminated
+    union), `sessionId`, `visibleToAssistant: boolean`, `sourceProvenance` (which
+    playbook/agent/user created it + when), `matterContext` (matterId + matter name),
+    `isPinned: boolean`, `canEdit: boolean`, `lastUserEditAt?: string` (ISO-8601;
+    central to Q8 conflict resolution), `createdAt`, `updatedAt`. Place in
+    `@spaarke/ai-widgets` shared library (NOT a code-page). Export from package index so
+    Pillar 6b chat tools, Pillar 7 memory composition, and Pillar 9 visibility contract
+    can import the canonical shape.
+  </prompt>
+
+  <role>
+    Senior TypeScript engineer with deep familiarity with the Spaarke `@spaarke/ai-widgets`
+    package + PaneEventBus discriminated-union typing patterns.
+  </role>
+
+  <goal>
+    A single `WorkspaceTab` interface lives in `@spaarke/ai-widgets/src/types/` and is
+    exported from the package barrel. All typed fields are documented with JSDoc citing
+    the originating FR (FR-31). The shape supports discriminated unions across widget
+    types (Summary, DocumentViewer, Dashboard, Table). Pillars 6b/6c/7/9 task authors can
+    import this interface without ambiguity. Type-check passes across the package.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="workspace-arch">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    <file purpose="widget-registry">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-030">PaneEventBus closed at 4 channels — additive event types only on `workspace.*` channel. Interface enables Pillar 6c additive events; do NOT introduce a 5th channel.</constraint>
+    <constraint source="ADR-012">Place in `@spaarke/ai-widgets` per shared-components convention; export from package barrel.</constraint>
+    <constraint source="spec FR-31">WorkspaceTab MUST be typed (widgetType/widgetData/sessionId/visibleToAssistant/sourceProvenance/matterContext/isPinned/canEdit/lastUserEditAt). Existing tabs migrate transparently.</constraint>
+    <constraint source="spec NFR-05">4-channel PaneEventBus preserved; this interface is consumed by additive events on workspace + context channels only.</constraint>
+    <constraint source="project R6 Pillar 6a binding">6a interface gates 6b/6c/7/9 — must land before any downstream pillar work begins. Drift in this shape breaks four pillars.</constraint>
+    <constraint source="project Q8 conflict resolution">`lastUserEditAt` is the key timestamp Pillar 6b's `update_workspace_tab` chat tool checks before mutating; field is REQUIRED in the interface (not optional in spirit, but typed optional to support brand-new tabs).</constraint>
+    <constraint source="project Pillar 9 visibility default">Default `visibleToAssistant: false`; agent-created tabs default true; user-created tabs default false (override via Pillar 6b "Add to Assistant" toggle).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/shared-components</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+    <patterns>
+      <pattern name="Discriminated union typing for widget data" location="src/client/shared/Spaarke.AI.Widgets/src/types/">
+        Use a string `widgetType` literal as the discriminator; `widgetData` is a union narrowed by `widgetType` so consumers get exhaustive type-checking when handling each variant.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — Reason: Interface is consumed by Pillars 6b/6c/7/9; drift breaks four downstream pillars."
+      Check context usage; if &gt;70% checkpoint + request /compact. Read CLAUDE.md §Pillar 6 + Phase C deliverables.
+    </step>
+    <step order="1" name="Review Progress">Read TASK-INDEX.md; confirm 050 is the first Phase C task and dependencies (049 Phase B exit) are complete. Update current-task.md.</step>
+    <step order="2" name="Gather Resources">Read every inputs + knowledge file. Locate the existing `@spaarke/ai-widgets/src/types/` folder.</step>
+    <step order="3" name="Author Interface">Create `WorkspaceTab.ts` with full discriminated-union typing for each `widgetType` (Summary, DocumentViewer, Dashboard, Table). JSDoc each field citing FR-31.</step>
+    <step order="4" name="Wire Exports">Add to package barrel; verify type re-export.</step>
+    <step order="5" name="Type-Check">Run `tsc --noEmit` on the `@spaarke/ai-widgets` package; resolve all errors.</step>
+    <step order="6" name="Update Consumers (smoke)">Grep for existing `WorkspaceTab` references; flag any consumer that needs the new shape (do NOT migrate consumers in this task — that's downstream).</step>
+    <step order="9.5" name="Quality Gates (FULL)">Run code-review skill; run adr-check skill (verify ADR-030 4-channel + ADR-012 shared-components compliance).</step>
+    <step order="10" name="Document + Complete">Update TASK-INDEX.md 050 🔲→✅; reset current-task.md to 051; report completion.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Type-check via `tsc --noEmit`</tool>
+    <tool name="git">Stage + commit on the R6 worktree branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/types/WorkspaceTab.ts (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/index.ts (export update)</output>
+    <output type="docs">TASK-INDEX.md (050 ✅)</output>
+    <output type="docs">current-task.md (reset to 051)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WorkspaceTab` interface exists in `@spaarke/ai-widgets/src/types/` with all required fields (id, widgetType, widgetData, sessionId, visibleToAssistant, sourceProvenance, matterContext, isPinned, canEdit, lastUserEditAt, createdAt, updatedAt).</criterion>
+    <criterion testable="true">`widgetData` is a discriminated union narrowed by `widgetType`; exhaustive switch produces compile error if a variant is missed.</criterion>
+    <criterion testable="true">Interface exported from package barrel; importable from `@spaarke/ai-widgets`.</criterion>
+    <criterion testable="true">`tsc --noEmit` on `@spaarke/ai-widgets` passes with no errors.</criterion>
+    <criterion testable="true">JSDoc on every field references the originating FR.</criterion>
+    <criterion testable="true">`lastUserEditAt: string | undefined` typed for Q8 conflict resolution semantics.</criterion>
+    <criterion testable="true">code-review + adr-check pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test>Type-only test: import WorkspaceTab in a consumer test file; verify each discriminated-union narrowing compiles correctly per widgetType.</test>
+  </ui-tests>
+</task>

@@ -1,0 +1,110 @@
+<task id="059" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-12 — Additive `context.*` PaneEventBus event types (ADR-015 binding: tool name + timestamp ONLY)</title>
+    <status>pending</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6c)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>053 (workspace state wired)</dependencies>
+    <tags>frontend, typescript, ai-widgets, telemetry</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>ADR-015 binding event-shape definition; downstream telemetry emission (task 063) + widget render (task 061) BOTH depend on these types being correct.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Add the following additive event types on the existing `context` channel of
+    PaneEventBus (per ADR-030 — 4 channels closed; additive types only; NO new channel):
+    `context.tool_call_started`, `context.tool_call_completed`,
+    `context.knowledge_retrieved`, `context.playbook_node_executing`,
+    `context.playbook_node_completed`, `context.decision_made`.
+
+    **ADR-015 BINDING (CRITICAL)**: trace events log tool name + decision + timestamp
+    ONLY. NEVER user message text. Deterministic IDs (matterId, scopeId, playbookId,
+    nodeId, toolName, knowledgeSourceId) acceptable. The event-type definitions
+    themselves MUST type the payload such that user message content CANNOT be smuggled
+    in — payload fields are explicit + enumerated. Each event payload includes
+    `timestamp: string` (ISO-8601), `sessionId: string`, `correlationId?: string`. Knowledge
+    retrievals include `knowledgeSourceId` + `relevanceScore` (numeric) but NOT the
+    retrieved content body. Decisions include `decision: string` (short enum-like) +
+    `decisionReason?: string` (machine summary, not user text).
+
+    Define in `@spaarke/ai-widgets/src/events/PaneEventTypes.ts`. Discriminated union per
+    event name. Type-check ensures consumers exhaustively handle each variant.
+  </prompt>
+
+  <role>
+    Senior TypeScript engineer with deep familiarity with PaneEventBus contract + ADR-030
+    4-channel constraint + ADR-015 data-governance audit pattern.
+  </role>
+
+  <goal>
+    Six new event types defined as discriminated union variants on the `context` channel.
+    Types make user content leakage IMPOSSIBLE by construction. Type-check passes.
+    Downstream tasks (061 widget + 063 telemetry emission) can import + use these types.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="pane-event-types">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015 BINDING">Trace events log tool name + decision + timestamp ONLY. NEVER user message text. Deterministic IDs (matterId, scopeId, playbookId, nodeId, toolName, knowledgeSourceId) acceptable. Payload typing MUST make user-content leakage impossible by construction.</constraint>
+    <constraint source="ADR-030">4 channels closed (workspace / context / conversation / safety); additive event types only; no 5th channel.</constraint>
+    <constraint source="ADR-012">Shared lib `@spaarke/ai-widgets`; Fluent v9 conventions.</constraint>
+    <constraint source="spec FR-37">Additive event types on `context` channel; no 5th channel.</constraint>
+    <constraint source="project R6 Pillar 6c">Types consumed by trace widget (061) + emission sites (063). Drift breaks both.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/pane-event-bus</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — ADR-015 binding event-shape definition; user-content leakage prevention by typing construction."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 053 complete.</step>
+    <step order="2" name="Gather Resources">Read existing PaneEventTypes.ts to map current shape + extension pattern.</step>
+    <step order="3" name="Define New Types">Add 6 discriminated-union variants to `context` channel. Each payload typed with explicit + enumerated fields ONLY; no `unknown`/`any` content fields.</step>
+    <step order="4" name="Export + Document">JSDoc each variant citing ADR-015 + FR-37. Export from `@spaarke/ai-widgets` barrel.</step>
+    <step order="5" name="Type-Check">tsc --noEmit; resolve all errors.</step>
+    <step order="6" name="ADR-015 Audit">Code review every payload field — confirm no `content: string`, no `userMessage: string`, no free-form text fields that could leak user input. Document audit in task notes.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-012/015/030).</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 059 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">tsc --noEmit + lint</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts (modified — 6 new context variants)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-059-adr015-audit.md</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">6 new event variants added to `context` channel: `tool_call_started`, `tool_call_completed`, `knowledge_retrieved`, `playbook_node_executing`, `playbook_node_completed`, `decision_made`.</criterion>
+    <criterion testable="true">Each payload typed with explicit enumerated fields; NO `unknown` / `any` content fields.</criterion>
+    <criterion testable="true">ADR-015 audit confirms zero free-form text fields that could leak user input; documented in task notes.</criterion>
+    <criterion testable="true">No new channel introduced (ADR-030 preserved).</criterion>
+    <criterion testable="true">Discriminated-union exhaustive matching compiles correctly.</criterion>
+    <criterion testable="true">Each variant exported from package barrel.</criterion>
+    <criterion testable="true">tsc --noEmit passes.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

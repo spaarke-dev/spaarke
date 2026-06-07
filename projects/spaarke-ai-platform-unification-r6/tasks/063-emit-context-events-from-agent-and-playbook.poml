@@ -1,0 +1,124 @@
+<task id="063" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-16 — Telemetry: chat agent + playbook execution emit new `context.*` events (ADR-015 BINDING)</title>
+    <status>pending</status>
+    <estimated-effort>1 day</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6c)</phase>
+    <wave>C-G2 (sequential after 059)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>059 (event types defined)</dependencies>
+    <tags>bff-api, telemetry, ai, chat</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Emission site modifications across SprkChatAgent + PlaybookExecutionEngine + node executors; ADR-015 binding — every site must be audited for user-message leakage.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Wire `context.*` event emissions from BFF to PaneEventBus (via existing SSE / event
+    transport per `chat-architecture.md`). Emission sites to chase down + add events:
+    1. `SprkChatAgent` invocation of any chat tool → `context.tool_call_started` +
+       `context.tool_call_completed` (with decision + outcome).
+    2. Knowledge retrieval in CapabilityRouter or RAG path →
+       `context.knowledge_retrieved` (sourceId + relevanceScore).
+    3. `PlaybookExecutionEngine.ExecuteAsync` per-node lifecycle →
+       `context.playbook_node_executing` + `context.playbook_node_completed`.
+    4. `CapabilityRouter` decisions (Layer 2 / Layer 3) → `context.decision_made`.
+
+    **ADR-015 AUDIT (BINDING + NON-NEGOTIABLE)**: At every emission site, review the
+    payload construction code — confirm only the typed enumerated fields are passed;
+    NEVER user message text, NEVER tool input/output bodies, NEVER raw LLM response text.
+    Deterministic IDs (matterId, scopeId, playbookId, nodeId, toolName, knowledgeSourceId)
+    + timestamps + decision strings (enum-like short identifiers) are acceptable.
+    Document each emission site + audit conclusion in task notes.
+
+    **NFR-08 BINDING**: 11 production node executors MUST NOT be modified. Lifecycle
+    events are emitted by `PlaybookExecutionEngine` wrapper, NOT inside executor
+    implementations.
+  </prompt>
+
+  <role>
+    Senior BFF + AI platform engineer with deep familiarity with `SprkChatAgent`,
+    `PlaybookExecutionEngine`, `CapabilityRouter`, and the existing telemetry
+    infrastructure from R5 task 008.
+  </role>
+
+  <goal>
+    All 4 emission categories wired; events flow to frontend trace widget (task 061);
+    every site passes ADR-015 audit (no user-content leakage); 11 node executors
+    unmodified per NFR-08.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="chat-arch">docs/architecture/chat-architecture.md</file>
+    <file purpose="ai-arch">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="chat-agent">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+    <file purpose="playbook-engine">src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/PlaybookExecutionEngine.cs</file>
+    <file purpose="capability-router">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">BFF-side emission; cross-cuts AI services; emit via existing telemetry sink + SSE transport.</constraint>
+    <constraint source="ADR-015 BINDING">Trace events log tool name + decision + timestamp ONLY. NEVER user message text. NEVER tool input/output bodies. NEVER raw LLM response. Deterministic IDs OK. Every emission site MUST be audited individually; audit conclusion documented.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified; expect &lt;2 MB; total R6 ≤+5 MB.</constraint>
+    <constraint source="ADR-030">Events on existing `context` channel.</constraint>
+    <constraint source="spec NFR-08">11 production node executors UNMODIFIED. Lifecycle events emitted by `PlaybookExecutionEngine` wrapper, NOT inside executors.</constraint>
+    <constraint source="spec FR-37">Telemetry from chat agent + playbook execution emits context.* events; trace widget renders them in order.</constraint>
+    <constraint source="spec NFR-12">Telemetry preserved + new events added per R5 task 008 infrastructure.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/telemetry-ai</topic>
+    <files>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Multiple emission sites across chat agent + playbook engine + capability router; ADR-015 binding audit per-site."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 059 complete + event types available.</step>
+    <step order="2" name="Gather Resources">Read SprkChatAgent + PlaybookExecutionEngine + CapabilityRouter + existing telemetry sink + SSE transport patterns.</step>
+    <step order="3" name="Map Emission Sites">Enumerate every site (4 categories). Confirm `PlaybookExecutionEngine` wrapper site for lifecycle events (NOT inside node executors — NFR-08 binding).</step>
+    <step order="4" name="Wire Tool-Call Events">In SprkChatAgent invocation path: emit `context.tool_call_started` before invocation, `context.tool_call_completed` after.</step>
+    <step order="5" name="Wire Knowledge Retrieval Events">In CapabilityRouter / RAG path: emit `context.knowledge_retrieved` after each retrieval.</step>
+    <step order="6" name="Wire Playbook Node Lifecycle Events">In `PlaybookExecutionEngine.ExecuteAsync` (NOT inside executors): emit `context.playbook_node_executing` + `context.playbook_node_completed`.</step>
+    <step order="7" name="Wire Capability Router Decisions">Emit `context.decision_made` at Layer 2 / Layer 3 decision points.</step>
+    <step order="8" name="ADR-015 Per-Site Audit">Review each emission site's payload construction; confirm ONLY typed enumerated fields; document audit in task notes.</step>
+    <step order="9" name="Tests + Publish-Size">Unit tests for each emission site (mock event sink); integration test asserts events flow end-to-end to PaneEventBus. dotnet publish + size measurement.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-013/015/029/030 + NFR-08 audit). NFR-08 audit MUST confirm node executors untouched.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 063 ✅. ADR-015 + NFR-08 audit results recorded.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish + vulnerable-package check</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs (modified — tool call events)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs (modified — decision + knowledge events)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/PlaybookExecutionEngine.cs (modified — node lifecycle events at wrapper, NOT inside executors)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Telemetry/ContextEventEmissionTests.cs (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-063-adr015-emission-audit.md</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 emission categories wired (tool calls, knowledge retrievals, playbook node lifecycle, router decisions).</criterion>
+    <criterion testable="true">Per-site ADR-015 audit documented; every payload confirmed typed enumerated fields only.</criterion>
+    <criterion testable="true">11 production node executors UNMODIFIED (NFR-08 binding verified via diff).</criterion>
+    <criterion testable="true">Lifecycle events emitted at PlaybookExecutionEngine wrapper, not inside executors.</criterion>
+    <criterion testable="true">Integration test: events flow end-to-end from BFF to PaneEventBus.</criterion>
+    <criterion testable="true">Publish-size delta within R6 budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,162 @@
+<task id="002" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-02 Add `GET /api/ai/scopes/personas` BFF Endpoint (Pillar 1)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>001</dependencies>
+    <blocks>005</blocks>
+    <tags>bff-api, endpoints, scope, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` files in `Sprk.Bff.Api`; adds new endpoint; tags include `bff-api`; touches authorization filter pattern (ADR-008).</rigor-reason>
+    <parallel-group>A-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent endpoint file; parallel with 003 (resolver methods) and 004 (seed row) — all unblocked by 001 and touch different layers.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a `GET /api/ai/scopes/personas` BFF endpoint that returns the list of resolvable
+    `sprk_aipersona` rows visible to the calling tenant, mirroring the existing scope
+    endpoints in `ScopeEndpoints.cs`. The endpoint returns a `ScopeListResult&lt;AnalysisPersona&gt;`
+    with the same pagination / filtering / sorting semantics as `/api/ai/scopes/actions`
+    etc., applies the same `ai-context` rate-limit policy (ADR-016), inherits the same
+    authorization filter pattern (ADR-008), and routes through the existing
+    `AnalysisServicesModule` DI registration (ADR-010).
+
+    Critical-path context: this endpoint is the CRUD-side facade for persona authoring
+    (Power Apps reads via Web API directly; the BFF endpoint serves any custom UI / debugging
+    surfaces in R7). It also validates the Pillar 1 schema end-to-end. The endpoint pairs
+    with the persona resolver methods in task 003 — both unblock task 005 (agent factory wiring).
+
+    Pattern reuse: the endpoint code is a clone of an existing `/api/ai/scopes/{type}` endpoint
+    with the entity name swapped. Reuse the existing `IScopeResolverService` query path;
+    do NOT introduce a new query service. The DTO `AnalysisPersona` is a thin record matching
+    the entity fields.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with .NET 8 Minimal API + Spaarke scope endpoint experience.
+    Familiar with `ScopeEndpoints.cs` registration pattern, endpoint-filter authorization,
+    and the existing 4-scope endpoint contract.
+  </role>
+
+  <goal>
+    `GET /api/ai/scopes/personas` endpoint exists, registered via existing
+    `AnalysisServicesModule` per ADR-010, applies the `ai-context` rate-limit policy per
+    ADR-016, inherits the authorization filter per ADR-008, returns
+    `ScopeListResult&lt;AnalysisPersona&gt;` for the calling tenant, and passes unit tests +
+    integration smoke test against the entity created in task 001.
+    BFF publish-size delta reported and ≤+5 MB R6 budget verified.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="canonical-endpoint-pattern">src/server/api/Sprk.Bff.Api/Api/Ai/ScopeEndpoints.cs</file>
+    <file purpose="resolver-service">src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Apply endpoint filter for authorization on the new endpoint — same filter as the existing 4-scope endpoints.</constraint>
+    <constraint source="ADR-010">Register inside existing `AnalysisServicesModule` per DI minimalism. ZERO new top-level `Program.cs` lines.</constraint>
+    <constraint source="ADR-013">Endpoint is CRUD-side facade — does NOT inject AI internals (`IOpenAiClient`, `IPlaybookOrchestrationService` etc.); routes via existing scope resolver only.</constraint>
+    <constraint source="ADR-016">Apply `ai-context` rate-limit policy on the new endpoint.</constraint>
+    <constraint source="ADR-018">No new feature flags; endpoint maps unconditionally.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; report absolute size + delta vs prior baseline (~45.65 MB); ≤+5 MB R6 total budget per NFR-02.</constraint>
+    <constraint source="spec FR-02">Endpoint returns `ScopeListResult&lt;AnalysisPersona&gt;` with same pagination/filtering/sorting as the existing 4 scope endpoints.</constraint>
+    <constraint source="bff-extensions.md F (test obligation)">PRs modifying `Services/Ai/` or adding endpoints MUST add/update unit tests in `tests/unit/Sprk.Bff.Api.Tests/`. Endpoints that map unconditionally must have unconditional service registration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/scope-endpoints</topic>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/scope-architecture.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing scope endpoint" location="src/server/api/Sprk.Bff.Api/Api/Ai/ScopeEndpoints.cs">
+        Clone the registration for one of the existing 4 scope types (Actions/Skills/Knowledge/Tools). Swap entity name to `personas`; reuse the same filter, the same `ai-context` policy, the same response shape.
+      </pattern>
+      <pattern name="DI module registration" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs">
+        Register any new helper service (if needed) inside this module. The endpoint itself maps via Program.cs extension method already present.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. Output mandatory declaration: "🔒 RIGOR LEVEL: FULL — `.cs` modification + new BFF endpoint + ADR-008/010/013/016 bound". Read project CLAUDE.md + spec.md FR-02 + relevant ADRs.
+    </step>
+    <step order="1" name="Review Progress">
+      Verify task 001 is ✅. Read TASK-INDEX.md. Update `current-task.md` to task 002.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Capture baseline BFF publish size for delta calculation: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` → measure compressed size. Record baseline in task notes.
+    </step>
+    <step order="3" name="Inspect Canonical Endpoint">
+      Open `ScopeEndpoints.cs` and identify the canonical registration for one of the existing 4 scope endpoints. Note: route template, filter, rate-limit policy, response DTO, query service injection.
+    </step>
+    <step order="4" name="Define AnalysisPersona DTO">
+      Add `AnalysisPersona` record (thin DTO matching entity fields: `Id`, `Name`, `Description`, `SystemPrompt`, `ScopeType`, `ParentScopeId`, audit). Place alongside other scope DTOs.
+    </step>
+    <step order="5" name="Register the New Endpoint">
+      Add `GET /api/ai/scopes/personas` to `ScopeEndpoints.cs`. Apply same filter + `ai-context` rate-limit policy + same pagination/filter/sort query params as canonical reference. Wire to `IScopeResolverService.GetPersonasAsync(...)` (extension method to land in task 003 — for now, stub returning empty `ScopeListResult` until 003 lands, OR coordinate sequencing so 003 lands first).
+    </step>
+    <step order="6" name="Add Unit + Integration Tests">
+      Add unit test in `tests/unit/Sprk.Bff.Api.Tests/` covering: endpoint maps; authorization filter applied; rate-limit policy applied; pagination/filter/sort handled. Add minimal integration test if test infrastructure permits.
+    </step>
+    <step order="7" name="Build + Verify Publish Size">
+      Run `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors. Run `dotnet publish -c Release` → measure compressed delta vs baseline captured Step 2. Confirm delta ≤+5 MB R6 budget; report absolute + delta in task notes.
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk every acceptance criterion below; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against changed `.cs` files. Run `adr-check` against same; verify ADR-008 (filter), ADR-010 (module), ADR-013 (no AI internals injected), ADR-016 (rate limit), ADR-018 (no new flags), ADR-029 (publish size). Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update TASK-INDEX: 002 🔲 → ✅. Reset `current-task.md`. Report publish-size delta + ADR compliance summary.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, publish, test</tool>
+    <tool name="git">stage + commit changes to R6 worktree branch</tool>
+    <tool name="code-review">Quality gate at Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ScopeEndpoints.cs (modified — add personas registration)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Models/AnalysisPersona.cs (NEW DTO)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ScopePersonasEndpointTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (002 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-002-publish-size-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GET /api/ai/scopes/personas` route maps and returns 200 with empty list when no personas exist.</criterion>
+    <criterion testable="true">Endpoint applies the same authorization filter as other scope endpoints (ADR-008 verified by adr-check).</criterion>
+    <criterion testable="true">Endpoint applies `ai-context` rate-limit policy (ADR-016 verified).</criterion>
+    <criterion testable="true">Registration occurs inside existing module pattern per ADR-010 — ZERO new top-level Program.cs lines.</criterion>
+    <criterion testable="true">No injection of AI internals; only `IScopeResolverService` consumed per ADR-013 facade boundary.</criterion>
+    <criterion testable="true">Unit test covers endpoint mapping + filter application + pagination.</criterion>
+    <criterion testable="true">BFF publish-size delta reported in task notes; ≤+5 MB R6 total budget verified.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>

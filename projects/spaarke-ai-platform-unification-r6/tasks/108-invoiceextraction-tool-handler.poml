@@ -1,0 +1,234 @@
+<task id="108" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-H-08 `InvoiceExtractionToolHandler` (FR-19, Wave 2 — LLM + Line-Item Math)</title>
+    <phase>Parallel — 8 Typed Tool Handlers</phase>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <dependencies>104</dependencies>
+    <blocks>109</blocks>
+    <tags>bff-api, ai, azure-openai, handler</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New LLM-assisted handler with tax/discount math; financial correctness blast radius; FULL quality gates required.</rigor-reason>
+    <parallel-group>H-G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave 2 LLM-assisted handler; independent of 105/106/107.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build `InvoiceExtractionToolHandler` — an LLM-assisted `IToolHandler` implementation
+    per FR-19 that performs invoice extraction with line-item arithmetic. Pipeline:
+    input invoice text/document → LLM structured-output call → extracted line items
+    (description, quantity, unit price, tax rate, discount rate) + invoice header
+    (vendor, invoice number, date, due date, currency) → deterministic line-item
+    arithmetic (line subtotal, line tax, line discount, line total; invoice subtotal,
+    total tax, total discount, grand total) → structured `ToolResult`.
+
+    Tax + discount handling: per-line tax/discount rates configurable; tax computation
+    method configurable (inclusive vs exclusive); discount application order configurable
+    (pre-tax vs post-tax). All math uses `decimal`.
+
+    Configurable via `sprk_analysistool.sprk_configuration`: `taxMethod` (inclusive /
+    exclusive), `discountOrder` (pre-tax / post-tax), `roundingMode`, `decimalPrecision`,
+    `expectedCurrencies`, `modelDeployment` override.
+
+    Handler registers via auto-discovery per task 100 — implements `IToolHandler`;
+    `HandlerId = "InvoiceExtractionToolHandler"`; lives in
+    `Services/Ai/Handlers/InvoiceExtractionToolHandler.cs`. Requires `sprk_analysistool`
+    row with `sprk_handlerclass = "InvoiceExtractionToolHandler"`.
+
+    LLM call uses structured outputs; per-tenant cache (ADR-014); rate limit (ADR-016);
+    safety pipeline (NFR-13).
+
+    Tests use mocked `IOpenAiClient`. Cover: contract test + positive (mocked LLM
+    returns invoice → arithmetic correct for inclusive + exclusive tax modes + discount
+    orderings) + error (negative quantity, missing currency, LLM invalid JSON) +
+    config-driven (tax method swap → different line totals) + cache + arithmetic
+    determinism (same line items → same totals across 100 runs).
+  </prompt>
+
+  <role>
+    Senior BFF engineer with .NET 8 + Azure OpenAI structured-outputs + invoice/billing
+    domain experience. Comfortable with `decimal` arithmetic, tax-inclusive vs exclusive
+    semantics, discount application order edge cases.
+  </role>
+
+  <goal>
+    `InvoiceExtractionToolHandler.cs` implemented in `Services/Ai/Handlers/`;
+    auto-discovered; `sprk_analysistool` row deployed; unit tests cover positive + error
+    + config-driven + cache + determinism cases; all arithmetic uses `decimal`; LLM call
+    respects cache (ADR-014) + rate limit (ADR-016) + safety pipeline (NFR-13); BFF
+    publish-size delta ≤+0.6 MB; `code-review` + `adr-check` green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+    <file purpose="existing-llm-handler-example">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    <file purpose="handler-conventions">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — auto-discovery; ZERO manual DI line.</constraint>
+    <constraint source="ADR-013">Handler lives in `Services/Ai/Handlers/`.</constraint>
+    <constraint source="ADR-014">Per-tenant cache key (`tenantId` mandatory).</constraint>
+    <constraint source="ADR-015">Telemetry logs handler name + execution outcome + timestamp ONLY; never invoice content (PII + financial sensitive).</constraint>
+    <constraint source="ADR-016">Respects `ai-context` rate limit policy.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta measured + reported; per-task ≤+0.6 MB.</constraint>
+    <constraint source="spec FR-19">LLM extraction + line-item arithmetic; tax/discount handling configurable.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline preserved unchanged.</constraint>
+    <constraint source="spec NFR-02">R6 BFF publish-size budget ≤+5 MB total.</constraint>
+    <constraint source="project CLAUDE.md Pillar 2">Implements `IToolHandler`; auto-discovered; `sprk_analysistool` row required.</constraint>
+    <constraint source="LLM-assisted binding">Uses existing OpenAI structured-outputs pattern; rate-limit policy per ADR-016.</constraint>
+    <constraint source="money-math binding">All line-item arithmetic uses `decimal` (never `double` / `float`). Banker's rounding default; configurable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/typed-handler-llm-assisted</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `InvoiceExtractionToolHandler` is the last typed handler — LLM identifies invoice
+      structure + line items, deterministic code does the math. Used heavily in vendor
+      management, AP automation, expense review playbooks. Tax-inclusive vs exclusive
+      and pre/post-tax discount ordering are the gotchas — wrong assumption shifts
+      totals by significant margins.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/InvoiceExtractionToolHandler.cs (NEW)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/InvoiceExtractionToolHandlerTests.cs (NEW)</file>
+      <file>infra/dataverse/sprk_analysistool-invoice-extraction-row.json (NEW)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-108-deployment-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Task 100 — handler infrastructure. Hard dependency.</item>
+      <item>Wave 1 complete (104) gates Wave 2 start.</item>
+      <item>Sibling Wave 2 tasks 105, 106, 107 — parallel-safe.</item>
+      <item>Task 109 — dispatch test exercises this handler (last Wave 2 gate before 109).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. If &gt;70%, run `context-handoff` then `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: New LLM-assisted handler; invoice arithmetic correctness; ADR-013/014/016 + NFR-13; FR-19
+      📖 PROTOCOL STEPS TO EXECUTE: all 11 steps below including Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX; confirm 108 is 🔲; dependency 104 complete.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every &lt;inputs&gt; + &lt;knowledge&gt; file.
+    </step>
+    <step order="3" name="Design Handler Surface + Output Schema">
+      Define `HandlerId = "InvoiceExtractionToolHandler"`; LLM output schema (invoice
+      header + line items array); `ConfigSchema` with `taxMethod`, `discountOrder`,
+      `roundingMode`, `decimalPrecision`, `expectedCurrencies`. Inject LLM client +
+      cache + resolver.
+    </step>
+    <step order="4" name="Implement Handler">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/InvoiceExtractionToolHandler.cs`.
+      Pattern: validate input → check per-tenant cache → on miss, call LLM via structured
+      outputs → validate JSON shape → execute deterministic line-item arithmetic per
+      configured tax method + discount order using `decimal` → emit `ToolResult` with
+      structured invoice. Telemetry per ADR-015 (no invoice content in logs).
+    </step>
+    <step order="5" name="Author Unit Tests">
+      Create `InvoiceExtractionToolHandlerTests.cs` using `TypedToolHandlerTestFixture`.
+      Mock `IOpenAiClient`. Cover: contract; positive (mocked LLM returns invoice → math
+      correct for both inclusive + exclusive tax + both discount orderings — at least 4
+      combinations); error (negative qty, missing currency, LLM invalid JSON); config-driven
+      (tax method swap shifts totals deterministically); cache (second call hits cache);
+      arithmetic determinism (same line items + same config → same totals across 100
+      runs); telemetry (no invoice content in logs).
+    </step>
+    <step order="6" name="Seed sprk_analysistool Row">
+      Create `infra/dataverse/sprk_analysistool-invoice-extraction-row.json` with
+      `sprk_handlerclass = "InvoiceExtractionToolHandler"`, `sprk_toolcode = "INV-EXTRACT@v1"`,
+      sample `sprk_configuration`, `AvailableInContexts = "Both"`. Deploy to Spaarke
+      Dev. Capture evidence.
+    </step>
+    <step order="7" name="Verify Build + Tests + Vuln Check">
+      `dotnet build` + `dotnet test --filter "InvoiceExtractionToolHandler"`. Vuln check.
+    </step>
+    <step order="8" name="Verify BFF Publish-Size Delta">
+      `dotnet publish -c Release ...`. Report absolute + diff. Target ≤+0.6 MB.
+      Cumulative Wave 1 + Wave 2 delta MUST be ≤+5 MB per spec NFR-02; record in task
+      notes.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through criteria; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Both MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update status `complete`; TASK-INDEX 108 🔲 → ✅; reset `current-task.md`. Note in
+      task-108-deployment-evidence.md that Wave 2 is now complete and task 109 (dispatch
+      test) is unblocked.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF + run tests + publish + vuln check</tool>
+    <tool name="pac">Deploy seed row</tool>
+    <tool name="git">Commit</tool>
+    <tool name="dataverse-deploy">Deploy seed row</tool>
+    <tool name="code-review">FULL-rigor quality gate</tool>
+    <tool name="adr-check">FULL-rigor quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/InvoiceExtractionToolHandler.cs (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/InvoiceExtractionToolHandlerTests.cs (NEW)</output>
+    <output type="infrastructure">infra/dataverse/sprk_analysistool-invoice-extraction-row.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-108-deployment-evidence.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (108 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InvoiceExtractionToolHandler.cs` exists, implements `IToolHandler`, uses existing `IOpenAiClient` structured-outputs pattern.</criterion>
+    <criterion testable="true">All line-item arithmetic uses `decimal` — grep verifiable.</criterion>
+    <criterion testable="true">Handler auto-discovered.</criterion>
+    <criterion testable="true">`sprk_analysistool` row deployed with `sprk_handlerclass = "InvoiceExtractionToolHandler"`, `AvailableInContexts = "Both"`.</criterion>
+    <criterion testable="true">Cache key includes `tenantId` per ADR-014.</criterion>
+    <criterion testable="true">Unit tests pass: contract, positive (4+ combinations of taxMethod × discountOrder), error (negative qty + missing currency + invalid JSON), config-driven (tax method swap), cache (second call hits cache), determinism (same line items → same totals across 100 runs), telemetry (no invoice content in logs).</criterion>
+    <criterion testable="true">Safety pipeline (NFR-13) preserved — no bypass.</criterion>
+    <criterion testable="true">Rate limit policy (ADR-016) respected.</criterion>
+    <criterion testable="true">BFF build succeeds.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+0.6 MB; cumulative Wave 1 + Wave 2 delta ≤+5 MB recorded.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` both pass.</criterion>
+    <criterion testable="true">Task notes record Wave 2 complete; task 109 unblocked.</criterion>
+  </acceptance-criteria>
+</task>

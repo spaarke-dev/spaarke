@@ -1,0 +1,151 @@
+<task id="008" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-08 Add `JsonSchema` Field to `AnalysisTool` DTO + Dataverse Column (Pillar 2)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>006, 007</dependencies>
+    <blocks>010</blocks>
+    <tags>bff-api, dataverse, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Schema change to production `sprk_analysistool` Dataverse entity (Confirmation Trigger) + `.cs` DTO modification + downstream blocker for adapter.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 007; both modify same DTO + Dataverse entity.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a `JsonSchema` field (nullable string) to the `AnalysisTool` DTO + a corresponding
+    Dataverse column on `sprk_analysistool`. The field stores the JSON Schema describing
+    the tool's parameter shape for LLM function-calling. Nullable for playbook-only tools
+    (Playbook context); required for chat-available tools (`Chat` or `Both`).
+
+    Critical-path context: this field feeds the `ToolHandlerToAIFunctionAdapter` (task 010)
+    which wraps an `IToolHandler` as a `Microsoft.Extensions.AI.AIFunction` — the LLM
+    sees the JSON Schema as the function's parameter declaration. Without this field,
+    chat-side tool invocation cannot be generated from data; we'd be back to hardcoded
+    tool classes. The Q9 batch migration (task 012) populates this field on every migrated
+    chat tool row.
+
+    Dataverse column: multi-line text (~64KB max), nullable. DTO: nullable string + JSON
+    validation helper. Add unit tests covering: valid JSON Schema parses cleanly; null is
+    permitted; invalid JSON raises at validation time (not silently passed to LLM).
+  </prompt>
+
+  <role>
+    Senior BFF engineer experienced with JSON Schema validation, the `sprk_analysistool`
+    entity, and the AI function-calling parameter contract.
+  </role>
+
+  <goal>
+    `AnalysisTool` DTO has `JsonSchema` (nullable string) field; `sprk_analysistool` entity
+    has matching multi-line text column. DTO + column persist a valid JSON Schema. Unit
+    tests cover null-allowed + valid-JSON-required + invalid-JSON-rejected cases.
+    Build green; publish-size delta reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="dto">src/server/api/Sprk.Bff.Api/Services/Ai/Models/AnalysisTool.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Use unmanaged solution conventions for Dataverse column change.</constraint>
+    <constraint source="ADR-010">No new top-level Program.cs lines.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget.</constraint>
+    <constraint source="spec FR-08">Field is nullable for playbook-only tools; required for chat-available tools (`AvailableInContexts ∋ Chat`).</constraint>
+    <constraint source="Confirmation Trigger">Schema change to production Dataverse entity — pause for user confirmation before deploying per project CLAUDE.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/tool-registry</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="JSON Schema validation in C#" location="System.Text.Json + JsonSchema.NET or equivalent">
+        Use existing JSON validation library if present in the codebase. Validate on DTO load to fail-fast vs. silently passing malformed JSON to LLM.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — Dataverse schema change + Confirmation Trigger + downstream blocker for adapter".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 006 ✅ + 007 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Capture baseline publish size.
+    </step>
+    <step order="3" name="Add DTO Field">
+      Add `JsonSchema` (nullable string) to `AnalysisTool`. Add JSON-validation helper that runs on DTO deserialization for non-null values.
+    </step>
+    <step order="4" name="Author Dataverse Column">
+      Add multi-line text column `sprk_jsonschema` to `sprk_analysistool`; nullable; ~64KB max length.
+    </step>
+    <step order="5" name="🛑 Confirmation Gate — Schema Deployment">
+      PAUSE per project CLAUDE.md §Confirmation Triggers. Present DTO + column schema; request approval.
+    </step>
+    <step order="6" name="Deploy Column to Dataverse">
+      After confirmation: deploy via `dataverse-deploy`. Verify column visible; verify existing rows have null value.
+    </step>
+    <step order="7" name="Add Unit Tests">
+      Tests in `tests/unit/Sprk.Bff.Api.Tests/`: null-allowed; valid JSON Schema accepted; invalid JSON rejected at DTO load (not silently passed); round-trip serialization works.
+    </step>
+    <step order="8" name="Build + Verify Publish Size">
+      `dotnet build` → 0 errors. `dotnet publish -c Release` → measure delta vs baseline; report ≤+5 MB R6 budget.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk each criterion; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-010 / ADR-013 / ADR-027 / ADR-029 + FR-08 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 008 ✅. Reset `current-task.md`. Report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="pac">Dataverse column deployment + verification</tool>
+    <tool name="dataverse-create-schema">Skill for column add</tool>
+    <tool name="dataverse-deploy">Skill for solution deployment</tool>
+    <tool name="git">stage + commit changes</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Models/AnalysisTool.cs (modified — JsonSchema added)</output>
+    <output type="schema">solutions/{solution}/Entities/sprk_analysistool/{column-xml} OR scripts/Add-AnalysisToolJsonSchema.ps1 (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisToolDtoTests.cs (modified)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (008 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-008-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`AnalysisTool` DTO has `JsonSchema` (nullable string) field.</criterion>
+    <criterion testable="true">`sprk_analysistool` entity has matching multi-line text column.</criterion>
+    <criterion testable="true">Existing rows preserve null value (backward-compat).</criterion>
+    <criterion testable="true">Unit test asserts: null allowed; valid JSON Schema accepted; invalid JSON rejected at DTO load.</criterion>
+    <criterion testable="true">Schema change committed to repo following ADR-027 conventions.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

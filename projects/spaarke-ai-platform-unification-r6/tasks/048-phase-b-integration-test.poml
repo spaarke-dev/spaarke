@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B (integration) Phase B integration test — TL;DR + Entities widget + duplicate-fire elimination + pre-fill regressions</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>not-started</status>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <dependencies>042, 034, 035</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, integration-test, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration test composition; tags include `integration-test` (STANDARD per Step 3.5.5); composes already-built widget + dedup + migrations; quality gates skipped per STANDARD rigor.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Integrates outputs of all Phase B implementation tasks (032-042); must run after they complete. Cannot parallelize.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Compose a Phase B integration test exercising every Phase B deliverable end-to-end:
+
+    (1) TL;DR rendering — invoke `summarize-document-for-workspace@v1` against a test
+        document; verify `tldr: string[]` renders as a Fluent v9 bulleted list (task 040).
+    (2) Entities rendering — same invocation; verify `entities: { organizations, persons
+        }` renders as labeled key-value blocks with nested bulleted lists (task 041).
+    (3) Duplicate-fire elimination — type `/summarize` in chat; verify ONE rendered
+        output (per task 042 CapabilityRouter dedup). Test BOTH natural-language
+        ("summarize this document") and slash (`/summarize`) entry paths.
+    (4) Matter-prefill regression — run end-to-end pre-fill on a test matter; verify
+        wizard fields populate identically to BEFORE-task-034 baseline (NFR-07 binding).
+    (5) Project-prefill regression — run end-to-end pre-fill on a test project; verify
+        wizard fields populate identically to BEFORE-task-035 baseline (NFR-07 binding).
+    (6) Backward compatibility — invoke an action whose row has NULL `sprk_outputschema`;
+        verify widget falls back to string rendering (no regression on non-migrated
+        actions).
+
+    Each scenario produces evidence (screenshots, server logs, before/after diffs)
+    stored under `notes/task-048-phase-b-integration-evidence.md`. Any failure requires
+    diagnosis + fix BEFORE marking complete. This task gates task 049 (Phase B exit gate
+    validation).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Integration tester comfortable composing end-to-end
+    scenarios across BFF + frontend + Dataverse seed data. Familiar with R5 SC-18
+    walkthrough methodology — the same disciplined evidence capture applies here.
+  </role>
+
+  <goal>
+    Documented Phase B integration test report at
+    `notes/task-048-phase-b-integration-evidence.md` covering all 6 scenarios above
+    with evidence (screenshots, logs, before/after diffs). All 6 scenarios PASS. Phase B
+    is provably exit-ready: schema-aware widget works (arrays + objects), dedup works
+    (one render per intent), pre-fill regressions clean (NFR-07 honored), backward
+    compatibility preserved.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="task-034-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-034-prefill-regression-test.md</file>
+    <file purpose="task-035-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-035-prefill-regression-test.md</file>
+    <file purpose="prefill-guide">docs/guides/WORKSPACE-AI-PREFILL-GUIDE.md</file>
+    <file purpose="r5-lessons">projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-07">Pre-fill regressions MUST show ZERO diff in per-field wizard output values vs BEFORE baselines from tasks 034 + 035. If ANY diff — escalate.</constraint>
+    <constraint source="project">Integration test SCENARIOS run against Spaarke Dev (or a designated test environment) using deterministic test documents (so before/after diffs are exact).</constraint>
+    <constraint source="project">Evidence MUST include: screenshots of rendered output; relevant server logs (no user message text per ADR-015); before/after pre-fill diffs.</constraint>
+    <constraint source="ADR-015">AI data governance — no user message text in evidence logs; redact if any test document contains sensitive content.</constraint>
+    <constraint source="ADR-029">BFF publish-size — this task is test-only; no BFF code change; publish-size delta = 0 MB; confirm in evidence notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/guides/WORKSPACE-AI-PREFILL-GUIDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="SC-18 walkthrough methodology" location="projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md">
+        R5 SC-18 disciplined end-to-end walkthrough is the template — invoke a real
+        scenario; capture screenshot + logs + state at each step; record the per-field
+        result. Phase B integration test follows the same shape but covers schema-aware
+        rendering + dedup + pre-fill regressions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase B is a tight architectural slice: schema-aware widget + CapabilityRouter
+      dedup + 4 action migrations. Each task carried its own acceptance criteria. This
+      integration task composes them end-to-end to PROVE the Phase B exit criteria can
+      be met (task 049 formally validates the exit gate).
+
+      R5 SC-18 was the walkthrough that surfaced the original rendering bugs + duplicate
+      fire. This Phase B integration test exercises the SAME SC-18-style scenarios
+      against the post-Phase-B build and proves the bugs are structurally fixed.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-048-phase-b-integration-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Depends on tasks 032, 033 (action migrations), 034, 035 (pre-fill migrations + BEFORE baselines), 040, 041 (widget array + object dispatch), 042 (CapabilityRouter dedup).</item>
+      <item>Gates task 049 (Phase B exit-gate validation).</item>
+      <item>R5 SC-18 walkthrough is the methodology baseline.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: STANDARD
+      📋 REASON: Integration test composition; tags include `integration-test`
+      📖 PROTOCOL STEPS: 8 steps; Step 9.5 quality gates SKIPPED per STANDARD rigor
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress + Confirm Prerequisites">
+      Read TASK-INDEX.md; confirm 048 status 🔲; deps (042, 034, 035) complete. Read
+      task 034 + 035 pre-fill regression test BEFORE baselines; confirm they exist.
+    </step>
+    <step order="2" name="Scenario 1: TL;DR Rendering">
+      Open SpaarkeAi workspace shell against a test matter. Trigger
+      `summarize-document-for-workspace@v1` against a deterministic test document.
+      Wait for `streaming_complete`. Capture screenshot of `tldr` field rendering.
+      Verify: rendered DOM uses semantic `<ul>` with multiple `<li>` children; no raw
+      JSON tokens visible; no console errors. Record in evidence notes.
+    </step>
+    <step order="3" name="Scenario 2: Entities Rendering">
+      Same invocation, but inspect `entities` field. Verify: rendered DOM uses labeled
+      sections (Organizations, Persons) with nested bulleted lists; no raw JSON object
+      literal visible. Record screenshot + evidence.
+    </step>
+    <step order="4" name="Scenario 3: Duplicate-Fire Elimination">
+      In chat, type `/summarize` (slash form). Verify: ONE rendered output. Inspect
+      server logs to confirm: ONE LLM call, ONE playbook execution, ONE DeliverOutput,
+      ONE render. Repeat for natural-language form ("summarize this document"). Verify
+      same single-render behavior. Record server log excerpts (tool names + decisions
+      + timestamps ONLY per ADR-015 — no user message text).
+    </step>
+    <step order="5" name="Scenario 4: Matter Pre-Fill Regression">
+      Run end-to-end pre-fill on the SAME test matter document used in task 034 BEFORE
+      baseline. Capture AFTER values: wizard fields populated + per-field values +
+      end-to-end latency. Diff against task 034 AFTER baseline (which was already
+      verified at task-034 close). Verify ZERO drift since task 034 close. Record
+      evidence.
+    </step>
+    <step order="6" name="Scenario 5: Project Pre-Fill Regression">
+      Run end-to-end pre-fill on the SAME test project document used in task 035
+      BEFORE baseline. Capture AFTER values. Diff against task 035 AFTER baseline.
+      Verify ZERO drift. Record evidence.
+    </step>
+    <step order="7" name="Scenario 6: Backward Compatibility">
+      Invoke an action whose row has NULL `sprk_outputschema` (e.g., a not-yet-migrated
+      action — verify via query). Confirm widget renders as today (string formatting).
+      No crash; no error. Record evidence.
+    </step>
+    <step order="8" name="Compose Phase B Integration Report + Complete">
+      Compose `notes/task-048-phase-b-integration-evidence.md`: pass/fail per scenario
+      with evidence references. Confirm BFF publish-size delta = 0 MB (no BFF code
+      changed by this task). If any scenario failed, document the issue + STOP for
+      escalation. Otherwise: update TASK-INDEX.md: 048 🔲 → ✅. Reset `current-task.md`.
+      Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Confirm BFF build current</tool>
+    <tool name="npm">Confirm widget build current</tool>
+    <tool name="git">Stage + commit evidence notes on R6 worktree branch</tool>
+    <tool name="ui-test">Optional: scripted UI test runs via Chrome integration</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-048-phase-b-integration-evidence.md (NEW — 6-scenario integration test report with evidence)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 048 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="report">Task completion report listing all 6 scenarios pass/fail</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Scenario 1 (TL;DR): `tldr: string[]` renders as semantic `<ul>` with `<li>` children; no raw JSON tokens; evidence screenshot captured.</criterion>
+    <criterion testable="true">Scenario 2 (Entities): `entities: { organizations, persons }` renders as labeled blocks with nested bulleted lists; no raw JSON object literal; evidence screenshot captured.</criterion>
+    <criterion testable="true">Scenario 3 (Dedup): typing `/summarize` produces ONE rendered output; server logs show ONE LLM call + ONE playbook execution + ONE DeliverOutput + ONE render. Both slash and natural-language entry paths verified.</criterion>
+    <criterion testable="true">Scenario 4 (Matter pre-fill): ZERO drift vs task 034 AFTER baseline; per-field wizard outputs identical; latency within ±10%; NFR-07 binding honored.</criterion>
+    <criterion testable="true">Scenario 5 (Project pre-fill): ZERO drift vs task 035 AFTER baseline; per-field wizard outputs identical; latency within ±10%; NFR-07 binding honored.</criterion>
+    <criterion testable="true">Scenario 6 (Backward compat): action with NULL `sprk_outputschema` renders as string (legacy); no crash; no error.</criterion>
+    <criterion testable="true">Evidence file `notes/task-048-phase-b-integration-evidence.md` exists with screenshot/log/diff references per scenario.</criterion>
+    <criterion testable="true">Server log excerpts captured per ADR-015 — tool names + decisions + timestamps ONLY; no user message text.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in evidence notes; no BFF code changed by this task).</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (048 🔲 → ✅) and `current-task.md` reset.</criterion>
+  </acceptance-criteria>
+</task>

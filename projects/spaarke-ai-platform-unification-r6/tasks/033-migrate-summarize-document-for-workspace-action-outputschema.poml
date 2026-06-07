@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B-04 Migrate `summarize-document-for-workspace@v1` action: populate outputSchema + node destination = workspace</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>030, 031</dependencies>
+    <blocks>040, 041, 048</blocks>
+    <tags>dataverse, seed, migration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data migration on existing production action; tags include `migration` (STANDARD per Step 3.5.5 decision tree); no code change; idempotency required.</rigor-reason>
+    <parallel-group>B-G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `sprk_analysisaction` row for `summarize-document-for-workspace@v1` + the matching playbook node. Sibling tasks 032/034/035 migrate different rows in parallel — no overlap.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Populate the new `outputSchema` field on the existing
+    `summarize-document-for-workspace@v1` `sprk_analysisaction` row, and set the playbook
+    node `destination = workspace` with `widgetType = StructuredOutputStreamWidget`. The
+    outputSchema is derived from the action's current `$choices`-constrained output
+    contract. R5 SC-18 surfaced the relevant rendering bugs for THIS action — the
+    workspace surface is where `tldr: string[]` and `entities: { orgs, persons }`
+    rendered as raw JSON. Declaring the schema here is the data foundation for tasks 040
+    (array → bullets) + 041 (object → labeled key-value blocks).
+
+    The migration script MUST be idempotent — guard with a GET before PATCH; if existing
+    `sprk_outputschema` is non-null AND matches, skip; if mismatches, FAIL loudly with a
+    conflict message. Same pattern for the node-level `destination = workspace` change.
+
+    No BFF code changes here. This task seeds data only. The downstream
+    `StructuredOutputStreamWidget` (tasks 040 + 041) reads the populated outputSchema at
+    render time and dispatches per-field-type formatting.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Familiar with the existing JPS pipeline + `$choices`
+    output contract for `summarize-document-for-workspace@v1`, the scope library schema,
+    the Dataverse Web API, and the `StructuredOutputStreamWidget` workspace surface.
+  </role>
+
+  <goal>
+    `sprk_analysisaction` row for action code `summarize-document-for-workspace@v1` has
+    `sprk_outputschema` populated with a valid JSON Schema document covering all output
+    fields (at minimum: `summary: string`, `tldr: string[]`, `entities: { organizations:
+    string[], persons: string[] }` per R5 SC-18 evidence). The playbook node referencing
+    this action has its `destination = workspace` and `widgetType =
+    StructuredOutputStreamWidget`. Migration script committed + idempotent + applied to
+    Spaarke Dev. Existing workspace summarization continues to render today's output
+    (regression-checked; the widget is not YET schema-aware — that lands in tasks 040 +
+    041).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="jps-guide">docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    <file purpose="r5-lessons">projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+    <file purpose="widget">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Dataverse data migration via Web API; idempotent; committed under `scripts/`.</constraint>
+    <constraint source="ADR-029">No BFF code modified; publish-size delta = 0 MB; confirm in task notes.</constraint>
+    <constraint source="spec FR-27">Q5 RE-SHAPED: `outputSchema` on the ACTION; `destination` + `widgetType` on the NODE.</constraint>
+    <constraint source="spec NFR-11">Backward compatibility — existing workspace summarization continues to render today's output during this task (schema declared but not yet consumed; widget update is task 040 + 041).</constraint>
+    <constraint source="project">outputSchema MUST cover the array-typed (`tldr`) and object-typed (`entities`) fields that R5 SC-18 surfaced as rendering bugs — these are the fields tasks 040 + 041 depend on for type dispatch.</constraint>
+    <constraint source="project">Migration script MUST be idempotent (guard with GET before PATCH).</constraint>
+    <constraint source="project">outputSchema MUST be a syntactically valid JSON Schema document (draft-07 or compatible).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Action row PATCH via Web API" location=".claude/patterns/dataverse/web-api-client.md">
+        Same guard pattern as task 032 — GET by alternate key; check null; PATCH on null
+        OR exact match; FAIL on mismatch.
+      </pattern>
+      <pattern name="R5 SC-18 bug evidence" location="projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md">
+        Gap C — "Schema-aware rendering implicit (string-only widget)". The `tldr:
+        string[]` rendered as raw JSON tokens; `entities` as raw JSON literal. The
+        outputSchema document for this action MUST include these field types correctly
+        typed so the widget can dispatch on them.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      `summarize-document-for-workspace@v1` is the workspace-side summarization action.
+      Its output renders in a workspace tab via `StructuredOutputStreamWidget`. R5 SC-18
+      showed the widget rendering raw streaming JSON for non-string fields (`tldr` array,
+      `entities` object) — Gap C in R5 lessons-learned. This task ships the data
+      foundation for the fix: an explicit JSON Schema declaration of what the action
+      produces, so the widget (tasks 040 + 041) can dispatch on field type.
+    </background>
+    <relevant-files>
+      <file>scripts/Migrate-SumWorkspaceActionOutputSchema.ps1 (NEW)</file>
+      <file>infra/dataverse/outputschemas/sum-workspace-v1.schema.json (NEW)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-033-migration-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Sibling tasks 032/034/035 migrate other actions in parallel (B-G2).</item>
+      <item>Tasks 040 + 041 update `StructuredOutputStreamWidget` to read THIS action's outputSchema and render array/object fields correctly.</item>
+      <item>R5 SC-18 walkthrough surfaced the rendering bugs this migration enables fixing.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: STANDARD
+      📋 REASON: Data migration on production action; idempotency required; no code change
+      📖 PROTOCOL STEPS: 8 steps; Step 9.5 quality gates SKIPPED per STANDARD rigor
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 033 status 🔲; deps (030, 031) complete.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Inspect the JPS source for SUM-WORKSPACE@v1 to find the
+      EXACT output field list. Read R5 lessons-learned Gap C in full.
+    </step>
+    <step order="3" name="Author the JSON Schema Document">
+      Create `infra/dataverse/outputschemas/sum-workspace-v1.schema.json`. Include:
+      - `summary: string`
+      - `tldr: array (items: string)`
+      - `entities: object` with nested `organizations: array(string)` + `persons:
+        array(string)`
+      - Any other fields the JPS source declares.
+      Validate against draft-07 meta-schema.
+    </step>
+    <step order="4" name="Author Migration Script">
+      Create `scripts/Migrate-SumWorkspaceActionOutputSchema.ps1`:
+      (a) GET action by alternate key `summarize-document-for-workspace@v1`;
+      (b) Guard + PATCH `sprk_outputschema`;
+      (c) GET playbook node referencing the action; PATCH `destination = workspace` and
+          `widgetType = StructuredOutputStreamWidget` per task 031 storage surface;
+      (d) Log all actions.
+    </step>
+    <step order="5" name="Apply to Spaarke Dev">
+      Run script. Capture output + post-migration row state.
+    </step>
+    <step order="6" name="Verify Idempotency">
+      Re-run; confirm no-op.
+    </step>
+    <step order="7" name="Regression Smoke Test">
+      Trigger the workspace summarization path against a test document. Confirm: output
+      renders to a workspace tab today (same as before; widget is not yet schema-aware).
+      Record evidence.
+    </step>
+    <step order="8" name="Confirm Acceptance + Complete">
+      Walk through acceptance criteria. Update TASK-INDEX.md: 033 🔲 → ✅. Reset
+      `current-task.md`. Report completion. Note BFF publish-size delta = 0 MB.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI</tool>
+    <tool name="pwsh">PowerShell 7+ for the migration script</tool>
+    <tool name="git">Stage + commit on R6 worktree branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/Migrate-SumWorkspaceActionOutputSchema.ps1 (NEW)</output>
+    <output type="schema">infra/dataverse/outputschemas/sum-workspace-v1.schema.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-033-migration-evidence.md (script output, before/after row state, idempotency evidence, regression smoke test)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 033 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="report">Task completion report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_analysisaction` row for `summarize-document-for-workspace@v1` has `sprk_outputschema` populated with a valid draft-07 JSON Schema covering at minimum `summary: string`, `tldr: array(string)`, and `entities: object` with `organizations + persons` array(string) members.</criterion>
+    <criterion testable="true">Playbook node referencing this action has `destination = workspace` AND `widgetType = StructuredOutputStreamWidget` per task 031's storage surface.</criterion>
+    <criterion testable="true">Migration script is idempotent (guard with GET before PATCH); second run succeeds with no-op; conflict mismatch FAILS loudly.</criterion>
+    <criterion testable="true">JSON Schema document validates against draft-07 meta-schema.</criterion>
+    <criterion testable="true">Regression smoke test: workspace summarization continues to render to a workspace tab today (same as before — widget update lands tasks 040 + 041).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes).</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (033 🔲 → ✅) and `current-task.md` reset.</criterion>
+  </acceptance-criteria>
+</task>

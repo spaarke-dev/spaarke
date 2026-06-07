@@ -1,0 +1,117 @@
+<task id="053" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-04 — Wire `WorkspaceStateService` into `SprkChatAgentFactory.CreateAgentAsync` per-turn snapshot</title>
+    <status>pending</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6a)</phase>
+    <wave>C-G1 (sequential; final 6a task — UNGATES 6b/6c/7/9)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>052 (workspace state endpoint)</dependencies>
+    <tags>bff-api, ai, chat, workspace</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies the chat agent factory (production hot path); adds workspace snapshot to system prompt; respects 8K NFR-10 budget; gates all of 6b/6c/7/9.</rigor-reason>
+    <parallel-group>C-G1</parallel-group>
+  </metadata>
+
+  <prompt>
+    Wire `IWorkspaceStateService` into `SprkChatAgentFactory.CreateAgentAsync` so every
+    turn includes a "Workspace State" block in the system prompt summarizing currently
+    open tabs that the user has marked visible to the assistant (`visibleToAssistant:
+    true`). The block per spec FR-34 reads e.g. "Tab 1 (active): Summary of foo.docx
+    (user-pinned); Tab 2: Document viewer for bar.pdf". Snapshot is built per-turn at
+    `CreateAgentAsync` time. MUST respect the existing 8K system-prompt budget (NFR-10);
+    use the shared token budget tracker (introduced later in task 068) — for now, this
+    task adds the block but flags the budget interaction in task notes. Pillar 9 (task
+    074) will refine by gathering each tab's `getAgentVisibleState()` output. This task
+    lays the structural wiring + a minimal text summary; task 074 makes it
+    schema-aware. MUST register the new dependency in existing module per ADR-010.
+  </prompt>
+
+  <role>
+    Senior AI-platform engineer with deep familiarity with `SprkChatAgentFactory` lifecycle
+    and the `PlaybookChatContextProvider` token budget contract.
+  </role>
+
+  <goal>
+    `SprkChatAgentFactory.CreateAgentAsync` queries `IWorkspaceStateService` per turn and
+    appends a concise "Workspace State" section to the system prompt for tabs where
+    `visibleToAssistant: true`. Respects 8K budget. Behavior with empty workspace is
+    no-op (no section appended). Integration test confirms agent prompt contains expected
+    workspace summary text.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="chat-architecture">docs/architecture/chat-architecture.md</file>
+    <file purpose="ai-arch">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="chat-factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="ctx-provider">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+    <file purpose="workspace-svc">src/server/api/Sprk.Bff.Api/Services/Workspace/IWorkspaceStateService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Inject `IWorkspaceStateService` via existing constructor pattern in factory; register in existing module. ZERO new Program.cs lines.</constraint>
+    <constraint source="ADR-013">`IWorkspaceStateService` is BFF-internal infrastructure (not AI Public Contracts); factory injection is acceptable within BFF.</constraint>
+    <constraint source="ADR-014">Service per-tenant cache key isolation enforced.</constraint>
+    <constraint source="ADR-015">Workspace State block in prompt is data-governance-safe (tab names + widget types + provenance); MUST NOT include raw user message text from prior turns into the workspace block.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="spec FR-34">Per-turn workspace snapshot included in system prompt as "Workspace State" block. Includes active tab indicator + user selection where present.</constraint>
+    <constraint source="spec NFR-10">8K system prompt budget preserved; truncate workspace section if it would exceed budget (log telemetry on truncation).</constraint>
+    <constraint source="spec NFR-13">Safety pipeline preserved; no middleware bypass.</constraint>
+    <constraint source="project R6 Pillar 6a binding">Task 053 is the gate that ungates 6b/6c/7/9. All four downstream sub-phases depend on this wiring landing first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-chat</topic>
+    <files>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Modifying chat agent factory (production hot path); gates all of 6b/6c/7/9."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX.md; confirm 050-052 complete.</step>
+    <step order="2" name="Gather Resources">Read SprkChatAgentFactory + PlaybookChatContextProvider in full; map system prompt assembly + budget tracking.</step>
+    <step order="3" name="Inject Service">Add `IWorkspaceStateService` to factory constructor; register module-wise per ADR-010.</step>
+    <step order="4" name="Implement Snapshot Builder">Add private method `BuildWorkspaceStateBlock(tabs)` returning concise text; truncate if section would push past 8K budget; emit telemetry on truncation.</step>
+    <step order="5" name="Wire into CreateAgentAsync">Insert call before final prompt assembly. No-op when no tabs visible.</step>
+    <step order="6" name="Tests">Unit test factory with mock workspace service: (a) empty workspace → no block; (b) populated workspace → expected text; (c) over-budget → truncation + telemetry. Integration test confirms full agent prompt.</step>
+    <step order="7" name="Publish-Size + CVE Verification">dotnet publish; vulnerable-package check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-010/013/014/015/029).</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 053 ✅; current-task → 054 (Pillar 6b/6c/7/9 NOW UNBLOCKED — main session may parallel-launch C-G2).</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish + vulnerable-package check</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (registration updated)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs (updated)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SprkChatAgentFactory.CreateAgentAsync` queries `IWorkspaceStateService` per turn.</criterion>
+    <criterion testable="true">"Workspace State" block appended to system prompt only when at least one tab has `visibleToAssistant: true`.</criterion>
+    <criterion testable="true">Empty workspace produces no block (no whitespace pollution).</criterion>
+    <criterion testable="true">8K budget respected; truncation emits telemetry.</criterion>
+    <criterion testable="true">No user message text from prior turns leaks into the workspace block (ADR-015).</criterion>
+    <criterion testable="true">ZERO new Program.cs lines; service registered in existing module.</criterion>
+    <criterion testable="true">Integration test confirms prompt contains expected workspace text.</criterion>
+    <criterion testable="true">Publish-size delta within budget; no HIGH-severity CVE.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

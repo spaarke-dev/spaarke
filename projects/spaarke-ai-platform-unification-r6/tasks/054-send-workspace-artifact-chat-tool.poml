@@ -1,0 +1,114 @@
+<task id="054" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-05 — `send_workspace_artifact` chat tool (registers as `sprk_analysistool` row)</title>
+    <status>pending</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6b)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>053 (workspace state wired into factory)</dependencies>
+    <tags>bff-api, ai, chat, workspace, tool-handler</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New chat tool registered via data-driven `sprk_analysistool` registry from Phase A; consumed by user affordances + LLM function-calling.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build the `send_workspace_artifact(content, widgetType, sourceProvenance?)` chat tool
+    as an `IToolHandler` implementation (uses the renamed interface from Phase A). On
+    invocation: creates a new `WorkspaceTab` via `WorkspaceStateService.UpsertTabAsync`,
+    sets `visibleToAssistant: true` (agent-created tabs default visible), sets
+    `sourceProvenance` to the agent context (model + playbook if invoked from one),
+    publishes a `workspace.tab_created` PaneEventBus event so the frontend tab strip
+    materializes the tab. Register the tool as a `sprk_analysistool` row with
+    `AvailableInContexts = "Chat"` + `JsonSchema` declaring `content: string`,
+    `widgetType: string` (Summary | DocumentViewer | Dashboard | Table). LLM sees the tool
+    via the `ToolHandlerToAIFunctionAdapter` from task 010. Tool name + decision +
+    timestamp emitted to telemetry per ADR-015 (no content body in trace).
+  </prompt>
+
+  <role>
+    Senior BFF engineer with deep familiarity with Pillar 2 tool handler infrastructure +
+    chat-context invocation pattern + workspace state model from Pillar 6a.
+  </role>
+
+  <goal>
+    `send_workspace_artifact` tool fully registered + discoverable + invocable from
+    chat. LLM-called invocation creates a workspace tab via state service. Frontend
+    receives `workspace.tab_created` event + materializes tab. Tool name + decision +
+    timestamp logged per ADR-015.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="chat-arch">docs/architecture/chat-architecture.md</file>
+    <file purpose="ai-arch">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="workspace-svc">src/server/api/Sprk.Bff.Api/Services/Workspace/IWorkspaceStateService.cs</file>
+    <file purpose="tool-handler-iface">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register in existing module per DI minimalism; auto-discovery via `IToolHandler` registry collection injection. ZERO new Program.cs lines.</constraint>
+    <constraint source="ADR-013">Tool is BFF-side; consumes `WorkspaceStateService` directly (BFF-internal); does NOT cross facade boundary inappropriately.</constraint>
+    <constraint source="ADR-015">Telemetry emits tool name + decision + timestamp ONLY. NEVER the artifact `content` body. Deterministic IDs (tabId, sessionId, matterId) acceptable.</constraint>
+    <constraint source="ADR-029">Verify publish-size delta; expect &lt;1 MB; total R6 budget ≤+5 MB.</constraint>
+    <constraint source="ADR-030">Publish `workspace.tab_created` on existing `workspace` channel; NO new channel. Additive event types only.</constraint>
+    <constraint source="spec FR-35">Tool creates new tab; registered as `sprk_analysistool` row with `AvailableInContexts ∋ "Chat"`.</constraint>
+    <constraint source="project R6 Pillar 6b">Tool builds on Phase A Pillar 2 infrastructure (`IToolHandler`, `ToolHandlerToAIFunctionAdapter`). Must use those primitives, NOT hardcode a parallel chat-tool class.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-chat-tools</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — New chat tool consuming workspace state service + emitting workspace events; ADR-015 telemetry-content gate critical."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 053 complete + Phase A Pillar 2 IToolHandler infra landed.</step>
+    <step order="2" name="Gather Resources">Read IAnalysisToolHandler + ChatInvocationContext + IToolHandler adapter + WorkspaceStateService API.</step>
+    <step order="3" name="Author Handler">Create `Services/Ai/Handlers/SendWorkspaceArtifactHandler.cs` implementing `IToolHandler`; constructor injects `IWorkspaceStateService` + telemetry sink + PaneEventBus publisher.</step>
+    <step order="4" name="Implement Logic">Validate inputs (content non-empty, widgetType in allowed enum); call `UpsertTabAsync`; emit `workspace.tab_created` event; emit telemetry (tool name + decision + timestamp ONLY).</step>
+    <step order="5" name="Seed Dataverse Row">Create `sprk_analysistool` row for send_workspace_artifact with `AvailableInContexts = "Chat"`, populated `JsonSchema`, `sprk_handlerclass` pointing at the new handler.</step>
+    <step order="6" name="Register Handler">Auto-discovery via collection injection; no manual DI add required if auto-registration pattern lands cleanly.</step>
+    <step order="7" name="Tests">Unit tests: input validation, tab creation, event publication, ADR-015 audit (verify telemetry does NOT include `content` body).</step>
+    <step order="8" name="Publish-Size + CVE Verification">dotnet publish; vulnerable-package check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-010/013/015/029/030). Explicit ADR-015 audit on telemetry emission point.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 054 ✅; current-task → next pending.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="pac">Seed `sprk_analysistool` row</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/SendWorkspaceArtifactHandler.cs (NEW)</output>
+    <output type="data">Dataverse row: `sprk_analysistool` for send_workspace_artifact</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/SendWorkspaceArtifactHandlerTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler implements `IToolHandler`; registered via auto-discovery.</criterion>
+    <criterion testable="true">`sprk_analysistool` row seeded with `AvailableInContexts = "Chat"` + valid `JsonSchema`.</criterion>
+    <criterion testable="true">LLM-invoked tool creates tab via `WorkspaceStateService` + publishes `workspace.tab_created`.</criterion>
+    <criterion testable="true">Telemetry contains tool name + decision + timestamp ONLY; no `content` body leak.</criterion>
+    <criterion testable="true">Input validation: empty content rejected; invalid widgetType rejected.</criterion>
+    <criterion testable="true">ZERO new Program.cs lines; ADR-030 4-channel preserved (no new channel).</criterion>
+    <criterion testable="true">Publish-size delta within budget; no HIGH-severity CVE.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

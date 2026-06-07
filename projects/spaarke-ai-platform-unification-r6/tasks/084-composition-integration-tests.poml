@@ -1,0 +1,124 @@
+<task id="084" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-D-05 Composition Integration Tests — `/summarize #engagement-letter.docx`, `/draft response to @opposing-counsel about #motion-to-dismiss`</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>081, 082, 083</dependencies>
+    <blocks>087</blocks>
+    <tags>frontend, integration-test, command-router</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration tests covering composition of command + references across the 3 parser components built in 081/082/083; no new code surface; STANDARD per task-create Step 0 rigor decision tree.</rigor-reason>
+    <parallel-group>D-G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Test-only task in its own test file; runs alongside 085 (`/help` UI) and 086 (natural-language regression).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build composition integration tests per spec FR-52: `/summarize #engagement-letter.docx`
+    (command + single reference) AND `/draft response to @opposing-counsel about #motion-to-dismiss`
+    (command + multiple references + interleaved text).
+
+    These are integration tests that exercise the full parse → resolve → decorate → send chain
+    across tasks 080 (parser), 081 (hard-slash executor — not used here, hard slashes don't compose
+    with references), 082 (soft-slash router), 083 (reference resolver). The test verifies the
+    BFF chat-endpoint payload includes: (a) correct command intent; (b) all references resolved
+    to canonical IDs; (c) intent metadata flows through to CapabilityRouter; (d) the agent
+    receives a coherent prompt with all resolved entities.
+
+    No new code surface — just tests. Place under
+    `src/solutions/SpaarkeAi/src/components/conversation/__tests__/composition.integration.test.ts`
+    or similar per the SpaarkeAi test convention.
+
+    NFR-11 binding: also include a regression test confirming that the same intent expressed in
+    natural language ("summarize the engagement letter") still works via the existing
+    CapabilityRouter path with no command intent set.
+
+    Frontend-only task; BFF publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Frontend integration-test engineer with familiarity with the SpaarkeAi conversation pane,
+    Pillar 8 components (080/081/082/083), and the BFF chat-endpoint payload schema.
+  </role>
+
+  <goal>
+    Composition test file exists; covers FR-52 examples; verifies parse → resolve → decorate →
+    send chain. All tests green. Documents the composition contract for future Pillar 8 extensions.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="command-router">src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts</file>
+    <file purpose="soft-slash-router">src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts</file>
+    <file purpose="reference-resolver">src/solutions/SpaarkeAi/src/components/conversation/ReferenceResolver.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-52">Composition works: `/summarize #engagement-letter.docx` AND `/draft response to @opposing-counsel about #motion-to-dismiss`.</constraint>
+    <constraint source="spec NFR-11">Backward compat — natural-language equivalent still works without command intent.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB (test-only task).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/integration-test-composition</topic>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Composition test shape" location="src/solutions/SpaarkeAi/src/components/conversation/__tests__/composition.integration.test.ts (new)">
+        Arrange: prep parser + soft-slash router + reference resolver + mocked BFF endpoints. Act: invoke parse → decorate → resolve → buildPayload. Assert: payload includes command intent + resolvedReferences[].
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context. Output: "🔒 RIGOR LEVEL: STANDARD — Integration tests for Pillar 8 composition; no new code surface". Read project CLAUDE.md.
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 084 status is 🔲, deps 081/082/083 are ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read CommandRouter.ts (080), SoftSlashRouter.ts (082), ReferenceResolver.ts (083). Identify the BFF chat-endpoint payload schema for mock fixtures.
+    </step>
+    <step order="3" name="Author Composition Test Suite">
+      Create `src/solutions/SpaarkeAi/src/components/conversation/__tests__/composition.integration.test.ts`. Tests: (a) `/summarize #engagement-letter.docx` → payload has `commandIntent: 'summarize'` + `resolvedReferences: [{type:'file', canonicalId:..., displayName:'engagement-letter.docx'}]`; (b) `/draft response to @opposing-counsel about #motion-to-dismiss` → payload has `commandIntent: 'draft'` + 2 resolvedReferences; (c) NFR-11 regression: "summarize the engagement letter" (natural language) → payload has `commandIntent: null`, references = [].
+    </step>
+    <step order="4" name="Build + Run Tests">
+      Run `npm install --legacy-peer-deps --no-audit --no-fund` + `npm run test` against the new test file. Confirm all tests green.
+    </step>
+    <step order="5" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below.
+    </step>
+    <step order="6" name="Document + Complete">
+      Update task POML status. Update TASK-INDEX.md: 084 🔲 → ✅. Reset `current-task.md`. Note BFF publish-size delta = 0 MB. Report completion + downstream unblock (087).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Frontend test runner</tool>
+    <tool name="git">Stage + commit composition test file</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/solutions/SpaarkeAi/src/components/conversation/__tests__/composition.integration.test.ts (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 084 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Composition test file exists and covers `/summarize #engagement-letter.docx`.</criterion>
+    <criterion testable="true">Test covers `/draft response to @opposing-counsel about #motion-to-dismiss` (multi-reference composition).</criterion>
+    <criterion testable="true">Test verifies BFF payload includes both commandIntent + resolvedReferences[].</criterion>
+    <criterion testable="true">NFR-11 regression: natural-language equivalent produces commandIntent: null + empty references.</criterion>
+    <criterion testable="true">All tests green via `npm run test`.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB.</criterion>
+  </acceptance-criteria>
+</task>

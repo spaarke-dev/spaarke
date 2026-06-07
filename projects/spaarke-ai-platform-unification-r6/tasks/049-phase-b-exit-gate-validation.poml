@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B-10 Phase B exit-gate validation (4 exit criteria from spec)</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>048</dependencies>
+    <blocks>none</blocks>
+    <tags>docs</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation gate — verifies + records that Phase B exit criteria are met from already-captured evidence. No code change. MINIMAL rigor per Step 3.5.5 decision tree.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase exit gate — sequentially after integration test (task 048).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Validate the 4 Phase B exit criteria from `spec.md` §Phase B Exit Criteria using
+    evidence already captured in task 048 + tasks 030-042 notes. This task is a
+    documentation gate: it does NOT re-run scenarios, it composes a Phase B exit-gate
+    report citing per-criterion evidence references. The 4 criteria are:
+
+    1. Workspace renderer handles array-typed (`tldr`) fields correctly (bulleted list,
+       not raw JSON).
+    2. Workspace renderer handles object-typed (`entities`) fields correctly (labeled
+       groups, not raw JSON literal).
+    3. `outputSchema` declared on action; destination/widgetType on node config (Q5
+       re-shape).
+    4. Duplicate-fire eliminated at CapabilityRouter (typing `/summarize` produces ONE
+       render).
+
+    For each criterion: cite evidence reference (e.g.,
+    `notes/task-048-phase-b-integration-evidence.md` scenario X; `task-040 widget
+    implementation evidence`; `task-042 dedup refactor evidence`). Record exit-gate
+    decision in `notes/phase-b-exit-gate-report.md`. If any criterion is not met based
+    on evidence: STOP, escalate, and do NOT mark Phase B exited.
+
+    Phase B exit gate requires user sign-off per CLAUDE.md Confirmation Triggers. After
+    composing the report, pause and present to user for explicit go/no-go to Phase C.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Comfortable composing crisp exit-gate reports from
+    already-captured evidence. No code work — pure documentation + escalation.
+  </role>
+
+  <goal>
+    `projects/spaarke-ai-platform-unification-r6/notes/phase-b-exit-gate-report.md`
+    exists with per-criterion verdict (PASS / FAIL / EVIDENCE-MISSING) and evidence
+    references. If all 4 criteria PASS: Phase B is exit-ready. User sign-off captured
+    (per CLAUDE.md Confirmation Triggers — phase exit gates require user sign-off).
+    TASK-INDEX.md updated. Project ready to begin Phase C (Tri-directional Workspace +
+    Memory + Visibility) once user approves.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="integration-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-048-phase-b-integration-evidence.md</file>
+    <file purpose="task-030">projects/spaarke-ai-platform-unification-r6/notes/task-030-schema-deployment-evidence.md</file>
+    <file purpose="task-031">projects/spaarke-ai-platform-unification-r6/notes/task-031-node-config-extension-evidence.md</file>
+    <file purpose="task-032">projects/spaarke-ai-platform-unification-r6/notes/task-032-migration-evidence.md</file>
+    <file purpose="task-033">projects/spaarke-ai-platform-unification-r6/notes/task-033-migration-evidence.md</file>
+    <file purpose="task-034">projects/spaarke-ai-platform-unification-r6/notes/task-034-prefill-regression-test.md</file>
+    <file purpose="task-035">projects/spaarke-ai-platform-unification-r6/notes/task-035-prefill-regression-test.md</file>
+    <file purpose="task-040">projects/spaarke-ai-platform-unification-r6/notes/task-040-widget-implementation-evidence.md</file>
+    <file purpose="task-041">projects/spaarke-ai-platform-unification-r6/notes/task-041-widget-object-dispatch-evidence.md</file>
+    <file purpose="task-042">projects/spaarke-ai-platform-unification-r6/notes/task-042-dedup-refactor-evidence.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">**Phase exit gate requires user sign-off per CLAUDE.md Confirmation Triggers.** Compose the report, then PAUSE for user go/no-go to Phase C.</constraint>
+    <constraint source="project">This is a documentation gate — no scenario re-execution; cite evidence references only.</constraint>
+    <constraint source="ADR-029">BFF publish-size — confirm cumulative R6 delta across Phase B is within ≤+5 MB R6 total budget per NFR-02. Report cumulative delta in exit-gate report.</constraint>
+    <constraint source="project">If any criterion FAILs or is EVIDENCE-MISSING: STOP, escalate, do NOT mark Phase B exited.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Phase exit-gate report" location="projects/">
+        Phase exit reports are concise markdown documents with per-criterion verdict +
+        evidence reference + concluding go/no-go recommendation.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase B closes the Pillar 5 work (schema-aware output) — a tight architectural
+      slice that fixes R5 SC-18 rendering bugs + duplicate-fire structurally. With
+      Phase B exited, Phase C (Pillar 6 + 7 + 9 — tri-directional workspace state +
+      memory + visibility) begins. Phase B exit is a CLAUDE.md Confirmation Trigger
+      requiring user sign-off.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/phase-b-exit-gate-report.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Task 048 produced the integration evidence this task consumes.</item>
+      <item>Tasks 030-042 produced per-task evidence references this task cites.</item>
+      <item>Phase A exit gate (Phase A task) is the pattern reference for this report's shape.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: MINIMAL
+      📋 REASON: Documentation gate; cites evidence; no code change
+      📖 PROTOCOL STEPS: 5 steps; Step 9.5 quality gates SKIPPED per MINIMAL rigor
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress + Gather Evidence">
+      Read TASK-INDEX.md; confirm 049 status 🔲; dep (048) complete. Read every file in
+      &lt;inputs&gt; — verify all referenced evidence files exist with substantive content.
+    </step>
+    <step order="2" name="Verify Exit Criteria Per Spec">
+      Open `spec.md` § Phase B Exit Criteria. Per criterion:
+      (1) Array-typed (`tldr`) handled correctly — cite task 040 evidence + task 048
+          Scenario 1.
+      (2) Object-typed (`entities`) handled correctly — cite task 041 evidence + task 048
+          Scenario 2.
+      (3) `outputSchema` on action + destination/widgetType on node config — cite tasks
+          030, 031, 032, 033, 034, 035 evidence.
+      (4) Duplicate-fire eliminated at CapabilityRouter — cite task 042 evidence + task
+          048 Scenario 3.
+
+      Also verify: cumulative BFF publish-size delta across Phase B is within ≤+5 MB R6
+      total budget per NFR-02 — sum task-by-task deltas from notes.
+    </step>
+    <step order="3" name="Verify NFR-07 Pre-Fill Regression">
+      Confirm tasks 034 + 035 evidence shows ZERO drift in per-field wizard output
+      values vs BEFORE baselines (NFR-07 binding). Cite task 048 Scenarios 4 + 5 for
+      end-to-end re-verification.
+    </step>
+    <step order="4" name="Compose Phase B Exit-Gate Report">
+      Create `notes/phase-b-exit-gate-report.md`:
+      - Phase B exit criteria summary (per-criterion PASS / FAIL / EVIDENCE-MISSING + reference)
+      - Cumulative BFF publish-size delta vs budget
+      - NFR-07 pre-fill binding confirmation
+      - R5 Gap A structural fix confirmation
+      - Concluding recommendation: GO / NO-GO to Phase C
+      - Outstanding risks (if any)
+
+      If any FAIL or EVIDENCE-MISSING: stop here; escalate to user.
+    </step>
+    <step order="5" name="User Sign-Off + Complete">
+      Present the report to the user. PAUSE for explicit go/no-go decision per CLAUDE.md
+      Confirmation Triggers. On GO: update TASK-INDEX.md: 049 🔲 → ✅; reset
+      `current-task.md` to the first pending Phase C task. On NO-GO: keep 049 in
+      progress; address blockers per user direction.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Stage + commit the exit-gate report on R6 worktree branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/notes/phase-b-exit-gate-report.md (NEW — per-criterion verdict + evidence + go/no-go)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 049 🔲 → ✅; Phase B summary row marked complete)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset to first pending Phase C task)</output>
+    <output type="report">Task completion report citing user sign-off</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/phase-b-exit-gate-report.md` exists with per-criterion verdict (4 criteria) + evidence reference + cumulative BFF size delta + NFR-07 confirmation + R5 Gap A confirmation + go/no-go recommendation.</criterion>
+    <criterion testable="true">All 4 Phase B exit criteria verdict = PASS (citing task 040 + 041 + 042 + 048 evidence; tasks 030-035 supporting).</criterion>
+    <criterion testable="true">Cumulative BFF publish-size delta across Phase B reported and within ≤+5 MB R6 total budget per NFR-02.</criterion>
+    <criterion testable="true">NFR-07 pre-fill binding confirmed honored via task 048 Scenarios 4 + 5 evidence.</criterion>
+    <criterion testable="true">R5 Gap A (path A vs path B parallelism is a smell) structurally fixed via task 042 + task 048 Scenario 3 evidence.</criterion>
+    <criterion testable="true">User explicitly approved go-to-Phase-C per CLAUDE.md Confirmation Triggers (or NO-GO blockers documented and addressed).</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (049 🔲 → ✅; Phase B summary marked complete) and `current-task.md` reset to first pending Phase C task.</criterion>
+  </acceptance-criteria>
+</task>

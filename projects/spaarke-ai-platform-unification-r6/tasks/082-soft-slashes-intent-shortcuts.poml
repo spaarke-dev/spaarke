@@ -1,0 +1,188 @@
+<task id="082" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-D-03 Soft Slashes — `/summarize`, `/draft`, `/extract-entities`, `/analyze` (intent shortcuts via agent)</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>080</dependencies>
+    <blocks>084</blocks>
+    <tags>frontend, react, ai-widgets, ai, command-router</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Soft slashes route through the agent and influence the LLM's intent classification; touch CapabilityRouter interaction; spec FR-50 binding; Phase D exit criterion 3 binding.</rigor-reason>
+    <parallel-group>D-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SoftSlashRouter module is isolated; works alongside HardSlashExecutor (081) and ReferenceResolver (083) in disjoint files.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the 4 soft-slash commands per spec FR-50 + Q6: `/summarize`, `/draft`,
+    `/extract-entities`, `/analyze`. Soft slashes do NOT bypass the LLM — they ROUTE through
+    the agent with a prioritized intent signal so existing `CapabilityRouter` matches the
+    correct playbook / tool path on first try.
+
+    Build `SoftSlashRouter.ts` alongside `HardSlashExecutor.ts`. When `CommandRouter.parse()`
+    returns `isSoftSlash: true`, this router builds a structured intent prefix that the chat
+    agent's `CapabilityRouter` recognizes as a strong intent (matching `/summarize` → SUM-CHAT
+    playbook directly without natural-language classification).
+
+    Per-command semantics:
+    - `/summarize`: route to `invoke_playbook(playbookId: "summarize-document-for-chat@v1")` from
+      Pillar 3 + Pillar 4. Agent may ask clarifying questions if no `#<filename>` reference.
+    - `/draft`: set draft-intent flag; agent uses draft-mode tool list (existing
+      `TextRefinement` + `WorkingDocument` tools from Pillar 2).
+    - `/extract-entities`: route to `EntityExtractorHandler` tool from Pillar 2 Wave 2.
+    - `/analyze`: set general-analysis-intent flag; agent picks from analysis playbook list.
+
+    The router decorates the message sent to the BFF chat endpoint with a `commandIntent` metadata
+    field; CapabilityRouter Layer 1 (existing 3-tier system) reads this and pre-selects.
+    No new BFF endpoint. No new tool registration. NFR-11 binding: natural-language equivalents
+    still work; soft slashes are explicit shortcuts.
+
+    Frontend-only task; BFF publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Senior frontend engineer with familiarity with the BFF chat endpoint payload shape +
+    CapabilityRouter 3-tier classification. Comfortable with intent prefixing + structured
+    message metadata without altering the agent's conversational ability (NFR-01).
+  </role>
+
+  <goal>
+    Four soft-slash commands work end-to-end. `SoftSlashRouter.ts` decorates the chat message
+    payload with a `commandIntent` metadata field that the existing CapabilityRouter Layer 1
+    consumes for strong-intent routing. Each soft slash composes correctly with references
+    (e.g., `/summarize #file.docx` → invoke_playbook with file reference). Tests verify intent
+    prefix is set, agent still conversational (NFR-01), references composable.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="command-router">src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="ai-architecture">docs/architecture/AI-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-50">Soft slashes set strong intent signal; route to agent; agent may ask clarifying questions if intent is incomplete.</constraint>
+    <constraint source="spec Phase D exit criterion 3">Soft slashes route via agent with prioritized intent; verifiable by tracing a `/summarize` invocation through CapabilityRouter to the SUM-CHAT playbook.</constraint>
+    <constraint source="spec NFR-01">Conversational primacy preserved — soft slashes augment routing, agent remains conversational.</constraint>
+    <constraint source="spec NFR-11">Backward compat — natural language ("summarize this") still works; soft slash is the explicit shortcut.</constraint>
+    <constraint source="ADR-013">No new public-contract surface in `Services/Ai/PublicContracts/`. Soft slashes use existing Pillar 3 `IInvokePlaybookAi` facade transparently.</constraint>
+    <constraint source="ADR-015">Telemetry: command name + decision + timestamp only; no user message text.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB.</constraint>
+    <constraint source="project Pillar 8">Q6 vocabulary closed at exactly 4 soft slashes — do NOT add new ones.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/soft-slash-router</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Intent-metadata decoration" location="src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts (new)">
+        Export `decorateMessage(intent: Intent, message: ChatMessage): ChatMessage`. Adds `commandIntent: 'summarize' | 'draft' | 'extract-entities' | 'analyze'` metadata. BFF chat endpoint reads this in existing payload schema; CapabilityRouter Layer 1 consumes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. Output: "🔒 RIGOR LEVEL: FULL — 4 soft slashes routed via agent; spec FR-50 + Phase D exit criterion 3 binding".
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 082 status is 🔲, dep 080 is ✅. Update `current-task.md` to 082.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read CommandRouter.ts (task 080). Read chat-architecture.md + AI-ARCHITECTURE.md to identify the BFF chat-endpoint payload schema. Verify CapabilityRouter Layer 1 consumes a `commandIntent` field (extend Layer 1 if needed — minimal change; verify no new public-contract surface is added).
+    </step>
+    <step order="3" name="Author SoftSlashRouter">
+      Create `src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts`. Implement `decorateMessage(intent, message)` that sets `commandIntent`. Map each soft slash to its intent value. Telemetry per ADR-015.
+    </step>
+    <step order="4" name="Verify CapabilityRouter Recognizes commandIntent">
+      Confirm in BFF chat-endpoint code (`Services/Ai/Capabilities/CapabilityRouter.cs`) that Layer 1 already reads or can be minimally extended to consume `commandIntent`. If extension needed: add a single deterministic lookup in Layer 1 that pre-selects route. NO new public-contract surface; NO new DI registration.
+    </step>
+    <step order="5" name="Wire into ConversationPane">
+      In `ConversationPane.tsx`, when `intent.isSoftSlash === true`, call `SoftSlashRouter.decorateMessage(intent, message)` then send via existing path. Hard slashes (081) are intercepted before this branch; natural language flows through unchanged.
+    </step>
+    <step order="6" name="Composition with References">
+      Test composition: `/summarize #engagement-letter.docx` — intent has command + references[]. Verify BFF payload includes both. (Reference resolution itself is task 083.)
+    </step>
+    <step order="7" name="Build + Test + Verify Conversational Primacy">
+      Run build + test. Confirm `/draft summarize that for me` still gets a conversational response (NFR-01). Confirm typing without slash still routes via existing path (NFR-11).
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-013 (no new facade), ADR-015 (telemetry hygiene), NFR-01 + NFR-11. If CapabilityRouter extension touched BFF code: verify publish-size delta is &lt;100 KB and recorded. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status. Update TASK-INDEX.md: 082 🔲 → ✅. Reset `current-task.md`. Report completion + downstream unblock (084).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Frontend build + test runner</tool>
+    <tool name="dotnet">If CapabilityRouter Layer 1 minimally extended: build BFF + measure publish size</tool>
+    <tool name="git">Stage + commit SoftSlashRouter.ts + ConversationPane changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.test.ts (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (MODIFIED — branch on isSoftSlash)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs (POSSIBLY MODIFIED — minimal commandIntent lookup in Layer 1)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 082 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 soft slashes (`/summarize`, `/draft`, `/extract-entities`, `/analyze`) implemented in SoftSlashRouter.ts.</criterion>
+    <criterion testable="true">`SoftSlashRouter.decorateMessage()` sets `commandIntent` metadata on chat message payload; verified via test fixture.</criterion>
+    <criterion testable="true">BFF CapabilityRouter Layer 1 consumes `commandIntent` and pre-selects the correct route for each soft slash (integration test).</criterion>
+    <criterion testable="true">`/summarize #file.docx` composes correctly: intent has both command + reference; BFF payload includes both.</criterion>
+    <criterion testable="true">NFR-01 preserved: agent still conversational after a soft-slash invocation (follow-up message receives conversational response).</criterion>
+    <criterion testable="true">NFR-11 preserved: natural-language "summarize this" still works via existing CapabilityRouter.</criterion>
+    <criterion testable="true">Telemetry per ADR-015 — command name only, no user message text logged.</criterion>
+    <criterion testable="true">BFF publish-size delta &lt; 100 KB (recorded in task notes); if 0 KB even better.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Soft Slash Routes via Agent">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control&amp;controlName=spaarke_SpaarkeAi</url>
+      <steps>
+        <step>Open conversation pane</step>
+        <step>Type `/summarize` and submit</step>
+        <step>Observe agent invokes summarize playbook (Pillar 3 invoke_playbook tool fires)</step>
+        <step>Verify Context pane shows execution trace from playbook engine</step>
+      </steps>
+      <expected>Agent recognizes soft slash; routes to SUM-CHAT playbook; trace visible in Context pane</expected>
+    </test>
+    <test name="Conversational Primacy After Soft Slash (NFR-01)">
+      <steps>
+        <step>After a `/summarize` invocation completes</step>
+        <step>Type a follow-up: "make it shorter"</step>
+        <step>Verify agent responds conversationally (no tool call needed)</step>
+      </steps>
+      <expected>Refinement message received; agent stays conversational</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Trigger `/summarize` and observe response rendering</step>
+      </steps>
+      <expected>Response surfaces use Fluent v9 semantic tokens; no hardcoded colors</expected>
+    </test>
+  </ui-tests>
+</task>
