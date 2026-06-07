@@ -40,6 +40,19 @@ public sealed record RecordSearchRequest
     /// </summary>
     [JsonPropertyName("options")]
     public RecordSearchOptions? Options { get; init; }
+
+    /// <summary>
+    /// Optional explicit Azure AI Search index name to target for this request. When
+    /// provided (non-null and non-empty), the BFF resolver MUST use this index in place
+    /// of the Dataverse / appsettings fallback chain — subject to the allow-list in
+    /// <c>appsettings.AiSearch.AllowedIndexes</c>. When omitted (null or empty), the
+    /// existing 2-tier resolver chain (<c>sprk_aiknowledgedeployment</c> Dataverse entity
+    /// then <c>appsettings.AiSearch.KnowledgeIndexName</c>) is used unchanged.
+    /// JSON deserialization is forward-compatible: requests without this field continue
+    /// to work as today (FR-BFF-05, NFR-02).
+    /// </summary>
+    [JsonPropertyName("searchIndexName")]
+    public string? SearchIndexName { get; init; }
 }
 
 /// <summary>
