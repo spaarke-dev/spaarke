@@ -28,7 +28,7 @@
 | 025 | `CreateEventWizard` — verify + fix gap + set both fields (FR-WIZ-05) | A | ✅ | 020 | Group A1 | FULL |
 | 026 | DocumentUploadWizard — `resolveSearchIndexNameForRecord` chain (FR-WIZ-06) | A | ✅ | 020 | Group A2 | FULL |
 | 027 | DocumentUploadWizard — `DocumentRecordService.buildRecordPayload` updates (FR-WIZ-07) | A | ✅ | 026 | — | FULL |
-| 028 | INV-5 unit tests for all wizards (FR-WIZ-08) | A | 🔲 | 021, 022, 023, 024, 025, 027 | — | STANDARD |
+| 028 | INV-5 unit tests for all wizards (FR-WIZ-08) | A | ✅ | 021, 022, 023, 024, 025, 027 | — | STANDARD |
 | 029 | Wizard code-page deploy via `/code-page-deploy` (all 6) | A — Deploy | 🔲 | 028 | — | STANDARD |
 | 030 | PCF manifest — add `searchIndexName` bound property (FR-PCF-01) | D — PCF v1.1.74 | 🔲 | 018 | — | FULL |
 | 031 | PCF — `SemanticSearchApiService.search()` includes `searchIndexName` (FR-PCF-02) | D | 🔲 | 030 | Group D1 | FULL |
