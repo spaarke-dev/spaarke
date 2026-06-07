@@ -64,7 +64,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
             Configuration = entity.Configuration,
             OwnerType = ScopeOwnerType.System,
             IsImmutable = false,
-            AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts)
+            AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts),
+            JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger)
         };
 
         var mappingSource = !string.IsNullOrEmpty(entity.HandlerClass) ? "HandlerClass" : "GenericAnalysisHandler (fallback)";
@@ -94,7 +95,7 @@ public class AnalysisToolService : DataverseHttpServiceBase
 
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration,sprk_availableincontexts",
+            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration,sprk_availableincontexts,sprk_jsonschema",
             expandClause: "sprk_ToolTypeId($select=sprk_name)",
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
@@ -135,7 +136,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
                 Configuration = entity.Configuration,
                 OwnerType = ScopeOwnerType.System,
                 IsImmutable = false,
-                AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts)
+                AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts),
+                JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger)
             };
         }).ToArray();
 
@@ -414,6 +416,57 @@ public class AnalysisToolService : DataverseHttpServiceBase
         };
     }
 
+    /// <summary>
+    /// Map nullable raw Dataverse <c>sprk_jsonschema</c> Memo value to the DTO's
+    /// <see cref="AnalysisTool.JsonSchema"/> string. Validates that the value parses
+    /// as JSON (the DTO contract per FR-08 / task D-A-08) — malformed JSON is logged
+    /// and stored as <c>null</c> rather than silently passed to the LLM downstream
+    /// via <c>ToolHandlerToAIFunctionAdapter</c> (task D-A-10).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// FR-08 contract: nullable on the DTO (backward-compat with pre-R6 playbook-only
+    /// rows whose column is unpopulated). Required for chat-available tools — but
+    /// that requirement is enforced by the chat-side resolver (task 011), NOT by this
+    /// mapper, because the mapper must continue to work for playbook-only rows.
+    /// </para>
+    /// <para>
+    /// Validation scope: this method validates JSON well-formedness only (parsable by
+    /// <see cref="System.Text.Json.JsonDocument.Parse(string, System.Text.Json.JsonDocumentOptions)"/>).
+    /// It does NOT validate JSON Schema semantics (required keywords, type correctness) —
+    /// that's the adapter's responsibility per FR-08 separation-of-concerns.
+    /// </para>
+    /// <para>
+    /// Empty / whitespace-only strings are treated as null (no schema set on this row).
+    /// </para>
+    /// </remarks>
+    internal static string? MapJsonSchema(string? rawValue, Guid toolId, ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var _ = JsonDocument.Parse(rawValue);
+            return rawValue;
+        }
+        catch (JsonException ex)
+        {
+            // FR-08: never silently pass malformed JSON to the LLM via the adapter.
+            // Map to null and log so the chat resolver (task 011) can refuse to expose
+            // the tool with a clear diagnostic trail.
+            logger.LogWarning(
+                ex,
+                "[FR-08] sprk_jsonschema for tool {ToolId} is not valid JSON; mapping to null. " +
+                "Schema length={Length}",
+                toolId,
+                rawValue.Length);
+            return null;
+        }
+    }
+
     #endregion
 
     #region Private DTOs
@@ -446,6 +499,18 @@ public class AnalysisToolService : DataverseHttpServiceBase
         /// </summary>
         [JsonPropertyName("sprk_availableincontexts")]
         public int? AvailableInContexts { get; set; }
+
+        /// <summary>
+        /// JSON Schema document describing the tool's parameter shape for LLM
+        /// function-calling — R6 Pillar 2 (FR-08; D-A-08). Backed by the
+        /// <c>sprk_jsonschema</c> Memo (multi-line text, ~100 KB) attribute. Nullable
+        /// in flight for backward-compat with pre-R6 playbook-only rows; required for
+        /// chat-available tools (enforced at chat-side resolver per FR-08).
+        /// Validated as well-formed JSON by
+        /// <see cref="MapJsonSchema(string?, Guid, ILogger)"/> before reaching the DTO.
+        /// </summary>
+        [JsonPropertyName("sprk_jsonschema")]
+        public string? JsonSchema { get; set; }
     }
 
     internal class ToolTypeReference

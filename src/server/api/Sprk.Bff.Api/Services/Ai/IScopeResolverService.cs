@@ -760,6 +760,39 @@ public record AnalysisTool
     /// </para>
     /// </remarks>
     public ToolAvailabilityContext? AvailableInContexts { get; init; }
+
+    /// <summary>
+    /// JSON Schema document (Draft 2020-12 family) describing the tool's parameter shape
+    /// for LLM function-calling. Consumed by <c>ToolHandlerToAIFunctionAdapter</c>
+    /// (R6 Pillar 2, task D-A-10) to wrap an <see cref="IToolHandler"/> as a
+    /// <c>Microsoft.Extensions.AI.AIFunction</c>: the LLM sees this schema as the
+    /// function's parameter declaration.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in R6 Pillar 2 (task D-A-08, FR-08). Backed by the
+    /// <c>sprk_jsonschema</c> Memo (multi-line text, ~100 KB max) attribute on the
+    /// <c>sprk_analysistool</c> Dataverse entity.
+    /// </para>
+    /// <para>
+    /// <b>Nullability contract (FR-08)</b>: nullable on the DTO for backward-compat
+    /// with pre-R6 playbook-only tool rows whose column is unpopulated. REQUIRED for
+    /// chat-available tools (rows with <see cref="AvailableInContexts"/> ∋
+    /// <see cref="ToolAvailabilityContext.Chat"/> or <see cref="ToolAvailabilityContext.Both"/>).
+    /// The "required-for-chat" rule is enforced by the chat-side resolver
+    /// (task 011) — not by this DTO contract — because the DTO must remain assignable
+    /// from playbook-only Dataverse rows. Migrating chat tools (task 012) populates this
+    /// field for the 10 migrated tools.
+    /// </para>
+    /// <para>
+    /// <b>Validation contract (FR-08)</b>: when non-null, the string MUST parse as
+    /// valid JSON. The DTO does NOT validate JSON Schema semantics (e.g., required
+    /// keywords, type correctness) — that's the adapter's responsibility (task 010).
+    /// The mapper logs malformed JSON and stores null rather than passing garbage
+    /// to the LLM (see <c>AnalysisToolService.MapJsonSchema</c>).
+    /// </para>
+    /// </remarks>
+    public string? JsonSchema { get; init; }
 }
 
 /// <summary>

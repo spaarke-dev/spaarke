@@ -2,7 +2,50 @@
   <metadata>
     <title>D-A-05 Wire `SprkChatAgentFactory.CreateAgentAsync` to Scope-Resolved Persona (Pillar 1)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Pillar 1 closeout: Replaced hardcoded `BuildDefaultSystemPrompt(null)` in
+      `PlaybookChatContextProvider.GetContextAsync` standalone-mode branch with
+      `_scopeResolver.ResolvePersonaForChatAsync(tenantId, playbookId, ct)`. The
+      factory's call chain (`SprkChatAgentFactory.CreateAgentAsync` →
+      `IChatContextProvider.GetContextAsync` → provider) now produces a
+      byte-identical system prompt when no tenant CUST- override exists (FR-04
+      binding via the seeded SYS-DEFAULT row from task 004).
+
+      Decision (smallest change to meet FR-04 per parent agent guidance): only
+      the standalone-mode branch (playbookId==null) was cut over to the resolver.
+      The named-playbook branches (lines 178/186) continue to call
+      `BuildDefaultSystemPrompt(playbookName)` because that text is runtime-dynamic
+      (interpolates playbook name). Wiring those to the playbook-attached persona
+      variant is out of scope for Pillar 1 closure.
+
+      Decision (legacy method retention): `BuildDefaultSystemPrompt()` is RETAINED
+      as a null-safety/exception fallback ONLY. When the resolver throws
+      `InvalidOperationException` (catastrophic SYS- seed-data failure per task
+      003's contract) OR returns null/empty (contract violation), the provider
+      emits a CRITICAL log and falls back to the legacy text to preserve chat
+      availability while loudly signaling the deployment gap. This satisfies
+      project CLAUDE.md "MUST NOT hardcode persona text" — the static text is
+      no longer the primary source; it's a deployment-failure safety net.
+
+      Files: 1 production (`PlaybookChatContextProvider.cs`), 1 new test file
+      (`SprkChatAgentFactoryPersonaTests.cs`, 4 tests). Build: 0 errors, 16
+      pre-existing warnings. Tests: 4/4 new + 35/35 existing PlaybookChatContextProvider
+      + 18/18 SprkChatAgentFactory + 92/92 related = all green. Publish-size
+      delta: +1,968 bytes (~0.002 MB) vs task-002 baseline (well under ≤+5 MB
+      R6 budget; 45.50 MB current vs 60 MB ceiling per NFR-02).
+
+      ADR/NFR compliance: ADR-010 (no new DI), ADR-013 (facade boundary
+      preserved — resolver is AI-internal), ADR-015 (no user message content
+      logged), ADR-029 (publish hygiene), NFR-01 (conversational primacy —
+      ChatContext shape unchanged by persona swap), NFR-10 (8K budget
+      unchanged), NFR-13 (safety pipeline untouched), FR-03 (most-specific-wins
+      via task 003 resolver), FR-04 (byte-identical with no override). All
+      verified via tests + manual code review.
+
+      Completion notes: `projects/spaarke-ai-platform-unification-r6/notes/task-005-completion.md`
+    </completion-notes>
     <estimated-effort>5 hours</estimated-effort>
     <dependencies>002, 003, 004</dependencies>
     <blocks>028</blocks>

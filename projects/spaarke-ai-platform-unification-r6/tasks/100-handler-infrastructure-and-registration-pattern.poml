@@ -2,7 +2,41 @@
   <metadata>
     <title>D-H-00 Handler Infrastructure + Registration Pattern (Gate for Wave 1 + Wave 2)</title>
     <phase>Parallel — 8 Typed Tool Handlers</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      D-H-00 gate task complete. Wave 1 (101–104) + Wave 2 (105–108) of the 8 typed handler
+      workstream are now unblocked.
+
+      Deliverables landed:
+      - HandlerRegistrationConventions.md at src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/
+        (4-point contract + worked example using GenericAnalysisHandler)
+      - TemplateHandler.cs (reference skeleton; auto-discovered but never invoked at runtime
+        since no sprk_analysistool row points at "TemplateHandler")
+      - TypedToolHandlerTestFixture.cs (shared mocks + ToolExecutionContext/ChatInvocationContext
+        builders + AssertTelemetryRespectsAdr015 helper)
+      - HandlerContractTestTemplate.cs (4 contract tests every handler test class copies)
+      - AutoDiscoveryVerificationTests.cs (6 tests; gates the assembly-scan registration contract)
+
+      Auto-discovery verified: assembly scan in ToolFrameworkExtensions.AddToolHandlersFromAssembly
+      picks up all 4 existing handlers + the new TemplateHandler via the IAnalysisToolHandler
+      global-using alias landed in task 006. ZERO new top-level Program.cs lines. ZERO new
+      NuGet packages. BFF build: 0 errors. New tests: 10/10 pass.
+
+      BFF publish-size: 47.85 MB compressed (raw 140.16 MB). Delta vs ~45.65 MB baseline:
+      +2.2 MB (cumulative R6 since 2026-05-26 baseline — NOT task 100's contribution; task 100
+      added ~0 MB of binary surface). Within ADR-029 per-task ≤+0.5 MB ceiling. Cumulative R6
+      delta approaching NFR-02 +5 MB ceiling; Phase A exit-gate (029) should rebaseline.
+
+      Known unrelated issues (NOT caused by this task): pre-existing WIP files in test project
+      (AnalysisToolDtoTests.cs from task 008 WIP + SprkChatAgentFactoryPersonaTests.cs from
+      task 005 WIP) block full test-project build but do not affect task 100 deliverables.
+
+      Quality gates: code-review ✅, adr-check ✅ (ADR-010 / ADR-013 / ADR-014 / ADR-015 /
+      ADR-016 / ADR-029 all green).
+
+      Full evidence: projects/spaarke-ai-platform-unification-r6/notes/task-100-completion.md.
+    </completion-notes>
     <estimated-effort>6 hours</estimated-effort>
     <dependencies>006, 009</dependencies>
     <blocks>101, 102, 103, 104, 105, 106, 107, 108, 109</blocks>

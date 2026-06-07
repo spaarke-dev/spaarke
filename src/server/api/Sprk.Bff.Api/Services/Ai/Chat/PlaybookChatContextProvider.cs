@@ -88,7 +88,61 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 "No playbook specified for document {DocumentId}; using generic chat context",
                 documentId);
 
-            var defaultPrompt = BuildDefaultSystemPrompt(null);
+            // R6 Pillar 1 (task 005, D-A-05): data-driven persona resolution replaces the
+            // hardcoded BuildDefaultSystemPrompt(null) call site. The resolver returns the
+            // most-specific-wins persona (global SYS- < tenant CUST- < playbook-attached per
+            // FR-03 / Q1). With no tenant CUST- override and no playbook bound, the seeded
+            // SYS-DEFAULT row (task 004, sprk_aipersonaid=4fe49430-aa62-f111-ab0c-70a8a58ae145
+            // on Spaarke Dev) returns the byte-identical text the legacy BuildDefaultSystemPrompt(null)
+            // produced — preserving today's behavior per FR-04 binding.
+            //
+            // NFR-01 binding: persona augments the LLM but never replaces conversational
+            // ability. The returned SystemPrompt is composed verbatim as the prompt opening;
+            // the safety pipeline + memory + capability routing layers remain unchanged.
+            //
+            // Failure mode: when the resolver throws InvalidOperationException (catastrophic
+            // SYS- seed-data failure per task 003's contract), we fall back to the legacy
+            // hardcoded text exactly once with a CRITICAL log so operators see the seed gap
+            // immediately. This is a defense-in-depth null-safety assertion — production
+            // deployments MUST keep the SYS-DEFAULT row seeded (task 004 owns the seed).
+            string defaultPrompt;
+            try
+            {
+                var persona = await _scopeResolver.ResolvePersonaForChatAsync(
+                    tenantId, playbookId, cancellationToken);
+
+                // Defense-in-depth: contract for ResolvePersonaForChatAsync is to throw
+                // InvalidOperationException on missing SYS-DEFAULT (catastrophic seed failure
+                // per task 003). A null return is contract-violating but possible (test doubles,
+                // mocks, fault injection). Treat null and missing SystemPrompt the same way as
+                // the exception path — fall back to legacy text + CRITICAL log.
+                if (persona is null || string.IsNullOrEmpty(persona.SystemPrompt))
+                {
+                    _logger.LogCritical(
+                        "R6 Pillar 1 persona resolver returned null/empty for tenant {TenantId} — " +
+                        "contract violation (expected InvalidOperationException). Falling back to " +
+                        "legacy hardcoded prompt to preserve chat availability. Operator action " +
+                        "required: verify task 004 SYS-DEFAULT row is seeded.",
+                        tenantId);
+                    defaultPrompt = BuildDefaultSystemPrompt(null);
+                }
+                else
+                {
+                    defaultPrompt = persona.SystemPrompt;
+                    _logger.LogDebug(
+                        "Resolved standalone-mode persona '{Name}' (scope={ScopeType}) for tenant {TenantId}",
+                        persona.Name, persona.ScopeType, tenantId);
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogCritical(ex,
+                    "R6 Pillar 1 persona resolver returned no SYS- default for tenant {TenantId} — " +
+                    "catastrophic seed-data failure. Falling back to legacy hardcoded prompt to " +
+                    "preserve chat availability. Operator action required: deploy task 004 SYS-DEFAULT row.",
+                    tenantId);
+                defaultPrompt = BuildDefaultSystemPrompt(null);
+            }
 
             // 6. Append entity metadata enrichment (generic mode)
             defaultPrompt = AppendEntityEnrichment(defaultPrompt, hostContext);

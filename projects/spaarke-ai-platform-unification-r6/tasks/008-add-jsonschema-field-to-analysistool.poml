@@ -2,7 +2,42 @@
   <metadata>
     <title>D-A-08 Add `JsonSchema` Field to `AnalysisTool` DTO + Dataverse Column (Pillar 2)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      DTO field `JsonSchema` (nullable string) added to `AnalysisTool` record in `IScopeResolverService.cs`
+      with FR-08 contract documented (nullable for playbook-only; required-for-chat enforced at chat-side
+      resolver per task 011 — NOT at DTO level so playbook-only rows remain assignable; validation scope
+      is well-formedness only — adapter at task 010 handles JSON Schema semantic validation).
+
+      `AnalysisToolService.MapJsonSchema(string?, Guid, ILogger)` added — mirrors `MapAvailableInContexts`
+      shape from task 007. Validates well-formedness via `JsonDocument.Parse`; logs + maps to null on
+      malformed JSON (never silently passes garbage to the LLM downstream per FR-08). `ToolEntity.JsonSchema`
+      field added; `$select` clause in `ListToolsAsync` extended to include `sprk_jsonschema`; both
+      `GetToolAsync` + `ListToolsAsync` map the new field.
+
+      Dataverse column `sprk_jsonschema` deployed to Spaarke Dev: Memo (multi-line text), nullable,
+      MaxLength 100000 (~100 KB) — matches canonical Spaarke convention for system-prompt-shape columns
+      (`sprk_systemprompt` on `sprk_aipersona`). 5 existing tool rows verified NULL post-deploy
+      (backward-compat invariant holds). Idempotent PowerShell script
+      `scripts/Add-AnalysisToolJsonSchema.ps1` (DryRun-tested, re-run verified no-op).
+
+      Tests: 11 new unit tests in `AnalysisToolDtoTests.cs` (40 total in file; 40/40 pass). Covers:
+      DTO default null, round-trip with populated/null schema, `with`-expression preservation, mapper
+      null/whitespace/valid/various-JSON-shapes/malformed/large-schema. Full Sprk.Bff.Api.Tests suite:
+      6176 pass, 109 skipped, 1 flaky (`R5SummarizeTelemetryTests.BothInvocationPaths_RecordViaSameCounter`
+      — passes in isolation; verified independent of task 008 via stash test on clean master).
+
+      Build: 0 errors, 16 warnings (same as baseline; all pre-existing in unrelated files).
+      Publish-size delta: +0.004 MB (3,748 bytes), well below +1 MB report threshold and R6 +5 MB budget.
+      Baseline 137.821 MB → 137.824 MB uncompressed.
+
+      Quality gates: code-review PASS (0 critical, 0 warnings, 2 forward-looking suggestions for tasks
+      010 + 012); adr-check PASS (ADR-010 / ADR-013 / ADR-027 / ADR-029 + BFF §10 §A all green).
+
+      No PublicContracts changes (ADR-013 Zone A boundary preserved). No new DI registrations (ADR-010).
+      No new feature flags (ADR-018). No new ADRs (NFR-03). No Microsoft Agent Framework refs (NFR-04).
+    </completion-notes>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>006, 007</dependencies>
     <blocks>010</blocks>
