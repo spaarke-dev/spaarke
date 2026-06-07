@@ -2,8 +2,12 @@
   <metadata>
     <title>D-A-06 Rename `IAnalysisToolHandler` → `IToolHandler` with Type Alias (Pillar 2)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Rename done via git mv (history preserved). Type alias `IAnalysisToolHandler = IToolHandler` added via `GlobalUsings.cs` in BOTH `Sprk.Bff.Api` AND `Sprk.Bff.Api.Tests` (alias does not cross assembly boundary). 16 production callsites + 5 test files compile unchanged via alias. Build clean (0 errors, 0 warnings). 2908 tests passing (0 failed). BFF publish-size delta = 0 MB. Quality gates: code-review ✅ PASS (0 critical/0 warning/1 informational suggestion); adr-check ✅ PASS (ADR-010, ADR-013, ADR-029 all green; others N/A). Unblocks tasks 007, 008, 009, 010 (Phase A Pillar 2) + 100 (handler infra gate).
+    </completion-notes>
     <dependencies>none</dependencies>
     <blocks>007, 008, 009</blocks>
     <tags>bff-api, refactoring, ai</tags>

@@ -1,10 +1,17 @@
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
-/// Interface for analysis tool handlers in the extensible AI tool framework.
-/// Implementations process specific analysis tasks (entity extraction, clause analysis, etc.).
+/// Interface for tool handlers in the extensible AI tool framework.
+/// Implementations process specific tasks across both playbook orchestration and chat-driven
+/// invocation (entity extraction, clause analysis, semantic search, etc.).
 /// </summary>
 /// <remarks>
+/// <para>
+/// Renamed from <c>IAnalysisToolHandler</c> in R6 Pillar 2 (task D-A-06, FR-06) to reflect
+/// cross-context use. A <c>global using IAnalysisToolHandler = IToolHandler;</c> alias in
+/// <c>GlobalUsings.cs</c> preserves source compatibility — existing implementations and
+/// consumers continue to reference the old name without per-file edits.
+/// </para>
 /// <para>
 /// Tool handlers are loaded dynamically based on the HandlerClass property
 /// in the AnalysisTool Dataverse entity. Each handler must:
@@ -19,7 +26,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// See ADR-013 for AI architecture patterns.
 /// </para>
 /// </remarks>
-public interface IAnalysisToolHandler
+public interface IToolHandler
 {
     /// <summary>
     /// Gets the unique identifier for this tool handler type.

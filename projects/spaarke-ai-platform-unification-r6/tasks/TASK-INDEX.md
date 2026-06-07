@@ -40,12 +40,12 @@
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 001 | A-G0 | Create `sprk_aipersona` Dataverse entity (D-A-01) | 🔲 | FULL | true | none |
+| 001 | A-G0 | Create `sprk_aipersona` Dataverse entity (D-A-01) | ✅ | FULL | true | none |
 | 002 | A-G1 | `GET /api/ai/scopes/personas` endpoint (D-A-02) | 🔲 | FULL | true | 001 |
 | 003 | A-G1 | Persona resolver methods in `IScopeResolverService` (D-A-03) | 🔲 | FULL | true | 001 |
 | 004 | A-G1 | Seed default SYS- persona row (D-A-04) | 🔲 | STANDARD | true | 001 |
 | 005 | A-G2 | Wire `SprkChatAgentFactory.CreateAgentAsync` to scope persona (D-A-05) | 🔲 | FULL | false | 002, 003, 004 |
-| 006 | A-G0' | Rename `IAnalysisToolHandler` → `IToolHandler` (D-A-06) | 🔲 | FULL | true | none |
+| 006 | A-G0' | Rename `IAnalysisToolHandler` → `IToolHandler` (D-A-06) | ✅ | FULL | true | none |
 | 007 | A-G3 | Add `AvailableInContexts` enum + Dataverse column (D-A-07) | 🔲 | FULL | true | 006 |
 | 008 | A-G3 | Add `JsonSchema` field to `AnalysisTool` DTO + Dataverse column (D-A-08) | 🔲 | FULL | false (same DTO as 007) | 006, 007 |
 | 009 | A-G3 | Split execution context (Tool/ChatInvocation) (D-A-09) | 🔲 | FULL | true | 006 |

@@ -10,18 +10,20 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (project just initialized) |
+| **Task** | 002 - D-A-02 Add `GET /api/ai/scopes/personas` BFF Endpoint (Pillar 1) |
 | **Step** | — |
-| **Status** | none |
-| **Next Action** | Run task-create (Step 3 of project-pipeline) to decompose plan.md into POML task files. After task-create completes, the first pending task in TASK-INDEX.md becomes the next active task. |
+| **Status** | not-started |
+| **Next Action** | Begin Step 1 of task 002. Task 001 (sprk_aipersona entity) complete + deployed. Tasks 002, 003, 004 now unblocked (Wave A-G1). Task 002 can run in parallel with 003 and 004. |
 
 ### Files Modified This Session
 
-(none — project just initialized via /project-pipeline; artifacts generated)
+(reset for next task)
 
 ### Critical Context
 
-R6 is a 9-pillar architecture convergence project decomposed into 4 phases + 1 parallel handler workstream. Q1–Q11 + sequencing decisions resolved upfront 2026-06-07 (see CLAUDE.md "R6 Binding Decisions"). Worktree already exists at `work/spaarke-ai-platform-unification-r6`. Pre-flight confirmed clean. Next step is generating ~80 POML task files via task-create.
+Task 001 complete 2026-06-07. `sprk_aipersona` entity deployed to Spaarke Dev with full canonical schema (sprk_name primary, sprk_personacode, sprk_description, sprk_systemprompt, sprk_scopetype CHOICE NOT NULL, sprk_tags, sprk_availableadhoc, sprk_parentpersonaid self-lookup). Quality gates PASS (code-review + adr-check both clean). BFF publish-size delta = 0 MB. Downstream tasks 002/003/004 unblocked.
+
+Next task (002) adds the `GET /api/ai/scopes/personas` BFF endpoint mirroring existing scope endpoints in `ScopeEndpoints.cs`. Uses `bff-api` + `endpoints` + `scope` + `ai` tags — FULL rigor; will require BFF publish-size verification per CLAUDE.md §10.
 
 ---
 
@@ -29,11 +31,11 @@ R6 is a 9-pillar architecture convergence project decomposed into 4 phases + 1 p
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
+| **Task ID** | 002 |
+| **Task File** | tasks/002-add-personas-bff-endpoint.poml |
+| **Title** | D-A-02 Add `GET /api/ai/scopes/personas` BFF Endpoint (Pillar 1) |
+| **Phase** | Phase A — Data-driven Foundation |
+| **Status** | not-started |
 | **Started** | — |
 
 ---
@@ -42,45 +44,27 @@ R6 is a 9-pillar architecture convergence project decomposed into 4 phases + 1 p
 
 ### Completed Steps
 
-*No tasks started yet.*
+*Task not yet started.*
 
 ### Current Step
 
-*No active step.*
+*Task not yet started.*
 
 ### Files Modified (All Task)
 
-*No tasks started yet.*
+*Task not yet started.*
 
 ### Decisions Made
 
-- **2026-06-07**: Q1–Q11 + sequencing decisions resolved during /project-pipeline kickoff (see CLAUDE.md §R6 Binding Decisions and plan.md §2 for full table). Includes Q5 reshape (outputSchema on action, destination on node config, widget schema-aware, dedup at CapabilityRouter), Q7 expansion (full Memory Management UI in R6), Q9 batch migration (10 chat tools in single task), Pillar 6 split (6a/6b/6c), handler order (Wave 1 deterministic → Wave 2 LLM).
+*Task not yet started.*
 
 ---
 
 ## Next Action
 
-**Next Step**: Run task-create (Step 3 of project-pipeline) — decompose plan.md into ~80 POML task files numbered 001–029 (Phase A), 030–049 (Phase B), 050–079 (Phase C), 080–089 (Phase D), 100–109 (handler workstream), 090 (wrap-up). Generate TASK-INDEX.md with parallel execution groups + critical path + pillar interaction matrix.
+**Next Step**: Begin Step 1 of task 002 — execute via `task-execute` skill with file path `projects/spaarke-ai-platform-unification-r6/tasks/002-add-personas-bff-endpoint.poml`.
 
-**Pre-conditions**:
-- README.md, plan.md, CLAUDE.md generated ✅
-- Folder structure created (tasks/, notes/{debug,spikes,drafts,handoffs}) ✅
-- Worktree on `work/spaarke-ai-platform-unification-r6` ✅
-- Master synced ✅
-- Q1–Q11 decisions baked into plan.md + CLAUDE.md ✅
-
-**Key Context**:
-- Refer to `plan.md` §4 Phase Breakdown for D-codes per phase
-- Refer to `plan.md` §9 Parallel Execution Opportunities for groups
-- Refer to `CLAUDE.md` "Per-Pillar Binding Rules" for per-task constraints
-- ADR-015 applies: trace events log tool name + decision + timestamp ONLY
-
-**Expected Output**:
-- ~80 POML task files in `tasks/`
-- `tasks/TASK-INDEX.md` with status legend, parallel groups, critical path, pillar interaction matrix
-- All task `<knowledge><files>` populated
-- All BFF-touching tasks include publish-size verification per CLAUDE.md §10
-- All Pillar 6c tasks include ADR-015 trace logging constraint
+**Parallel-safe with**: 003 (persona resolver), 004 (SYS- seed row). Wave A-G1 can run in parallel after 001 closes.
 
 ---
 
@@ -94,20 +78,21 @@ R6 is a 9-pillar architecture convergence project decomposed into 4 phases + 1 p
 
 ### Current Session
 - Started: 2026-06-07
-- Focus: /project-pipeline execution — Step 2 artifacts generated; Step 3 task decomposition next
+- Focus: Task 001 complete → ready for Wave A-G1 (002 + 003 + 004 in parallel)
 
-### Key Learnings
-- Q5 reshape (this session): Cleaner separation of action (intrinsic outputSchema) vs node config (per-playbook destination). Avoids action-destination coupling that would break reuse across playbooks.
-- Q7 expansion (this session): User chose full Memory Management UI in R6 instead of R7 deferral; Phase C +1–2 weeks accepted.
-- Q9 batch (this session): User chose all-10-at-once over incremental; demands comprehensive regression test + rollback plan; high single-task risk acknowledged.
+### Key Learnings (carry-forward from task 001)
+
+- **Idempotent script pattern works**: First-run transient "An unexpected error occurred" on second attribute (Dataverse entity propagation timing) is a known pattern per `dataverse-create-schema` skill. Re-running the idempotent script picks up cleanly. The `Test-EntityExists` / `Test-AttributeExists` / `Test-RelationshipExists` guards are mandatory for this pattern.
+- **Prefix enforcement lives in BFF**: The canonical 4-scope schema verified via MCP describe has NO Dataverse-side SYS-/CUST- enforcement; lives in `OwnershipValidator.cs` / `ScopeManagementService.cs`. New scope entities should follow the same pattern (schema only; API-side enforcement). Task 002 must wire `OwnershipValidator` for persona CRUD.
+- **MCP describe_table is the fastest post-deployment verification**: Returns full T-SQL schema in one call. Use it instead of multiple Web API calls.
+- **Canonical exemplar `Deploy-ChartDefinitionEntity.ps1`** matched 1:1 — saved ~30 mins of pattern discovery.
 
 ### Handoff Notes
 
 If a new session needs to pick up here:
-1. Read CLAUDE.md §R6 Binding Decisions for resolved Q1–Q11
-2. Read plan.md §4 Phase Breakdown for D-codes
-3. Run task-create to generate POML task files
-4. Then Step 3.5 artifacts review checkpoint with user before commit (Step 4)
+1. Read CLAUDE.md §R6 Binding Decisions for Q1–Q11
+2. Read task POML at `tasks/002-add-personas-bff-endpoint.poml`
+3. Run task-execute on task 002 (FULL rigor; BFF publish-size verification required per §10)
 
 ---
 
@@ -116,19 +101,19 @@ If a new session needs to pick up here:
 ### Project Context
 - **Project**: spaarke-ai-platform-unification-r6
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) (will be generated by task-create)
+- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
 
-### Applicable ADRs
-See [plan.md §2 Discovered Resources](plan.md) for full list. Highlights: ADR-013 (AI architecture + facade boundary), ADR-015 (trace data governance), ADR-029 (publish size), ADR-030 (PaneEventBus 4-channel), ADR-031 (4-stage shell).
+### Applicable ADRs (task 002)
 
-### Knowledge Files Loaded
-- [`spec.md`](spec.md)
-- [`design.md`](design.md)
-- [`plan.md`](plan.md)
-- [`README.md`](README.md)
-- [`CLAUDE.md`](CLAUDE.md)
-- Root [`CLAUDE.md`](../../CLAUDE.md)
-- R5 lessons-learned: [`../spaarke-ai-platform-unification-r5/notes/lessons-learned.md`](../spaarke-ai-platform-unification-r5/notes/lessons-learned.md)
+- **ADR-001** (Minimal API) — endpoint MUST be Minimal API style
+- **ADR-008** (Endpoint filters) — authorization via endpoint filter
+- **ADR-010** (DI minimalism) — register inside existing module
+- **ADR-013** (AI architecture / facade boundary) — endpoint sits in BFF (correct placement per §10 "Placement Justification")
+- **ADR-029** (BFF publish-size) — verify post-build delta
+
+### Recently Completed
+
+- ✅ **Task 001** (2026-06-07) — `sprk_aipersona` entity deployed to Spaarke Dev. Schema verified via MCP describe. Quality gates passed. See `tasks/001-create-sprk-aipersona-entity.poml` `<notes>` for full evidence.
 
 ---
 
@@ -137,14 +122,12 @@ See [plan.md §2 Discovered Resources](plan.md) for full list. Highlights: ADR-0
 **To recover context after compaction or new session:**
 
 1. Read "Quick Recovery" section above (< 30 seconds)
-2. If more context needed: read CLAUDE.md §R6 Binding Decisions and plan.md §4
-3. Load relevant task file: `tasks/{task-id}-*.poml` (after task-create runs)
-4. Resume from "Next Action" section
+2. Read task POML at `tasks/002-add-personas-bff-endpoint.poml`
+3. Resume from "Next Action"
 
 **Commands**:
 - `/project-continue` — full project context reload + master sync
 - `/context-handoff` — save current state before compaction
-- "where was I?" — quick context recovery
 
 **For full protocol**: see [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
 

@@ -2,7 +2,7 @@
   <metadata>
     <title>D-A-01 Create `sprk_aipersona` Dataverse Entity (Pillar 1 foundation)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6 hours</estimated-effort>
     <dependencies>none</dependencies>
     <blocks>002, 003, 004, 005</blocks>
@@ -158,4 +158,44 @@
     <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
     <criterion testable="true">Downstream tasks (002, 003, 004, 005) unblocked — TASK-INDEX updated.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completed-on>2026-06-07</completed-on>
+    <completion-summary>
+      `sprk_aipersona` entity deployed to Spaarke Dev (`spaarkedev1.crm.dynamics.com`) via new
+      `scripts/Create-AiPersonaEntity.ps1` (idempotent PowerShell deployment script following
+      `Deploy-ChartDefinitionEntity.ps1` exemplar pattern).
+
+      **Schema (MCP-verified via describe_table)**: `sprk_aipersona` collection `sprk_aipersonas`,
+      primary key `sprk_aipersonaid` GUID. Attributes: `sprk_name` (NVARCHAR(200) NOT NULL primary),
+      `sprk_personacode` (NVARCHAR(10)), `sprk_description` (MULTILINE TEXT), `sprk_systemprompt`
+      (MULTILINE TEXT), `sprk_scopetype` (CHOICE Global=100000000 / Tenant=100000001 /
+      PlaybookAttached=100000002, NOT NULL), `sprk_tags` (NVARCHAR(1000)), `sprk_availableadhoc`
+      (BIT), `sprk_parentpersonaid` (LOOKUP → sprk_aipersona self). Audit fields auto-added.
+
+      **Prefix enforcement**: API-side via existing `OwnershipValidator.cs` (matches canonical
+      4-scope pattern; verified via MCP describe — `sprk_analysisaction`/skill/knowledge/tool
+      have NO Dataverse-side enforcement; lives in BFF `ScopeManagementService.cs`). Task 002
+      will wire it.
+
+      **Deployment evidence**: First run created entity + sprk_personacode, then transient
+      "An unexpected error occurred" on sprk_description (known pattern per
+      dataverse-create-schema skill — entity propagation timing). Second run (idempotency
+      proven): skipped existing sprk_personacode; added remaining 5 attributes; created
+      self-lookup relationship; published customizations; smoke test PASSED (collection
+      endpoint reachable, 0 records).
+
+      **Quality gates**: code-review PASS (0 critical / 0 warning / 0 AI smells); adr-check
+      PASS (18 ADRs+NFRs compliant, 0 violations, 0 warnings). All ADR-027 / ADR-029
+      (0 MB delta) / ADR-018 / NFR-04 / NFR-07 / NFR-08 / NFR-14 honored.
+
+      **Downstream unblocked**: tasks 002 (persona endpoint), 003 (persona resolver methods
+      in IScopeResolverService), 004 (SYS- seed row), 005 (factory wiring) — all dependencies
+      satisfied.
+    </completion-summary>
+    <files-created>
+      <file>scripts/Create-AiPersonaEntity.ps1 (NEW — 537 lines, idempotent PS deployment script)</file>
+    </files-created>
+    <bff-publish-size-delta>0 MB (no BFF code changed)</bff-publish-size-delta>
+  </notes>
 </task>
