@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Wire `Tasks.ReadWrite` through `GraphClientFactory` + add OBO smoke test</title>
+    <phase>Phase 6: Graph Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>015</dependencies>
+    <blocks>061, 063, 066</blocks>
+    <tags>bff-api, api, auth, oauth, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` in `Sprk.Bff.Api/Infrastructure/Graph/`; tags include `bff-api` + `auth`. FULL rigor + Step 9.5 quality gates + BFF publish-size verification.</rigor-reason>
+    <parallel-group>P6-W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies `GraphClientFactory.cs`; serialized with any other Phase 6 BFF tasks.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add `Tasks.ReadWrite` to the delegated scope list in `GraphClientFactory.cs` so OBO token acquisition includes it. Add an OBO smoke test asserting that `GraphServiceClient.Me.Todo.Lists.GetAsync()` succeeds with a test user's token. Measure BFF publish size and report delta vs. baseline (~45.65 MB).
+  </prompt>
+
+  <role>Spaarke BFF API developer with ASP.NET Core + Microsoft Graph SDK + OBO expertise.</role>
+
+  <goal>`GraphClientFactory.cs` requests `Tasks.ReadWrite` in its delegated scopes. OBO smoke test passes against the target environment. BFF publish-size delta documented (expected ≈0 — no new packages, just config change).</goal>
+
+  <context>
+    <background>`GraphClientFactory` is the central OBO factory for all delegated Graph calls. Adding a scope here makes it available for the to-be-added `TodoGraphSyncHandler` and the webhook endpoint without introducing a new auth path.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Graph/GraphClientFactoryTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Reuse existing OBO flow; do not introduce a new auth path.</constraint>
+    <constraint source="ADR-001">Minimal API pattern for any new test-only endpoints (avoid in this task).</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish-size verification mandatory. Baseline ~45.65 MB; ceiling 60 MB.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation: this task adds an OBO smoke test in `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Graph/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+    <patterns>
+      <pattern name="obo-token-acquisition" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs">Existing OBO flow for `Mail.ReadWrite`, `Files.Read.All`, etc.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current `GraphClientFactory.cs` delegated-scopes list. Identify the registration point.</step>
+    <step order="2">Add `"Tasks.ReadWrite"` to the scope list (alphabetical insertion).</step>
+    <step order="3">Add an OBO smoke test in `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Graph/` that mocks the OBO token, calls `GraphServiceClient.Me.Todo.Lists.GetAsync()`, and asserts the configured scopes include `Tasks.ReadWrite`.</step>
+    <step order="4">Run `dotnet build` and `dotnet test` for `Sprk.Bff.Api` projects. Verify clean.</step>
+    <step order="5">Run BFF publish-size check: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed output; record delta vs. ~45.65 MB baseline in task completion report. Expected: ≈0 MB delta (config-only change).</step>
+    <step order="6">Run `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`. Confirm zero HIGH-severity CVEs (regression check).</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish, CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` (updated)</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Graph/GraphClientFactoryTests.cs` (smoke test added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GraphClientFactory.cs` delegated-scopes list includes `"Tasks.ReadWrite"`.</criterion>
+    <criterion testable="true">OBO smoke test passes (unit-level mock OBO + scope assertion).</criterion>
+    <criterion testable="true">`dotnet build` + `dotnet test` clean.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+5 MB (expected ≈0); reported in task completion notes.</criterion>
+    <criterion testable="true">Zero new HIGH-severity CVEs.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review. BFF publish-size verification per CLAUDE.md §10.</protocol>
+  </execution>
+</task>

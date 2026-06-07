@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Deploy SmartTodo Code Page to Dataverse (post-repoint)</title>
+    <phase>Phase 3: SmartTodo Code Page Repoint</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>020, 021, 022, 023</dependencies>
+    <blocks>none</blocks>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task using existing skill. STANDARD rigor.</rigor-reason>
+    <parallel-group>P3-W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build and deploy the SmartTodo Code Page web resource to the target Dataverse environment using `/code-page-deploy`. Smoke-test the deployed page: load kanban, verify queries hit `sprk_todos`, verify "My Tasks" filter renders and persists, verify regarding edit through `AssociateToStep`.
+  </prompt>
+
+  <role>Spaarke Code Page deployment engineer.</role>
+
+  <goal>SmartTodo Code Page deployed; kanban loads from `sprk_todo`; filter + regarding edit work end-to-end.</goal>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `npm run build` (production mode) in `src/solutions/SmartTodo/`.</step>
+    <step order="2">Invoke `/code-page-deploy` skill to upload to Dataverse.</step>
+    <step order="3">Smoke test in browser: load kanban, verify `sprk_todos` network call, toggle My Tasks filter, edit regarding from panel.</step>
+    <step order="4">Document deployed version in `projects/smart-todo-decoupling-r3/notes/deployments.md`.</step>
+    <step order="5">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Production build</tool>
+    <tool name="pac">Web resource upload</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">SmartTodo Code Page in target Dataverse environment</output>
+    <output type="docs">`projects/smart-todo-decoupling-r3/notes/deployments.md` (entry added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Code Page loads in browser without console errors.</criterion>
+    <criterion testable="true">Kanban displays `sprk_todo` records.</criterion>
+    <criterion testable="true">"My Tasks" filter works.</criterion>
+    <criterion testable="true">Regarding edit from panel succeeds and updates all four resolver fields.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor. Use `code-page-deploy` skill.</protocol>
+  </execution>
+</task>

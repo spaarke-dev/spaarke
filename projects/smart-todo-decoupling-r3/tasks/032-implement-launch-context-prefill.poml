@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Implement launch-context pre-fill for CreateTodo wizard (kanban / parent ribbon / Outlook)</title>
+    <phase>Phase 4: CreateTodo Wizard + AssociateToStep Extension</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>031</dependencies>
+    <blocks>070</blocks>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Wizard-launch contract change; affects three different surface entry points. FULL rigor.</rigor-reason>
+    <parallel-group>P4-W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wire CreateTodo wizard launch parameters so the regarding pre-fill is correct for each entry point: (1) kanban "Add To Do" — no regarding pre-filled; (2) parent-form ribbon (Matter / Project / Event / etc.) — regarding pre-filled to the launch record; (3) Outlook add-in "Create To Do" — regarding pre-filled to `sprk_regardingcommunication`.
+  </prompt>
+
+  <role>Spaarke shared-UI developer.</role>
+
+  <goal>Wizard accepts an `initialRegarding?: { entityType, recordId, recordName }` prop. All three entry points exercise this prop correctly. Skip succeeds and creates standalone todo when no prop passed.</goal>
+
+  <constraints>
+    <constraint source="FR-16">All three entry points pre-fill regarding correctly per spec.</constraint>
+    <constraint source="NFR-01">Fluent v9 only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateTodo/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add `initialRegarding?: RegardingTriple` prop to `CreateTodo` wizard.</step>
+    <step order="2">In `AssociateToStep` integration: if prop present, pre-fill the step's state; user can still change or clear.</step>
+    <step order="3">Update SmartTodo "Add To Do" button: call wizard with `initialRegarding={undefined}`.</step>
+    <step order="4">Document the integration contract for parent-form ribbon callers (will be invoked in Phase 5 deployment) and the Outlook add-in (will be invoked in Phase 8).</step>
+    <step order="5">Unit tests: (a) no prop → no pre-fill, skippable; (b) prop with Matter → Matter pre-filled; (c) prop with Communication → Communication pre-filled.</step>
+    <step order="6">Run `npm run build` + `npm test`. Fluent v9 lint pass.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/client/shared/Spaarke.UI.Components/src/components/CreateTodo/` (initialRegarding prop)</output>
+    <output type="code">`src/solutions/SmartTodo/src/components/AddTodoButton.tsx` (or equivalent — kanban entry)</output>
+    <output type="docs">`projects/smart-todo-decoupling-r3/notes/createtodo-launch-contract.md`</output>
+    <output type="test">Unit tests for three pre-fill scenarios</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Kanban "Add To Do" → no regarding pre-filled.</criterion>
+    <criterion testable="true">Parent-form ribbon (simulated in test) with launch record → regarding pre-filled correctly.</criterion>
+    <criterion testable="true">Outlook entry (simulated in test) with `sprk_communication` id → regarding pre-filled.</criterion>
+    <criterion testable="true">All three scenarios end with `applyResolverFields` populated correctly.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

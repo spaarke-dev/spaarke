@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Integrate `AssociateToStep` into SmartTodo `TodoDetail` panel for regarding edit</title>
+    <phase>Phase 3: SmartTodo Code Page Repoint</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>011, 020, 030</dependencies>
+    <blocks>024</blocks>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx` in shared lib consumer; integrates with `PolymorphicResolverService`. FULL rigor.</rigor-reason>
+    <parallel-group>P3-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Use `AssociateToStep` in the SmartTodo `TodoDetail` side-panel for regarding edit so users can attach or change the parent record after creation. On regarding change, call `PolymorphicResolverService.applyResolverFields` to atomically populate all four resolver fields. UI shows the chosen parent's display name + clickable URL.
+  </prompt>
+
+  <role>Spaarke shared-UI consumer developer.</role>
+
+  <goal>Editing regarding from the TodoDetail panel re-runs `applyResolverFields`; all four resolver fields update on save. UI shows the chosen parent's name with a clickable URL.</goal>
+
+  <constraints>
+    <constraint source="ADR-024">Use `PolymorphicResolverService.applyResolverFields` for any regarding change. Never set resolver fields directly.</constraint>
+    <constraint source="FR-13">Editing regarding from panel re-runs `applyResolverFields`; all four fields update.</constraint>
+    <constraint source="NFR-01">Fluent v9 only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Embed `AssociateToStep` in the `TodoDetail` panel's regarding section.</step>
+    <step order="2">On regarding change, call `applyResolverFields({ entityName, recordId, recordName })`; pass updated fields to `updateRecord("sprk_todo", id, ...)`.</step>
+    <step order="3">Display chosen parent's name as clickable link using the resolved `sprk_regardingrecordurl`.</step>
+    <step order="4">Unit tests: change regarding from null → Matter; from Matter → Project; verify all four resolver fields update.</step>
+    <step order="5">Run `npm run build` + `npm test`. Fluent v9 lint pass.</step>
+    <step order="6">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/solutions/SmartTodo/src/components/TodoDetail/` (updated)</output>
+    <output type="test">Unit tests for regarding-edit path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Regarding change re-runs `applyResolverFields`; all four fields update.</criterion>
+    <criterion testable="true">Switching from one regarding type to another clears the previous specific lookup.</criterion>
+    <criterion testable="true">UI shows parent name + clickable URL.</criterion>
+    <criterion testable="true">Unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check (ADR-024 mandatory) + code-review.</protocol>
+  </execution>
+</task>

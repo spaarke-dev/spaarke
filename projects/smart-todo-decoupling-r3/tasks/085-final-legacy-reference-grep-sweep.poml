@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Final repo-wide legacy-reference grep sweep (verify FR-29 zero hits)</title>
+    <phase>Phase 9: Cleanup & Documentation</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>005, 011, 020, 031, 081, 083</dependencies>
+    <blocks>090</blocks>
+    <tags>refactoring, testing, audit</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification sweep; produces an audit doc; gates the wrap-up. STANDARD rigor.</rigor-reason>
+    <parallel-group>P9-W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run a final repo-wide grep for every legacy name listed in FR-29: `sprk_eventtodo`, `sprk_event.sprk_todoflag`, `sprk_event.sprk_todostatus`, `sprk_event.sprk_todocolumn`, `sprk_event.sprk_todopinned`, `loadTodoExtension`, `saveTodoExtensionFields`, `deactivateTodoExtension`, `_sprk_regardingevent_value`. Confirm zero hits in `src/` outside `.claude/archive/` and outside this spec's own references. Output a final-sweep audit doc.
+  </prompt>
+
+  <role>Spaarke verification engineer.</role>
+
+  <goal>Final-sweep audit doc shows zero hits for every name in FR-29. If any non-zero hits found, escalate and resolve before wrap-up.</goal>
+
+  <constraints>
+    <constraint source="FR-29">All listed names deleted; zero hits in `src/` outside `.claude/archive/` and this spec's own references.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">For each name in FR-29's list, run repo-wide grep.</step>
+    <step order="2">Record hits per name. Exclude `.claude/archive/`, this project's `spec.md` / `design.md` / `plan.md` / `notes/`, and any docs marked superseded.</step>
+    <step order="3">If any non-zero hits found: investigate, fix, re-run sweep.</step>
+    <step order="4">Write `projects/smart-todo-decoupling-r3/notes/final-legacy-grep-sweep.md` with results.</step>
+    <step order="5">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">`projects/smart-todo-decoupling-r3/notes/final-legacy-grep-sweep.md`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero hits in `src/` for every name in FR-29 (excluding archive + spec docs).</criterion>
+    <criterion testable="true">Audit doc records the verification.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

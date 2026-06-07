@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Delete `sprk_eventtodo` entity entirely</title>
+    <phase>Phase 1: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>001, 004</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, solution, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Entity-level delete is the most destructive Phase 1 op. Tags include `dataverse` + `refactoring`; pre-cut audit + reference removal must be confirmed; FULL rigor.</rigor-reason>
+    <parallel-group>P1-W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Must follow task 004 (sprk_event cleanup) because some `sprk_eventtodo` rows have `_sprk_regardingevent_value` lookups that reference `sprk_event` fields being removed.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Delete the `sprk_eventtodo` entity entirely from the solution and target environment: entity + all attributes + the relationship `sprk_eventtodo_RegardingEvent_n1` + all saved queries + the entity SVG. Per spec FR-02 + OS-1 (hard cut, pre-release, no compat). Pre-delete: confirm task 001 audit lists every reference and that all `src/` references have been removed in their respective phases (or have explicit pending tasks for removal).
+  </prompt>
+
+  <role>Spaarke Dataverse schema developer.</role>
+
+  <goal>`sprk_eventtodo` no longer present in solution or target environment. Zero `src/` references remain. Solution validates clean.</goal>
+
+  <context>
+    <background>The entire purpose of R3 is to replace `sprk_eventtodo` with the standalone `sprk_todo`. This task is the symbolic + practical cut.</background>
+    <relevant-files>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+      <file>solutions/{spaarke-core}/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-02">Delete entity, all attributes, the relationship, saved queries, SVG.</constraint>
+    <constraint source="FR-29">Zero `src/` references after this task.</constraint>
+    <constraint source="OS-1">Hard cut, no compat shims.</constraint>
+    <constraint source="OS-2">No data migration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Re-verify task 001 audit doc is complete and that every TS/C#/Form/Ribbon reference has been removed by the appropriate phase task. If unresolved references remain in `src/`, STOP and escalate.</step>
+    <step order="2">Use Web API to delete the `sprk_eventtodo_RegardingEvent_n1` relationship first (relationship-before-entity order).</step>
+    <step order="3">Delete all saved queries scoped to `sprk_eventtodo`.</step>
+    <step order="4">Delete the entity itself via Web API DELETE on EntityDefinitions.</step>
+    <step order="5">Pack solution; import to target environment; verify clean import (no orphan references warnings).</step>
+    <step order="6">Run repo grep for `sprk_eventtodo` (all variants). Confirm zero hits in `src/` outside `.claude/archive/`.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-mcp">Metadata delete operations</tool>
+    <tool name="pac">Solution pack/import</tool>
+    <tool name="grep">Reference verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Target environment with `sprk_eventtodo` absent</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution import succeeds without orphan-reference warnings.</criterion>
+    <criterion testable="true">`sprk_eventtodo` no longer present in solution.</criterion>
+    <criterion testable="true">Repo grep returns zero hits in `src/` (excluding `.claude/archive/`) for `sprk_eventtodo` and `_sprk_regardingevent_value` (where `_value` references the now-deleted relationship).</criterion>
+    <criterion testable="true">Solution validates clean via PAC CLI / maker portal.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task completes Phase 1. After this, all `sprk_event`/`sprk_eventtodo`-coupled to-do logic is gone, and `sprk_todo` is the canonical entity. Downstream phases (2-9) build on this foundation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Pre-cut verification is the safety gate. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>
