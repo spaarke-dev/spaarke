@@ -288,6 +288,20 @@ public record RagSearchOptions
     public string? ParentEntityId { get; init; }
 
     /// <summary>
+    /// multi-container-multi-index-r1 FR-BFF-07 — optional explicit Azure AI Search index name
+    /// to target for this search request. When provided (non-null / non-whitespace), the BFF
+    /// resolver routes via the 3-argument <see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, string?, System.Threading.CancellationToken)"/>
+    /// overload which validates the value against <c>AiSearchOptions.AllowedIndexes</c>
+    /// (rejecting non-allow-listed values with <c>INDEX_NOT_ALLOWED</c> → 400 per FR-BFF-02 /
+    /// NFR-08). When null or whitespace, the resolver falls through to the existing 2-tier
+    /// chain (<c>sprk_aiknowledgedeployment</c> Dataverse entity → <c>AiSearchOptions.KnowledgeIndexName</c>
+    /// fallback) — byte-for-byte backward-compatible with all existing callers (FR-BFF-04 /
+    /// NFR-02). Has no effect under session-scoped routing (when <see cref="SessionId"/> is set,
+    /// the session-files index is selected directly via the injected <c>SearchIndexClient</c>).
+    /// </summary>
+    public string? SearchIndexName { get; init; }
+
+    /// <summary>
     /// R5 spec §4.2 / FR-09 — optional session identifier for session-scoped retrieval.
     /// When set (non-null/non-empty), <see cref="IRagService.SearchAsync(string, RagSearchOptions, CancellationToken)"/>
     /// routes the underlying <c>SearchClient</c> to the session-files index

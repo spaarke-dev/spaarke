@@ -14,9 +14,9 @@
 | 010 | Extend `IKnowledgeDeploymentService` interface + impl with allow-list | B — BFF resolver | ✅ | none | — | FULL |
 | 011 | Add `SearchIndexName` to request DTOs (`SemanticSearchRequest`, `RagSearchRequest`, `RecordSearchRequest`) | B | ✅ | 010 | Group B1 | FULL |
 | 012 | Add `AiSearch.AllowedIndexes` to appsettings + startup INFO log | B | ✅ | 010 | Group B1 | STANDARD |
-| 013 | Thread `SearchIndexName` through `SemanticSearchService.cs` | B | 🔲 | 010, 011 | Group B2 | FULL |
-| 014 | Thread `SearchIndexName` through `RagService.cs` | B | 🔲 | 010, 011 | Group B2 | FULL |
-| 015 | Thread `SearchIndexName` through `RecordSearchService.cs` | B | 🔲 | 010, 011 | Group B2 | FULL |
+| 013 | Thread `SearchIndexName` through `SemanticSearchService.cs` | B | ✅ | 010, 011 | Group B2 | FULL |
+| 014 | Thread `SearchIndexName` through `RagService.cs` | B | ✅ | 010, 011 | Group B2 | FULL |
+| 015 | Thread `SearchIndexName` through `RecordSearchService.cs` | B | ✅ | 010, 011 | Group B2 | FULL |
 | 016 | Update `SemanticSearchEndpoints.cs` to pass DTO field to resolver | B | 🔲 | 013, 014, 015 | — | FULL |
 | 017 | BFF unit + integration tests for FR-BFF-01..07 | B | 🔲 | 016 | — | STANDARD |
 | 018 | BFF publish-size check + deploy via `/bff-deploy` | B — Deploy | 🔲 | 017 | — | STANDARD |

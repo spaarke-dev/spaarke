@@ -193,6 +193,16 @@ public partial class RagService : IRagService
             // than via IKnowledgeDeploymentService (which routes per-tenant for the knowledge
             // index family). Tenant isolation is preserved via the unconditional
             // `tenantId eq '...'` filter in BuildSearchOptions (ADR-014 invariant).
+            //
+            // multi-container-multi-index-r1 FR-BFF-07 (task 014) — when SessionId is NOT set
+            // AND no explicit DeploymentId is provided, but SearchIndexName IS provided,
+            // route via the 3-arg resolver overload to apply allow-list validation
+            // (FR-BFF-02) and bind the SearchClient to the explicit index (FR-BFF-03).
+            // When SearchIndexName is null / whitespace, preserve the original 2-arg call
+            // site verbatim so the existing test suite passes UNMODIFIED (FR-BFF-04 /
+            // NFR-02 backward-compat). Validation logic is intentionally NOT replicated
+            // here — it lives in one place inside KnowledgeDeploymentService per the
+            // resolver's contract.
             searchStopwatch.Start();
             SearchClient searchClient;
             if (!string.IsNullOrEmpty(options.SessionId))
@@ -206,8 +216,17 @@ public partial class RagService : IRagService
             {
                 searchClient = await _deploymentService.GetSearchClientByDeploymentAsync(options.DeploymentId.Value, cancellationToken);
             }
+            else if (!string.IsNullOrWhiteSpace(options.SearchIndexName))
+            {
+                // Explicit caller-supplied index name — route via the 3-arg overload, which
+                // applies allow-list validation in KnowledgeDeploymentService (FR-BFF-02).
+                searchClient = await _deploymentService.GetSearchClientAsync(options.TenantId, options.SearchIndexName, cancellationToken);
+            }
             else
             {
+                // No explicit index — preserve the original 2-arg call site verbatim so the
+                // existing test suite passes UNMODIFIED (NFR-02). The 2-arg overload is the
+                // contract-preserved entry point per IKnowledgeDeploymentService XML doc.
                 searchClient = await _deploymentService.GetSearchClientAsync(options.TenantId, cancellationToken);
             }
 

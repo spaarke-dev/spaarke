@@ -131,8 +131,19 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 embeddingStopwatch.Stop();
             }
 
-            // Step 3: Get SearchClient for tenant
-            var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+            // Step 3: Get SearchClient for tenant.
+            //
+            // multi-container-multi-index-r1 FR-BFF-07 (part 1): thread the caller-supplied
+            // `searchIndexName` from the request DTO through to the resolver. When omitted
+            // (null/whitespace), invoke the existing 2-arg overload UNCHANGED to preserve
+            // NFR-02 backward-compat — every existing test fixture sets up a 2-arg Moq
+            // expression (`GetSearchClientAsync(tenantId, ct)`) which would not match a
+            // 3-arg call. The 3-arg overload is reserved for the explicit-index path,
+            // where validation against `AiSearchOptions.AllowedIndexes` runs in
+            // `KnowledgeDeploymentService` (FR-BFF-02 / NFR-08, delivered by task 010).
+            var searchClient = !string.IsNullOrWhiteSpace(request.SearchIndexName)
+                ? await _deploymentService.GetSearchClientAsync(tenantId, request.SearchIndexName, cancellationToken)
+                : await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
 
             // Step 4: Build filter using SearchFilterBuilder
             var filter = SearchFilterBuilder.BuildFilter(
@@ -260,8 +271,15 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
         try
         {
-            // Get SearchClient for tenant
-            var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+            // Get SearchClient for tenant.
+            //
+            // multi-container-multi-index-r1 FR-BFF-07 (part 1): mirror the SearchAsync
+            // thread-through so the count and search paths agree on which physical index
+            // is being queried. Backward-compat: when `request.SearchIndexName` is
+            // null/whitespace, call the 2-arg overload UNCHANGED (NFR-02).
+            var searchClient = !string.IsNullOrWhiteSpace(request.SearchIndexName)
+                ? await _deploymentService.GetSearchClientAsync(tenantId, request.SearchIndexName, cancellationToken)
+                : await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
 
             // Build filter using SearchFilterBuilder
             var filter = SearchFilterBuilder.BuildFilter(
