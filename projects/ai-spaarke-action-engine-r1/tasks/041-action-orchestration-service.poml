@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>ActionOrchestrationService.cs — Action orchestrator (Tool dispatch + gate resolution + audit)</title>
+    <phase>Phase 4: Action Execution Runtime</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>026, 030, 040</dependencies>
+    <blocks>042, 043, 052, 053, 054, 055, 060</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates core orchestration service (.cs file) that runs every Action; tags include bff-api/ai; modifies code files; depends on 3 prereqs; downstream consumers (jobs, endpoints, tests) all depend on this service shape; G12 facade integrity gate verified here</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Creates new files under Services/Ai/ActionEngine/ — disjoint from task 042 (Services/Jobs/) and task 043 (Infrastructure/Logging/ middleware edit). After 040 lands, 041 + 042 can run in parallel.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ActionOrchestrationService.cs` modeled on the existing `AnalysisOrchestrationService.cs` pattern. The service orchestrates an Action run from invocation through Tool dispatch (via `IToolHandlerRegistry` from task 026), gate resolution (via `IGateResolver` from task 030), and audit (via the existing `IAuditLogService`). Define the internal `IActionOrchestrationService` interface so the endpoint layer (task 040) and job handler (task 042) consume the service through a typed seam. G12 acceptance gate: no CRUD-side caller injects `IActionOrchestrationService` directly — verified by grep audit at Step 9.5.
+  </prompt>
+
+  <role>
+    SPAARKE BFF AI services engineer fluent in the existing `AnalysisOrchestrationService.cs` pattern, the `IToolHandlerRegistry` dispatch surface (task 026), the `IGateResolver` primitive (task 030), and the `IAuditLogService` audit surface. You write services that are testable, idempotent under retry, and respect the ADR-013 facade boundary so CRUD-side consumers never see internal types.
+  </role>
+
+  <goal>
+    Concrete artifacts:
+    1. **`Services/Ai/ActionEngine/IActionOrchestrationService.cs`** — internal interface (not in PublicContracts) with method `Task&lt;ActionRunResult&gt; ExecuteActionAsync(ActionDefinition action, IReadOnlyDictionary&lt;string, object&gt; parameters, ActionExecutionContext context, CancellationToken ct)`. Marked `internal` (or `public` within `Sprk.Bff.Api` only) — never injected outside `Services/Ai/ActionEngine/`.
+    2. **`Services/Ai/ActionEngine/ActionOrchestrationService.cs`** — concrete implementation. Pipeline: (a) load Action Definition + governance block (feature flag check delegated to task 045's policy on the endpoint side); (b) resolve parameters + validate against template parameter schema; (c) for each Tool step: pre-dispatch gate check via `IGateResolver` (if `humanGate.required = true`); (d) Tool dispatch via `IToolHandlerRegistry.DispatchAsync(toolId, parameters, ct)`; (e) post-dispatch audit emission (writes Run record + Tier 2 hash audit + Tier 3 work history per ADR-015 — Tier 3 details extended by task 043's middleware extension); (f) write final `sprk_actionrun` record with ADR-017 canonical status sequence.
+    3. **DI registration** — add to `Infrastructure/DI/AddActionEngineModule()` (existing from task 014): `services.AddScoped&lt;IActionOrchestrationService, ActionOrchestrationService&gt;();`. Keep total non-framework DI registrations for the module ≤15 per ADR-010.
+    4. **Facade hookup** — wire `IActionEngineFacade` (task 015) implementation to delegate `ExecuteActionAsync` to this orchestrator so CRUD-side callers reach the orchestrator ONLY through the facade. The facade implementation lives in `Services/Ai/PublicContracts/` and is the ONLY type allowed to reference `IActionOrchestrationService` outside `Services/Ai/ActionEngine/`.
+    5. **G12 verification artifact** — `notes/spikes/g12-facade-integrity-grep.md` recording the grep `grep -rn "IActionOrchestrationService" src/ --include="*.cs"` showing all references live under `Services/Ai/ActionEngine/` or are the single facade-implementation reference.
+
+    Acceptance: unit test asserts orchestrator runs Tool dispatch → gate check → audit write in order; integration test asserts the orchestrator handles a 2-step Action (e.g., the "Summarize a matter" template — deterministic Dataverse query + AI narrative summary) end-to-end with a Run record persisted.
+  </goal>
+
+  <context>
+    <background>
+      The orchestrator is the engine of the Action runtime. It is invoked from THREE callers in MVP:
+      1. `ActionEndpoints.cs` `/run` handler (task 040) via the `IActionEngineFacade`.
+      2. `ScheduledActionDispatchJobHandler.cs` (task 042) via the same facade.
+      3. The `InvokeResource` meta-tool implementation (task 024 — Phase 2) via the same facade.
+
+      All three callers go through `IActionEngineFacade` per ADR-013 refined (2026-05-20). The orchestrator is the single seam where Tool dispatch, gate resolution, and audit converge — there is no other place these three concerns meet.
+
+      Existing pattern reference: `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` — clone the structural shape (constructor injection of dependencies, scoped service lifetime, cancellation token propagation, structured logging with correlation id). The Action orchestrator differs in two ways: (a) it walks a Tool step list rather than running a single analysis pipeline; (b) it interleaves gate checks between Tool dispatches when `humanGate.required = true`.
+
+      ADR-015 audit choke point: `IToolHandlerRegistry` (task 026) is documented as "the audit choke point" for Tool dispatch. The orchestrator does NOT write audit directly — it lets the registry write the per-dispatch audit, then writes the per-Run audit on completion. Task 043 extends `AuditEnrichmentMiddleware` to add Tool-dispatch enrichment fields; this orchestrator emits the events that the middleware enriches.
+
+      Run record status sequence (ADR-017 canonical): `Queued → Running → Completed | Failed | Poisoned | Cancelled`. The orchestrator owns transitions; `ScheduledActionDispatchJobHandler` (task 042) sets `Queued`, the orchestrator sets `Running` on entry and the terminal state on exit.
+
+      G12 acceptance gate: `IActionOrchestrationService` is `internal`-scoped to the Action Engine. CRUD-side callers must NEVER inject it directly — they go through `IActionEngineFacade` (task 015). This task establishes the boundary; the grep audit at Step 9.5 enforces it.
+
+      Binding governance: `.claude/constraints/bff-extensions.md` MUST be loaded. Placement = BFF per spec.md §6. ≤5MB publish-size delta tracked at the module level. No new NuGet packages.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/IActionOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ActionOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionEngineFacade.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/IAuditLogService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/AuditLogService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (or equivalent from task 014)</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/spikes/g12-facade-integrity-grep.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. Orchestrator is a scoped service (per request / per job).</constraint>
+    <constraint source="ADR-008">Authorization happens at the endpoint layer (task 040) and job-handler layer (task 042). The orchestrator does NOT re-authorize — it assumes the caller is already authorized.</constraint>
+    <constraint source="ADR-010">DI registration via `AddActionEngineModule()` extension. Module total ≤15 non-framework registrations.</constraint>
+    <constraint source="ADR-013">Orchestrator type is internal to the Action Engine module. CRUD-side callers reach it via `IActionEngineFacade` (PublicContracts). G12 verified by grep audit.</constraint>
+    <constraint source="ADR-015">Tool dispatch audit emitted by `IToolHandlerRegistry` (task 026 — the choke point). Orchestrator emits per-Run audit on completion. Tier 2 hash + Tier 3 work history per dispatch; tenant scoping; GDPR erasure path. Task 043 extends middleware for Tool-dispatch enrichment.</constraint>
+    <constraint source="ADR-017">Run record status sequence `Queued → Running → Completed | Failed | Poisoned | Cancelled`. Orchestrator owns Running + terminal transitions. NO invented states.</constraint>
+    <constraint source="ADR-019">Errors surfaced from the orchestrator as typed exceptions (e.g., `GateRejectedException`, `PhaseToolDeniedException` from task 025); endpoint layer translates to ProblemDetails.</constraint>
+    <constraint source="ADR-029">No new NuGet packages without budget verification. Reuse existing AI Search client + SK references.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF, publish-size delta verified (module-level), no new CRUD→AI direct dependencies (facade enforces), no new HIGH-severity CVE.</constraint>
+    <constraint source="project">G12 facade integrity. No CRUD-side caller injects `IActionOrchestrationService` — verified by grep for the type outside `Services/Ai/ActionEngine/` (G12).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Orchestration service pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">Canonical reference — scoped service, constructor DI, structured logging with correlation id, cancellation propagation.</pattern>
+      <pattern name="Facade boundary (ADR-013 refined)" location=".claude/adr/ADR-013-ai-architecture.md">CRUD-side consumers reach AE internals via `Services/Ai/PublicContracts/`. Internal types stay internal.</pattern>
+      <pattern name="Feature-module DI" location=".claude/patterns/api/endpoint-definition.md">`AddActionEngineModule()` extension; ≤15 non-framework registrations.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes. Confirm tasks 026 (IToolHandlerRegistry), 030 (IGateResolver), 040 (ActionEndpoints) all show ✅ in TASK-INDEX.md. (task-execute Step 0)</step>
+    <step order="1">Load `.claude/constraints/bff-extensions.md` and answer the pre-merge checklist in `notes/decisions/task-041-bff-extensions-checklist.md`. Cite placement = BFF (spec.md §6).</step>
+    <step order="2">Read `AnalysisOrchestrationService.cs` to capture the structural shape. Read `IToolHandlerRegistry` (task 026 surface), `IGateResolver` (task 030 surface), `IAuditLogService` to understand the seams the orchestrator wires together.</step>
+    <step order="3">Create `Services/Ai/ActionEngine/IActionOrchestrationService.cs`. Define `ExecuteActionAsync(ActionDefinition, IReadOnlyDictionary&lt;string, object&gt; parameters, ActionExecutionContext context, CancellationToken ct)`. The `ActionExecutionContext` carries `correlationId`, `tenantId`, `callerOid`, `phase` (default `execute`), `invocationSource` (Endpoint / ScheduledJob / MetaTool). Type is `internal` (or constrained to the Action Engine assembly).</step>
+    <step order="4">Create `Services/Ai/ActionEngine/ActionOrchestrationService.cs`. Constructor-inject: `IToolHandlerRegistry`, `IGateResolver`, `IAuditLogService`, `IActionRepository` (Dataverse read of Action Definition + Run write — typically the facade-internal repository from task 014/015), `ILogger&lt;ActionOrchestrationService&gt;`. Implement the 6-stage pipeline: load → validate-params → run-each-step (gate check → Tool dispatch → audit per ADR-015) → write Run terminal state.</step>
+    <step order="5">Handle the canonical exceptions: `PhaseToolDeniedException` (from task 025) bubbles up with Run status `Failed`; `GateRejectedException` (from task 030) bubbles up with Run status `Failed` + reason; `OperationCanceledException` → Run status `Cancelled`. The endpoint layer (task 040) translates to ProblemDetails.</step>
+    <step order="6">Run status transitions per ADR-017: caller sets `Queued`; orchestrator sets `Running` on entry; orchestrator sets terminal state (`Completed` / `Failed` / `Poisoned` / `Cancelled`) on exit. Use `IActionRunRepository.UpdateStatusAsync(runId, status, terminalDetails, ct)` for transitions.</step>
+    <step order="7">Wire the `IActionEngineFacade` (task 015) implementation: `Services/Ai/PublicContracts/ActionEngineFacade.cs` (or wherever task 015 placed it) delegates `ExecuteActionAsync` to this orchestrator. The facade is the ONLY type outside `Services/Ai/ActionEngine/` allowed to reference `IActionOrchestrationService`. Document this boundary in a code comment AND in the file's top-of-file `&lt;remarks&gt;` XML doc.</step>
+    <step order="8">DI registration: add `services.AddScoped&lt;IActionOrchestrationService, ActionOrchestrationService&gt;();` to `AddActionEngineModule()` (the extension created by task 014). Verify total non-framework registrations ≤15 per ADR-010.</step>
+    <step order="9">Run the G12 grep audit: `grep -rn "IActionOrchestrationService" src/ --include="*.cs"` — expect references ONLY in `Services/Ai/ActionEngine/*.cs` and ONE reference in the facade implementation under `Services/Ai/PublicContracts/`. Record the verbatim grep output in `notes/spikes/g12-facade-integrity-grep.md`. If any reference is in `Services/Documents/`, `Api/` (other than tests), or elsewhere — that's a G12 violation, fix it before Step 9.5.</step>
+    <step order="9.5">Run quality gates per task-execute Step 9.5: `code-review` on the new service + interface + facade wiring; `adr-check` verifies ADR-010 (registration via module extension), ADR-013 (facade boundary preserved — G12), ADR-015 (audit emission at run-completion + delegation to IToolHandlerRegistry for per-dispatch audit), ADR-017 (status transitions canonical), ADR-029 (no new packages). Re-run `dotnet build` and unit-test scaffolding.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 041 ✅. Verify it unblocks tasks 042, 043, 052, 053, 054, 055, 060. Reset `current-task.md` for the next active task.</step>
+    <step order="11">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-041-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF API</tool>
+    <tool name="terminal">Run grep audit for G12 facade integrity</tool>
+    <tool name="git">Confirm state + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/IActionOrchestrationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ActionOrchestrationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ActionEngineFacade.cs (or equivalent — facade implementation delegating to the orchestrator)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (edit — register orchestrator)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/task-041-bff-extensions-checklist.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/spikes/g12-facade-integrity-grep.md (G12 verification artifact)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IActionOrchestrationService.cs` + `ActionOrchestrationService.cs` exist under `Services/Ai/ActionEngine/`. `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+    <criterion testable="true">**G12 facade integrity** — No CRUD-side caller injects `IActionOrchestrationService` — verified by grep for the type outside `Services/Ai/ActionEngine/` (G12). The grep artifact at `notes/spikes/g12-facade-integrity-grep.md` shows references confined to `Services/Ai/ActionEngine/*.cs` plus exactly one in the facade under `Services/Ai/PublicContracts/`.</criterion>
+    <criterion testable="true">Orchestrator pipeline (load → validate-params → per-step gate-check + Tool dispatch + audit → Run terminal write) verified by unit test that mocks `IToolHandlerRegistry` + `IGateResolver` + `IAuditLogService` and asserts call order.</criterion>
+    <criterion testable="true">Integration test runs a 2-step Action (e.g., the "Summarize a matter" template — deterministic Dataverse query + AI narrative summary) end-to-end with a `sprk_actionrun` record persisted in `Completed` state.</criterion>
+    <criterion testable="true">Run record status transitions follow ADR-017 canonical sequence (`Queued → Running → Completed | Failed | Poisoned | Cancelled`); verified by integration test asserting expected status at each stage.</criterion>
+    <criterion testable="true">DI registration added to `AddActionEngineModule()`; total non-framework registrations ≤15 per ADR-010 — verified by counting `Add*` calls in the extension method.</criterion>
+    <criterion testable="true">`notes/decisions/task-041-bff-extensions-checklist.md` exists with every `bff-extensions.md` pre-merge item answered. Placement = BFF cited from spec.md §6.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` returns no NEW HIGH-severity CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    `AnalysisOrchestrationService.cs` is the structural reference. Read it carefully — the Action orchestrator is the "Action world" version of the same shape. Differences: (a) Tool step list with interleaved gate checks; (b) Run record persistence is owned by this service, not the facade.
+
+    The orchestrator does NOT write per-Tool-dispatch audit directly — that's `IToolHandlerRegistry` (task 026, the audit choke point per ADR-015). The orchestrator emits one Run-completion audit event. Task 043 extends the middleware to enrich Tool-dispatch events with Action-Engine-specific fields (`actionId`, `runId`, `phase`).
+
+    The internal-scope of `IActionOrchestrationService` is the load-bearing piece for G12. If you find a CRUD-side caller wanting to inject the orchestrator directly, route them through `IActionEngineFacade` (task 015). The facade is the ONLY allowable seam.
+
+    Do NOT add a new orchestrator-internal audit service. `IAuditLogService` (existing) is sufficient. Task 043's extension is to the existing `AuditEnrichmentMiddleware`, not a new service.
+
+    Spec.md §NFR-08 (idempotency / retry) applies primarily to task 042 (job handler). The orchestrator itself can assume the caller has handled idempotency (job handler uses `IIdempotencyService`; endpoint uses request-ids if applicable). The orchestrator stays straightforward.
+
+    The 3 MVP starter templates (FR-19/FR-20/FR-21) all flow through this orchestrator. Phase 5 tasks (052-055) build templates AGAINST this orchestrator — do not block on them. Get the orchestrator right and they slot in.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5 (code-review + adr-check). G12 grep audit is part of the Step 9 set.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Default Playbook Seed — `Spaarke Assistant — General`</title>
+    <phase>Phase 5: Surfaces + Templates</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>013, 025, 032</dependencies>
+    <blocks>053, 054, 055</blocks>
+    <tags>dataverse, ai, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data seeding + JSON authoring task; produces a new Dataverse record (`sprk_playbook`) consumed by all three starter Templates and the SpaarkeAi no-context landing. No new C# / TypeScript code; the deliverable is a JSON playbook definition + deploy invocation. Has explicit ADR constraints + dependencies (013, 025, 032).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocks tasks 053, 054, 055 (Templates seed against this default playbook). Single critical-path task within the Phase 5 Templates sub-group.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author and seed the `Spaarke Assistant — General` default playbook into Dataverse (`sprk_playbook` entity). This playbook is the configuration record that determines how the SpaarkeAi Code Page behaves at no-context landing: it sets the system prompt per design.md §7.4.3, registers the always-on tools (the 3 meta-tools `FindResources` / `GetResourceDetail` / `InvokeResource` from task 025 + the 3 foundational tools `SearchDocuments` / `QueryDataverse` / `GetCurrentEntityContext`), and points to `InteractiveInChatGateResolver` (task 032) as the default `IGateResolver` for any side-effect gates raised during conversational invocation. Per spec.md FR-13 + design.md §7.4.7, this single record is the configuration of the Assistant's default behavior — tuning is a Dataverse record change, not a code change.
+  </prompt>
+
+  <role>
+    Spaarke AI / JPS engineer with deep familiarity with the JPS Playbook entity schema (`sprk_playbook`), the `sprk_aichatcontextmap` lookup convention (how SpaarkeAi resolves the right playbook per surface context), and the playbook-seed deployment scripts in `scripts/Deploy-Playbook.ps1`. You preserve idempotent seeding (re-running this task is safe).
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **Playbook JSON definition** — `infra/insights/schemas/playbook-spaarke-assistant-general.json` containing the playbook record fields: `sprk_name`, `sprk_displayname`, `sprk_systemprompt` (the full §7.4.3 system prompt, verbatim), `sprk_alwaysontools` (JSON array of tool ids: meta-tools + foundational tools), `sprk_defaultgateresolver` (`InteractiveInChatGateResolver`), `sprk_modeltier` (`Standard`), `sprk_costbudget` + `sprk_latencybudget` (sensible defaults).
+    2. **No-context aichatcontextmap entry** — a row in `sprk_aichatcontextmap` keyed by an empty/null entity logical name (the no-context default landing) pointing to this playbook. Other rows (entity-scoped) are added by future tasks; this is just the default.
+    3. **Deployment** — run `scripts/Deploy-Playbook.ps1` (or the equivalent existing seed script — verify name via `Glob`) against the dev environment to upsert the record. Idempotent: re-running yields no diff.
+
+    Deliverable: `infra/insights/schemas/playbook-spaarke-assistant-general.json`, a deploy invocation recorded in `notes/deploys/052-default-playbook-seed.md`, and a verification query confirming the record exists in Dataverse with the expected fields.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-13 + Assumption "Default Assistant playbook ... provisioned via seed data on first deploy" + design.md §7.4.7 ("The Assistant default playbook is the configuration of all of the above") all point to a single Dataverse record carrying the Assistant's behavior. Design.md §7.4.3 specifies the verbatim system prompt — do NOT paraphrase; copy it exactly. Design.md §7.4.2 lists the always-on tools that bypass the `FindResources` hop for common requests.
+
+      The playbook record is consumed by:
+      - **SpaarkeAi Code Page** at no-context landing (task 050 parsing + task 052 lookup integration via `sprk_aichatcontextmap`)
+      - **All three starter Templates** (tasks 053, 054, 055) inherit this playbook's system prompt + tool set unless they override
+      - **The default `IGateResolver` routing** (task 032's `InteractiveInChatGateResolver`)
+
+      The seed is **idempotent** — if the record already exists (e.g., from a previous run), the script upserts (update if present, insert if not). This is critical because Phase 6 deploys may re-run the seed and must not duplicate records.
+
+      Per ADR-013 (refined 2026-05-20), this is BFF AI placement — the playbook record lives in Dataverse, consumed by BFF code via `Services/Ai/PublicContracts/` facade where needed. No CRUD-side caller should query `sprk_playbook` directly.
+
+      Per ADR-018, the playbook record's `sprk_featureflagref` field (if it exists in the schema) MUST reference a kill-switch flag (e.g., `feature.actionEngine.assistantDefault`) so the default playbook can be disabled without redeploying.
+    </background>
+    <relevant-files>
+      <file>infra/insights/schemas/playbook-spaarke-assistant-general.json</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/deploys/052-default-playbook-seed.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI placement: playbook record lives in Dataverse (system of record); BFF reads via `Services/Ai/PublicContracts/` facade. No CRUD-side direct injection of `IPlaybookService` or playbook-internal types.</constraint>
+    <constraint source="ADR-018">Feature flag for opt-in: the default playbook MUST reference a feature flag / kill-switch (e.g., `feature.actionEngine.assistantDefault`) so it can be disabled per tenant / per environment without code changes.</constraint>
+    <constraint source="ADR-029">Publish size impact: this task adds NO BFF code — only Dataverse data + a JSON file under `infra/`. Publish-size delta is zero; no NuGet additions. Templates are JSON, low impact.</constraint>
+    <constraint source="project">System prompt MUST be copied verbatim from design.md §7.4.3 — do not paraphrase, rewrite, or condense. The prompt is the load-bearing discipline layer per design.md §7.4.5 guardrail #1.</constraint>
+    <constraint source="project">Idempotent seed: re-running `Deploy-Playbook.ps1` MUST upsert (no duplicates). Verified by running it twice and checking record count = 1.</constraint>
+    <constraint source="project">Always-on tools list MUST include exactly: `FindResources`, `GetResourceDetail`, `InvokeResource`, `SearchDocuments`, `QueryDataverse`, `GetCurrentEntityContext`. No more, no fewer in MVP.</constraint>
+    <constraint source="project">Default `IGateResolver` MUST be `InteractiveInChatGateResolver` (the in-chat card per design.md §5). The other three resolvers are situation-specific opt-ins.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="JPS playbook design" location=".claude/skills/jps-playbook-design/SKILL.md">Canonical workflow for designing a playbook — schema, system prompt, tool registration, deploy. Follow this skill's body when authoring the JSON.</pattern>
+      <pattern name="Idempotent seed via Deploy-Playbook.ps1" location="scripts/Deploy-Playbook.ps1">Existing script upserts by `sprk_name`. Re-running is safe.</pattern>
+      <pattern name="aichatcontextmap routing" location="docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md">SpaarkeAi looks up the right playbook by entity logical name; the no-context default is the null/empty key row.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, dependencies (tasks 013 schema, 025 always-on tools, 032 InteractiveInChatGateResolver) marked ✅ in `TASK-INDEX.md`. (task-execute Step 0)</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;` — especially design.md §7.4.3 (the verbatim system prompt) and the `jps-playbook-design` skill workflow.</step>
+    <step order="2">Locate the existing `Deploy-Playbook.ps1` (or equivalent seed script) via `Glob scripts/Deploy-Playbook*.ps1`. Confirm its parameter contract (environment URL, solution prefix, JSON file path). If absent, the task's deployment step (step 5) uses the `dataverse-deploy` skill's record-upsert pattern instead.</step>
+    <step order="3">Author `infra/insights/schemas/playbook-spaarke-assistant-general.json` with the following fields populated:
+      - `sprk_name`: `"spaarke-assistant-general"`
+      - `sprk_displayname`: `"Spaarke Assistant — General"`
+      - `sprk_systemprompt`: the verbatim text from design.md §7.4.3 (multi-paragraph; preserve markdown emphasis and bullet styling)
+      - `sprk_alwaysontools`: JSON array containing exactly the 6 tool ids (3 meta-tools + 3 foundational tools)
+      - `sprk_defaultgateresolver`: `"InteractiveInChatGateResolver"`
+      - `sprk_modeltier`: `"Standard"`
+      - `sprk_costbudget`: `"Cheap"`
+      - `sprk_latencybudget`: `"Sub10s"`
+      - `sprk_featureflagref`: `"feature.actionEngine.assistantDefault"` (ADR-018)
+      - `sprk_iskillswitched`: `false` (default — flag is opt-out)
+    </step>
+    <step order="4">Add a `sprk_aichatcontextmap` row for the no-context default landing: `sprk_entitylogicalname`: null/empty, `sprk_playbookref`: the playbook from step 3 (by `sprk_name`), `sprk_displaylabel`: `"No-context default (SpaarkeAi landing)"`. This row lives in the same JSON file under an `aichatcontextmap` key, or in a sibling file — follow `jps-playbook-design` skill convention.</step>
+    <step order="5">Deploy: run `scripts/Deploy-Playbook.ps1 -EnvironmentUrl https://{org}.crm.dynamics.com -JsonPath infra/insights/schemas/playbook-spaarke-assistant-general.json` (or the equivalent invocation per skill convention). Capture stdout/stderr to `notes/deploys/052-default-playbook-seed.md`.</step>
+    <step order="6">Verify in Dataverse: query `sprk_playbook` filtered by `sprk_name eq 'spaarke-assistant-general'` — exactly one record exists with the expected fields. Use the `dataverse:dv-python-sdk` skill or `pac data query` for the check.</step>
+    <step order="7">**Idempotency verification**: re-run the deploy script. Confirm record count = 1 (no duplicate). Capture proof in `notes/deploys/052-default-playbook-seed.md`.</step>
+    <step order="8">Update `current-task.md` with progress; checkpoint via `context-handoff` skill.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 052 status ✅. Update `current-task.md`: task 052 complete; unblocks tasks 053, 054, 055 (parallel group E).</step>
+    <step order="10">If any deviations from this plan, document in `projects/ai-spaarke-action-engine-r1/notes/handoffs/052-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-deploy">Solution and record deployment to Dataverse</tool>
+    <tool name="powershell">Run Deploy-Playbook.ps1</tool>
+    <tool name="dataverse:dv-python-sdk">Verification query against `sprk_playbook`</tool>
+    <tool name="git">Confirm state</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">infra/insights/schemas/playbook-spaarke-assistant-general.json</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/deploys/052-default-playbook-seed.md</output>
+    <output type="dataverse-record">`sprk_playbook` row `spaarke-assistant-general` in dev environment</output>
+    <output type="dataverse-record">`sprk_aichatcontextmap` row for no-context default landing</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`infra/insights/schemas/playbook-spaarke-assistant-general.json` exists and parses as valid JSON.</criterion>
+    <criterion testable="true">`sprk_systemprompt` field contains the verbatim text from design.md §7.4.3 (verified by string match — no paraphrasing).</criterion>
+    <criterion testable="true">`sprk_alwaysontools` array contains exactly 6 tool ids: `FindResources`, `GetResourceDetail`, `InvokeResource`, `SearchDocuments`, `QueryDataverse`, `GetCurrentEntityContext`.</criterion>
+    <criterion testable="true">`sprk_defaultgateresolver` field value is `"InteractiveInChatGateResolver"`.</criterion>
+    <criterion testable="true">`sprk_featureflagref` references a kill-switch flag per ADR-018.</criterion>
+    <criterion testable="true">After deployment, exactly one `sprk_playbook` row with `sprk_name='spaarke-assistant-general'` exists in the dev environment.</criterion>
+    <criterion testable="true">After deployment, exactly one `sprk_aichatcontextmap` row for the no-context default exists in the dev environment.</criterion>
+    <criterion testable="true">Re-running `Deploy-Playbook.ps1` does NOT create a duplicate record (idempotency verified).</criterion>
+    <criterion testable="true">Publish-size delta is zero (no BFF code change) — confirmed by `dotnet publish` comparison (or by inspection since this task adds no `.cs` / `.csproj` changes).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The system prompt in design.md §7.4.3 spans roughly 8 paragraphs. Copy it verbatim — including the bold emphasis, the "Based on general legal knowledge:" prefix instruction, and the "always offer 2-3 follow-up suggestions" closer. Paraphrasing weakens the discipline layer per guardrail #1.
+
+    The `sprk_playbook` entity schema is created in task 013 (Foundation Phase). If a field name in this task does not match the schema (e.g., `sprk_alwaysontools` vs an actual `sprk_always_on_tools` column), defer to the actual schema from task 013 and document the mapping in `notes/deploys/052-default-playbook-seed.md`.
+
+    The seed script name (`Deploy-Playbook.ps1`) is a best guess; verify via `Glob` in step 2. If the existing JPS deployment infrastructure uses `Deploy-JpsActions.ps1` or `Seed-Playbook.ps1` instead, use that — the skill workflow takes priority over the hardcoded name in this POML.
+
+    Per spec.md "Assumptions" — default playbook provisioned via seed data on first deploy. This task IS that seed. Phase 6 deploys may re-invoke this task's deploy script (idempotency is critical).
+
+    The `sprk_aichatcontextmap` row for the no-context landing has a NULL/empty `sprk_entitylogicalname`. Future tasks (post-MVP / R2) will add entity-scoped rows (e.g., `sprk_matter` → matter-specific playbook). This task only adds the default.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: STANDARD with the reason from `&lt;rigor-reason&gt;`. Use the `jps-playbook-design` skill for the JSON authoring workflow. Use the `dataverse-deploy` skill for the upsert. Follow the task-execute skill for proactive checkpointing. Skip the Step 9.5 quality gate (STANDARD rigor — no code changes).
+    </protocol>
+  </execution>
+</task>

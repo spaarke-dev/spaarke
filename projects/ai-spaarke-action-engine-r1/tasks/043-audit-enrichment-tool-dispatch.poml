@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>AuditEnrichmentMiddleware extension — Tool dispatch context (ADR-015 Tier 2 hash + Tier 3 Cosmos work history)</title>
+    <phase>Phase 4: Action Execution Runtime</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>026, 041</dependencies>
+    <blocks>060, 061, 062, 063</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies existing middleware (.cs file) that runs on every authenticated request; tags include bff-api/ai; touches the audit choke point per ADR-015; G6 acceptance gate (every Tool dispatch writes audit) verified here</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits Infrastructure/Logging/AuditEnrichmentMiddleware.cs — disjoint from task 041 (Services/Ai/ActionEngine/) and task 042 (Services/Jobs/). Touches the audit middleware which is module-disjoint from the orchestrator and job-handler code.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend the existing `src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs` (and the supporting `IAuditLogService` + `AuditLogService` + `AuditEntry` types) to add Tool-dispatch enrichment fields per ADR-015: Tier 2 hash-only entries (compliance) and Tier 3 Cosmos work history (tenant-scoped, GDPR erasure path). The middleware ALREADY enriches every authenticated request with `oid` / `appid` / `obo` / `tenantId` / `correlationId`; this task adds the Tool-dispatch-specific fields (`actionId`, `runId`, `toolId`, `phase`, `gateDecision`) when an Action Engine handler is on the request path. This is the G6 acceptance gate: every Tool dispatch writes audit (ADR-015 Tier 2 + Tier 3) — verified by audit middleware integration test.
+  </prompt>
+
+  <role>
+    SPAARKE BFF audit + observability engineer fluent in ADR-015 AI Data Governance (Tier 2 hash-only / Tier 3 Cosmos work history / tenant scoping / GDPR erasure), the existing `AuditEnrichmentMiddleware` shape, and Cosmos partitioning patterns. You add fields that are useful for incident response without leaking content (no prompts, no model responses, no document bytes — hash only).
+  </role>
+
+  <goal>
+    Concrete artifacts:
+    1. **`Infrastructure/Logging/AuditEnrichmentMiddleware.cs`** (edit existing) — add Tool-dispatch enrichment fields to the `BeginScope` dictionary when the request is on an Action Engine path. New fields (only populated when set by the orchestrator / Tool registry): `actionId` (Guid string), `runId` (Guid string), `toolId` (string), `phase` (string — `authoring | schedule | execute | approve | deliver`), `gateDecision` (string — `Approved | Rejected | TimedOut | Pending | NotRequired`). Fields stay null when not applicable so non-AE requests are untouched.
+    2. **`Services/Ai/Audit/AuditEntry.cs`** (edit existing) — add new fields for the Tool-dispatch shape: `ActionId`, `RunId`, `ToolId`, `Phase`, `GateDecision`, plus `ContentHash` (SHA-256 over the Tool's input + output blobs — for Tier 2 compliance) and `TenantId` (mandatory for Tier 3 partition key).
+    3. **`Services/Ai/Audit/AuditLogService.cs`** (edit existing) — extend `WriteAsync` to support two-tier emission: (a) Tier 2 hash-only entry to the existing audit sink (no Tool content); (b) Tier 3 entry to Cosmos work history, partitioned by `tenantId`, with the Tool dispatch details (still hash, not raw content). Add `DeleteWorkHistoryForTenantAsync(tenantId, ct)` for GDPR erasure path.
+    4. **Tool-dispatch event emission** — confirm `IToolHandlerRegistry` (task 026) writes the per-dispatch audit. THIS task extends the audit ENTRY shape and the middleware scope; the registry remains the audit choke point per ADR-015. The integration test (Step 8) confirms the registry → audit service → middleware enrichment → Tier 2 + Tier 3 emission path is complete.
+    5. **GDPR erasure verification** — unit test asserts that `DeleteWorkHistoryForTenantAsync(tenantId, ct)` removes ALL Tier 3 entries for a tenant while leaving other tenants' entries untouched.
+    6. **G6 verification artifact** — integration test `tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/AuditEnrichmentIntegrationTests.cs` runs a Tool dispatch end-to-end and asserts both Tier 2 (hash-only audit entry) and Tier 3 (Cosmos work history entry) are written with the expected fields and NO content / prompt / response verbatim.
+
+    Acceptance: G6 integration test passes; GDPR erasure test passes; the middleware scope includes the new fields only when the orchestrator sets them via `IActionExecutionContextAccessor` (a thin accessor service — add if not already present).
+  </goal>
+
+  <context>
+    <background>
+      ADR-015 (AI Data Governance) requires that EVERY AI invocation writes audit: Tier 1 (request/response telemetry, not content), Tier 2 (hash-only — for compliance and audit-trail integrity, no content), Tier 3 (Cosmos work history — tenant-scoped, supports GDPR erasure). The Action Engine's Tool dispatch is an AI invocation in the broadest sense (any Tool — Deterministic, AI, Hybrid — gets audited identically per the spec).
+
+      The existing `AuditEnrichmentMiddleware` at `src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs` enriches every AUTHENTICATED request with `oid` / `appid` / `obo` / `tenantId` / `correlationId` (canonical Auth v2 fields per ADR-028). It does NOT yet know about Action Engine concerns. This task adds the fields that make Tool-dispatch audit useful for incident response without leaking content.
+
+      ADR-015 explicit rules:
+      - MUST log only identifiers, sizes, timings, outcome codes
+      - MUST NOT log document contents, prompts, or model responses verbatim
+      - MUST NOT store verbatim AI response in Tier 2 audit (hash only)
+      - MUST scope all persisted AI artifacts by tenant
+
+      The Tool-dispatch audit is written by `IToolHandlerRegistry` (task 026 — the audit choke point). This task does NOT add a new audit writer — it (a) extends the entry shape, (b) enriches the middleware scope so request-level fields propagate, (c) adds two-tier emission to the audit service.
+
+      `IActionExecutionContextAccessor` is a small `AsyncLocal&lt;ActionExecutionContext&gt;` shim (similar to `IHttpContextAccessor`) that the orchestrator sets at run start and the middleware reads to enrich the scope. If task 041 already created it, reuse; otherwise add it here as part of the field-propagation plumbing.
+
+      Cosmos work history container: per ADR-015 + plan.md, partition by `tenantId`. Index on `actionId`, `runId`, `toolId`, `timestamp`. GDPR erasure path: delete all entries with partition key = `tenantId`. The Cosmos client itself is already wired in the BFF (existing audit infrastructure); this task adds the Action-Engine-specific entry shape and erasure method.
+
+      G6 acceptance gate: Every Tool dispatch writes audit (ADR-015 Tier 2 + Tier 3) — verified by audit middleware integration test (G6). This task is where G6 is established.
+
+      Binding governance: `.claude/constraints/bff-extensions.md` MUST be loaded. Placement = BFF. No new NuGet packages.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs (existing — edit)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/IAuditLogService.cs (existing — edit)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/AuditLogService.cs (existing — edit)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/AuditEntry.cs (existing — edit)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/AuditHashHelper.cs (existing — reuse)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/IActionExecutionContextAccessor.cs (new if not from task 041)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ActionExecutionContextAccessor.cs (new if not from task 041)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/AuditEnrichmentIntegrationTests.cs (new — G6 verification)</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. Middleware is registered in the BFF pipeline; runs on every authenticated request.</constraint>
+    <constraint source="ADR-008">Audit is NOT a substitute for authorization. The endpoint filters (ADR-008) gate access; audit records the access AFTER authorization passes.</constraint>
+    <constraint source="ADR-010">DI registration via `AddActionEngineModule()` extension. Module total ≤15 non-framework registrations.</constraint>
+    <constraint source="ADR-013">Audit fields enrichment for Action Engine concerns. Tool dispatch audit is written by `IToolHandlerRegistry` (task 026 choke point); this middleware extension enriches the request scope. The audit emission path does NOT create new CRUD→AI dependencies.</constraint>
+    <constraint source="ADR-015">**PRIMARY**. Tier 2 hash-only audit entries (no Tool content). Tier 3 Cosmos work history, tenant-partitioned, GDPR erasure path. MUST send minimum text required to achieve outcome. MUST log only identifiers, sizes, timings, outcome codes. MUST scope all persisted AI artifacts by tenant. MUST NOT log document contents, prompts, or model responses verbatim. MUST NOT store verbatim AI response in Tier 2 audit (hash only).</constraint>
+    <constraint source="ADR-019">If the middleware emits errors (e.g., audit-sink unavailable), it does NOT block the request — fails open with telemetry. The audit sink failure is logged but does not bubble to the caller as a request failure.</constraint>
+    <constraint source="ADR-029">No new NuGet packages without budget verification. Cosmos client + AuditHashHelper already in module.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF, publish-size delta verified, no new HIGH-severity CVE.</constraint>
+    <constraint source="project">G6 acceptance gate: Every Tool dispatch writes audit (ADR-015 Tier 2 + Tier 3) — verified by audit middleware integration test (G6).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Auth v2 audit enrichment" location="src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs">Existing middleware — `BeginScope` dictionary pattern with canonical Auth v2 fields. Extend, do not replace.</pattern>
+      <pattern name="ADR-015 two-tier audit" location=".claude/adr/ADR-015-ai-data-governance.md">Tier 2 hash + Tier 3 Cosmos work history; tenant partition key; GDPR erasure semantics.</pattern>
+      <pattern name="AsyncLocal context accessor" location="src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/IActionExecutionContextAccessor.cs">Pattern for cross-cutting context propagation without HttpContextAccessor dependency.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes. Confirm tasks 026 (IToolHandlerRegistry) and 041 (orchestrator) show ✅ in TASK-INDEX.md. Read the existing `AuditEnrichmentMiddleware.cs` + `AuditEntry.cs` + `AuditLogService.cs` + `AuditHashHelper.cs` to capture current shape. (task-execute Step 0)</step>
+    <step order="1">Load `.claude/constraints/bff-extensions.md` and answer the pre-merge checklist in `notes/decisions/task-043-bff-extensions-checklist.md`. Cite placement = BFF (spec.md §6).</step>
+    <step order="2">Determine `IActionExecutionContextAccessor` status: if task 041 added it, reuse. If not, create `Services/Ai/ActionEngine/IActionExecutionContextAccessor.cs` + `ActionExecutionContextAccessor.cs` using `AsyncLocal&lt;ActionExecutionContext&gt;` (same pattern as `HttpContextAccessor`). Register as `Singleton` in DI. The orchestrator (task 041) sets the context at run start; the middleware reads it during scope enrichment.</step>
+    <step order="3">Edit `AuditEnrichmentMiddleware.cs`: in the existing `BeginScope` dictionary, ADD the Action-Engine fields conditionally — `if (actionContextAccessor.Current is { } ctx)` populate `actionId`, `runId`, `toolId`, `phase`, `gateDecision`. Inject `IActionExecutionContextAccessor` via constructor (singleton-safe). For non-AE requests, the accessor's `Current` is null and the fields are omitted — non-AE requests unaffected.</step>
+    <step order="4">Edit `AuditEntry.cs`: add fields `ActionId`, `RunId`, `ToolId`, `Phase`, `GateDecision`, `ContentHash` (string — SHA-256 hex), `TenantId` (string, mandatory for Tier 3 partition). Mark `TenantId` as required in JSON serialization.</step>
+    <step order="5">Edit `AuditLogService.cs` + `IAuditLogService.cs`: extend `WriteAsync` (or add `WriteToolDispatchAsync(AuditEntry, ct)`) to emit two-tier: (a) Tier 2 entry to existing audit sink (logger or whatever the current sink is) — hash-only, NO Tool content; (b) Tier 3 entry to Cosmos `work-history` container with partition key = `tenantId`. Add `DeleteWorkHistoryForTenantAsync(string tenantId, CancellationToken ct)` for GDPR erasure — deletes all Cosmos documents in the `tenantId` partition.</step>
+    <step order="6">Use `AuditHashHelper.cs` (existing) to compute `ContentHash` over Tool input + output blobs. The orchestrator (task 041) and `IToolHandlerRegistry` (task 026) call the audit service with the raw blob; the audit service hashes and stores ONLY the hash in Tier 2. Tier 3 also stores the hash, NEVER the raw content (ADR-015 binding).</step>
+    <step order="7">DI registration: register `IActionExecutionContextAccessor` as Singleton in `AddActionEngineModule()`. The audit-service additions reuse existing DI. Confirm total non-framework registrations ≤15 (ADR-010).</step>
+    <step order="8">Write the **G6 integration test** at `tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/AuditEnrichmentIntegrationTests.cs`: dispatch a Tool through the orchestrator (which calls `IToolHandlerRegistry` which writes audit); assert (a) a Tier 2 audit entry exists with `ActionId`, `RunId`, `ToolId`, `Phase`, `ContentHash` populated; (b) a Tier 3 Cosmos document exists with partition key = the test tenant id; (c) NEITHER entry contains the raw Tool input or output (assert by inspection — only the hash is present); (d) `DeleteWorkHistoryForTenantAsync(testTenantId)` removes the Tier 3 entry while leaving entries for other tenants untouched.</step>
+    <step order="9">Verify GDPR erasure end-to-end: seed Cosmos with entries for two tenants (test-tenant-A, test-tenant-B), call `DeleteWorkHistoryForTenantAsync("test-tenant-A")`, assert only tenant A's entries are deleted, tenant B's remain.</step>
+    <step order="9.5">Run quality gates per task-execute Step 9.5: `code-review` on the middleware edit + audit service edit + new accessor; `adr-check` verifies ADR-008 (audit is post-authz), ADR-013 (no new CRUD→AI deps), ADR-015 (Tier 2 hash + Tier 3 Cosmos tenant-partitioned + GDPR erasure + no verbatim content), ADR-019 (audit sink failure does not bubble as request error), ADR-029 (no new packages). Re-run `dotnet build` and integration tests.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 043 ✅. Verify it unblocks tasks 060 (integration tests phase), 061, 062, 063. Reset `current-task.md` for the next active task.</step>
+    <step order="11">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-043-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF API including integration tests</tool>
+    <tool name="terminal">Run Cosmos local-emulator or test-doubles for integration testing</tool>
+    <tool name="git">Confirm state + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs (edit — Tool dispatch field enrichment)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Audit/AuditEntry.cs (edit — new fields)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Audit/IAuditLogService.cs (edit — two-tier surface + erasure method)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Audit/AuditLogService.cs (edit — Tier 2 + Tier 3 emission + DeleteWorkHistoryForTenantAsync)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/IActionExecutionContextAccessor.cs (new — if not from task 041)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ActionExecutionContextAccessor.cs (new — if not from task 041)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (edit — register accessor)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/AuditEnrichmentIntegrationTests.cs (G6 verification)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/task-043-bff-extensions-checklist.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">**G6 acceptance gate** — Every Tool dispatch writes audit (ADR-015 Tier 2 + Tier 3) — verified by audit middleware integration test (G6). The integration test at `tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/AuditEnrichmentIntegrationTests.cs` passes.</criterion>
+    <criterion testable="true">Tier 2 audit entry is hash-only — assertion: the entry's serialized JSON contains `ContentHash` but does NOT contain the raw Tool input/output (test inspects the entry contents).</criterion>
+    <criterion testable="true">Tier 3 Cosmos work history entry is tenant-partitioned — assertion: the document's partition key equals the request's `tenantId`; querying with a different tenant id returns no results.</criterion>
+    <criterion testable="true">GDPR erasure path works — `DeleteWorkHistoryForTenantAsync(tenantA, ct)` deletes ALL tenant A entries; tenant B entries remain unaffected.</criterion>
+    <criterion testable="true">Non-Action-Engine requests are unaffected — assertion: a request to a non-AE endpoint (e.g., `/healthz`, `/api/document/...`) produces no `actionId`/`runId`/`toolId` fields in the log scope; existing audit shape preserved.</criterion>
+    <criterion testable="true">`IActionExecutionContextAccessor` is set by the orchestrator (task 041) and read by the middleware; verified by integration test that asserts fields propagate correctly during a Tool dispatch.</criterion>
+    <criterion testable="true">Audit-sink failure does not bubble — if Cosmos write fails, the request continues; failure is logged but does not return 500 to the caller.</criterion>
+    <criterion testable="true">`notes/decisions/task-043-bff-extensions-checklist.md` exists with every `bff-extensions.md` pre-merge item answered.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` returns no NEW HIGH-severity CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `AuditEnrichmentMiddleware` lives at `src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs` — NOT `Services/Ai/Audit/` as some older docs may say. The `Services/Ai/Audit/` folder holds `IAuditLogService` + `AuditLogService` + `AuditEntry` + `AuditHashHelper` (the data + writer side). This task touches BOTH the middleware (scope enrichment) and the audit service (two-tier emission + erasure method).
+
+    ADR-015's binding rule "MUST NOT store verbatim AI response in Tier 2 audit (hash only)" is the load-bearing constraint. If the Tier 2 entry contains raw Tool input or output, the implementation is wrong. Use `AuditHashHelper` (existing) to compute the hash; store the hash only.
+
+    Tier 3 Cosmos work history is for incident response and forensic audit. It MAY contain Tool input/output if explicitly classified as "low-sensitivity" per the Tool's metadata, but the SAFE default is hash-only. For MVP, ALL Tier 3 entries are hash-only. Lift this restriction in R2 with explicit per-Tool classification.
+
+    GDPR erasure: the partition-key-based delete is efficient at Cosmos scale. Do NOT iterate documents and delete one-by-one — use the partition delete API. If the existing Cosmos client wrapper doesn't expose this, add it now (cheap addition).
+
+    The G6 integration test is the verification surface. If you can't get the integration test green, the task is not done. Don't skip it.
+
+    `IToolHandlerRegistry` (task 026) is the audit choke point — every Tool dispatch goes through it, every dispatch writes audit. This task makes the audit ENTRY useful for incident response by adding the AE-specific fields. The choke point itself was established in task 026.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5 (code-review + adr-check). G6 integration test is the binding verification — do not skip.
+    </protocol>
+  </execution>
+</task>

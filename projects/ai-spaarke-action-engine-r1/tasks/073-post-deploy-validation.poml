@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Post-deploy validation via `Validate-DeployedEnvironment.ps1` — env vars, BFF health, CORS, dev leakage check</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>070, 071, 072</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Validation task with explicit deploy ADRs; final Phase 6 gate before wrap-up</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential: depends on all 3 deploys (070, 071, 072) being complete; precedes project wrap-up (090)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run the post-deploy validation script `Validate-DeployedEnvironment.ps1` against the dev environment after BFF (070), Dataverse (071), and Code Page (072) deploys complete. Verify: environment variables set; BFF `/healthz` 200; CORS configured for SpaarkeAi origins; no dev-mode leakage (e.g., source maps in production bundle, debug log levels, test data).
+  </prompt>
+
+  <role>
+    Senior Spaarke platform engineer with end-to-end deployment validation expertise. Familiar with `Validate-DeployedEnvironment.ps1` checks and the post-deploy smoke-test runbook in `auth-deployment-setup.md` §9.
+  </role>
+
+  <goal>
+    A validation report at `projects/ai-spaarke-action-engine-r1/notes/deployments/post-deploy-validation-{date}.md` documenting:
+    - Environment variable presence + correctness (App Service settings + Code Page config)
+    - BFF `/healthz` returns 200 + downstream Dataverse `/healthz/dataverse/doc/{id}` 200 (MI works)
+    - CORS allowed-origins includes SpaarkeAi launcher origins
+    - No source maps in production Code Page bundle (singlefile inline check)
+    - No debug log level / verbose telemetry in App Insights
+    - No test data leakage in Dataverse seed (no "test" rows; idempotent seed didn't duplicate)
+    - All 12 graduation criteria status snapshot (G1–G12)
+
+    Final Phase 6 gate. Project wrap-up (090) starts on PASS.
+  </goal>
+
+  <context>
+    <background>
+      The cumulative effect of three deploys (BFF + Dataverse + Code Page) can introduce subtle issues that no single deploy validation catches: CORS misconfiguration, env-var mismatch across surfaces, source-map leakage from a forgetful frontend build, dev-mode `/swagger` exposure, or test-data carry-over.
+
+      `Validate-DeployedEnvironment.ps1` is the canonical post-deploy script; it embeds the §9 smoke tests from `auth-deployment-setup.md` and adds the dev-leakage checks.
+    </background>
+    <relevant-files>
+      <file>scripts/Validate-DeployedEnvironment.ps1</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/deployments/post-deploy-validation-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Spaarke Auth v2: client uses `useAuth()` / `authenticatedFetch`; server uses `DefaultAzureCredential` (MI); audit middleware applied. Validate end-to-end OBO chain.</constraint>
+    <constraint source="ADR-029">Publish hygiene: no source maps in production bundle. Verify via singlefile inline HTML inspection.</constraint>
+    <constraint source="bff-extensions.md">Verify no plaintext secrets in App Service settings (use Key Vault references).</constraint>
+    <constraint source="project">No test data in Dataverse: seed scripts must NOT carry "test_" prefix rows; if found, escalate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Post-deploy smoke tests §9" location="docs/guides/auth-deployment-setup.md">§9a–§9e canonical smoke tests after any auth-touching deploy.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Pre-validation check: tasks 070, 071, 072 ALL ✅ in TASK-INDEX.md.</step>
+    <step order="1">Read knowledge files; review `Validate-DeployedEnvironment.ps1` to confirm coverage of all check categories.</step>
+    <step order="2">Run `Validate-DeployedEnvironment.ps1` against dev (`spaarke-bff-dev` + dev Dataverse + dev SpaarkeAi); capture full output.</step>
+    <step order="3">Run §9a–§9e smoke tests from `auth-deployment-setup.md`: `/healthz`, OBO round-trip, Dataverse health, EXO mailbox access, browser MSAL regression. Capture results.</step>
+    <step order="4">Manual dev-leakage checks: (a) inspect `sprk_spaarkeai.html` for `sourceMappingURL` comments — must be absent; (b) check App Insights for `Trace` or `Debug` level logs in last hour — should be empty or minimal; (c) check App Service config for plaintext secrets — should use Key Vault references; (d) check Dataverse for `test_*` rows in `sprk_actiontemplate` — should be empty.</step>
+    <step order="5">CORS check: from a SpaarkeAi launcher origin, attempt a BFF API call via `fetch` (browser DevTools); confirm CORS allows the origin; no `Access-Control-Allow-Origin` errors.</step>
+    <step order="6">Browser-based end-to-end: navigate Matter form → click ribbon button → SpaarkeAi opens as side pane → send "Summarize this matter" → verify summary renders in chat with citations. This is the "demo path" sanity check.</step>
+    <step order="7">Snapshot graduation criteria G1–G12 status in the report: G1 (Templates) ✅, G2 (meta-tools) ✅, ..., G12 (no AE internals leakage). Reference the verifying task for each.</step>
+    <step order="8">Write report at `projects/ai-spaarke-action-engine-r1/notes/deployments/post-deploy-validation-{YYYY-MM-DD}.md`: validation script output, smoke test results, dev-leakage check results, CORS check, end-to-end demo result, G1–G12 snapshot.</step>
+    <step order="9">If any check FAILS: do NOT proceed to project wrap-up (090). Escalate, remediate, re-validate.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD (validation task).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 073 status ✅. Update `current-task.md`: Phase 6 complete; ready for wrap-up (090).</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="powershell">Validate-DeployedEnvironment.ps1 execution</tool>
+    <tool name="curl">Smoke-test endpoints</tool>
+    <tool name="az">Azure CLI for App Insights queries + App Service config inspection</tool>
+    <tool name="browser">End-to-end demo path validation</tool>
+    <tool name="terminal">Shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/deployments/post-deploy-validation-{date}.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`Validate-DeployedEnvironment.ps1` exits 0 with all checks PASS.</criterion>
+    <criterion testable="true">Smoke tests §9a–§9e all PASS (BFF health, OBO, Dataverse MI, EXO, MSAL).</criterion>
+    <criterion testable="true">No source map references in production Code Page bundle.</criterion>
+    <criterion testable="true">CORS allows SpaarkeAi launcher origin; no fetch errors from launcher to BFF.</criterion>
+    <criterion testable="true">End-to-end demo path passes: ribbon → side pane → conversational summary works.</criterion>
+    <criterion testable="true">G1–G12 graduation snapshot in report; all 12 verified.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Final Phase 6 gate. Project wrap-up (090) only starts on PASS here. If ANY validation fails, remediate before 090.
+
+    The end-to-end demo path is the user-acceptance proxy. If it doesn't work here, the product-owner acceptance session will fail.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Declare RIGOR LEVEL: STANDARD. Follow task-execute skill.
+    </protocol>
+  </execution>
+</task>

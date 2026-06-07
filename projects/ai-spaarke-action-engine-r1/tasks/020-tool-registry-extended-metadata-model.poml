@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Tool Registry — Extended Metadata Model &amp; Serialization</title>
+    <phase>Phase 2: Tool Registry + Discovery</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>011, 014, 015</dependencies>
+    <blocks>021, 022, 023, 024, 025, 026</blocks>
+    <tags>bff-api, ai, models</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF code implementation; produces the canonical Tool Registry data contract consumed by every Phase 2 task and downstream Phase 3/4 work; ADR-013 facade boundary; tags include bff-api + ai</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundation model for tasks 021–026; its output (types, JSON contract) must exist before any sibling can compile. Single critical-path task within Phase 2.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the `ToolRegistry` extended-metadata data model (POCOs + JSON serialization) inside `Services/Ai/ActionEngine/ToolRegistry/`. This model is the canonical contract for Tool Registry entries in BFF code, mirrors the `sprk_toolregistry` Dataverse entity created in task 011, and is the input shape for the `spaarke-resource-registry-index` indexer (task 016). It MUST include all 11 extended-metadata fields enumerated in spec.md FR-07 and design.md §5 (Classification, CostClass, LatencyClass, Idempotency, AuthMode, Discoverability, ModelTier, PhaseRestrictions, EvidenceRequired, IsAlwaysOnInAssistant, PromoteInContexts).
+  </prompt>
+
+  <role>
+    Senior .NET 8 / C# engineer with deep familiarity with the Spaarke BFF AI feature module conventions (`Services/Ai/`), strongly-typed serialization (`System.Text.Json` with source generators where applicable), and ADR-013 facade boundary discipline.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **POCO data model** — `ToolRegistryEntry`, plus enum/value types for `Classification`, `CostClass`, `LatencyClass`, `Idempotency`, `AuthMode`, `ModelTier`, and complex types for `Discoverability` (with `SemanticDescription`, `Aliases`, `SampleInvocations`) and `PhaseRestrictions` (per-phase deny-tools).
+    2. **JSON serialization contract** — round-trip stable JSON shape used by (a) Dataverse → BFF reads, (b) AI Search index push, (c) `ToolRegistryEndpoints.cs` (task 021) response payloads. JsonSerializerOptions registered via `AddActionEngineModule()`.
+    3. **Unit tests** — round-trip serialization, defaulting behavior (missing fields default sensibly), and validation (e.g., `PhaseRestrictions` cannot contain a phase the parent Action does not declare).
+
+    Deliverable: `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModel.cs` + `ToolRegistryEnums.cs` + `Discoverability.cs` + `PhaseRestriction.cs`; unit tests at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/ToolRegistry/`.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-07 enumerates the 11 extended-metadata fields. Design.md §5 documents the semantic intent of each. The joint signal-envelope coordination with the Insights Engine project means the field shapes (especially `Classification` and `Discoverability`) MUST stay aligned with what `coordination-assessment-with-insights-engine.md` §4.8 declares.
+
+      The model is consumed in three places:
+      - `ToolRegistryEndpoints.cs` (task 021) for CRUD + query
+      - `FindResourcesTool.cs` (task 022) for semantic-search response shaping
+      - The AI Search index push pipeline (task 016 — index already created; this task may need to coordinate field mapping)
+
+      This task is the data-foundation task within Phase 2. All sibling tasks (021–026) depend on its output. It produces NO endpoints, NO services with side effects — only types + serialization + tests.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModel.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryEnums.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/Discoverability.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/PhaseRestriction.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionEngineFacade.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModelTests.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API. POCOs only — NO EF Core entity bleed into the model. Strongly typed; nullable reference types respected.</constraint>
+    <constraint source="ADR-008">Endpoint-filter auth applies at task 021 (endpoints). This task is data-only.</constraint>
+    <constraint source="ADR-010">DI minimalism. JsonSerializerOptions registration via `AddActionEngineModule()` extension. Do NOT register loose `IOptions&lt;&gt;` in `Program.cs`.</constraint>
+    <constraint source="ADR-013">PublicContracts/ facade boundary. If any type here is referenced by CRUD-side callers, it MUST be exposed via the facade — not directly. This task's model types live under `Services/Ai/ActionEngine/ToolRegistry/` and are internal to AE.</constraint>
+    <constraint source="ADR-015">Tool dispatch audit (Tier 2 + Tier 3) will hash these structures. JSON round-trip MUST be deterministic (e.g., property ordering controlled) to keep hashes stable.</constraint>
+    <constraint source="ADR-019">N/A here (no endpoints).</constraint>
+    <constraint source="ADR-029">Publish-size: avoid Newtonsoft.Json unless already transitively present. Prefer `System.Text.Json`.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist binding: placement decision (in BFF, internal to `Services/Ai/ActionEngine/`), no new CRUD→AI dependencies, no new NuGet packages without justification.</constraint>
+    <constraint source="project">11 extended-metadata fields from spec.md FR-07 MUST all be present: Classification, CostClass, LatencyClass, Idempotency, AuthMode, Discoverability, ModelTier, PhaseRestrictions, EvidenceRequired, IsAlwaysOnInAssistant, PromoteInContexts.</constraint>
+    <constraint source="project">Classification and Discoverability shapes coordinate with Insights Engine per coordination-assessment-with-insights-engine.md §4.8; do NOT diverge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+    </files>
+    <patterns>
+      <pattern name="Feature-module DI" location=".claude/patterns/api/service-registration.md">`AddActionEngineModule()` extension; ≤15 non-framework registrations per ADR-010.</pattern>
+      <pattern name="System.Text.Json source generators" location="src/server/api/Sprk.Bff.Api/">Existing precedent in BFF for source-generator JSON serialization where applicable.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, baseline build passes, branch is `work/ai-spaarke-action-engine-r1`. (task-execute Step 0)</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;`. Pay close attention to spec.md FR-07, design.md §5 (Tool Registry metadata section), coordination-assessment §4.8 (joint Classification + Discoverability shapes), and bff-extensions.md (binding governance).</step>
+    <step order="2">Sketch the type hierarchy on paper / in a scratch note: `ToolRegistryEntry` (root) → 11 metadata fields. Identify which become enums (`Classification`, `CostClass`, `LatencyClass`, `Idempotency`, `AuthMode`, `ModelTier`) and which are complex types (`Discoverability`, `PhaseRestrictions`). Document defaulting rules (e.g., `IsAlwaysOnInAssistant` defaults to false; `PromoteInContexts` defaults to empty array).</step>
+    <step order="3">Implement enums in `ToolRegistryEnums.cs`. Use `[JsonStringEnumConverter]` for stable JSON shape. Document each enum value with XML comments referencing design.md §5.</step>
+    <step order="4">Implement `Discoverability.cs` (SemanticDescription, Aliases[], SampleInvocations[]) and `PhaseRestriction.cs` (per-phase deny-tools structure). These are the two complex value types.</step>
+    <step order="5">Implement `ToolRegistryModel.cs` containing `ToolRegistryEntry`. All 11 extended-metadata fields present + ToolId, DisplayName, Description, ParameterSchema (JSON schema as string or `JsonElement`). Use nullable reference types; record types where appropriate for value semantics.</step>
+    <step order="6">Configure JSON serialization: explicit `JsonSerializerOptions` in `AddActionEngineModule()` extension (DI). PropertyNamingPolicy = camelCase. Enums via string converter. Property ordering stable (so audit hashes from ADR-015 are deterministic — alphabetic property names within each level OR source-generator default ordering).</step>
+    <step order="7">Write unit tests at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModelTests.cs`: (a) round-trip serialization for a fully populated entry, (b) round-trip for minimal entry (defaults apply), (c) enum string-shape stability, (d) PhaseRestrictions validation (deny-tool references valid phase names), (e) JSON shape locked to a golden fixture (regression guard against accidental shape drift).</step>
+    <step order="8">Verify build + test passes: `dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Run `dotnet format` to keep style consistent.</step>
+    <step order="9">Verify NFR-10 publish-size impact is zero (no new NuGet packages added). Run `dotnet list package src/server/api/Sprk.Bff.Api/ --include-transitive` before/after if uncertain.</step>
+    <step order="9.5">Run quality gates: `code-review` on the new files; `adr-check` to verify ADR-013 (facade boundary respected — model is internal to AE folder), ADR-010 (DI registration only via module extension), ADR-029 (no new NuGet packages).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 020 ✅. Update `current-task.md`: task 020 complete; next: Phase 2 Group C parallel (tasks 022, 023, 024) + tasks 021, 025, 026 in parallel.</step>
+    <step order="11">Document any deviations or design notes in `projects/ai-spaarke-action-engine-r1/notes/handoffs/`. Commit with a brief recap message.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, format the BFF API</tool>
+    <tool name="git">Branch state + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModel.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryEnums.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/Discoverability.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/PhaseRestriction.cs</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModelTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ToolRegistryEntry` exists with all 11 extended-metadata fields enumerated in spec.md FR-07 (Classification, CostClass, LatencyClass, Idempotency, AuthMode, Discoverability, ModelTier, PhaseRestrictions, EvidenceRequired, IsAlwaysOnInAssistant, PromoteInContexts).</criterion>
+    <criterion testable="true">Round-trip JSON serialization unit test passes for a fully populated entry and for a minimally populated entry (defaults apply correctly).</criterion>
+    <criterion testable="true">Enum JSON shape uses string converter (verified by golden-fixture unit test); ordering is stable for ADR-015 audit hashing.</criterion>
+    <criterion testable="true">`Classification` + `Discoverability` shapes match the coordination-assessment-with-insights-engine.md §4.8 contract (verified by inspection in code review).</criterion>
+    <criterion testable="true">Build passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0. Tests pass: `dotnet test tests/unit/Sprk.Bff.Api.Tests/` exits 0.</criterion>
+    <criterion testable="true">No new NuGet packages added (NFR-10 publish-size preserved). Verified by `git diff src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj`.</criterion>
+    <criterion testable="true">Model types live under `Services/Ai/ActionEngine/ToolRegistry/` and are NOT exposed via `PublicContracts/` (ADR-013 boundary — verified by grep).</criterion>
+    <criterion testable="true">Supports spec gate G2 (meta-tools discovery flow) by providing the canonical contract `FindResources` / `GetResourceDetail` / `InvokeResource` consume.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Coordination with Insights Engine on `Classification` + `Discoverability` shapes is non-negotiable. If a shape conflict is detected during this task, escalate before committing — do NOT diverge silently. The signal envelope contract is jointly owned per `coordination-assessment-with-insights-engine.md` §4.8.
+
+    The 11 fields enumeration is the most important checklist for this task. Missing one breaks downstream tasks (notably 022 `FindResources` which surfaces `Discoverability.SemanticDescription`, and 026 phase deny-tools which consume `PhaseRestrictions`).
+
+    Audit hash stability (ADR-015) demands deterministic property ordering. Lean on `System.Text.Json` source generators or explicit `[JsonPropertyOrder]` to lock the shape.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with reason from `&lt;rigor-reason&gt;`. Follow task-execute skill for pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

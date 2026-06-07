@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Deploy Sprk.Bff.Api to Azure App Service via `bff-deploy` skill</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>060, 061, 062, 063, 064, 065, 066</dependencies>
+    <blocks>071, 072, 073, 090</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit ADR-001 / ADR-029 / bff-extensions.md governance; invokes bff-deploy skill</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential deploy: BFF must deploy first; Dataverse + Code Page depend on BFF endpoints being live for post-deploy validation</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the Action Engine BFF surface to Azure App Service (`spaarke-bff-dev`) via the `bff-deploy` skill. All Phase 6 quality gates (G1–G9) must have passed before this task runs. Use the hardened `Deploy-BffApi.ps1` script with hash-verify + auto-recover and 120s health-check window.
+  </prompt>
+
+  <role>
+    Senior Spaarke platform engineer with deep Azure App Service deployment experience and familiarity with the `bff-deploy` skill's hardened deploy script (hash-verify, auto-recover, 120s cold-start window).
+  </role>
+
+  <goal>
+    Sprk.Bff.Api running on `spaarke-bff-dev` with the Action Engine surface live. `/healthz` returns 200. Action Engine endpoints (`/actions/*`, `/tools/*`, meta-tool endpoints) respond per ADR-008 endpoint-filter authorization. Deploy log captured at `projects/ai-spaarke-action-engine-r1/notes/deployments/bff-deploy-{date}.md`.
+  </goal>
+
+  <context>
+    <background>
+      This is the first of three deploys in Phase 6 (BFF → Dataverse → Code Page). Order matters: BFF endpoints must be live before Dataverse seeding (task 071) calls them and before SpaarkeAi launcher tests (task 072) target them.
+
+      The hardened `Deploy-BffApi.ps1` script has the two-layer safety net (hash-verify + 120s health-check). Trust it; don't manually re-deploy if hash-verify passes but `/healthz` is slow.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/deployments/bff-deploy-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API + BackgroundService. NO Azure Functions hosting BFF endpoints.</constraint>
+    <constraint source="ADR-029">Framework-dependent linux-x64 publish; sourcemap exclusion; ≤5MB delta verified by task 065.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist verified: placement decision stated; ADRs cited; publish-size impact verified (G8); no new HIGH CVE (G9); feature-module DI per ADR-010.</constraint>
+    <constraint source="project">Tasks 060–066 (G1–G9) MUST all be PASS before this task starts.</constraint>
+    <constraint source="bff-deploy skill">Use `Deploy-BffApi.ps1`; trust hash-verify; default 120s health-check window; never re-deploy if hash-verify passes but health is slow.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy two-layer safety" location=".claude/skills/bff-deploy/SKILL.md">Hash-verify catches silent file-lock failures; 120s health-check catches Linux cold-start.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Pre-deploy gate check: verify tasks 060–066 are ALL ✅ in TASK-INDEX.md (G1–G9 verified). If any FAIL, STOP and escalate.</step>
+    <step order="1">Read `bff-deploy` skill SKILL.md fully; review the hardened script behavior (hash-verify + auto-recover + 120s health window).</step>
+    <step order="2">Invoke the `bff-deploy` skill — this builds, publishes, zips, deploys via `Deploy-BffApi.ps1`, runs hash-verify, runs health-check.</step>
+    <step order="3">If hash-verify FAILS: trust the script's auto-recover (Kudu zipdeploy retry); review logs in deploy output.</step>
+    <step order="4">If hash-verify PASSES but `/healthz` is slow: wait an additional 60s; do NOT redeploy; per skill guidance, hash-pass + slow-health = correct deploy still booting.</step>
+    <step order="5">Verify post-deploy smoke tests per `bff-deploy` skill: §9a `/healthz` 200; §9b OBO endpoint round-trip; §9c `/healthz/dataverse/doc/{id}` (MI → Dataverse). Capture results.</step>
+    <step order="6">Curl a sample Action Engine endpoint (e.g., `GET /tools` with bearer token) to confirm the new surface is reachable + endpoint-filter authorization enforced (401 without token; 200 with valid token).</step>
+    <step order="7">Write deploy log at `projects/ai-spaarke-action-engine-r1/notes/deployments/bff-deploy-{YYYY-MM-DD}.md`: deploy timestamp, script output summary, smoke test results, Action Engine endpoint verification.</step>
+    <step order="8">If deploy fails for non-recoverable reason (e.g., missing app setting, auth misconfig): rollback via App Service deployment slot or previous publish; escalate as a project blocker.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD (deploy task).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 070 status ✅. Update `current-task.md`: BFF deployed; ready for Dataverse deploy (071).</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="powershell">Deploy-BffApi.ps1 execution</tool>
+    <tool name="az">Azure CLI for App Service operations</tool>
+    <tool name="curl">Smoke-test endpoints</tool>
+    <tool name="terminal">Shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/deployments/bff-deploy-{date}.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sprk.Bff.Api running on `spaarke-bff-dev`; `/healthz` returns 200; hash-verify PASSED.</criterion>
+    <criterion testable="true">Action Engine endpoints reachable (sample endpoint returns 401 without auth, 200 with valid token — ADR-008 endpoint-filter enforced).</criterion>
+    <criterion testable="true">Smoke tests §9a, §9b, §9c from `bff-deploy` skill all pass.</criterion>
+    <criterion testable="true">Deploy log written at `notes/deployments/bff-deploy-{date}.md` with timestamp + results.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the first deploy. Tasks 071 (Dataverse) and 072 (Code Page) depend on this. If this deploy fails, the rest of Phase 6 stops.
+
+    Trust the hardened script. The two-layer safety net is the canonical pattern per the May 2026 incident (FAILURE-MODES.md G-2).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Declare RIGOR LEVEL: STANDARD. Invoke `bff-deploy` skill for the actual deploy.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Load test `FindResources` — p95 &lt; 200ms over `spaarke-resource-registry-index` (NFR-01 / G5)</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>022, 016</dependencies>
+    <blocks>070, 090</blocks>
+    <tags>testing, ai, azure-search, performance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Performance test with explicit NFR-01 target; creates new test harness file; Phase 6 quality gate</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent load-test harness; no file overlap with size validation (065) or CVE scan (066)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build a dedicated load-test harness for `FindResources` against the `spaarke-resource-registry-index` Azure AI Search index and verify NFR-01: p95 latency &lt; 200ms. Combine harness-driven measurements with App Insights custom metric `action_engine.metatool.latency` for production-validated coverage of graduation criterion G5.
+  </prompt>
+
+  <role>
+    Senior Spaarke performance engineer with Azure AI Search query-tuning experience and BFF load-testing familiarity (BenchmarkDotNet or NBomber). Comfortable interpreting App Insights metrics + p95 distributions.
+  </role>
+
+  <goal>
+    `tests/load/Sprk.Bff.Api.Load.Tests/FindResourcesLoadTests.cs` exists (in a new or existing load-test project), executing N parallel `FindResources` calls against the resource registry index and reporting p50 / p95 / p99 latencies. Verify p95 &lt; 200ms (NFR-01).
+
+    Output a measurement report at `projects/ai-spaarke-action-engine-r1/notes/spikes/find-resources-load-test.md` documenting:
+    - Test environment (search service tier, index document count, replica/partition count)
+    - Test load profile (concurrency, query mix, total queries)
+    - p50 / p95 / p99 measurements
+    - App Insights metric snapshot showing `action_engine.metatool.latency`
+    - PASS/FAIL judgement against NFR-01
+
+    Graduation criterion G5 verifiable from the report + the App Insights snapshot.
+  </goal>
+
+  <context>
+    <background>
+      G5 codifies the user-experience contract: discovery via meta-tools must be fast enough that the Assistant feels responsive. p95 &lt; 200ms (NFR-01) is the line — slower than this and conversational invocation degrades to "type, wait, watch spinner."
+
+      The `spaarke-resource-registry-index` is the semantic-search index over Tool Registry `Discoverability` metadata (provisioned in task 016). The index population happens in task 022 (FindResources implementation).
+    </background>
+    <relevant-files>
+      <file>tests/load/Sprk.Bff.Api.Load.Tests/FindResourcesLoadTests.cs</file>
+      <file>tests/load/Sprk.Bff.Api.Load.Tests/Sprk.Bff.Api.Load.Tests.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/FindResourcesTool.cs</file>
+      <file>infra/ai-search/spaarke-resource-registry-index.json</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/spikes/find-resources-load-test.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">FindResources p95 &lt; 200ms over `spaarke-resource-registry-index`. Measured via App Insights custom metric + dedicated load test.</constraint>
+    <constraint source="ADR-022">Load tests are a separate project (`tests/load/`) — NOT mixed with unit/integration tests in CI runs by default.</constraint>
+    <constraint source="ADR-013">Test runs against a non-prod Azure AI Search instance (test or dev tier) — do NOT load-test production.</constraint>
+    <constraint source="project">Document the test environment in the report — search tier, index doc count, replica/partition count — so results are reproducible.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-022-test-organization.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Load-test harness" location=".claude/patterns/testing/integration-tests.md">NBomber or BenchmarkDotNet for p50/p95/p99 measurement.</pattern>
+      <pattern name="App Insights custom metric" location="docs/architecture/AI-ARCHITECTURE.md">`action_engine.metatool.latency` is the canonical metric per spec NFR-07.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: tasks 022 (FindResources impl) and 016 (search index) complete in TASK-INDEX.md.</step>
+    <step order="1">Read knowledge files; check whether `tests/load/Sprk.Bff.Api.Load.Tests/` already exists (it may not). If not, create it; if so, extend it.</step>
+    <step order="2">Create `tests/load/Sprk.Bff.Api.Load.Tests/Sprk.Bff.Api.Load.Tests.csproj` (or use existing) with NBomber + xUnit references; ensure it's NOT included in the default `dotnet test` solution scope (load tests run on-demand).</step>
+    <step order="3">Author `FindResourcesLoadTests.cs`: configure NBomber scenario with a query mix (5-10 representative intents); run at concurrency levels 1, 5, 10, 25 over the dev `spaarke-resource-registry-index`; record p50/p95/p99 per concurrency.</step>
+    <step order="4">Wire test to consume `Sprk.Bff.Api` `FindResourcesTool` via test composition (in-process) OR via HTTP against a running BFF (`spaarke-bff-dev`) — document which path is used.</step>
+    <step order="5">Run the load test against the dev environment; capture p50/p95/p99 measurements; pull App Insights `action_engine.metatool.latency` for the same window.</step>
+    <step order="6">Write the report at `projects/ai-spaarke-action-engine-r1/notes/spikes/find-resources-load-test.md`: environment, load profile, measurements, App Insights snapshot, PASS/FAIL judgement. If p95 &gt; 200ms, propose mitigations (replica scaling, index tuning, query-shape change) and re-measure.</step>
+    <step order="7">Verify NFR-01 passes; if it fails, escalate as a risk and update plan.md Risk Register before proceeding.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD (performance test).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 064 status ✅. Update `current-task.md`: G5 verified.</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test runner</tool>
+    <tool name="az">Azure CLI for App Insights metric queries</tool>
+    <tool name="terminal">Shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/load/Sprk.Bff.Api.Load.Tests/FindResourcesLoadTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/spikes/find-resources-load-test.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">**G5**: FindResources p95 &lt; 200ms over semantic index (verified by load test + App Insights metric — NFR-01). Report at `notes/spikes/find-resources-load-test.md` shows PASS with measurements.</criterion>
+    <criterion testable="true">Load-test harness exists at `tests/load/Sprk.Bff.Api.Load.Tests/FindResourcesLoadTests.cs` and is reproducible.</criterion>
+    <criterion testable="true">App Insights metric `action_engine.metatool.latency` is referenced in the report.</criterion>
+    <criterion testable="true">If NFR-01 fails, the report documents mitigation strategy and risk escalation.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task directly verifies graduation gate **G5** (spec.md Success Criteria #5; NFR-01). The load test runs against dev, not prod — use the existing `spaarke-search-dev` Azure AI Search instance per `docs/architecture/auth-azure-resources.md`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Declare RIGOR LEVEL: STANDARD. Follow task-execute skill.
+    </protocol>
+  </execution>
+</task>
