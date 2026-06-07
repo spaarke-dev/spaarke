@@ -18,7 +18,7 @@
 | 014 | Thread `SearchIndexName` through `RagService.cs` | B | ✅ | 010, 011 | Group B2 | FULL |
 | 015 | Thread `SearchIndexName` through `RecordSearchService.cs` | B | ✅ | 010, 011 | Group B2 | FULL |
 | 016 | Update `SemanticSearchEndpoints.cs` to pass DTO field to resolver | B | ✅ | 013, 014, 015 | — | FULL |
-| 017 | BFF unit + integration tests for FR-BFF-01..07 | B | 🔲 | 016 | — | STANDARD |
+| 017 | BFF unit + integration tests for FR-BFF-01..07 | B | ✅ | 016 | — | STANDARD |
 | 018 | BFF publish-size check + deploy via `/bff-deploy` | B — Deploy | 🔲 | 017 | — | STANDARD |
 | 020 | Update shared `EntityCreationService.ts` for `sprk_searchindexname` cascade | A — Wizards | ✅ | 018 | — | FULL |
 | 021 | `CreateMatterWizard` — set `sprk_searchindexname` from BU (FR-WIZ-01) | A | ✅ | 020 | Group A1 | FULL |
@@ -27,7 +27,7 @@
 | 024 | `CreateWorkAssignmentWizard` — verify + fix gap + set both fields (FR-WIZ-04) | A | ✅ | 020 | Group A1 | FULL |
 | 025 | `CreateEventWizard` — verify + fix gap + set both fields (FR-WIZ-05) | A | ✅ | 020 | Group A1 | FULL |
 | 026 | DocumentUploadWizard — `resolveSearchIndexNameForRecord` chain (FR-WIZ-06) | A | ✅ | 020 | Group A2 | FULL |
-| 027 | DocumentUploadWizard — `DocumentRecordService.buildRecordPayload` updates (FR-WIZ-07) | A | 🔲 | 026 | — | FULL |
+| 027 | DocumentUploadWizard — `DocumentRecordService.buildRecordPayload` updates (FR-WIZ-07) | A | ✅ | 026 | — | FULL |
 | 028 | INV-5 unit tests for all wizards (FR-WIZ-08) | A | 🔲 | 021, 022, 023, 024, 025, 027 | — | STANDARD |
 | 029 | Wizard code-page deploy via `/code-page-deploy` (all 6) | A — Deploy | 🔲 | 028 | — | STANDARD |
 | 030 | PCF manifest — add `searchIndexName` bound property (FR-PCF-01) | D — PCF v1.1.74 | 🔲 | 018 | — | FULL |
