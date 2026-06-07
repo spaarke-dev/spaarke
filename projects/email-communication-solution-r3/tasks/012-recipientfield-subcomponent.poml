@@ -1,0 +1,154 @@
+<task id="012" project="email-communication-solution-r3">
+  <metadata>
+    <title>RecipientField sub-component — canonical To/Cc/Bcc with separator parsing + directory autocomplete</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>020, 028</blocks>
+    <tags>react, frontend, fluent-ui, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Replaces 5 distinct recipient-normalization implementations identified in the driver assessment; canonical UX for every email surface; ADR-021 (Fluent v9) + NFR-09 (a11y) + paste-from-Outlook compatibility (separator parsing) are load-bearing user-facing concerns. FULL guards against regressions across all migrating callers.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-05</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build the single canonical `<RecipientField />` sub-component at `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.tsx`. One implementation, three use sites (To / Cc / Bcc) — replaces 5 different recipient-normalization implementations identified in the assessment.
+
+    Requirements (FR-05):
+    - Accepts string-with-`;`-or-`,`-separator input (paste-from-Outlook compatibility — Outlook copies addresses separated by `; `)
+    - On commit (Enter, Tab, blur, or separator key), parse the string into individual addresses
+    - Each parsed address resolves via `searchUsersAndContacts()` directory autocomplete (existing service in `@spaarke/ui-components`)
+    - Resolved entries render as Fluent `&lt;Tag /&gt;` chips with displayName + remove-X button
+    - Unresolved-but-valid email-format addresses render as plain-text Tag chips (no directory metadata)
+    - Invalid email format on commit → reject (don't add as Tag), surface validation error via parent's reducer dispatch
+    - Component is controlled: receives `value: IRecipient[]` and `onChange(IRecipient[])` from engine reducer
+    - Keyboard nav: arrow keys between Tags, Backspace removes last Tag, Tab moves focus out of field
+    - Screen-reader: `aria-label="To recipients"` / `Cc recipients` / `Bcc recipients` based on `label` prop
+
+    Files:
+    - `subcomponents/RecipientField.tsx` (NEW)
+    - `subcomponents/RecipientField.types.ts` (NEW — `IRecipient { displayName: string; email: string; type: 'user' | 'contact' | 'unknown'; entityRef?: { entityName: string; recordId: string } }`)
+    - Update `EmailComposer.types.ts` to import `IRecipient` from this file (or move to a shared types module)
+    - Update `EmailComposer/index.ts` to export `RecipientField` + `IRecipient`
+  </prompt>
+
+  <role>
+    React + Fluent UI v9 developer with a11y experience. Familiar with Fluent v9 `&lt;Combobox /&gt;` / `&lt;Tag /&gt;` / `&lt;TagGroup /&gt;` primitives and the controlled-component pattern.
+  </role>
+
+  <goal>
+    `&lt;RecipientField /&gt;` component compiles, lint-clean, renders correctly in the engine slots. Paste-from-Outlook test: `"Alice &lt;alice@example.com&gt;; Bob &lt;bob@example.com&gt;"` parses into 2 Tags. Directory autocomplete: typing `"al"` triggers `searchUsersAndContacts('al')` and shows dropdown. Validation: typing `"notanemail"` + Enter → rejected, validation error dispatched. Keyboard nav functional (Tab, Backspace, arrows). `npm run build` + `npm run lint` clean.
+  </goal>
+
+  <context>
+    <background>
+      Driver assessment identified 5 different recipient-normalization implementations across email surfaces — each parsed `;` / `,` separators differently, validated emails differently, and rendered Tags differently. Result: inconsistent UX + occasional duplicate-Tag bugs. This component is the single canonical implementation.
+
+      `searchUsersAndContacts()` already exists in `@spaarke/ui-components/src/services/` — used by other autocomplete contexts. It returns `{ users: User[]; contacts: Contact[] }` from Dataverse + Graph (per existing implementation; reuse the existing signature).
+
+      Tags vs plain-text Tags: a "resolved" recipient has a `entityRef` (user / contact GUID) — useful for downstream `sprk_communication.sprk_to_collection` polymorphic stamping. Unresolved but valid emails (e.g., external addresses not in the directory) render as plain-text Tags and still send successfully (they end up as email-only entries in the request body).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.types.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts (UPDATE — import IRecipient)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE — export RecipientField, IRecipient)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/ (READ — find searchUsersAndContacts())</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 only — use `&lt;Combobox /&gt;`, `&lt;Tag /&gt;`, `&lt;TagGroup /&gt;`, `&lt;Field /&gt;` from `@fluentui/react-components`</constraint>
+    <constraint source="ADR-028">No direct `@spaarke/auth` import — `searchUsersAndContacts()` already takes `authenticatedFetch` parameter (per NFR-02 decoupling rule); pass it through from engine props</constraint>
+    <constraint source="ADR-033">Canonical impl — DO NOT clone existing recipient implementations; this REPLACES them</constraint>
+    <constraint source="NFR-09">Full keyboard nav (Tab, arrow, Backspace, Enter); `aria-label` based on `label` prop; live region for validation errors handled by parent (task 020)</constraint>
+    <constraint source="project">Component is CONTROLLED — `value: IRecipient[]` + `onChange(IRecipient[])`; never holds its own state for recipients (engine reducer owns state)</constraint>
+    <constraint source="project">Commit on: Enter, Tab, `;`/`,` keystroke, or blur — all four trigger the parse-and-resolve flow</constraint>
+    <constraint source="project">Paste support: `onPaste` event handler parses pasted text via the same separator logic before commit</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 Combobox + TagGroup" location=".claude/skills/fluent-v9-component/SKILL.md">
+        Authoritative pattern for autocomplete-with-chips UI in Fluent v9. Reference for prop shape + a11y attributes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep for `searchUsersAndContacts` in `src/client/shared/Spaarke.UI.Components/src/services/` to confirm signature + `authenticatedFetch` parameter shape.</step>
+    <step order="2">Author `RecipientField.types.ts` with `IRecipient` shape per prompt.</step>
+    <step order="3">Author `RecipientField.tsx`:
+      - Props: `{ label: 'To' | 'Cc' | 'Bcc'; value: IRecipient[]; onChange: (next: IRecipient[]) =&gt; void; onValidationError?: (code: string, message: string) =&gt; void; authenticatedFetch: typeof fetch }`
+      - Local state ONLY for the input buffer (text being typed) — NOT for the resolved Tags
+      - Separator parse: `const parseAddresses = (input: string): string[] =&gt; input.split(/[;,]/).map(s =&gt; s.trim()).filter(Boolean)`
+      - Email regex validation (RFC 5322 simplified): `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`
+      - Commit handler: parse, validate each, resolve via `searchUsersAndContacts` (best-effort — if directory lookup fails, fall back to email-only Tag), call `onChange` with new union
+      - Render `&lt;Field label={label}&gt;&lt;TagGroup&gt;...&lt;/TagGroup&gt;&lt;Combobox /&gt;&lt;/Field&gt;`</step>
+    <step order="4">Update `EmailComposer.types.ts` to re-export `IRecipient` from `subcomponents/RecipientField.types`.</step>
+    <step order="5">Update `EmailComposer/index.ts` to export `RecipientField` and the `IRecipient` type.</step>
+    <step order="6">Smoke test in dev: paste `"Alice &lt;alice@example.com&gt;; bob@example.com,charlie@example.com"` → 3 Tags; type `"not"` → no autocomplete results; Enter → rejected; Backspace → last Tag removed.</step>
+    <step order="7">Run `npm run build` + `npm run lint` — both clean.</step>
+    <step order="7.5">Step 9.5 quality gates — invoke `code-review` + `adr-check` (ADR-021, ADR-028).</step>
+    <step order="8">Update `TASK-INDEX.md`: mark task 012 ✅.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Find searchUsersAndContacts signature</tool>
+    <tool name="write">RecipientField.tsx + types</tool>
+    <tool name="edit">EmailComposer.types.ts re-export, index.ts barrel</tool>
+    <tool name="bash">npm run build + lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/subcomponents/RecipientField.tsx (NEW)</output>
+    <output type="file">EmailComposer/subcomponents/RecipientField.types.ts (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.types.ts (UPDATED — re-export IRecipient)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED — export RecipientField + IRecipient)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RecipientField.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">Pasting `"Alice &lt;alice@example.com&gt;; bob@example.com,charlie@example.com"` produces 3 Tags.</criterion>
+    <criterion testable="true">Typing 2+ characters triggers `searchUsersAndContacts()` autocomplete dropdown.</criterion>
+    <criterion testable="true">Submitting `"notanemail"` does NOT add a Tag and surfaces a validation error via `onValidationError` callback.</criterion>
+    <criterion testable="true">Keyboard: Tab moves focus out; Backspace removes last Tag; Enter commits; `;`/`,` keystroke commits.</criterion>
+    <criterion testable="true">Component is fully controlled (no internal Tag state).</criterion>
+    <criterion testable="true">`aria-label` set based on `label` prop ("To recipients", "Cc recipients", "Bcc recipients") — NFR-09.</criterion>
+    <criterion testable="true">No `@spaarke/auth` import — uses injected `authenticatedFetch` only — NFR-02.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Replaces 5 ad-hoc impls per assessment §3.2. After this lands, grep for `split.*[;,]` in shared lib should show only this file as the source of separator-parsing logic.
+
+    `searchUsersAndContacts` may not exist under that exact name — adjust as needed. The point is: use the existing directory-lookup service, don't re-roll a new one.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor. Quality gates at Step 9.5 mandatory.
+    </protocol>
+  </execution>
+</task>

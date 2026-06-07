@@ -1,0 +1,123 @@
+<task id="070" project="email-communication-solution-r3">
+  <metadata>
+    <title>Refactor EntityCreationService.sendEmail() into thin adapter over sendCommunication()</title>
+    <phase>Wave 5 — 5-Wizard Migration + DocumentEmailWizard Fix + Forks</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>065</dependencies>
+    <blocks>071, 075</blocks>
+    <tags>react, frontend, refactoring, communication, bff-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a service consumed by every create-record wizard send-email path; behavioral change with downstream impact across 5 wizards; touches BFF-bound typed wrapper invocation; FULL rigor required by CLAUDE.md decision tree (services/.ts, deps on 3+ tasks, communication tag)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocks tasks 071 and 075; both depend on this adapter's final shape. Must complete first before downstream wizard migrations and DocumentEmailWizard fix consume it.</parallel-reason>
+    <fr-refs>FR-16</fr-refs>
+  </metadata>
+
+  <prompt>
+    Refactor `EntityCreationService.sendEmail()` in `src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts` from a duplicated implementation into a thin adapter (≤30 LOC) over the typed `sendCommunication()` wrapper (Wave 0 task 005). All payload shaping, validation, error mapping, and ProblemDetails parsing must delegate to `sendCommunication()` and `SendCommunicationError`.
+
+    This is the foundational service refactor for Wave 5 — the shared `SendEmailStep` (task 071) and `DocumentEmailWizard` (task 075) both depend on the adapter's final shape. The goal is to make `sendEmail()` a typed bridge between the wizard-context-shaped input and the canonical `SendCommunicationRequest`, nothing more.
+
+    NOTE per Owner Clarification (Wave 5 PR shape): ALL Wave 5 migrations ship in a single PR. This task's diff will be included in the consolidated Wave 5 PR alongside tasks 071–076. Do not push as a standalone PR.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer. Authoritative on `@spaarke/ui-components` shared library services and the canonical `sendCommunication()` typed wrapper. Familiar with ADR-019 (ProblemDetails) and ADR-033 (Communication architecture).
+  </role>
+
+  <goal>
+    `EntityCreationService.sendEmail()` is reduced to ≤30 LOC, contains no duplicated validation/payload/error-mapping logic, and delegates entirely to `sendCommunication()`. All existing callers (5 create-record wizards) continue to function with no behavior change. Unit tests pass. `npm run build` clean in `@spaarke/ui-components`.
+  </goal>
+
+  <context>
+    <background>
+      Pre-R3, `EntityCreationService.sendEmail()` carried its own payload construction, error handling, and `fetch` invocation — partially duplicating logic that now lives in the canonical `sendCommunication()` wrapper (refined in Wave 0 task 005 with `attachmentDriveItemIds` + `SendCommunicationError`). Wave 5 closes this duplication by making `sendEmail()` a thin adapter.
+
+      The adapter exists (vs. having wizards call `sendCommunication()` directly) so the wizard-context-to-request shape mapping has a single named location. Removing it would force every wizard to duplicate the mapping.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">All client send-email paths MUST route through `sendCommunication()` typed wrapper; no direct `fetch` to `/api/communications/send`</constraint>
+    <constraint source="ADR-019">Errors MUST surface as `SendCommunicationError` parsed from ProblemDetails</constraint>
+    <constraint source="ADR-028">Shared lib components MUST NOT directly import `@spaarke/auth`; `authenticatedFetch` injected via params/props</constraint>
+    <constraint source="spec NFR-06">All client send-email paths must surface errors as `SendCommunicationError`</constraint>
+    <constraint source="project">Adapter MUST be ≤30 LOC (excluding type declarations and imports) — enforced by code review</constraint>
+    <constraint source="project">No behavior change for existing 5 wizard callers — input shape preserved at adapter boundary</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="canonical sendCommunication wrapper" location="src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts">
+        Wave 0 task 005 added `SendCommunicationError` export + `attachmentDriveItemIds` field. This task delegates to it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load `spec.md` FR-16, `CLAUDE.md` empirical findings table, `plan.md` Wave 5 section, and ADR-033.</step>
+    <step order="2">Read the current `EntityCreationService.sendEmail()` implementation; catalog its responsibilities (payload construction, fetch invocation, error handling, validation).</step>
+    <step order="3">Read `communicationApi.ts` to confirm `sendCommunication()` signature and `SendCommunicationError` export are available (verified Wave 0 task 005).</step>
+    <step order="4">Identify the 5 wizard callers via grep: `EntityCreationService.sendEmail` or `entityCreationService.sendEmail` references across `src/client/shared/` and `src/solutions/`. Catalog input shapes to ensure adapter preserves them.</step>
+    <step order="5">Refactor `sendEmail()`: strip duplicated payload/fetch/error logic; transform wizard-context input into `SendCommunicationRequest`; invoke `sendCommunication(request, authenticatedFetch)`; let `SendCommunicationError` propagate. Target ≤30 LOC.</step>
+    <step order="6">Run `npm run lint` + `npm run build` in `src/client/shared/Spaarke.UI.Components/`; fix any TS errors.</step>
+    <step order="7">Run unit tests for `EntityCreationService`; fix any test breakage. If tests assume the old internal payload shape, update assertions to verify the adapter delegates correctly (e.g., spy on `sendCommunication`).</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 070 ✅ completed; verify 071 and 075 are no longer blocked.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol: status → completed, advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Find all 5 wizard callers</tool>
+    <tool name="read">Inspect current `EntityCreationService.sendEmail()` + `communicationApi.ts`</tool>
+    <tool name="edit">Refactor the adapter</tool>
+    <tool name="bash">`npm run lint`, `npm run build`, `npm test` in shared lib</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts (REFACTORED — sendEmail ≤30 LOC)</output>
+    <output type="test">tests for EntityCreationService updated where assertions targeted old internals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`EntityCreationService.sendEmail()` body is ≤30 LOC (excluding imports + type declarations).</criterion>
+    <criterion testable="true">`sendEmail()` invokes `sendCommunication()` directly; no inline `fetch` to `/api/communications/send`.</criterion>
+    <criterion testable="true">Errors thrown by `sendEmail()` are `SendCommunicationError` instances.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` succeed in `@spaarke/ui-components`.</criterion>
+    <criterion testable="true">All existing unit tests for `EntityCreationService` pass (updated where they targeted old internals).</criterion>
+    <criterion testable="true">All 5 create-record wizards still compile when consumed via the adapter; no input shape changes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Single-PR scope (Owner Clarification): this task's diff ships as part of the consolidated Wave 5 PR (task 076). Do not push as a standalone branch.
+
+    Empirical findings relevant here:
+    - Wave 0 task 005 added `SendCommunicationError` + `attachmentDriveItemIds` to `communicationApi.ts`; both are available as dependencies.
+    - The 5 wizard callers consume the adapter via either the shared `CreateRecordWizard/steps/SendEmailStep.tsx` (Project/Event/Todo/WorkAssignment) or `CreateMatterWizard/SendEmailStep.tsx` (Matter only — separate file per CLAUDE.md DELTA #9).
+    - DocumentEmailWizard ALSO consumes `EntityCreationService.sendEmail()`; the line-494 latent bug fix in task 075 depends on this adapter being clean.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>` — code-review + adr-check quality gates at Step 9.5 are REQUIRED. Verify ≤30 LOC adapter constraint, ADR-033/019/028 compliance, and no direct `fetch` to `/api/communications/send` remain in the file.
+    </protocol>
+  </execution>
+</task>

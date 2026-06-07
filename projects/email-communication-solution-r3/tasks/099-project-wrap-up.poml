@@ -1,0 +1,172 @@
+<task id="099" project="email-communication-solution-r3">
+  <metadata>
+    <title>Project wrap-up — code-review + adr-check + repo-cleanup + status updates + lessons-learned</title>
+    <phase>Wrap-up — Project Completion</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>093</dependencies>
+    <blocks>none</blocks>
+    <tags>project-mgmt, quality, cleanup, docs</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-cutting quality gate spanning all R3 code (Waves 0–6); runs full `/code-review` + `/adr-check` skills; any Critical findings must be fixed; final acceptance of 13 graduation criteria. Highest-rigor task in the project.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final wrap-up task — must run sequentially after all other tasks; updates project-level statuses and authors lessons-learned doc</parallel-reason>
+    <fr-refs>FR-27, graduation criteria</fr-refs>
+  </metadata>
+
+  <prompt>
+    Execute the project wrap-up per `task-create` Step 3.7 protocol. This is the final task of R3 — it verifies every wave's deliverable holds, fixes any cross-cutting issues found by `/code-review` + `/adr-check`, archives ephemera, updates project-level status docs, and codifies lessons-learned for future R-class projects.
+
+    The wrap-up is a checkpoint, not a rubber stamp. If `/code-review` finds Critical issues across waves OR `/adr-check` finds violations, this task fixes them BEFORE marking project complete.
+  </prompt>
+
+  <role>
+    Spaarke project lead. Authoritative on R3 deliverables, graduation criteria, and the project-management cleanup convention.
+  </role>
+
+  <goal>
+    R3 project marked complete with:
+    - Zero Critical findings from `/code-review` on all R3 code (Waves 0–6)
+    - Zero violations from `/adr-check` on all R3 code
+    - `/repo-cleanup` report reviewed; ephemera archived
+    - `README.md` Status → Complete; all 13 graduation criteria ✅
+    - `plan.md` Status → Complete; all wave statuses ✅
+    - `notes/lessons-learned.md` written
+    - Every row in `TASK-INDEX.md` is ✅
+  </goal>
+
+  <context>
+    <background>
+      R3 closes the class of client-side email-send fragmentation bugs by replacing 6 ad-hoc implementations with one canonical engine + 3 wrappers + 1 Code Page + 1 typed wrapper. The wrap-up task is the final quality gate before merge-to-master.
+
+      Per task-create Step 3.7 protocol, the wrap-up has 7 sub-steps (run code-review, run adr-check, run repo-cleanup, update README, update plan, write lessons-learned, final verification).
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/README.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/tasks/TASK-INDEX.md</file>
+      <file>projects/email-communication-solution-r3/current-task.md</file>
+      <file>projects/email-communication-solution-r3/notes/lessons-learned.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task-create Step 3.7">Wrap-up MUST run code-review, adr-check, repo-cleanup, and update statuses</constraint>
+    <constraint source="project">Any Critical code-review finding MUST be fixed before completion</constraint>
+    <constraint source="project">Any adr-check violation MUST be fixed before completion</constraint>
+    <constraint source="project">All 13 graduation criteria in `README.md` MUST be ✅</constraint>
+    <constraint source="project">All wave statuses in `plan.md` MUST be ✅</constraint>
+    <constraint source="project">`notes/lessons-learned.md` MUST capture R3 key insights (R2 precedent)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/email-communication-solution-r3/README.md</file>
+      <file>projects/email-communication-solution-r3/tasks/TASK-INDEX.md</file>
+      <file>projects/email-communication-solution-r3/current-task.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/email-communication-solution-r2/notes/lessons-learned.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+    </files>
+    <patterns>
+      <pattern name="lessons-learned exemplar" location="projects/email-communication-solution-r2/notes/lessons-learned.md">
+        R2's lessons-learned doc — direct precedent for R3's wrap-up doc format and content depth.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke `/code-review` skill on all R3 code (Waves 0–6). Capture report. Categorize findings: Critical / Major / Minor.</step>
+    <step order="2">Fix every Critical finding. For Major findings, decide per-case (fix vs file backlog). Re-run `/code-review` until zero Critical remain.</step>
+    <step order="3">Invoke `/adr-check` skill on all R3 code. Capture report.</step>
+    <step order="4">Fix every adr-check violation. Re-run `/adr-check` until clean.</step>
+    <step order="5">Invoke `/repo-cleanup projects/email-communication-solution-r3` skill. Review the report; approve removals (notes/debug, notes/spikes, notes/drafts directories); archive handoffs per skill convention.</step>
+    <step order="6">Update `README.md`:
+      - Status → Complete
+      - All 13 graduation criteria checked ✅
+      - Completion date noted
+    </step>
+    <step order="7">Update `plan.md`:
+      - Status → Complete
+      - All wave statuses ✅ (Wave 0, 1, 2, 3, 4, 5, 6, Wrap-up)
+      - Note any deviations from original plan
+    </step>
+    <step order="8">**Write `notes/lessons-learned.md`** capturing:
+      - Project objective recap (1 paragraph)
+      - What worked well (1–3 items)
+      - What was harder than expected (1–3 items)
+      - Key insights — specifically:
+        * LegalWorkspace fork delta (only 1 true fork, not 5 — CLAUDE.md finding #9)
+        * `sprk_communication_send.js` LOC underestimate (~1,150 LOC × 2 vs spec's ~600 — CLAUDE.md finding #7)
+        * UQ3 strategy resolution (Wave 0 task 003 — chosen Internet-Message-Id retrieval approach)
+        * Active PR #360 collision handling (Wave 6 tasks 086/087/088/091)
+        * Wave 5 single-PR shape lessons (review burden mitigation)
+        * Form Component Control swap (UQ1 resolution in Wave 2)
+      - Recommendations for future R-class projects
+    </step>
+    <step order="9">**Final verification**: confirm every row in `TASK-INDEX.md` is ✅ (no 🔲 / 🔁 left). Confirm `current-task.md` shows "none / project complete". Confirm zero Critical findings in `/code-review`, zero violations in `/adr-check`.</step>
+    <step order="10">Update `current-task.md`: project status → Complete; next action → handoff to `merge-to-master` skill.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: mark task 099 ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="code-review">Cross-cutting code review</tool>
+    <tool name="adr-check">ADR compliance verification</tool>
+    <tool name="repo-cleanup">Ephemera archival</tool>
+    <tool name="read">Read R2 lessons-learned + project status docs</tool>
+    <tool name="write">Author lessons-learned doc</tool>
+    <tool name="edit">Update README + plan statuses</tool>
+  </tools>
+
+  <outputs>
+    <output type="quality">Code-review report — zero Critical findings</output>
+    <output type="quality">adr-check report — zero violations</output>
+    <output type="cleanup">Repo-cleanup applied; ephemera archived</output>
+    <output type="docs">README.md (UPDATED — Status: Complete, 13 graduation criteria ✅)</output>
+    <output type="docs">plan.md (UPDATED — Status: Complete, all waves ✅)</output>
+    <output type="docs">notes/lessons-learned.md (NEW — R3 key insights)</output>
+    <output type="docs">tasks/TASK-INDEX.md (FINAL — all rows ✅)</output>
+    <output type="docs">current-task.md (FINAL — project status Complete)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/code-review` final invocation returns zero Critical findings.</criterion>
+    <criterion testable="true">`/adr-check` final invocation returns zero violations.</criterion>
+    <criterion testable="true">`/repo-cleanup` report reviewed; ephemera archived.</criterion>
+    <criterion testable="true">`README.md` Status reads "Complete"; all 13 graduation criteria are ✅.</criterion>
+    <criterion testable="true">`plan.md` Status reads "Complete"; all 8 wave statuses are ✅.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists with at least the 6 key insights listed in step 8.</criterion>
+    <criterion testable="true">Every row in `tasks/TASK-INDEX.md` is ✅ (no 🔲 / 🔁).</criterion>
+    <criterion testable="true">`current-task.md` shows project status Complete.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the FULL-rigor task per CLAUDE.md §8 decision tree. Quality gates (code-review + adr-check at Step 9.5) ARE run within this task's own steps (1–4) — they are the task's primary purpose.
+
+    Empirical findings from project pipeline (essential for lessons-learned):
+    - LegalWorkspace fork count delta (CLAUDE.md finding #9): only `CreateMatter/SendEmailStep.tsx` was a true fork. Project/Event/Todo/WorkAssignment dirs existed but no email step. Wave 5 scope was smaller than spec implied.
+    - `sprk_communication_send.js` LOC delta (CLAUDE.md finding #7): ~1,150 LOC per copy × 2 copies (~2,300 LOC total) vs spec's stated ~600 LOC.
+    - UQ3 resolution: Wave 0 task 003 chose the Internet-Message-Id retrieval strategy via 1-hour spike. Record final strategy choice in lessons-learned.
+    - PR #360 collision handling: tasks 086, 087, 088, 091 had to coordinate rebase with active PR #360 (audit-r1-docs-update) touching `.claude/patterns/`, `.claude/constraints/`, `docs/architecture/`. Capture coordination approach.
+    - UQ1 resolution: Wave 2 task 035 audited standard form customizations; document the migration path chosen.
+    - Owner clarification "single PR for 5 wizards" (Wave 5): capture how that shipped + the review-burden trade-off.
+
+    Post-completion handoff: after this task is ✅, the project is ready for `/merge-to-master`. Do NOT run merge-to-master from inside this task — it's the next discrete action.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>`. Quality gates ARE the task's primary purpose; do not skip steps 1–4. Step 9 final verification is the binding gate for project completion.
+    </protocol>
+  </execution>
+</task>

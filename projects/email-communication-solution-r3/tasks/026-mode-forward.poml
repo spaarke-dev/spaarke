@@ -1,0 +1,160 @@
+<task id="026" project="email-communication-solution-r3">
+  <metadata>
+    <title>Forward mode — pre-fill with attachment carry + Fwd: prefix + sprk_inreplyto stamp</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020, 003</dependencies>
+    <blocks>028</blocks>
+    <tags>react, frontend, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Forward mode carries attachments by default (user can deselect) + stamps thread linkage; user-facing complexity around attachment-deselect-before-send. FULL appropriate.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-12</fr-refs>
+  </metadata>
+
+  <prompt>
+    Implement `forward` mode behavior in `EmailComposer/modes/forwardMode.ts` (pure logic) + integration in the reducer + send path. Companion to task 025 reply mode; key behavioral difference is ATTACHMENT CARRY.
+
+    Pre-fill behavior (FR-12) — derived from `sourceRecord`:
+    - `to` = `[]` (user fills in)
+    - `cc` = `[]`
+    - `subject`:
+      * If `sourceRecord.subject` starts with `/^Fwd:\s*/i` → keep as-is
+      * Else → `Fwd: ${sourceRecord.subject}`
+    - `body` = wrap original body with a divider (HTML/plaintext variants, similar to reply quoting):
+      ```
+      ---------- Forwarded message ----------
+      From: {sourceRecord.from.displayName}
+      Date: {sentDate}
+      Subject: {sourceRecord.subject}
+      To: {sourceRecord.to.map(r =&gt; r.displayName).join(', ')}
+
+      {sourceRecord.body}
+      ```
+    - `attachments` = **carried by default**, each pre-checked. User can deselect via AttachmentList row checkbox or remove button. Deselected items removed from request before send.
+    - `associations` = `[...sourceRecord.associations]`
+
+    Stamping on send (FR-12):
+    - New `sprk_communication.sprk_inreplyto` set to `sourceRecord.communicationId` (same as reply — forward is also a thread continuation)
+    - `threadId` carried over from sourceRecord
+
+    AttachmentList carries a "checkbox per row in forward mode" UX twist: in forward mode, each row has a checkbox (instead of just a remove button). Unchecked → not included in send. Sub-component update needed.
+
+    Files:
+    - `modes/forwardMode.ts` (NEW) — pure functions
+    - Update `EmailComposer.reducer.ts` — handle `mode === 'forward'` initialState + transition
+    - Update `EmailComposer.tsx` — send-path stamping (same as reply: include `inReplyTo` + `threadId`)
+    - Update `AttachmentList.tsx` — add `forwardMode` prop that renders checkbox column; engine filters un-checked attachments before send
+  </prompt>
+
+  <role>
+    React + TypeScript developer familiar with attachment-carry semantics from email clients (Outlook, Gmail Forward UX).
+  </role>
+
+  <goal>
+    `forward` mode pre-fills correctly per FR-12. Attachments carried + pre-checked + deselectable. Subject prefix dedup. New record stamped with `sprk_inreplyto` + `threadId`. `npm run build` + `npm run lint` clean.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-12: forward IS in the thread (same `sprk_inreplyto` stamping as reply). The difference vs reply is attachment carry + To/Cc behavior.
+
+      Attachment carry: forwarded attachments use the same `driveItemId` references as the source — no re-upload needed; the BFF resolves the existing SPE driveItems.
+
+      Subject prefix: `Fwd:` is industry standard. Some clients use `FW:` — we standardize on `Fwd:`. The dedup regex catches both: `/^F(wd|w):\s*/i`.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/modes/forwardMode.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx (UPDATE — forward-mode checkbox column)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">Server-side polymorphic resolver unchanged — client just carries associations</constraint>
+    <constraint source="ADR-033">Forward-mode logic in canonical engine — no parallel forward UI</constraint>
+    <constraint source="project">Subject dedup: `/^F(wd|w):\s*/i` — handles `Fwd:` and `FW:` variants</constraint>
+    <constraint source="project">Attachments carried + pre-checked; deselected items filtered before send</constraint>
+    <constraint source="project">Same `sprk_inreplyto` stamping as reply (per FR-12)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/modes/replyMode.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `modes/forwardMode.ts`:
+      - `deriveForwardState(sourceRecord: IComposerSourceRecord): Partial&lt;EmailComposerState&gt;` — pre-fill per FR-12
+      - `formatForwardBody(originalBody, bodyFormat, metadata: { fromName, sentDate, subject, toList }): string`
+      - Re-use `dedupSubjectPrefix` from replyMode.ts (export from there or move to a shared `modes/util.ts`)</step>
+    <step order="2">Update `EmailComposer.reducer.ts`:
+      - `initialState` handles `mode === 'forward' &amp;&amp; sourceRecord` by applying `deriveForwardState` — IMPORTANT: each carried attachment gets a `forwardSelected: true` flag (extend `IAttachment` type with `forwardSelected?: boolean` — defaults true)
+      - `SET_MODE` from view → forward applies same logic
+      - New action: `TOGGLE_ATTACHMENT_SELECTED` for forward-mode deselect</step>
+    <step order="3">Update `EmailComposer.tsx` send-path:
+      - When `mode === 'forward'`, filter attachments by `forwardSelected !== false` before sending
+      - Include `inReplyTo: sourceRecord.communicationId` + `threadId: sourceRecord.threadId` in request</step>
+    <step order="4">Update `AttachmentList.tsx`:
+      - Add `forwardMode?: boolean` prop
+      - When `forwardMode`, render checkbox column for each row; checkbox state from `attachment.forwardSelected`
+      - On toggle, dispatch `TOGGLE_ATTACHMENT_SELECTED` via callback</step>
+    <step order="5">Update `IAttachment` type in `AttachmentList.types.ts` to add optional `forwardSelected?: boolean`.</step>
+    <step order="6">Smoke test in dev: load a record with 2 attachments, click Forward, verify subject `Fwd: ${original}`, both attachments pre-checked, deselect one, send → request body has 1 attachment.</step>
+    <step order="7">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="7.5">Step 9.5 quality gates — code-review + adr-check.</step>
+    <step order="8">Update `TASK-INDEX.md`: 026 ✅.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="write">forwardMode.ts</tool>
+    <tool name="edit">reducer, EmailComposer.tsx send-path, AttachmentList.tsx checkbox column, IAttachment type</tool>
+    <tool name="bash">npm run build + lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/modes/forwardMode.ts (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.reducer.ts (UPDATED)</output>
+    <output type="file">EmailComposer/EmailComposer.tsx (UPDATED — send-path filter + stamp)</output>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.tsx (UPDATED — checkbox column for forward)</output>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.types.ts (UPDATED — forwardSelected field)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Forward pre-fill: `to=[]`, `cc=[]`, `subject` single "Fwd: " prefix, body wrapped with forward header.</criterion>
+    <criterion testable="true">All source attachments carried with `forwardSelected: true` default.</criterion>
+    <criterion testable="true">Deselected attachments filtered before send.</criterion>
+    <criterion testable="true">On send, request body contains `inReplyTo: sourceRecord.communicationId` + `threadId`.</criterion>
+    <criterion testable="true">Subject dedup: `Fwd: Fwd: foo` preserved.</criterion>
+    <criterion testable="true">Body quoting respects bodyFormat (HTML vs plaintext).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Engine's `IAttachment.forwardSelected` is optional — only meaningful in forward mode. Other modes treat undefined as "included".
+
+    Carried attachments retain their `driveItemId` references — no re-upload. Server (existing R2 path) attaches by driveItemId.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 9.5 mandatory.
+    </protocol>
+  </execution>
+</task>

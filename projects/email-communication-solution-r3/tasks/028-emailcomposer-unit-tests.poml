@@ -1,0 +1,196 @@
+<task id="028" project="email-communication-solution-r3">
+  <metadata>
+    <title>EmailComposer unit tests — state machine, validation, modes, caps</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>011, 012, 013, 014, 015, 016, 017, 018, 019, 020, 024, 025, 026, 027</dependencies>
+    <blocks>029</blocks>
+    <tags>testing, unit-test, react, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Unit tests creation — follows constraints in `.claude/constraints/testing.md` + `.claude/patterns/testing/unit-test-structure.md`. STANDARD is the canonical level for test creation per `task-execute` Step 0.5.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Aggregates tests across all Wave 1 components; needs all of them landed first; serial.</parallel-reason>
+    <fr-refs>FR-01, FR-05, FR-06, FR-07, FR-08, FR-09, FR-10, FR-11, FR-12, FR-13</fr-refs>
+  </metadata>
+
+  <prompt>
+    Write comprehensive Jest unit tests in `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/`. Goal: cover state machine transitions, validation contract, separator parsing, attachment caps, mode transitions, imperative handle methods.
+
+    Test files to create:
+
+    1. **`__tests__/EmailComposer.reducer.test.ts`** — pure reducer logic
+       - Initial state shape per mode (compose, view, reply, forward, draft)
+       - `SET_FIELD` actions update correct state slice
+       - `ADD_ATTACHMENT` / `REMOVE_ATTACHMENT` / `TOGGLE_ATTACHMENT_SELECTED`
+       - `SET_MODE` transition matrix — at minimum: view→reply, view→forward, view→compose (Edit), compose→draft (Save Draft)
+       - `SET_VALIDATION_ERRORS` idempotent
+       - `BEGIN_SEND` / `END_SEND` toggle isSending
+       - `RESET` clears state
+
+    2. **`__tests__/validation.test.ts`** — `validateState` from reducer
+       - All 10 canonical codes triggered by appropriate state:
+         * TO_REQUIRED: no recipients
+         * TO_INVALID_EMAIL: malformed recipient (impossible if RecipientField filters, but reducer should still defend)
+         * TO_TOO_MANY: > 500 recipients
+         * SUBJECT_REQUIRED: empty subject (only forSend=true)
+         * BODY_REQUIRED: empty body (only forSend=true)
+         * ATTACHMENT_TOO_LARGE: single file > 25 MB OR total > 35 MB
+         * ATTACHMENTS_TOO_MANY: > 150 attachments
+         * ATTACHMENT_BLOCKED_TYPE: stub (no triggers in Wave 1; assert code exists)
+         * FROM_REQUIRED: no from
+         * FROM_NOT_APPROVED: stub
+       - `forSend=false` skips SUBJECT_REQUIRED + BODY_REQUIRED
+
+    3. **`__tests__/RecipientField.test.tsx`** — React Testing Library
+       - Paste `"Alice <alice@example.com>; bob@example.com,charlie@example.com"` → 3 Tags
+       - Type invalid email + Enter → no Tag added + onValidationError fires with TO_INVALID_EMAIL
+       - Backspace removes last Tag
+       - Controlled value prop — Tags reflect value
+       - aria-label matches "To recipients" / "Cc recipients" / "Bcc recipients"
+
+    4. **`__tests__/AttachmentList.test.tsx`**
+       - Cap enforcement: simulate 150 attachments → Add buttons disabled, ATTACHMENTS_TOO_MANY emitted
+       - Total size cap: 35 MB total → ATTACHMENT_TOO_LARGE emitted
+       - 25 MB warning: warning MessageBar rendered, no hard block
+       - Source badges render correctly per source kind
+       - Remove button removes item from list (via onChange)
+       - Forward mode: checkbox column visible; toggle dispatches TOGGLE_ATTACHMENT_SELECTED
+
+    5. **`__tests__/modes/replyMode.test.ts`** — pure mode logic
+       - `dedupSubjectPrefix('foo', 'Re:')` → `'Re: foo'`
+       - `dedupSubjectPrefix('Re: foo', 'Re:')` → `'Re: foo'` (no double prefix)
+       - `dedupSubjectPrefix('RE:  foo', 'Re:')` → `'RE:  foo'` (case-insensitive)
+       - `deriveReplyState({from: alice, subject: 'foo', body: 'hello', associations: [a], attachments: [x]})` → state with to=[alice], cc=[], subject='Re: foo', body wrapped, attachments=[], associations=[a]
+       - HTML vs plaintext body wrapping
+
+    6. **`__tests__/modes/forwardMode.test.ts`**
+       - `dedupSubjectPrefix` for Fwd:/FW: variants
+       - `deriveForwardState` — attachments carried with forwardSelected=true
+       - associations carried
+       - Body wrapping
+
+    7. **`__tests__/modes/draftMode.test.ts`**
+       - `deriveDraftState` — sets existingCommunicationId
+       - `mapStateToDraftUpdate` shape matches Dataverse field expectations
+       - `mapStateToSendRequest` includes existingCommunicationId
+
+    8. **`__tests__/imperative-handle.test.tsx`** — engine ref methods
+       - Render `<EmailComposer ref={ref} mode='compose' mount='inline' ... />`
+       - `ref.current.getState()` returns current state
+       - `ref.current.validate()` returns IValidationResult[] matching current state
+       - `ref.current.send()` triggers mocked communicationApi call
+       - `ref.current.saveDraft()` triggers update path
+
+    Use existing Jest setup in `Spaarke.UI.Components/`. Mock `communicationApi.sendCommunication` and `Xrm.WebApi` calls. Follow `.claude/patterns/testing/unit-test-structure.md` for arrange/act/assert structure.
+  </prompt>
+
+  <role>
+    React + TypeScript developer with Jest + React Testing Library + reducer-testing experience.
+  </role>
+
+  <goal>
+    Comprehensive unit test suite covering Wave 1 implementation. All canonical validation codes exercised at least once. State machine transitions covered. Mode pre-fill behaviors covered. Imperative handle methods covered. `npm run test` in `Spaarke.UI.Components` passes; coverage of `EmailComposer/` ≥ 80% lines.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §6 Testing Strategy: engine state machine + validation contract + recipient parsing + body toggle + attachment caps + SendCommunicationError parsing are the in-scope unit test surface for Wave 1.
+
+      Existing Jest setup in `Spaarke.UI.Components` — tests live alongside source or in `__tests__/` dir. Follow whatever pattern the lib already uses (audit first).
+
+      Mocking strategy per `.claude/patterns/testing/mocking-patterns.md`: prefer minimal mocks (mock at the boundary — `communicationApi.sendCommunication`, `Xrm.WebApi.retrieveRecord`); avoid mocking React internals.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/ (NEW — all test files)</file>
+      <file>src/client/shared/Spaarke.UI.Components/jest.config.* (READ — existing config)</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="constraints/testing.md">Tests follow Arrange / Act / Assert structure; describe blocks per unit; no over-mocking</constraint>
+    <constraint source="patterns/testing">Mock at the boundary; prefer real reducer/state-machine code under test</constraint>
+    <constraint source="project">Cover all 10 canonical validation codes</constraint>
+    <constraint source="project">Cover state machine transitions for at least 5 mode-pairs</constraint>
+    <constraint source="project">Cover all 4 attachment source kinds (badges + onAdd)</constraint>
+    <constraint source="project">Cover imperative handle methods (validate, send, saveDraft, getState)</constraint>
+    <constraint source="project">Coverage of `EmailComposer/` ≥ 80% lines (`npm run test -- --coverage`)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Unit test structure" location=".claude/patterns/testing/unit-test-structure.md">Authoritative for test file layout + describe/it conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit existing test setup: locate jest.config, sample test, common mocks; document in task notes.</step>
+    <step order="2">Author `EmailComposer.reducer.test.ts` — state machine coverage.</step>
+    <step order="3">Author `validation.test.ts` — all 10 canonical codes.</step>
+    <step order="4">Author `RecipientField.test.tsx` — separator parsing + autocomplete mock + a11y.</step>
+    <step order="5">Author `AttachmentList.test.tsx` — caps + source badges + remove + forward checkbox.</step>
+    <step order="6">Author `modes/replyMode.test.ts` — subject dedup + pre-fill.</step>
+    <step order="7">Author `modes/forwardMode.test.ts` — attachment carry + pre-fill.</step>
+    <step order="8">Author `modes/draftMode.test.ts` — existingCommunicationId + map functions.</step>
+    <step order="9">Author `imperative-handle.test.tsx` — engine ref methods.</step>
+    <step order="10">Run `npm run test` — all green. Coverage check via `npm run test -- --coverage` — verify `EmailComposer/` ≥ 80%.</step>
+    <step order="11">Update `TASK-INDEX.md`: 028 ✅.</step>
+    <step order="12">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Audit existing Jest config + sample tests</tool>
+    <tool name="write">8 new test files</tool>
+    <tool name="bash">npm run test + coverage check</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/__tests__/EmailComposer.reducer.test.ts (NEW)</output>
+    <output type="file">EmailComposer/__tests__/validation.test.ts (NEW)</output>
+    <output type="file">EmailComposer/__tests__/RecipientField.test.tsx (NEW)</output>
+    <output type="file">EmailComposer/__tests__/AttachmentList.test.tsx (NEW)</output>
+    <output type="file">EmailComposer/__tests__/modes/replyMode.test.ts (NEW)</output>
+    <output type="file">EmailComposer/__tests__/modes/forwardMode.test.ts (NEW)</output>
+    <output type="file">EmailComposer/__tests__/modes/draftMode.test.ts (NEW)</output>
+    <output type="file">EmailComposer/__tests__/imperative-handle.test.tsx (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 8 test files created + green.</criterion>
+    <criterion testable="true">All 10 canonical validation codes exercised in at least one test.</criterion>
+    <criterion testable="true">State machine transition matrix covers ≥ 5 mode pairs.</criterion>
+    <criterion testable="true">Attachment cap enforcement tested at boundaries (150 / 35 MB / 25 MB).</criterion>
+    <criterion testable="true">Recipient separator parsing tested for `;`, `,`, and `;,` mixed.</criterion>
+    <criterion testable="true">Imperative handle methods (`validate`, `send`, `saveDraft`, `getState`) covered.</criterion>
+    <criterion testable="true">`npm run test` passes — all suites green.</criterion>
+    <criterion testable="true">Coverage of `EmailComposer/` directory ≥ 80% lines.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Where the engine relies on Xrm.WebApi (draft mode load, view mode load), tests provide a global mock (`(global as any).Xrm = { WebApi: { retrieveRecord: jest.fn(), updateRecord: jest.fn(), deleteRecord: jest.fn(), createRecord: jest.fn() } }`). Confirm pattern with existing shared lib tests that mock Xrm.
+
+    If overall coverage falls short of 80%, document gaps in task notes; do NOT pad tests with low-value assertions to game coverage.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor. Step 9.5 quality gates SKIPPED for STANDARD.
+    </protocol>
+  </execution>
+</task>

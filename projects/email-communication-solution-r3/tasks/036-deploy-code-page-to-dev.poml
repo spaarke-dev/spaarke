@@ -1,0 +1,133 @@
+<task id="036" project="email-communication-solution-r3">
+  <metadata>
+    <title>Deploy EmailComposer Code Page to dev as `sprk_emailcomposer` web resource</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>037, 038, 040, 041, 042, 043, 044, 045</blocks>
+    <tags>deploy, code-page, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy step using the canonical `code-page-deploy` skill; verifies the artifact lands in Dataverse + smoke-tested via direct URL</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Hub task — entry surfaces (037, 038, 040) and UI tests (041–045) all depend on a deployed Code Page</parallel-reason>
+    <fr-refs>FR-18</fr-refs>
+  </metadata>
+
+  <prompt>
+    Deploy the EmailComposer Code Page to the dev environment as Dataverse web resource `sprk_emailcomposer` using the `code-page-deploy` skill. After deploy, verify:
+    1. Direct URL access: open `https://{org}/WebResources/sprk_emailcomposer?data=...` (or Dataverse-equivalent) and confirm the Code Page loads
+    2. Auth bootstrap succeeds without a popup (silent acquisition path)
+    3. All 5 modes (compose/view/reply/forward/draft) render appropriate UI given test URL params
+    4. No console errors on cold load
+  </prompt>
+
+  <role>
+    Spaarke deployment engineer. Familiar with the `code-page-deploy` skill conventions, Dataverse web resource lifecycle (create/update), and PAC CLI / solution publish flow.
+  </role>
+
+  <goal>
+    `sprk_emailcomposer` web resource exists in the dev Dataverse environment, references the latest `build-webresource.ps1` output, and is publicly accessible at its web resource URL. Smoke-test report confirms auth and 5 modes work.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-18, the Code Page deploys as the `sprk_emailcomposer` web resource and serves as the canonical surface for the 3 entry points (ribbon, Form Component Control, embeddable). This task is the gate before tasks 037/038/040/041–045 can land.
+
+      The `code-page-deploy` skill is the canonical deployer for this pattern (used by DocumentRelationshipViewer and other Code Pages). Invoke it; do not hand-roll a deploy script.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/EmailComposer/dist/sprk_emailcomposer.html (deploy artifact from task 034)</file>
+      <file>src/client/code-pages/EmailComposer/build-webresource.ps1 (the deploy script)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="code-page-deploy skill">Use the canonical skill — do not introduce a bespoke deploy script</constraint>
+    <constraint source="ADR-026">Code Page deploys as full-page custom page web resource</constraint>
+    <constraint source="ADR-028">Auth bootstrap is `@spaarke/auth` v2 — verify silent acquisition post-deploy</constraint>
+    <constraint source="project">Web resource name: `sprk_emailcomposer` (type: Web Page (HTML))</constraint>
+    <constraint source="project">Dev environment only — do not deploy to prod from this task</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code Page deploy via skill" location=".claude/skills/code-page-deploy/SKILL.md">
+        Invoke the skill; it handles build → upload → publish → verification cycle.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm task 034 output: `dist/sprk_emailcomposer.html` exists and is the latest build.</step>
+    <step order="2">Invoke the `code-page-deploy` skill with target = dev environment, web resource name = `sprk_emailcomposer`, source = build output path.</step>
+    <step order="3">Wait for skill to complete: build → upload → publish customizations.</step>
+    <step order="4">Verify deploy: query Dataverse via PAC CLI or Web API to confirm `sprk_emailcomposer` exists, latest published, type = Web Page (HTML).</step>
+    <step order="5">Smoke test 1 (auth): open `https://{org}/WebResources/sprk_emailcomposer` directly in a browser logged in as a Spaarke user. Confirm:
+      - Code Page loads (HTML mounts)
+      - No popup for auth
+      - DevTools Network shows `/token` calls succeed silently
+      - DevTools Console: zero errors
+    </step>
+    <step order="6">Smoke test 2 (modes): open the Code Page with each of the 5 mode URLs:
+      - `?data=%7B%22mode%22%3A%22compose%22%7D` → empty compose form
+      - `?data=%7B%22mode%22%3A%22view%22%2C%22id%22%3A%22{existing-record-guid}%22%7D` → view UI
+      - `?data=%7B%22mode%22%3A%22reply%22%2C%22id%22%3A%22{existing-record-guid}%22%7D` → reply UI
+      - `?data=%7B%22mode%22%3A%22forward%22%2C%22id%22%3A%22{existing-record-guid}%22%7D` → forward UI
+      - `?data=%7B%22mode%22%3A%22draft%22%2C%22id%22%3A%22{existing-draft-guid}%22%7D` → draft UI
+      Confirm each mode renders the appropriate composer state.
+    </step>
+    <step order="7">Document smoke-test results in `projects/email-communication-solution-r3/notes/research/036-deploy-smoketest.md` (URL, screenshots if available, observations per mode).</step>
+    <step order="8">If any mode fails smoke test, file a defect note and BLOCK on it before marking task complete (the failure likely indicates a Wave 1 or Wave 2 prior-task regression).</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 036 ✅ completed; reference smoke-test note.</step>
+    <step order="10">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task (037 or parallel-group H starts).</step>
+  </steps>
+
+  <tools>
+    <tool name="code-page-deploy">Invoke skill</tool>
+    <tool name="bash">PAC CLI verification + smoke-test browser checks via Chrome integration if available</tool>
+    <tool name="write">Smoke-test note</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Dataverse `sprk_emailcomposer` web resource (CREATED/UPDATED in dev)</output>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/036-deploy-smoketest.md (NEW — smoke test results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_emailcomposer` web resource exists in dev Dataverse, published, type = Web Page (HTML).</criterion>
+    <criterion testable="true">Direct URL access loads the Code Page in a browser without errors.</criterion>
+    <criterion testable="true">Auth bootstrap succeeds silently (no popup in steady state).</criterion>
+    <criterion testable="true">All 5 modes render their respective UI given correct URL params.</criterion>
+    <criterion testable="true">DevTools Console shows zero errors on cold load.</criterion>
+    <criterion testable="true">Smoke-test note documents the results.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `code-page-deploy` skill handles bumping the version + publishing customizations. If invocation order matters (build first, then upload), follow the skill's protocol exactly.
+
+    Smoke-test record GUIDs: pick existing `sprk_communication` records from dev (one Draft, one Sent) for view/reply/forward/draft mode tests. If no records exist, create one via the standard form first (before Form Component Control swap in task 038).
+
+    Empirical (CLAUDE.md §3): this task does not write to `.claude/`, so it's sub-agent-safe; the deploy is the only Dataverse mutation in Wave 2 to this point.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 are SKIPPED for STANDARD rigor. Invoke `code-page-deploy` skill for the deploy mechanics.
+    </protocol>
+  </execution>
+</task>

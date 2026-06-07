@@ -1,0 +1,139 @@
+<task id="002" project="email-communication-solution-r3">
+  <metadata>
+    <title>BFF DTO — Add `AttachmentDriveItemIds` canonical field + non-breaking alias mapping</title>
+    <phase>Wave 0 — Foundations + Non-Breaking BFF</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>005, 007</blocks>
+    <tags>bff-api, refactoring, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` files in `Sprk.Bff.Api`; non-breaking contract change with mapping logic; must respect ADR-010 / ADR-019 / ADR-024 and the bff-extensions governance checklist</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-21</fr-refs>
+  </metadata>
+
+  <prompt>
+    Add `public string[]? AttachmentDriveItemIds { get; init; }` as the canonical attachment field on `SendCommunicationRequest`, mark the existing `AttachmentDocumentIds` `[Obsolete("Use AttachmentDriveItemIds")]`, and implement non-breaking server-side mapping in `CommunicationService` so existing callers continue to work during the R3 migration window. Both fields MUST be accepted; canonical wins when both are populated; alias usage logs a deprecation warning. Update XML docs on both fields to clarify Microsoft Graph `driveItem` ID semantics (NOT `sprk_document` GUIDs).
+
+    This is the BFF half of the field rename. The client wrapper update happens in task 005 (depends on this). Per FR-21 + NFR-05, this MUST be non-breaking — all existing callers continue to work unmodified.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer. Authoritative on `Services/Communication/` pipeline. Familiar with ADR-010 (DI minimalism via `CommunicationModule`), ADR-019 (ProblemDetails), ADR-024 (polymorphic resolver), and the binding `.claude/constraints/bff-extensions.md` governance checklist for BFF additions.
+  </role>
+
+  <goal>
+    `SendCommunicationRequest` exposes both `AttachmentDriveItemIds` (canonical) and `AttachmentDocumentIds` (deprecated alias). `CommunicationService.SendAsync()` normalizes the two into a single internal list at entry. When both are set, the canonical field wins and a structured warning is logged. When only the alias is set, it is copied to the canonical slot and a deprecation warning is logged. Build is clean; `dotnet test` passes; bff-extensions placement justification stated in PR description.
+  </goal>
+
+  <context>
+    <background>
+      Empirical finding from project pre-flight (CLAUDE.md row 3): `SendCommunicationRequest.cs` currently exposes ONLY `AttachmentDocumentIds`. The name is misleading — those values are Graph `driveItem` IDs, not `sprk_document` GUIDs. DocumentEmailWizard at line 494 ships `sprk_document` GUIDs into this field, which is the latent bug class to be closed across R3 (Wave 5 task 075 fixes the caller; task 002 here cleans up the DTO).
+
+      Per FR-21 + NFR-05, the rename MUST be non-breaking. R4 will remove the alias after all callers have migrated. This task only adds the alias path — it does NOT delete or rename the deprecated field.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-21: non-breaking rename — both `AttachmentDriveItemIds` and `AttachmentDocumentIds` MUST be accepted by the BFF DTO. R4 removes the alias; R3 does NOT.</constraint>
+    <constraint source="project">NFR-05: existing client callers MUST NOT break. Existing requests sending `AttachmentDocumentIds` continue to send mail successfully.</constraint>
+    <constraint source="project">Server-side mapping rule: if `AttachmentDocumentIds` set AND `AttachmentDriveItemIds` null → copy across. If BOTH set → prefer canonical AND log a structured warning (caller bug, but proceed).</constraint>
+    <constraint source="ADR-010">Communication services register via `CommunicationModule` only. Do NOT add new DI registrations outside that module.</constraint>
+    <constraint source="ADR-019">Validation failures surface as ProblemDetails (existing pattern). This task adds no new error path; it normalizes input at entry to `SendAsync()`.</constraint>
+    <constraint source="ADR-024">Server-side `IncomingAssociationResolver` is unchanged. This task touches only outbound DTO + the outbound mapping step.</constraint>
+    <constraint source="project">bff-extensions.md placement justification REQUIRED in PR description even though answer is "in BFF" (per CLAUDE.md §10).</constraint>
+    <constraint source="project">Publish-size delta MUST be reported (per CLAUDE.md §10 bullet 4; baseline ~45.65 MB as of 2026-05-26). This task adds zero packages; delta expected ≈ 0.</constraint>
+    <constraint source="ADR-033">The new ADR (task 001) codifies the canonical pattern. Confirm this task aligns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="DTO field obsoletion (non-breaking)" location="docs/architecture/communication-service-architecture.md">
+        Mark old field `[Obsolete("Use X")]`; keep accepting it; normalize at single entry point in service layer; log structured warning on use.
+      </pattern>
+      <pattern name="bff-extensions placement decision" location=".claude/constraints/bff-extensions.md">
+        State placement decision explicitly in PR description, citing decision criteria from bff-extensions.md, even when answer is "stays in BFF."
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `SendCommunicationRequest.cs` to confirm current shape (only `AttachmentDocumentIds` per empirical finding #3).</step>
+    <step order="2">Read `CommunicationService.cs` to locate `SendAsync()` entry point and identify where to insert the normalization shim.</step>
+    <step order="3">Read `.claude/constraints/bff-extensions.md` §F (Test update obligation, Asymmetric-Registration, Fixture-Config-FIRST) — this task does NOT add a conditional service, but the test update obligation still applies (task 008 covers tests; PR for 002 must indicate tests will follow in 008).</step>
+    <step order="4">Edit `SendCommunicationRequest.cs`: add `public string[]? AttachmentDriveItemIds { get; init; }` with XML doc clarifying "Microsoft Graph driveItem IDs (NOT `sprk_document` GUIDs). Canonical field per ADR-033." Mark existing `AttachmentDocumentIds` with `[Obsolete("Use AttachmentDriveItemIds. This alias will be removed in R4 (FR-21).")]` and update its XML doc to point to `AttachmentDriveItemIds` and note the deprecation.</step>
+    <step order="5">Edit `CommunicationService.SendAsync()`: at the top of the method (after request validation, before Graph call), add a normalization block: if `request.AttachmentDriveItemIds is null && request.AttachmentDocumentIds is { Length: > 0 }` → copy `AttachmentDocumentIds` into a local canonical list AND `_logger.LogWarning("Caller used deprecated AttachmentDocumentIds field. Migrate to AttachmentDriveItemIds (FR-21).")`. If both set → use `AttachmentDriveItemIds` AND `_logger.LogWarning("Caller sent both AttachmentDocumentIds and AttachmentDriveItemIds; using canonical AttachmentDriveItemIds.")`. Below this block, replace any subsequent direct reads of `request.AttachmentDocumentIds` with the local canonical variable.</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/` — confirm build clean (obsolete-field usage will produce CS0618 warnings in the SAME file, suppress with `#pragma warning disable CS0618` around the normalization read, scoped narrowly).</step>
+    <step order="7">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` — confirm existing tests still pass. (New unit tests added in task 008.)</step>
+    <step order="8">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r3-002-publish/` and report compressed size + delta vs baseline (~45.65 MB). Expected ≈ 0 MB delta. Record in task notes/ if &gt;0.5 MB.</step>
+    <step order="9">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` skill on the diff; invoke `adr-check` skill against `spec.md`. Address any Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 002 ✅ completed; confirm task 005 + task 007 dependencies satisfied.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task; record decisions (e.g., chosen canonical-prefer-with-warning vs canonical-prefer-silent).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect current DTO + service shape</tool>
+    <tool name="edit">Add canonical field + obsolete attribute + normalization shim</tool>
+    <tool name="bash">Build, test, publish-size measurement, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate at step 9.5</tool>
+    <tool name="adr-check">FULL-rigor quality gate at step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs (UPDATED — canonical field + obsolete alias)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — normalization shim + deprecation warnings)</output>
+    <output type="docs">PR description with bff-extensions placement justification + publish-size delta (per CLAUDE.md §10)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SendCommunicationRequest.AttachmentDriveItemIds` property exists (init-only, nullable `string[]?`).</criterion>
+    <criterion testable="true">`SendCommunicationRequest.AttachmentDocumentIds` has `[Obsolete("Use AttachmentDriveItemIds...")]` attribute.</criterion>
+    <criterion testable="true">XML docs on both fields explicitly say "Microsoft Graph driveItem IDs" (not "document IDs").</criterion>
+    <criterion testable="true">`CommunicationService.SendAsync()` normalizes both fields into one internal canonical list at entry.</criterion>
+    <criterion testable="true">When only `AttachmentDocumentIds` is sent, the send proceeds AND a deprecation warning is logged (verifiable via test in task 008).</criterion>
+    <criterion testable="true">When both fields are set, canonical wins AND a warning is logged.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with zero new errors/warnings outside the scoped `#pragma warning disable CS0618` region.</criterion>
+    <criterion testable="true">Existing `dotnet test` Communication-related tests still pass.</criterion>
+    <criterion testable="true">Publish-size delta reported in PR description; ≤ +0.5 MB expected.</criterion>
+    <criterion testable="true">No new HIGH-severity CVEs introduced.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    R4 will delete `AttachmentDocumentIds` after all callers (R3 + any external API consumers) have migrated. Track this in `projects/_backlog/needs-a-project.md` if not already on the R4 candidate list.
+
+    Empirical finding context (CLAUDE.md row 3): only `AttachmentDocumentIds` is currently present. Confirmed at pre-flight 2026-06-05.
+
+    Unit tests for the mapping behavior live in task 008 (parallel-group B in Wave 0). This task's acceptance criteria reference those tests but do NOT block on them — task 008 verifies; task 002 implements.
+
+    DocumentEmailWizard line 494 bug (sending `sprk_document` GUIDs instead of driveItem IDs) is fixed in Wave 5 task 075. The deprecation warning here will fire from that caller until the migration lands.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>` — Step 9.5 quality gates (code-review + adr-check) are REQUIRED. Per CLAUDE.md §10: publish-size delta + CVE scan + bff-extensions placement justification ALL required and reportable in PR description.
+    </protocol>
+  </execution>
+</task>

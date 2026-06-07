@@ -1,0 +1,105 @@
+<task id="006" project="email-communication-solution-r3">
+  <metadata>
+    <title>Backlog — File 4 referrals from spec to `projects/_backlog/needs-a-project.md`</title>
+    <phase>Wave 0 — Foundations + Non-Breaking BFF</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, backlog, project-mgmt</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation-only task — appends backlog rows to a project-management file. No code, no schema, no architecture impact.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Append 4 backlog items to `projects/_backlog/needs-a-project.md` per the spec's "Backlog Referrals" section. These are scope items the R3 driver assessment surfaced but explicitly deferred outside R3. Filing them now keeps the team's roadmap honest.
+
+    Items:
+    - **#12 Investigate retirement of `/api/v1/emails/*`** — Email-to-Document Automation subsystem built Jan 2026; functionally dead in production usage per the driver assessment §3.3.
+    - **#13 Build `sprk_communication` browse / thread / inbox UI** — R3 builds the form (single record); server already creates records; no list view exists.
+    - **#14 Outlook add-in alignment with canonical composer** — When the add-in is next touched, evaluate whether it can mount `<EmailComposer />`.
+    - **#15 Future TeamsMessage / SMS / Notification composers** — Sibling components in `@spaarke/ui-components` when use cases land.
+  </prompt>
+
+  <role>
+    Spaarke project-management contributor. Familiar with `projects/_backlog/needs-a-project.md` conventions (numbered list with title + 1-paragraph context + source link).
+  </role>
+
+  <goal>
+    `projects/_backlog/needs-a-project.md` contains 4 new entries (#12, #13, #14, #15) each with a title, a 1-paragraph rationale, and a cross-reference back to the R3 spec + the driver assessment. The numbering follows the existing file's convention.
+  </goal>
+
+  <context>
+    <background>
+      The R3 spec's "Backlog Referrals" section (spec.md ~line 434) enumerates 4 scope items the driver assessment surfaced but R3 explicitly excludes. Each one is a candidate future project. Filing them in `projects/_backlog/needs-a-project.md` makes the deferred scope visible.
+
+      Empirical note: confirm the next available number in the backlog file before assigning #12–#15. If another concurrent project has already taken #12+, shift these to the next available block (#13–#16, etc.) and note the shift in the PR description.
+    </background>
+    <relevant-files>
+      <file>projects/_backlog/needs-a-project.md</file>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use the existing file's row format (do not invent a new format).</constraint>
+    <constraint source="project">Each entry MUST cross-reference (a) R3 spec.md §Backlog Referrals AND (b) the driver assessment for the source claim.</constraint>
+    <constraint source="project">If the spec's proposed numbers (#12–#15) are taken by other concurrent backlog adds, shift to the next available block and document the shift in PR notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/_backlog/needs-a-project.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `projects/_backlog/needs-a-project.md` to confirm the current row format + the next available item number.</step>
+    <step order="2">Read spec.md §Backlog Referrals (around line 434) to confirm the canonical text of each item.</step>
+    <step order="3">Append items #12–#15 (or the next free block if #12+ are taken) following the existing row format. Each entry includes: title, 1-paragraph rationale, source links (R3 spec + driver assessment).</step>
+    <step order="4">If the proposed numbers were shifted, note the shift at the top of the new block (e.g., "/* originally proposed as #12–#15 in R3 spec; shifted to #N because #12 was claimed by ... */").</step>
+    <step order="5">Run `Grep` for "communication" / "EmailComposer" / "Outlook" / "TeamsMessage" elsewhere in the backlog file — confirm no duplicates with existing entries.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: mark task 006 ✅ completed; no downstream tasks blocked (this is a terminal task in the project's backlog-file leaf).</step>
+    <step order="7">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect backlog file format + next available number</tool>
+    <tool name="edit">Append 4 new rows</tool>
+    <tool name="grep">Check for duplicate entries</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/_backlog/needs-a-project.md (UPDATED — 4 new backlog entries)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">4 new entries appear in `projects/_backlog/needs-a-project.md` with the spec's canonical titles.</criterion>
+    <criterion testable="true">Each entry cross-references R3 spec.md and the driver assessment.</criterion>
+    <criterion testable="true">No duplicates with prior entries.</criterion>
+    <criterion testable="true">Numbering follows the existing file's convention (sequential after the highest existing number).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task touches `projects/_backlog/` — NOT `.claude/` — so it can run as a sub-agent (parallel-safe true). Group with task 008 in parallel-group B.
+
+    The spec's numbers (#12–#15) are aspirational. If concurrent backlog adds have shifted the floor, this task uses the actual next available number and notes the shift inline.
+
+    Originally identified by: R3 driver assessment §3.3 (#12), R3 spec.md §Backlog Referrals (#13–#15).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply MINIMAL rigor per `<rigor-hint>` — Step 9.5 quality gates are SKIPPED. Documentation-only task.
+    </protocol>
+  </execution>
+</task>

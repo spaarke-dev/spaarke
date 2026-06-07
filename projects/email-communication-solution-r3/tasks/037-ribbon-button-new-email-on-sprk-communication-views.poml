@@ -1,0 +1,139 @@
+<task id="037" project="email-communication-solution-r3">
+  <metadata>
+    <title>Add ribbon button "+ New Email" on `sprk_communication` views (Surface 1)</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>041</blocks>
+    <tags>dataverse, ribbon, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Ribbon customization via the canonical `ribbon-edit` skill; deterministic; verifiable in dev environment</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel-safe with 038 (Form Component Control) and 040 (embeddable docs) — independent Dataverse customizations</parallel-reason>
+    <fr-refs>FR-19 (Surface 1)</fr-refs>
+  </metadata>
+
+  <prompt>
+    Add a "+ New Email" ribbon button to `sprk_communication` views that launches the EmailComposer Code Page (deployed in task 036) in `mode=compose`. Use the `ribbon-edit` skill — do not hand-roll ribbon XML.
+
+    Button placement targets:
+    1. Active Communications system view (HomePageGrid)
+    2. My Communications view (if exists as a custom view)
+    3. Related-record subgrids — when `sprk_communication` is shown as a subgrid on a parent record (e.g., Matter, Project), the button launches the Code Page with `mode=compose&associatedTo={parentEntity, parentId}` prefilled
+
+    Button behavior: opens the Code Page via `Xrm.Navigation.navigateTo` (or `openUrl` equivalent), passing the `data=` query parameter encoding `{mode: 'compose', associatedTo?: {...}}`.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse customization engineer. Familiar with the `ribbon-edit` skill, Dataverse Command Bar / ribbon XML, and `Xrm.Navigation.navigateTo` patterns.
+  </role>
+
+  <goal>
+    "+ New Email" button visible on `sprk_communication` views in dev. Clicking it launches the EmailComposer Code Page in compose mode. When launched from a related-record subgrid, the button auto-populates `associatedTo` with the parent record's entity + ID.
+
+    Verified: ribbon definition deployed; button click navigates correctly; compose mode loads.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-19 Surface 1, the ribbon button is the primary entry point for users creating a new email outside the Form Component Control swap context. Common scenarios: user on a Matter record → clicks "+ New Email" in the Communications subgrid → composer opens prefilled with the Matter as the association target.
+
+      The `ribbon-edit` skill handles the export-modify-import cycle for ribbon XML; canonical pattern from prior projects (Matter UI enhancement R1, others).
+    </background>
+    <relevant-files>
+      <file>(Dataverse) sprk_communication entity ribbon definition (UPDATED via ribbon-edit skill)</file>
+      <file>(Dataverse) sprk_communication related-record subgrid ribbon (UPDATED)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ribbon-edit skill">Use the skill's export-modify-import cycle — do not hand-roll Customizations.xml edits</constraint>
+    <constraint source="ADR-026">Button launches Code Page via standard URL navigation — no embedded iframe within Dataverse form</constraint>
+    <constraint source="ADR-028">Button uses `Xrm.Navigation.navigateTo` to preserve auth context (silent token acquisition)</constraint>
+    <constraint source="spec FR-19 Surface 1">Button on Active, My Communications, and related-record subgrids</constraint>
+    <constraint source="spec FR-19 Surface 1">`associatedTo` prefilled from parent record when launched from subgrid</constraint>
+    <constraint source="project">Dev environment only; prod deploy is a separate project step (Wave 6 or later)</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ribbon button launches Code Page" location=".claude/skills/ribbon-edit/SKILL.md">
+        Canonical pattern: ribbon JS command function calls `Xrm.Navigation.navigateTo({pageType: 'webresource', webresourceName: 'sprk_emailcomposer', data: encodedJson}, {target: 2})`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm task 036 deployed `sprk_emailcomposer` web resource successfully (smoke-test note exists).</step>
+    <step order="2">Invoke `ribbon-edit` skill — export the `sprk_communication` entity's ribbon definition for editing.</step>
+    <step order="3">Add ribbon button "+ New Email" to:
+      - HomePageGrid (Active Communications + system views)
+      - SubGrid context (related-record subgrids — Matter, Project, etc.)
+      Define Display Rules: visible on appropriate views; enabled when user has Create permission on `sprk_communication`.
+    </step>
+    <step order="4">Define ribbon command JavaScript: a small function that calls `Xrm.Navigation.navigateTo({pageType: 'webresource', webresourceName: 'sprk_emailcomposer', data: encodeURIComponent(JSON.stringify({mode: 'compose', associatedTo: <derived>}))}, {target: 2})`.
+      - When invoked from subgrid context, derive `associatedTo` from `PrimaryEntityTypeName` + `PrimaryItemId` (ribbon parameters)
+      - When invoked from view context, omit `associatedTo`
+    </step>
+    <step order="5">Place command JS in an existing web resource (e.g., `sprk_/js/communication-ribbon-commands.js`) — DO NOT use the soon-to-be-retired `sprk_communication_send.js`. If a new web resource is needed, create one (e.g., `sprk_emailcomposer_ribbon`).</step>
+    <step order="6">Import the modified ribbon definition + new command web resource via `ribbon-edit` skill.</step>
+    <step order="7">Publish customizations.</step>
+    <step order="8">Manual smoke test:
+      - Open Active Communications view → confirm "+ New Email" button visible → click → Code Page opens in compose mode
+      - Open a Matter record → Communications subgrid → confirm "+ New Email" button visible → click → Code Page opens in compose mode with `associatedTo={entity: 'sprk_matter', id: '<matter-id>'}` URL param
+    </step>
+    <step order="9">Document smoke test in `projects/email-communication-solution-r3/notes/research/037-ribbon-button-deploy.md`.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 037 ✅ completed.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="ribbon-edit">Skill — export, modify, import ribbon</tool>
+    <tool name="dataverse-deploy">For web resource deploy (if new command JS resource)</tool>
+    <tool name="bash">PAC CLI for publish</tool>
+    <tool name="write">Smoke-test note</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Dataverse ribbon customization (UPDATED — adds "+ New Email" button)</output>
+    <output type="deploy">Dataverse web resource for ribbon command JS (NEW or UPDATED)</output>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/037-ribbon-button-deploy.md (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"+ New Email" button visible on Active Communications view in dev.</criterion>
+    <criterion testable="true">"+ New Email" button visible on related-record subgrids (Matter Communications subgrid verified).</criterion>
+    <criterion testable="true">Clicking button from view launches Code Page with `mode=compose`.</criterion>
+    <criterion testable="true">Clicking button from related-record subgrid launches Code Page with `mode=compose&associatedTo={entity, id}`.</criterion>
+    <criterion testable="true">Smoke-test note documents results.</criterion>
+    <criterion testable="true">Ribbon command JS does NOT reuse `sprk_communication_send.js` (retired in Wave 6).</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-group H: this task is safe to run alongside 038 (Form Component Control) and 040 (embeddable docs) since they touch independent Dataverse surfaces and are independent of each other's outputs.
+
+    The `target: 2` parameter to `Xrm.Navigation.navigateTo` opens the Code Page in a new dialog window; consider `target: 1` (inline navigation) per UX preference. Document the choice.
+
+    Ribbon edit may require manual MDA app refresh after publish — note this in the smoke-test report.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 are SKIPPED for STANDARD rigor. Invoke `ribbon-edit` skill for ribbon mechanics.
+    </protocol>
+  </execution>
+</task>

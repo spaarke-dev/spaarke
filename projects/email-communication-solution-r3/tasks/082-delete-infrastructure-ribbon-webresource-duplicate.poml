@@ -1,0 +1,110 @@
+<task id="082" project="email-communication-solution-r3">
+  <metadata>
+    <title>Delete `infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js` (duplicate ~1,150 LOC)</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>083</blocks>
+    <tags>cleanup, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Duplicate source file deletion paralleling task 081; same verification rigor required</rigor-reason>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-24</fr-refs>
+  </metadata>
+
+  <prompt>
+    Delete the duplicate copy of the retired webresource at `infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js` (~1,150 LOC). This file is a stale duplicate of the primary copy at `src/client/webresources/js/sprk_communication_send.js` (deleted by parallel task 081). Both copies total ~2,300 LOC.
+
+    Like task 081, verify the task 080 audit verdict is "safe to proceed" AND no remaining references depend on this file. Parallel-safe with 081 because they touch different files.
+  </prompt>
+
+  <role>
+    Dataverse ribbon customization specialist. Familiar with the `infrastructure/dataverse/ribbon/` directory structure (typically holds ribbon definition source for solution build pipelines).
+  </role>
+
+  <goal>
+    `infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js` deleted from the repo. Zero remaining references to this file anywhere in `src/`, `infrastructure/`, or build pipelines (ribbon manifest, solution.xml, etc.).
+  </goal>
+
+  <context>
+    <background>
+      `infrastructure/dataverse/ribbon/EmailRibbons/` holds ribbon definition source for the EmailRibbons solution. The webresource file in `WebResources/` is a duplicate of the primary `src/client/webresources/js/` copy — historically maintained for ribbon solution packaging convenience but obsolete after Wave 2's EmailComposer Code Page replaced all ribbon entry points.
+
+      Critical: also inspect ribbon manifests in the same `EmailRibbons/` directory tree for any XML reference to `sprk_communication_send` — those references must also be removed (or they will fail packaging).
+    </background>
+    <relevant-files>
+      <file>infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js</file>
+      <file>infrastructure/dataverse/ribbon/EmailRibbons/</file>
+      <file>notes/research/080-webresource-entry-point-audit.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-24">Duplicate file deletion MUST be preceded by audit verdict (task 080 must be complete with "safe to proceed")</constraint>
+    <constraint source="FR-24">Inspect ribbon manifest XML in `infrastructure/dataverse/ribbon/EmailRibbons/` for references to the file; remove any found</constraint>
+    <constraint source="project">Coordinated with parallel task 081; both must be complete before task 083 deletes the Dataverse record</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>notes/research/080-webresource-entry-point-audit.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="ribbon-edit skill" location=".claude/skills/ribbon-edit/SKILL.md">
+        Inspecting ribbon manifest XML — needed to find references in the EmailRibbons solution definition that must be removed alongside the file deletion.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify task 080 is ✅ completed with verdict "safe to proceed". If not, STOP and notify.</step>
+    <step order="2">Confirm file existence: `ls infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js`. Record approximate LOC.</step>
+    <step order="3">Inspect ribbon manifests in `infrastructure/dataverse/ribbon/EmailRibbons/` — find any XML/JSON reference to the webresource (commonly in solution.xml, CustomizationsExport.xml, RibbonDiffXml, or a WebResources manifest). List each reference found.</step>
+    <step order="4">Grep the repo for references: `grep -r "sprk_communication_send" infrastructure/`. Expect only the file itself and any manifest references found in step 3.</step>
+    <step order="5">Remove or update each manifest reference found in step 3 — the manifest should no longer declare the webresource as a component of the EmailRibbons solution.</step>
+    <step order="6">Delete `infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js`.</step>
+    <step order="7">Re-run grep from step 4 — confirm zero hits in `infrastructure/`.</step>
+    <step order="8">If a build / pack step exists for EmailRibbons solution (e.g., `pac solution pack`), run it to verify the solution still packs without the webresource.</step>
+    <step order="9">Stage the deletion + any manifest updates with a clear commit message: `chore(r3/task-082): delete duplicate sprk_communication_send.js + remove ribbon manifest refs per FR-24`.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 082 ✅ completed.</step>
+    <step order="11">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify references in `infrastructure/`</tool>
+    <tool name="ribbon-edit">Inspect ribbon manifest XML if needed</tool>
+    <tool name="bash">Delete file + run solution pack</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js (DELETED, ~1,150 LOC removed)</output>
+    <output type="code">Ribbon manifest XML/JSON updates (any file in `infrastructure/dataverse/ribbon/EmailRibbons/` referencing the webresource)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js` no longer exists.</criterion>
+    <criterion testable="true">All ribbon manifest references to the webresource removed.</criterion>
+    <criterion testable="true">Grep for `sprk_communication_send` in `infrastructure/` returns zero hits.</criterion>
+    <criterion testable="true">EmailRibbons solution packs cleanly (if pack step exists).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical findings from project pipeline (relevant here):
+    - This duplicate is roughly the same ~1,150 LOC as the primary copy. Total Wave 6 retirement removes ~2,300 LOC (CLAUDE.md finding #7).
+    - Parallel-safe with task 081 — both must complete before task 083 (Dataverse record deletion).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Step 1 audit-verdict check is the binding gate. Step 3 manifest inspection prevents broken solution packaging.
+    </protocol>
+  </execution>
+</task>

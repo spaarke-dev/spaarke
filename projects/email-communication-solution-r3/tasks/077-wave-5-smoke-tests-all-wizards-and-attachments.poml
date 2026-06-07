@@ -1,0 +1,129 @@
+<task id="077" project="email-communication-solution-r3">
+  <metadata>
+    <title>Wave 5 smoke tests — 5 wizards' send-email step + DocumentEmailWizard attachment regression</title>
+    <phase>Wave 5 — 5-Wizard Migration + DocumentEmailWizard Fix + Forks</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>076</dependencies>
+    <blocks>080</blocks>
+    <tags>testing, e2e-test, frontend, communication</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Manual smoke test execution + documentation; verifies migrations + latent bug fix; STANDARD rigor per CLAUDE.md decision tree (testing tag, no new code)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gates Wave 6 (task 080 retirement audit) — must verify all 5 wizards + DocumentEmailWizard regression are functional in dev before retirement work begins. Cannot run in parallel with Wave 6 tasks.</parallel-reason>
+    <fr-refs>FR-16, FR-17</fr-refs>
+  </metadata>
+
+  <prompt>
+    Execute manual smoke tests in the dev environment to verify Wave 5 migrations and the DocumentEmailWizard latent-bug fix:
+
+    **Test runs (6 total)**:
+    1. CreateMatterWizard → send-email step → verify composer renders + sends successfully
+    2. CreateProjectWizard → send-email step → verify composer renders + sends successfully
+    3. CreateEventWizard → send-email step → verify composer renders + sends successfully
+    4. CreateTodoWizard → send-email step → verify composer renders + sends successfully
+    5. CreateWorkAssignmentWizard → send-email step → verify composer renders + sends successfully
+    6. DocumentEmailWizard with attachments → send email with 2+ attached documents → verify files successfully attach end-to-end (REGRESSION test for line-494 latent bug fixed in task 075)
+
+    For each test:
+    - Composer renders without console errors
+    - Recipients, subject, body fields functional
+    - Send succeeds; `sprk_communication` record created with correct fields
+    - For test #6: confirm recipient receives email with the attachments (verify via test inbox or BFF logs showing attachment driveItem IDs propagated to Graph SendMail)
+
+    Document results in `projects/email-communication-solution-r3/notes/test-results/077-wave5-smoke.md` with a pass/fail row per test and any observations.
+  </prompt>
+
+  <role>
+    Spaarke QA engineer. Familiar with Spaarke create-record wizard flows, the DocumentEmailWizard, dev environment access, and the `sprk_communication` record verification approach.
+  </role>
+
+  <goal>
+    All 6 smoke tests pass in dev. Results documented at `projects/email-communication-solution-r3/notes/test-results/077-wave5-smoke.md`. Wave 6 (task 080) is unblocked.
+  </goal>
+
+  <context>
+    <background>
+      Wave 5 migrated 5 wizards onto the canonical `<SendEmailStep />` wrapper and fixed a latent attachment bug in DocumentEmailWizard. These smoke tests are the human-in-the-loop verification gate before Wave 6 retires the `sprk_communication_send.js` webresource (~2.3K LOC) and updates documentation. A failure here means we cannot proceed to retirement — the canonical wrappers must work for every consumer.
+
+      The DocumentEmailWizard attachment test (#6) is specifically a regression test for the line-494 latent bug fixed in task 075: prior to the fix, attachments silently failed because the BFF received `sprk_document` GUIDs in a field expecting driveItem IDs. The regression test confirms attachments now propagate end-to-end.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/test-results/077-wave5-smoke.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateMatterWizard/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">All 5 wizards + DocumentEmailWizard send via canonical pattern; smoke tests verify no behavior regression</constraint>
+    <constraint source="spec FR-16">5 wizards on canonical `<SendEmailStep />` — all 5 smoke-tested</constraint>
+    <constraint source="spec FR-17">DocumentEmailWizard uses canonical `attachmentDriveItemIds` — regression test confirms attachments work</constraint>
+    <constraint source="project">All 6 tests must pass for Wave 6 to begin (task 080 blocked by this task)</constraint>
+    <constraint source="project">Document results — task 099 (wrap-up) references these test logs</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load spec.md FR-16/FR-17, CLAUDE.md empirical findings, plan.md Wave 5 testing strategy section, ADR-033.</step>
+    <step order="2">Verify task 076 ✅ in TASK-INDEX.md (Wave 5 deployed to dev); abort if not.</step>
+    <step order="3">Create the results notes file: `projects/email-communication-solution-r3/notes/test-results/077-wave5-smoke.md` with a header + pass/fail table template (6 rows, one per test).</step>
+    <step order="4">Execute test #1 (CreateMatterWizard send-email step): launch wizard in dev → reach send-email step → fill recipient/subject/body → send → verify `sprk_communication` record created; record pass/fail + observations.</step>
+    <step order="5">Execute test #2 (CreateProjectWizard send-email step): same approach.</step>
+    <step order="6">Execute test #3 (CreateEventWizard send-email step): same approach.</step>
+    <step order="7">Execute test #4 (CreateTodoWizard send-email step): same approach.</step>
+    <step order="8">Execute test #5 (CreateWorkAssignmentWizard send-email step): same approach. Also confirm the WorkAssignmentWizardDialog uses the canonical wrapper (task 073 import fix).</step>
+    <step order="9">Execute test #6 (DocumentEmailWizard regression test): launch wizard → upload 2+ documents → reach send-email step → send → verify recipient receives email with attachments (use test inbox or check BFF logs for driveItem IDs propagated to Graph SendMail). This is the critical regression test for the line-494 latent bug fix.</step>
+    <step order="10">Update the results file with all 6 pass/fail rows, attached observations, and any defects discovered.</step>
+    <step order="11">If any test fails: do NOT mark this task complete. File a defect, escalate to owner per CLAUDE.md §6 human escalation triggers, and pause Wave 6 startup.</step>
+    <step order="12">If all 6 pass: update `tasks/TASK-INDEX.md` marking 077 ✅; verify 080 is no longer blocked.</step>
+    <step order="13">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">Optional: BFF log retrieval for test #6 verification</tool>
+    <tool name="ui-test">Optional: automated assist for the 6 manual smoke runs (skill `.claude/skills/ui-test/`)</tool>
+    <tool name="write">Author the results notes file</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/test-results/077-wave5-smoke.md (NEW — pass/fail table + observations)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 wizard send-email step smoke tests pass (CreateMatter, CreateProject, CreateEvent, CreateTodo, CreateWorkAssignment).</criterion>
+    <criterion testable="true">DocumentEmailWizard attachment regression test passes: recipient receives email with attached files (verifies line-494 latent bug fix from task 075).</criterion>
+    <criterion testable="true">`notes/test-results/077-wave5-smoke.md` exists with 6 pass/fail rows + observations.</criterion>
+    <criterion testable="true">If any test fails, this task is NOT marked complete; Wave 6 startup paused.</criterion>
+    <criterion testable="true">No new console errors in any of the 6 test runs.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The DocumentEmailWizard regression test (#6) is the critical verification for the latent bug fix from task 075. Without this test passing, Wave 5's FR-17 acceptance is not demonstrated.
+
+    Per CLAUDE.md §6 human escalation triggers: if a test fails, escalate to owner with 🔔 Human Input Required before deciding to proceed or rollback.
+
+    Per CLAUDE.md §13, the `ui-test` skill (Chrome integration) can optionally assist the 6 manual runs; manual verification is acceptable for STANDARD rigor smoke tests.
+
+    Task 099 (wrap-up) references this results file as evidence of Wave 5 completion.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>`. Apply STANDARD rigor — quality gates at Step 9.5 SKIPPED. Verify all 6 smoke tests pass before marking complete. Escalate via §6 protocol if any test fails.
+    </protocol>
+  </execution>
+</task>

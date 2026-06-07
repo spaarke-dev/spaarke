@@ -1,0 +1,152 @@
+<task id="053" project="email-communication-solution-r3">
+  <metadata>
+    <title>Audit and migrate any other `SendEmailDialog` consumers beyond FilePreview</title>
+    <phase>Wave 3 — SendEmailDialog + FilePreview</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050, 052</dependencies>
+    <blocks>054</blocks>
+    <tags>refactoring, audit, react, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit-then-migrate task; rigor scales with what the audit finds. If the audit surfaces only FilePreviewDialog (already handled by 051), this is a no-op verification. If it surfaces other consumers, each migration mirrors task 051 patterns — well-trodden territory. No new architectural decisions.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential gate before Wave 3 build/deploy (054). Audit results must be settled before deploy to avoid shipping unmigrated consumers. Depends on task 052 (interface rename) being landed so audit can leverage TypeScript compiler errors as a discovery signal.</parallel-reason>
+    <fr-refs>FR-14</fr-refs>
+  </metadata>
+
+  <prompt>
+    Perform a complete grep + TypeScript-compiler-error audit of `src/` to surface every consumer of the `SendEmailDialog` component beyond `LegalWorkspace/FilePreview/FilePreviewDialog.tsx`. Migrate each surfaced consumer inline using the canonical wrapper pattern established by task 051.
+
+    Audit sources:
+    1. `grep -rn 'SendEmailDialog' src/` — surfaces import statements + JSX usages
+    2. `grep -rn 'ISendEmailDialogProps' src/` — surfaces type-level consumers
+    3. `grep -rn 'onSend.*SendEmailDialog\|<SendEmailDialog' src/ -A 5` — surfaces legacy-callback usages
+    4. After tasks 050+052 land: `npm run build` across all consuming packages will surface TypeScript compilation errors for any consumer still passing `onSend` — these are auto-discovery signals
+
+    Document the audit findings in the PR description: for each surfaced consumer, list path + current usage shape + migration approach (or "already canonical / N/A").
+
+    Expected outcome based on pre-flight: the only known consumer is `FilePreviewDialog.tsx` (handled by task 051). Pre-R3 the engine + wrappers did not exist, so direct `SendEmailDialog` imports were possible only from the legacy component. Audit MAY surface ZERO other consumers — that is an acceptable outcome (document "no other consumers found" in PR description and proceed).
+
+    If a consumer IS found beyond FilePreview, migrate it using task 051's pattern:
+    - Remove inline `fetch` to `/api/communications/send` (if present)
+    - Replace legacy `onSend` callback with `onSent` / `onError`
+    - Import `SendEmailDialog` from `@spaarke/ui-components`
+    - Use canonical props
+    - Build + lint clean
+  </prompt>
+
+  <role>
+    Frontend developer authoritative on consumer-impact audits across the Spaarke repository. Comfortable with grep-based discovery, TypeScript compiler errors as an audit signal, and applying mechanical migration patterns.
+  </role>
+
+  <goal>
+    A complete, audited list of every `SendEmailDialog` consumer in `src/` is produced. Every non-FilePreview consumer (if any) is migrated to the canonical wrapper. Zero remaining usages of the legacy `onSend` callback. Zero inline `fetch.*communications/send` in any consumer of `SendEmailDialog`. All affected packages build clean. PR description lists every surfaced consumer + migration status.
+  </goal>
+
+  <context>
+    <background>
+      Task 050 produced an initial consumer audit list (recorded in `current-task.md`). THIS task takes that list, broadens it with additional grep patterns and TypeScript compiler errors (after task 052 landed the interface change), and migrates whatever the audit finds.
+
+      Empirical state from pre-flight: pre-R3 the canonical wrapper did not exist; the only `SendEmailDialog` symbol in the repo was the legacy `Spaarke.UI.Components/.../SendEmailDialog/SendEmailDialog.tsx` component. The only known LegalWorkspace consumer is `FilePreviewDialog.tsx`. There MAY be additional consumers — for example:
+      - Other LegalWorkspace components (CreateMatter, Project, etc. — though these mostly use `SendEmailStep` not `SendEmailDialog`)
+      - PCF controls that bundle `@spaarke/ui-components`
+      - Code Pages that mount the dialog
+      - Other solutions (`SummarizeFilesWizard`, etc. — though Summarize uses `SendEmailStep` per Wave 4)
+
+      The audit is mechanical; the migrations (if any) reuse task 051's pattern verbatim.
+    </background>
+    <relevant-files>
+      <file>src/ (entire tree — grep audit target)</file>
+      <file>projects/email-communication-solution-r3/current-task.md (initial audit list from task 050)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx (canonical wrapper / re-export)</file>
+      <file>src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx (handled by 051 — skip)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-14">Post-audit: zero consumers using legacy `onSend` callback; zero consumers with inline `fetch` to `/api/communications/send` via `SendEmailDialog` surfaces.</constraint>
+    <constraint source="ADR-033">Every migrated consumer uses the canonical wrapper from `@spaarke/ui-components` (NOT a fork, NOT a re-implementation).</constraint>
+    <constraint source="ADR-019">Migrated `onError` handlers use typed `SendCommunicationError`.</constraint>
+    <constraint source="project">PR description MUST list every surfaced consumer + migration status (migrated / already canonical / no consumers found).</constraint>
+    <constraint source="project">Do NOT touch `.claude/` paths from this task.</constraint>
+    <constraint source="repo">All affected packages MUST build clean after migrations.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/email-communication-solution-r3/tasks/051-filepreviewdialog-migration.poml</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+    </files>
+    <patterns>
+      <pattern name="Consumer migration template" location="projects/email-communication-solution-r3/tasks/051-filepreviewdialog-migration.poml">
+        Task 051's step-by-step migration of FilePreviewDialog IS the template. For every non-FilePreview consumer found by the audit, apply this pattern.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load the initial consumer audit list from `current-task.md` (produced by task 050).</step>
+    <step order="2">Broaden the audit. Run grep across `src/`:
+      <code>
+      grep -rn 'SendEmailDialog' src/
+      grep -rn 'ISendEmailDialogProps' src/
+      grep -rn 'from .*ui-components.*SendEmailDialog\|from .*ui-components.*ISendEmailDialogProps' src/
+      </code>
+      Compile a deduplicated consumer list.
+    </step>
+    <step order="3">After task 052 landed the interface change, run `npm run build` across consumer packages — LegalWorkspace, any PCFs bundling `@spaarke/ui-components`, code-pages. Any TypeScript compilation error referencing `onSend` is a consumer that needs migration. Add those files to the audit list.</step>
+    <step order="4">For each consumer in the audit list, classify: (a) already FilePreviewDialog (handled by 051 — skip), (b) already on canonical contract (no change needed — verify and document), (c) needs migration (apply task 051 pattern).</step>
+    <step order="5">For consumers in category (c), apply task 051's migration pattern: import canonical wrapper, remove inline fetch (if any), replace `onSend` with `onSent`/`onError`, ensure attachments / associations / initial values are passed through. ONE consumer at a time; small atomic edits.</step>
+    <step order="6">Run `npm run build` + `npm run lint` across every affected package after each migration. Verify clean.</step>
+    <step order="7">Grep verify: zero `onSend.*SendEmailDialog` usages remain in `src/`. Zero `fetch.*communications/send` in any file consuming `SendEmailDialog`.</step>
+    <step order="8">Write the audit summary to `notes/wave-3-sendemaildialog-consumer-audit.md` (project-internal, not `.claude/`). Include: full consumer list, classification, migration status.</step>
+    <step order="9">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 053 ✅ completed.</step>
+    <step order="10">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (054).</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Audit consumers across `src/`</tool>
+    <tool name="bash">Run `npm run build` to surface TypeScript errors as audit signals</tool>
+    <tool name="read">Inspect each surfaced consumer's current usage</tool>
+    <tool name="edit">Apply task 051's migration pattern to non-FilePreview consumers</tool>
+    <tool name="write">Create `notes/wave-3-sendemaildialog-consumer-audit.md` audit report</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/email-communication-solution-r3/notes/wave-3-sendemaildialog-consumer-audit.md (NEW — audit summary)</output>
+    <output type="file">Any `*.tsx` files migrated (zero or more — depends on audit findings)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit list of `SendEmailDialog` consumers produced and committed to `notes/wave-3-sendemaildialog-consumer-audit.md`.</criterion>
+    <criterion testable="true">Every non-FilePreview consumer (if any) is either migrated to canonical contract OR documented as already canonical.</criterion>
+    <criterion testable="true">Zero `onSend.*SendEmailDialog` patterns remaining in `src/` (grep verified).</criterion>
+    <criterion testable="true">Zero `fetch.*communications/send` patterns in any file consuming `SendEmailDialog` (grep verified).</criterion>
+    <criterion testable="true">All affected packages build clean after migrations.</criterion>
+    <criterion testable="true">PR description lists every surfaced consumer + migration status.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 053 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Expected outcome: the audit likely finds zero non-FilePreview consumers, in which case this task is a 30-minute verification + audit-report write-up. Empirical pre-flight scan did not surface other consumers, BUT a thorough audit is still required per spec FR-14 ("Audit for any other `SendEmailDialog` consumers and migrate inline").
+
+    If the audit surfaces a complex consumer (e.g., one that wraps `SendEmailDialog` in a HOC or layered abstraction), document the discovery and decide: (a) inline migration if the wrapping is thin, or (b) escalate to project owner if the wrapping suggests the consumer should be re-architected. Default to (a) when possible.
+
+    Do NOT delete the legacy `SendEmailDialog/` directory in this task. Task 050 may have already collapsed it to a re-export; do not touch beyond what 050 produced.
+
+    Notes file location: per CLAUDE.md §3 (Sub-Agent Write Boundary), `.claude/` paths are off-limits to sub-agents. The audit report lives in `projects/email-communication-solution-r3/notes/` — project-internal, accessible to sub-agents and main session.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 (adr-check + code-review) SKIPPED for STANDARD rigor.
+    </protocol>
+  </execution>
+</task>

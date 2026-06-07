@@ -1,0 +1,141 @@
+<task id="052" project="email-communication-solution-r3">
+  <metadata>
+    <title>Update `ISendEmailDialogProps` interface to canonical signature</title>
+    <phase>Wave 3 — SendEmailDialog + FilePreview</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>051, 053</blocks>
+    <tags>react, frontend, typescript, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Interface-only TypeScript change with no business logic; downstream impact is type-check-driven (consumers won't compile until they migrate, which is the desired forcing function). Not architectural; no ADR-bearing decisions beyond what task 050 already locked in.</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Can run in parallel with 051 ONLY IF the interface lives in a separate file from the consumer; otherwise serialize. Empirically the interface usually colocates with the component file, so safer to treat as sequential. Marked `parallel-safe: true` for flexibility — if task 050 lands the interface in a dedicated `types.ts`, this and 051 can proceed concurrently.</parallel-reason>
+    <fr-refs>FR-14</fr-refs>
+  </metadata>
+
+  <prompt>
+    Update the `ISendEmailDialogProps` interface (exported from `@spaarke/ui-components`) to the canonical signature defined by FR-03 + FR-14. Remove the legacy `onSend` callback. Final shape:
+
+    ```typescript
+    export interface ISendEmailDialogProps {
+      open: boolean;
+      onClose: () => void;
+      initialTo?: string | string[];
+      initialSubject?: string;
+      associations?: CommunicationAssociation[];
+      attachmentSources?: AttachmentSourceKind[];
+      onSent?: (communicationId: string) => void;
+      onError?: (error: SendCommunicationError) => void;
+    }
+    ```
+
+    The interface MUST live colocated with the canonical wrapper (most likely `EmailComposer/wrappers/SendEmailDialog.tsx` or its `index.ts`) and be re-exported from the top-level `@spaarke/ui-components` barrel.
+
+    This is interface-only — no implementation logic changes here. Task 050 already integrated the canonical wrapper into the production export path; this task locks the type contract that consumers (task 051, task 053) migrate against.
+
+    DO NOT remove the legacy `onSend` field gradually — REMOVE it entirely. The break-and-migrate forcing function is the desired behavior per spec FR-14 (every consumer must explicitly switch to the new contract). After this task, TypeScript will not compile any consumer still using `onSend` — that compilation failure surfaces the audit list for task 053.
+  </prompt>
+
+  <role>
+    TypeScript developer authoritative on `@spaarke/ui-components` public type contracts. Familiar with the canonical wrapper signature per FR-03, the legacy `onSend` callback being deprecated, and the TypeScript-driven migration forcing function.
+  </role>
+
+  <goal>
+    `ISendEmailDialogProps` exported from `@spaarke/ui-components` matches the canonical FR-03 + FR-14 signature: `{ open, onClose, initialTo?, initialSubject?, associations?, attachmentSources?, onSent?, onError? }`. Legacy `onSend` field REMOVED. `@spaarke/ui-components` builds clean (the interface change is self-contained). Downstream consumers (FilePreviewDialog and any others surfaced by task 053) will fail TypeScript compilation until migrated — this is the desired forcing function.
+  </goal>
+
+  <context>
+    <background>
+      Pre-R3 `ISendEmailDialogProps` exposed a legacy `onSend` callback that consumers populated with the request body for the dialog to invoke. R3 inverts this: the wrapper OWNS the send, parents react via `onSent` / `onError`. Task 050 integrates the canonical wrapper; THIS task locks the type contract.
+
+      The interface lives either:
+      (a) Colocated with the canonical wrapper at `EmailComposer/wrappers/SendEmailDialog.tsx`, or
+      (b) In a dedicated types file under `EmailComposer/types.ts`.
+
+      Either location is acceptable. Task 050 likely produced (a) — verify and adjust here if (b) is cleaner.
+
+      Empirical state: a separate `SendEmailDialog/` directory existed pre-R3 with its own legacy `ISendEmailDialogProps`. Task 050 either rewrites that file or re-exports from the canonical wrapper. THIS task ensures the canonical interface is THE only definition; any duplicate legacy interface in `SendEmailDialog/` must be deleted.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx (canonical wrapper + interface, likely)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx (legacy location; verify no duplicate interface)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (top-level barrel — confirm `ISendEmailDialogProps` exported)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (`SendCommunicationError` lives here)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/types.ts (if it exists; check for shared `CommunicationAssociation`, `AttachmentSourceKind`)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-03">Canonical signature: `{ open, onClose, initialTo?, initialSubject?, associations?, attachmentSources?, onSent?, onError? }`. NO `onSend`.</constraint>
+    <constraint source="spec FR-14">Legacy `onSend` REMOVED entirely (not deprecated, not aliased) — break-and-migrate forcing function.</constraint>
+    <constraint source="ADR-019">`onError` parameter typed as `SendCommunicationError` (typed ProblemDetails class, not `Error` or string).</constraint>
+    <constraint source="project">Interface MUST be re-exported from `@spaarke/ui-components` top-level barrel.</constraint>
+    <constraint source="project">Single canonical definition — any duplicate `ISendEmailDialogProps` in the legacy `SendEmailDialog/` location must be removed.</constraint>
+    <constraint source="repo">`npm run build` + `npm run lint` in `@spaarke/ui-components` MUST remain green.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the canonical wrapper produced by Wave 1 task 022 + integrated by task 050: `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx`. Locate the existing `ISendEmailDialogProps` definition.</step>
+    <step order="2">Read the legacy file `src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx` (which task 050 either rewrote or converted to re-export). Confirm no duplicate `ISendEmailDialogProps` lives there.</step>
+    <step order="3">Update the canonical `ISendEmailDialogProps` to the FR-03/FR-14 signature. Remove `onSend`. Confirm types for `CommunicationAssociation`, `AttachmentSourceKind`, `SendCommunicationError` resolve correctly (imports + colocated definitions).</step>
+    <step order="4">If a duplicate interface exists in `SendEmailDialog/SendEmailDialog.tsx` or `SendEmailDialog/index.ts`, delete it; the canonical one wins.</step>
+    <step order="5">Confirm `src/client/shared/Spaarke.UI.Components/src/index.ts` top-level barrel exports `ISendEmailDialogProps` from the canonical path. If exported from the legacy path, redirect.</step>
+    <step order="6">Run `npm run build` in `@spaarke/ui-components` — the lib itself MUST compile clean (the wrapper's internal usage must be consistent). Note: downstream consumer projects (LegalWorkspace) will FAIL to compile if they still use `onSend` — that is the desired forcing function; do NOT fix downstream from this task (task 051 handles FilePreviewDialog).</step>
+    <step order="7">Run `npm run lint`. Verify clean.</step>
+    <step order="8">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 052 ✅ completed.</step>
+    <step order="9">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Locate canonical + any duplicate interface</tool>
+    <tool name="grep">Confirm `onSend` is removed from the canonical interface</tool>
+    <tool name="edit">Update interface signature</tool>
+    <tool name="bash">Run `npm run build` + `npm run lint`</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx (UPDATED — canonical interface)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/index.ts (CONFIRMED — `ISendEmailDialogProps` exported)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx (if duplicate interface removed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ISendEmailDialogProps` exported from `@spaarke/ui-components` matches the FR-03/FR-14 canonical signature exactly.</criterion>
+    <criterion testable="true">`onSend` field REMOVED from the interface.</criterion>
+    <criterion testable="true">`onError` parameter typed as `SendCommunicationError`.</criterion>
+    <criterion testable="true">Single source of truth — no duplicate `ISendEmailDialogProps` in the codebase (grep verified).</criterion>
+    <criterion testable="true">`@spaarke/ui-components` `npm run build` exits 0.</criterion>
+    <criterion testable="true">`@spaarke/ui-components` `npm run lint` exits 0.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 052 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallelism note: this task is marked `parallel-safe: true` in `parallel-group: I`, BUT it depends on 050 and blocks 051/053 — so effective sequencing is `050 → 052 → 051 + 053`. The parallel-safe flag is for flexibility if the project pipeline scheduler chooses to fan-out, but the dependency declaration governs ordering.
+
+    Forcing-function rationale: after this task, downstream consumers (LegalWorkspace `FilePreviewDialog.tsx`, any others) will fail TypeScript compilation if they still use `onSend`. This compilation failure IS the audit signal for task 053 — every consumer that errors needs migration. Do NOT add transitional type compatibility (`onSend?: never;` or similar); the break is intentional.
+
+    Edge case: if Wave 1 task 022 already locked the canonical interface and this task finds nothing to change, that is acceptable — record "verified canonical, no edits required" in task notes and proceed to step 8 (TASK-INDEX update).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 (adr-check + code-review) SKIPPED for STANDARD rigor.
+    </protocol>
+  </execution>
+</task>

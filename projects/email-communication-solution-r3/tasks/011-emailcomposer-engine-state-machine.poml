@@ -1,0 +1,204 @@
+<task id="011" project="email-communication-solution-r3">
+  <metadata>
+    <title>Build EmailComposer engine — state machine + imperative handle (5 modes × 3 mounts)</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>012, 013, 014, 015, 016, 017, 018, 019, 020, 021, 022, 023, 024, 025, 026, 027</blocks>
+    <tags>react, frontend, fluent-ui, state-machine, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Engine implementation — the load-bearing centerpiece of the entire project; modifies `.tsx`/`.ts`; architecture-level decisions (state machine shape, imperative handle contract, mount-variant layout); blocks 16 downstream tasks; ADR-021 (Fluent v9), ADR-028 (auth decoupling), NFR-01 (React 18), NFR-02 (no `@spaarke/auth` import), NFR-03 (mount variants) all bind here. FULL is non-negotiable.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Engine is the foundation for all sub-components, wrappers, and modes — every Wave 1 task after this reads `EmailComposer.tsx` / `EmailComposer.types.ts` / `EmailComposer.reducer.ts`. Cannot parallelize.</parallel-reason>
+    <fr-refs>FR-01, FR-08, FR-09</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build the canonical `<EmailComposer />` engine in `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx`. This is THE engine — the entire project hangs on getting this right.
+
+    Engine requirements (FR-01):
+    - 5 modes: `compose`, `view`, `reply`, `forward`, `draft`
+    - 3 mounts: `inline`, `dialog`, `page`
+    - 15 combinations of mode × mount, all must render and behave correctly
+    - Internal state via `useReducer` (NOT scattered `useState`); state machine shape captured in `EmailComposer.reducer.ts`
+    - Imperative handle via `useImperativeHandle` exposing `validate()`, `send()`, `saveDraft()`, `getState()` — wizard hosts call these via `composerRef`
+    - React 18 only (NFR-01) — free use of `useId`, `useTransition`, etc.
+
+    Critical constraints:
+    - **No direct `@spaarke/auth` import** (NFR-02). Network calls use an `authenticatedFetch: (input, init) => Promise<Response>` prop injected by the host. Engine remains auth-library-agnostic.
+    - **Fluent UI v9 only** (ADR-021). Use `@fluentui/react-components` primitives + design tokens; dark mode passes through automatically via Fluent theme provider.
+    - **Mount variants** (NFR-03):
+      - `page`: full-width form layout; section dividers; prominent bottom-right action bar; page header showing entity context
+      - `dialog`: bounded width ~600px; compressed spacing; dialog header + footer action bar
+      - `inline`: fills wizard step container; NO internal header or action bar (wizard frame owns navigation)
+    - **Sub-components are NOT yet built** — engine should render placeholder slots that downstream tasks (012-019) fill in. Engine should compile and render an empty skeleton at end of this task.
+    - **Validation contract** (FR-08): `validate(): IValidationResult[]` with `{ field, code, message }` — canonical codes implemented in task 020; engine returns `[]` as a stub until 020 lands.
+    - **Error contract** (FR-09): `send()` throws `SendCommunicationError` on non-2xx — the class itself was added in Wave 0 task 005; engine imports it from `communicationApi.ts`.
+
+    Files to create in this task:
+    - `EmailComposer.tsx` (engine component, `forwardRef` + `useImperativeHandle`)
+    - `EmailComposer.types.ts` (`IEmailComposerProps`, `IEmailComposerHandle`, `EmailComposerState`, `EmailComposerAction`, `EmailComposerMode`, `EmailComposerMount`, `IComposerAssociation`, `IComposerAttachmentSource`)
+    - `EmailComposer.reducer.ts` (`emailComposerReducer`, `initialState(props)`)
+    - Update `EmailComposer/index.ts` — uncomment the `EmailComposer` export
+    - Uncomment the EmailComposer barrel line in `src/client/shared/Spaarke.UI.Components/src/index.ts`
+
+    Engine intentionally compiles to a minimal-but-correct skeleton — sub-components in `subcomponents/` slot in via tasks 012-019; mode-specific logic via 024-027.
+  </prompt>
+
+  <role>
+    Senior React + TypeScript developer fluent in Fluent UI v9 + state-machine modeling. Comfortable with `useReducer`, `forwardRef`, `useImperativeHandle`, and the imperative-handle-from-wizard-host pattern already used elsewhere in the shared lib (e.g., `CreateRecordWizard` patterns).
+  </role>
+
+  <goal>
+    `EmailComposer.tsx` compiles, lint-clean, renders an empty-but-correct skeleton for all 15 mode × mount combinations. Imperative handle methods (`validate()`, `send()`, `saveDraft()`, `getState()`) exist as stubs that downstream tasks fully wire. Mount-variant layout (NFR-03) visible: `page` = full-width form chrome, `dialog` = ~600px compact, `inline` = no chrome. Shared lib `npm run build` + `npm run lint` clean. Barrel exports updated.
+  </goal>
+
+  <context>
+    <background>
+      The engine is what replaces 6 ad-hoc client-side email implementations (Owner Clarifications + design.md §2). It MUST be the only React component that knows about email-send mechanics; wrappers (021-023) are thin (~30-60 LOC each) and only lock the `mount` prop.
+
+      Imperative handle pattern: wizard hosts hold a `composerRef = useRef<IEmailComposerHandle>()` and call `composerRef.current.send()` on Finish, `composerRef.current.validate()` on step-change. This pattern is mirrored from the existing `CreateRecordWizard` pattern.
+
+      Wave 0 task 005 already added `SendCommunicationError` to `communicationApi.ts` (per CLAUDE.md Empirical Finding #2). Engine imports from there.
+
+      Sub-components (012-019) render INSIDE the engine — engine should reserve clear slot/region elements (e.g., a `<HeaderSlot />`, `<RecipientsSlot />`, `<BodySlot />`, `<AttachmentsSlot />`, `<ActionsSlot />`) that the downstream tasks fill in.
+
+      Per NFR-02, the engine must NOT `import` from `@spaarke/auth`. Instead the host injects `authenticatedFetch` via props. The communicationApi.ts wrapper already takes `authenticatedFetch` as a parameter — engine forwards from its prop.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE — uncomment export)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (UPDATE — uncomment EmailComposer barrel line)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (READ — pull `SendCommunicationError` + `sendCommunication()` types)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 ONLY (`@fluentui/react-components`); no v8/v0; dark mode via Fluent theme provider only</constraint>
+    <constraint source="ADR-028">Engine does NOT import `@spaarke/auth` — host injects `authenticatedFetch` via props (NFR-02)</constraint>
+    <constraint source="ADR-019">Engine `send()` throws `SendCommunicationError` (typed) on non-2xx — never returns `{success: false}` or pushes to `warnings[]`</constraint>
+    <constraint source="ADR-033">Single-engine constraint — this IS the only React component that knows email-send mechanics; wrappers must be thin</constraint>
+    <constraint source="ADR-010">No new DI registrations (engine is pure client; CommunicationModule only registers server-side)</constraint>
+    <constraint source="NFR-01">React 18 only — no PCF React 16 compatibility considerations</constraint>
+    <constraint source="NFR-03">Three explicit mount variants: page (full-width form), dialog (~600px compact), inline (no header/action bar — wizard owns)</constraint>
+    <constraint source="NFR-09">Engine renders semantic landmarks (`role="region"`, `aria-label`) for screen-reader navigation; live region reserved for validation errors (populated in task 020)</constraint>
+    <constraint source="project">Engine MUST `forwardRef` and expose `IEmailComposerHandle` via `useImperativeHandle` with methods: `validate()`, `send()`, `saveDraft()`, `getState()`</constraint>
+    <constraint source="project">State machine MUST be a `useReducer` (single source of truth) — NOT scattered `useState` calls</constraint>
+    <constraint source="project">Engine MUST compile and render at end of this task — sub-components are stub placeholders filled by 012-019</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+    </files>
+    <patterns>
+      <pattern name="forwardRef + useImperativeHandle" location="src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/">
+        Existing wizard pattern in shared lib showing the imperative-handle-from-host idiom. EmailComposer mirrors this so wizard wrappers consume it identically.
+      </pattern>
+      <pattern name="Fluent v9 component skeleton" location=".claude/skills/fluent-v9-component/SKILL.md">
+        Authoritative skill for Fluent v9 styling: `makeStyles`, `tokens`, theme provider, dark-mode-by-default.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `communicationApi.ts` (post-task-005) to confirm `SendCommunicationError` export + `sendCommunication()` signature + how `authenticatedFetch` is currently parameterized.</step>
+    <step order="2">Read `.claude/adr/ADR-021-fluent-design-system.md` + `fluent-v9-component/SKILL.md` for Fluent v9 + `makeStyles` + `tokens` patterns.</step>
+    <step order="3">Read existing wizard with `forwardRef` + `useImperativeHandle` in `CreateRecordWizard/` for shape mirroring.</step>
+    <step order="4">Author `EmailComposer.types.ts`:
+      - `EmailComposerMode = 'compose' | 'view' | 'reply' | 'forward' | 'draft'`
+      - `EmailComposerMount = 'inline' | 'dialog' | 'page'`
+      - `EmailComposerBodyFormat = 'html' | 'plaintext'`
+      - `IComposerAssociation { entityName: string; recordId: string; primaryName?: string }`
+      - `IComposerAttachmentSource { kind: 'local' | 'spe' | 'related' | 'wizard'; config?: unknown }`
+      - `IValidationResult { field: 'to' | 'cc' | 'bcc' | 'subject' | 'body' | 'attachments' | 'from'; code: string; message: string }`
+      - `EmailComposerState { mode; mount; from; to; cc; bcc; subject; body; bodyFormat; attachments; associations; isDirty; isSending; validationErrors }`
+      - `EmailComposerAction` discriminated union: `SET_FIELD`, `SET_MODE`, `ADD_ATTACHMENT`, `REMOVE_ATTACHMENT`, `SET_VALIDATION_ERRORS`, `BEGIN_SEND`, `END_SEND`, `RESET`
+      - `IEmailComposerProps { mode; mount; communicationId?; initialTo?; initialCc?; initialBcc?; initialSubject?; initialBody?; initialBodyFormat?; associations?; attachmentSources?; wizardContext?; authenticatedFetch; onSent?; onError?; onStateChange? }`
+      - `IEmailComposerHandle { validate: () => IValidationResult[]; send: () => Promise&lt;void&gt;; saveDraft: () => Promise&lt;void&gt;; getState: () => EmailComposerState }`
+    </step>
+    <step order="5">Author `EmailComposer.reducer.ts`:
+      - `initialState(props: IEmailComposerProps): EmailComposerState` — derives from props (mode, mount, initial* fields)
+      - `emailComposerReducer(state, action): EmailComposerState` — pure switch over action types; immutable updates</step>
+    <step order="6">Author `EmailComposer.tsx`:
+      - `forwardRef&lt;IEmailComposerHandle, IEmailComposerProps&gt;((props, ref) => { ... })`
+      - `useReducer(emailComposerReducer, props, initialState)`
+      - `useImperativeHandle(ref, () => ({ validate: () => state.validationErrors, send: stubSend, saveDraft: stubSaveDraft, getState: () => state }))`
+      - Mount-variant layout via `makeStyles` + `tokens` — three style objects keyed on mount:
+        * `pageStyles` — full width, generous padding, section divider tokens, bottom-right action bar slot
+        * `dialogStyles` — `maxWidth: 600px`, compressed padding, dialog header/footer slots
+        * `inlineStyles` — no chrome wrapping (let wizard frame supply it); only inner content slots
+      - Render skeleton slots: `&lt;HeaderRegion /&gt;` (page+dialog only), `&lt;RecipientsRegion /&gt;`, `&lt;SubjectRegion /&gt;`, `&lt;BodyRegion /&gt;`, `&lt;AttachmentsRegion /&gt;`, `&lt;ActionsRegion /&gt;` (page+dialog only) — each is `&lt;div role="region" aria-label="..."&gt;TODO sub-component slot&lt;/div&gt;` (filled in by 012-019)
+      - Stub `validate()` returns `[]` (task 020 implements the real validation contract)
+      - Stub `send()` throws `new Error('send() not yet implemented; pending sub-components')` — wizards will wire after sub-components land
+      - Stub `saveDraft()` ditto
+    </step>
+    <step order="7">Update `EmailComposer/index.ts`: add `export { EmailComposer } from './EmailComposer'; export type { IEmailComposerProps, IEmailComposerHandle, EmailComposerMode, EmailComposerMount, EmailComposerState, IValidationResult, IComposerAssociation, IComposerAttachmentSource } from './EmailComposer.types';`</step>
+    <step order="8">Update shared lib `src/index.ts`: uncomment the `export * from './components/EmailComposer';` line added in task 010.</step>
+    <step order="9">Run `npm run build` + `npm run lint` in `@spaarke/ui-components`. Both MUST be clean.</step>
+    <step order="9.5">Step 9.5 quality gates — invoke `code-review` skill on the new files; invoke `adr-check` against ADR-021, ADR-028, ADR-019. Fix any findings (Critical + High).</step>
+    <step order="10">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 011 ✅ completed.</step>
+    <step order="11">Update `projects/email-communication-solution-r3/current-task.md`: status → completed; advance to first parallel-group C task (012/013/014/019).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">communicationApi.ts + ADR-021 + CreateRecordWizard exemplar</tool>
+    <tool name="write">EmailComposer.types.ts, EmailComposer.reducer.ts, EmailComposer.tsx</tool>
+    <tool name="edit">EmailComposer/index.ts (export lines), shared lib src/index.ts (uncomment barrel)</tool>
+    <tool name="bash">npm run build + npm run lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/EmailComposer.tsx (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.types.ts (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.reducer.ts (NEW)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED — exports)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/index.ts (UPDATED — barrel uncommented)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`EmailComposer.tsx` compiles; engine renders without runtime error for all 15 mode × mount combinations (smoke-test via a temporary story or inline test).</criterion>
+    <criterion testable="true">Engine `forwardRef`s and exposes `IEmailComposerHandle` with `validate`, `send`, `saveDraft`, `getState` methods.</criterion>
+    <criterion testable="true">State is managed via a SINGLE `useReducer` — no `useState` calls for engine state (other than refs / transient UI state).</criterion>
+    <criterion testable="true">Engine does NOT `import` anything from `@spaarke/auth` (verified by grep — NFR-02).</criterion>
+    <criterion testable="true">Engine uses only `@fluentui/react-components` primitives + `makeStyles` + `tokens` (ADR-021).</criterion>
+    <criterion testable="true">Mount-variant styling visible: page = full-width form chrome; dialog = ~600px bounded; inline = no header/action chrome (NFR-03).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean in `@spaarke/ui-components`.</criterion>
+    <criterion testable="true">Shared lib barrel exports `EmailComposer` (via `src/index.ts`).</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 011 as ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Engine intentionally ships in "skeleton" form here. Validation contract (FR-08) fills in via task 020. Sub-components fill the slots via 012-019. Modes (view/reply/forward/draft pre-fill logic) via 024-027. Tests via 028.
+
+    Imperative handle pattern is the key — wizard hosts will hold a `composerRef = useRef&lt;IEmailComposerHandle&gt;()` and call its methods on user actions. This pattern lets the wizard own the "Finish" button while the composer remains agnostic to wizard chrome.
+
+    Per CLAUDE.md Empirical Finding #2: `SendCommunicationError` is added by Wave 0 task 005 — DO NOT define it again here; import from `communicationApi.ts`.
+
+    Dark mode: ADR-021 mandates dark-mode-by-default via Fluent theme provider. Engine does NOT manage its own theme — host's `FluentProvider` propagates. Manual confirm: render in dev with dark theme and verify no hardcoded colors.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>`. Quality gates at Step 9.5 (code-review + adr-check) MANDATORY.
+    </protocol>
+  </execution>
+</task>

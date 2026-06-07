@@ -1,0 +1,145 @@
+<task id="040" project="email-communication-solution-r3">
+  <metadata>
+    <title>Document the embeddable-launch pattern for EmailComposer Code Page (Surface 3)</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, code-page</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task; outcome is a research note describing the pattern for opportunistic adoption</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel-safe with 037 and 038 — documentation only, no shared mutation surface</parallel-reason>
+    <fr-refs>FR-19 (Surface 3)</fr-refs>
+  </metadata>
+
+  <prompt>
+    Document the embeddable-launch pattern for the EmailComposer Code Page so other Spaarke Code Pages, PCF controls, or shared library components can launch the composer from their own UI via `Xrm.Navigation.navigateTo` (or equivalent).
+
+    Per FR-19 Surface 3: "Embeddable launch from other Code Pages / components via `Xrm.Navigation.navigateTo` — no central work — opportunistic adoption." This task captures the documented pattern so future adopters have a reference.
+
+    Produce `projects/email-communication-solution-r3/notes/research/040-embeddable-launch.md` containing:
+    1. The canonical launch call (`Xrm.Navigation.navigateTo` with `pageType: 'webresource'`)
+    2. URL parameter encoding examples for each of the 5 modes
+    3. Example callers (hypothetical / sample) — how a wizard, a PCF, or a Code Page would invoke it
+    4. Notes on `target` (modal vs inline) trade-offs
+    5. Return-value handling (the composer's `onSent` / `onClose` callbacks don't natively bubble back to the caller; document workarounds)
+  </prompt>
+
+  <role>
+    Spaarke developer documentation author. Familiar with `Xrm.Navigation.navigateTo`, Dataverse web resource URL patterns, and Spaarke's shared library / Code Page integration patterns.
+  </role>
+
+  <goal>
+    Research note documents the embeddable-launch pattern with concrete code snippets that future adopters (other Code Pages, PCFs, components) can copy-paste. Wave 6 task 085 (`docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md`) lifts this content into the customer-facing developer guide.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-19, Surface 3 is "no central work" — adoption is opportunistic. But the absence of central work doesn't mean absence of pattern documentation. R3 ships the documented pattern so adopters don't reinvent.
+
+      The Code Page's URL contract is already defined by FR-18 and task 032's URL parameter parsing. This task documents how external callers construct the URL and invoke the launch.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/research/040-embeddable-launch.md (NEW)</file>
+      <file>src/client/code-pages/EmailComposer/src/hooks/useUrlParams.ts (REFERENCE — URL schema)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-19 Surface 3">No central code work; documentation-only deliverable</constraint>
+    <constraint source="ADR-028">Code Page handles its own auth; embedded callers don't pass auth tokens</constraint>
+    <constraint source="ADR-026">Launch via `Xrm.Navigation.navigateTo` (or `openUrl` for non-Dataverse hosts) — no iframe embedding</constraint>
+    <constraint source="project">Research note is project-internal; Wave 6 task 085 produces customer-facing guide</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>src/client/code-pages/EmailComposer/src/hooks/useUrlParams.ts (URL schema source)</file>
+      <file>src/client/code-pages/EmailComposer/src/types/url.ts (IEmailComposerUrlParams definition)</file>
+    </files>
+    <patterns>
+      <pattern name="Xrm.Navigation.navigateTo for web resource" location="src/client/webresources/js/ (existing patterns)">
+        `Xrm.Navigation.navigateTo({pageType: 'webresource', webresourceName: 'sprk_emailcomposer', data: encodeURIComponent(JSON.stringify(params))}, {target: 1|2, width, height, title})`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read FR-19 Surface 3 + task 032's URL parameter schema (`useUrlParams.ts` + `types/url.ts`).</step>
+    <step order="2">Document the canonical launch call:
+      ```ts
+      const launchEmailComposer = (params: IEmailComposerUrlParams) => {
+        const data = encodeURIComponent(JSON.stringify(params));
+        return Xrm.Navigation.navigateTo(
+          { pageType: 'webresource', webresourceName: 'sprk_emailcomposer', data },
+          { target: 2, width: { value: 80, unit: '%' }, height: { value: 90, unit: '%' }, title: 'Email Composer' }
+        );
+      };
+      ```
+    </step>
+    <step order="3">Document URL parameter examples for each mode:
+      - compose (empty): `{mode: 'compose'}`
+      - compose with prefill: `{mode: 'compose', to: 'user@org.com', subject: 'Hello'}`
+      - compose with association: `{mode: 'compose', associatedTo: {entity: 'sprk_matter', id: 'abc-123'}}`
+      - view: `{mode: 'view', id: '<commGuid>'}`
+      - reply: `{mode: 'reply', id: '<commGuid>'}`
+      - forward: `{mode: 'forward', id: '<commGuid>'}`
+      - draft: `{mode: 'draft', id: '<draftGuid>'}`
+    </step>
+    <step order="4">Document `target` trade-offs:
+      - `target: 1` (inline) — replaces current view; full-page experience; harder to return to caller
+      - `target: 2` (dialog) — modal overlay; preserves caller context; recommended for embedded launches
+    </step>
+    <step order="5">Document return-value handling:
+      - The Code Page's `onSent`/`onClose` don't propagate to the launcher; pattern is fire-and-forget
+      - For callers needing post-send signal: subscribe to `sprk_communication` create event in Dataverse, or poll for new record post-launch
+    </step>
+    <step order="6">Provide three hypothetical caller examples:
+      - Example 1: Wizard step launches composer with prefilled `associatedTo`
+      - Example 2: PCF "Email Selected Records" button launches with `to` derived from picked contacts
+      - Example 3: Code Page (e.g., DocumentRelationshipViewer) launches with file attachments via `attachmentSources` future extension
+    </step>
+    <step order="7">Write `notes/research/040-embeddable-launch.md` with all the above content.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 040 ✅ completed.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol: status → completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read URL schema + spec</tool>
+    <tool name="write">Create research note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/040-embeddable-launch.md (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Research note exists at `projects/email-communication-solution-r3/notes/research/040-embeddable-launch.md`.</criterion>
+    <criterion testable="true">Note documents the canonical `Xrm.Navigation.navigateTo` launch call.</criterion>
+    <criterion testable="true">URL parameter examples cover all 5 modes.</criterion>
+    <criterion testable="true">`target` trade-offs documented (modal vs inline).</criterion>
+    <criterion testable="true">Three hypothetical caller examples provided.</criterion>
+    <criterion testable="true">Return-value handling documented (fire-and-forget + workarounds).</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per FR-19 Surface 3, no surfaces in R3 actually adopt the embeddable launch — adoption is opportunistic by future projects. The deliverable is documentation, not code.
+
+    Wave 6 task 085 (`docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md`) consumes this note's content for the customer-facing guide.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply MINIMAL rigor per `<rigor-hint>`. Quality gates at Step 9.5 are SKIPPED for MINIMAL rigor.
+    </protocol>
+  </execution>
+</task>

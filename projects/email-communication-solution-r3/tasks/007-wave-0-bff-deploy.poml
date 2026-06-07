@@ -1,0 +1,137 @@
+<task id="007" project="email-communication-solution-r3">
+  <metadata>
+    <title>Wave 0 — Deploy BFF API to dev Azure App Service + verify Wave 0 server changes</title>
+    <phase>Wave 0 — Foundations + Non-Breaking BFF</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002, 003, 004, 005</dependencies>
+    <blocks>008, 010</blocks>
+    <tags>deploy, bff-api, azure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task using the `bff-deploy` skill; no new code authored; verification + publish-size delta reporting per CLAUDE.md §10; STANDARD per rigor table (deploy is not a code-implementation task)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential gate: must wait for tasks 002, 003, 004, 005 to complete; deploys to shared dev App Service so concurrent deploys would conflict</parallel-reason>
+    <fr-refs>FR-21, FR-22, FR-23</fr-refs>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF API (`Sprk.Bff.Api`) carrying Wave 0 server changes to the dev Azure App Service via the `bff-deploy` skill. Verify in dev that:
+    (a) `/healthz` returns 200.
+    (b) `/api/communications/send` accepts requests with `AttachmentDriveItemIds` (canonical, task 002).
+    (c) `/api/communications/send` still accepts requests with `AttachmentDocumentIds` (deprecated alias, task 002) and logs the deprecation warning.
+    (d) Outbound `sprk_communication` records have `sprk_internetmessageid` populated after successful send (task 003).
+    (e) Dataverse schema columns `sprk_inreplyto` + `sprk_internetmessageid` exist on `sprk_communication` (task 004) — confirm via Dataverse MCP.
+
+    Per CLAUDE.md §10 bullet 4, this task MUST report publish-size delta vs the ~45.65 MB baseline (as of 2026-05-26). Wave 0's additions are: 1 small DTO field + 1 helper service + ~30 LOC of mapping logic. Expected delta ≈ 0 MB. Hard ceiling: 60 MB compressed.
+  </prompt>
+
+  <role>
+    Spaarke BFF deployment engineer. Authoritative on the `bff-deploy` skill flow + dev App Service environment. Familiar with publish-size budgets per CLAUDE.md §10.
+  </role>
+
+  <goal>
+    Wave 0 server changes (tasks 002, 003) live in dev BFF and verified functional via end-to-end smoke tests. Publish-size delta reported within tolerance (≤ +0.5 MB single-task expected for Wave 0; HARD ceiling 60 MB cumulative compressed). Task 008 (unit tests) and Wave 1 task 010 (engine scaffold) are unblocked.
+  </goal>
+
+  <context>
+    <background>
+      Wave 0 server changes accumulate three small modifications:
+      - DTO field rename (task 002) — additive.
+      - `Internet-Message-Id` capture helper + post-send invocation (task 003) — additive.
+      - Schema columns verified/added (task 004) — Dataverse change, not part of BFF deploy but verified at this step.
+
+      Together these should produce ≈ 0 MB publish-size delta (no new NuGet packages; small C# additions). The deploy verifies behavior; publish-size reporting is a binding obligation per CLAUDE.md §10 bullet 4.
+
+      The dev App Service is shared across BFF deploys — this task takes a serial slot. Coordinate with any other concurrent BFF deploys (none expected during Wave 0).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>scripts/deploy/deploy-bff.ps1 (or equivalent, per bff-deploy skill)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Publish-size delta MUST be reported in PR/task notes per CLAUDE.md §10 bullet 4. Baseline ~45.65 MB (2026-05-26 post-Phase 5 Outcome A).</constraint>
+    <constraint source="project">Single-task delta ≥ +5 MB → explicit justification required. ≥ 55 MB cumulative → architecture review. ≥ 60 MB → HARD STOP.</constraint>
+    <constraint source="project">No new HIGH-severity CVE per `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="project">Verify endpoints listed in prompt are functional in dev before declaring success.</constraint>
+    <constraint source="ADR-024">Inbound association resolver is unchanged. This deploy adds the OUTBOUND stamping; resolver was already production-ready.</constraint>
+    <constraint source="ADR-010">No DI registrations outside `CommunicationModule`. Verify at deploy step (smoke test).</constraint>
+    <constraint source="ADR-033">The new ADR (task 001) codifies the canonical pattern. Confirm this task aligns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy invocation" location=".claude/skills/bff-deploy/SKILL.md">
+        Standard flow: `dotnet publish -c Release` → measure size → `bff-deploy` skill → wait for swap → smoke test `/healthz` → integration smoke.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm tasks 002, 003, 004, 005 are all ✅ completed in TASK-INDEX.md. If any are still in-progress, STOP and request human input.</step>
+    <step order="2">Read `.claude/skills/bff-deploy/SKILL.md` for the canonical deploy invocation pattern. Read `docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md` if present for environment specifics.</step>
+    <step order="3">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed output size + report delta vs ~45.65 MB baseline. If delta ≥ +5 MB single-task: STOP, document, request human review (per CLAUDE.md §10).</step>
+    <step order="4">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="5">Invoke the `bff-deploy` skill to deploy `deploy/api-publish/` to the dev App Service. Wait for deployment slot swap (per skill flow).</step>
+    <step order="6">Smoke test #1: GET `/healthz` returns 200.</step>
+    <step order="7">Smoke test #2 (FR-21): POST `/api/communications/send` with a payload using `attachmentDriveItemIds` (canonical). Confirm 2xx response.</step>
+    <step order="8">Smoke test #3 (FR-21 alias): POST `/api/communications/send` with a payload using the deprecated `attachmentDocumentIds`. Confirm 2xx response. Inspect dev App Service logs for the deprecation warning (task 002 added it).</step>
+    <step order="9">Smoke test #4 (FR-22): After smoke test #2 succeeds, query the resulting `sprk_communication` record (via Dataverse MCP or PAC CLI). Confirm `sprk_internetmessageid` is populated (or warning was logged + field is empty — best-effort failure mode acceptable per FR-22).</step>
+    <step order="10">Smoke test #5 (FR-23): Via Dataverse MCP `describe` on `sprk_communication`, confirm `sprk_inreplyto` (Lookup self-ref) + `sprk_internetmessageid` (Text 255 indexed) exist (task 004 verified/added; this confirms in deployed environment).</step>
+    <step order="11">Record results in task notes: deploy SHA, publish-size + delta, smoke-test outcomes, any warnings observed.</step>
+    <step order="12">Update `tasks/TASK-INDEX.md`: mark task 007 ✅ completed; confirm task 008 + task 010 dependencies satisfied.</step>
+    <step order="13">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task; record deployment SHA in Implementation Notes (CLAUDE.md).</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">dotnet publish, dotnet list package, publish-size measurement</tool>
+    <tool name="bff-deploy">Skill-driven deploy to dev App Service</tool>
+    <tool name="curl">Smoke tests against `/healthz` + `/api/communications/send`</tool>
+    <tool name="dataverse-mcp">Schema verification + record inspection post-send</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">BFF API deployed to dev Azure App Service with Wave 0 server changes</output>
+    <output type="docs">Task notes capturing: deploy SHA, publish-size + delta, 5 smoke-test outcomes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF API published successfully (`dotnet publish` clean) and deployed via `bff-deploy` skill to dev App Service.</criterion>
+    <criterion testable="true">Publish-size delta reported in task notes; ≤ +5 MB vs ~45.65 MB baseline (hard ceiling 60 MB cumulative).</criterion>
+    <criterion testable="true">No new HIGH-severity CVEs.</criterion>
+    <criterion testable="true">`/healthz` returns 200 post-deploy.</criterion>
+    <criterion testable="true">`/api/communications/send` accepts `attachmentDriveItemIds` (canonical).</criterion>
+    <criterion testable="true">`/api/communications/send` accepts `attachmentDocumentIds` (deprecated alias); deprecation warning observed in App Service logs.</criterion>
+    <criterion testable="true">Outbound `sprk_communication` record after successful send has `sprk_internetmessageid` populated (or best-effort warning logged + field empty — both acceptable per FR-22).</criterion>
+    <criterion testable="true">Dataverse `sprk_communication.sprk_inreplyto` + `sprk_internetmessageid` exist in dev (verified via MCP).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The dev App Service is shared. If another concurrent project is mid-deploy, wait for their swap to complete before invoking `bff-deploy`. The skill flow handles slot swap; do not bypass.
+
+    If smoke test #4 (`Internet-Message-Id` populated) returns null + the deprecation warning IS logged, that's the best-effort failure mode per FR-22 — acceptable. Capture the evidence in task notes so the Wave 0 wrap-up can quantify success rate.
+
+    Per CLAUDE.md §10, publish-size reporting is BINDING — not optional. Even when delta is 0 MB, report 0 MB explicitly.
+
+    Wave 0 task 008 (unit tests) is independent of this deploy — task 008 can run in parallel with task 007 since they don't share files (task 008 adds NEW test files; task 007 deploys EXISTING build artifacts). Per dependencies declared above, task 008 depends on tasks 002/003/005 (not 007) — so the parallel-group B (tasks 006 + 008) starts as soon as Wave 0 code work completes, in parallel with task 007's deploy.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>` — Step 9.5 quality gates are SKIPPED for STANDARD. Publish-size reporting + CVE scan + 5-smoke-test verification are all REQUIRED per CLAUDE.md §10.
+    </protocol>
+  </execution>
+</task>

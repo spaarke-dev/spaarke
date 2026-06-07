@@ -1,0 +1,152 @@
+<task id="033" project="email-communication-solution-r3">
+  <metadata>
+    <title>Mount `<SendEmailPage />` wrapper into EmailComposer Code Page App</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>023, 031, 032</dependencies>
+    <blocks>034</blocks>
+    <tags>code-page, react, frontend, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>The integration moment between the Code Page host, the auth bootstrap, the URL parameters, and the shared-lib wrapper — touches the canonical surface the entire R3 project is delivering. Code-review + adr-check verify NFR-02 (no @spaarke/auth import in shared lib reachable from this surface) and ADR-028 binding.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on three predecessors (023, 031, 032) and is the integration point; cannot parallelize with any Wave 2 task</parallel-reason>
+    <fr-refs>FR-18, FR-04</fr-refs>
+  </metadata>
+
+  <prompt>
+    Mount the `<SendEmailPage />` wrapper (built in Wave 1 task 023, from `@spaarke/ui-components`) inside the EmailComposer Code Page's `<App />` tree. This is the integration moment that turns the Code Page from a placeholder into a functional email composer.
+
+    Wire three sources into the wrapper's props:
+    1. `authenticatedFetch` from the auth React context (built in task 031)
+    2. URL parameters from `useUrlParams()` (built in task 032) → mapped to `mode`, `communicationId` (from `id`), `initialTo`, `initialCc`, `initialSubject`, `initialBody`, `associations` (from `associatedTo`)
+    3. Callbacks: `onSent` (for navigation post-send), `onClose` (return to record or list)
+
+    After this task, the Code Page is feature-complete for the 5 modes (compose/view/reply/forward/draft); task 034 sets up the build pipeline; task 036 deploys.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer. Familiar with the `<SendEmailPage />` wrapper API (Wave 1 task 023), the auth context shape (task 031), and the URL parameter shape (task 032).
+  </role>
+
+  <goal>
+    `<App />` renders `<SendEmailPage />` from `@spaarke/ui-components` wired with:
+    - `mount='page'` (enforced internally by the wrapper, per FR-04)
+    - `mode` from URL
+    - `communicationId` from URL `id` (for view/reply/forward/draft modes)
+    - Prefill props (`initialTo`, `initialCc`, `initialSubject`, `initialBody`, `associations`) from URL
+    - `authenticatedFetch` from auth context
+    - `onSent` callback: route to a confirmation view or close
+    - `onClose` callback: navigate back (history.back or Xrm.Navigation.openForm if launched from Form Component Control)
+
+    All 5 modes render successfully when their corresponding URL params are present.
+  </goal>
+
+  <context>
+    <background>
+      Wave 1 task 023 produces the `<SendEmailPage />` wrapper exposing the semantic prop API per FR-04. This task is the consumption point: the Code Page is the canonical hoster, and per NFR-02 the Code Page (not the shared lib) is the surface that knows about `@spaarke/auth`.
+
+      Critically: `<SendEmailPage />` receives `authenticatedFetch` as a prop — it does NOT import `@spaarke/auth`. This boundary is enforced by spec NFR-02 and the existing decoupling rule in `communicationApi.ts:21-23`.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/EmailComposer/src/App.tsx (UPDATED — mount SendEmailPage)</file>
+      <file>src/client/code-pages/EmailComposer/package.json (UPDATED — add @spaarke/ui-components dep)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPage.tsx (from Wave 1 task 023)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (export surface — confirm SendEmailPage exported)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-026">Code Page mounts the wrapper at root; no embedding inside other Dataverse controls</constraint>
+    <constraint source="ADR-028">Code Page is the auth surface; shared lib receives `authenticatedFetch` via props</constraint>
+    <constraint source="NFR-02">Shared library components MUST NOT import `@spaarke/auth` — verify via grep post-mount</constraint>
+    <constraint source="spec FR-04">`<SendEmailPage />` wrapper sets `mount='page'` internally; do NOT override</constraint>
+    <constraint source="spec FR-18">All 5 modes functional via URL after this task</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/App.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPage.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Code Page mounts shared-lib component with injected fetch" location="src/client/code-pages/DocumentRelationshipViewer/src/App.tsx">
+        Code Page reads URL params → builds props → mounts shared-lib component with `authenticatedFetch` injected.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm Wave 1 task 023 shipped `<SendEmailPage />` exported from `@spaarke/ui-components/src/index.ts`. If not exported, raise blocker (do not proceed).</step>
+    <step order="2">Read the wrapper's prop API (`ISendEmailPageProps`) from Wave 1 task 023's output file.</step>
+    <step order="3">Update `package.json` — add `@spaarke/ui-components` as a workspace-local dep (or matching version pattern to DocumentRelationshipViewer if it uses the same).</step>
+    <step order="4">Update `src/App.tsx`:
+      - Import `<SendEmailPage />` from `@spaarke/ui-components`
+      - Consume `authenticatedFetch` from auth context
+      - Consume parsed URL params from task 032's `useUrlParams()` hook
+      - Map URL `id` → `communicationId`, `to` → `initialTo`, `cc` → `initialCc`, `subject` → `initialSubject`, `body` → `initialBody`, `associatedTo` → `associations` (array or singular per wrapper API)
+      - Render `<SendEmailPage authenticatedFetch={...} mode={...} communicationId={...} initial...={...} onSent={...} onClose={...} />`
+    </step>
+    <step order="5">Implement `onSent` and `onClose` callbacks:
+      - `onSent`: log telemetry; if launched from Form Component Control, call `Xrm.Page.ui.close()` if available; otherwise route to a success state
+      - `onClose`: similar — close form or navigate back
+    </step>
+    <step order="6">Run `npm run build`; confirm clean build; resolve any TypeScript prop-mismatch errors.</step>
+    <step order="7">Grep verification: confirm `@spaarke/auth` is NOT imported anywhere in `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/`. Document grep output in task notes.</step>
+    <step order="8">Local smoke: serve the Code Page locally (npm dev or equivalent), open with `?data=...` for each of the 5 modes, confirm `<SendEmailPage />` renders for each mode and shows the appropriate UI (empty for compose; loaded record for view).</step>
+    <step order="9">Wait — this is a FULL-rigor task; insert checkpoint after step 9 if context > 60%.</step>
+    <step order="9.5">QUALITY GATE — Run `code-review` on `src/App.tsx` + the mount integration; run `adr-check` against ADR-026 + ADR-028 + NFR-02. Confirm: (a) wrapper consumed correctly; (b) auth boundary upheld; (c) no Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 033 ✅ completed.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task (034).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read wrapper API + auth context + URL params hook</tool>
+    <tool name="edit">Update App.tsx + package.json</tool>
+    <tool name="bash">npm install + build + grep verification</tool>
+    <tool name="code-review">Step 9.5 quality gate</tool>
+    <tool name="adr-check">Step 9.5 ADR validation (ADR-026, ADR-028, NFR-02)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/EmailComposer/src/App.tsx (UPDATED — full integration: auth + URL params + SendEmailPage mount)</output>
+    <output type="code">src/client/code-pages/EmailComposer/package.json (UPDATED — add @spaarke/ui-components dep)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`<SendEmailPage />` is mounted inside `<App />`, receiving all required props.</criterion>
+    <criterion testable="true">`authenticatedFetch` flows from auth context to wrapper props (no direct `@spaarke/auth` import in shared lib).</criterion>
+    <criterion testable="true">URL params from `useUrlParams()` correctly map to wrapper props (5 modes verified).</criterion>
+    <criterion testable="true">`onSent` + `onClose` callbacks implemented with reasonable post-action behavior.</criterion>
+    <criterion testable="true">`npm run build` clean; zero TypeScript errors.</criterion>
+    <criterion testable="true">Grep verification confirms zero `@spaarke/auth` imports in `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/`.</criterion>
+    <criterion testable="true">`code-review` returns no Critical findings.</criterion>
+    <criterion testable="true">`adr-check` against ADR-026, ADR-028, NFR-02 passes.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If Wave 1's `<SendEmailPage />` wrapper API diverges from the FR-04 shape (e.g., named differently, props differ), prefer adapting THIS task's prop mapping to match the wrapper — do NOT modify the wrapper from a Code Page task. Wave 1 owns the wrapper; raise a coordination flag if the prop shape isn't usable.
+
+    The `Xrm` global is available when the Code Page is hosted inside Dataverse — guard usage with `typeof Xrm !== 'undefined'` for local dev safety.
+
+    Empirical finding (CLAUDE.md): DocumentRelationshipViewer is the canonical exemplar — keep this App.tsx structure analogous so future maintainers see the parallel.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>`. Run Step 9.5 quality gates: `code-review` + `adr-check` (ADR-026, ADR-028, NFR-02). This is the integration point — investigate any prop-shape mismatch or auth-flow anomaly thoroughly.
+    </protocol>
+  </execution>
+</task>
