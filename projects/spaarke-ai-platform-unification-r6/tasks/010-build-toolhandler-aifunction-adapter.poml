@@ -2,8 +2,12 @@
   <metadata>
     <title>D-A-10 Build `ToolHandlerToAIFunctionAdapter` (Pillar 2)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
     <estimated-effort>6 hours</estimated-effort>
+    <completion-notes>
+      ToolHandlerToAIFunctionAdapter built (399 LOC) + 27 unit tests (all pass). Wraps IToolHandler as Microsoft.Extensions.AI.AIFunction. Constructor takes data + delegates (no DI registration — instantiated per-tool by SprkChatAgentFactory.ResolveTools() in task 011). Constructor rejects handlers without InvocationContextKind.Chat (FR-09 guard). JsonSchema well-formedness + object-root + properties-shape validation at construction (FR-08 guards). Semantic JSON Schema validation deferred (would add ~1MB NuGet — JsonSchema.Net — outside R6 budget; runtime validation by handler's ValidateChat per FR-08 separation). ADR-015 telemetry hygiene enforced via dedicated sentinel-string test (InvokeAsync_Telemetry_DoesNotLogArgumentPayload). Build clean. BFF size delta: +0.067 MB. Unblocks task 011.
+    </completion-notes>
     <dependencies>007, 008, 009</dependencies>
     <blocks>011</blocks>
     <tags>bff-api, ai, chat</tags>

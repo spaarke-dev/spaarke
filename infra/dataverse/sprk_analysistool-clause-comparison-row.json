@@ -1,0 +1,57 @@
+{
+  "_comment_top": "R6 task 103 (D-H-03, FR-16) — seed row for the ClauseComparisonHandler typed handler.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'ClauseComparisonHandler' (= nameof handler class).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_toolcode first; UPSERTs.",
+  "sprk_name": "SYS-Clause Comparison",
+  "sprk_toolcode": "CLAUSE-CMP@v1",
+  "sprk_description": "Pure-deterministic structural text-diff between two clauses (clauseA + clauseB) at configurable granularity (word / sentence / paragraph). Emits ordered segments (added / removed / unchanged / modified) plus a normalized similarity score [0.0, 1.0]. Case- + punctuation- + whitespace-normalization configurable. NO LLM call.",
+  "sprk_handlerclass": "ClauseComparisonHandler",
+  "sprk_availableincontexts_value": 100000000,
+  "_comment_availableincontexts": "100000000 = Playbook (this handler is invoked from Playbook nodes — typically after upstream extraction provides clauseA + clauseB; no chat-direct invocation in R6).",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ClauseComparisonHandler Request",
+    "type": "object",
+    "required": ["clauseA", "clauseB"],
+    "properties": {
+      "clauseA": {
+        "type": "string",
+        "description": "Original / baseline clause text.",
+        "maxLength": 50000
+      },
+      "clauseB": {
+        "type": "string",
+        "description": "Proposed / revised clause text.",
+        "maxLength": 50000
+      },
+      "granularity": {
+        "type": "string",
+        "enum": ["word", "sentence", "paragraph"],
+        "default": "sentence",
+        "description": "Diff granularity. Sentence and paragraph preserve structural boundaries; word is the finest."
+      },
+      "caseSensitive": {
+        "type": "boolean",
+        "default": false,
+        "description": "When false (default), 'Agreement' and 'agreement' compare equal."
+      },
+      "punctuationSensitive": {
+        "type": "boolean",
+        "default": true,
+        "description": "When false, '.', ',', ';' etc. are stripped before token comparison."
+      },
+      "normalizeWhitespace": {
+        "type": "boolean",
+        "default": true,
+        "description": "When true (default), runs of whitespace collapse to a single space before tokenization."
+      }
+    }
+  },
+  "sprk_configuration": {
+    "granularity": "sentence",
+    "caseSensitive": false,
+    "punctuationSensitive": true,
+    "normalizeWhitespace": true
+  },
+  "_comment_configuration": "Default policy: sentence-level granularity, case-insensitive, whitespace-normalized, punctuation-aware. Per-invocation requests supply clauseA + clauseB and may override granularity / sensitivity flags."
+}

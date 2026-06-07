@@ -1,0 +1,75 @@
+{
+  "_comment_top": "R6 task 102 (D-H-02, FR-18) — seed row for the FinancialCalculatorHandler typed handler.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'FinancialCalculatorHandler' (= nameof handler class).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_toolcode first; UPSERTs.",
+  "sprk_name": "SYS-Financial Calculator",
+  "sprk_toolcode": "FIN-CALC@v1",
+  "sprk_description": "Pure deterministic financial math: sum, tax, discount, FX conversion (configured rate table), weighted average, and aggregation by category. All money math uses decimal; mixed-currency operations are rejected. NO LLM call.",
+  "sprk_handlerclass": "FinancialCalculatorHandler",
+  "sprk_availableincontexts_value": 100000000,
+  "_comment_availableincontexts": "100000000 = Playbook (this handler is invoked from Playbook nodes after upstream extraction; no chat-direct invocation in R6).",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "FinancialCalculatorHandler Request",
+    "type": "object",
+    "required": ["operation"],
+    "properties": {
+      "operation": {
+        "type": "string",
+        "enum": ["Sum", "Tax", "Discount", "FxConvert", "WeightedAvg", "AggregateByCategory"]
+      },
+      "operands": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["amount", "currency"],
+          "properties": {
+            "amount":   { "type": "number" },
+            "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+            "category": { "type": "string" },
+            "weight":   { "type": "number", "minimum": 0 }
+          }
+        }
+      },
+      "rate":   { "type": "number" },
+      "amount": {
+        "type": "object",
+        "required": ["amount", "currency"],
+        "properties": {
+          "amount":   { "type": "number" },
+          "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+        }
+      },
+      "targetCurrency": { "type": "string", "minLength": 3, "maxLength": 3 },
+      "config": {
+        "type": "object",
+        "properties": {
+          "supportedCurrencies":  { "type": "array", "items": { "type": "string" } },
+          "fxRateTable":          { "type": "object", "additionalProperties": { "type": "number" } },
+          "defaultRoundingMode":  { "type": "string", "enum": ["BankersRounding", "MidpointAwayFromZero"] },
+          "decimalPrecision":     { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  },
+  "sprk_configuration": {
+    "operation": "Sum",
+    "operands": [],
+    "config": {
+      "supportedCurrencies": ["USD", "EUR", "GBP", "JPY", "CAD"],
+      "fxRateTable": {
+        "USD/EUR": 0.92,
+        "EUR/USD": 1.087,
+        "USD/GBP": 0.79,
+        "GBP/USD": 1.27,
+        "USD/CAD": 1.36,
+        "CAD/USD": 0.74,
+        "USD/JPY": 156.5,
+        "JPY/USD": 0.00639
+      },
+      "defaultRoundingMode": "BankersRounding",
+      "decimalPrecision": 2
+    }
+  },
+  "_comment_configuration": "Sample default configuration. Per-invocation requests override `operation` / `operands` / `rate` etc.; the `config` block survives as defaults for currency policy + FX rates + rounding."
+}

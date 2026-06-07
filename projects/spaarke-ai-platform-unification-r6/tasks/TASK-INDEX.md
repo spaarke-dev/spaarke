@@ -49,7 +49,7 @@
 | 007 | A-G3 | Add `AvailableInContexts` enum + Dataverse column (D-A-07) | ✅ | FULL | true | 006 |
 | 008 | A-G3 | Add `JsonSchema` field to `AnalysisTool` DTO + Dataverse column (D-A-08) | ✅ | FULL | false (same DTO as 007) | 006, 007 |
 | 009 | A-G3 | Split execution context (Tool/ChatInvocation) (D-A-09) | ✅ | FULL | true | 006 |
-| 010 | A-G4 | Build `ToolHandlerToAIFunctionAdapter` (D-A-10) | 🔲 | FULL | false | 007, 008, 009 |
+| 010 | A-G4 | Build `ToolHandlerToAIFunctionAdapter` (D-A-10) | ✅ | FULL | false | 007, 008, 009 |
 | 011 | A-G5 | Wire `ResolveTools()` to read `sprk_analysistool` rows (D-A-11) | 🔲 | FULL | false | 010 |
 | 012 | A-G6 | **Q9 BIG-BANG: Migrate 10 pre-R5 chat tools** (D-A-11) | 🔲 | FULL | false | 011 |
 | 013 | A-G7 | Q9 migration regression test gate (D-A-11) | 🔲 | STANDARD | false | 012 |
@@ -157,10 +157,10 @@
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
 | 100 | H-G0 | Handler infra + registration pattern (gate) (D-H-00) | ✅ | FULL | false | 006, 009 |
-| 101 | H-G1 | `DateExtractorHandler` (pure deterministic) (D-H-01) | 🔲 | FULL | true | 100 |
-| 102 | H-G1 | `FinancialCalculatorHandler` (pure deterministic) (D-H-02) | 🔲 | FULL | true | 100 |
-| 103 | H-G1 | `ClauseComparisonHandler` (pure deterministic) (D-H-03) | 🔲 | FULL | true | 100 |
-| 104 | H-G1 | `FinancialCalculationToolHandler` (pure deterministic) (D-H-04) | 🔲 | FULL | true | 100 |
+| 101 | H-G1 | `DateExtractorHandler` (pure deterministic) (D-H-01) | ✅ | FULL | true | 100 |
+| 102 | H-G1 | `FinancialCalculatorHandler` (pure deterministic) (D-H-02) | ✅ | FULL | true | 100 |
+| 103 | H-G1 | `ClauseComparisonHandler` (pure deterministic) (D-H-03) | ✅ | FULL | true | 100 |
+| 104 | H-G1 | `FinancialCalculationToolHandler` (pure deterministic) (D-H-04) | ✅ | FULL | true | 100 |
 | 105 | H-G2 | `EntityExtractorHandler` (LLM-assisted NER) (D-H-05) | 🔲 | FULL | true | 104 |
 | 106 | H-G2 | `ClauseAnalyzerHandler` (LLM-assisted clause structuring) (D-H-06) | 🔲 | FULL | true | 104 |
 | 107 | H-G2 | `RiskDetectorHandler` (LLM-assisted + severity scoring) (D-H-07) | 🔲 | FULL | true | 104 |

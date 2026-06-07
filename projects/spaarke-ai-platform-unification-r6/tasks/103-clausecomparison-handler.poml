@@ -2,8 +2,12 @@
   <metadata>
     <title>D-H-03 `ClauseComparisonHandler` (FR-16, Wave 1 — Pure Deterministic)</title>
     <phase>Parallel — 8 Typed Tool Handlers</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
     <estimated-effort>6 hours</estimated-effort>
+    <completion-notes>
+      ClauseComparisonHandler (675 LOC with comprehensive XML doc + ~250 LOC actual logic). Pure deterministic Myers-style LCS algorithm (no LLM, no NuGet diff library). Tokenization → LCS → segment merge → similarity (sentence/paragraph granularity configurable). MaxClauseLength = 50_000 DoS guard. CancellationToken honored at 2 checkpoints. 27 unit tests pass: contract (from template) + tokenizer + LCS + 5-flag combinatorial config + determinism (byte-identical output assertion) + ADR-015 telemetry hygiene (sentinel substring scan). sprk_analysistool seed row in infra/dataverse/. Added entry to shared scripts/Seed-TypedHandlers.ps1. Build clean. BFF size delta: +0.025 MB. Quality gates pass.
+    </completion-notes>
     <dependencies>100</dependencies>
     <blocks>105, 106, 107, 108, 109</blocks>
     <tags>bff-api, ai, handler</tags>

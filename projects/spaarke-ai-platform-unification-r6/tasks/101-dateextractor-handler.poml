@@ -2,7 +2,19 @@
   <metadata>
     <title>D-H-01 `DateExtractorHandler` (FR-17, Wave 1 — Pure Deterministic)</title>
     <phase>Parallel — 8 Typed Tool Handlers</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      DateExtractorHandler (R6 Pillar 2, FR-17, Wave 1) landed: pure-deterministic; 0 LLM/Azure OpenAI deps;
+      auto-discovered via assembly scan (no manual DI line per ADR-010); ADR-015-compliant telemetry
+      (handler name + IDs + outcome counts only, never input text). Supports BOTH playbook + chat
+      invocation contexts (FR-17 acceptance). 35 unit tests pass in 98 ms (sub-millisecond per-test).
+      sprk_analysistool row deployed to Spaarke Dev (sprk_analysistoolid b76a58b2-b862-f111-ab0c-000d3a4d8152
+      with sprk_handlerclass="DateExtractorHandler", sprk_availableincontexts=100000002/Both, sprk_toolcode=DATEXTR@v1).
+      BFF publish-size delta +0.02 MB compressed (44.20 → 44.22 MB), well under +0.5 MB target.
+      code-review + adr-check (ADRs 010/013/014/015/016/029): all GREEN.
+      Full evidence: projects/spaarke-ai-platform-unification-r6/notes/task-101-completion.md.
+    </completion-notes>
     <estimated-effort>6 hours</estimated-effort>
     <dependencies>100</dependencies>
     <blocks>105, 106, 107, 108, 109</blocks>

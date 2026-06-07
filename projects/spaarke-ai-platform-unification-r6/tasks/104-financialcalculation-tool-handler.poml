@@ -2,8 +2,12 @@
   <metadata>
     <title>D-H-04 `FinancialCalculationToolHandler` (FR-20, Wave 1 — Pure Deterministic)</title>
     <phase>Parallel — 8 Typed Tool Handlers</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
     <estimated-effort>6 hours</estimated-effort>
+    <completion-notes>
+      FinancialCalculationToolHandler (540 LOC) for named formulas: simple_interest, compound_interest, present_value, future_value, loan_payment, ROI. All math in decimal (binding); double escape-hatch with quantize-back only for fractional/large-exponent compound interest. Exponent capped at 1000. Parameter validation surfaces parameter NAMES only (no values) per ADR-015. 30 unit tests pass: positive cases per formula + validation errors (negative inputs, unknown formula) + banker's rounding default + decimal precision determinism (0.1+0.2=0.3 exactly) + ADR-015 telemetry hygiene (sentinel scan). sprk_analysistool seed row in infra/dataverse/. Added entry to shared scripts/Seed-TypedHandlers.ps1. Build clean. BFF size delta: +0.04 MB. Quality gates pass.
+    </completion-notes>
     <dependencies>100</dependencies>
     <blocks>105, 106, 107, 108, 109</blocks>
     <tags>bff-api, ai, handler</tags>

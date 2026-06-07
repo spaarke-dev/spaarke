@@ -1,0 +1,36 @@
+{
+  "_comment": "Seed row for FinancialCalculationToolHandler (R6 task 104, FR-20). Pure-deterministic formula handler. Deploy via PAC CLI Web API POST or Power Automate dataflow. sprk_handlerclass MUST equal the C# class name for auto-discovery to route correctly.",
+  "_task": "spaarke-ai-platform-unification-r6 / task 104 (D-H-04)",
+  "_handlerSource": "src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/FinancialCalculationToolHandler.cs",
+  "_dataverseEntity": "sprk_analysistool",
+  "row": {
+    "sprk_name": "Financial Calculation (formula)",
+    "sprk_description": "Pure-deterministic, currency-aware financial formulas: simple/compound interest, present/future value, loan payment (amortization), ROI. All monetary math uses decimal. No LLM call.",
+    "sprk_tooltype": 7,
+    "_tooltype_comment": "ToolType.FinancialCalculator = 7 (from IScopeResolverService.cs)",
+    "sprk_handlerclass": "FinancialCalculationToolHandler",
+    "sprk_toolcode": "FIN-CALC-FORMULA@v1",
+    "sprk_availableincontexts": 100000000,
+    "_availableincontexts_comment": "ToolAvailabilityContext.Playbook = 100000000 — formula handler exposed to playbook orchestration only by default. Promote to Both (100000002) once chat-facing JSON schema for inputs is authored.",
+    "sprk_ownertype": "SYS",
+    "sprk_isimmutable": true,
+    "sprk_configuration": "{\n  \"formula\": \"simple_interest\",\n  \"inputs\": {\n    \"principal\": 1000.00,\n    \"rate\": 0.05,\n    \"time\": 2\n  },\n  \"options\": {\n    \"precision\": 2,\n    \"rounding\": \"banker\",\n    \"compoundingFrequency\": 1,\n    \"currency\": \"USD\"\n  }\n}",
+    "_configuration_comment": "Default config = simple_interest with textbook values ($1000 @ 5% for 2y → $100). Per-invocation playbook nodes override formula + inputs at runtime via the AnalysisTool.Configuration override; this seed only documents the contract shape.",
+    "sprk_jsonschema": "{\n  \"$schema\": \"https://json-schema.org/draft-07/schema#\",\n  \"title\": \"FinancialCalculationToolHandler input\",\n  \"type\": \"object\",\n  \"properties\": {\n    \"formula\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"simple_interest\",\n        \"compound_interest\",\n        \"present_value\",\n        \"future_value\",\n        \"loan_payment\",\n        \"roi\"\n      ]\n    },\n    \"inputs\": {\n      \"type\": \"object\",\n      \"description\": \"Named decimal parameters. Required keys per formula: simple_interest=[principal,rate,time]; compound_interest=[principal,rate,time]; present_value=[futureValue,rate,time]; future_value=[presentValue,rate,time]; loan_payment=[principal,rate,periods]; roi=[gain,cost].\"\n    },\n    \"options\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"precision\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 8, \"default\": 2 },\n        \"rounding\": { \"type\": \"string\", \"enum\": [\"banker\", \"away_from_zero\"], \"default\": \"banker\" },\n        \"compoundingFrequency\": { \"type\": \"integer\", \"minimum\": 1, \"maximum\": 365, \"default\": 1 },\n        \"currency\": { \"type\": \"string\", \"default\": \"USD\" }\n      }\n    }\n  },\n  \"required\": [\"formula\", \"inputs\"]\n}"
+  },
+  "deployment": {
+    "_instructions": [
+      "Deploy to Spaarke Dev via PAC CLI Web API (or Power Automate dataflow):",
+      "  pac dataverse-api create --entity sprk_analysistool --body $row",
+      "Verify after deploy:",
+      "  GET /api/data/v9.2/sprk_analysistools?$filter=sprk_handlerclass eq 'FinancialCalculationToolHandler'",
+      "Expected: one row returned with sprk_toolcode = 'FIN-CALC-FORMULA@v1'."
+    ],
+    "adrCompliance": {
+      "ADR-010": "Auto-discovery picks up handler — NO manual DI line.",
+      "ADR-013": "Handler in Services/Ai/Handlers/; CRUD-side code routes through PublicContracts facades (not relevant for this deterministic handler).",
+      "ADR-015": "Telemetry surface is handler name + formula name + outcome + duration + IDs ONLY. Never input values.",
+      "ADR-029": "Zero new NuGet packages; BFF publish-size delta ≪ 0.5 MB."
+    }
+  }
+}
