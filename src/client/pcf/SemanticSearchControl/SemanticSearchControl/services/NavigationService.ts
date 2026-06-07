@@ -272,6 +272,70 @@ export class NavigationService {
   }
 
   /**
+   * Open the SemanticSearch Code Page web resource (`sprk_semanticsearch`)
+   * in a modal dialog, prefilled with the caller's current query and scope
+   * context. The code page's `parseUrlParams` reads `query`, `theme`,
+   * `scope`, and `entityId` from the Dataverse data envelope and seeds its
+   * initial state, so the dialog renders showing the same result set the
+   * PCF was showing.
+   *
+   * @param query - Current search query (empty string is allowed)
+   * @param scope - Current PCF search scope (passed through to code page)
+   * @param scopeId - Current scope entity ID (passed as `entityId`)
+   * @param isDarkMode - PCF's resolved theme (passed as `theme`)
+   * @param options - Optional modal sizing options (default 80% x 80%)
+   */
+  async openSemanticSearchPage(
+    query: string,
+    scope: SearchScope,
+    scopeId: string | null,
+    isDarkMode: boolean = false,
+    options: ModalOptions = DEFAULT_MODAL_OPTIONS
+  ): Promise<void> {
+    const theme = isDarkMode ? 'dark' : 'light';
+    const params: string[] = [`query=${encodeURIComponent(query ?? '')}`, `theme=${theme}`];
+    if (scope && scope !== 'all') {
+      params.push(`scope=${encodeURIComponent(scope)}`);
+    }
+    if (scopeId) {
+      params.push(`entityId=${encodeURIComponent(scopeId.replace(/[{}]/g, ''))}`);
+    }
+    const dataString = params.join('&');
+
+    const xrm = this.getXrm();
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn(
+        'NavigationService.openSemanticSearchPage: Xrm.Navigation not available — falling back to window.open'
+      );
+      const clientUrl = this.getClientUrl();
+      const url = `${clientUrl}/WebResources/sprk_semanticsearch?data=${encodeURIComponent(dataString)}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    try {
+      await xrm.Navigation.navigateTo(
+        {
+          pageType: 'webresource' as Xrm.Navigation.PageInputHtmlWebResource['pageType'],
+          webresourceName: 'sprk_semanticsearch',
+          data: encodeURIComponent(dataString),
+        } as Xrm.Navigation.PageInputHtmlWebResource,
+        {
+          target: 2,
+          width: { value: options.width, unit: options.unit },
+          height: { value: options.height, unit: options.unit },
+        }
+      );
+    } catch (error) {
+      // errorCode 2 = user cancelled — not an error
+      const err = error as { errorCode?: number };
+      if (err?.errorCode !== 2) {
+        console.error('NavigationService.openSemanticSearchPage: Navigation failed', error);
+      }
+    }
+  }
+
+  /**
    * Navigate to the Custom Page for viewing all search results
    * @param query - Current search query
    * @param scope - Search scope (all, matter, custom)
