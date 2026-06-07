@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — autonomous progress blocked |
-| **Step** | Awaiting decisions |
-| **Status** | Wave 1 + Wave 2 complete (001 ✅ 010 ✅ 018 ✅ 084 ✅); no more autonomous-safe tasks remain. |
-| **Next Action** | Human decisions needed: (1) resolve 4 escalation items from task 001 audit; (2) select target Dataverse environment for tasks 002/003/017; (3) initiate AAD `Tasks.ReadWrite` consent (task 015) with deploy team. |
+| **Task** | none |
+| **Step** | Ready for Phase 1 Dataverse schema work + parallel BFF refactor |
+| **Status** | Wave 1 + Wave 2 complete (001 ✅ 010 ✅ 018 ✅ 084 ✅); 3 new tasks added per user decisions (006, 007, 008); 41 total tasks. |
+| **Next Action** | Task 002 (create `sprk_todo` entity in `https://spaarkedev1.crm.dynamics.com/`). Once 002 completes, tasks 003 + 006 + 007 run in parallel (P1-W2.5 wave); then 008; then 004 + 005. Task 015 (AAD scope) can run independently — user has instructions. |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -31,15 +31,16 @@
 
 ### Critical Context
 
-**Wave 1 complete (3 tasks)**: 001 audit + 018 Null-Object scaffolding (BFF; 6103 tests pass; publish-size -0.15 MB; zero new CVEs) + 084 CLAUDE.md drift fix. Wave 2 launched: task 010 (Kanban hoist) in sub-agent.
+**Waves 1+2 complete (4 tasks)**: 001 audit + 010 Kanban hoist (18 tests pass; 3 packages build clean) + 018 Null-Object scaffolding (6103 tests pass; publish-size -0.15 MB) + 084 CLAUDE.md drift fix.
 
-**Escalation findings from task 001** (need human decision before Phase 1 task 004 can run):
-1. **`Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs`** writes `sprk_todoflag` — direct task 004 blocker. Owned by x-home-corporate-workspace-r1 project. Decide: (a) refactor to write `sprk_todo`; (b) delete if orphaned; (c) defer to Phase 7.
-2. **`Sprk.Bff.Api/Infrastructure/ExternalAccess/{ExternalDataService.cs, ExternalProjectDtos.cs}`** — external-portal DTOs exposing `sprk_eventtodo` to external SPA. Scope decision: include external-spa migration in R3, or accept external surface breakage.
-3. **`src/client/external-spa/`** — consumer of #2; same scope decision.
-4. **`EventDetailSidePane/components/MemoSection.tsx:5`** — false positive on `_sprk_regardingevent_value` (actually `sprk_memo`, not todo). Noted for task 085 sweep; no action needed.
+**Audit escalation resolved (user decisions, 2026-06-07)**:
+1. **`TodoGenerationService.cs`**: option (a) refactor to write `sprk_todo`. → **New task 006** added.
+2. **`ExternalAccess` BFF + `external-spa`**: included in scope, refactor/migrate. → **New tasks 007 + 008** added.
+3. **Environment**: target = `https://spaarkedev1.crm.dynamics.com/` (dev). **Portability mandate**: nothing hardcoded — this is a product; schema + code must work in any tenant via solution export/import + config-driven endpoints.
+4. **AAD `Tasks.ReadWrite` scope (task 015)**: user will add the scope — instructions provided.
+5. **Worktree setup**: `node_modules/` missing at root → both wave 1 + wave 2 commits used `--no-verify` per user authorization. Tooling fix pending (or accept `--no-verify` for this branch).
 
-Items 1+2+3 must be resolved before tasks 003/004/005 run.
+**TASK-INDEX updated**: Phase 1 expanded from 5 → 8 tasks. Total project tasks: 38 → 41. Tasks 004 + 005 now depend on 006/007/008 completion.
 
 ---
 

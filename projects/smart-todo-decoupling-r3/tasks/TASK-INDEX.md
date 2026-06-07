@@ -10,7 +10,7 @@
 
 | Metric | Value |
 |---|---|
-| **Total tasks** | 37 (excluding wrap-up: 36 implementation/cleanup tasks + 1 wrap-up) |
+| **Total tasks** | 41 (38 from initial decomposition + 3 audit-surfaced: 006, 007, 008) |
 | **Phases** | 9 (Phase 1 Schema · 2 Shared-Lib · 3 Code Page · 4 Wizard · 5 Subgrids · 6 Graph Foundation · 7 Sync Engine · 8 Outlook · 9 Cleanup) + final wrap-up |
 | **FULL-rigor tasks** | 22 |
 | **STANDARD-rigor tasks** | 11 |
@@ -27,8 +27,11 @@
 | 001 | Audit `sprk_eventtodo` and `sprk_event.sprk_todo*` references | 1 | STANDARD | ✅ | none | P1-W1 | ✅ |
 | 002 | Create `sprk_todo` custom entity (full attribute set) | 1 | FULL | 🔲 | 001 | P1-W2 | — |
 | 003 | Register `sprk_todo` in `sprk_recordtype_ref` | 1 | STANDARD | 🔲 | 002 | P1-W3 | ✅ |
-| 004 | Remove four to-do fields from `sprk_event` | 1 | FULL | 🔲 | 001 | P1-W3 | ✅ |
-| 005 | Delete `sprk_eventtodo` entity | 1 | FULL | 🔲 | 001, 004 | P1-W4 | — |
+| 004 | Remove four to-do fields from `sprk_event` | 1 | FULL | 🔲 | 001, 006, 007, 008 | P1-W4 | — |
+| 005 | Delete `sprk_eventtodo` entity | 1 | FULL | 🔲 | 001, 004, 007, 008 | P1-W4 | — |
+| 006 | Refactor `TodoGenerationService` to create `sprk_todo` (audit-surfaced) | 1 | FULL | 🔲 | 002 | P1-W2.5 | ✅ |
+| 007 | Refactor `ExternalAccess` BFF surface to `sprk_todo` (audit-surfaced) | 1 | FULL | 🔲 | 002 | P1-W2.5 | ✅ |
+| 008 | Migrate `external-spa` to `sprk_todo` (audit-surfaced) | 1 | FULL | 🔲 | 002, 007 | P1-W3 | — |
 | 010 | Hoist Kanban primitives to `@spaarke/ui-components/Kanban/` | 2 | FULL | ✅ | 001 | P2-W1 | — |
 | 011 | Simplify `TodoDetail` to single-entity load/save | 2 | FULL | 🔲 | 002, 010 | P2-W2 | — |
 | 012 | Update `@spaarke/ui-components` barrel + version bump | 2 | STANDARD | 🔲 | 010, 011 | P2-W3 | ✅ |
@@ -71,12 +74,15 @@ Phases run in waves. Within each wave, tasks marked Parallel Safe ✅ can be dis
 
 ### Phase 1 — Dataverse Schema (sequential, blocks all)
 
+**Updated 2026-06-07 (audit escalation)**: Tasks 006/007/008 inserted between 002 and 004/005 per user decision (refactor TodoGenerationService + ExternalAccess BFF + migrate external-spa rather than break those surfaces).
+
 | Wave | Tasks | Prereq | Notes |
 |------|-------|--------|-------|
 | P1-W1 | 001 | none | Reference audit gates the schema cut |
-| P1-W2 | 002 | 001 | Create `sprk_todo` entity |
-| P1-W3 | 003, 004 | 002 (003), 001 (004) | Both parallel-safe — 003 inserts data row; 004 removes `sprk_event` fields |
-| P1-W4 | 005 | 001, 004 | Final schema cut — delete `sprk_eventtodo` |
+| P1-W2 | 002 | 001 | Create `sprk_todo` entity (Dataverse env: spaarkedev1) |
+| P1-W2.5 | 003, 006, 007 | 002 | Parallel-safe — 003 inserts data row; 006 refactors TodoGenerationService; 007 refactors ExternalAccess BFF |
+| P1-W3 | 008 | 002, 007 | external-spa migration (consumes 007's new contract) |
+| P1-W4 | 004, 005 | 001, 006, 007, 008 (004); 001, 004, 007, 008 (005) | Final schema cuts — only safe after all consumer refactors complete |
 
 ### Phase 2 + Phase 6 — Parallel-running phases (per spec A-7)
 

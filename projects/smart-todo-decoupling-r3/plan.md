@@ -145,11 +145,16 @@ Phase 9: Cleanup & Documentation (Week 5-6)                       [final, sequen
 
 ### Phase 1: Dataverse Schema (Week 1)
 
+> **Expanded 2026-06-07 (audit escalation)**: Task 001 surfaced 3 prerequisite refactors before the schema cut is safe: `TodoGenerationService` (task 006), `ExternalAccess` BFF surface (007), and external-spa migration (008). All run after task 002 (entity create) but before tasks 004 + 005 (field removal + entity delete).
+
+**Target environment**: `https://spaarkedev1.crm.dynamics.com/` (dev) for the initial deploy. **Product portability**: schema + code MUST be tenant-agnostic — solution export/import for schema; configuration-driven endpoints for code. No hardcoded org URLs.
+
 **Objectives**:
 1. Create `sprk_todo` custom entity with the full attribute set defined in spec FR-01 / design §4.1
-2. Delete `sprk_eventtodo` entirely
-3. Remove `sprk_todoflag` / `sprk_todostatus` / `sprk_todocolumn` / `sprk_todopinned` from `sprk_event`
-4. Register `sprk_todo` in `sprk_recordtype_ref`
+2. Refactor `TodoGenerationService` (task 006) + `ExternalAccess` BFF (task 007) + migrate external-spa (task 008) — audit-surfaced prerequisites
+3. Delete `sprk_eventtodo` entirely
+4. Remove `sprk_todoflag` / `sprk_todostatus` / `sprk_todocolumn` / `sprk_todopinned` from `sprk_event`
+5. Register `sprk_todo` in `sprk_recordtype_ref`
 
 **Deliverables**:
 - [ ] `sprk_todo` entity present (primary name, description, ownership, `sprk_assignedto`, state/status, kanban behavior, detail, 11 specific regarding lookups, 4 resolver fields, 5 Graph sync state fields)
