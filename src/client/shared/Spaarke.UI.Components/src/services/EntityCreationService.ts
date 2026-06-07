@@ -29,13 +29,36 @@
  * ```
  */
 
-import type { IWebApiWithCreate } from '../types/WebApiLike';
+import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
 // PolymorphicResolverService not needed — document records use canonical field set only
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * Cascade defaults derived from the current user's owning Business Unit.
+ *
+ * Per spaarke-multi-container-multi-index-r1 spec (FR-WIZ-01..05) the 5 parent-record
+ * wizards (Matter, Project, Invoice, WorkAssignment, Event) and DocumentUploadWizard
+ * cascade two fields from `businessunit` onto the create payload:
+ *
+ *   - `sprk_containerid` — SPE container/drive ID
+ *   - `sprk_searchindexname` — Azure AI Search index name
+ *
+ * Both fields are OPTIONAL on `businessunit`. When unset on the BU, the helpers
+ * leave the corresponding payload field untouched and the BFF tenant-default
+ * chain (or downstream backfill) takes over server-side.
+ */
+export interface IUserBuCascadeDefaults {
+  /** `businessunit.sprk_containerid` for the current user's owning BU, or undefined if unset. */
+  containerId?: string;
+  /** `businessunit.sprk_searchindexname` for the current user's owning BU, or undefined if unset. */
+  searchIndexName?: string;
+  /** GUID of the user's owning Business Unit (always set when the lookup succeeded). */
+  businessUnitId?: string;
+}
 
 /** Result of a file upload operation. */
 export interface IFileUploadResult {
@@ -110,6 +133,161 @@ export class EntityCreationService {
     private readonly _authenticatedFetch: AuthenticatedFetchFn,
     private readonly _bffBaseUrl: string
   ) {}
+
+  // -------------------------------------------------------------------------
+  // INV-5-safe cascade helpers (spaarke-multi-container-multi-index-r1 / FR-WIZ-01..08)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Returns true when the entity payload has a non-empty value for the given field.
+   *
+   * "Non-empty" means: not `undefined`, not `null`, and not an empty/whitespace-only string.
+   * Booleans and numbers (including `false` / `0`) count as non-empty since they are explicit values.
+   *
+   * Per design.md INV-5: explicit override values are sacred — never overwrite.
+   */
+  private static _hasExplicitValue(entity: Record<string, unknown>, fieldLogicalName: string): boolean {
+    if (!(fieldLogicalName in entity)) return false;
+    const v = entity[fieldLogicalName];
+    if (v === null || v === undefined) return false;
+    if (typeof v === 'string' && v.trim() === '') return false;
+    return true;
+  }
+
+  /**
+   * Apply a default `sprk_containerid` to the create payload IF AND ONLY IF the payload
+   * does not already have an explicit value for that field (INV-5).
+   *
+   * Mirrors the canonical assignment shape from
+   * `CreateMatterWizard/matterService.ts:216` — `entity['sprk_containerid'] = containerId` —
+   * adding the INV-5 guard so each wizard does not duplicate it.
+   *
+   * @param entity Create payload (mutated in place).
+   * @param containerId BU-derived container ID; passing `undefined` / `null` / `''` is a no-op.
+   * @returns `true` if the value was set, `false` if it was skipped (already present, or input empty).
+   *
+   * @see design.md INV-5
+   * @see spec.md FR-WIZ-01..05 (parent-record wizards)
+   * @see spec.md FR-WIZ-08 (INV-5 preservation across all wizards)
+   */
+  static applyDefaultContainerId(entity: Record<string, unknown>, containerId: string | null | undefined): boolean {
+    if (containerId === null || containerId === undefined || containerId === '') return false;
+    if (this._hasExplicitValue(entity, 'sprk_containerid')) return false;
+    entity['sprk_containerid'] = containerId;
+    return true;
+  }
+
+  /**
+   * Apply a default `sprk_searchindexname` to the create payload IF AND ONLY IF the payload
+   * does not already have an explicit value for that field (INV-5).
+   *
+   * Mirrors `applyDefaultContainerId` — both fields cascade from the current user's owning
+   * Business Unit per FR-WIZ-01..05. When the BU has no configured index name, callers should
+   * pass `undefined` here and the field will be left unset on the payload (the BFF tenant-default
+   * chain handles the fallback server-side).
+   *
+   * @param entity Create payload (mutated in place).
+   * @param searchIndexName BU-derived index name; passing `undefined` / `null` / `''` is a no-op.
+   * @returns `true` if the value was set, `false` if it was skipped (already present, or input empty).
+   *
+   * @see design.md INV-5
+   * @see spec.md FR-WIZ-01..05 (parent-record wizards)
+   * @see spec.md FR-WIZ-07 (DocumentUploadWizard payload)
+   * @see spec.md FR-WIZ-08 (INV-5 preservation across all wizards)
+   */
+  static applyDefaultSearchIndexName(
+    entity: Record<string, unknown>,
+    searchIndexName: string | null | undefined
+  ): boolean {
+    if (searchIndexName === null || searchIndexName === undefined || searchIndexName === '') return false;
+    if (this._hasExplicitValue(entity, 'sprk_searchindexname')) return false;
+    entity['sprk_searchindexname'] = searchIndexName;
+    return true;
+  }
+
+  /**
+   * Apply both BU-derived defaults to the create payload, each guarded independently by INV-5.
+   * Convenience wrapper around `applyDefaultContainerId` + `applyDefaultSearchIndexName` for the
+   * 5 parent-record wizards (Matter, Project, Invoice, WorkAssignment, Event).
+   *
+   * @param entity Create payload (mutated in place).
+   * @param defaults BU-derived defaults; either or both may be undefined.
+   * @returns Object reporting which fields were actually set (vs. skipped by INV-5 or empty input).
+   *
+   * @see spec.md FR-WIZ-01..05
+   * @see spec.md FR-WIZ-08 (INV-5)
+   */
+  static applyUserBuDefaults(
+    entity: Record<string, unknown>,
+    defaults: IUserBuCascadeDefaults | null | undefined
+  ): { containerIdSet: boolean; searchIndexNameSet: boolean } {
+    if (!defaults) {
+      return { containerIdSet: false, searchIndexNameSet: false };
+    }
+    return {
+      containerIdSet: EntityCreationService.applyDefaultContainerId(entity, defaults.containerId),
+      searchIndexNameSet: EntityCreationService.applyDefaultSearchIndexName(entity, defaults.searchIndexName),
+    };
+  }
+
+  /**
+   * Resolve the current user's owning Business Unit defaults for cascade fields
+   * (`sprk_containerid`, `sprk_searchindexname`).
+   *
+   * Chain (matches the SemanticSearchControl NavigationService + SummarizeFilesWizard pattern):
+   *   systemuser(userId) → `_businessunitid_value` → businessunit(buId)
+   *     → `sprk_containerid`, `sprk_searchindexname`
+   *
+   * Caller responsibilities:
+   *   - Determine `userId` upstream (e.g. via `Xrm.Utility.getUserId()` in a Code Page / PCF host).
+   *     This helper stays Xrm-host-agnostic per ADR-012 so it can be unit-tested without
+   *     a real Xrm global.
+   *
+   * Behavior:
+   *   - Returns `{ containerId: undefined, searchIndexName: undefined, businessUnitId: undefined }`
+   *     if the user has no `_businessunitid_value` (rare).
+   *   - Returns either field as `undefined` when the BU exists but the field is unset
+   *     (Spaarke Dev 1 / Test 1 case per Phase A.5 — operator setup may lag).
+   *   - Returns trimmed-empty strings as `undefined` (treated as unset).
+   *   - Never throws on Dataverse "field exists but is null" — only network / 4xx errors propagate.
+   *
+   * @param webApi Xrm.WebApi-compatible interface (PCF context.webAPI or wrapped Xrm.WebApi).
+   * @param userId GUID of the current user (with or without surrounding braces).
+   * @returns Cascade defaults from the user's BU; fields may be `undefined` if unset on the BU.
+   *
+   * @see spec.md FR-WIZ-01..05
+   * @see design.md §5.0 (BU cascade source)
+   */
+  static async resolveUserBuDefaults(webApi: IWebApiLike, userId: string): Promise<IUserBuCascadeDefaults> {
+    const cleanUserId = userId.replace(/^\{|\}$/g, '');
+
+    // Step 1: user → BU id
+    const userRecord = await webApi.retrieveRecord('systemuser', cleanUserId, '?$select=_businessunitid_value');
+    const rawBuId = userRecord['_businessunitid_value'];
+    const buId = typeof rawBuId === 'string' && rawBuId.trim() !== '' ? rawBuId : undefined;
+    if (!buId) {
+      return { containerId: undefined, searchIndexName: undefined, businessUnitId: undefined };
+    }
+
+    // Step 2: BU → cascade fields
+    const buRecord = await webApi.retrieveRecord(
+      'businessunit',
+      buId,
+      '?$select=sprk_containerid,sprk_searchindexname'
+    );
+
+    const normalize = (v: unknown): string | undefined => {
+      if (typeof v !== 'string') return undefined;
+      const trimmed = v.trim();
+      return trimmed === '' ? undefined : trimmed;
+    };
+
+    return {
+      businessUnitId: buId,
+      containerId: normalize(buRecord['sprk_containerid']),
+      searchIndexName: normalize(buRecord['sprk_searchindexname']),
+    };
+  }
 
   /**
    * Upload files to SPE via the BFF OBO upload endpoint.

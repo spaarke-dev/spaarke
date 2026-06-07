@@ -17,10 +17,10 @@
 | 013 | Thread `SearchIndexName` through `SemanticSearchService.cs` | B | ✅ | 010, 011 | Group B2 | FULL |
 | 014 | Thread `SearchIndexName` through `RagService.cs` | B | ✅ | 010, 011 | Group B2 | FULL |
 | 015 | Thread `SearchIndexName` through `RecordSearchService.cs` | B | ✅ | 010, 011 | Group B2 | FULL |
-| 016 | Update `SemanticSearchEndpoints.cs` to pass DTO field to resolver | B | 🔲 | 013, 014, 015 | — | FULL |
+| 016 | Update `SemanticSearchEndpoints.cs` to pass DTO field to resolver | B | ✅ | 013, 014, 015 | — | FULL |
 | 017 | BFF unit + integration tests for FR-BFF-01..07 | B | 🔲 | 016 | — | STANDARD |
 | 018 | BFF publish-size check + deploy via `/bff-deploy` | B — Deploy | 🔲 | 017 | — | STANDARD |
-| 020 | Update shared `EntityCreationService.ts` for `sprk_searchindexname` cascade | A — Wizards | 🔲 | 018 | — | FULL |
+| 020 | Update shared `EntityCreationService.ts` for `sprk_searchindexname` cascade | A — Wizards | ✅ | 018 | — | FULL |
 | 021 | `CreateMatterWizard` — set `sprk_searchindexname` from BU (FR-WIZ-01) | A | 🔲 | 020 | Group A1 | FULL |
 | 022 | `CreateProjectWizard` — fix latent G2 + set both fields (FR-WIZ-02) | A | 🔲 | 020 | Group A1 | FULL |
 | 023 | `CreateInvoiceWizard` — verify + fix gap + set both fields (FR-WIZ-03) | A | 🔲 | 020 | Group A1 | FULL |

@@ -39,6 +39,7 @@ export type {
   ISendEmailInput,
   ISendEmailResult,
   IUploadProgress,
+  IUserBuCascadeDefaults,
   AuthenticatedFetchFn,
 } from './EntityCreationService';
 export * from './CommandRegistry';

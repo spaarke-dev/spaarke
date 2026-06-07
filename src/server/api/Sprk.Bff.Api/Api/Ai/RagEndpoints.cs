@@ -207,15 +207,39 @@ public static class RagEndpoints
             });
         }
 
+        // multi-container-multi-index-r1 FR-BFF-07 (task 016 — final wiring): the
+        // client supplies `searchIndexName` at the top level of `RagSearchRequest`
+        // (per the DTO contract in task 011), but `IRagService.SearchAsync(query,
+        // options, ct)` consumes the value from `RagSearchOptions.SearchIndexName`
+        // (added in task 014). Bridge the two here without mutating the caller's
+        // request DTO. When the caller did NOT set `request.SearchIndexName`,
+        // pass `request.Options` verbatim — preserves byte-for-byte backward-compat
+        // (NFR-02) for existing callers and the unmodified service-level test
+        // suite. ProblemDetails 400 (ADR-019) for INDEX_NOT_ALLOWED propagates
+        // from the resolver via the generic 500 catch — see Step 9.5 notes.
+        var effectiveOptions = !string.IsNullOrWhiteSpace(request.SearchIndexName)
+            ? request.Options with { SearchIndexName = request.SearchIndexName }
+            : request.Options;
+
         try
         {
-            var response = await ragService.SearchAsync(request.Query, request.Options, cancellationToken);
+            var response = await ragService.SearchAsync(request.Query, effectiveOptions, cancellationToken);
             return Results.Ok(response);
         }
         catch (FeatureDisabledException ex)
         {
             // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
             return ex.AsFeatureDisabled503();
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
+        {
+            // multi-container-multi-index-r1 FR-BFF-07 (task 016) — rethrow so the
+            // global `UseExceptionHandler` middleware (MiddlewarePipelineExtensions)
+            // renders the canonical ProblemDetails JSON per ADR-019. Without this,
+            // the generic `catch (Exception)` below would convert
+            // `INDEX_NOT_ALLOWED` (statusCode 400) into a 500 response — breaking
+            // NFR-08 (rejected index name MUST surface as ProblemDetails 400).
+            throw;
         }
         catch (Exception ex)
         {
