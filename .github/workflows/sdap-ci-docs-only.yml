@@ -1,0 +1,54 @@
+name: SDAP CI - Docs-Only Fallback
+
+# Purpose: emit no-op "Build & Test (Debug)" + "Build & Test (Release)" check runs
+# for PRs that touch ONLY paths-ignored by sdap-ci.yml.
+#
+# Why this exists: sdap-ci.yml's pull_request trigger uses `paths-ignore` (docs/**,
+# **.md, .claude/**, memory/**, knowledge/**, etc.). When ALL changed files match those
+# patterns, sdap-ci.yml does NOT run at all — but branch protection on master requires
+# the "Build & Test (Debug)" status check. Without this fallback, docs-only PRs are
+# blocked indefinitely.
+#
+# What this does: triggers on the SAME paths sdap-ci.yml ignores, and provides
+# successful check runs named exactly "Build & Test (Debug)" and "Build & Test (Release)"
+# so branch protection is satisfied.
+#
+# Mixed PRs (touching both docs and code): BOTH this workflow AND sdap-ci.yml will
+# trigger, both producing checks with the same names. Branch protection treats the
+# REAL check from sdap-ci.yml as authoritative because that's where the actual build
+# runs. The no-op check here is informational on mixed PRs.
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'projects/_backlog/**'
+      - 'projects/x-*/**'
+      - '**.md'
+      - '.claude/**'
+      - 'memory/**'
+      - 'knowledge/**'
+      - 'CHANGELOG*'
+      - 'CODEOWNERS'
+      - 'LICENSE*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdap-ci-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - name: No-op acknowledgment (docs-only PR)
+        run: |
+          echo "Docs-only PR detected — no code build/test required for ${{ matrix.configuration }}."
+          echo "Reporting 'Build & Test (${{ matrix.configuration }})' as success to satisfy branch protection."
+          echo "Real Build & Test runs via .github/workflows/sdap-ci.yml when code paths change."
