@@ -22,6 +22,7 @@ import type { ICreateMatterFormState } from './formTypes';
 import type { IUploadedFile } from './wizardTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
+import type { IWebApiLike } from '../../types/WebApiLike';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress, AuthenticatedFetchFn } from '../../services/EntityCreationService';
 
@@ -143,6 +144,60 @@ function _resolveNavProp(navPropMap: Record<string, string>, columnLogical: stri
   return navPropMap[columnLogical] ?? columnLogical;
 }
 
+/**
+ * Best-effort resolution of the current Dataverse user GUID from the host Xrm global.
+ *
+ * Matches the established `SummarizeFilesWizard.getBusinessUnitContainerId` pattern:
+ * walks `window`, `window.parent`, `window.top` (cross-origin safe) looking for
+ * `Xrm.Utility.getUserId()`. Returns `null` when unavailable so callers can degrade
+ * gracefully — `sprk_searchindexname` cascade is optional and the BFF tenant-default
+ * chain handles the fallback server-side.
+ *
+ * @returns Current user GUID (braces stripped), or `null` if Xrm is unreachable.
+ */
+function _tryGetCurrentUserId(): string | null {
+  const frames: Window[] = [window];
+  try {
+    if (window.parent && window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
+  } catch {
+    /* cross-origin */
+  }
+
+  for (const frame of frames) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (frame as any).Xrm;
+      if (xrm?.Utility?.getUserId) {
+        const raw = xrm.Utility.getUserId() as string;
+        const cleaned = raw.replace(/^\{|\}$/g, '');
+        if (cleaned) return cleaned;
+      }
+    } catch {
+      // Cross-origin frame — skip
+    }
+  }
+  return null;
+}
+
+/**
+ * Adapt an {@link IDataService} into an {@link IWebApiLike} suitable for
+ * `EntityCreationService.resolveUserBuDefaults`. The shapes differ in two ways:
+ *  - `retrieveMultipleRecords` return type is wrapped in `{ entities }` (same).
+ *  - `IWebApiLike` allows an optional `maxPageSize` (we ignore it — `IDataService`
+ *    does not surface it but the cascade resolver never sets it).
+ */
+function _toWebApiLike(dataService: IDataService): IWebApiLike {
+  return {
+    retrieveRecord: (entityType, id, options) => dataService.retrieveRecord(entityType, id, options),
+    retrieveMultipleRecords: (entityType, options) => dataService.retrieveMultipleRecords(entityType, options),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // MatterService class
 // ---------------------------------------------------------------------------
@@ -214,6 +269,53 @@ export class MatterService {
     // Store the SPE container ID on the matter record
     if (this._containerId) {
       entity['sprk_containerid'] = this._containerId;
+    }
+
+    // -------------------------------------------------------------------------
+    // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): cascade `sprk_searchindexname`
+    // from the current user's owning Business Unit onto the create payload.
+    //
+    // INV-5 contract: if the payload already has an explicit non-empty value
+    // (e.g. set by a form field default), DO NOT overwrite.
+    // `EntityCreationService.applyDefaultSearchIndexName` enforces this guard.
+    //
+    // Non-fatal: if userId resolution fails (no Xrm host), or BU has no
+    // `sprk_searchindexname`, leave the field unset — the BFF tenant-default
+    // chain handles the fallback server-side. We log a warning instead of
+    // aborting matter creation.
+    // -------------------------------------------------------------------------
+    try {
+      const userId = _tryGetCurrentUserId();
+      if (userId) {
+        const webApi = _toWebApiLike(this._dataService);
+        const buDefaults = await EntityCreationService.resolveUserBuDefaults(webApi, userId);
+        const wasSet = EntityCreationService.applyDefaultSearchIndexName(entity, buDefaults.searchIndexName);
+        if (wasSet) {
+          console.info(
+            '[MatterService] Cascaded sprk_searchindexname from user BU:',
+            buDefaults.searchIndexName,
+            '(BU:',
+            buDefaults.businessUnitId,
+            ')'
+          );
+        } else if (buDefaults.searchIndexName) {
+          console.info('[MatterService] sprk_searchindexname already explicitly set on payload — preserving (INV-5).');
+        } else {
+          console.info(
+            '[MatterService] User BU has no sprk_searchindexname — leaving payload field unset; BFF tenant-default chain will apply.'
+          );
+        }
+      } else {
+        console.warn(
+          '[MatterService] Xrm.Utility.getUserId() unavailable — skipping sprk_searchindexname BU cascade. BFF tenant-default will apply server-side.'
+        );
+      }
+    } catch (err) {
+      // Cascade is best-effort; never block matter creation on it.
+      console.warn(
+        '[MatterService] Failed to cascade sprk_searchindexname from user BU (non-fatal):',
+        err instanceof Error ? err.message : err
+      );
     }
 
     // Generate matter number: {matterTypeCode}-{random 6 digits}

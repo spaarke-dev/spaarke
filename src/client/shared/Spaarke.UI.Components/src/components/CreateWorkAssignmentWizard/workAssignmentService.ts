@@ -90,6 +90,53 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
 // are imported from the shared PolymorphicResolverService.
 
 /**
+ * Resolve the current Dataverse user ID from the host Xrm global.
+ *
+ * Walks `window` → `window.parent` → `window.top` to find an `Xrm.Utility.getGlobalContext()`
+ * (Code Page hosted in a Power App iframe) or `Xrm.Utility.getUserId()` (PCF / direct host).
+ * Returns `''` (empty) when no Xrm context is reachable — caller treats that as "skip cascade".
+ *
+ * Kept module-private (not exported) so consumers cannot pass an arbitrary user ID; this
+ * preserves the "current user" semantics of FR-WIZ-04.
+ */
+function _getCurrentUserId(): string {
+  const frames: Window[] = [window];
+  try {
+    if (window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window) frames.push(window.top);
+  } catch {
+    /* cross-origin */
+  }
+
+  for (const frame of frames) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (frame as any).Xrm;
+      if (xrm?.Utility?.getGlobalContext) {
+        const ctx = xrm.Utility.getGlobalContext();
+        const userId = ctx?.userSettings?.userId;
+        if (typeof userId === 'string' && userId.trim() !== '') {
+          return userId.replace(/^\{|\}$/g, '').toLowerCase();
+        }
+      }
+      if (typeof xrm?.Utility?.getUserId === 'function') {
+        const userId = xrm.Utility.getUserId();
+        if (typeof userId === 'string' && userId.trim() !== '') {
+          return userId.replace(/^\{|\}$/g, '').toLowerCase();
+        }
+      }
+    } catch {
+      /* cross-origin */
+    }
+  }
+  return '';
+}
+
+/**
  * Resolve navigation property name for a document lookup by referenced entity.
  * Used when creating sprk_document records linked to a parent entity.
  */
@@ -399,9 +446,29 @@ export class WorkAssignmentService {
       entity['sprk_responseduedate'] = form.responseDueDate;
     }
 
-    // Store the SPE container ID on the work assignment record (enables Documents tab)
+    // Store the host-resolved SPE container ID on the work assignment record (enables Documents tab).
+    // Applied FIRST so it acts as an explicit override during the subsequent BU cascade (INV-5).
     if (this._containerId) {
       entity['sprk_containerid'] = this._containerId;
+    }
+
+    // FR-WIZ-04: Cascade `sprk_containerid` + `sprk_searchindexname` from the current user's
+    // owning Business Unit. INV-5 guards each field independently — values set by the caller
+    // above (or pre-seeded on `form`) are preserved. If the user's BU has either field unset,
+    // the corresponding payload field is left untouched and the BFF tenant-default chain takes
+    // over server-side (e.g. Spaarke Dev 1 / Test 1 per Phase A.5 ordering).
+    try {
+      const currentUserId = _getCurrentUserId();
+      if (currentUserId) {
+        // IDataService is a structural superset of IWebApiLike (retrieveRecord, retrieveMultipleRecords).
+        const defaults = await EntityCreationService.resolveUserBuDefaults(this._dataService, currentUserId);
+        EntityCreationService.applyUserBuDefaults(entity, defaults);
+      } else {
+        console.warn('[WorkAssignmentService] BU cascade skipped: current user ID could not be resolved.');
+      }
+    } catch (err) {
+      // Non-fatal: log and continue. BFF tenant-default chain handles routing if both fields are unset.
+      console.warn('[WorkAssignmentService] BU cascade failed (non-fatal):', err);
     }
 
     // Helper: bind a lookup if the nav-prop exists on the entity

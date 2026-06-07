@@ -18,6 +18,7 @@
 import type { ICreateProjectFormState } from './projectFormTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
+import { EntityCreationService, type IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -269,9 +270,29 @@ export class ProjectService {
    * Uses navigation property discovery to resolve the correct OData
    * @odata.bind syntax for each lookup field.
    *
+   * BU cascade (FR-WIZ-02, fixes latent gap G2): when `cascadeDefaults` is provided,
+   * applies `sprk_containerid` AND `sprk_searchindexname` from the user's owning
+   * Business Unit to the create payload via
+   * {@link EntityCreationService.applyUserBuDefaults}. Both fields are guarded by
+   * INV-5 — explicit values pre-existing on the payload are preserved (never
+   * overwritten). Callers (typically `CreateProjectWizard.tsx`) resolve the
+   * defaults via {@link EntityCreationService.resolveUserBuDefaults}.
+   *
    * Returns ICreateProjectResult — never throws.
+   *
+   * @param formValues Form state captured by the wizard.
+   * @param cascadeDefaults Optional BU-derived defaults (containerId, searchIndexName).
+   *   When omitted/undefined the cascade step is a no-op (legacy behavior). New
+   *   wizard call sites pass the resolved value; tests can omit it.
+   *
+   * @see spec.md FR-WIZ-02
+   * @see spec.md FR-WIZ-08 (INV-5)
+   * @see design.md §5.0 (BU cascade source)
    */
-  async createProject(formValues: ICreateProjectFormState): Promise<ICreateProjectResult> {
+  async createProject(
+    formValues: ICreateProjectFormState,
+    cascadeDefaults?: IUserBuCascadeDefaults
+  ): Promise<ICreateProjectResult> {
     // Discover correct OData navigation property names from entity metadata.
     // Matches by referenced (target) entity to avoid hardcoding column names
     // which can differ between entities (e.g. sprk_mattertype vs sprk_projecttyperef).
@@ -291,6 +312,15 @@ export class ProjectService {
     // the designation is irreversible (enforced by domain logic in the BFF).
     if (formValues.isSecure === true) {
       entity['sprk_issecure'] = true;
+    }
+
+    // FR-WIZ-02 / G2 latent-gap fix: cascade `sprk_containerid` AND
+    // `sprk_searchindexname` from the current user's owning Business Unit.
+    // INV-5 is enforced per-field by applyUserBuDefaults — explicit override
+    // values already on the payload are preserved.
+    if (cascadeDefaults) {
+      const applied = EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults);
+      console.info('[ProjectService] BU cascade applied:', applied);
     }
 
     // Add lookup bindings — match by referenced entity name (robust).

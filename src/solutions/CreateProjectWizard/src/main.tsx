@@ -7,6 +7,7 @@ import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmD
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { CreateProjectWizard } from "@spaarke/ui-components/components/CreateProjectWizard";
+import { EntityCreationService, type IUserBuCascadeDefaults } from "@spaarke/ui-components/services";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
@@ -64,6 +65,14 @@ function App() {
     return (bu["sprk_containerid"] as string) || "";
   }, []);
 
+  const resolveUserBuDefaults = React.useCallback(async (): Promise<IUserBuCascadeDefaults> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
+    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+    return await EntityCreationService.resolveUserBuDefaults(xrm.WebApi, userId);
+  }, []);
+
   if (!isAuthReady) {
     return (
       <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -86,6 +95,7 @@ function App() {
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
+        resolveUserBuDefaults={resolveUserBuDefaults}
       />
     </FluentProvider>
   );

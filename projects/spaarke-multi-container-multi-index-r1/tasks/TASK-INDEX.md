@@ -21,12 +21,12 @@
 | 017 | BFF unit + integration tests for FR-BFF-01..07 | B | 🔲 | 016 | — | STANDARD |
 | 018 | BFF publish-size check + deploy via `/bff-deploy` | B — Deploy | 🔲 | 017 | — | STANDARD |
 | 020 | Update shared `EntityCreationService.ts` for `sprk_searchindexname` cascade | A — Wizards | ✅ | 018 | — | FULL |
-| 021 | `CreateMatterWizard` — set `sprk_searchindexname` from BU (FR-WIZ-01) | A | 🔲 | 020 | Group A1 | FULL |
-| 022 | `CreateProjectWizard` — fix latent G2 + set both fields (FR-WIZ-02) | A | 🔲 | 020 | Group A1 | FULL |
-| 023 | `CreateInvoiceWizard` — verify + fix gap + set both fields (FR-WIZ-03) | A | 🔲 | 020 | Group A1 | FULL |
-| 024 | `CreateWorkAssignmentWizard` — verify + fix gap + set both fields (FR-WIZ-04) | A | 🔲 | 020 | Group A1 | FULL |
-| 025 | `CreateEventWizard` — verify + fix gap + set both fields (FR-WIZ-05) | A | 🔲 | 020 | Group A1 | FULL |
-| 026 | DocumentUploadWizard — `resolveSearchIndexNameForRecord` chain (FR-WIZ-06) | A | 🔲 | 020 | Group A2 | FULL |
+| 021 | `CreateMatterWizard` — set `sprk_searchindexname` from BU (FR-WIZ-01) | A | ✅ | 020 | Group A1 | FULL |
+| 022 | `CreateProjectWizard` — fix latent G2 + set both fields (FR-WIZ-02) | A | ✅ | 020 | Group A1 | FULL |
+| 023 | `CreateInvoiceWizard` — verify + fix gap + set both fields (FR-WIZ-03) | A | 🚫 | 020 | Group A1 | DEFERRED |
+| 024 | `CreateWorkAssignmentWizard` — verify + fix gap + set both fields (FR-WIZ-04) | A | ✅ | 020 | Group A1 | FULL |
+| 025 | `CreateEventWizard` — verify + fix gap + set both fields (FR-WIZ-05) | A | ✅ | 020 | Group A1 | FULL |
+| 026 | DocumentUploadWizard — `resolveSearchIndexNameForRecord` chain (FR-WIZ-06) | A | ✅ | 020 | Group A2 | FULL |
 | 027 | DocumentUploadWizard — `DocumentRecordService.buildRecordPayload` updates (FR-WIZ-07) | A | 🔲 | 026 | — | FULL |
 | 028 | INV-5 unit tests for all wizards (FR-WIZ-08) | A | 🔲 | 021, 022, 023, 024, 025, 027 | — | STANDARD |
 | 029 | Wizard code-page deploy via `/code-page-deploy` (all 6) | A — Deploy | 🔲 | 028 | — | STANDARD |
