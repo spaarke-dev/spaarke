@@ -85,14 +85,9 @@ import { PaneHeader, SprkChat } from "@spaarke/ui-components";
 import type { AttachmentChip, ChatAttachment, IChatMessage } from "@spaarke/ui-components";
 import { useAiSession, usePaneEvent, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent, ContextPaneEvent } from "@spaarke/ai-widgets";
-// R4 task 042 (W-4): symbolic widget type ID + payload shape for the
-// Assistant-pane PDF-upload → DocumentViewer demo. We import the constant
-// (NOT the literal "document-viewer") so a rename in the registration file
-// surfaces at compile time.
-import {
-  DOCUMENT_VIEWER_WIDGET_TYPE,
-  type DocumentViewerWidgetData,
-} from "@spaarke/ai-widgets";
+// R4 task 042 (W-4): the DocumentViewerWidget dispatch from this file was
+// disabled in R5 SC-18 cycle 6 (see handleAttachmentReady). Import will be
+// reinstated when R5 task 022 upgrades the widget.
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 import {
@@ -1129,6 +1124,14 @@ export function ConversationPane(): React.JSX.Element {
                 authenticatedFetch,
                 getAccessToken,
                 publishPaneEvent: dispatch,
+                // R5 task 038: pass the chat sessionId as the streamId so
+                // every `workspace.streaming_*` event carries `streamId ===
+                // chatSessionId`. The Summary tab in WorkspacePane registers
+                // `correlationId = chatSessionId` on the
+                // StructuredOutputStreamWidget and gates auto-focus on the
+                // same id, so this propagation is required for session
+                // isolation (FR-06 acceptance).
+                streamId: chatSessionId,
               });
               // Flip Held → Indexed badges on the promoted chip ids.
               setPromotedChipIds(prev => {
@@ -1342,20 +1345,32 @@ export function ConversationPane(): React.JSX.Element {
    */
   const handleAttachmentReady = React.useCallback(
     (attachment: ChatAttachment) => {
-      const widgetData: DocumentViewerWidgetData = {
-        filename: attachment.filename,
-        contentType: attachment.contentType,
-        textContent: attachment.textContent,
-      };
-      dispatch("workspace", {
-        type: "widget_load",
-        widgetType: DOCUMENT_VIEWER_WIDGET_TYPE,
-        widgetData,
-        // Use the filename as the tab label — operator-visible behaviour per
-        // OC-R4-07. WorkspacePane.tsx prefers event.displayName over the
-        // registry metadata's generic "Document Viewer" label.
-        displayName: attachment.filename,
-      });
+      // R5 SC-18 cycle-6 (2026-06-05): the DocumentViewerWidget shows
+      // "Preview not available" for chat-uploaded files because no SharePoint
+      // Embedded preview URL exists (the file is held client-side until the
+      // user triggers an intent like /summarize that promotes it). The empty
+      // preview tab is misleading — operator feedback: "preview but seems too
+      // fast for an actual preview to be generated, says 'Preview not
+      // available'". Suppressing the dispatch until R5 task 022 upgrades the
+      // widget to render text content as a fallback OR a real previewUrl
+      // pipeline is wired for client-staged files. Until then, the chip strip
+      // above the input bar is the visible confirmation that the file was
+      // received; the structured Summarize output will appear in the
+      // Workspace-pane Summary tab (task 038) when /summarize fires.
+      //
+      // Original dispatch (kept commented for reversibility — uncomment when
+      // task 022 ships):
+      //   const widgetData: DocumentViewerWidgetData = {
+      //     filename: attachment.filename,
+      //     contentType: attachment.contentType,
+      //     textContent: attachment.textContent,
+      //   };
+      //   dispatch("workspace", {
+      //     type: "widget_load",
+      //     widgetType: DOCUMENT_VIEWER_WIDGET_TYPE,
+      //     widgetData,
+      //     displayName: attachment.filename,
+      //   });
 
       // R5 task 036: capture the File so the promote-and-execute
       // orchestrator (`executeSummarizeIntent`) can POST multipart binary

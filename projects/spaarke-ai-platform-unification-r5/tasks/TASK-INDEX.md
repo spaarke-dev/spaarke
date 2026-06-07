@@ -1,10 +1,21 @@
 # Task Index — Spaarke AI Platform Unification R5
 
-> **Status**: READY — all 37 task POMLs generated; tasks ready for `task-execute` invocation
+> **Status**: ✅ CLOSED with known limitations (2026-06-06) — see [`notes/lessons-learned.md`](../notes/lessons-learned.md)
 > **Created**: 2026-06-03 (late); POMLs generated 2026-06-04
 > **Source**: `plan.md` Phase Breakdown
 > **Universal task driver**: `task-execute` skill (MANDATORY per root CLAUDE.md §4)
-> **Total tasks**: 41 across 3 phases + closeout + wrap-up (Phase 1: 9; Phase 2: 22; Phase 2 Closeout: 4 [added 2026-06-04 post-walkthrough]; Phase 3: 5; wrap-up: 1)
+> **Total tasks**: 41 across 3 phases + closeout + wrap-up (Phase 1: 9; Phase 2: 22; Phase 2 Closeout: 4; Phase 3: 5; wrap-up: 1)
+
+---
+
+## R5 Closeout (2026-06-06)
+
+R5 is closed. The wire-layer foundation shipped via PRs #345 / #354 / #359 / #361 / #362 / #364 — Phase 1 complete, vertical slice + Insights tool integration mostly shipped. Two structural defects were surfaced during the SC-18 SME walkthrough that cannot be fixed at the wire layer:
+
+- Renderer is not schema-aware for array/object fields (TL;DR renders raw JSON fragments, Entities renders JSON object literal). → R6 Pillar 5.
+- Duplicate-fire (chat agent + workspace path both invoke summarize for `/summarize`). → R6 Pillars 5 + 8.
+
+**All remaining 🔲 / 🔄 tasks below are ⏭️ deferred to R6** unless explicitly marked ✅ in the table. See `notes/lessons-learned.md` §6 for the per-task → R6-pillar mapping. R6 design is at [`projects/spaarke-ai-platform-unification-r6/design.md`](../../spaarke-ai-platform-unification-r6/design.md).
 
 ---
 
@@ -16,14 +27,15 @@
 
 ## Phase organization
 
-R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opportunities within phases. Critical path crosses phases; non-critical-path tasks parallelize within Wave groups.
+R5 shipped in 3 sequential phases + 1 wrap-up task. Closing state per phase:
 
-| Phase | Wave structure | Status |
+| Phase | Wave structure | Final status |
 |---|---|---|
-| Phase 1: Platform Extensions | 5 parallel groups (P1-G1 through P1-G5) | 🔲 |
-| Phase 2: Vertical Slice + Insights Tool Integration | 8 parallel groups (P2-G1 through P2-G8) | 🔲 |
-| Phase 3: Polish + Future-Use Validation | Mostly serial (D3-01 → D3-05) | 🔲 |
-| Wrap-up | Single task (090) | 🔲 |
+| Phase 1: Platform Extensions | 5 parallel groups (P1-G1 through P1-G5) | ✅ shipped |
+| Phase 2: Vertical Slice + Insights Tool Integration | 8 parallel groups (P2-G1 through P2-G8) | ⚠️ partial — Summarize vertical shipped wire-layer; Insights renderer + remaining widgets ⏭️ R6 |
+| Phase 2 Closeout (added 2026-06-04) | 4 tasks (032–038) | ⚠️ partial — backend + task 036 + task 038 ✅; tasks 022/030/031/034/035/037 ⏭️ R6 |
+| Phase 3: Polish + Future-Use Validation | Mostly serial (D3-01 → D3-05) | ⏭️ deferred to R6/R7 |
+| Wrap-up | Single task (090) | ✅ closed via PR #364 + closeout docs |
 
 ---
 
@@ -60,12 +72,12 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 | 014 | P2-G3 | D2-04 New `POST /api/ai/chat/sessions/{id}/summarize` endpoint | ✅ | 3h (actual ~2.5h) | ✅ | 012 |
 | 015 | P2-G3 | D2-05 Register `InvokeSummarizePlaybookTool` on `SprkChatAgent` | ✅ | 3h (actual ~2.5h) | ✅ | 012 |
 | 016 | P2-G3 | D2-06 Add additive PaneEventBus event types (5 new) per ADR-030 | ✅ | 2h (actual 1h) | ✅ | — |
-| 017 | P2-G4 | D2-07 Build `StructuredOutputStreamWidget` (Workspace; schema-driven) | 🔲 | 1d | ✅ | 016 |
+| 017 | P2-G4 | D2-07 Build `StructuredOutputStreamWidget` (Workspace; schema-driven) | ✅ widget shipped; renderer fidelity for array/object fields ⏭️ R6 Pillar 5 | 1d | ✅ | 016 |
 | 018 | P2-G4 | D2-09 Build `FilePreviewContextWidget` (Context pane; non-modal) | 🔲 | 1d | ✅ | 013, 016 |
 | 019 | P2-G5 | D2-10 Slash command `/summarize` semantic extension (dual-mode routing) | ✅ | 3h (actual 1.5h; branch-a wiring deferred to task 020) | ✅ | — |
-| 020 | P2-G5 | D2-11 Chat-pane orchestration UX (file chips, indicator, interjection) | 🔲 | 1d | ✅ | 017 |
+| 020 | P2-G5 | D2-11 Chat-pane orchestration UX (file chips, indicator, interjection) | ✅ shipped via task 036 (PR #362 + cycles 6-7 in #364) | 1d | ✅ | 017 |
 | 021 | P2-G5 | D2-12 "Summarize this only" per-file affordance + UI multi-turn refinement | 🔲 | 3h | ✅ | 018 |
-| 022 | P2-G5 | D2-08 Upgrade `DocumentViewerWidget` (R4 stub) to use extracted renderer | 🔲 | 2h | ✅ | 013 |
+| 022 | P2-G5 | D2-08 Upgrade `DocumentViewerWidget` (R4 stub) to use extracted renderer | ⏭️ R6 Pillar 9 (widget visibility contract) — dispatch suppressed in cycle 8 | 2h | ✅ | 013 |
 
 #### Insights tool integration (D2-13 to D2-20)
 
@@ -78,13 +90,13 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 | 027 | P2-G6 | D2-17 Clickable citations (v1.1 `citations[].href`; v1.0 fallback) | 🔲 | 4h | ✅ | 026 |
 | 028 | P2-G6 | D2-18 Confidence floor badge (D5 R5 client-side; `<0.6` threshold) | 🔲 | 2h | ✅ | 026 |
 | 029 | P2-G7 | D2-19 12 Insights error codes + correlation propagation + retry logic | ✅ | 4h (actual ~2h sub-agent; main session owns commit + npm build verification) | ❌ | 024, 025, 026 |
-| 030 | P2-G8 | D2-20 Insights tool smoke tests (Wave D7 synthetic GUIDs + SME walkthrough) | 🔄 (scaffold complete; SME walkthrough pending) | 4h (~1h scaffold so far) | ❌ | 024, 025, 026, 027, 028, 029 |
+| 030 | P2-G8 | D2-20 Insights tool smoke tests (Wave D7 synthetic GUIDs + SME walkthrough) | ⏭️ R6 vertical-slice validation target (scaffold ✅) | 4h | ❌ | 024, 025, 026, 027, 028, 029 |
 
 #### Cross-cutting Phase 2
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| 031 | P2-G8 | D2-22 Phase 2 tests + integration verification (E2E Summarize + Insights smoke + cross-tool disambiguation) | 🔄 code-side gate ✅; final ✅ pending PR merge + Dev deploy + 030 SME | 4h (actual ~30m) | ❌ | All P2 tasks |
+| 031 | P2-G8 | D2-22 Phase 2 tests + integration verification (E2E Summarize + Insights smoke + cross-tool disambiguation) | ⏭️ R6 vertical-slice validation target (code-side gate ✅) | 4h | ❌ | All P2 tasks |
 
 ---
 
@@ -97,10 +109,10 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 | 032 | P2-G9-CLOSEOUT | P2-CLOSEOUT-01 Wire ChatDocumentEndpoints upload into R5 session-files pipeline (IndexSessionFileAsync + ChatSession.UploadedFiles[] + UpdateSessionCacheAsync) | ✅ 2026-06-04 | 1.5h | ✅ (with 033) | 003, 004, 011, 012 |
 | 033 | P2-G9-CLOSEOUT | P2-CLOSEOUT-02 Surface ChatSession.UploadedFiles[] in PlaybookChatContextProvider so chat agent sees them | ✅ 2026-06-04 | 1h | ✅ (with 032) | 004, 011, 015 |
 | 034 | P2-G10-CLOSEOUT | P2-CLOSEOUT-03 Frontend auto-trigger: when upload completes after summarize intent, auto-invoke summary (pattern B) | 🔲 | 1h | ❌ | 032 + 033 deployed |
-| 035 | P2-G11-CLOSEOUT | P2-CLOSEOUT-04 Re-run SC-18 SME walkthrough end-to-end; capture solo-SME signoff; close 030 + 031 | 🔲 | 30m operator + 5m agent | ❌ | 036 + 037 + 038 deployed |
-| 036 | P2-G12-CLOSEOUT | P2-CLOSEOUT-05 Inline file holding + extensible intent matcher + deterministic Summarize promotion (frontend UX rework) | 🔄 | 4h | ❌ | 032, 033, PR #361 ✅ |
-| 037 | P2-G13-CLOSEOUT | P2-CLOSEOUT-06 Context-pane execution-trace widget ("what the AI is doing" view) | 🔲 | 3h | ✅ (with 038) | 036 |
-| 038 | P2-G13-CLOSEOUT | P2-CLOSEOUT-07 Workspace-pane "Summary" tab registration + auto-focus on streaming_started | 🔲 | 2h | ✅ (with 037) | 036 |
+| 035 | P2-G11-CLOSEOUT | P2-CLOSEOUT-04 Re-run SC-18 SME walkthrough end-to-end; capture solo-SME signoff; close 030 + 031 | ⏭️ R6 vertical-slice validation target (SC-18 surfaced architectural gaps → R6 pivot) | 30m operator + 5m agent | ❌ | 036 + 037 + 038 deployed |
+| 036 | P2-G12-CLOSEOUT | P2-CLOSEOUT-05 Inline file holding + extensible intent matcher + deterministic Summarize promotion (frontend UX rework) | ✅ PR #362 + cycle 6-9 follow-ups in PR #364 | 4h | ❌ | 032, 033, PR #361 ✅ |
+| 037 | P2-G13-CLOSEOUT | P2-CLOSEOUT-06 Context-pane execution-trace widget ("what the AI is doing" view) | ⏭️ R6 Pillar 6 (workspace state model) + Pillar 9 (widget visibility) | 3h | ✅ (with 038) | 036 |
+| 038 | P2-G13-CLOSEOUT | P2-CLOSEOUT-07 Workspace-pane "Summary" tab registration + auto-focus on streaming_started | ✅ PR #364 (cycle 8 — WorkspaceTabManager.prependTab + WorkspacePane installer + 7 tests) | 2h | ✅ (with 037) | 036 |
 
 **Plus (follow-up PR, not a numbered task)**: promote the live-patched `ChatDocumentEndpoints.cs` tid-claim fix (applied to Dev mid-walkthrough 2026-06-04) to master via small PR so the next deploy preserves it. — **Done**: PR #354 + PR #359 + PR #361 carry all closeout backend fixes; deployed to Spaarke Dev 2026-06-05 14:54 UTC with hash verify MATCH.
 
@@ -124,7 +136,7 @@ R5 ships in 3 sequential phases + 1 wrap-up task, with parallel-execution opport
 
 | ID | Wave-item | Title | Status | Estimated | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|---|
-| 090 | Wrap | Project wrap-up (README → Complete; coordination doc §8; R5 PR + merge) | 🔲 | 4h | ❌ | All prior |
+| 090 | Wrap | Project wrap-up (README → Closed; coordination doc §8; R5 PR + merge) | ✅ closed 2026-06-06 via PR #364 + closeout docs PR | 4h | ❌ | All prior |
 
 ---
 

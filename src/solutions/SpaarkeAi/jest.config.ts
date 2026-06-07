@@ -21,6 +21,20 @@ const config: Config = {
     '^@spaarke/auth$': '<rootDir>/../../client/shared/Spaarke.AI.Widgets/src/__mocks__/@spaarke/auth.ts',
     '^@spaarke/ai-context$': '<rootDir>/../../client/shared/Spaarke.AI.Context/src/index.ts',
     '^@spaarke/ai-outputs$': '<rootDir>/../../client/shared/Spaarke.AI.Outputs/src/index.ts',
+    // d3-force ships pure ESM — ts-jest's CommonJS transform can't consume it.
+    // Map to a tiny CJS stub so transitive imports of useForceSimulation don't
+    // crash jsdom tests. (R5 task 038.) The stub returns the chainable
+    // simulation surface the hook expects.
+    '^d3-force$': '<rootDir>/src/__mocks__/d3-force.ts',
+    // Dedupe React — the workspace-linked shared libraries each have their own
+    // node_modules/react copy. Without forcing a single instance, hooks fail
+    // with "Cannot read properties of null (reading 'useRef')" because the
+    // dispatcher pointer lives in the test-runner's React, but a sub-component
+    // imports a SECOND React instance from a nested node_modules. (R5 task 038.)
+    '^react$': '<rootDir>/node_modules/react',
+    '^react/(.*)$': '<rootDir>/node_modules/react/$1',
+    '^react-dom$': '<rootDir>/node_modules/react-dom',
+    '^react-dom/(.*)$': '<rootDir>/node_modules/react-dom/$1',
     // CSS modules
     '\\.css$': 'identity-obj-proxy',
   },
