@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>UAT — PCF smoke on Protected Matter (BFF log verification)</title>
+    <phase>H: Deploy + UAT</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>035, 070</dependencies>
+    <blocks>073</blocks>
+    <tags>testing, e2e-test, pcf, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end test of the deployed PCF v1.1.74 against a Protected Matter scenario; verifies FR-PCF-01..04 acceptance. Testing-only.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential UAT step depending on PCF deployment (035) and BFF smoke (070). Blocks task 073 (filter-parity walkthrough requires this PCF baseline).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Smoke-test the deployed PCF SemanticSearchControl v1.1.74 against a Protected Matter scenario per spec.md FR-PCF-01..04 acceptance criteria. Create a Matter with explicit `sprk_searchindexname = "spaarke-file-index"` (Protected). Open the Matter form; verify SemanticSearchControl renders. Trigger a search; verify the BFF log shows the resolved Azure Search URL targeting `spaarke-file-index` (NOT the default). Verify the PCF footer shows `v1.1.74`.
+  </prompt>
+
+  <role>
+    Spaarke QA / operator running PCF smoke tests in a model-driven app. Uses browser DevTools / Application Insights to verify request shape and BFF routing.
+  </role>
+
+  <goal>
+    PCF v1.1.74 sends `searchIndexName` in search requests; BFF log confirms the resolved Azure Search URL targets the Protected Matter's index (`spaarke-file-index`), NOT the tenant default. PCF footer displays `v1.1.74`. Results returned match the Protected Matter's index content.
+  </goal>
+
+  <context>
+    <background>
+      Phase D deployed PCF v1.1.74 with the new `searchIndexName` bound property + request-body inclusion. This task validates the end-to-end path: bound property reads `sprk_searchindexname` from the Matter &#8594; PCF sends it in the search request body &#8594; BFF resolves the SearchClient to the specified index. Application Insights / BFF log is the verification gate.
+
+      "Protected Matter" is the canonical use case from design.md §1: a Matter whose documents must be indexed to a separate, access-controlled index. Setting `sprk_searchindexname = "spaarke-file-index"` on the Matter triggers this routing.
+    </background>
+    <relevant-files>
+      <file>(testing only)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-PCF-01 acceptance">PCF manifest has `searchIndexName` bound property; maker wired it on the form (verify via inspector or `Xrm.Page.getAttribute`).</constraint>
+    <constraint source="spec.md FR-PCF-02 acceptance">PCF search request body includes `searchIndexName` when non-empty (verified via network trace).</constraint>
+    <constraint source="spec.md FR-PCF-03 acceptance">PCF `navigateTo` envelope includes `searchIndexName` (verified by decoding the URL passed to `Xrm.Navigation.navigateTo`).</constraint>
+    <constraint source="spec.md FR-PCF-04 acceptance">PCF footer shows `v1.1.74`.</constraint>
+    <constraint source="design.md §1 Protected Matter">A Matter with explicit `sprk_searchindexname` must route its searches to that index, not the tenant default.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create a Matter in the test environment with explicit `sprk_searchindexname = "spaarke-file-index"` (e.g., via CreateMatterWizard with explicit override per FR-WIZ-08, or via direct MCP update of an existing Matter). Confirm via MCP query.</step>
+    <step order="2">Open the Matter form in the model-driven app. Locate the SemanticSearchControl PCF. Verify it renders (no error state). Verify the footer string shows `v1.1.74` (FR-PCF-04 acceptance).</step>
+    <step order="3">Open browser DevTools Network tab. Trigger a search in the PCF (enter a query, hit search). Capture the POST request to `/api/ai/search`. Verify the request body contains `searchIndexName: "spaarke-file-index"` (FR-PCF-02 acceptance).</step>
+    <step order="4">Inspect the Application Insights / BFF log for the corresponding request trace. Verify the trace line shows the resolved Azure Search URL with the index segment = `spaarke-file-index` (NOT `spaarke-knowledge-index-v2` or any other default). This proves FR-PCF-01..03 + FR-BFF-03 end-to-end.</step>
+    <step order="5">Verify results content: documents returned should match what's stored in `spaarke-file-index` (NOT the default index). Sanity-check by comparing a known document's parent matter / index attribution.</step>
+    <step order="6">Capture screenshots (PCF footer showing v1.1.74, network trace showing request body, BFF log showing resolved URL) to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/072-pcf-protected-matter.md`. Update TASK-INDEX + current-task.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__read_query">Verify the Matter has the explicit override</tool>
+    <tool name="Bash">Browser-based testing (if scripted) — otherwise manual</tool>
+    <tool name="Write">Capture verification notes + screenshots</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/072-pcf-protected-matter.md (footer screenshot + network trace + BFF log snippet)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-PCF-04: PCF footer shows `v1.1.74`.</criterion>
+    <criterion testable="true">FR-PCF-02: Network trace shows search request body contains `searchIndexName: "spaarke-file-index"`.</criterion>
+    <criterion testable="true">FR-BFF-03 end-to-end: BFF log shows the resolved Azure Search URL targeting `spaarke-file-index` (not the tenant default).</criterion>
+    <criterion testable="true">Results content matches the Protected Matter's index (sanity-checked against known document attribution).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequential — depends on 035 (PCF deploy) and 070 (BFF smoke). Blocks 073 (filter parity walkthrough, which uses this PCF baseline).
+
+    If the PCF footer shows the wrong version, that's an NFR-10 (clean-rebuild) failure — file a remediation task that re-runs `/pcf-deploy` with the clean-rebuild step enforced.
+
+    The "BFF log showing resolved URL" verification is the load-bearing one — if the log shows the default index instead of `spaarke-file-index`, the issue is in the BFF resolver (Phase B), not the PCF. Triage accordingly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load spec.md FR-PCF-01..04, FR-BFF-03 + design.md §1 Protected Matter before starting. Follow task-execute Step 0 (STANDARD rigor).
+    </protocol>
+  </execution>
+</task>

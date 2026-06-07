@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>CreateEventWizard — verify `sprk_containerid` + add `sprk_searchindexname` (FR-WIZ-05)</title>
+    <phase>A: Wizards</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>028</blocks>
+    <tags>react, typescript, frontend, fluent-ui, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx`/`.ts` wizard implementation; carries ADR-012 / ADR-021 / ADR-022 / ADR-028 obligations; INV-5 enforcement; verifies and may fix a latent `sprk_containerid` gap.</rigor-reason>
+    <parallel-group>A1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches an independent wizard service file (CreateEventWizard); file-disjoint from sibling wizard tasks 021, 022, 023, 024. All depend only on 020's shared-lib build.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    First verify whether `CreateEventWizard` currently sets `sprk_containerid` on the create payload. If gap exists, fix it. Then add `sprk_searchindexname` cascade from the user's BU. Honor INV-5.
+  </prompt>
+
+  <role>
+    Spaarke.UI.Components wizard implementer. React 18 + Fluent v9 + TypeScript. Familiar with the CreateMatterWizard canonical pattern.
+  </role>
+
+  <goal>
+    `CreateEventWizard` produces a `sprk_event` record where BOTH `sprk_containerid` AND `sprk_searchindexname` are populated from the user's BU. Any latent gap on `sprk_containerid` is fixed. INV-5 honored.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-WIZ-05 + assumption A1 require verification of whether `sprk_containerid` is already being set by `CreateEventWizard`. Canonical reference is `matterService.ts:216`.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/CreateEventWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Wizard logic in `@spaarke/ui-components` (eventService.ts).</constraint>
+    <constraint source="ADR-021">Fluent v9 + `tokens.*` only.</constraint>
+    <constraint source="ADR-022">Code page React 18; shared lib portable.</constraint>
+    <constraint source="ADR-028">BFF calls (if any) use `authenticatedFetch`.</constraint>
+    <constraint source="spec.md FR-WIZ-05">BOTH `sprk_containerid` AND `sprk_searchindexname` populated.</constraint>
+    <constraint source="design.md INV-5">Never overwrite pre-existing non-empty values.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-ui-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Wizard sets BU-derived field on create payload" location="src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts">
+        Line 216: `entity['sprk_containerid'] = this._containerId;` — apply same shape in eventService.ts.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">**Verify `sprk_containerid` state**: Read the Event wizard service file to determine whether the field is currently being set. Record finding in `notes/handoffs/025-event-wizard-verification.md`.</step>
+    <step order="2">Locate the user's BU load path; extend the BU $select to include `sprk_searchindexname`.</step>
+    <step order="3">If `sprk_containerid` gap confirmed: add the cascade with INV-5 guard.</step>
+    <step order="4">Add `sprk_searchindexname` cascade from BU with INV-5 guard.</step>
+    <step order="5">Run shared-lib build (`npm run build` in `Spaarke.UI.Components`).</step>
+    <step order="6">Unit tests covering cascade + INV-5 for both fields.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read eventService.ts + matterService.ts</tool>
+    <tool name="Edit">Add/extend cascades in eventService.ts</tool>
+    <tool name="Bash">Run `npm run build` in Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts (extended)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/025-event-wizard-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-WIZ-05: Event created via the wizard has BOTH `sprk_containerid` AND `sprk_searchindexname` populated from the user's BU (MCP-verified post-deploy in task 071 UAT).</criterion>
+    <criterion testable="true">INV-5 unit tests pass for both fields.</criterion>
+    <criterion testable="true">If a `sprk_containerid` latent gap existed, it is fixed and documented in the verification handoff.</criterion>
+    <criterion testable="true">`npm run build` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Same shape as tasks 023 (Invoice) and 024 (WorkAssignment). Verification step is important — spec.md assumption A1 says "verify and adjust"; effort scales with whether the gap is present. Note: Event is special in the Spaarke `sprk_fieldmappingprofile` framework (Matter→Event / Project→Event regarding-selection) — but that profile cascade stays untouched (INV-1).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-012/021/022/028 + .claude/constraints/auth.md before Step 1. Declare rigor (FULL). Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

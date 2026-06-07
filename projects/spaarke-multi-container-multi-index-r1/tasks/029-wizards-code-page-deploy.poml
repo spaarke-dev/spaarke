@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Wizard code-page deploy via `/code-page-deploy` (all 6 code-pages)</title>
+    <phase>A: Wizards (Deploy)</phase>
+    <status>not-started</status>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>028</dependencies>
+    <blocks>050, 051, 052, 053, 071</blocks>
+    <tags>deploy, dataverse, code-page, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task — no source code changes; STANDARD rigor per CLAUDE.md task-execute rigor table. NFR-11 clean-rebuild discipline is the load-bearing protocol here.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Coordinates the 6-code-page deploy through a single deploy skill invocation chain; serial to ensure clean-rebuild + Vite-cache-clear discipline is uniform across all 6.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy all 6 wizard code-pages (CreateMatterWizard, CreateProjectWizard, CreateInvoiceWizard, CreateWorkAssignmentWizard, CreateEventWizard, DocumentUploadWizard) using the `/code-page-deploy` skill. **MANDATORY** per spec NFR-11 and saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle`: clean-rebuild `@spaarke/auth` and `@spaarke/ui-components` `dist/` folders BEFORE each code-page build; clean Vite cache for each code-page. Smoke-test by creating one record per entity type after deploy.
+  </prompt>
+
+  <role>
+    Deployment engineer following the `/code-page-deploy` skill. Familiar with the saved lesson about stale `dist/` artifacts poisoning code-page bundles.
+  </role>
+
+  <goal>
+    All 6 wizard code-pages built in production mode (clean shared-lib `dist/` + clean Vite cache) and deployed via `/code-page-deploy` to Dataverse. Smoke test: create one record per entity type; no console errors; new field values present (handed off to task 071 for full UAT).
+  </goal>
+
+  <context>
+    <background>
+      Spec NFR-11 requires the `/code-page-deploy` skill to be followed exactly for every code-page deploy. The saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle` documents a recurring failure mode: when `@spaarke/auth` or `@spaarke/ui-components` `dist/` artifacts are stale (e.g. left over from a previous build of a different branch), the code-page bundle silently links the wrong source — causing runtime behavior that doesn't match the new code. The mandatory mitigation is a clean rebuild of both shared libs before every code-page build.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/</file>
+      <file>src/client/shared/Spaarke.Auth/</file>
+      <file>src/client/code-pages/CreateMatterWizard/</file>
+      <file>src/client/code-pages/CreateProjectWizard/</file>
+      <file>src/client/code-pages/CreateInvoiceWizard/</file>
+      <file>src/client/code-pages/CreateWorkAssignmentWizard/</file>
+      <file>src/client/code-pages/CreateEventWizard/</file>
+      <file>src/solutions/DocumentUploadWizard/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-11">Clean-rebuild of `@spaarke/auth` + `@spaarke/ui-components` `dist/` and Vite cache clear BEFORE each code-page build. Deploy log must show these steps were executed.</constraint>
+    <constraint source="saved lesson feedback_stale-shared-lib-dist-poisons-codepage-bundle">MANDATORY — stale shared-lib `dist/` poisons the code-page bundle and silently links wrong source. Always clean-rebuild both shared libs before building any code-page.</constraint>
+    <constraint source="saved lesson feedback_deploy-asks-follow-skill-no-openended-questions">Invoke `/code-page-deploy` skill verbatim with file paths; do not ask open-ended questions during deploy.</constraint>
+    <constraint source="ADR-021">Code-pages use Fluent UI v9. Build must pass.</constraint>
+    <constraint source="ADR-022">Code-pages target React 18. Use the project's existing Vite config.</constraint>
+    <constraint source="ADR-028">Code-pages use `@spaarke/auth.authenticatedFetch`. No new auth wiring during deploy.</constraint>
+    <constraint source="CLAUDE.md §11">For Vite code-pages, use `npm install --legacy-peer-deps --no-audit --no-fund` (not `npm ci` — stale package-lock).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Clean rebuild before code-page build" location="saved lesson feedback_stale-shared-lib-dist-poisons-codepage-bundle">
+        Step sequence: (1) delete `Spaarke.Auth/dist`; (2) `npm run build` in `Spaarke.Auth`; (3) delete `Spaarke.UI.Components/dist`; (4) `npm run build` in `Spaarke.UI.Components`; (5) delete code-page `node_modules/.vite`; (6) build the code-page in production mode. Visible in deploy log.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Clean-rebuild `@spaarke/auth`: delete `src/client/shared/Spaarke.Auth/dist`; run `npm run build` in `Spaarke.Auth`. Capture log evidence.</step>
+    <step order="2">Clean-rebuild `@spaarke/ui-components`: delete `src/client/shared/Spaarke.UI.Components/dist`; run `npm run build` in `Spaarke.UI.Components`. Capture log evidence.</step>
+    <step order="3">For each of the 6 code-pages (in order: CreateMatterWizard, CreateProjectWizard, CreateInvoiceWizard, CreateWorkAssignmentWizard, CreateEventWizard, DocumentUploadWizard): clean Vite cache (`node_modules/.vite`); run the code-page's production build per its `package.json`.</step>
+    <step order="4">Invoke `/code-page-deploy` for each code-page (skill handles inline-deploy to Dataverse webresource path). One invocation per code-page; capture each deploy log to `notes/handoffs/029-{wizard-name}-deploy.md`.</step>
+    <step order="5">Verify deploy logs show: (a) clean-rebuild of both shared libs (Steps 1–2 evidence); (b) Vite cache cleared; (c) production build mode; (d) Dataverse import success.</step>
+    <step order="6">Smoke test (informal): from a Spaarke Demo BU user, open each code-page; create one minimal record per entity type (Matter, Project, Invoice, WorkAssignment, Event, Document); verify no console errors. Capture smoke-test result in `notes/handoffs/029-smoke-test.md`. Full UAT (MCP-verified field values) is handed off to task 071.</step>
+    <step order="7">Update TASK-INDEX.md (🔲 → ✅) and current-task.md (advance to next task per project pipeline).</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Clean-rebuild shared libs + Vite cache + code-page builds</tool>
+    <tool name="Skill">/code-page-deploy (one invocation per code-page)</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">6 webresource records updated in Dataverse (one per code-page)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/029-{wizard-name}-deploy.md (×6)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/029-smoke-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 code-pages built in production mode and deployed via `/code-page-deploy`.</criterion>
+    <criterion testable="true">NFR-11 evidence visible in each deploy log: clean-rebuild of `@spaarke/auth` `dist/` AND `@spaarke/ui-components` `dist/` BEFORE the code-page build; Vite cache cleared for each code-page.</criterion>
+    <criterion testable="true">Smoke test: one record created per entity type via the deployed wizard; no console errors in any wizard.</criterion>
+    <criterion testable="true">Handoff files exist for each code-page deploy and the smoke test.</criterion>
+    <criterion testable="true">Full MCP-verified field-value UAT is explicitly handed off to task 071 (not closed here).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **CRITICAL SAVED LESSON**: `feedback_stale-shared-lib-dist-poisons-codepage-bundle` — without the clean-rebuild step, code-pages can deploy with stale shared-lib source linked into their bundle, leading to runtime behavior that doesn't match the new code. This has bitten the team multiple times. The clean-rebuild evidence in deploy logs is the project's audit trail for NFR-11.
+
+    `/code-page-deploy` skill handles the inline-deploy to Dataverse webresources. This task is the orchestration around that — sequencing the 6 code-pages and proving the discipline.
+
+    Full UAT (MCP query against newly-created records to verify `sprk_searchindexname` + `sprk_containerid` values) is task 071's job in Phase H. This task is the deploy + smoke-test only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load .claude/skills/code-page-deploy/SKILL.md + ADR-021/022/028 + saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle` before Step 1. Declare rigor (STANDARD — deploy task). Skill-level checks within `/code-page-deploy` handle bundle-size + build validation; this task's protocol is the orchestration.
+    </protocol>
+  </execution>
+</task>
