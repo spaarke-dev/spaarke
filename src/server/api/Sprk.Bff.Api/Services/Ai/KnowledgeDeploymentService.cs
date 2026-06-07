@@ -5,6 +5,7 @@ using Azure.Search.Documents.Indexes;
 using Azure.Security.KeyVault.Secrets;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -28,21 +29,39 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
     private readonly SearchIndexClient _searchIndexClient;
     private readonly SecretClient? _secretClient;
     private readonly AnalysisOptions _options;
+    private readonly AiSearchOptions? _aiSearchOptions;
     private readonly ILogger<KnowledgeDeploymentService> _logger;
 
     // In-memory cache for deployment configs (TRACKED: GitHub #229 - Move to Dataverse)
     private readonly ConcurrentDictionary<string, KnowledgeDeploymentConfig> _configCache = new();
     private readonly ConcurrentDictionary<string, SearchClient> _clientCache = new();
 
+    /// <summary>
+    /// Constructs the resolver.
+    /// </summary>
+    /// <remarks>
+    /// <para>The <paramref name="aiSearchOptions"/> parameter is OPTIONAL (defaults to <c>null</c>) so
+    /// existing test fixtures that construct <see cref="KnowledgeDeploymentService"/> directly with
+    /// only (<c>SearchIndexClient</c>, <c>IOptions&lt;AnalysisOptions&gt;</c>, <c>ILogger</c>) continue
+    /// to compile UNCHANGED — multi-container-multi-index-r1 spec NFR-02 (backward-compat) is the
+    /// binding requirement. In production DI, <c>IOptions&lt;AiSearchOptions&gt;</c> is registered by
+    /// <see cref="Sprk.Bff.Api.Infrastructure.DI.JobProcessingModule"/> (<c>Configure&lt;AiSearchOptions&gt;</c>),
+    /// so this parameter resolves automatically. When <paramref name="aiSearchOptions"/> is <c>null</c>
+    /// AND a non-empty <c>indexName</c> is supplied to
+    /// <see cref="GetSearchClientAsync(string, CancellationToken, string?)"/>, the call MUST fail
+    /// closed (reject) — no allow-list configured means no caller-supplied index is permitted.</para>
+    /// </remarks>
     public KnowledgeDeploymentService(
         SearchIndexClient searchIndexClient,
         IOptions<AnalysisOptions> options,
         ILogger<KnowledgeDeploymentService> logger,
-        SecretClient? secretClient = null)
+        SecretClient? secretClient = null,
+        IOptions<AiSearchOptions>? aiSearchOptions = null)
     {
         _searchIndexClient = searchIndexClient;
         _secretClient = secretClient;
         _options = options.Value;
+        _aiSearchOptions = aiSearchOptions?.Value;
         _logger = logger;
     }
 
@@ -74,14 +93,101 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
     }
 
     /// <inheritdoc />
+    public Task<SearchClient> GetSearchClientAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default)
+        => GetSearchClientAsync(tenantId, indexName: null, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<SearchClient> GetSearchClientAsync(
         string tenantId,
+        string? indexName,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(tenantId);
 
+        // Multi-container-multi-index-r1 Phase B (FR-BFF-01..04) — caller-supplied explicit index.
+        // When non-empty, validate against the appsettings allow-list and bind a SearchClient to that
+        // index name (resolved via the tenant's SearchIndexClient endpoint). When null/whitespace,
+        // fall through to the existing 2-tier chain (FR-BFF-04 backward-compat per NFR-02).
+        if (!string.IsNullOrWhiteSpace(indexName))
+        {
+            ValidateAllowedIndex(indexName);
+            return GetOrCreateExplicitIndexClient(tenantId, indexName);
+        }
+
         var config = await GetDeploymentConfigAsync(tenantId, cancellationToken);
         return await GetOrCreateSearchClientAsync(config, cancellationToken);
+    }
+
+    /// <summary>
+    /// Validates a caller-supplied index name against the <see cref="AiSearchOptions.AllowedIndexes"/>
+    /// allow-list. On miss, throws <see cref="SdapProblemException"/> with stable code
+    /// <c>INDEX_NOT_ALLOWED</c> mapping to ProblemDetails 400 per ADR-019 + spec NFR-08.
+    /// </summary>
+    /// <remarks>
+    /// FAILS CLOSED when no <c>AiSearchOptions</c> is configured (the optional constructor parameter
+    /// was not supplied) — caller-supplied indexes are rejected outright in that case. Production DI
+    /// always registers <c>IOptions&lt;AiSearchOptions&gt;</c> via <c>JobProcessingModule</c>, so this
+    /// branch is only reachable in test fixtures that explicitly omit it.
+    /// </remarks>
+    private void ValidateAllowedIndex(string indexName)
+    {
+        var allowedIndexes = _aiSearchOptions?.AllowedIndexes ?? Array.Empty<string>();
+
+        // Case-insensitive comparison: Azure AI Search index names are documented as case-insensitive
+        // at the service level, and operator-configured allow-list values should not require
+        // exact-case matching by callers.
+        var isAllowed = allowedIndexes.Any(allowed =>
+            string.Equals(allowed, indexName, StringComparison.OrdinalIgnoreCase));
+
+        if (!isAllowed)
+        {
+            _logger.LogWarning(
+                "Rejecting caller-supplied indexName '{RejectedIndexName}' — not present in AiSearch.AllowedIndexes (configured count: {AllowedCount}).",
+                indexName,
+                allowedIndexes.Length);
+
+            throw new SdapProblemException(
+                code: "INDEX_NOT_ALLOWED",
+                title: "AI Search index not allowed",
+                detail: $"The requested AI Search index '{indexName}' is not in the configured allow-list (AiSearch:AllowedIndexes). Contact your administrator to enable this index.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object>
+                {
+                    ["indexName"] = indexName,
+                    ["allowedCount"] = allowedIndexes.Length
+                });
+        }
+
+        _logger.LogDebug(
+            "Caller-supplied indexName '{IndexName}' validated against AiSearch.AllowedIndexes ({AllowedCount} entries).",
+            indexName,
+            allowedIndexes.Length);
+    }
+
+    /// <summary>
+    /// Returns a SearchClient bound to the explicit (validated) index name, reusing the
+    /// tenant's <see cref="SearchIndexClient"/> endpoint. Caches per (tenant, index) pair to
+    /// match the existing client-cache strategy in <see cref="GetOrCreateSearchClientAsync"/>.
+    /// </summary>
+    private SearchClient GetOrCreateExplicitIndexClient(string tenantId, string indexName)
+    {
+        var cacheKey = $"{tenantId}:explicit:{indexName}";
+
+        if (_clientCache.TryGetValue(cacheKey, out var cachedClient))
+        {
+            return cachedClient;
+        }
+
+        _logger.LogDebug(
+            "Creating explicit-index SearchClient for tenant {TenantId}, indexName={IndexName}",
+            tenantId,
+            indexName);
+
+        var client = _searchIndexClient.GetSearchClient(indexName);
+        _clientCache[cacheKey] = client;
+        return client;
     }
 
     /// <inheritdoc />

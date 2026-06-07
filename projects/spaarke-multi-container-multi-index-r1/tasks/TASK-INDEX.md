@@ -11,7 +11,7 @@
 | ID | Title | Phase | Status | Dependencies | Parallel Group | Rigor |
 |----|-------|-------|--------|--------------|----------------|-------|
 | 001 | Operator BU value setup + MCP verification | A.5 — Prerequisite | 🔲 | none | — | STANDARD |
-| 010 | Extend `IKnowledgeDeploymentService` interface + impl with allow-list | B — BFF resolver | 🔲 | none | — | FULL |
+| 010 | Extend `IKnowledgeDeploymentService` interface + impl with allow-list | B — BFF resolver | ✅ | none | — | FULL |
 | 011 | Add `SearchIndexName` to request DTOs (`SemanticSearchRequest`, `RagSearchRequest`, `RecordSearchRequest`) | B | 🔲 | 010 | Group B1 | FULL |
 | 012 | Add `AiSearch.AllowedIndexes` to appsettings + startup INFO log | B | 🔲 | 010 | Group B1 | STANDARD |
 | 013 | Thread `SearchIndexName` through `SemanticSearchService.cs` | B | 🔲 | 010, 011 | Group B2 | FULL |
@@ -45,8 +45,8 @@
 | 051 | Backfill — `Backfill-MultiContainerMultiIndex-Documents.ps1` (FR-BF-02) | F | 🔲 | 029, 044 | Group F1 | FULL |
 | 052 | Backfill — `Audit-MultiContainerMultiIndex-Drift.ps1` (FR-BF-03) | F | 🔲 | 029, 044 | Group F1 | FULL |
 | 053 | Backfill — test-environment dry run + INV-5-safety verification | F | 🔲 | 050, 051, 052 | — | STANDARD |
-| 060 | Docs — `MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` (FR-DOC-01) | G — Docs | 🔲 | none | Group G1 | MINIMAL |
-| 061 | Docs — update `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` (FR-DOC-02) | G | 🔲 | none | Group G1 | MINIMAL |
+| 060 | Docs — `MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` (FR-DOC-01) | G — Docs | ✅ | none | Group G1 | MINIMAL |
+| 061 | Docs — update `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` (FR-DOC-02) | G | ✅ | none | Group G1 | MINIMAL |
 | 070 | UAT — BFF smoke (allow-list rejection + valid request routing) | H — Deploy + UAT | 🔲 | 018 | — | STANDARD |
 | 071 | UAT — Wizards smoke (MCP-verify both fields populated on each entity create) | H | 🔲 | 029, 070 | — | STANDARD |
 | 072 | UAT — PCF smoke on Protected Matter (BFF log verification) | H | 🔲 | 035, 070 | — | STANDARD |

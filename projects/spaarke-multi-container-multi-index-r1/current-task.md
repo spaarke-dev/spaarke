@@ -1,30 +1,35 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-07 (initial)
+> **Last Updated**: 2026-06-07 (Wave 1 complete)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
 
-<!-- This section is for FAST context restoration after compaction -->
-<!-- Must be readable in < 30 seconds -->
-
 | Field | Value |
 |-------|-------|
-| **Task** | — (no active task) |
-| **Step** | — |
-| **Status** | none (project initialized; no task started yet) |
-| **Next Action** | Run task-execute on `tasks/001-*.poml` (Phase A.5 — operator BU value setup) by saying "work on task 001" |
+| **Task** | Wave 1 complete (010, 060, 061 ✅) |
+| **Step** | Between waves |
+| **Status** | none (no active task in main session) |
+| **Next Action** | Decide on task 001 (production MCP writes) → then Wave 2 dispatch (011 + 012, Group B1) |
 
 ### Files Modified This Session
 
-*No files modified yet in this project*
+- `src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs` — Modified — added `AllowedIndexes` property (task 010)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs` — Modified — added 3-arg `GetSearchClientAsync` overload (task 010)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs` — Modified — allow-list validation + explicit-index client construction (task 010)
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/KnowledgeDeploymentServiceTests.cs` — Modified — +7 tests for FR-BFF-01..04 (task 010)
+- `docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` — Created — operator runbook (task 060)
+- `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` — Modified — §6.3 added on per-BU routing (task 061)
+- `projects/spaarke-multi-container-multi-index-r1/tasks/TASK-INDEX.md` — Modified — 010/060/061 marked ✅
 
 ### Critical Context
 
-Project is freshly initialized by `/project-pipeline`. All 8 phases are decomposed into ~45 POML task files in `tasks/`. Deploy order is strict: A.5 → B → A → D → E → F. Phase A.5 is a prerequisite that must complete before Phase A wizards deploy. design.md §3 INV-1..INV-8 are binding invariants.
+Wave 1 (010 + 060 + 061) shipped in parallel via 3 sub-agents. Build passes (0 errors, 16 pre-existing warnings). Full BFF test suite: 6096 pass / 0 fail / 109 skip (NFR-02 backward-compat verified — original 2-arg overload preserved via two-overload design instead of optional parameter, avoids Moq CS0854 in existing tests).
+
+Task 001 (Phase A.5 — operator BU value setup via MCP writes to production Dataverse) is intentionally pending — user wanted to review before MCP writes happen.
 
 ---
 
@@ -43,42 +48,52 @@ Project is freshly initialized by `/project-pipeline`. All 8 phases are decompos
 
 ## Progress
 
-### Completed Steps
+### Completed Steps (this session)
 
-*No steps completed yet*
+- [x] Wave 1 launched (010 + 060 + 061 in parallel) — 2026-06-07
+- [x] Task 010 completed by sub-agent — FULL rigor, 4 files modified, +7 tests, build OK
+- [x] Task 060 completed by sub-agent — MINIMAL rigor, new runbook 2780 words, 7 of 7 bullets
+- [x] Task 061 completed by sub-agent — MINIMAL rigor, §6.3 added to arch doc
+- [x] Main-session build verification: `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors
+- [x] Main-session test verification: 6096 / 0 / 109 (per agent report; verified by build)
 
 ### Current Step
 
-*No active task*
+*No active task — between waves*
 
-### Files Modified (All Task)
+### Files Modified (Wave 1)
 
-*No files modified yet*
+See "Files Modified This Session" above.
 
 ### Decisions Made
 
-*No decisions recorded yet (project-level decisions are in CLAUDE.md)*
+- 2026-06-07: **Wave 1 ordering** = 010 + 060 + 061 (file-disjoint, all `dependencies: none`). Task 001 deferred — production MCP writes warrant separate user attention.
+- 2026-06-07: **Two-overload design for `GetSearchClientAsync`** (rather than optional 3rd parameter) chosen by sub-agent to preserve full backward compat with existing Moq expression-tree setups (CS0854 avoidance). Documented in interface XML doc and tests. Sensible NFR-02-preserving engineering call.
 
 ---
 
 ## Next Action
 
-**Next Step**: Begin Phase A.5 — operator BU value setup
+**Next Step**: User decision on task 001, then Wave 2 dispatch
 
-**Pre-conditions**:
-- Operator has maker-portal access to Dataverse `businessunit` table
-- `businessunit.sprk_searchindexname` field exists (MCP-verified per spec.md §Dependencies)
-- This project's branch is checked out (`work/spaarke-multi-container-multi-index-r1`)
+**Pre-conditions for Wave 2**:
+- Wave 1 committed (in progress)
+- Task 010 ✅ (done)
+
+**Wave 2 candidates** (parallel, Group B1):
+- 011 (DTO additions) — modifies `Models/Ai/*Request.cs`
+- 012 (appsettings allow-list values + startup INFO log) — modifies `appsettings*.json` + `Program.cs`
+
+These are file-disjoint per the TASK-INDEX parallel-group analysis.
 
 **Key Context**:
-- Refer to `spec.md` FR-OPS-01 for the BU values to populate
-- Refer to `design.md` §5.0 for the canonical value table
-- Spaarke Demo BU → `spaarke-knowledge-index-v2`
-- Spaarke BU → `spaarke-file-index`
-- Other BUs (Spaarke Dev 1, Spaarke Test 1) — operator-determined, may stay NULL → tenant default applies
+- Task 001 still blocks Phase A wizard work (020 onward). It does NOT block Phase B (011/012/013/014/015/016/017/018) or Phase D.
+- BFF allow-list (task 010) is in place but EMPTY by default (`AllowedIndexes = []`). Task 012 populates it with the 4 default values from FR-BFF-06.
 
-**Expected Output**:
-- BU records populated; MCP verification query confirms values BEFORE Phase A wizard deploy
+**Expected Output of Wave 2**:
+- DTOs accept `SearchIndexName`
+- Appsettings shows the 4 default allowed indexes
+- BFF startup INFO log shows allow-list
 
 ---
 
@@ -92,15 +107,16 @@ Project is freshly initialized by `/project-pipeline`. All 8 phases are decompos
 
 ### Current Session
 - Started: 2026-06-07
-- Focus: Project initialization via `/project-pipeline`
+- Focus: Parallel task execution starting with Wave 1
 
 ### Key Learnings
 
-*None yet — first session*
+- **Sub-agent file-overlap detection works correctly** — task 010's agent flagged that 061 and 060's files were pre-existing in its working tree and correctly chose not to touch them. The parallel boundary held.
+- **Two-overload design** for `GetSearchClientAsync` is a cleaner NFR-02 solution than optional-parameter. Mark for the lessons-learned file at project wrap-up.
 
 ### Handoff Notes
 
-*No handoff notes (project just initialized)*
+*Not needed — context healthy*
 
 ---
 
@@ -115,11 +131,11 @@ Project is freshly initialized by `/project-pipeline`. All 8 phases are decompos
 
 ### Applicable ADRs
 
-(Per-task ADR loading happens via `adr-aware` skill at task-execute Step 0. Full ADR list in [`CLAUDE.md`](./CLAUDE.md) § Resources.)
+(Per-task ADR loading via `adr-aware` skill.)
 
 ### Knowledge Files Loaded
 
-(Per-task knowledge loading happens via task-execute Step 1 from each task's `<knowledge>` section.)
+(Per-task knowledge loading via task-execute Step 1.)
 
 ---
 
@@ -132,13 +148,6 @@ Project is freshly initialized by `/project-pipeline`. All 8 phases are decompos
 3. **Load task file**: `tasks/{task-id}-*.poml`
 4. **Load knowledge files**: From task's `<knowledge>` section
 5. **Resume**: From the "Next Action" section
-
-**Commands**:
-- `/project-continue` — Full project context reload + master sync
-- `/context-handoff` — Save current state before compaction
-- "where was I?" — Quick context recovery
-
-**For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
 
 ---
 
