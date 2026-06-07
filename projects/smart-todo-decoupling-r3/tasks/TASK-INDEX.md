@@ -24,7 +24,7 @@
 
 | ID | Title | Phase | Rigor | Status | Dependencies | Parallel Group | Parallel Safe |
 |----|-------|-------|-------|--------|--------------|----------------|---------------|
-| 001 | Audit `sprk_eventtodo` and `sprk_event.sprk_todo*` references | 1 | STANDARD | 🔲 | none | P1-W1 | ✅ |
+| 001 | Audit `sprk_eventtodo` and `sprk_event.sprk_todo*` references | 1 | STANDARD | ✅ | none | P1-W1 | ✅ |
 | 002 | Create `sprk_todo` custom entity (full attribute set) | 1 | FULL | 🔲 | 001 | P1-W2 | — |
 | 003 | Register `sprk_todo` in `sprk_recordtype_ref` | 1 | STANDARD | 🔲 | 002 | P1-W3 | ✅ |
 | 004 | Remove four to-do fields from `sprk_event` | 1 | FULL | 🔲 | 001 | P1-W3 | ✅ |
@@ -35,7 +35,7 @@
 | 015 | Add `Tasks.ReadWrite` delegated scope to AAD app | 6 | STANDARD | 🔲 | none | P6-W1 | ✅ |
 | 016 | Wire `Tasks.ReadWrite` through `GraphClientFactory` | 6 | FULL | 🔲 | 015 | P6-W2 | — |
 | 017 | Define `MicrosoftToDoSync` user-pref schema | 6 | STANDARD | 🔲 | none | P6-W1 | ✅ |
-| 018 | Null-Object scaffolding for Graph sync (feature gate) | 6 | FULL | 🔲 | none | P6-W2 | ✅ |
+| 018 | Null-Object scaffolding for Graph sync (feature gate) | 6 | FULL | ✅ | none | P6-W2 | ✅ |
 | 020 | Repoint SmartTodo kanban queries to `sprk_todo` | 3 | FULL | 🔲 | 002, 010, 011, 012 | P3-W1 | — |
 | 021 | Add "My Tasks" filter to `KanbanHeader` | 3 | FULL | 🔲 | 020 | P3-W2 | ✅ |
 | 022 | Integrate `AssociateToStep` in SmartTodo `TodoDetail` | 3 | FULL | 🔲 | 011, 020, 030 | P3-W2 | ✅ |
@@ -59,7 +59,7 @@
 | 081 | Retire or refactor `TodoDetailSidePane` | 9 | STANDARD | 🔲 | 080 | P9-W2 | ✅ |
 | 082 | Architecture doc: supersede + new `spaarke-todo-architecture.md` | 9 | MINIMAL | 🔲 | 005 | P9-W2 | ✅ |
 | 083 | Update root `CLAUDE.md` §16 pointer table | 9 | MINIMAL | 🔲 | 082 | P9-W3 | — (main-session) |
-| 084 | Fix `CLAUDE.md` §10 stale `ADR-030` link → `ADR-032` | 9 | MINIMAL | 🔲 | none | P9-W3 | — (main-session) |
+| 084 | Fix `CLAUDE.md` §10 stale `ADR-030` link → `ADR-032` | 9 | MINIMAL | ✅ | none | P9-W3 | — (main-session) |
 | 085 | Final repo-wide legacy-reference grep sweep | 9 | STANDARD | 🔲 | 005, 011, 020, 031, 081, 083 | P9-W4 | ✅ |
 | 090 | **Project wrap-up** (code-review + adr-check + repo-cleanup + lessons-learned) | 9-Final | FULL | 🔲 | 085, 081, 083, 084, 024, 072 | P9-W5 | — |
 

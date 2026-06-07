@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-07
+> **Last Updated**: 2026-06-07 (wave 1 complete; wave 2 launching)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,19 +13,33 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none |
-| **Step** | — |
-| **Status** | not-started |
-| **Next Action** | Run `/task-execute projects/smart-todo-decoupling-r3/tasks/001-*.poml` to begin Phase 1 (schema work). Phase 1 is sequential and blocks all downstream phases. |
+| **Task** | 010 (in-progress in sub-agent) |
+| **Step** | Wave 2 launch |
+| **Status** | partial — wave 1 complete (001, 018, 084 ✅); wave 2 task 010 launched; escalation pending for task 004 prerequisites |
+| **Next Action** | Wait for task 010 (Kanban hoist) sub-agent. Then human decision needed on 4 escalation items from task 001 audit before tasks 002–005 can run. |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
-
-*No files modified yet*
+- `CLAUDE.md` — Modified (task 084: fixed §10 line 183 stale ADR-030 link → ADR-032)
+- `src/server/api/Sprk.Bff.Api/Program.cs` — Modified (task 018: registered TodoSync module)
+- `src/server/api/Sprk.Bff.Api/appsettings.template.json` — Modified (task 018: added `Spaarke:Graph:TodoSync:Enabled: false`)
+- `src/server/api/Sprk.Bff.Api/Services/Todo/*` (13 files) — Created (task 018: 4 interfaces + 1 enum + 4 NullObject impls + 4 Placeholder impls)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/TodoSyncModule.cs` — Created (task 018: feature-gated DI with unconditional binding per ADR-032)
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Todo/TodoSyncModuleTests.cs` — Created (task 018: 14 tests, all pass)
+- `projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md` — Created (task 001: legacy-reference audit, 4 escalation items flagged)
+- `projects/smart-todo-decoupling-r3/tasks/TASK-INDEX.md` — Modified (statuses 001/018/084 → ✅)
 
 ### Critical Context
 
-Project just initialized by `/project-pipeline` on 2026-06-07. Phase 1 begins with Dataverse schema work: create `sprk_todo` custom entity, delete `sprk_eventtodo`, remove four to-do fields from `sprk_event`. Pre-release — no compat shims. Spec's stale ADR-030 references were corrected to ADR-032 during pipeline. CLAUDE.md §10 line 183 has the same stale link — tracked as a low-priority cleanup task in this project.
+**Wave 1 complete (3 tasks)**: 001 audit + 018 Null-Object scaffolding (BFF; 6103 tests pass; publish-size -0.15 MB; zero new CVEs) + 084 CLAUDE.md drift fix. Wave 2 launched: task 010 (Kanban hoist) in sub-agent.
+
+**Escalation findings from task 001** (need human decision before Phase 1 task 004 can run):
+1. **`Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs`** writes `sprk_todoflag` — direct task 004 blocker. Owned by x-home-corporate-workspace-r1 project. Decide: (a) refactor to write `sprk_todo`; (b) delete if orphaned; (c) defer to Phase 7.
+2. **`Sprk.Bff.Api/Infrastructure/ExternalAccess/{ExternalDataService.cs, ExternalProjectDtos.cs}`** — external-portal DTOs exposing `sprk_eventtodo` to external SPA. Scope decision: include external-spa migration in R3, or accept external surface breakage.
+3. **`src/client/external-spa/`** — consumer of #2; same scope decision.
+4. **`EventDetailSidePane/components/MemoSection.tsx:5`** — false positive on `_sprk_regardingevent_value` (actually `sprk_memo`, not todo). Noted for task 085 sweep; no action needed.
+
+Items 1+2+3 must be resolved before tasks 003/004/005 run.
 
 ---
 
