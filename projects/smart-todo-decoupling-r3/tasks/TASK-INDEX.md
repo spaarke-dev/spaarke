@@ -27,7 +27,7 @@
 | 001 | Audit `sprk_eventtodo` and `sprk_event.sprk_todo*` references | 1 | STANDARD | ✅ | none | P1-W1 | ✅ |
 | 002 | Create `sprk_todo` custom entity (full attribute set) | 1 | FULL | ✅ | 001 | P1-W2 | — |
 | 003 | Register `sprk_todo` in `sprk_recordtype_ref` | 1 | STANDARD | ✅ | 002 | P1-W3 | ✅ |
-| 004 | Remove four to-do fields from `sprk_event` (FINAL schema cut) | 1 | FULL | 🔲 | 001, 006, 007, 008, 011, 013, 014, 020, 023, 031 | P1-W-FINAL | — |
+| 004 | Remove four to-do fields from `sprk_event` (FINAL schema cut) | 1 | FULL | ✅ | 001, 006, 007, 008, 011, 013, 014, 020, 023, 031 | P1-W-FINAL | — |
 | 005 | Delete `sprk_eventtodo` entity (FINAL schema cut) | 1 | FULL | 🔲 | 001, 004, 007, 008, 011, 013, 014, 020, 023, 031 | P1-W-FINAL | — |
 | 006 | Refactor `TodoGenerationService` to create `sprk_todo` (audit-surfaced) | 1 | FULL | ✅ | 002 | P1-W2.5 | ✅ |
 | 007 | Refactor `ExternalAccess` BFF surface to `sprk_todo` (audit-surfaced) | 1 | FULL | ✅ | 002 | P1-W2.5 | ✅ |
