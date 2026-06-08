@@ -50,7 +50,7 @@
 | 008 | A-G3 | Add `JsonSchema` field to `AnalysisTool` DTO + Dataverse column (D-A-08) | ✅ | FULL | false (same DTO as 007) | 006, 007 |
 | 009 | A-G3 | Split execution context (Tool/ChatInvocation) (D-A-09) | ✅ | FULL | true | 006 |
 | 010 | A-G4 | Build `ToolHandlerToAIFunctionAdapter` (D-A-10) | ✅ | FULL | false | 007, 008, 009 |
-| 011 | A-G5 | Wire `ResolveTools()` to read `sprk_analysistool` rows (D-A-11) | 🔲 | FULL | false | 010 |
+| 011 | A-G5 | Wire `ResolveTools()` to read `sprk_analysistool` rows (D-A-11) | ✅ | FULL | false | 010 |
 | 012 | A-G6 | **Q9 BIG-BANG: Migrate 10 pre-R5 chat tools** (D-A-11) | 🔲 | FULL | false | 011 |
 | 013 | A-G7 | Q9 migration regression test gate (D-A-11) | 🔲 | STANDARD | false | 012 |
 | 020 | A-G8 | Add `IInvokePlaybookAi` facade (D-A-12) | 🔲 | FULL | true | 011 |
@@ -165,7 +165,7 @@
 | 106 | H-G2 | `ClauseAnalyzerHandler` (LLM-assisted clause structuring) (D-H-06) | 🔲 | FULL | true | 104 |
 | 107 | H-G2 | `RiskDetectorHandler` (LLM-assisted + severity scoring) (D-H-07) | ✅ | FULL | true | 104 |
 | 108 | H-G2 | `InvoiceExtractionToolHandler` (LLM-assisted + line-item arithmetic) (D-H-08) | ✅ | FULL | true | 104 |
-| 109 | H-G3 | Handler dispatch tests (playbook + chat) (D-H-09/10) | 🔲 | STANDARD | false | 105, 106, 107, 108 |
+| 109 | H-G3 | Handler dispatch tests (playbook + chat) (D-H-09/10) | ✅ | STANDARD | false | 105, 106, 107, 108 |
 
 ### Wrap-up (1 task)
 

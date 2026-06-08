@@ -2,7 +2,35 @@
   <metadata>
     <title>D-A-11 Wire `SprkChatAgentFactory.ResolveTools()` to Read `sprk_analysistool` Rows (Pillar 2)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Data-driven chat-tool discovery wired in `SprkChatAgentFactory.ResolveTools()` as an
+      ADDITIVE block appended after the 10 existing hardcoded registrations (NFR-11 binding —
+      Q9 migration window preserved). Block queries `AnalysisToolService.ListToolsAsync()`,
+      filters rows where `AvailableInContexts ∋ Chat` (Chat OR Both), resolves each row's
+      `HandlerClass` via `IToolHandlerRegistry`, and wraps via `ToolHandlerToAIFunctionAdapter`
+      (task 010). Per-row try/catch for resilient registration (malformed schema / missing
+      handler / playbook-only handler all log + skip without crashing the agent).
+
+      `ResolveTools` signature changed to `async Task&lt;IReadOnlyList&lt;AIFunction&gt;&gt;`
+      (was synchronous); call site in `CreateAgentAsync` awaits. Two private static helpers
+      added: `TryParseChatSessionId` (legacy non-GUID session ids fall back to fresh GUID per
+      NFR-11), `TryParseMatterId` (extracts matter id from ChatKnowledgeScope when present).
+
+      Quality gates: code-review APPROVED (no blockers, no warnings); adr-check 9/9 ADRs
+      compliant (ADR-001/007/008/010/013/014/015/018/029). Build green (0 errors, 16 warnings
+      = baseline). 11 new tests pass; 29 SprkChatAgentFactory-area tests pass; 659 chat-area
+      tests pass (3 pre-existing skips, no regression). BFF publish-size delta: 0 MB (45 MB
+      compressed — same as baseline).
+
+      Caching deferred per task POML "Don't over-engineer" — comment block at lines 1293-1302
+      documents the canonical Redis key shape (`r6:chat-tools:{tenantId}`) for future
+      implementer. Tenant safety preserved structurally (per-call materialization in captured
+      method stack; no cross-tenant leakage possible).
+
+      Unblocks tasks 012 (Q9 BIG-BANG), 020 (invoke_playbook facade), 024 (FK fix).
+    </completion-notes>
     <estimated-effort>5 hours</estimated-effort>
     <dependencies>010</dependencies>
     <blocks>012, 020, 024</blocks>

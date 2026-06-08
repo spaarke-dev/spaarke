@@ -416,10 +416,10 @@ public class SprkChatAgentFactory
         // result so ResolveTools restricts to only the capabilities selected for this turn.
         // Otherwise fall back to the full playbook capability set (backward compatible).
         var effectiveCapabilities = routedCapabilities ?? capabilities;
-        var tools = ResolveTools(
+        var tools = await ResolveTools(
             scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, effectiveCapabilities,
             playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
-            routingResult);
+            routingResult, cancellationToken).ConfigureAwait(false);
 
         // === AIPU2-061: capability_change SSE event ===
         // Emit when the routed tool set for this turn differs from the previous turn's tool set.
@@ -718,7 +718,7 @@ public class SprkChatAgentFactory
     /// or in the capabilities' tool name lists are included. Null = full set (backward compat).
     /// </param>
     /// <returns>List of registered <see cref="AIFunction"/> instances, or empty list on failure.</returns>
-    private IReadOnlyList<AIFunction> ResolveTools(
+    private async Task<IReadOnlyList<AIFunction>> ResolveTools(
         IServiceProvider scopedProvider,
         string tenantId,
         string sessionId,
@@ -730,7 +730,8 @@ public class SprkChatAgentFactory
         HttpContext? httpContext,
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter,
         CitationContext? citationContext,
-        CapabilityRoutingResult? routingResult = null)
+        CapabilityRoutingResult? routingResult = null,
+        CancellationToken cancellationToken = default)
     {
         // Resolve services that tool classes depend on from DI.
         // IRagService and IAnalysisOrchestrationService are registered in Program.cs.
@@ -1264,6 +1265,221 @@ public class SprkChatAgentFactory
             }
         }
 
+        // === R6 Pillar 2 / Task D-A-11 (FR-11) — Data-Driven Tool Resolution =================
+        // Append AIFunctions for `sprk_analysistool` rows whose
+        // `AvailableInContexts` ∋ Chat (i.e. = Chat OR = Both). Each row is wrapped via
+        // ToolHandlerToAIFunctionAdapter (task 010) using the IToolHandler whose HandlerId
+        // matches the row's HandlerClass (looked up via IToolHandlerRegistry).
+        //
+        // STRATEGY: ADDITIVE during Q9 migration window (NFR-11 binding).
+        //   Existing hardcoded tools above (DocumentSearch, AnalysisQuery, etc.) continue to
+        //   work; data-driven tools are APPENDED. Task 012 (Q9 BIG-BANG) will remove the
+        //   hardcoded registrations once each tool has a corresponding `sprk_analysistool`
+        //   row with `sprk_handlerclass` populated. Until then, the two paths coexist.
+        //
+        // DEDUPLICATION: rows whose Name collides with an already-registered tool's Name are
+        //   skipped (with a warning log) — defensive guard against double-registration when
+        //   task 012 partially seeds a row before its hardcoded counterpart is removed. The
+        //   hardcoded version wins; the data-driven row is skipped until the hardcoded path
+        //   is removed.
+        //
+        // FALLBACK (FR-11 step 5): if the query yields ZERO chat-available rows (e.g., before
+        //   task 012 seeds rows), this block contributes no AIFunctions and the agent
+        //   continues with only the hardcoded set. Because the existing hardcoded tools are
+        //   untouched, the chat agent remains operational with zero behavior change. The
+        //   conversational ability (NFR-01) is preserved unconditionally — even a zero-tool
+        //   list yields a working conversational agent.
+        //
+        // ADR-014 caching: the tool-list query happens at chat-session start (per-session,
+        //   not per-message). At ~10 chat tools per tenant, the Dataverse round-trip is
+        //   sub-100ms. Per task 011 POML notes ("don't over-engineer"), we DO NOT add a
+        //   Redis cache layer here. Tenant scoping is achieved via the in-memory per-call
+        //   materialization (every CreateAgentAsync invocation re-queries; no cross-tenant
+        //   leakage is possible because the list lives only in the captured method stack).
+        //   If session-start latency becomes measurable in production, an
+        //   IDistributedCache layer keyed `r6:chat-tools:{tenantId}` with a short TTL can
+        //   be inserted via the existing scopedProvider — but defer that to a follow-up.
+        //
+        // ADR-015 telemetry: log row-COUNT registered/skipped/failed + tenant id only.
+        //   NEVER log JSON Schema content, tool descriptions, or handler config.
+        //
+        // ADR-013 facade boundary: AnalysisToolService and IToolHandlerRegistry are
+        //   AI-internal services already registered in AnalysisServicesModule — no new
+        //   PublicContracts surface needed.
+        //
+        // ADR-010: no new top-level DI registration. All dependencies resolved from
+        //   the existing scoped provider.
+        //
+        // ADR-018: NO new feature flag — the additive strategy needs no kill-switch (the
+        //   existing tools remain authoritative until task 012 explicitly retires them).
+        var dataDrivenAttemptedRows = 0;
+        var dataDrivenResolvedRows = 0;
+        var dataDrivenSkippedDuplicates = 0;
+        var dataDrivenFailedRows = new List<string>();
+        try
+        {
+            var analysisToolService = scopedProvider.GetService<AnalysisToolService>();
+            var toolHandlerRegistry = scopedProvider.GetService<IToolHandlerRegistry>();
+
+            if (analysisToolService is null)
+            {
+                // Pre-AnalysisServicesModule.AddAnalysisOrchestrationServices environment
+                // (Analysis:Enabled=false). Skip silently — data-driven discovery requires
+                // AnalysisToolService which is gated by the same compound flag.
+                _logger.LogDebug(
+                    "[FR-11] AnalysisToolService not registered (Analysis:Enabled=false); " +
+                    "skipping data-driven chat-tool discovery. Hardcoded tools continue to work.");
+            }
+            else if (toolHandlerRegistry is null)
+            {
+                _logger.LogWarning(
+                    "[FR-11] IToolHandlerRegistry not registered; cannot resolve handlers for " +
+                    "data-driven tools. Hardcoded tools continue to work.");
+            }
+            else
+            {
+                // Build the set of already-registered tool names so we can dedup. Comparison
+                // is case-insensitive because LLM function-calling vendors vary in case
+                // handling — better to be conservative.
+                var existingToolNames = new HashSet<string>(
+                    tools.Select(t => t.Name ?? string.Empty).Where(n => n.Length > 0),
+                    StringComparer.OrdinalIgnoreCase);
+
+                // Query Dataverse for chat-available tool rows. Paginated; we request a
+                // generous page size (200) — chat tool registry is small (~10 in R6 batch).
+                // No tenant filter on the query (rows are global SYS- / customer-prefixed
+                // CUST-, scoped by name prefix not by lookup) — same semantics as existing
+                // ListToolsAsync usages elsewhere in the codebase.
+                var listOptions = new ScopeListOptions { Page = 1, PageSize = 200 };
+                var listResult = await analysisToolService
+                    .ListToolsAsync(listOptions, cancellationToken)
+                    .ConfigureAwait(false);
+
+                foreach (var row in listResult.Items)
+                {
+                    // Filter to chat-available rows. Treat null AvailableInContexts as
+                    // Playbook (backward-compat per FR-07 mapper) — those rows are skipped.
+                    var availability = row.AvailableInContexts ?? ToolAvailabilityContext.Playbook;
+                    var isChatAvailable =
+                        availability == ToolAvailabilityContext.Chat ||
+                        availability == ToolAvailabilityContext.Both;
+                    if (!isChatAvailable)
+                    {
+                        continue;
+                    }
+
+                    dataDrivenAttemptedRows++;
+
+                    // Dedup: if a hardcoded tool with this name is already in the list,
+                    // keep the hardcoded one and skip the row. The migration cutover
+                    // (task 012) removes the hardcoded registration once the row's
+                    // handler-class wiring is verified.
+                    if (existingToolNames.Contains(row.Name))
+                    {
+                        dataDrivenSkippedDuplicates++;
+                        _logger.LogDebug(
+                            "[FR-11] Skipping data-driven tool '{ToolName}' (id={ToolId}) — " +
+                            "name collides with already-registered hardcoded tool. " +
+                            "This is expected during Q9 migration; task 012 will remove the " +
+                            "hardcoded version once the row's handler wiring is verified.",
+                            row.Name, row.Id);
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(row.HandlerClass))
+                    {
+                        _logger.LogWarning(
+                            "[FR-11] Tool row '{ToolName}' (id={ToolId}) has no HandlerClass — " +
+                            "cannot resolve IToolHandler. Skipping.",
+                            row.Name, row.Id);
+                        dataDrivenFailedRows.Add(row.Name);
+                        continue;
+                    }
+
+                    var handler = toolHandlerRegistry.GetHandler(row.HandlerClass);
+                    if (handler is null)
+                    {
+                        _logger.LogWarning(
+                            "[FR-11] Tool row '{ToolName}' (id={ToolId}) HandlerClass " +
+                            "'{HandlerClass}' is not registered in IToolHandlerRegistry. " +
+                            "Skipping — verify the handler is added to DI in " +
+                            "AnalysisServicesModule.",
+                            row.Name, row.Id, row.HandlerClass);
+                        dataDrivenFailedRows.Add(row.Name);
+                        continue;
+                    }
+
+                    // Build a context factory closure capturing the captured chat-session
+                    // metadata. The adapter calls this per LLM invocation to get a fresh
+                    // decision id (Guid.NewGuid per call).
+                    var sessionIdGuid = TryParseChatSessionId(sessionId);
+                    Func<ChatInvocationContext> contextFactory = () => new ChatInvocationContext
+                    {
+                        ChatSessionId = sessionIdGuid,
+                        TenantId = tenantId,
+                        MatterId = TryParseMatterId(knowledgeScope)
+                    };
+
+                    try
+                    {
+                        var adapter = new ToolHandlerToAIFunctionAdapter(
+                            row, handler, contextFactory, _logger);
+                        tools.Add(adapter);
+                        existingToolNames.Add(row.Name);
+                        dataDrivenResolvedRows++;
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        // Bad schema or missing required AnalysisTool field. Log + skip
+                        // rather than crash — resilient registration so other rows still
+                        // expose. The adapter logs the row id; we add to failed list for
+                        // the summary log below.
+                        _logger.LogWarning(ex,
+                            "[FR-11] Failed to wrap tool row '{ToolName}' (id={ToolId}) — " +
+                            "adapter construction rejected the row. Skipping.",
+                            row.Name, row.Id);
+                        dataDrivenFailedRows.Add(row.Name);
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        // Handler does not opt-in to chat invocation context — log + skip.
+                        _logger.LogWarning(ex,
+                            "[FR-11] Failed to wrap tool row '{ToolName}' (id={ToolId}) — " +
+                            "handler '{HandlerClass}' does not support chat invocation. Skipping.",
+                            row.Name, row.Id, row.HandlerClass);
+                        dataDrivenFailedRows.Add(row.Name);
+                    }
+                }
+
+                // ADR-015: count + outcome only. NEVER log row contents, schemas, descriptions.
+                _logger.LogInformation(
+                    "[FR-11] Data-driven chat-tool discovery: tenant={TenantId} " +
+                    "attempted={AttemptedRows} resolved={ResolvedRows} " +
+                    "skippedDuplicates={SkippedDuplicates} failed={FailedRows}",
+                    tenantId,
+                    dataDrivenAttemptedRows,
+                    dataDrivenResolvedRows,
+                    dataDrivenSkippedDuplicates,
+                    dataDrivenFailedRows.Count);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Propagate cancellation — caller may have aborted the chat creation.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Soft failure: data-driven discovery is additive. If the query fails (Dataverse
+            // outage, transient auth failure, etc.) the chat agent still operates with the
+            // hardcoded tools above. NFR-01 conversational primacy is preserved.
+            _logger.LogWarning(ex,
+                "[FR-11] Data-driven chat-tool discovery failed; hardcoded tools remain. " +
+                "tenant={TenantId}",
+                tenantId);
+        }
+        // === End R6 Pillar 2 / Task D-A-11 =====================================================
+
         // Summary log: resolved vs. attempted so operators can detect partial degradation
         // without grepping individual warning entries.
         if (failedTools.Count > 0)
@@ -1384,6 +1600,43 @@ public class SprkChatAgentFactory
         }
 
         return allowed;
+    }
+
+    /// <summary>
+    /// Best-effort parse of the opaque chat session id (which may not always be a GUID
+    /// in legacy session formats) into a Guid for
+    /// <see cref="ChatInvocationContext.ChatSessionId"/>. Falls back to
+    /// <see cref="Guid.NewGuid"/> when the session id is not a valid Guid — the chat
+    /// invocation still proceeds; the decision id remains unique per call.
+    /// </summary>
+    /// <remarks>
+    /// R6 Pillar 2 / Task D-A-11. We do NOT throw on parse failure because the chat
+    /// session identifier is opaque to the factory (per
+    /// <see cref="CreateAgentAsync"/> contract) — some legacy or test session formats
+    /// are non-GUID strings, and rejecting them would break NFR-11 backward compat for
+    /// existing sessions.
+    /// </remarks>
+    private static Guid TryParseChatSessionId(string sessionId) =>
+        Guid.TryParse(sessionId, out var parsed) ? parsed : Guid.NewGuid();
+
+    /// <summary>
+    /// Best-effort extraction of a matter id from the active
+    /// <see cref="ChatKnowledgeScope"/> for
+    /// <see cref="ChatInvocationContext.MatterId"/>. Returns null when the scope is null
+    /// or does not carry a matter-shaped entity reference.
+    /// </summary>
+    /// <remarks>
+    /// R6 Pillar 2 / Task D-A-11. We read <c>ParentEntityType=='sprk_matter'</c> +
+    /// <c>ParentEntityId</c> from the scope; non-matter contexts (e.g., chat from
+    /// a project workspace) return null per the ChatInvocationContext contract.
+    /// ADR-015: this is a deterministic id only — no user content is captured.
+    /// </remarks>
+    private static Guid? TryParseMatterId(ChatKnowledgeScope? knowledgeScope)
+    {
+        if (knowledgeScope is null) return null;
+        if (!string.Equals(knowledgeScope.ParentEntityType, "sprk_matter", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return Guid.TryParse(knowledgeScope.ParentEntityId, out var parsed) ? parsed : null;
     }
 
     /// <summary>

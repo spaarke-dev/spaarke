@@ -2,8 +2,12 @@
   <metadata>
     <title>D-H-09 + D-H-10 Handler Dispatch Tests (Playbook + Chat Contexts)</title>
     <phase>Parallel — 8 Typed Tool Handlers</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
     <estimated-effort>6 hours</estimated-effort>
+    <completion-notes>
+      HandlerDispatchTests.cs (791 LOC) created. 15 dispatch tests pass — 8 playbook-context (one per handler: 101-108) + 7 chat-context (chat-available handlers wrapped via ToolHandlerToAIFunctionAdapter). Tests use TypedToolHandlerTestFixture for shared context-builders + LLM mock pattern established by task 105. No handler bugs surfaced. ADR-015 telemetry surface re-verified across dispatch paths via existing sentinel patterns in handler-specific test suites. Build clean. BFF size delta: 0 MB (test code doesn't ship with BFF). Closes 8-typed-handler workstream end-to-end.
+    </completion-notes>
     <dependencies>105, 106, 107, 108</dependencies>
     <blocks>none</blocks>
     <tags>bff-api, ai, integration-test</tags>
