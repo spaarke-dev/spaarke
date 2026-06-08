@@ -8,10 +8,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Upload-indexing centralization (scope extension to multi-container-multi-index-r1) |
-| **Active Phase** | Phase 1 — IPostUploadIndexingEnqueuer helper + DI + unit tests |
-| **Status** | in progress |
-| **Next Action** | Begin Phase 1 implementation (see checklist) |
+| **Task** | Upload-indexing centralization — debugging the FINAL gap: helper not running despite correct deploy |
+| **Active Phase** | DIAGNOSTIC — see [`notes/handoffs/RESTART-helper-not-running-mystery.md`](./notes/handoffs/RESTART-helper-not-running-mystery.md) |
+| **Status** | Mystery — code is correct, deploy is current, but helper invocation between OBO upload success and HTTP 200 response is missing from App Insights traces |
+| **Next Action** | Add diagnostic MARKER-A/B/C/D log lines around the if-block in OBOEndpoints.cs to determine where execution diverges. See restart-point doc Step 2. |
 
 ### Resume protocol (after compaction or new session)
 
