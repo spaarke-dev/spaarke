@@ -10,4 +10,5 @@
  */
 
 export { AssociateToStep } from './AssociateToStep';
-export type { AssociateToStepProps, AssociationResult, EntityTypeOption } from './types';
+export type { AssociateToStepProps, AssociationResult, EntityTypeOption, RegardingTarget } from './types';
+export { TODO_REGARDING_TARGETS } from './types';

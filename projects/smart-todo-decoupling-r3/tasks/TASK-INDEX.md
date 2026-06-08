@@ -40,12 +40,12 @@
 | 016 | Wire `Tasks.ReadWrite` through `GraphClientFactory` | 6 | FULL | 🔲 | 015 | P6-W2 | — |
 | 017 | Define `MicrosoftToDoSync` user-pref schema | 6 | STANDARD | ✅ | none | P6-W1 | ✅ |
 | 018 | Null-Object scaffolding for Graph sync (feature gate) | 6 | FULL | ✅ | none | P6-W2 | ✅ |
-| 020 | Repoint SmartTodo kanban queries to `sprk_todo` | 3 | FULL | 🔲 | 002, 010, 011, 012 | P3-W1 | — |
+| 020 | Repoint SmartTodo kanban queries to `sprk_todo` | 3 | FULL | ✅ | 002, 010, 011, 012 | P3-W1 | — |
 | 021 | Add "My Tasks" filter to `KanbanHeader` | 3 | FULL | 🔲 | 020 | P3-W2 | ✅ |
 | 022 | Integrate `AssociateToStep` in SmartTodo `TodoDetail` | 3 | FULL | 🔲 | 011, 020, 030 | P3-W2 | ✅ |
 | 023 | Update `FeedTodoSyncContext` payload to todo-id | 3 | FULL | 🔲 | 020 | P3-W2 | — |
 | 024 | Deploy SmartTodo Code Page | 3 | STANDARD | 🔲 | 020, 021, 022, 023 | P3-W3 | ✅ |
-| 030 | Extend `AssociateToStep` to all 11 entity targets | 4 | FULL | 🔲 | 002, 010, 012 | P4-W1 | — |
+| 030 | Extend `AssociateToStep` to all 11 entity targets | 4 | FULL | ✅ | 002, 010, 012 | P4-W1 | — |
 | 031 | Rewrite `CreateTodo` wizard to target `sprk_todo` | 4 | FULL | 🔲 | 002, 030 | P4-W2 | — |
 | 032 | Implement launch-context pre-fill | 4 | FULL | 🔲 | 031 | P4-W3 | ✅ |
 | 040 | "To Dos" subgrid on 11 parent forms (consolidated) | 5 | STANDARD | 🔲 | 002, 030, 031, 032 | P5-W1 | ✅ |

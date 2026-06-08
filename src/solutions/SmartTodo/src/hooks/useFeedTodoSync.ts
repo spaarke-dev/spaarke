@@ -1,19 +1,28 @@
 /**
  * useFeedTodoSync — No-op stub for the SmartTodo Code Page.
  *
- * In the LegalWorkspace, this hook connects to FeedTodoSyncContext to
- * synchronise flag toggles between the Updates Feed and the Smart To Do
- * list. The standalone SmartTodo Code Page does not have an Updates Feed,
- * so this stub provides a subscribe function that never fires.
+ * In LegalWorkspace, this hook connects to FeedTodoSyncContext to synchronise
+ * todo lifecycle events between the Updates Feed and the Smart To Do list.
+ * The standalone SmartTodo Code Page does not have an Updates Feed, so this
+ * stub provides a subscribe function that never fires.
+ *
+ * Per R3 FR-14 / task 023 (forthcoming), the `subscribe` callback delivers
+ * `(todoId, isActive)` — todoId is a sprk_todoid; isActive=true when the todo
+ * just became Open/In-Progress, false when it became Inactive (Completed or
+ * Dismissed) or was deleted. The legacy `(eventId, flagged)` shape is gone.
+ *
+ * The legacy id-based methods (isFlagged / toggleFlag / isPending / getError)
+ * are retained as no-ops for API compatibility with LegalWorkspace's
+ * FeedTodoSyncContext until the formal payload update in task 023.
  */
 
 export interface IFeedTodoSyncContextValue {
-  isFlagged: (eventId: string) => boolean;
-  toggleFlag: (eventId: string) => void;
-  isPending: (eventId: string) => boolean;
-  getError: (eventId: string) => string | null;
+  isFlagged: (todoId: string) => boolean;
+  toggleFlag: (todoId: string) => void;
+  isPending: (todoId: string) => boolean;
+  getError: (todoId: string) => string | null;
   subscribe: (
-    callback: (eventId: string, flagged: boolean) => void
+    callback: (todoId: string, isActive: boolean) => void
   ) => () => void;
 }
 

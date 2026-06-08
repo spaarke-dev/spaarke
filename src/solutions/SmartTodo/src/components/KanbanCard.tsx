@@ -31,7 +31,7 @@ import {
   Button,
 } from "@fluentui/react-components";
 import { PinRegular, PinFilled } from "@fluentui/react-icons";
-import { IEvent } from "../types/entities";
+import { ITodo } from "../types/entities";
 import { computeDueLabel, parseDueDate, DueUrgency } from "../utils/dueLabelUtils";
 import { computeTodoScore } from "../utils/todoScoreUtils";
 
@@ -218,11 +218,11 @@ function formatDueDate(date: Date): string {
 // ---------------------------------------------------------------------------
 
 export interface IKanbanCardProps {
-  event: IEvent;
+  todo: ITodo;
   /** Called when pin button is clicked. */
-  onPinToggle?: (eventId: string) => void;
+  onPinToggle?: (todoId: string) => void;
   /** Called when card body is clicked (not pin). Opens detail pane. */
-  onClick?: (eventId: string) => void;
+  onClick?: (todoId: string) => void;
   /** Left border accent colour from parent column. */
   accentColor?: string;
   /** Whether this card is currently selected (detail panel open). */
@@ -234,16 +234,18 @@ export interface IKanbanCardProps {
 // ---------------------------------------------------------------------------
 
 export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
-  ({ event, onPinToggle, onClick, accentColor, isSelected = false }) => {
+  ({ todo, onPinToggle, onClick, accentColor, isSelected = false }) => {
     const styles = useStyles();
 
     // Derived display values
-    const dueDate = parseDueDate(event.sprk_duedate);
+    const dueDate = parseDueDate(todo.sprk_duedate);
     const dueLabel = computeDueLabel(dueDate);
-    const { todoScore } = computeTodoScore(event);
+    const { todoScore } = computeTodoScore(todo);
     const roundedScore = Math.round(todoScore);
-    const isCompleted = event.sprk_todostatus === 100000001;
-    const isPinned = event.sprk_todopinned === true;
+    // statuscode 2 = Completed (task 009 mapping). statecode 1 (Inactive) is
+    // also a valid signal that the item is no longer in the active pipeline.
+    const isCompleted = todo.statuscode === 2 || todo.statecode === 1;
+    const isPinned = todo.sprk_todopinned === true;
     const dueDateFormatted = dueDate ? formatDueDate(dueDate) : null;
 
     // -----------------------------------------------------------------------
@@ -254,17 +256,17 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
       (ev: React.MouseEvent<HTMLButtonElement>) => {
         ev.stopPropagation();
         if (onPinToggle) {
-          onPinToggle(event.sprk_eventid);
+          onPinToggle(todo.sprk_todoid);
         }
       },
-      [onPinToggle, event.sprk_eventid]
+      [onPinToggle, todo.sprk_todoid]
     );
 
     const handleCardClick = React.useCallback(() => {
       if (onClick) {
-        onClick(event.sprk_eventid);
+        onClick(todo.sprk_todoid);
       }
-    }, [onClick, event.sprk_eventid]);
+    }, [onClick, todo.sprk_todoid]);
 
     const handleCardKeyDown = React.useCallback(
       (ev: React.KeyboardEvent<HTMLDivElement>) => {
@@ -281,7 +283,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
     // -----------------------------------------------------------------------
 
     const cardAriaLabel = [
-      event.sprk_eventname,
+      todo.sprk_name,
       isSelected ? "Selected." : "",
       isCompleted ? "Completed." : "Open.",
       isPinned ? "Pinned." : "",
@@ -353,7 +355,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
         <div className={styles.contentColumn}>
           {/* Row 1: Title */}
           <Text as="span" size={300} weight="semibold" className={titleClassName}>
-            {event.sprk_eventname}
+            {todo.sprk_name}
           </Text>
 
           {/* Row 2: Due date + urgency badge */}
@@ -384,10 +386,10 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
           )}
 
           {/* Row 3: Assigned to */}
-          {event.assignedToName && (
+          {todo.assignedToName && (
             <div className={styles.metadataRow}>
               <span className={styles.fieldLabel}>Assigned:</span>
-              <span className={styles.fieldValue}>{event.assignedToName}</span>
+              <span className={styles.fieldValue}>{todo.assignedToName}</span>
             </div>
           )}
         </div>
@@ -399,7 +401,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
             size="small"
             icon={isPinned ? <PinFilled /> : <PinRegular />}
             onClick={handlePinClick}
-            aria-label={isPinned ? `Unpin "${event.sprk_eventname}"` : `Pin "${event.sprk_eventname}"`}
+            aria-label={isPinned ? `Unpin "${todo.sprk_name}"` : `Pin "${todo.sprk_name}"`}
             title={isPinned ? "Unpin from column" : "Pin to column"}
           />
         </div>

@@ -19,7 +19,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { tokens } from '@fluentui/react-components';
 import { DataverseService } from '../services/DataverseService';
 import { computeTodoScore } from '../utils/todoScoreUtils';
-import type { IEvent } from '../types/entities';
+import type { ITodo } from '../types/entities';
 import type { TodoColumn } from '../types/enums';
 import type { IKanbanColumn } from '@spaarke/ui-components';
 import type { IWebApi } from '../types/xrm';
@@ -48,7 +48,7 @@ const CHOICE_TO_COLUMN: Record<number, TodoColumn> = {
 
 export interface IUseKanbanColumnsOptions {
   /** Sorted todo items from useTodoItems. */
-  items: IEvent[];
+  items: ITodo[];
   /** Score threshold: items scoring at or above this go to "Today". */
   todayThreshold: number;
   /** Score threshold: items scoring at or above this (but below todayThreshold) go to "Tomorrow". */
@@ -61,13 +61,13 @@ export interface IUseKanbanColumnsOptions {
 
 export interface IUseKanbanColumnsResult {
   /** Three columns (Today, Tomorrow, Future) with items assigned. */
-  columns: IKanbanColumn<IEvent>[];
+  columns: IKanbanColumn<ITodo>[];
   /** Move an item to a target column. Auto-pins and persists to Dataverse. */
-  moveItem: (eventId: string, targetColumn: TodoColumn) => void;
+  moveItem: (todoId: string, targetColumn: TodoColumn) => void;
   /** Reorder an item within the same column (user drag). */
   reorderInColumn: (columnId: string, fromIndex: number, toIndex: number) => void;
   /** Toggle pin state for an item. Persists to Dataverse. */
-  togglePin: (eventId: string) => void;
+  togglePin: (todoId: string) => void;
   /** Reassign all unpinned items by current scores. Batch-writes to Dataverse. */
   recalculate: () => void;
   /** True while a recalculate batch write is in progress. */
@@ -82,11 +82,11 @@ export interface IUseKanbanColumnsResult {
  * Determine which column an unpinned item belongs to based on its To Do Score.
  */
 function assignColumnByScore(
-  event: IEvent,
+  todo: ITodo,
   todayThreshold: number,
   tomorrowThreshold: number
 ): TodoColumn {
-  const { todoScore } = computeTodoScore(event);
+  const { todoScore } = computeTodoScore(todo);
   if (todoScore >= todayThreshold) return 'Today';
   if (todoScore >= tomorrowThreshold) return 'Tomorrow';
   return 'Future';
@@ -98,14 +98,14 @@ function assignColumnByScore(
  * - Unpinned items: compute from To Do Score + thresholds.
  */
 function resolveColumn(
-  event: IEvent,
+  todo: ITodo,
   todayThreshold: number,
   tomorrowThreshold: number
 ): TodoColumn {
-  if (event.sprk_todopinned && event.sprk_todocolumn != null) {
-    return CHOICE_TO_COLUMN[event.sprk_todocolumn] ?? assignColumnByScore(event, todayThreshold, tomorrowThreshold);
+  if (todo.sprk_todopinned && todo.sprk_todocolumn != null) {
+    return CHOICE_TO_COLUMN[todo.sprk_todocolumn] ?? assignColumnByScore(todo, todayThreshold, tomorrowThreshold);
   }
-  return assignColumnByScore(event, todayThreshold, tomorrowThreshold);
+  return assignColumnByScore(todo, todayThreshold, tomorrowThreshold);
 }
 
 /**
@@ -113,13 +113,13 @@ function resolveColumn(
  * Preserves item order (items arrive pre-sorted by To Do Score from useTodoItems).
  */
 function buildColumns(
-  items: IEvent[],
+  items: ITodo[],
   todayThreshold: number,
   tomorrowThreshold: number
-): IKanbanColumn<IEvent>[] {
-  const today: IEvent[] = [];
-  const tomorrow: IEvent[] = [];
-  const future: IEvent[] = [];
+): IKanbanColumn<ITodo>[] {
+  const today: ITodo[] = [];
+  const tomorrow: ITodo[] = [];
+  const future: ITodo[] = [];
 
   for (const item of items) {
     const col = resolveColumn(item, todayThreshold, tomorrowThreshold);
@@ -170,13 +170,13 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
       setOverrides((prev) => {
         if (Object.keys(prev).length === 0) return prev;
         const remaining: typeof prev = {};
-        for (const [eventId, ov] of Object.entries(prev)) {
-          const freshItem = items.find((i) => i.sprk_eventid === eventId);
+        for (const [todoId, ov] of Object.entries(prev)) {
+          const freshItem = items.find((i) => i.sprk_todoid === todoId);
           if (!freshItem) continue; // Item gone — drop override
           const columnMatch = ov.column == null || freshItem.sprk_todocolumn === ov.column;
           const pinnedMatch = ov.pinned == null || freshItem.sprk_todopinned === ov.pinned;
           if (!columnMatch || !pinnedMatch) {
-            remaining[eventId] = ov; // Keep — Dataverse hasn't caught up yet
+            remaining[todoId] = ov; // Keep — Dataverse hasn't caught up yet
           }
           // else: Dataverse values match override — safe to drop
         }
@@ -193,7 +193,7 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
     if (Object.keys(overrides).length === 0) return items;
 
     return items.map((item) => {
-      const ov = overrides[item.sprk_eventid];
+      const ov = overrides[item.sprk_todoid];
       if (!ov) return item;
       return {
         ...item,
@@ -214,15 +214,15 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
     return base.map((col) => {
       const order = columnOrders[col.id];
       if (!order || order.length === 0) return col;
-      const itemMap = new Map(col.items.map((i) => [i.sprk_eventid, i]));
-      const ordered: IEvent[] = [];
+      const itemMap = new Map(col.items.map((i) => [i.sprk_todoid, i]));
+      const ordered: ITodo[] = [];
       for (const id of order) {
         const item = itemMap.get(id);
         if (item) { ordered.push(item); itemMap.delete(id); }
       }
       // Append items not in the custom order (new items since reorder)
       for (const item of col.items) {
-        if (itemMap.has(item.sprk_eventid)) ordered.push(item);
+        if (itemMap.has(item.sprk_todoid)) ordered.push(item);
       }
       return { ...col, items: ordered };
     });
@@ -236,7 +236,7 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
     (columnId: string, fromIndex: number, toIndex: number) => {
       const col = columns.find((c) => c.id === columnId);
       if (!col) return;
-      const ids = col.items.map((i) => i.sprk_eventid);
+      const ids = col.items.map((i) => i.sprk_todoid);
       const [moved] = ids.splice(fromIndex, 1);
       ids.splice(toIndex, 0, moved);
       setColumnOrders((prev) => ({ ...prev, [columnId]: ids }));
@@ -249,25 +249,23 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
   // -------------------------------------------------------------------------
 
   const moveItem = useCallback(
-    (eventId: string, targetColumn: TodoColumn) => {
+    (todoId: string, targetColumn: TodoColumn) => {
       const choiceValue = COLUMN_TO_CHOICE[targetColumn];
 
       // Optimistic: set column + pin
       setOverrides((prev) => ({
         ...prev,
-        [eventId]: { column: choiceValue, pinned: true },
+        [todoId]: { column: choiceValue, pinned: true },
       }));
 
       // Persist both column and pin in parallel.
-      // On failure we keep the override (user intent) — the override will persist
-      // until Dataverse fields are provisioned and the next recalculate/refetch.
       const service = serviceRef.current;
       Promise.all([
-        service.updateEventColumn(eventId, choiceValue),
-        service.updateEventPinned(eventId, true),
+        service.updateEventColumn(todoId, choiceValue),
+        service.updateEventPinned(todoId, true),
       ]).then(([colResult, pinResult]) => {
         if (!colResult.success || !pinResult.success) {
-          console.warn('[useKanbanColumns] moveItem write failed (fields may not exist yet)', {
+          console.warn('[useKanbanColumns] moveItem write failed', {
             colResult,
             pinResult,
           });
@@ -282,9 +280,9 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
   // -------------------------------------------------------------------------
 
   const togglePin = useCallback(
-    (eventId: string) => {
+    (todoId: string) => {
       // Find current effective pin state
-      const item = effectiveItems.find((i) => i.sprk_eventid === eventId);
+      const item = effectiveItems.find((i) => i.sprk_todoid === todoId);
       if (!item) return;
 
       const currentPinned = item.sprk_todopinned ?? false;
@@ -292,17 +290,17 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
 
       // Optimistic: flip pin (keep existing column override if any)
       setOverrides((prev) => {
-        const existing = prev[eventId] ?? {};
+        const existing = prev[todoId] ?? {};
         return {
           ...prev,
-          [eventId]: { ...existing, pinned: newPinned },
+          [todoId]: { ...existing, pinned: newPinned },
         };
       });
 
       // Persist — keep override on failure (user intent takes priority)
-      serviceRef.current.updateEventPinned(eventId, newPinned).then((result) => {
+      serviceRef.current.updateEventPinned(todoId, newPinned).then((result) => {
         if (!result.success) {
-          console.warn('[useKanbanColumns] togglePin write failed (fields may not exist yet)', result);
+          console.warn('[useKanbanColumns] togglePin write failed', result);
         }
       });
     },
@@ -329,7 +327,9 @@ export function useKanbanColumns(options: IUseKanbanColumnsOptions): IUseKanbanC
       const currentChoice = item.sprk_todocolumn;
 
       if (currentChoice !== computedChoice) {
-        updates.push({ eventId: item.sprk_eventid, column: computedChoice });
+        // DataverseService.batchUpdateEventColumns keeps the historical
+        // `eventId` field name for the update payload; the value is a sprk_todoid.
+        updates.push({ eventId: item.sprk_todoid, column: computedChoice });
       }
     }
 

@@ -170,7 +170,13 @@ export function buildMattersTabQuery(userId: string, contactId: string | null, t
 // Event feed query helpers
 // ---------------------------------------------------------------------------
 
-/** $select fields for sprk_event used in the Updates Feed */
+/**
+ * $select fields for sprk_event used in the Updates Feed.
+ *
+ * Per R3 FR-29 / OS-1, the four legacy event-todo fields (`sprk_todoflag`,
+ * `sprk_todostatus`, `sprk_todocolumn`, `sprk_todopinned`) are removed from
+ * `sprk_event` in Phase 1 and no longer included here.
+ */
 export const EVENT_SELECT_FIELDS: string[] = [
   'sprk_eventid',
   'sprk_eventname',
@@ -182,9 +188,6 @@ export const EVENT_SELECT_FIELDS: string[] = [
   'sprk_estimatedminutes',
   'sprk_priorityreason',
   'sprk_effortreason',
-  'sprk_todoflag',
-  'sprk_todostatus',
-  'sprk_todosource',
   'sprk_regardingrecordid',
   'sprk_regardingrecordname',
   '_sprk_regardingrecordtype_value',  // Lookup → sprk_recordtype_ref (display via formatted value)
@@ -457,47 +460,62 @@ export function buildDocumentsTabQuery(userId: string, top: number = 50): string
 }
 
 // ---------------------------------------------------------------------------
-// To-Do query helpers
+// To-Do query helpers (sprk_todo — first-class entity per R3 FR-09 / FR-11)
 // ---------------------------------------------------------------------------
 
-/** $select fields when querying to-do items (sprk_event with todoflag=true) */
+/**
+ * $select fields when querying to-do items from `sprk_todo`.
+ *
+ * Replaces the legacy `sprk_event`-based select that filtered on `sprk_todoflag`.
+ * Per R3 FR-29 / OS-1, the legacy event-todo fields are removed; the native
+ * `sprk_todo` entity carries `sprk_todocolumn`, `sprk_todopinned`,
+ * `sprk_priorityscore`, `sprk_effortscore` as first-class fields.
+ *
+ * statuscode is the canonical lifecycle field (task 009):
+ *   1 = Open, 659490001 = In Progress, 2 = Completed, 659490002 = Dismissed.
+ */
 export const TODO_SELECT_FIELDS: string[] = [
-  'sprk_eventid',
-  'sprk_eventname',
-  '_sprk_eventtype_ref_value',  // Lookup → sprk_eventtype_ref (display via formatted value)
+  'sprk_todoid',
+  'sprk_name',
   'sprk_description',
-  'sprk_priority',
+  'sprk_notes',
   'sprk_priorityscore',
   'sprk_effortscore',
-  'sprk_estimatedminutes',
-  'sprk_priorityreason',
-  'sprk_effortreason',
-  'sprk_todoflag',
-  'sprk_todostatus',
-  'sprk_todosource',
-  'sprk_regardingrecordid',
-  'sprk_regardingrecordname',
-  '_sprk_regardingrecordtype_value',  // Lookup → sprk_recordtype_ref (display via formatted value)
-  '_sprk_assignedto_value',  // Lookup → contact (display name via formatted value)
   'sprk_duedate',
+  'sprk_completedon',
   'sprk_todocolumn',
   'sprk_todopinned',
+  'statecode',
+  'statuscode',
+  '_sprk_assignedto_value',  // Lookup → systemuser (display name via formatted value)
+  '_ownerid_value',
   'createdon',
   'modifiedon',
 ];
 
 /**
- * Build the OData query for active to-do items.
+ * Build the OData query for active to-do items (Kanban-visible).
  *
- * Returns sprk_event records where:
- *   - todoflag = true
- *   - todostatus != Dismissed (option set value 2)
+ * Returns `sprk_todo` records where:
+ *   - statecode = 0 (Active)
+ *   - statuscode in (Open, In Progress) — excludes Completed + Dismissed
  *   - owner = current user
  *
  * Sort: priorityscore desc, then duedate asc (most urgent first).
+ *
+ * Per FR-11: zero queries to `sprk_event` from the kanban path.
+ * Per OS-1: no `sprk_todoflag` filter — that field no longer exists on `sprk_event`.
  */
 export function buildTodoItemsQuery(userId: string): string {
-  const filter = `_ownerid_value eq ${userId} and sprk_todoflag eq true and sprk_todostatus eq 100000000`;
+  // Active to-do statuscodes per task 009:
+  //   1          = Open
+  //   659490001  = In Progress
+  // Completed (2) and Dismissed (659490002) are inactive and handled by the
+  // dismissed / restore paths.
+  const filter =
+    `_ownerid_value eq ${userId}` +
+    ` and statecode eq 0` +
+    ` and (statuscode eq 1 or statuscode eq 659490001)`;
   return buildQuery({
     select: TODO_SELECT_FIELDS,
     filter,
@@ -507,9 +525,13 @@ export function buildTodoItemsQuery(userId: string): string {
 
 /**
  * Build the OData query for dismissed to-do items (collapsible section).
+ *
+ * Returns `sprk_todo` records where statuscode = 659490002 (Dismissed).
  */
 export function buildDismissedTodoQuery(userId: string): string {
-  const filter = `_ownerid_value eq ${userId} and sprk_todoflag eq true and sprk_todostatus eq 100000002`;
+  const filter =
+    `_ownerid_value eq ${userId}` +
+    ` and statuscode eq 659490002`;
   return buildQuery({
     select: TODO_SELECT_FIELDS,
     filter,

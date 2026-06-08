@@ -54,7 +54,7 @@ import { useTodoItems } from "../hooks/useTodoItems";
 import { useKanbanColumns } from "../hooks/useKanbanColumns";
 import { useUserPreferences } from "../hooks/useUserPreferences";
 import { DataverseService } from "../services/DataverseService";
-import { IEvent } from "../types/entities";
+import { ITodo } from "../types/entities";
 import { computeTodoScore } from "../utils/todoScoreUtils";
 import { useOptionalTodoContext } from "../context/TodoContext";
 import type { TodoColumn } from "../types/enums";
@@ -95,7 +95,7 @@ export { LazyTodoAISummaryDialog, TodoAISummaryFallback };
 // Sort helper (mirrors useTodoItems.ts — used when inserting new items)
 // ---------------------------------------------------------------------------
 
-function sortTodoItems(items: IEvent[]): IEvent[] {
+function sortTodoItems(items: ITodo[]): ITodo[] {
   return [...items].sort((a, b) => {
     // Primary: To Do Score DESC (higher is more important)
     const scoreA = computeTodoScore(a).todoScore;
@@ -235,7 +235,7 @@ export interface ISmartToDoProps {
    * Optional mock items for local development / testing.
    * When provided, bypasses Xrm.WebApi.
    */
-  mockItems?: IEvent[];
+  mockItems?: ITodo[];
   /**
    * When true, hides the card wrapper (border, fixed height) and header
    * so the component can be embedded inside a tabbed container.
@@ -273,10 +273,10 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   const todoCtx = useOptionalTodoContext();
 
   const handleCardClick = React.useCallback(
-    (eventId: string) => {
+    (todoId: string) => {
       // In embedded mode, card clicks should NOT open the detail panel
       if (embedded) return;
-      todoCtx?.selectItem(eventId);
+      todoCtx?.selectItem(todoId);
     },
     [embedded, todoCtx],
   );
@@ -310,18 +310,21 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Local optimistic state (preserved from pre-Kanban version)
   // -------------------------------------------------------------------------
 
-  /** Status overrides keyed by eventId: 0=Open, 1=Completed */
+  /**
+   * Status overrides keyed by sprk_todoid. Stored as a Dataverse statuscode
+   * (1=Open, 659490001=In Progress, 2=Completed, 659490002=Dismissed).
+   */
   const [statusOverrides, setStatusOverrides] = React.useState<Map<string, number>>(
     new Map()
   );
 
-  /** Set of eventIds that are currently being dismissed (disable dismiss button) */
+  /** Set of todoIds that are currently being dismissed (disable dismiss button) */
   const [dismissingIds, setDismissingIds] = React.useState<Set<string>>(new Set());
 
   /** Dismissed items managed locally — populated optimistically and persisted in Dataverse */
-  const [dismissedItems, setDismissedItems] = React.useState<IEvent[]>([]);
+  const [dismissedItems, setDismissedItems] = React.useState<ITodo[]>([]);
 
-  /** Set of eventIds currently being restored from the dismissed list */
+  /** Set of todoIds currently being restored from the dismissed list */
   const [restoringIds, setRestoringIds] = React.useState<Set<string>>(new Set());
 
   /** Whether a manual add operation is in-flight */
@@ -331,7 +334,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   const [addError, setAddError] = React.useState<string | null>(null);
 
   /** Locally-added items (optimistic, replaced by refetch on Dataverse success) */
-  const [addedItems, setAddedItems] = React.useState<IEvent[]>([]);
+  const [addedItems, setAddedItems] = React.useState<ITodo[]>([]);
 
   /** Settings popover state */
   const [settingsOpen, setSettingsOpen] = React.useState(false);
@@ -358,21 +361,27 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // -------------------------------------------------------------------------
 
   const activeItems = React.useMemo(() => {
-    const dismissedSet = new Set(dismissedItems.map((d) => d.sprk_eventid));
+    const dismissedSet = new Set(dismissedItems.map((d) => d.sprk_todoid));
     return items
-      .filter((item) => !dismissedSet.has(item.sprk_eventid))
+      .filter((item) => !dismissedSet.has(item.sprk_todoid))
       .map((item) => {
-        const overrideStatus = statusOverrides.get(item.sprk_eventid);
-        if (overrideStatus === undefined) return item;
-        return { ...item, sprk_todostatus: overrideStatus };
+        const overrideStatuscode = statusOverrides.get(item.sprk_todoid);
+        if (overrideStatuscode === undefined) return item;
+        // statecode follows statuscode (per task 009 mapping): Open/InProgress => Active, else Inactive.
+        const isActive = overrideStatuscode === 1 || overrideStatuscode === 659490001;
+        return {
+          ...item,
+          statuscode: overrideStatuscode,
+          statecode: isActive ? 0 : 1,
+        };
       });
   }, [items, dismissedItems, statusOverrides]);
 
   // Merge addedItems into the display list
   const displayItems = React.useMemo(() => {
     if (addedItems.length === 0) return activeItems;
-    const addedIds = new Set(addedItems.map((a) => a.sprk_eventid));
-    const dedupedActive = activeItems.filter((i) => !addedIds.has(i.sprk_eventid));
+    const addedIds = new Set(addedItems.map((a) => a.sprk_todoid));
+    const dedupedActive = activeItems.filter((i) => !addedIds.has(i.sprk_todoid));
     return sortTodoItems([...dedupedActive, ...addedItems]);
   }, [activeItems, addedItems]);
 
@@ -408,14 +417,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       setAddError(null);
 
       const tempId = `temp-${Date.now()}`;
-      const optimisticItem: IEvent = {
-        sprk_eventid: tempId,
-        sprk_eventname: title,
-        sprk_todoflag: true,
-        sprk_todostatus: 100000000, // Open
-        sprk_todosource: 100000001, // User
-        sprk_priority: 0, // Low
-        sprk_effortscore: 10, // Low
+      const optimisticItem: ITodo = {
+        sprk_todoid: tempId,
+        sprk_name: title,
+        statecode: 0,        // Active
+        statuscode: 1,       // Open (per task 009)
+        sprk_priorityscore: 50,
+        sprk_effortscore: 10,
         createdon: new Date().toISOString(),
         modifiedon: new Date().toISOString(),
       };
@@ -427,20 +435,20 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
         if (!result.success) {
           setAddedItems((prev) =>
-            prev.filter((i) => i.sprk_eventid !== tempId)
+            prev.filter((i) => i.sprk_todoid !== tempId)
           );
           setAddError(
             result.error?.message ?? "Failed to create to-do item. Please try again."
           );
         } else {
           setAddedItems((prev) =>
-            prev.filter((i) => i.sprk_eventid !== tempId)
+            prev.filter((i) => i.sprk_todoid !== tempId)
           );
           refetch();
         }
       } catch {
         setAddedItems((prev) =>
-          prev.filter((i) => i.sprk_eventid !== tempId)
+          prev.filter((i) => i.sprk_todoid !== tempId)
         );
         setAddError("Failed to create to-do item. Please try again.");
       } finally {
@@ -455,28 +463,28 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // -------------------------------------------------------------------------
 
   const handleDismiss = React.useCallback(
-    async (eventId: string) => {
-      const item = displayItems.find((i) => i.sprk_eventid === eventId);
+    async (todoId: string) => {
+      const item = displayItems.find((i) => i.sprk_todoid === todoId);
       if (!item) return;
 
-      setDismissingIds((prev) => new Set(prev).add(eventId));
+      setDismissingIds((prev) => new Set(prev).add(todoId));
       setDismissedItems((prev) => [item, ...prev]);
 
       try {
-        const result = await serviceRef.current.dismissTodo(eventId);
+        const result = await serviceRef.current.dismissTodo(todoId);
         if (!result.success) {
           setDismissedItems((prev) =>
-            prev.filter((i) => i.sprk_eventid !== eventId)
+            prev.filter((i) => i.sprk_todoid !== todoId)
           );
         }
       } catch {
         setDismissedItems((prev) =>
-          prev.filter((i) => i.sprk_eventid !== eventId)
+          prev.filter((i) => i.sprk_todoid !== todoId)
         );
       } finally {
         setDismissingIds((prev) => {
           const next = new Set(prev);
-          next.delete(eventId);
+          next.delete(todoId);
           return next;
         });
       }
@@ -489,21 +497,22 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // -------------------------------------------------------------------------
 
   const handleRestore = React.useCallback(
-    async (eventId: string) => {
-      const item = dismissedItems.find((i) => i.sprk_eventid === eventId);
+    async (todoId: string) => {
+      const item = dismissedItems.find((i) => i.sprk_todoid === todoId);
       if (!item) return;
 
-      setRestoringIds((prev) => new Set(prev).add(eventId));
-      setDismissedItems((prev) => prev.filter((i) => i.sprk_eventid !== eventId));
-      setStatusOverrides((prev) => new Map(prev).set(eventId, 0));
+      setRestoringIds((prev) => new Set(prev).add(todoId));
+      setDismissedItems((prev) => prev.filter((i) => i.sprk_todoid !== todoId));
+      // Override to statuscode=1 (Open) optimistically.
+      setStatusOverrides((prev) => new Map(prev).set(todoId, 1));
 
       try {
-        const result = await serviceRef.current.updateTodoStatus(eventId, "Open");
+        const result = await serviceRef.current.updateTodoStatus(todoId, "Open");
         if (!result.success) {
           setDismissedItems((prev) => [item, ...prev]);
           setStatusOverrides((prev) => {
             const next = new Map(prev);
-            next.delete(eventId);
+            next.delete(todoId);
             return next;
           });
         } else {
@@ -513,13 +522,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         setDismissedItems((prev) => [item, ...prev]);
         setStatusOverrides((prev) => {
           const next = new Map(prev);
-          next.delete(eventId);
+          next.delete(todoId);
           return next;
         });
       } finally {
         setRestoringIds((prev) => {
           const next = new Set(prev);
-          next.delete(eventId);
+          next.delete(todoId);
           return next;
         });
       }
@@ -574,8 +583,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // -------------------------------------------------------------------------
 
   const handlePinToggle = React.useCallback(
-    (eventId: string) => {
-      togglePin(eventId);
+    (todoId: string) => {
+      togglePin(todoId);
     },
     [togglePin]
   );
@@ -587,16 +596,16 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   const selectedEventId = todoCtx?.selectedEventId ?? null;
 
   const renderCard = React.useCallback(
-    (item: IEvent, _index: number, columnId: string) => {
+    (item: ITodo, _index: number, columnId: string) => {
       // Get column accent colour from the columns array
       const col = columns.find((c) => c.id === columnId);
       return (
         <KanbanCard
-          event={item}
+          todo={item}
           onPinToggle={handlePinToggle}
           onClick={handleCardClick}
           accentColor={col?.accentColor}
-          isSelected={item.sprk_eventid === selectedEventId}
+          isSelected={item.sprk_todoid === selectedEventId}
         />
       );
     },
@@ -604,7 +613,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   );
 
   const getItemId = React.useCallback(
-    (item: IEvent) => item.sprk_eventid,
+    (item: ITodo) => item.sprk_todoid,
     []
   );
 
@@ -705,7 +714,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
           {/* Kanban board */}
           {!isEmpty && (
             <div className={styles.boardContainer}>
-              <KanbanBoard<IEvent>
+              <KanbanBoard<ITodo>
                 columns={columns}
                 onDragEnd={handleDragEnd}
                 renderCard={renderCard}
