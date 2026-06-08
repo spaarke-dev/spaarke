@@ -10,6 +10,8 @@ import { SaveView } from './components/views/SaveView';
 import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
+import { CreateTodoView } from './components/views/CreateTodoView';
+import type { SaveEmailToSpaarkeFn } from './hooks';
 
 /**
  * Main App shell for Office Add-in taskpane.
@@ -67,6 +69,28 @@ export interface AppProps {
    * stays config-driven — keeps `LinkedTodosBanner` free of hardcoded org URLs.
    */
   onViewLinkedTodos?: (communicationId: string) => void;
+  /**
+   * Optional Outlook "Create To Do" ribbon-action wiring (smart-todo-decoupling-r3
+   * FR-27 / task 070). When provided AND `initialAction === 'createTodo'` (set by
+   * the host based on the URL `?action=createTodo` query param), the taskpane
+   * renders the CreateTodoView instead of the default tabs.
+   *
+   * - `codePageBaseUrl`: SmartTodo Code Page base URL (env-supplied; no hardcoded
+   *   org URLs allowed per CLAUDE.md §16).
+   * - `saveEmailToSpaarke`: callback the host wires to its existing Save flow.
+   *   When the email isn't already saved, the view invokes this; the host runs
+   *   the SaveView and resolves with the new sprk_communication triple.
+   */
+  createTodoConfig?: {
+    codePageBaseUrl: string;
+    saveEmailToSpaarke: SaveEmailToSpaarkeFn;
+  };
+  /**
+   * Initial action discriminator read from the host's URL / launch context.
+   * Today: 'createTodo' to mount CreateTodoView immediately. Default: undefined
+   * (renders the default tab from `initialTab`).
+   */
+  initialAction?: 'createTodo';
 }
 
 export const App: React.FC<AppProps> = ({
@@ -78,6 +102,8 @@ export const App: React.FC<AppProps> = ({
   showErrorDetails = process.env.NODE_ENV === 'development',
   communicationId,
   onViewLinkedTodos,
+  createTodoConfig,
+  initialAction,
 }) => {
   const styles = useStyles();
 
@@ -199,6 +225,15 @@ export const App: React.FC<AppProps> = ({
   const hostType: HostType = hostAdapter.getHostType() === 'outlook' ? 'outlook' : 'word';
   const displayTitle = title || 'Spaarke Add-in';
 
+  // Outlook "Create To Do" ribbon-action mode (smart-todo-decoupling-r3 FR-27 / task 070).
+  // When the host launched the taskpane with `?action=createTodo` AND a
+  // `createTodoConfig` is supplied, the CreateTodoView replaces the default tabs.
+  // Outlook-only — the action makes no sense in Word.
+  const showCreateTodoView =
+    initialAction === 'createTodo' &&
+    createTodoConfig !== undefined &&
+    hostAdapter.getHostType() === 'outlook';
+
   // Outlook taskpane banner indicator (smart-todo-decoupling-r3 FR-28 / A-1).
   // The hook is inert when communicationId is undefined / not Outlook, so it
   // safely no-ops on the Word add-in.
@@ -283,8 +318,23 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {/* Tab Content */}
-        {currentTab === 'save' && (
+        {/*
+          Outlook "Create To Do" ribbon-action view (smart-todo-decoupling-r3 FR-27 / task 070).
+          Mounted instead of the default tabs when the host invoked the taskpane
+          with `?action=createTodo` (set by the manifest button click handler).
+          Requires `createTodoConfig` to wire the save flow + code-page URL — when
+          absent we fall through to the default tabs so the action degrades gracefully.
+        */}
+        {showCreateTodoView && (
+          <CreateTodoView
+            hostAdapter={hostAdapter}
+            saveEmailToSpaarke={createTodoConfig!.saveEmailToSpaarke}
+            codePageBaseUrl={createTodoConfig!.codePageBaseUrl}
+          />
+        )}
+
+        {/* Tab Content (default — when not in createTodo action mode) */}
+        {!showCreateTodoView && currentTab === 'save' && (
           <SaveView
             hostAdapter={hostAdapter}
             getAccessToken={async () => {
@@ -314,7 +364,7 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {currentTab === 'share' && (
+        {!showCreateTodoView && currentTab === 'share' && (
           <ShareView
             onSearch={async query => {
               // Placeholder - will connect to API in later tasks
@@ -333,7 +383,7 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {currentTab === 'search' && (
+        {!showCreateTodoView && currentTab === 'search' && (
           <StatusView
             onFetchJobs={async () => {
               // Placeholder - shows document search in later tasks
@@ -343,7 +393,7 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {currentTab === 'recent' && (
+        {!showCreateTodoView && currentTab === 'recent' && (
           <StatusView
             onFetchJobs={async () => {
               // Placeholder - will connect to API in later tasks

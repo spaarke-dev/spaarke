@@ -83,7 +83,6 @@ $ViteSolutions = @(
     "SmartTodo"
     "SpeAdminApp"
     "SummarizeFilesWizard"
-    "TodoDetailSidePane"
     "WorkspaceLayoutWizard"
 )
 

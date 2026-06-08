@@ -9,7 +9,9 @@
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: Verified (accurate)
 >
-> Already verified substantively in R2 task 076. Spot-checks confirm: `sprk_smarttodo` Code Page at `src/solutions/SmartTodo/` uses React 19 (package.json: `"react": "^19.0.0"`), `TodoDetailSidePane` at `src/solutions/TodoDetailSidePane/`, `TodoDetail` extracted to `src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/`, `PanelSplitter` component present in shared library.
+> Already verified substantively in R2 task 076. Spot-checks confirm: `sprk_smarttodo` Code Page at `src/solutions/SmartTodo/` uses React 19 (package.json: `"react": "^19.0.0"`), `TodoDetail` extracted to `src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/`, `PanelSplitter` component present in shared library.
+>
+> **R3 update (2026-06-08)**: `TodoDetailSidePane` retired (see §"UI Surfaces" note). Document will be fully superseded by `spaarke-todo-architecture.md` per smart-todo-decoupling-r3 FR-30.
 
 ---
 
@@ -59,7 +61,7 @@ Every mutation (save, drag, flag toggle, pin toggle) updates local state immedia
 
 ### Why Extract TodoDetail to Shared Library?
 
-The TodoDetail component is consumed by both the SmartTodo Code Page (inline panel) and the standalone TodoDetailSidePane. Extracting to `@spaarke/ui-components` eliminates duplication. The component accepts callback props (`onSearchContacts`, `onOpenRegardingRecord`, `onSaveEventFields`, etc.) to stay context-agnostic per ADR-012.
+Historically (R2), the `TodoDetail` component was consumed by both the SmartTodo Code Page (inline panel) and the standalone `TodoDetailSidePane`. Extracting to `@spaarke/ui-components` eliminated duplication. The component accepts callback props (`onSearchContacts`, `onOpenRegardingRecord`, `onSaveEventFields`, etc.) to stay context-agnostic per ADR-012. (R3 retired `TodoDetailSidePane`; `TodoDetail` now has a single consumer — `TodoDetailPanel` inside the SmartTodo Code Page — but the extracted location remains correct for future reuse.)
 
 ### Why Two Entities (sprk_event + sprk_eventtodo)?
 
@@ -140,8 +142,9 @@ When both rendered in LegalWorkspace, flagging an event in the Updates Feed uses
 | Surface | Web Resource | Notes |
 |---------|-------------|-------|
 | SmartTodo Code Page (primary) | `sprk_smarttodo` | Full Kanban + inline detail panel. React 19, Vite single-file |
-| TodoDetailSidePane (standalone) | `sprk_tododetailsidepane` | For non-Kanban contexts (e.g., EventsPage). Still uses BroadcastChannel for standalone operation |
 | LegalWorkspace glance | N/A (embedded) | `embedded=true, disableSidePane=true`. "Open full view" → `navigateTo sprk_smarttodo` |
+
+> **Note** (smart-todo-decoupling-r3, 2026-06-08): `TodoDetailSidePane` was retired during R3. The R2 SmartTodo consolidation had already replaced its launch path with an inline `TodoDetailPanel`; the R3 audit (`projects/smart-todo-decoupling-r3/notes/tododetailsidepane-decision.md`) confirmed zero hard consumers. This document will be superseded by `spaarke-todo-architecture.md` per FR-30.
 
 ---
 
@@ -162,4 +165,3 @@ All UI uses Fluent UI v9 semantic tokens per ADR-021.
 | Artifact | Build | Deploy Script |
 |----------|-------|---------------|
 | SmartTodo Code Page | `cd src/solutions/SmartTodo && npm run build` → `dist/smarttodo.html` | `scripts/Deploy-SmartTodo.ps1` |
-| TodoDetailSidePane | `cd src/solutions/TodoDetailSidePane && npm run build` | Manual upload or deploy script |

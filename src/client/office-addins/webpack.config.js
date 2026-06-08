@@ -32,6 +32,11 @@ const ENV_CONFIG = {
   TENANT_ID: process.env.TENANT_ID,
   BFF_API_CLIENT_ID: process.env.BFF_API_CLIENT_ID,
   BFF_API_BASE_URL: process.env.BFF_API_BASE_URL,
+  // Optional: SmartTodo Code Page URL (smart-todo-decoupling-r3 FR-27 / task 070).
+  // When set, the Outlook "Create To Do" ribbon opens the wizard from this URL
+  // with launch-context query params. When unset, the ribbon action is hidden
+  // / inert. Documented in .env.example.
+  SMARTTODO_CODEPAGE_URL: process.env.SMARTTODO_CODEPAGE_URL || '',
 };
 
 async function getHttpsOptions() {
@@ -176,6 +181,7 @@ module.exports = async (env, options) => {
         'process.env.TENANT_ID': JSON.stringify(ENV_CONFIG.TENANT_ID),
         'process.env.BFF_API_CLIENT_ID': JSON.stringify(ENV_CONFIG.BFF_API_CLIENT_ID),
         'process.env.BFF_API_BASE_URL': JSON.stringify(ENV_CONFIG.BFF_API_BASE_URL),
+        'process.env.SMARTTODO_CODEPAGE_URL': JSON.stringify(ENV_CONFIG.SMARTTODO_CODEPAGE_URL),
         'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
       }),
       ...(mode === 'production'

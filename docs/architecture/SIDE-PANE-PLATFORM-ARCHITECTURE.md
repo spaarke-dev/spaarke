@@ -22,7 +22,7 @@
 >
 > **What still exists and is current**:
 > - `SprkChatBridge.ts` (BroadcastChannel) in `src/client/shared/Spaarke.UI.Components/src/services/` — used for cross-frame events
-> - Individual side pane Code Pages (`CalendarSidePane`, `EventDetailSidePane`, `TodoDetailSidePane`) — these are per-entity side panes, not a global SprkChat host
+> - Individual side pane Code Pages (`CalendarSidePane`, `EventDetailSidePane`) — these are per-entity side panes, not a global SprkChat host. (`TodoDetailSidePane` was retired in smart-todo-decoupling-r3; the SmartTodo Code Page now renders the todo detail inline via `TodoDetailPanel`.)
 > - `SidePaneShell` component in `@spaarke/ui-components/src/components/SidePane/` — reusable shell for the above
 >
 > **See instead**:

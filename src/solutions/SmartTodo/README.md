@@ -43,7 +43,7 @@ App (FluentProvider + theme detection)
 From `@spaarke/ui-components`:
 - `PanelSplitter` — draggable resize handle with ARIA role="separator"
 - `useTwoPanelLayout` — two-panel layout hook with localStorage persistence
-- `TodoDetail` — reusable detail form (also used by TodoDetailSidePane)
+- `TodoDetail` — reusable detail form (rendered inline by `TodoDetailPanel`)
 - `resolveCodePageTheme` / `setupCodePageThemeListener` — theme detection
 
 ## Build

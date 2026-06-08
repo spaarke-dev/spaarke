@@ -11,7 +11,8 @@
  * `GET /api/v1/external/projects/{id}/todos` with ADR-024 polymorphic-resolver
  * fields populated server-side.
  *
- * Design reference: src/solutions/TodoDetailSidePane/src/components/TodoDetail.tsx
+ * Design reference: @spaarke/ui-components/TodoDetail
+ *   (src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx)
  *
  * Access level enforcement (ADR per project CLAUDE.md):
  *   - ViewOnly    (100000000): Read-only. Can view to-dos, cannot create or modify.
