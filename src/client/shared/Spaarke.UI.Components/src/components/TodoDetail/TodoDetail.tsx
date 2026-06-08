@@ -49,7 +49,7 @@ import type {
   OptionOnSelectData,
   SelectionEvents,
 } from '@fluentui/react-components';
-import { SaveRegular, InfoRegular, DeleteRegular, CheckmarkRegular, OpenRegular } from '@fluentui/react-icons';
+import { SaveRegular, InfoRegular, DeleteRegular, CheckmarkRegular, OpenRegular, EditRegular, DismissRegular, AddCircleRegular } from '@fluentui/react-icons';
 import type { ITodoRecord, ITodoFieldUpdates, IContactOption } from './types';
 
 // ---------------------------------------------------------------------------
@@ -302,6 +302,26 @@ const useStyles = makeStyles({
   scoreSection: {
     marginBottom: '20px',
   },
+  regardingRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+  },
+  regardingLink: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  regardingActions: {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -342,14 +362,56 @@ export interface ITodoDetailProps {
    * Open the regarding record (matter/project/etc.) in a new tab/window.
    * Decoupled from Xrm — host provides the navigation implementation (ADR-012).
    * Called with the entity logical name and record ID.
+   *
+   * Hosts implementing FR-13 (regarding edit) should prefer `onOpenRegardingUrl`
+   * which uses the already-populated `sprk_regardingrecordurl` field directly
+   * (no Xrm dependency, supports all 11 regarding entity types).
    */
   onOpenRegardingRecord?: (entityName: string, recordId: string) => void;
+  /**
+   * Open the regarding record using the resolver `sprk_regardingrecordurl` field.
+   * Per FR-13, the URL is populated by `PolymorphicResolverService.applyResolverFields`
+   * and includes the Xrm clientUrl + appid. Preferred over `onOpenRegardingRecord`
+   * because it is portable across all 11 regarding entity types without requiring
+   * the host to maintain a record-type-to-entityname map.
+   */
+  onOpenRegardingUrl?: (url: string) => void;
+  /**
+   * Invoked when the user clicks "Change" / "Set Regarding…" — the host opens the
+   * `AssociateToStep` dialog (FR-13). Pure signal: no payload is passed. The host
+   * is responsible for orchestrating selection → `applyResolverFields` → save.
+   */
+  onChangeRegarding?: () => void;
+  /**
+   * Invoked when the user clicks "Clear Regarding" — the host nulls all 15
+   * regarding fields (11 lookups + 4 resolver fields) and saves.
+   *
+   * When omitted, the Clear button is hidden.
+   */
+  onClearRegarding?: () => void;
 }
 
-/** Map record-type display name to Dataverse entity logical name for navigation. */
+/**
+ * Map record-type display name to Dataverse entity logical name for the
+ * legacy `onOpenRegardingRecord` Xrm-navigate fallback. Covers all 11
+ * `sprk_todo` regarding targets per spec.md FR-07.
+ *
+ * Note: callers implementing FR-13 should prefer `onOpenRegardingUrl` —
+ * that path uses the resolver `sprk_regardingrecordurl` directly and is
+ * portable without this map.
+ */
 const RECORD_TYPE_ENTITY_MAP: Record<string, string> = {
   Matter: 'sprk_matter',
   Project: 'sprk_project',
+  Event: 'sprk_event',
+  Communication: 'sprk_communication',
+  'Work Assignment': 'sprk_workassignment',
+  Invoice: 'sprk_invoice',
+  Budget: 'sprk_budget',
+  Analysis: 'sprk_analysis',
+  Organization: 'sprk_organization',
+  Contact: 'contact',
+  Document: 'sprk_document',
 };
 
 // ---------------------------------------------------------------------------
@@ -366,6 +428,9 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     onClose: _onClose,
     onSearchContacts,
     onOpenRegardingRecord,
+    onOpenRegardingUrl,
+    onChangeRegarding,
+    onClearRegarding,
   }) => {
     const styles = useStyles();
 
@@ -656,14 +721,28 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       }
     }, [record, buildDirtyUpdates, onSaveTodo, description, notes, dueDate, priority, effort, assignedToId]);
 
-    // Open regarding record — delegates to host via callback prop
+    // Open regarding record — delegates to host via callback prop.
+    //
+    // Preference order (per FR-13):
+    //   1. onOpenRegardingUrl + sprk_regardingrecordurl — portable across all
+    //      11 regarding entity types without requiring a record-type map.
+    //   2. onOpenRegardingRecord + RECORD_TYPE_ENTITY_MAP fallback — legacy
+    //      Xrm-based path, supports only Matter + Project today.
     const handleOpenRegardingRecord = React.useCallback(() => {
-      if (!record?.sprk_regardingrecordid || !onOpenRegardingRecord) return;
-      const typeName = record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] ?? '';
-      const entityName = RECORD_TYPE_ENTITY_MAP[typeName];
-      if (!entityName) return;
-      onOpenRegardingRecord(entityName, record.sprk_regardingrecordid);
-    }, [record, onOpenRegardingRecord]);
+      if (!record) return;
+      // Path 1: use sprk_regardingrecordurl (FR-13, ADR-024 resolver-field path)
+      if (record.sprk_regardingrecordurl && onOpenRegardingUrl) {
+        onOpenRegardingUrl(record.sprk_regardingrecordurl);
+        return;
+      }
+      // Path 2: legacy Xrm navigate fallback
+      if (record.sprk_regardingrecordid && onOpenRegardingRecord) {
+        const typeName = record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] ?? '';
+        const entityName = RECORD_TYPE_ENTITY_MAP[typeName];
+        if (!entityName) return;
+        onOpenRegardingRecord(entityName, record.sprk_regardingrecordid);
+      }
+    }, [record, onOpenRegardingUrl, onOpenRegardingRecord]);
 
     // --- Render states ---
 
@@ -746,16 +825,71 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               </div>
             )}
 
-            {/* Record link */}
-            {record.sprk_regardingrecordname && record.sprk_regardingrecordid && (
+            {/*
+              Regarding row (FR-13). When a regarding parent exists the row
+              shows the resolver name + an "open in new tab" icon (clickable
+              Link → sprk_regardingrecordurl via onOpenRegardingUrl). The Change
+              button (visible when onChangeRegarding is wired) launches the
+              AssociateToStep dialog hosted by the consumer. The Clear button
+              (visible when onClearRegarding is wired AND a regarding exists)
+              nulls all 15 regarding fields atomically.
+
+              When no regarding exists AND onChangeRegarding is wired, a single
+              "Set Regarding…" button is rendered in lieu of the link row.
+            */}
+            {record.sprk_regardingrecordname && record.sprk_regardingrecordid ? (
               <div className={styles.fieldRow}>
                 <label className={styles.fieldLabel}>Record</label>
-                <Link className={styles.recordLink} onClick={handleOpenRegardingRecord} as="button">
-                  {record.sprk_regardingrecordname}
-                  <OpenRegular className={styles.openIcon} />
-                </Link>
+                <div className={styles.regardingRow}>
+                  <Link
+                    className={`${styles.recordLink} ${styles.regardingLink}`}
+                    onClick={handleOpenRegardingRecord}
+                    as="button"
+                  >
+                    {record.sprk_regardingrecordname}
+                    <OpenRegular className={styles.openIcon} />
+                  </Link>
+                  <div className={styles.regardingActions}>
+                    {onChangeRegarding && (
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<EditRegular />}
+                        onClick={onChangeRegarding}
+                        aria-label="Change regarding record"
+                      >
+                        Change
+                      </Button>
+                    )}
+                    {onClearRegarding && (
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<DismissRegular />}
+                        onClick={onClearRegarding}
+                        aria-label="Clear regarding record"
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
-            )}
+            ) : onChangeRegarding ? (
+              <div className={styles.fieldRow}>
+                <label className={styles.fieldLabel}>Record</label>
+                <div className={styles.regardingRow}>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<AddCircleRegular />}
+                    onClick={onChangeRegarding}
+                  >
+                    Set Regarding…
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             <div className={styles.fieldRow}>
               <label className={styles.fieldLabel}>Due Date</label>

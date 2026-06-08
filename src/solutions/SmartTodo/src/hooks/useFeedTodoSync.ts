@@ -1,41 +1,48 @@
 /**
- * useFeedTodoSync — No-op stub for the SmartTodo Code Page.
+ * useFeedTodoSync — No-op stub for the standalone SmartTodo Code Page.
  *
- * In LegalWorkspace, this hook connects to FeedTodoSyncContext to synchronise
- * todo lifecycle events between the Updates Feed and the Smart To Do list.
- * The standalone SmartTodo Code Page does not have an Updates Feed, so this
- * stub provides a subscribe function that never fires.
+ * In LegalWorkspace this hook resolves a real FeedTodoSyncContext that acts as
+ * a cross-block todo-lifecycle notification bus between the Updates Feed
+ * (Block 3) and the Smart To Do block (Block 4). The standalone SmartTodo
+ * Code Page is mounted independently with no parent providers, so this stub
+ * returns a safe no-op shape that mirrors the LegalWorkspace contract.
  *
- * Per R3 FR-14 / task 023 (forthcoming), the `subscribe` callback delivers
- * `(todoId, isActive)` — todoId is a sprk_todoid; isActive=true when the todo
- * just became Open/In-Progress, false when it became Inactive (Completed or
- * Dismissed) or was deleted. The legacy `(eventId, flagged)` shape is gone.
- *
- * The legacy id-based methods (isFlagged / toggleFlag / isPending / getError)
- * are retained as no-ops for API compatibility with LegalWorkspace's
- * FeedTodoSyncContext until the formal payload update in task 023.
+ * R3 contract (FR-14 / OS-1): both methods carry `todoId` (sprk_todoid) +
+ * `isActive` boolean. `isActive=true` when the todo is Open / In Progress;
+ * `isActive=false` when Completed / Dismissed / deleted. The legacy
+ * `(eventId, flagged)` shape has no compat path here.
  */
 
+/**
+ * Listener callback for todo-lifecycle change notifications.
+ *
+ * @param todoId   - `sprk_todoid` GUID of the todo that changed.
+ * @param isActive - true when the todo is currently active (Open / In Progress);
+ *                   false when it became Completed, Dismissed, or was deleted.
+ */
+export type FeedTodoSyncListener = (todoId: string, isActive: boolean) => void;
+
+/**
+ * Public API exposed by the cross-block todo-lifecycle notification bus.
+ *
+ * Mirrors `IFeedTodoSyncContextValue` from LegalWorkspace so consumers can
+ * use the same hook signature regardless of host.
+ */
 export interface IFeedTodoSyncContextValue {
-  isFlagged: (todoId: string) => boolean;
-  toggleFlag: (todoId: string) => void;
-  isPending: (todoId: string) => boolean;
-  getError: (todoId: string) => string | null;
-  subscribe: (
-    callback: (todoId: string, isActive: boolean) => void
-  ) => () => void;
+  /** Broadcast that a `sprk_todo` record's active state changed. */
+  notifyTodoChange: (todoId: string, isActive: boolean) => void;
+  /** Subscribe to todo-lifecycle change notifications. */
+  subscribe: (listener: FeedTodoSyncListener) => () => void;
 }
 
 /**
- * No-op stub: returns a subscribe function that does nothing.
- * The SmartTodo Code Page operates independently without the Updates Feed.
+ * No-op stub: notifyTodoChange is a sink; subscribe registers a listener
+ * that never fires. The standalone SmartTodo Code Page operates independently
+ * without any Updates Feed counterpart.
  */
 export function useFeedTodoSync(): IFeedTodoSyncContextValue {
   return {
-    isFlagged: () => false,
-    toggleFlag: () => {},
-    isPending: () => false,
-    getError: () => null,
+    notifyTodoChange: () => {},
     subscribe: () => () => {},
   };
 }

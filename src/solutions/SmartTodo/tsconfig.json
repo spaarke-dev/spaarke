@@ -18,7 +18,13 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src/index.ts"]
+      "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src/index.ts"],
+      "@spaarke/ui-components/TodoDetail": ["../../client/shared/Spaarke.UI.Components/src/components/TodoDetail/index.ts"],
+      "@spaarke/ui-components/AssociateToStep": ["../../client/shared/Spaarke.UI.Components/src/components/AssociateToStep/index.ts"],
+      "@spaarke/ui-components/PanelSplitter": ["../../client/shared/Spaarke.UI.Components/src/components/PanelSplitter/index.ts"],
+      "@spaarke/ui-components/services": ["../../client/shared/Spaarke.UI.Components/src/services/index.ts"],
+      "@spaarke/ui-components/hooks": ["../../client/shared/Spaarke.UI.Components/src/hooks/useTwoPanelLayout.ts"],
+      "@spaarke/ui-components/utils": ["../../client/shared/Spaarke.UI.Components/src/utils/index.ts"]
     }
   },
   "include": ["src"],

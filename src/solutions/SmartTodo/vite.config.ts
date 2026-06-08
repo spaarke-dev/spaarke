@@ -16,6 +16,8 @@ export default defineConfig({
       "@spaarke/ui-components/PanelSplitter": path.resolve(sharedLibRoot, "components/PanelSplitter/index.ts"),
       "@spaarke/ui-components/hooks": path.resolve(sharedLibRoot, "hooks/useTwoPanelLayout.ts"),
       "@spaarke/ui-components/TodoDetail": path.resolve(sharedLibRoot, "components/TodoDetail/index.ts"),
+      "@spaarke/ui-components/AssociateToStep": path.resolve(sharedLibRoot, "components/AssociateToStep/index.ts"),
+      "@spaarke/ui-components/services": path.resolve(sharedLibRoot, "services/index.ts"),
       "@spaarke/ui-components/utils": path.resolve(sharedLibRoot, "utils/index.ts"),
       "@spaarke/ui-components": path.resolve(sharedLibRoot, "index.ts"),
     },

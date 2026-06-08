@@ -517,9 +517,12 @@ export class DataverseService {
    * Toggle the todoflag on a sprk_event record.
    *
    * Used for:
-   *   - Feed item flag toggle: adds or removes from To Do list
-   *   - "Add to To Do" in AI Summary dialog footer
-   *   - FeedTodoSyncContext.toggleFlag (cross-block state synchronisation)
+   *   - "Add to To Do" in AI Summary dialog footer (legacy)
+   *
+   * NOTE (R3 FR-14): No longer driven by FeedTodoSyncContext, which became a
+   * stateless notification bus. The flag column on `sprk_event` is being
+   * removed in R3 — this method exists only for the AISummaryDialog stub
+   * and will be deleted alongside the schema cut.
    *
    * When flagging (flagged=true):
    *   - Sets sprk_todoflag = true

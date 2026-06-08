@@ -53,6 +53,7 @@ import { DismissedSection } from "./DismissedSection";
 import { useTodoItems } from "../../hooks/useTodoItems";
 import { useKanbanColumns } from "../../hooks/useKanbanColumns";
 import { useUserPreferences } from "../../hooks/useUserPreferences";
+import { useFeedTodoSync } from "../../hooks/useFeedTodoSync";
 import { DataverseService } from "../../services/DataverseService";
 import { IEvent } from "../../types/entities";
 import { computeTodoScore } from "../../utils/todoScoreUtils";
@@ -283,6 +284,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     serviceRef.current = new DataverseService(webApi);
   }, [webApi]);
 
+  // FeedTodoSyncContext producer hook (R3 FR-14): notify other blocks when a
+  // todo lifecycle event happens here (dismiss / restore / add). Receivers
+  // (e.g. ActivityFeed-side consumers, BroadcastChannel relays) react within
+  // one render cycle. Wired into the mutation handlers below.
+  const { notifyTodoChange } = useFeedTodoSync();
+
   // -------------------------------------------------------------------------
   // Core data hooks
   // -------------------------------------------------------------------------
@@ -435,6 +442,11 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
             prev.filter((i) => i.sprk_eventid !== tempId)
           );
           refetch();
+          // FR-14: cross-block notification — the new todo is active.
+          // `result.data` is the new record id when available; fall back to
+          // the optimistic tempId if the service did not surface one.
+          const newId = (result as { data?: { id?: string } }).data?.id ?? tempId;
+          notifyTodoChange(newId, true);
         }
       } catch {
         setAddedItems((prev) =>
@@ -445,7 +457,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         setIsAdding(false);
       }
     },
-    [userId, refetch]
+    [userId, refetch, notifyTodoChange]
   );
 
   // -------------------------------------------------------------------------
@@ -466,6 +478,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
           setDismissedItems((prev) =>
             prev.filter((i) => i.sprk_eventid !== eventId)
           );
+        } else {
+          // FR-14: cross-block notification — todo became inactive.
+          // `eventId` here is the row identifier carried by IEvent today;
+          // the eventual sprk_todo repoint (see useTodoItems header comment)
+          // will swap this for a true sprk_todoid without changing the call.
+          notifyTodoChange(eventId, false);
         }
       } catch {
         setDismissedItems((prev) =>
@@ -479,7 +497,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         });
       }
     },
-    [displayItems]
+    [displayItems, notifyTodoChange]
   );
 
   // -------------------------------------------------------------------------
@@ -506,6 +524,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
           });
         } else {
           refetch();
+          // FR-14: cross-block notification — restored todo is active again.
+          notifyTodoChange(eventId, true);
         }
       } catch {
         setDismissedItems((prev) => [item, ...prev]);
@@ -522,7 +542,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         });
       }
     },
-    [dismissedItems, refetch]
+    [dismissedItems, refetch, notifyTodoChange]
   );
 
   // -------------------------------------------------------------------------

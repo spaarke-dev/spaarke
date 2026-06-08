@@ -31,6 +31,7 @@ import {
   buildDocumentsTabQuery,
   buildTodoItemsQuery,
   buildDismissedTodoQuery,
+  type TodoFilterMode,
 } from './queryHelpers';
 
 // ---------------------------------------------------------------------------
@@ -417,12 +418,23 @@ export class DataverseService {
    * To Do list.
    *
    * Returns `sprk_todo` records where statecode = 0 (Active) and statuscode in
-   * (Open, In Progress). Sort: priorityscore desc, duedate asc.
+   * (Open, In Progress). Ownership predicate is determined by `mode`:
+   *   - 'MyTasks' (default): owner OR assignee = userId
+   *   - 'AssignedToMe':      assignee = userId
+   *   - 'All':               no ownership predicate
+   * (R3 FR-12 / A-6 — see queryHelpers.buildTodoItemsQuery for the team-clause
+   * deferral TODO.)
+   *
+   * Sort: priorityscore desc, duedate asc.
    *
    * @param userId - The GUID of the current user
+   * @param mode   - My Tasks filter mode (default 'MyTasks')
    */
-  async getActiveTodos(userId: string): Promise<IResult<ITodo[]>> {
-    const query = buildTodoItemsQuery(userId);
+  async getActiveTodos(
+    userId: string,
+    mode: TodoFilterMode = 'MyTasks'
+  ): Promise<IResult<ITodo[]>> {
+    const query = buildTodoItemsQuery(userId, mode);
     return tryCatch(async () => {
       const result = await this._webApi.retrieveMultipleRecords('sprk_todo', query);
       return toTypedArray<ITodo>(mapTodoFormattedValues(result.entities));

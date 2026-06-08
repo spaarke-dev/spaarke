@@ -137,8 +137,17 @@ export const TODO_DETAIL_SELECT = [
  * Updatable fields for `sprk_todo` via Web API `updateRecord`.
  *
  * Note on resolver fields: callers MUST use `PolymorphicResolverService.applyResolverFields`
- * when changing any `sprk_regarding*` specific lookup — never set the four resolver
- * fields directly (ADR-024). This type intentionally omits resolver fields.
+ * (typically via `buildTodoRegardingUpdate` in
+ * `@spaarke/ui-components/services/TodoRegardingUpdateBuilder`) when changing any
+ * `sprk_regarding*` specific lookup — never set the four resolver fields directly
+ * (ADR-024).
+ *
+ * The index signature accepts the dynamic `@odata.bind` keys produced by
+ * `buildTodoRegardingUpdate` (e.g., `sprk_RegardingMatter@odata.bind`,
+ * `sprk_RegardingRecordType@odata.bind`) along with the three plain resolver
+ * text/URL fields (id, name, url) which the builder also populates per ADR-024.
+ *
+ * Concrete shape (typed for editor IntelliSense on the well-known fields):
  */
 export interface ITodoFieldUpdates {
   sprk_name?: string;
@@ -154,6 +163,20 @@ export interface ITodoFieldUpdates {
   statuscode?: number;
   /** OData bind for the Assigned To lookup (systemuser table). */
   'sprk_AssignedTo@odata.bind'?: string | null;
+
+  // ---- Resolver fields (FR-13) ---------------------------------------------
+  // These three text/URL fields are populated by buildTodoRegardingUpdate and
+  // MUST NOT be set directly. They are listed here so the type accepts payloads
+  // produced by the helper. Always use the helper (ADR-024).
+  sprk_regardingrecordid?: string | null;
+  sprk_regardingrecordname?: string | null;
+  sprk_regardingrecordurl?: string | null;
+
+  // ---- Dynamic @odata.bind escape hatch ------------------------------------
+  // Accepts the entity-specific lookup binds + sprk_regardingrecordtype bind
+  // produced by buildTodoRegardingUpdate. Keys end in '@odata.bind'; values
+  // are `string` (e.g. "/sprk_matters(guid)") or `null` to clear the binding.
+  [odataBindKey: `${string}@odata.bind`]: string | null | undefined;
 }
 
 // ---------------------------------------------------------------------------

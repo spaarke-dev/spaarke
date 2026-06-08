@@ -19,6 +19,9 @@ export type { IKanbanCardProps } from './KanbanCard';
 export { KanbanHeader } from './KanbanHeader';
 export type { IKanbanHeaderProps } from './KanbanHeader';
 
+export { MyTasksFilter, MY_TASKS_FILTER_MODES } from './MyTasksFilter';
+export type { IMyTasksFilterProps } from './MyTasksFilter';
+
 export { ThresholdSettingsPopover } from './ThresholdSettings';
 export type { IThresholdSettingsProps } from './ThresholdSettings';
 

@@ -562,9 +562,15 @@ export class WorkAssignmentService {
       if (eventState.eventFinalDueDate) {
         entity['sprk_finalduedate'] = eventState.eventFinalDueDate;
       }
-      if (eventState.addTodo) {
-        entity['sprk_todoflag'] = true;
-      }
+
+      // R3 (smart-todo-decoupling-r3, task 031): The legacy "Add a To Do"
+      // checkbox that wrote `entity['sprk_todoflag'] = true` was removed here
+      // per FR-15 / OS-1. The `sprk_event.sprk_todoflag` column is being
+      // dropped from the schema; To Dos are now first-class `sprk_todo`
+      // records created via the CreateTodoWizard. Consumers who want a
+      // companion To Do for a work assignment's follow-on event should
+      // launch the CreateTodoWizard separately and select the event as
+      // the regarding record.
 
       // Link to work assignment
       const waNavProp = findNavProp(navProps, 'sprk_workassignment', 'workassignment');

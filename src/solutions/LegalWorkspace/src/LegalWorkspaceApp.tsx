@@ -136,10 +136,12 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
     /*
      * FeedTodoSyncProvider is placed at the top of the app tree so that
      * Block 3 (ActivityFeed / FeedItemCard) and Block 4 (SmartToDo) both
-     * share the same flag state instance and receive cross-block updates
-     * via the subscribe() mechanism without prop-drilling.
+     * share the same cross-block todo-lifecycle bus and receive change
+     * notifications via subscribe() without prop-drilling. The provider
+     * holds no persistence state — producers write to Dataverse and then
+     * call notifyTodoChange(todoId, isActive). See FeedTodoSyncContext.tsx.
      */
-    <FeedTodoSyncProvider webApi={webApi}>
+    <FeedTodoSyncProvider>
       <div className={styles.root}>
         {/* Embedded mode skips the LegalWorkspace internal PageHeader.
             Standalone mode renders the full header with workspace dropdown. */}

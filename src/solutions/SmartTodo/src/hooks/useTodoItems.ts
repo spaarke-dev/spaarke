@@ -24,6 +24,7 @@ import { ITodo } from '../types/entities';
 import { useFeedTodoSync } from './useFeedTodoSync';
 import { computeTodoScore } from '../utils/todoScoreUtils';
 import type { IWebApi } from '../types/xrm';
+import type { TodoFilterMode } from '../services/queryHelpers';
 
 // ---------------------------------------------------------------------------
 // Sort helper
@@ -63,6 +64,11 @@ export interface IUseTodoItemsOptions {
   /** GUID of the current user (context.userSettings.userId) */
   userId: string;
   /**
+   * My Tasks filter mode (R3 FR-12). Changing this value triggers a re-fetch
+   * with a new OData predicate. Defaults to 'MyTasks' (owner OR assignee).
+   */
+  filterMode?: TodoFilterMode;
+  /**
    * Optional mock items for local development / testing.
    * When provided, bypasses Xrm.WebApi.
    */
@@ -85,7 +91,7 @@ export interface IUseTodoItemsResult {
 // ---------------------------------------------------------------------------
 
 export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult {
-  const { webApi, userId, mockItems } = options;
+  const { webApi, userId, mockItems, filterMode = 'MyTasks' } = options;
 
   const [items, setItems] = useState<ITodo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -136,7 +142,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     setError(null);
 
     serviceRef.current
-      .getActiveTodos(userId)
+      .getActiveTodos(userId, filterMode)
       .then((result) => {
         if (cancelled) return;
 
@@ -163,21 +169,23 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     return () => {
       cancelled = true;
     };
-  }, [userId, mockItems, fetchKey]);
+  }, [userId, mockItems, fetchKey, filterMode]);
 
   // -------------------------------------------------------------------------
-  // FeedTodoSyncContext subscription — react to cross-block flag changes
+  // FeedTodoSyncContext subscription — react to cross-block todo lifecycle
+  // changes (R3 FR-14 / task 023 contract).
   // -------------------------------------------------------------------------
 
   const { subscribe } = useFeedTodoSync();
 
   useEffect(() => {
-    // FeedTodoSyncContext now signals todo lifecycle (add/remove) rather than
-    // sprk_event.sprk_todoflag toggles. The `id` parameter is a sprk_todoid; the
-    // boolean indicates whether the todo is currently active (true) or removed
-    // (false, e.g. dismissed/deleted). In standalone SmartTodo the sync context
-    // is a no-op stub, so this callback never fires; in LegalWorkspace it will
-    // be wired in task 023 (FeedTodoSyncContext payload update).
+    // The listener payload is `(todoId, isActive)` per R3 FR-14:
+    //   - todoId is a sprk_todoid GUID
+    //   - isActive=true  → todo became Open / In Progress
+    //   - isActive=false → todo became Completed / Dismissed / deleted
+    // In the standalone SmartTodo Code Page the bus is a no-op stub
+    // (see useFeedTodoSync.ts) so this callback only fires when the hook is
+    // re-hosted inside LegalWorkspace where a FeedTodoSyncProvider is mounted.
     const unsubscribe = subscribe(async (todoId: string, isActive: boolean) => {
       if (isActive) {
         // Todo became active externally — check for duplicates and re-fetch.
@@ -189,7 +197,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
         if (!userId) return;
 
         try {
-          const result = await serviceRef.current.getActiveTodos(userId);
+          const result = await serviceRef.current.getActiveTodos(userId, filterMode);
           if (!result.success) return;
 
           // Find the newly active todo in the refreshed list
@@ -216,7 +224,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     });
 
     return unsubscribe;
-  }, [subscribe, userId]);
+  }, [subscribe, userId, filterMode]);
 
   // Memoize the returned items so that consumers receive a stable reference
   // when neither the list contents nor the loading/error state has changed.

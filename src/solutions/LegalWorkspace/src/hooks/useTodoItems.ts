@@ -1,20 +1,17 @@
 /**
  * useTodoItems — React hook for fetching and managing Smart To Do list items.
  *
- * Queries sprk_event records where sprk_todoflag=true AND sprk_todostatus != Dismissed.
- * Integrates with FeedTodoSyncContext so that flag toggles from the Updates Feed
- * (Block 3) are reflected in real time without a page refresh.
+ * Currently queries sprk_event records (legacy event-based todo path); this
+ * hook will be repointed at `sprk_todo` in a follow-up that mirrors task 020
+ * (which already migrated the standalone SmartTodo Code Page). Until then it
+ * subscribes to FeedTodoSyncContext for cross-block lifecycle updates using
+ * the new R3 todoId-based payload (FR-14 / OS-1): the listener receives
+ * `(todoId, isActive)` and the hook treats the `todoId` opaquely — it
+ * triggers a refetch when relevant todos become active/inactive.
  *
  * Sort order (FR-07):
  *   1. sprk_priorityscore DESC (highest priority first)
  *   2. sprk_duedate ASC (earliest due date first within same priority)
- *
- * FeedTodoSyncContext integration:
- *   - On mount, subscribes to flag change notifications.
- *   - When an event is flagged (true), fetches its full details and inserts
- *     it into the local list, then re-sorts.
- *   - When an event is unflagged (false), removes it from the local list.
- *   - This gives instant UI feedback without waiting for a full re-fetch.
  *
  * Usage:
  *   const { items, isLoading, error, refetch } = useTodoItems({ webApi, userId });
@@ -172,57 +169,32 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
   }, [userId, mockItems, fetchKey, options.scope, options.businessUnitId]);
 
   // -------------------------------------------------------------------------
-  // FeedTodoSyncContext subscription — react to cross-block flag changes
+  // FeedTodoSyncContext subscription — react to cross-block todo lifecycle
+  // changes (R3 FR-14 payload contract: `(todoId, isActive)`).
+  //
+  // This LegalWorkspace block still loads its data from `sprk_event` (the
+  // sprk_todo repoint here lands in a later task), so we cannot resolve a
+  // todoId to a specific row in our list directly. The robust behaviour is
+  // to trigger a refetch on any cross-block notification — the next render
+  // sees a fresh authoritative list. The cost is one extra query per
+  // notification, acceptable for the user-driven mutation cadence.
   // -------------------------------------------------------------------------
 
   const { subscribe } = useFeedTodoSync();
 
   useEffect(() => {
-    const unsubscribe = subscribe(async (eventId: string, flagged: boolean) => {
-      if (flagged) {
-        // Event was flagged in the Updates Feed.
-        // Check if it already exists in our list to avoid duplicates.
-        const alreadyInList = itemsRef.current.some(
-          (item) => item.sprk_eventid === eventId
-        );
-        if (alreadyInList) return;
-
-        // Fetch full event details and add to list
-        if (!userId) return;
-
-        try {
-          // We don't have a single-record helper, so fetch with an eventId filter.
-          // Using retrieveMultipleRecords with a filter is the cleanest approach
-          // with Xrm.WebApi (no retrieveRecord equivalent in ComponentFramework.WebApi
-          // without the entity type — and we have it: sprk_event).
-          const result = await serviceRef.current.getActiveTodos(userId, { scope: options.scope, businessUnitId: options.businessUnitId });
-          if (!result.success) return;
-
-          // Find the newly flagged event in the refreshed list
-          const newItem = result.data.find((e) => e.sprk_eventid === eventId);
-          if (!newItem) return;
-
-          setItems((prev) => {
-            // Double-check for race condition: event might have been added already
-            if (prev.some((item) => item.sprk_eventid === eventId)) return prev;
-            return sortTodoItems([...prev, newItem]);
-          });
-        } catch {
-          // Silently ignore — the item will appear on next manual refetch
-        }
-      } else {
-        // Event was unflagged — remove from the to-do list immediately
-        setItems((prev) => {
-          const filtered = prev.filter((item) => item.sprk_eventid !== eventId);
-          // Only update if something actually changed
-          if (filtered.length === prev.length) return prev;
-          return filtered;
-        });
-      }
+    const unsubscribe = subscribe((_todoId: string, _isActive: boolean) => {
+      // Mark suppressed-args to satisfy strict no-unused — these are part of
+      // the public listener contract and used by other consumers.
+      void _todoId;
+      void _isActive;
+      // Trigger refetch. Safe to call multiple times in quick succession —
+      // useEffect coalesces via the fetchKey state bump.
+      setFetchKey((k) => k + 1);
     });
 
     return unsubscribe;
-  }, [subscribe, userId]);
+  }, [subscribe]);
 
   // Memoize the returned items so that consumers receive a stable reference
   // when neither the list contents nor the loading/error state has changed.

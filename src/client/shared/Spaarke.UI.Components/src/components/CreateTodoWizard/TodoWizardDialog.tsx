@@ -1,12 +1,24 @@
 /**
  * TodoWizardDialog.tsx
- * Thin wrapper around CreateRecordWizard for "Create New To Do".
+ * Thin wrapper around CreateRecordWizard for "Create New To Do" (R3 — targets `sprk_todo`).
  *
- * A To Do is a sprk_event record with sprk_todoflag=true.
- * Default export enables React.lazy() dynamic import.
+ * Per smart-todo-decoupling-r3 spec:
+ *   - FR-15: The wizard creates `sprk_todo` records (NOT `sprk_event` with `todoflag=true`).
+ *   - FR-16: The AssociateToStep step is skippable (skipping creates a standalone todo
+ *            with all 11 regarding lookups and 4 resolver fields null).
+ *   - ADR-024: When the user selects a regarding record, `applyResolverFields` is invoked
+ *              by the service layer to atomically populate the entity-specific lookup
+ *              and the four resolver fields.
+ *   - OS-1: No compat path — never writes a sprk_event row.
  *
- * Dependencies are injected via props -- no solution-specific imports.
- * Uses IDataService (not IWebApi) for shared library portability.
+ * Default export enables React.lazy() dynamic import (preserved from R1/R2).
+ *
+ * Dependencies are injected via props — no solution-specific imports.
+ *
+ * @see CreateRecordWizard — the underlying multi-step shell (reused; AssociateToStep is
+ *                           prepended as wizard step 0 via the `associateToStep` config).
+ * @see TodoService — the create handler (writes sprk_todo + optional resolver fields).
+ * @see ./formTypes.ts — captured form state shape
  */
 import * as React from 'react';
 import { Button, Text, tokens } from '@fluentui/react-components';
@@ -15,11 +27,12 @@ import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 import { CreateRecordWizard, type ICreateRecordWizardConfig, type IFinishContext } from '../CreateRecordWizard';
 
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
+import { TODO_REGARDING_TARGETS } from '../AssociateToStep/types';
 
 import { CreateTodoStep } from './CreateTodoStep';
 import { TodoService } from './todoService';
 import { EMPTY_TODO_FORM } from './formTypes';
-import type { ICreateTodoFormState } from './formTypes';
+import type { ICreateTodoFormState, IInitialRegarding } from './formTypes';
 
 import {
   searchContactsAsLookup,
@@ -28,7 +41,7 @@ import {
 } from '../CreateMatterWizard/matterService';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
-import type { IDataService } from '../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 
 // ---------------------------------------------------------------------------
@@ -42,6 +55,23 @@ export interface ICreateTodoWizardProps {
   onClose: () => void;
   /** IDataService for Dataverse operations. */
   dataService: IDataService;
+  /**
+   * INavigationService for opening the Dataverse lookup dialog from the
+   * AssociateToStep wizard step. When omitted, the AssociateToStep is
+   * disabled (wizard runs without the regarding step). Most callers should
+   * pass a real INavigationService so users can associate the To Do.
+   */
+  navigationService?: INavigationService;
+  /**
+   * Optional initial regarding selection. When supplied, task 032 will
+   * use this to pre-fill the AssociateToStep so launch contexts that
+   * already know the parent record (e.g., a Matter detail-page ribbon
+   * button) can skip the user-selection step.
+   *
+   * Task 031 adds the prop surface only — the AssociateToStep does not
+   * yet auto-advance when this is supplied. Task 032 wires the auto-advance.
+   */
+  initialRegarding?: IInitialRegarding;
   /**
    * Authenticated fetch function for BFF API calls.
    * Required for email send operations.
@@ -72,6 +102,8 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
   open,
   onClose,
   dataService,
+  navigationService,
+  initialRegarding: _initialRegarding,
   authenticatedFetch,
   bffBaseUrl,
   embedded,
@@ -107,7 +139,17 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
       title: 'Create New To Do',
       entityLabel: 'to do',
       filesStepSubtitle: 'Upload documents to associate with this to do, or click Next to skip.',
-      finishingLabel: 'Creating to do\u2026',
+      finishingLabel: 'Creating to do…',
+
+      // FR-16: AssociateToStep is prepended (skippable). The CreateRecordWizard
+      // shell renders the eleven-target dropdown + lookup; selection is captured
+      // into context.association and passed through to onFinish.
+      associateToStep: navigationService
+        ? {
+            entityTypes: TODO_REGARDING_TARGETS.slice(),
+            navigationService,
+          }
+        : undefined,
 
       infoStep: {
         id: 'create-record',
@@ -116,6 +158,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         renderContent: _wizardFiles => (
           <CreateTodoStep
             dataService={dataService}
+            onSearchUsers={handleSearchUsers}
             onValidChange={setFormValid}
             onFormValues={setFormValues}
             initialFormValues={formValues}
@@ -139,11 +182,13 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         title: formValuesRef.current.title,
       }),
 
-      onFinish: async (_context: IFinishContext): Promise<IWizardSuccessConfig> => {
+      onFinish: async (context: IFinishContext): Promise<IWizardSuccessConfig> => {
         const currentFormValues = formValuesRef.current;
 
+        // ── Create sprk_todo (ADR-024: applyResolverFields runs inside TodoService when
+        //    a regarding triple is supplied; skipped wizard means context.association is null)
         const todoService = new TodoService(dataService);
-        const result = await todoService.createTodo(currentFormValues);
+        const result = await todoService.createTodo(currentFormValues, context.association);
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create to do');
         }
@@ -152,8 +197,8 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         const todoName = result.todoName!;
         const warnings: string[] = [];
 
-        // Send email (if selected)
-        if (_context.selectedActions.includes('send-email') && _context.followOn.emailTo.trim()) {
+        // ── Send email (if selected) — preserved from R1/R2 follow-on flow ────────
+        if (context.selectedActions.includes('send-email') && context.followOn.emailTo.trim()) {
           // Wrap IDataService to adapt to IWebApiWithCreate expected by EntityCreationService
           const webApiAdapter = {
             createRecord: async (entityName: string, data: Record<string, unknown>) => {
@@ -175,10 +220,11 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
           };
           const entityService = new EntityCreationService(webApiAdapter, authenticatedFetch, bffBaseUrl);
           const emailResult = await entityService.sendEmail({
-            to: _context.followOn.emailTo,
-            subject: _context.followOn.emailSubject,
-            body: _context.followOn.emailBody,
-            associations: [{ entityType: 'sprk_event', entityId: todoId, entityName: todoName }],
+            to: context.followOn.emailTo,
+            subject: context.followOn.emailSubject,
+            body: context.followOn.emailBody,
+            // Per FR-15: the association entity type is sprk_todo (NOT sprk_event)
+            associations: [{ entityType: 'sprk_todo', entityId: todoId, entityName: todoName }],
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
         }
@@ -208,6 +254,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
       formValid,
       formValues,
       dataService,
+      navigationService,
       authenticatedFetch,
       bffBaseUrl,
       handleSearchContacts,

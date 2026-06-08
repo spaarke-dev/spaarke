@@ -494,28 +494,81 @@ export const TODO_SELECT_FIELDS: string[] = [
 ];
 
 /**
+ * "My Tasks" filter modes used by KanbanHeader (R3 FR-12 / A-6).
+ *
+ * Re-declared here (rather than imported from hooks/useUserPreferences) so the
+ * query-builder layer has no upward dependency on the React hooks layer.
+ * The string literals must match `MyTasksFilterMode` in useUserPreferences.ts.
+ */
+export type TodoFilterMode = 'MyTasks' | 'AssignedToMe' | 'All';
+
+/**
+ * Build the ownership clause for the To Do kanban query per FR-12 / A-6.
+ *
+ * Modes:
+ *   - MyTasks (default): owner = currentuser OR assignee = currentuser
+ *     A-6 also calls for "OR ownerid eq team-where-currentuser-is-member".
+ *     That third clause is intentionally deferred to v2 because OData on
+ *     Dataverse Web API cannot express "owner is one of my teams" without
+ *     pre-fetching the user's team memberships (a separate roundtrip via
+ *     /teammemberships?$filter=_systemuserid_value eq {userId}) and inlining
+ *     the resulting team ids into the predicate. TODO(R3-v2): wire the
+ *     team-membership prefetch into the data hook and append
+ *     `or _owningteam_value in ({teamIds})` to this clause.
+ *   - AssignedToMe: assignee = currentuser only.
+ *   - All: no ownership clause (the active-statuscode filter still applies).
+ *
+ * Returns `null` for the All mode (caller omits the clause from the predicate).
+ */
+function buildTodoOwnershipClause(userId: string, mode: TodoFilterMode): string | null {
+  switch (mode) {
+    case 'AssignedToMe':
+      return `_sprk_assignedto_value eq ${userId}`;
+
+    case 'All':
+      return null;
+
+    case 'MyTasks':
+    default:
+      // FR-12 / A-6 — clauses 1 + 2. Clause 3 (team membership) deferred to v2.
+      return `(_ownerid_value eq ${userId} or _sprk_assignedto_value eq ${userId})`;
+  }
+}
+
+/**
  * Build the OData query for active to-do items (Kanban-visible).
  *
  * Returns `sprk_todo` records where:
  *   - statecode = 0 (Active)
  *   - statuscode in (Open, In Progress) — excludes Completed + Dismissed
- *   - owner = current user
+ *   - ownership predicate per `mode` (FR-12 / A-6)
  *
  * Sort: priorityscore desc, then duedate asc (most urgent first).
  *
  * Per FR-11: zero queries to `sprk_event` from the kanban path.
  * Per OS-1: no `sprk_todoflag` filter — that field no longer exists on `sprk_event`.
+ *
+ * @param userId - GUID of the current user
+ * @param mode   - My Tasks filter mode (default: 'MyTasks' per FR-12)
  */
-export function buildTodoItemsQuery(userId: string): string {
+export function buildTodoItemsQuery(
+  userId: string,
+  mode: TodoFilterMode = 'MyTasks'
+): string {
   // Active to-do statuscodes per task 009:
   //   1          = Open
   //   659490001  = In Progress
   // Completed (2) and Dismissed (659490002) are inactive and handled by the
   // dismissed / restore paths.
-  const filter =
-    `_ownerid_value eq ${userId}` +
-    ` and statecode eq 0` +
-    ` and (statuscode eq 1 or statuscode eq 659490001)`;
+  const activeClause =
+    `statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001)`;
+
+  const ownershipClause = buildTodoOwnershipClause(userId, mode);
+
+  const filter = ownershipClause
+    ? `${ownershipClause} and ${activeClause}`
+    : activeClause;
+
   return buildQuery({
     select: TODO_SELECT_FIELDS,
     filter,

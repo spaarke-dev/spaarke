@@ -1,6 +1,6 @@
 {
   "name": "@spaarke/ui-components",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Spaarke shared UI component library - Fluent UI v9 (selective imports)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

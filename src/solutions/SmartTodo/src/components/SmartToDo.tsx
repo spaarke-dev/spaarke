@@ -291,14 +291,31 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Core data hooks
   // -------------------------------------------------------------------------
 
+  const { preferences, updatePreferences, isLoading: prefsLoading } =
+    useUserPreferences({ webApi, userId });
+
   const { items, isLoading, error, refetch } = useTodoItems({
     webApi,
     userId,
     mockItems,
+    filterMode: preferences.myTasksFilterMode,
   });
 
-  const { preferences, updatePreferences, isLoading: prefsLoading } =
-    useUserPreferences({ webApi, userId });
+  // -------------------------------------------------------------------------
+  // My Tasks filter change handler (FR-12)
+  //
+  // Persists the new mode through the existing user-preference record (no new
+  // optionset value required — see hooks/useUserPreferences.ts). The
+  // useTodoItems hook subscribes to preferences.myTasksFilterMode, so the
+  // update triggers a re-fetch with the new OData predicate.
+  // -------------------------------------------------------------------------
+
+  const handleMyTasksFilterModeChange = React.useCallback(
+    (mode: typeof preferences.myTasksFilterMode) => {
+      void updatePreferences({ myTasksFilterMode: mode });
+    },
+    [updatePreferences]
+  );
 
   // Expose refetch to parent for refresh button routing (embedded mode)
   React.useEffect(() => {
@@ -644,6 +661,9 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         isAdding={isAdding}
         onSettingsOpen={() => setSettingsOpen(true)}
         embedded={embedded}
+        myTasksFilterMode={preferences.myTasksFilterMode}
+        onMyTasksFilterModeChange={handleMyTasksFilterModeChange}
+        myTasksFilterDisabled={prefsLoading}
       />
 
       {/* ── Settings popover — anchor to a hidden trigger ──────────────── */}
