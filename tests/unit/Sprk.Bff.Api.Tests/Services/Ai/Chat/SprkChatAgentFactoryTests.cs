@@ -501,10 +501,12 @@ public class SprkChatAgentFactoryTests
         services.AddScoped(_ => contextProvider);
         services.AddLogging();
 
-        // Register dependencies of SessionSummarizeOrchestrator. ChatSessionManager is a
-        // concrete class (not an interface) so we cannot Moq.Of() it — construct with
-        // mocked I/O deps directly. The tool's registration block ONLY checks "is the
-        // orchestrator resolvable?", it does NOT invoke the orchestrator's methods.
+        // Register dependencies of SessionSummarizeOrchestrator. After R6 task 025 (Pillar 4
+        // refactor), the orchestrator is a thin pass-through with 3 ctor deps:
+        // ChatSessionManager + IPlaybookExecutionEngine + ILogger. The legacy RAG/OpenAI/
+        // Dataverse/telemetry deps moved into PlaybookExecutionEngine where they belong.
+        // The tool's registration block ONLY checks "is the orchestrator resolvable?", it
+        // does NOT invoke the orchestrator's methods.
         var chatSessionManager = new ChatSessionManager(
             cache: Mock.Of<IDistributedCache>(),
             dataverseRepository: Mock.Of<IChatDataverseRepository>(),
@@ -513,10 +515,7 @@ public class SprkChatAgentFactoryTests
             cleanupSignal: null);
 
         services.AddSingleton(chatSessionManager);
-        services.AddSingleton(Mock.Of<IRagService>());
-        services.AddSingleton(Mock.Of<IOpenAiClient>());
-        services.AddSingleton(Mock.Of<Spaarke.Dataverse.IGenericEntityService>());
-        services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
+        services.AddSingleton(Mock.Of<Sprk.Bff.Api.Services.Ai.IPlaybookExecutionEngine>());
 
         // The actual orchestrator class — concrete, scoped, per task 012 + AnalysisServicesModule.
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();

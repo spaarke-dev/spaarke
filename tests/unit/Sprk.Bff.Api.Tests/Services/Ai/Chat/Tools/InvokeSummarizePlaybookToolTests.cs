@@ -348,7 +348,7 @@ public class InvokeSummarizePlaybookToolTests
         // FR-04 + the orchestrator's CombinedSummaryInterjection emission contract.
         capturedEvents.Should().NotBeEmpty();
         capturedEvents[0].Type.Should().Be("text");
-        capturedEvents[0].Content.Should().Be(SessionSummarizeOrchestrator.CombinedSummaryInterjection);
+        capturedEvents[0].Content.Should().Be(PlaybookExecutionEngine.CombinedSummaryInterjection);
 
         // The terminal event MUST be Type="complete" — the orchestrator's Completed chunk.
         capturedEvents.Last().Type.Should().Be("complete");
@@ -438,9 +438,15 @@ public class InvokeSummarizePlaybookToolTests
     }
 
     /// <summary>
-    /// Constructs a real <see cref="SessionSummarizeOrchestrator"/> (which is sealed per ADR-010)
-    /// with stubbed I/O boundary dependencies — mirrors <c>SessionSummarizeOrchestratorTests</c>
-    /// approach. Returns the orchestrator + the mocks/stubs the test can inspect.
+    /// Constructs a real <see cref="SessionSummarizeOrchestrator"/> backed by a real
+    /// <see cref="PlaybookExecutionEngine"/> wired against stubbed I/O boundary deps. Returns
+    /// the orchestrator + the mocks/stubs the test can inspect.
+    /// <para>
+    /// <b>R6 task 025 (Pillar 4 / D-A-17) update</b>: the chat-summarize streaming pipeline
+    /// moved from the orchestrator into the engine. This helper now constructs both — the
+    /// orchestrator forwards to the engine, the engine runs RAG + Structured Outputs + parser
+    /// against the stubs.
+    /// </para>
     /// </summary>
     private static SessionSummarizeOrchestrator BuildOrchestrator(
         out TestableChatSessionManager sessionManager,
@@ -463,25 +469,45 @@ public class InvokeSummarizePlaybookToolTests
 
         openAi = new RecordingOpenAiClient();
 
+        // R6 task 025 — FK chain (post-task-024 valid) supersedes alternate-key load.
+        var actionId = Guid.Parse("eeb05bfd-1260-f111-ab0b-70a8a59455f4");
+        var nodeMock = new Mock<INodeService>();
+        nodeMock
+            .Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new PlaybookNodeDto
+            {
+                Id = Guid.NewGuid(),
+                PlaybookId = SessionSummarizeOrchestrator.ChatSummarizePlaybookId,
+                ActionId = actionId
+            }});
+
         var entityMock = new Mock<Spaarke.Dataverse.IGenericEntityService>();
         entityMock
-            .Setup(e => e.RetrieveByAlternateKeyAsync(
+            .Setup(e => e.RetrieveAsync(
                 "sprk_analysisaction",
-                It.IsAny<KeyAttributeCollection>(),
-                It.IsAny<string[]?>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string[]>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(BuildActionEntity(
+            .ReturnsAsync(BuildActionEntity(actionId,
                 systemPrompt: "You are the R5 Summarize-for-Chat assistant.",
                 outputSchemaJson: """{"type":"object","additionalProperties":false,"required":["tldr"],"properties":{"tldr":{"type":"array","items":{"type":"string"}}}}"""));
 
         var telemetry = new R5SummarizeTelemetry();
 
+        var engine = new PlaybookExecutionEngine(
+            builderService: Mock.Of<IAiPlaybookBuilderService>(),
+            orchestrationService: Mock.Of<IPlaybookOrchestrationService>(),
+            httpContextAccessor: Mock.Of<Microsoft.AspNetCore.Http.IHttpContextAccessor>(),
+            nodeService: nodeMock.Object,
+            entityService: entityMock.Object,
+            ragService: ragMock.Object,
+            openAiClient: openAi,
+            summarizeTelemetry: telemetry,
+            logger: NullLogger<PlaybookExecutionEngine>.Instance);
+
         return new SessionSummarizeOrchestrator(
             sessionManager,
-            ragMock.Object,
-            openAi,
-            entityMock.Object,
-            telemetry,
+            engine,
             NullLogger<SessionSummarizeOrchestrator>.Instance);
     }
 
@@ -509,12 +535,12 @@ public class InvokeSummarizePlaybookToolTests
             UploadedFiles: files);
     }
 
-    private static Entity BuildActionEntity(string systemPrompt, string outputSchemaJson)
+    private static Entity BuildActionEntity(Guid actionId, string systemPrompt, string outputSchemaJson)
     {
-        var entity = new Entity("sprk_analysisaction", Guid.NewGuid());
+        var entity = new Entity("sprk_analysisaction", actionId);
         entity["sprk_analysisactionid"] = entity.Id;
         entity["sprk_name"] = "Summarize Document for Chat";
-        entity["sprk_actioncode"] = SessionSummarizeOrchestrator.SummarizeActionCode;
+        entity["sprk_actioncode"] = "SUM-CHAT@v1";
         entity["sprk_systemprompt"] = systemPrompt;
         entity["sprk_outputschemajson"] = outputSchemaJson;
         return entity;

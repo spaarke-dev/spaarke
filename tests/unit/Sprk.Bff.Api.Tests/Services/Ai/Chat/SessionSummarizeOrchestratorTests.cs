@@ -1,27 +1,41 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
-using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
-using Sprk.Bff.Api.Telemetry;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 
 /// <summary>
-/// Unit tests for <see cref="SessionSummarizeOrchestrator"/> — the R5 task 012 (D2-03) convergence
-/// orchestrator that bridges the direct-endpoint path (task 014) and the agent-tool path (task 015).
+/// Unit tests for <see cref="SessionSummarizeOrchestrator"/> — the chat-Summarize convergence
+/// orchestrator.
 ///
-/// Covers spec FR-01 + FR-04 + FR-08 + FR-11 + NFR-02 + NFR-03 + SC-08 acceptance criteria.
-/// Includes ADR-010 enforcement (no R5-authored interface) + convergence-method count
-/// reflection assertions per acceptance criterion in the task POML.
+/// <para>
+/// <b>R6 task 025 (Pillar 4 / D-A-17) update</b>: the orchestrator is now a thin pass-through
+/// that forwards to <see cref="IPlaybookExecutionEngine.ExecuteChatSummarizeAsync"/>. Tests
+/// here verify the orchestrator's boundary responsibilities ONLY:
+/// </para>
+/// <list type="bullet">
+///   <item>Public <see cref="SessionSummarizeOrchestrator.SummarizeSessionFilesAsync"/>
+///         signature unchanged (convergence + ADR-010 reflection).</item>
+///   <item>Argument validation (tenant + session required; NFR-02 ≤20 file cap).</item>
+///   <item>Session lookup at the orchestrator boundary (missing session →
+///         InvalidOperationException; endpoint maps to 404).</item>
+///   <item>Forwards <see cref="ChatSummarizeRequest"/> to the engine with playbook ID
+///         <see cref="SessionSummarizeOrchestrator.ChatSummarizePlaybookId"/>
+///         and yields the engine's chunks unchanged (byte-equivalent pass-through).</item>
+/// </list>
+/// <para>
+/// Tests covering the moved logic (RAG retrieval / Structured Outputs / IncrementalJsonParser
+/// / FR-04 interjection / ADR-014 session filter / telemetry) live in
+/// <c>PlaybookExecutionEngineTests</c> — that's where the chat-Summarize pipeline lives now.
+/// </para>
 /// </summary>
 public class SessionSummarizeOrchestratorTests
 {
@@ -31,60 +45,85 @@ public class SessionSummarizeOrchestratorTests
     private const string FileId2 = "file-002";
 
     private readonly TestableChatSessionManager _sessionManagerStub;
-    private readonly Mock<IRagService> _ragServiceMock;
-    private readonly StubOpenAiClient _openAiClient;
-    private readonly Mock<Spaarke.Dataverse.IGenericEntityService> _entityServiceMock;
-    private readonly R5SummarizeTelemetry _telemetry;
+    private readonly Mock<IPlaybookExecutionEngine> _engineMock;
     private readonly Mock<ILogger<SessionSummarizeOrchestrator>> _loggerMock;
 
     public SessionSummarizeOrchestratorTests()
     {
         _sessionManagerStub = new TestableChatSessionManager();
-        _ragServiceMock = new Mock<IRagService>();
-        _openAiClient = new StubOpenAiClient();
-        _entityServiceMock = new Mock<Spaarke.Dataverse.IGenericEntityService>();
-        _telemetry = new R5SummarizeTelemetry();
+        _engineMock = new Mock<IPlaybookExecutionEngine>();
         _loggerMock = new Mock<ILogger<SessionSummarizeOrchestrator>>();
-
-        // Default RAG response — small valid result set so the happy-path tests can proceed.
-        _ragServiceMock
-            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RagSearchResponse
-            {
-                Query = "default",
-                Results = new[]
-                {
-                    new RagSearchResult { Id = "chunk-1", DocumentName = "f1.pdf", Content = "Lorem ipsum.", Score = 0.9 }
-                }
-            });
-
-        // Default action seed: valid system prompt + a minimal but valid Structured-Outputs schema.
-        _entityServiceMock
-            .Setup(e => e.RetrieveByAlternateKeyAsync(
-                "sprk_analysisaction",
-                It.IsAny<KeyAttributeCollection>(),
-                It.IsAny<string[]?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(BuildActionEntity(
-                systemPrompt: "You are the R5 Summarize-for-Chat assistant.",
-                outputSchemaJson: """{"type":"object","additionalProperties":false,"required":["tldr"],"properties":{"tldr":{"type":"array","items":{"type":"string"}}}}"""));
     }
 
     private SessionSummarizeOrchestrator CreateSut() => new(
         _sessionManagerStub,
-        _ragServiceMock.Object,
-        _openAiClient,
-        _entityServiceMock.Object,
-        _telemetry,
+        _engineMock.Object,
         _loggerMock.Object);
 
-    // ─── (a) Single-file does NOT emit combined-summary interjection — FR-04 negative ──────────
+    // ─── (a) Forwards to engine with ChatSummarizePlaybookId and resolved manifest ─────────────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_SingleFile_DoesNotEmitCombinedSummaryInterjection()
+    public async Task SummarizeSessionFilesAsync_ForwardsToEngine_WithCorrectPlaybookIdAndRequest()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1, FileId2);
+
+        Guid capturedPlaybookId = Guid.Empty;
+        ChatSummarizeRequest? capturedRequest = null;
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ChatSummarizeRequest, CancellationToken>(
+                (pid, req, _) => { capturedPlaybookId = pid; capturedRequest = req; })
+            .Returns(EmptyChunkStream());
+
+        var request = new SummarizeSessionFilesRequest(
+            TenantId, SessionId, new[] { FileId1 }, StyleHint: "executive",
+            Path: SummarizeInvocationPath.DirectEndpoint,
+            CorrelationId: "corr-001");
+
+        var sut = CreateSut();
+        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
+
+        capturedPlaybookId.Should().Be(SessionSummarizeOrchestrator.ChatSummarizePlaybookId,
+            "Pillar 4 binding — chat /summarize MUST route through PlaybookExecutionEngine using " +
+            "the summarize-document-for-chat@v1 playbook ID");
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.TenantId.Should().Be(TenantId);
+        capturedRequest.SessionId.Should().Be(SessionId);
+        capturedRequest.FileIds.Should().BeEquivalentTo(new[] { FileId1 });
+        capturedRequest.StyleHint.Should().Be("executive");
+        capturedRequest.Path.Should().Be(SummarizeInvocationPath.DirectEndpoint);
+        capturedRequest.CorrelationId.Should().Be("corr-001");
+        capturedRequest.UploadedFiles.Should().HaveCount(2,
+            "orchestrator forwards the session's full uploaded-files manifest; engine does the filtering");
+    }
+
+    // ─── (b) Pass-through: engine chunks emitted unchanged (regression — byte-equivalent) ──────
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_YieldsEngineChunksUnchanged_RegressionByteEquivalent()
     {
         _sessionManagerStub.Session = BuildSession(FileId1);
-        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"point\"]}" };
+
+        // Engine emits a representative stream: text (FR-04 would only be multi-file; using
+        // single-file here means engine sends text+delta+complete shapes). Orchestrator MUST
+        // yield these unchanged — no mutation, no re-shaping.
+        var engineChunks = new[]
+        {
+            AnalysisChunk.FromContent("(engine-emitted preamble)"),
+            AnalysisChunk.FromDelta("tldr", "alpha", 1),
+            AnalysisChunk.FromDelta("tldr", "beta", 2),
+            AnalysisChunk.Completed(new DocumentAnalysisResult
+            {
+                Summary = "done",
+                TlDr = new[] { "alpha", "beta" },
+                ParsedSuccessfully = true
+            })
+        };
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(engineChunks));
 
         var request = new SummarizeSessionFilesRequest(
             TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
@@ -93,46 +132,31 @@ public class SessionSummarizeOrchestratorTests
         var sut = CreateSut();
         var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
 
-        chunks.Should().NotContain(c => c.Type == "text" && c.Content == SessionSummarizeOrchestrator.CombinedSummaryInterjection);
+        chunks.Should().HaveCount(engineChunks.Length, "byte-equivalent pass-through — every engine chunk emitted exactly once, in order");
+        for (var i = 0; i < engineChunks.Length; i++)
+        {
+            chunks[i].Should().BeEquivalentTo(engineChunks[i],
+                $"chunk {i} forwarded unchanged from engine to orchestrator");
+        }
     }
 
-    // ─── (b) Multi-file emits combined-summary interjection BEFORE stream — FR-04 positive ────
+    // ─── (c) FK-chain routing — playbookId is the constant, not the alternate-key code ────────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_MultiFile_EmitsCombinedSummaryInterjectionBeforePlaybookStream()
+    public async Task SummarizeSessionFilesAsync_UsesFkChainPlaybookId_NotAlternateKeyCode()
     {
-        _sessionManagerStub.Session = BuildSession(FileId1, FileId2);
-        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"a\",\"b\"]}" };
-
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1, FileId2 }, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
-
-        var sut = CreateSut();
-        var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
-
-        chunks.Should().NotBeEmpty();
-        chunks[0].Type.Should().Be("text");
-        chunks[0].Content.Should().Be(SessionSummarizeOrchestrator.CombinedSummaryInterjection);
-
-        // And the interjection precedes any delta or completion chunk.
-        var firstStructured = chunks.FirstOrDefault(c => c.Type is "delta" or "complete");
-        firstStructured.Should().NotBeNull();
-        chunks.IndexOf(chunks[0]).Should().BeLessThan(chunks.IndexOf(firstStructured!));
-    }
-
-    // ─── (c) ADR-014 — RagService gets BOTH tenantId AND sessionId filters ─────────────────────
-
-    [Fact]
-    public async Task SummarizeSessionFilesAsync_PropagatesTenantAndSessionIdToRagSearchOptions()
-    {
+        // The pre-R6 path loaded the action seed via sprk_actioncode = "SUM-CHAT@v1" alternate key.
+        // Post-R6 task 025, the orchestrator MUST forward the playbook ID (a Guid) to the engine,
+        // and the engine resolves the action via the FK chain. This test pins the FR-26 invariant.
         _sessionManagerStub.Session = BuildSession(FileId1);
-        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"x\"]}" };
-        RagSearchOptions? observedOptions = null;
-        _ragServiceMock
-            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<string, RagSearchOptions, CancellationToken>((_, opts, _) => observedOptions = opts)
-            .ReturnsAsync(new RagSearchResponse { Query = "q", Results = Array.Empty<RagSearchResult>() });
+
+        Guid capturedPlaybookId = Guid.Empty;
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ChatSummarizeRequest, CancellationToken>(
+                (pid, _, _) => capturedPlaybookId = pid)
+            .Returns(EmptyChunkStream());
 
         var request = new SummarizeSessionFilesRequest(
             TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
@@ -141,12 +165,39 @@ public class SessionSummarizeOrchestratorTests
         var sut = CreateSut();
         _ = await Collect(sut.SummarizeSessionFilesAsync(request));
 
-        observedOptions.Should().NotBeNull();
-        observedOptions!.TenantId.Should().Be(TenantId);
-        observedOptions.SessionId.Should().Be(SessionId);
+        // FR-26 binding: playbook ID is a Guid, not the alternate-key string code.
+        capturedPlaybookId.Should().NotBe(Guid.Empty);
+        capturedPlaybookId.Should().Be(Guid.Parse("44285d15-1360-f111-ab0b-70a8a59455f4"),
+            "Pillar 4 chat-summarize uses the FK-resolved playbook 'summarize-document-for-chat@v1' ID");
     }
 
-    // ─── (d) NFR-02 — hard cap 20 files per session ────────────────────────────────────────────
+    // ─── (d) ADR-014 — tenant + session forwarded to engine for downstream RAG isolation ─────
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_PropagatesTenantAndSessionIdToEngine()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1);
+
+        ChatSummarizeRequest? captured = null;
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ChatSummarizeRequest, CancellationToken>((_, req, _) => captured = req)
+            .Returns(EmptyChunkStream());
+
+        var request = new SummarizeSessionFilesRequest(
+            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
+            Path: SummarizeInvocationPath.DirectEndpoint);
+
+        var sut = CreateSut();
+        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
+
+        captured.Should().NotBeNull();
+        captured!.TenantId.Should().Be(TenantId, "ADR-014 tenant isolation forwarded to engine");
+        captured.SessionId.Should().Be(SessionId, "ADR-014 session isolation forwarded to engine");
+    }
+
+    // ─── (e) NFR-02 — hard cap 20 files per session — orchestrator boundary ───────────────────
 
     [Fact]
     public async Task SummarizeSessionFilesAsync_RejectsMoreThanTwentyFileIds()
@@ -161,45 +212,52 @@ public class SessionSummarizeOrchestratorTests
 
         var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*NFR-02*");
+
+        _engineMock.Verify(
+            e => e.ExecuteChatSummarizeAsync(It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "NFR-02 cap fails fast at orchestrator boundary; engine MUST NOT be called");
     }
 
-    // ─── (e) Mid-stream exception yields FromError + terminates gracefully ─────────────────────
+    // ─── (f) Session not found → InvalidOperationException (endpoint maps to 404) ────────────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_MidStreamException_YieldsFromErrorAndTerminates()
+    public async Task SummarizeSessionFilesAsync_SessionNotFound_ThrowsInvalidOperationException()
     {
-        _sessionManagerStub.Session = BuildSession(FileId1);
-        _openAiClient.ThrowMidStream = true;
-        _openAiClient.TokensToYield = new[] { "{\"tld" }; // emits one token, then the next MoveNext throws
+        _sessionManagerStub.Session = null; // session lookup returns null
 
         var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
+            TenantId, SessionId, FileIds: null, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
         var sut = CreateSut();
-        var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
 
-        chunks.Should().Contain(c => c.Type == "error");
-        chunks.Last().Type.Should().Be("error");
-        chunks.Last().Error.Should().NotBeNullOrEmpty();
+        var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not found*");
+
+        _engineMock.Verify(
+            e => e.ExecuteChatSummarizeAsync(It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "missing session fails at orchestrator boundary; engine MUST NOT be called");
     }
 
-    // ─── (f) ADR-010 — class has no R5-authored interface ─────────────────────────────────────
+    // ─── (g) ADR-010 — class has no orchestrator-authored interface ──────────────────────────
 
     [Fact]
-    public void SessionSummarizeOrchestrator_HasNoR5AuthoredInterface()
+    public void SessionSummarizeOrchestrator_HasNoOrchestratorAuthoredInterface()
     {
         var ifaces = typeof(SessionSummarizeOrchestrator).GetInterfaces();
         // Filter out framework-supplied interfaces (System.*, Microsoft.*); any remaining
-        // would indicate an R5-authored interface, which ADR-010 forbids unless a genuine seam exists.
-        var r5Authored = ifaces.Where(i =>
+        // would indicate an orchestrator-authored interface, which ADR-010 forbids unless a
+        // genuine seam exists.
+        var authored = ifaces.Where(i =>
             !i.Namespace?.StartsWith("System", StringComparison.Ordinal) is true
             && !i.Namespace?.StartsWith("Microsoft", StringComparison.Ordinal) is true).ToList();
-        r5Authored.Should().BeEmpty(
+        authored.Should().BeEmpty(
             "ADR-010 forbids interfaces-for-testability-alone; SessionSummarizeOrchestrator is concrete by design");
     }
 
-    // ─── (g) Convergence — exactly ONE public streaming entry point ────────────────────────────
+    // ─── (h) Convergence — exactly ONE public streaming entry point ──────────────────────────
 
     [Fact]
     public void SessionSummarizeOrchestrator_ExposesExactlyOneConvergenceMethod()
@@ -217,50 +275,64 @@ public class SessionSummarizeOrchestratorTests
             .ToList();
 
         convergence.Should().HaveCount(1,
-            "spec FR-01 + FR-08 + SC-08 require a single convergence method that both task 014 and task 015 delegate to");
+            "spec FR-01 + FR-08 + SC-08 require a single convergence method that both the " +
+            "direct endpoint and the agent-tool path delegate to");
         convergence[0].Name.Should().Be(nameof(SessionSummarizeOrchestrator.SummarizeSessionFilesAsync));
     }
 
-    // ─── (h) Telemetry — agent_tool path dimension ────────────────────────────────────────────
+    // ─── (i) Path discriminator forwarded — agent_tool ──────────────────────────────────────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_AgentToolPath_TelemetryRecordsAgentToolDimension()
+    public async Task SummarizeSessionFilesAsync_AgentToolPath_ForwardsAgentToolDiscriminator()
     {
         _sessionManagerStub.Session = BuildSession(FileId1);
-        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"a\"]}" };
+
+        ChatSummarizeRequest? captured = null;
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ChatSummarizeRequest, CancellationToken>((_, req, _) => captured = req)
+            .Returns(EmptyChunkStream());
 
         var request = new SummarizeSessionFilesRequest(
             TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
             Path: SummarizeInvocationPath.AgentTool);
 
-        request.Path.ToTelemetryValue().Should().Be("agent_tool");
-
         var sut = CreateSut();
         _ = await Collect(sut.SummarizeSessionFilesAsync(request));
-        // No exception means the bounded-enum guard accepted agent_tool. Negative case is covered
-        // by the next test using DirectEndpoint.
+
+        captured.Should().NotBeNull();
+        captured!.Path.Should().Be(SummarizeInvocationPath.AgentTool);
+        captured.Path.ToTelemetryValue().Should().Be("agent_tool");
     }
 
-    // ─── (i) Telemetry — direct_endpoint path dimension ───────────────────────────────────────
+    // ─── (j) Path discriminator forwarded — direct_endpoint ─────────────────────────────────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_DirectEndpointPath_TelemetryRecordsDirectEndpointDimension()
+    public async Task SummarizeSessionFilesAsync_DirectEndpointPath_ForwardsDirectEndpointDiscriminator()
     {
         _sessionManagerStub.Session = BuildSession(FileId1);
-        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"a\"]}" };
+
+        ChatSummarizeRequest? captured = null;
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ChatSummarizeRequest, CancellationToken>((_, req, _) => captured = req)
+            .Returns(EmptyChunkStream());
 
         var request = new SummarizeSessionFilesRequest(
             TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        request.Path.ToTelemetryValue().Should().Be("direct_endpoint");
-
         var sut = CreateSut();
-        var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
-        chunks.Should().Contain(c => c.Type == "complete");
+        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
+
+        captured.Should().NotBeNull();
+        captured!.Path.Should().Be(SummarizeInvocationPath.DirectEndpoint);
+        captured.Path.ToTelemetryValue().Should().Be("direct_endpoint");
     }
 
-    // ─── (j) Empty input validation — required tenant + session ID ────────────────────────────
+    // ─── (k) Empty input validation — required tenant + session ID ───────────────────────────
 
     [Fact]
     public async Task SummarizeSessionFilesAsync_EmptyTenantId_Throws()
@@ -288,25 +360,26 @@ public class SessionSummarizeOrchestratorTests
         await act.Should().ThrowAsync<ArgumentException>();
     }
 
-    // ─── (k) Decline path — empty session emits a decline-style error chunk ───────────────────
+    // ─── (l) FR-26 invariant — orchestrator no longer references alternate-key constants ─────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_NoFilesInSession_EmitsDecline()
+    public void SessionSummarizeOrchestrator_HasNoAlternateKeyConstants_FR26()
     {
-        _sessionManagerStub.Session = BuildSession(/* no files */);
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, FileIds: null, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
+        // The pre-R6 path used SessionSummarizeOrchestrator.SummarizeActionCode +
+        // ActionEntityLogicalName constants for the alternate-key bypass. R6 task 025 removed
+        // these. Reflection assert: neither constant exists on the orchestrator anymore.
+        var members = typeof(SessionSummarizeOrchestrator)
+            .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Select(m => m.Name)
+            .ToArray();
 
-        var sut = CreateSut();
-        var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
-
-        chunks.Should().ContainSingle();
-        chunks[0].Type.Should().Be("error");
-        chunks[0].Error.Should().Contain("No files are available");
+        members.Should().NotContain("SummarizeActionCode",
+            "FR-26 — alternate-key bypass removed in R6 task 025 (D-A-17)");
+        members.Should().NotContain("ActionEntityLogicalName",
+            "FR-26 — alternate-key bypass removed in R6 task 025 (D-A-17)");
     }
 
-    // ─── Helpers ───────────────────────────────────────────────────────────────────────────────
+    // ─── Helpers ─────────────────────────────────────────────────────────────────────────────
 
     private static async Task<List<AnalysisChunk>> Collect(IAsyncEnumerable<AnalysisChunk> source)
     {
@@ -316,6 +389,24 @@ public class SessionSummarizeOrchestratorTests
             list.Add(chunk);
         }
         return list;
+    }
+
+    private static async IAsyncEnumerable<AnalysisChunk> EmptyChunkStream(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
+
+    private static async IAsyncEnumerable<AnalysisChunk> ToAsyncEnumerable(
+        IEnumerable<AnalysisChunk> chunks,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        foreach (var c in chunks)
+        {
+            await Task.Yield();
+            yield return c;
+        }
     }
 
     private static ChatSession BuildSession(params string[] fileIds)
@@ -342,24 +433,12 @@ public class SessionSummarizeOrchestratorTests
             UploadedFiles: files);
     }
 
-    private static Entity BuildActionEntity(string systemPrompt, string outputSchemaJson)
-    {
-        var entity = new Entity("sprk_analysisaction", Guid.NewGuid());
-        entity["sprk_analysisactionid"] = entity.Id;
-        entity["sprk_name"] = "Summarize Document for Chat";
-        entity["sprk_actioncode"] = SessionSummarizeOrchestrator.SummarizeActionCode;
-        entity["sprk_systemprompt"] = systemPrompt;
-        entity["sprk_outputschemajson"] = outputSchemaJson;
-        return entity;
-    }
-
     // ─── Test doubles ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Subclass of <see cref="ChatSessionManager"/> that overrides the virtual
     /// <see cref="ChatSessionManager.GetSessionAsync(string, string, CancellationToken)"/> so we can
-    /// inject a fixed session without wiring Redis/Dataverse. Sealed Moq doesn't apply to non-virtual
-    /// methods; subclass-with-override is the canonical pattern in this codebase (see ChatSessionManagerTests).
+    /// inject a fixed session without wiring Redis/Dataverse.
     /// </summary>
     private sealed class TestableChatSessionManager : ChatSessionManager
     {
@@ -377,62 +456,5 @@ public class SessionSummarizeOrchestratorTests
         public override Task<ChatSession?> GetSessionAsync(
             string tenantId, string sessionId, CancellationToken ct = default)
             => Task.FromResult(Session);
-    }
-
-    /// <summary>
-    /// Stub <see cref="IOpenAiClient"/> for streaming tests. Only the streaming method is needed;
-    /// all other interface members throw to make accidental use visible.
-    /// </summary>
-    private sealed class StubOpenAiClient : IOpenAiClient
-    {
-        public IReadOnlyList<string> TokensToYield { get; set; } = Array.Empty<string>();
-        public bool ThrowMidStream { get; set; }
-
-        public async IAsyncEnumerable<string> StreamStructuredCompletionAsync(
-            IEnumerable<global::OpenAI.Chat.ChatMessage> messages,
-            BinaryData jsonSchema,
-            string schemaName,
-            string? model = null,
-            int? maxOutputTokens = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            var i = 0;
-            foreach (var token in TokensToYield)
-            {
-                if (ThrowMidStream && i > 0)
-                {
-                    throw new InvalidOperationException("simulated mid-stream failure");
-                }
-                yield return token;
-                i++;
-                await Task.Yield();
-            }
-
-            if (ThrowMidStream && TokensToYield.Count > 0)
-            {
-                // If only one token was queued and we still want to fail, simulate the failure
-                // on the MoveNext following the last yield.
-                throw new InvalidOperationException("simulated mid-stream failure");
-            }
-        }
-
-        public IAsyncEnumerable<string> StreamCompletionAsync(string prompt, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Not used by R5 task 012 tests.");
-        public Task<string> GetCompletionAsync(string prompt, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Not used by R5 task 012 tests.");
-        public IAsyncEnumerable<string> StreamVisionCompletionAsync(string prompt, byte[] imageBytes, string mediaType, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Not used by R5 task 012 tests.");
-        public Task<string> GetVisionCompletionAsync(string prompt, byte[] imageBytes, string mediaType, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Not used by R5 task 012 tests.");
-        public Task<ReadOnlyMemory<float>> GenerateEmbeddingAsync(string text, string? model = null, int? dimensions = null, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Not used by R5 task 012 tests.");
-        public Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(IEnumerable<string> texts, string? model = null, int? dimensions = null, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Not used by R5 task 012 tests.");
-        public Task<ChatCompletionResult> GetChatCompletionWithToolsAsync(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, IEnumerable<global::OpenAI.Chat.ChatTool> tools, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Not used by R5 task 012 tests.");
-        public Task<T> GetStructuredCompletionAsync<T>(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, BinaryData jsonSchema, string schemaName, string deploymentName, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Not used by R5 task 012 tests.");
-        public Task<string> GetStructuredCompletionRawAsync(string prompt, BinaryData jsonSchema, string schemaName, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Not used by R5 task 012 tests.");
     }
 }
