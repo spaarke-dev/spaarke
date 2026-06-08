@@ -412,33 +412,21 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
         Console.WriteLine("✓ R5 SessionSummarizeOrchestrator registered (task 012; ADR-010 concrete; chat-session Summarize convergence)");
 
-        // R5 task 024 (D2-14) — InvokeInsightsQueryTool typed HttpClient. Zone B HTTP
-        // consumer of the Insights /api/insights/assistant/query endpoint per refined
-        // ADR-013 §3.5 + R5 CLAUDE.md §3.5 / §10. The endpoint co-locates in the same
-        // BFF process today, but the boundary is binding — same-process HTTP is the
-        // canonical Zone B consumption pattern.
+        // --- InvokeInsightsQueryTool typed HttpClient ---
+        // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): the specialized
+        // InvokeInsightsQueryTool C# bridge class was deleted in favor of the generic
+        // InvokePlaybookHandler (R6 Pillar 3 / task 021). The chat-side path no longer
+        // requires a typed HttpClient — the InsightsIntentClassifier playbook-vs-RAG
+        // routing happens inside the orchestration layer the IInvokePlaybookAi facade
+        // wraps (per FR-24 + docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md).
         //
-        // ZERO new Program.cs lines per R5 CLAUDE.md §3.3. ZERO new feature flags per
-        // R5 CLAUDE.md §3.2 — kill-switch coverage inherits via the parent compound gate
-        // (Analysis:Enabled && DocumentIntelligence:Enabled) AND the Insights endpoint's
-        // own kill-switches (returns 503 ai.insights.disabled / ai.rag.disabled /
-        // ai.intent-classification.disabled).
-        //
-        // Config key Bff:BaseAddress — defaults to https://localhost:7001 for local dev.
-        // In production this is the BFF App Service URL (e.g.,
-        // https://spaarke-bff-dev.azurewebsites.net). When BaseAddress is the SAME process
-        // as the caller, the HTTP request loops through the local listener — slightly
-        // higher latency than in-process invocation but preserves the Zone B boundary.
-        services.AddHttpClient<Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool>(client =>
-        {
-            var bffBaseAddress = configuration["Bff:BaseAddress"]
-                ?? "https://localhost:7001"; // local dev fallback
-            client.BaseAddress = new Uri(bffBaseAddress);
-            client.Timeout = TimeSpan.FromSeconds(60); // Insights p95 ~2s; RAG can spike
-            client.DefaultRequestHeaders.Accept.Add(
-                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-        });
-        Console.WriteLine("✓ R5 InvokeInsightsQueryTool typed HttpClient registered (task 024; Zone B consumer of /api/insights/assistant/query)");
+        // Zone B boundary preservation: the /api/insights/assistant/query endpoint
+        // itself is unchanged and continues to enforce its own kill-switches (503
+        // ai.insights.disabled / ai.rag.disabled / ai.intent-classification.disabled).
+        // Any future chat-side caller that needs to invoke the Insights endpoint directly
+        // can re-add an IHttpClientFactory registration here — the boundary pattern is
+        // documented in the legacy InvokeInsightsQueryTool class (recoverable via
+        // `git show HEAD~1:src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InvokeInsightsQueryTool.cs`).
     }
     private static void AddPlaybookServices(IServiceCollection services)
     {

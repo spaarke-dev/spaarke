@@ -149,9 +149,10 @@ public class SprkChatAgentFactory
     /// <see cref="IChatContextProvider.GetContextAsync"/> so the returned
     /// <see cref="ChatContext.UploadedFiles"/> reflects session state, and surfaced as a
     /// compact "Session Files" manifest suffix on the system prompt so the LLM's tool-call
-    /// reasoning sees that uploaded files exist and can correctly invoke
-    /// <see cref="Tools.InvokeSummarizePlaybookTool"/> (the Summarize convergence path —
-    /// FR-01 + FR-08).
+    /// reasoning sees that uploaded files exist and can correctly invoke the generic
+    /// <c>invoke_playbook</c> chat tool with the chat-summarize playbook GUID (the Summarize
+    /// convergence path — FR-01 + FR-08). R6 task 023 (Wave 10 / Pillar 3) replaced the
+    /// specialized <c>InvokeSummarizePlaybookTool</c> bridge with the generic dispatcher.
     /// Manifest only (fileId + fileName); never carries extracted text (ADR-015).
     /// Default <c>null</c> for backward compatibility — pre-R5 sessions / call sites that
     /// omit the parameter behave exactly as before.
@@ -240,11 +241,11 @@ public class SprkChatAgentFactory
 
         // === R5 task 033 — Session Files manifest enrichment ====================
         // Surface uploaded session-file awareness (fileId + fileName) to the LLM so its
-        // tool-call reasoning correctly invokes invoke_summarize_playbook when the user
-        // asks to summarize. Without this signal the agent has historically (verbatim
-        // observed on Dev 2026-06-04) declined: "I don't see the document uploaded yet"
-        // — even with the InvokeSummarizePlaybookTool registered and the playbook gated
-        // on PlaybookCapabilities.Summarize.
+        // tool-call reasoning correctly invokes the generic `invoke_playbook` chat tool
+        // (R6 task 023; the chat-summarize playbook is one of the playbooks listed in the
+        // tool's dynamic description per task 022) when the user asks to summarize. Without
+        // this signal the agent has historically (verbatim observed on Dev 2026-06-04)
+        // declined: "I don't see the document uploaded yet".
         //
         // Constraints (R5 task 033 + ADR-015 + R5 CLAUDE.md §3.4):
         //   - Manifest only — fileId + fileName + count. NEVER include extracted text
@@ -253,9 +254,9 @@ public class SprkChatAgentFactory
         //     reference materials + active capabilities + entity enrichment).
         //   - Additive — when no files uploaded, leaves the system prompt unchanged
         //     (zero behavior change for pre-R5 sessions and standalone chat).
-        //   - Tool-name binding — names `invoke_summarize_playbook` explicitly so the
-        //     LLM has the exact tool identifier to invoke (matches the AIFunction name
-        //     registered for InvokeSummarizePlaybookTool — R5 task 015).
+        //   - Tool-name binding — names `invoke_playbook` explicitly so the LLM has the
+        //     exact tool identifier to invoke (matches the AIFunction name registered for
+        //     InvokePlaybookHandler via the SYS-Invoke Playbook seed row — R6 task 021).
         if (context.UploadedFiles is { Count: > 0 } files)
         {
             try
@@ -616,11 +617,14 @@ public class SprkChatAgentFactory
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Format (final wording per task 033 POML §1 step 3):
+    /// Format (R6 task 023 update — names the generic `invoke_playbook` tool instead of
+    /// the now-deleted `invoke_summarize_playbook` bridge):
     /// <code>
     /// Session Files: This chat session has {N} uploaded file(s) available for tool calls:
     /// {comma-separated fileNames}. When the user asks to summarize, invoke the
-    /// `invoke_summarize_playbook` tool with these file IDs: {comma-separated fileIds}.
+    /// `invoke_playbook` tool with the chat-summarize playbook ID (see the tool's
+    /// description for tenant-accessible playbooks) and pass these file IDs in the
+    /// parameters object: {comma-separated fileIds}.
     /// </code>
     /// </para>
     /// <para>
@@ -629,11 +633,12 @@ public class SprkChatAgentFactory
     /// content, MIME, or size beyond what the manifest already exposes.
     /// </para>
     /// <para>
-    /// Tool name reference: the literal <c>invoke_summarize_playbook</c> matches the
-    /// AIFunction name registered for
-    /// <see cref="Tools.InvokeSummarizePlaybookTool"/> via
-    /// <c>InvokeSummarizePlaybookTool.ToolName</c> (R5 task 015). Updating that constant
-    /// REQUIRES updating this suffix.
+    /// Tool name reference: the literal <c>invoke_playbook</c> matches the AIFunction name
+    /// registered for <see cref="Sprk.Bff.Api.Services.Ai.Handlers.InvokePlaybookHandler"/>
+    /// via the SYS-Invoke Playbook Dataverse seed row (R6 task 021). Per R6 task 022's
+    /// dynamic invoke_playbook description (D-A-14), the tool description itself enumerates
+    /// the tenant-accessible playbook GUIDs at request time so the LLM can pick the
+    /// chat-summarize playbook without prior knowledge.
     /// </para>
     /// </remarks>
     /// <param name="uploadedFiles">Non-empty, non-null manifest list. Caller guarantees Count &gt; 0.</param>
@@ -662,8 +667,12 @@ public class SprkChatAgentFactory
 
         // Two leading newlines isolate the suffix as its own paragraph so the LLM does
         // not blend it into the preceding "### Active Capabilities" or entity enrichment.
+        // R6 task 023: names the generic `invoke_playbook` tool (replacing the deleted
+        // `invoke_summarize_playbook` bridge). The chat-summarize playbook GUID is one of
+        // the tenant-accessible playbooks enumerated in the tool's dynamic description
+        // (R6 task 022 / D-A-14), so the LLM can resolve it without prior knowledge.
         return $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
-               $"When the user asks to summarize, invoke the `invoke_summarize_playbook` tool with these file IDs: {fileIds}.";
+               $"When the user asks to summarize, invoke the `invoke_playbook` tool with the chat-summarize playbook ID (see the tool's description for tenant-accessible playbooks) and pass these file IDs in the parameters object: {fileIds}.";
     }
 
     /// <summary>
@@ -894,129 +903,58 @@ public class SprkChatAgentFactory
             }
         }
 
-        // --- InvokeSummarizePlaybookTool (R5 D2-05 / task 015) ---
-        // Gated behind the existing "summarize" capability (PlaybookCapabilities.Summarize).
-        // Reuses the existing capability constant (no new feature flag, no new capability key)
-        // per R5 CLAUDE.md §3.2 + ADR-018. The tool DELEGATES to SessionSummarizeOrchestrator
-        // (task 012 — registered Scoped inside AnalysisServicesModule.AddAnalysisOrchestrationServices)
-        // — both this agent-tool path and task 014's direct endpoint converge on the SAME
-        // SummarizeSessionFilesAsync method (FR-01 + FR-08 + SC-08).
+        // --- InvokeSummarizePlaybookTool ---
+        // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): replaced by the
+        // generic InvokePlaybookHandler (Services/Ai/Handlers/InvokePlaybookHandler.cs)
+        // auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010)
+        // and surfaced to the chat agent by the data-driven block below (FR-11) via one
+        // sprk_analysistool row:
+        //   - SYS-Invoke Playbook (INVOKE-PLAYBOOK) → InvokePlaybookHandler (single function,
+        //     no method discriminator). The LLM now calls invoke_playbook(playbookId,
+        //     parameters) with the chat-summarize playbook GUID instead of
+        //     invoke_summarize_playbook(fileIds, style).
         //
-        // Tool routing scope (NFR-12 / UR-01): the tool description text is the LOAD-BEARING
-        // artifact for correct LLM routing between this Summarize tool and the upcoming
-        // insights.query tool (task 024). See InvokeSummarizePlaybookTool.ToolDescription.
+        // Capability gate preservation:
+        //   The hardcoded `if (capabilities.Contains(PlaybookCapabilities.Summarize))` check
+        //   is REMOVED. The generic invoke_playbook tool is unconditionally available (per
+        //   the seed row's sprk_requiredcapability = null), but the per-playbook authorization
+        //   is enforced by InvokePlaybookHandler.IsTenantVisibleAsync — only playbooks the
+        //   tenant has access to via IPlaybookService can be dispatched. Per task 022's
+        //   dynamic invoke_playbook description (D-A-14), the LLM sees the tenant's
+        //   accessible playbook list rendered into the tool description at request time, so
+        //   it can correctly choose the chat-summarize playbook GUID without prior knowledge.
         //
-        // ADR-028: no token snapshot — the orchestrator uses its existing scoped DI
-        // resolution; fresh tokens flow through RAG / OpenAI / Dataverse clients per call.
-        // No HttpContext dependency (Summarize operates over pre-indexed session content
-        // — task 003 — not SPE OBO-authenticated file download).
-        //
-        // Factory-instantiated (ADR-010): no new top-level DI registration; orchestrator
-        // already registered via AnalysisServicesModule (task 012 evidence note).
-        if (capabilities.Contains(PlaybookCapabilities.Summarize))
-        {
-            attempted++;
-            try
-            {
-                var sessionSummarizeOrchestrator =
-                    scopedProvider.GetService<SessionSummarizeOrchestrator>();
-                if (sessionSummarizeOrchestrator != null)
-                {
-                    var loggerFactory =
-                        scopedProvider.GetRequiredService<ILoggerFactory>();
-                    var toolLogger =
-                        loggerFactory.CreateLogger<InvokeSummarizePlaybookTool>();
+        // Convergence preserved:
+        //   The chat /summarize path (POST /api/ai/chat/sessions/{id}/summarize) continues
+        //   to flow through SessionSummarizeOrchestrator → IPlaybookExecutionEngine.ExecuteChatSummarizeAsync
+        //   (task 025). The tool-call path now flows through InvokePlaybookHandler →
+        //   IInvokePlaybookAi → IPlaybookOrchestrationService. Both end at the same engine
+        //   methods. The session-files Azure Search filter, Structured Outputs streaming,
+        //   and per-file highlights are preserved unchanged inside the engine.
 
-                    var correlationId = httpContext?.TraceIdentifier;
-
-                    var invokeSummarizeTool = new InvokeSummarizePlaybookTool(
-                        sessionSummarizeOrchestrator,
-                        tenantId,
-                        sessionId,
-                        correlationId,
-                        sseWriter,
-                        toolLogger);
-                    tools.AddRange(invokeSummarizeTool.GetTools());
-                    resolved++;
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "SessionSummarizeOrchestrator not available; " +
-                        "InvokeSummarizePlaybookTool will not be registered. Verify " +
-                        "AnalysisServicesModule.AddAnalysisOrchestrationServices is " +
-                        "enabled (Analysis:Enabled and DocumentIntelligence:Enabled).");
-                    failedTools.Add(nameof(InvokeSummarizePlaybookTool));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Failed to resolve InvokeSummarizePlaybookTool — skipping");
-                failedTools.Add(nameof(InvokeSummarizePlaybookTool));
-            }
-        }
-
-        // --- InvokeInsightsQueryTool (R5 D2-14 / task 024) ---
-        // Gated behind the InsightsQuery capability (PlaybookCapabilities.InsightsQuery).
-        // Reuses the existing capability gate framework (no new feature flag per R5
-        // CLAUDE.md §3.2 + ADR-018; kill-switch coverage inherits via the Insights
-        // endpoint's own 503 responses for ai.insights.disabled / ai.rag.disabled /
-        // ai.intent-classification.disabled).
+        // --- InvokeInsightsQueryTool ---
+        // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): replaced by the
+        // generic InvokePlaybookHandler (Services/Ai/Handlers/InvokePlaybookHandler.cs)
+        // auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010)
+        // and surfaced to the chat agent by the data-driven block below (FR-11) via the
+        // same single SYS-Invoke Playbook row used to replace InvokeSummarizePlaybookTool.
         //
-        // Zone B HTTP consumer (R5 CLAUDE.md §3.5 / §10 + refined ADR-013 §3.5): the
-        // tool consumes POST /api/insights/assistant/query via the typed HttpClient
-        // registered in AnalysisServicesModule.AddAnalysisOrchestrationServices. The
-        // tool does NOT inject Insights internals (IInsightsAi, InsightsOrchestrator,
-        // Models.Insights.*) — same-process HTTP is the canonical Zone B pattern.
+        // FR-24 InsightsIntentClassifier preserved:
+        //   The InsightsIntentClassifier continues to handle playbook-vs-RAG routing
+        //   internally (per FR-24 + docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md).
+        //   When the LLM invokes invoke_playbook with an insights-scoped playbook ID, the
+        //   orchestration layer's playbook engine dispatches through the same routing logic.
+        //   For entity-scoped analytical questions, the tenant publishes an "insights query"
+        //   playbook whose nodes invoke the IInsightsAi services (or the RAG fallback)
+        //   internally — the chat tool surface is now uniform.
         //
-        // Tool routing scope (NFR-12 / UR-01): the tool description text is the
-        // LOAD-BEARING artifact for correct LLM routing between this insights.query
-        // tool and the invoke_summarize_playbook tool (task 015). See
-        // InvokeInsightsQueryTool.ToolDescription — entity-scoped analytical questions
-        // (matter/project/invoice) vs session-uploaded files summarization.
-        //
-        // ADR-028: no token snapshot — the tool reads HttpContext.Request.Headers
-        // Authorization FRESH per outbound call via IHttpContextAccessor (NEVER captured
-        // in constructor or closure).
-        //
-        // Factory-instantiated (ADR-010): the tool class itself is NOT DI-registered;
-        // we resolve the typed HttpClient + IHttpContextAccessor + logger from the
-        // scopedProvider and construct the tool here. Mirrors the canonical
-        // InvokeSummarizePlaybookTool pattern (AIPL-053).
-        if (capabilities.Contains(PlaybookCapabilities.InsightsQuery))
-        {
-            attempted++;
-            try
-            {
-                // The typed HttpClient is registered via
-                // services.AddHttpClient<InvokeInsightsQueryTool>(...) so we resolve the
-                // tool itself directly — IHttpClientFactory wires the HttpClient into the
-                // constructor.
-                var insightsQueryTool =
-                    scopedProvider.GetService<InvokeInsightsQueryTool>();
-                if (insightsQueryTool != null)
-                {
-                    tools.AddRange(insightsQueryTool.GetTools());
-                    resolved++;
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "InvokeInsightsQueryTool not available; insights.query will not be " +
-                        "registered. Verify AnalysisServicesModule.AddAnalysisOrchestrationServices " +
-                        "registered the typed HttpClient (Analysis:Enabled and " +
-                        "DocumentIntelligence:Enabled).");
-                    failedTools.Add(nameof(InvokeInsightsQueryTool));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Failed to resolve InvokeInsightsQueryTool — skipping");
-                failedTools.Add(nameof(InvokeInsightsQueryTool));
-            }
-        }
+        // Capability gate preservation:
+        //   The hardcoded `if (capabilities.Contains(PlaybookCapabilities.InsightsQuery))`
+        //   check is REMOVED. Like Summarize above, per-playbook authorization is enforced
+        //   inside InvokePlaybookHandler.IsTenantVisibleAsync via IPlaybookService.
+        //   The Insights endpoint's own kill-switches (503 ai.insights.disabled /
+        //   ai.rag.disabled / ai.intent-classification.disabled) remain in force at the
+        //   downstream service boundary — unchanged by this deletion.
 
         // --- WebSearchTools ---
         // REMOVED in R6 Wave 8 (Q9 chat-tool batch migration): replaced by the typed

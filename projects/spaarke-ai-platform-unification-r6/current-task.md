@@ -1,8 +1,8 @@
 # Current Task State — spaarke-ai-platform-unification-r6
 
-> **Last Updated**: 2026-06-08 (Wave 9 complete; Q9 chat-tool migration closes at 10/10)
+> **Last Updated**: 2026-06-08 (Task 023 in progress — Pillar 3 cleanup; delete InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges)
 > **Recovery**: Read "Quick Recovery" section first
-> **Last Commit**: `3ccb5304` (Wave 9 — WorkingDocument migrated + ADR-033 streaming side channel)
+> **Last Commit**: `cc6d8e3b` (Tasks 022 + 025 — dynamic invoke_playbook description + PlaybookExecutionEngine.ExecuteChatSummarizeAsync)
 > **Branch**: `work/spaarke-ai-platform-unification-r6` (pushed to origin; clean working tree)
 
 ---
