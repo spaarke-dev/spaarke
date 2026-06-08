@@ -50,6 +50,8 @@
 | 032 | Implement launch-context pre-fill | 4 | FULL | ✅ | 031 | P4-W3 | ✅ |
 | 013 | Cleanup LegalWorkspace legacy to-do refs (audit-surfaced; CreateTodo + CreateWorkAssignment + useTodoItems) | 2 | FULL | ✅ | 010, 011, 023, 030, 031 | P2-W4 | — |
 | 014 | Cleanup DailyBriefing `useInlineTodoCreate.ts` (audit-surfaced; surfaced by 013) | 2 | STANDARD | ✅ | 002 | P2-W5 | ✅ |
+| 070a | Add BFF Office endpoints (/by-message-id + /linked-todos) — task 070+071 dep gap | 8 | FULL | ✅ | 002, 016, 070, 071 | P8-W3a | ✅ |
+| 070b | SmartTodo Code Page launch-context URL-param parser — task 070 dep gap | 3 | FULL | ✅ | 020, 031, 032, 070 | P8-W3b | ✅ |
 | 040 | "To Dos" subgrid on 11 parent forms (consolidated; 10 ribbon XMLs drafted, deploy deferred) | 5 | STANDARD | ✅ | 002, 030, 031, 032 | P5-W1 | ✅ |
 | 060 | `DeepLinkBuilder` service | 7 | FULL | ✅ | 002 | P7-W1 | ✅ |
 | 061 | Outbound sync pipeline (plugin + ServiceBus + handler) | 7 | FULL | 🔲 | 002, 009, 016, 018, 060 | P7-W2 | — |

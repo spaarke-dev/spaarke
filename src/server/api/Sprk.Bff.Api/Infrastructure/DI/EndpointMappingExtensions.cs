@@ -111,6 +111,9 @@ public static class EndpointMappingExtensions
         app.MapDocumentOperationsEndpoints();
         app.MapEmailEndpoints();
         app.MapOfficeEndpoints();
+        // smart-todo-decoupling-r3 task 070a — Office-scoped sprk_communication lookups
+        // for Outlook taskpane (Create To Do ribbon + linked-todos banner).
+        app.MapOfficeCommunicationsEndpoints();
         app.MapFieldMappingEndpoints();
         app.MapEventEndpoints();
         app.MapWorkAssignmentEndpoints();
