@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Models.Ai.Chat;
+
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
@@ -89,4 +91,26 @@ public record ChatInvocationContext : ToolInvocationContextBase
     /// matter-scoped.
     /// </summary>
     public Guid? MatterId { get; init; }
+
+    /// <summary>
+    /// Optional playbook knowledge scope (R6 Wave 7c). When the chat session is bound to a
+    /// playbook with knowledge sources, the data-driven block of
+    /// <see cref="Chat.SprkChatAgentFactory"/> forwards the resolved
+    /// <see cref="ChatKnowledgeScope"/> here so chat-side handlers (KnowledgeRetrieval,
+    /// DocumentSearch, etc.) can filter their queries to the playbook's knowledge sources
+    /// without taking a separate DI dependency.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Carries deterministic identifiers (knowledge-source IDs, document IDs, parent-entity
+    /// refs) + the playbook's inline-content / skill-instructions text. ADR-015 binding:
+    /// handlers reading this MUST NOT log the inline text. Telemetry remains IDs + counts only.
+    /// </para>
+    /// <para>
+    /// Null when no playbook is bound (standalone chat) or when the playbook has no knowledge
+    /// scopes configured — handlers SHOULD interpret null as "no scope filter" and fall back to
+    /// tenant-wide retrieval (subject to their own contract).
+    /// </para>
+    /// </remarks>
+    public ChatKnowledgeScope? KnowledgeScope { get; init; }
 }

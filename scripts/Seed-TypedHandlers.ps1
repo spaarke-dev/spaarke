@@ -19,6 +19,12 @@
       - TextRefinementHandler             (3 rows via method-discriminator)
           TEXT-REFINE / TEXT-KEYPOINTS / TEXT-SUMMARY
 
+    Wave-7c (citations + widget post-processing migration):
+      - KnowledgeRetrievalHandler         (2 rows via method-discriminator)
+          KNOWLEDGE-SOURCE-GET / KNOWLEDGE-BASE-SEARCH
+      - VerifyCitationsHandler            (1 row, capability-gated via sprk_requiredcapability)
+          CITATION-VERIFY (gated by 'verify_citations' capability)
+
     Source rows are JSON files in infra/dataverse/ (one per row, not per handler). This
     script reads each row, upserts to sprk_analysistools. Upsert key is sprk_toolcode with
     a safety filter requiring sprk_name to start with 'SYS-' (refined 2026-06-08 from the
@@ -107,6 +113,16 @@ $RowFiles = @{
     "TEXT-REFINE"                      = "$RepoRoot/infra/dataverse/sprk_analysistool-text-refine-row.json"
     "TEXT-KEYPOINTS"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-text-keypoints-row.json"
     "TEXT-SUMMARY"                     = "$RepoRoot/infra/dataverse/sprk_analysistool-text-summary-row.json"
+    # Wave 7c — KnowledgeRetrievalHandler serves 2 rows via the method discriminator in
+    # sprk_configuration (GetKnowledgeSource / SearchKnowledgeBase). Same multi-row-per-
+    # handler pattern as TextRefinementHandler — upsert disambiguated by sprk_toolcode.
+    "KNOWLEDGE-SOURCE-GET"             = "$RepoRoot/infra/dataverse/sprk_analysistool-knowledge-source-get-row.json"
+    "KNOWLEDGE-BASE-SEARCH"            = "$RepoRoot/infra/dataverse/sprk_analysistool-knowledge-base-search-row.json"
+    # Wave 7c — VerifyCitationsHandler: single row, capability-gated via
+    # sprk_requiredcapability = 'verify_citations'. The data-driven block's
+    # IsCapabilityGateSatisfied filter in SprkChatAgentFactory.ResolveTools replaces the
+    # hardcoded `if (capabilities.Contains(PlaybookCapabilities.VerifyCitations))` gate.
+    "CITATION-VERIFY"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-citation-verify-row.json"
 }
 
 # -----------------------------------------------------------------------------

@@ -794,36 +794,16 @@ public class SprkChatAgentFactory
         // GetAnalysisResult vs GetAnalysisSummary as a single LLM tool with a method parameter.
 
         // --- KnowledgeRetrievalTools ---
-        // Requires IRagService, accepts knowledge scope for domain filtering.
-        // sseWriter is forwarded so GetKnowledgeSourceAsync can emit source_pane SSE events with
-        // structured DocumentViewer widget data alongside the text response (Gap 1 fix).
-        attempted++;
-        if (ragService != null)
-        {
-            try
-            {
-                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, tenantId, knowledgeScope, citationContext, sseWriter);
-                tools.Add(AIFunctionFactory.Create(
-                    knowledgeRetrievalTools.GetKnowledgeSourceAsync,
-                    name: "GetKnowledgeSource",
-                    description: "Retrieve all indexed content for a specific knowledge source by its ID."));
-                tools.Add(AIFunctionFactory.Create(
-                    knowledgeRetrievalTools.SearchKnowledgeBaseAsync,
-                    name: "SearchKnowledgeBase",
-                    description: "Search the knowledge base for reference information relevant to the query."));
-                resolved++;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve KnowledgeRetrievalTools — skipping");
-                failedTools.Add(nameof(KnowledgeRetrievalTools));
-            }
-        }
-        else
-        {
-            _logger.LogDebug("IRagService not available; KnowledgeRetrievalTools will not be registered");
-            failedTools.Add(nameof(KnowledgeRetrievalTools));
-        }
+        // REMOVED in R6 Wave 7c: replaced by the typed KnowledgeRetrievalHandler
+        // (Services/Ai/Handlers/KnowledgeRetrievalHandler.cs) auto-discovered via
+        // ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
+        // chat agent by the data-driven block below (FR-11) via two sprk_analysistool rows:
+        //   - SYS-Knowledge Source Retrieval (KNOWLEDGE-SOURCE-GET) → method=GetKnowledgeSource
+        //   - SYS-Knowledge Base Search      (KNOWLEDGE-BASE-SEARCH) → method=SearchKnowledgeBase
+        // Citations + source_pane SSE events are returned via ToolResult.Metadata and the
+        // adapter performs side effects (Wave 7b infrastructure). The ChatKnowledgeScope
+        // forwards into ChatInvocationContext.KnowledgeScope so the handler can filter to
+        // the playbook's knowledge sources.
 
         // --- TextRefinementTools ---
         // REMOVED in R6 Wave 7 (Q9 chat-tool batch migration): replaced by the typed
@@ -1185,49 +1165,24 @@ public class SprkChatAgentFactory
         }
 
         // --- VerifyCitationsTool ---
-        // Gated behind "verify_citations" capability (AIPU2-024).
-        // Exposes the "verify_citations" AI function so the LLM can verify legal citations
-        // when the user explicitly asks to check references, case validity, or regulatory
-        // citations in a passage of text.
+        // REMOVED in R6 Wave 7c: replaced by the typed VerifyCitationsHandler
+        // (Services/Ai/Handlers/VerifyCitationsHandler.cs) auto-discovered via
+        // ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
+        // chat agent by the data-driven block below (FR-11) via one sprk_analysistool row:
+        //   - SYS-Citation Verification (CITATION-VERIFY) → VerifyCitationsHandler
         //
-        // The automatic post-LLM citation check (CitationSafetyCheck) runs unconditionally
-        // after every response regardless of this capability — this gate only controls whether
-        // the LLM can explicitly invoke the tool during a turn.
+        // Capability gate preservation (Wave 7b infrastructure):
+        //   The hardcoded `if (capabilities.Contains(PlaybookCapabilities.VerifyCitations))`
+        //   check that previously gated this block is replaced by the per-row
+        //   `sprk_requiredcapability = "verify_citations"` column on the seeded row. The
+        //   data-driven block's IsCapabilityGateSatisfied(row.RequiredCapability, capabilities)
+        //   enforces the same security boundary at chat-session start. Standalone chat
+        //   (capabilities = CoreCapabilities; "verify_citations" not included) continues to
+        //   skip this tool exactly as before — preserving the pre-Wave-7c boundary.
         //
-        // Requires ICitationVerificationService (singleton registered in AiSafetyModule).
-        // Factory-instantiated (ADR-010): no new DI registration.
-        if (capabilities.Contains(PlaybookCapabilities.VerifyCitations))
-        {
-            attempted++;
-            try
-            {
-                var citationVerificationService = scopedProvider.GetService<ICitationVerificationService>();
-                if (citationVerificationService != null)
-                {
-                    var verifyCitationsTool = new VerifyCitationsTool(citationVerificationService, _logger);
-                    tools.Add(AIFunctionFactory.Create(
-                        verifyCitationsTool.VerifyCitationsAsync,
-                        name: "verify_citations",
-                        description: "Verifies legal citations found in the provided text against authoritative sources. " +
-                                     "Returns verification status, confidence, and source URLs for each citation. " +
-                                     "Use when the user asks to verify references, check case validity, or confirm " +
-                                     "regulatory citations."));
-                    resolved++;
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "VerifyCitationsTool requires ICitationVerificationService — service not registered. " +
-                        "Ensure AddAiSafetyModule is called before AddAiChatModule.");
-                    failedTools.Add(nameof(VerifyCitationsTool));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve VerifyCitationsTool — skipping");
-                failedTools.Add(nameof(VerifyCitationsTool));
-            }
-        }
+        // NFR-13 unchanged: the automatic post-LLM CitationSafetyCheck middleware
+        // continues to run unconditionally after every response regardless of whether
+        // VerifyCitationsHandler is exposed to the LLM for the current playbook.
 
         // === R6 Pillar 2 / Task D-A-11 (FR-11) — Data-Driven Tool Resolution =================
         // Append AIFunctions for `sprk_analysistool` rows whose
@@ -1413,7 +1368,13 @@ public class SprkChatAgentFactory
                     {
                         ChatSessionId = sessionIdGuid,
                         TenantId = tenantId,
-                        MatterId = TryParseMatterId(knowledgeScope)
+                        MatterId = TryParseMatterId(knowledgeScope),
+                        // R6 Wave 7c: forward the playbook's knowledge scope so chat-side
+                        // handlers (KnowledgeRetrievalHandler etc.) can filter their queries
+                        // to the playbook's knowledge sources without taking a separate DI
+                        // dependency. ADR-014 per-tenant scope is preserved via TenantId above;
+                        // the knowledge scope adds the playbook-level filter on top.
+                        KnowledgeScope = knowledgeScope
                     };
 
                     try
