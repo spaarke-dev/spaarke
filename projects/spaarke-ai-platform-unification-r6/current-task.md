@@ -1,8 +1,8 @@
 # Current Task State — spaarke-ai-platform-unification-r6
 
-> **Last Updated**: 2026-06-08 (post-compaction, Wave 7c verified)
+> **Last Updated**: 2026-06-08 (Wave 8 complete; rows deployed to Dataverse)
 > **Recovery**: Read "Quick Recovery" section first
-> **Last Commit**: `52201189` (checkpoint = Wave 7c content; verified post-compaction by 450/450 tests passing)
+> **Last Commit**: `3eb7d17d` (Wave 8 — 4 citation/SSE-state chat tools migrated)
 > **Branch**: `work/spaarke-ai-platform-unification-r6` (pushed to origin; clean working tree)
 
 ---
@@ -11,11 +11,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | A (data-driven foundation) — ~26 of ~30 Phase A tasks complete |
-| **Wave** | 7c VERIFIED (committed in checkpoint `52201189`; full tests green post-compaction) |
-| **Last Committed Wave** | 7c (`52201189` — packaged as "checkpoint" but contents are the Wave 7c work) |
-| **Status** | ✅ Wave 7c complete. Build clean (0 errors, 16 baseline warnings). 55/55 new handler tests pass. 450/450 broader handler+adapter+factory sweep passes. No regressions. |
-| **Next Action** | Wave 8 dispatch — 4 citation/SSE-state migrations (DocumentSearch, WebSearch, CodeInterpreter, LegalResearch) using validated Wave 7b infra pattern |
+| **Phase** | A (data-driven foundation) — ~30 of ~30 Phase A tasks except Wave 9/10/exit-gate |
+| **Wave** | 8 COMPLETE (4 handlers migrated, 7 seed rows deployed to Spaarke Dev) |
+| **Last Committed Wave** | 8 (`3eb7d17d`) |
+| **Status** | ✅ Wave 8 complete. Build clean (0 errors, 16 baseline warnings). 115/115 new Wave 8 handler tests pass. 3549/3571 broader AI services sweep passes (0 failed, 22 skipped). All 7 Wave 8 seed rows deployed to `spaarkedev1.crm.dynamics.com`. |
+| **Next Action** | Wave 9 — requires ADR-032 (Streaming chat-tool contract) — this is a **confirmation trigger** per project CLAUDE.md (ADR file modification, public contract change, new ADR needed). STOP and confirm direction with user before dispatch. |
 
 ### ✅ Wave 7c verification (2026-06-08, post-compaction)
 
@@ -73,12 +73,14 @@ R6 is migrating 10 pre-R5 chat tool C# classes to data-driven `IToolHandler` imp
 | `9e3d4f93` | W7 partial | AnalysisQuery + TextRefinement migrated (2 of 4 trivial); KnowledgeRetrieval + VerifyCitations surfaced gaps |
 | `66da08ca` | W7b infra | ToolResult.Metadata + adapter post-process; sprk_requiredcapability column + filter |
 | `52201189` | W7c (checkpoint) | KnowledgeRetrieval + VerifyCitations handlers + tests + 3 seed rows; verified post-compaction 450/450 tests green |
+| `b7c089cc` | W7c marker | current-task.md update; 450/450 verification documented |
+| `3eb7d17d` | W8 | 4 handlers (DocumentSearch, WebSearch, CodeInterpreter, LegalResearch) + 7 seed rows + 115 new tests; factory −81 lines; deployed to Spaarke Dev 2026-06-08 |
 
 ### Pending
 
 | Wave | Tasks | Notes |
 |---|---|---|
-| **8 (NEXT)** | DocumentSearch + WebSearch + CodeInterpreter + LegalResearch | 4 citation/SSE-state migrations using validated Wave 7b pattern |
+| **9 (NEXT — CONFIRMATION TRIGGER)** | ADR-032 Streaming chat-tool contract + IToolHandler streaming overload + WorkingDocumentTools migration | Requires new ADR (NFR-03 revision per ADRs-Are-Defaults principle). Must confirm with user before dispatch. |
 | 9 | ADR-032 Streaming chat-tool contract + WorkingDocumentTools | Per "ADRs are defaults" principle — yielded NFR-03 for this case |
 | 10 | Delete AnalysisExecutionTools (replaced by Pillar 3 invoke_playbook) + delete InvokeSummarize + InvokeInsightsQueryTool bridges (task 023) | Cleanup |
 | 028, 029 | Phase A integration test + Phase A exit gate | MUST address the 9 pre-existing WorkspaceEndpointsTests failures before exit |
