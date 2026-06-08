@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
 using FluentAssertions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Ai;
 using Xunit;
 
@@ -28,9 +31,11 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 public class ScopePersonasEndpointTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebAppFactory _factory;
 
     public ScopePersonasEndpointTests(CustomWebAppFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -167,5 +172,81 @@ public class ScopePersonasEndpointTests : IClassFixture<CustomWebAppFactory>
         unauthed.StatusCode.Should().BeOneOf(
             [HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden, HttpStatusCode.InternalServerError],
             "all scope LIST endpoints must enforce the same authorization filter (R6 D-A-02 acceptance: symmetric ADR-008 behavior)");
+    }
+
+    // =========================================================================
+    // Rate Limiting (ADR-016 — R6 audit item 03 atomic fix)
+    //
+    // All 5 scope LIST endpoints MUST apply the `ai-context` rate-limit policy
+    // (60 req/min sliding window per user, defined in RateLimitingModule).
+    // Pre-fix state: 4 canonical endpoints (skills/knowledge/tools/actions) lacked
+    // the policy; the 5th (personas, added by task 002) inherited the gap via
+    // sibling parity. Atomic fix applied 2026-06-07.
+    //
+    // Verification strategy: introspect the live EndpointDataSource for the
+    // `EnableRateLimitingAttribute` metadata. This is contract-level — it verifies
+    // the policy is registered on the endpoint regardless of whether the test
+    // factory wires up the full rate-limit middleware chain. (See
+    // RateLimitingIntegrationTests for behavioral 429 verification on the shared
+    // ai-context policy.)
+    // =========================================================================
+
+    [Theory]
+    [InlineData("/api/ai/scopes/skills")]
+    [InlineData("/api/ai/scopes/knowledge")]
+    [InlineData("/api/ai/scopes/tools")]
+    [InlineData("/api/ai/scopes/actions")]
+    [InlineData("/api/ai/scopes/personas")]
+    public void AllScopeEndpoints_HaveAiContextRateLimitPolicy(string pattern)
+    {
+        // Arrange — pull live endpoint data sources from the booted test host
+        var dataSource = _factory.Services.GetRequiredService<EndpointDataSource>();
+        var endpoint = dataSource.Endpoints
+            .OfType<RouteEndpoint>()
+            .FirstOrDefault(e => string.Equals(e.RoutePattern.RawText, pattern, StringComparison.OrdinalIgnoreCase));
+
+        // Assert — endpoint exists
+        endpoint.Should().NotBeNull(
+            $"endpoint {pattern} must be registered (R6 audit item 03 covers all 5 scope LIST endpoints)");
+
+        // Assert — endpoint has the `ai-context` rate-limit policy applied
+        var rateLimitMetadata = endpoint!.Metadata.GetMetadata<EnableRateLimitingAttribute>();
+        rateLimitMetadata.Should().NotBeNull(
+            $"endpoint {pattern} must have RequireRateLimiting metadata per ADR-016 (R6 audit item 03 atomic fix)");
+        rateLimitMetadata!.PolicyName.Should().Be("ai-context",
+            $"endpoint {pattern} must use the shared `ai-context` policy (60 req/min sliding window per user) — sibling-parity per the 4 canonical scope endpoints");
+    }
+
+    [Fact]
+    public void AllScopeEndpoints_PreserveAuthorizationFilter_AfterRateLimitAdd()
+    {
+        // Arrange — verify R6 audit item 03 did NOT disturb the group-level RequireAuthorization()
+        // filter (per stop-and-report trigger: "adding rate limit breaks any existing endpoint test").
+        var dataSource = _factory.Services.GetRequiredService<EndpointDataSource>();
+        var patterns = new[]
+        {
+            "/api/ai/scopes/skills",
+            "/api/ai/scopes/knowledge",
+            "/api/ai/scopes/tools",
+            "/api/ai/scopes/actions",
+            "/api/ai/scopes/personas"
+        };
+
+        foreach (var pattern in patterns)
+        {
+            var endpoint = dataSource.Endpoints
+                .OfType<RouteEndpoint>()
+                .FirstOrDefault(e => string.Equals(e.RoutePattern.RawText, pattern, StringComparison.OrdinalIgnoreCase));
+
+            endpoint.Should().NotBeNull($"endpoint {pattern} must be registered");
+
+            // Endpoint must still carry the group-level authorization metadata
+            // (RequireAuthorization() produces AuthorizeAttribute in the metadata chain).
+            var authMetadata = endpoint!.Metadata
+                .OfType<Microsoft.AspNetCore.Authorization.IAuthorizeData>()
+                .ToList();
+            authMetadata.Should().NotBeEmpty(
+                $"endpoint {pattern} must retain group-level RequireAuthorization() after rate-limit addition (ADR-008 unchanged by audit item 03)");
+        }
     }
 }

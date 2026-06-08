@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
@@ -341,18 +342,30 @@ public class AnalysisToolDtoTests
 
     [Theory]
     [InlineData("""{"type":"string"}""")]
+    [InlineData("true")]   // Draft 2020-12: a boolean is a valid root schema (true = accept everything)
+    [InlineData("false")]  // Draft 2020-12: false = reject everything (still a valid schema)
+    public void MapJsonSchema_ValidSchemaJsonShapes_ReturnsRawValue(string rawValue)
+    {
+        // R6 audit item 1: the mapper now requires semantic JSON Schema validity, not just
+        // well-formedness. Per JSON Schema Draft 2020-12, a schema is either an object or
+        // a boolean — every other JSON value form (string, number, null, array) is rejected.
+        AnalysisToolService.MapJsonSchema(rawValue, Guid.NewGuid(), NullLogger.Instance)
+            .Should().Be(rawValue);
+    }
+
+    [Theory]
     [InlineData("[1, 2, 3]")]
     [InlineData("null")]
     [InlineData("42")]
-    [InlineData("true")]
     [InlineData("\"a string\"")]
-    public void MapJsonSchema_VariousValidJsonShapes_ReturnsRawValue(string rawValue)
+    public void MapJsonSchema_WellFormedJsonButInvalidSchemaShape_ReturnsNull(string rawValue)
     {
-        // System.Text.Json's JsonDocument.Parse accepts any valid JSON value
-        // (object, array, primitive). The mapper does not enforce "must be object"
-        // because that semantic check is the adapter's responsibility (FR-08).
+        // R6 audit item 1: well-formed JSON that is not a valid JSON Schema (per Draft
+        // 2020-12: must be object or boolean) is now rejected by the semantic validator
+        // and mapped to null with a warning. The chat resolver (task 011) refuses to
+        // expose tools whose schema is null, so the LLM never sees a malformed contract.
         AnalysisToolService.MapJsonSchema(rawValue, Guid.NewGuid(), NullLogger.Instance)
-            .Should().Be(rawValue);
+            .Should().BeNull();
     }
 
     [Theory]
@@ -395,5 +408,101 @@ public class AnalysisToolDtoTests
         var result = AnalysisToolService.MapJsonSchema(largeSchema, Guid.NewGuid(), NullLogger.Instance);
 
         result.Should().Be(largeSchema);
+    }
+
+    // =========================================================================
+    // R6 audit item 1 (2026-06-07) — semantic JSON Schema validation.
+    // MapJsonSchema now performs Draft 2020-12 meta-schema validation in
+    // addition to JSON well-formedness. Malformed schemas are mapped to null
+    // (silent-warning behavior preserved) so the chat resolver refuses to
+    // expose the tool to the LLM.
+    // =========================================================================
+
+    [Fact]
+    public void MapJsonSchema_SemanticInvalid_PropertiesValueIsNumber_ReturnsNull()
+    {
+        // Well-formed JSON, but "properties.query" is the integer 42 — must be a schema
+        // object. Draft 2020-12 meta-schema rejects this; mapper returns null.
+        const string schema = """{"type":"object","properties":{"query":42}}""";
+
+        AnalysisToolService.MapJsonSchema(schema, Guid.NewGuid(), NullLogger.Instance)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void MapJsonSchema_SemanticInvalid_RequiredValueIsString_ReturnsNull()
+    {
+        // "required" must be an array of strings per Draft 2020-12. Here it is a string.
+        const string schema = """{"type":"object","required":"query"}""";
+
+        AnalysisToolService.MapJsonSchema(schema, Guid.NewGuid(), NullLogger.Instance)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void MapJsonSchema_SemanticInvalid_TypeIsObjectNotString_ReturnsNull()
+    {
+        // "type" must be a string or array of strings; here it is an object.
+        const string schema = """{"type":{"oops":true}}""";
+
+        AnalysisToolService.MapJsonSchema(schema, Guid.NewGuid(), NullLogger.Instance)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void MapJsonSchema_SemanticValid_StandardFunctionCallingShape_ReturnsRawValue()
+    {
+        // Canonical LLM function-calling schema (the shape every chat-available tool ships).
+        // Must round-trip through the new validator unchanged.
+        const string schema = """
+        {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "Search query" },
+            "topK": { "type": "integer", "default": 5, "minimum": 1, "maximum": 50 }
+          },
+          "required": ["query"],
+          "additionalProperties": false
+        }
+        """;
+
+        AnalysisToolService.MapJsonSchema(schema, Guid.NewGuid(), NullLogger.Instance)
+            .Should().Be(schema);
+    }
+
+    [Fact]
+    public void MapJsonSchema_SemanticInvalid_LogsWarning()
+    {
+        // R6 audit item 1: malformed-schema warning is emitted so admins see the
+        // failure in BFF logs as soon as the row is loaded (no silent LLM-time failure).
+        var logger = new TestLogger();
+        const string badSchema = """{"type":"object","properties":{"query":42}}""";
+
+        var result = AnalysisToolService.MapJsonSchema(badSchema, Guid.NewGuid(), logger);
+
+        result.Should().BeNull();
+        logger.WarningCount.Should().BeGreaterThan(0,
+            "R6-audit-1: malformed schemas must emit a warning so admins can fix the row");
+        logger.LastWarningMessage.Should().Contain("R6-audit-1",
+            "warning must carry the R6-audit-1 marker so log filters can find it");
+    }
+
+    private sealed class TestLogger : ILogger
+    {
+        public int WarningCount { get; private set; }
+        public string? LastWarningMessage { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                WarningCount++;
+                LastWarningMessage = formatter(state, exception);
+            }
+        }
     }
 }

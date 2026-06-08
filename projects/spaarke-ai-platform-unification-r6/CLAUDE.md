@@ -94,6 +94,50 @@ For tasks modifying 4+ files, Claude Code MUST:
 
 ---
 
+## 🚨 ADRs Are Defaults — Challenge When Warranted (binding operating principle)
+
+**ADRs are guardrails, not immutable laws.** The default is to follow them. But agents MUST surface trade-offs honestly when an ADR or rule produces a suboptimal technical outcome — they MUST NOT silently build workarounds around an ADR to avoid touching it.
+
+### When to challenge an ADR (mandatory stop-and-surface)
+
+Sub-agents executing R6 tasks MUST stop and report to the main session (and through it, to the user) when ANY of these conditions hold:
+
+1. **The optimal technical solution is blocked by a discipline rule, not a binding architectural constraint** (e.g., the constraint is a project scope rule like NFR-03 "no new ADRs," not a hard architectural invariant)
+2. **The "compliant" path requires a known-fragile workaround** — losing streaming UX, building a parallel implementation, accepting runtime fragility to avoid compile-time investment, etc.
+3. **The ADR is being enforced on a case the original author didn't anticipate** — the spec/ADR was written without the specific scenario in mind
+4. **An existing ADR can be cleanly extended (additively) but the project rule forbids it** — the change doesn't violate the ADR's intent; it just requires updating the document
+
+### What the agent MUST do (not what to silently work around)
+
+When any condition above holds:
+
+1. **STOP execution** before implementing the suboptimal workaround
+2. **NAME THE SPECIFIC ADR** — don't say "an ADR blocks this." Say "ADR-029 publish-size constraint, NFR-03 scope rule, etc." Cite the rule's text.
+3. **VERIFY the rule actually blocks the change** — walk through each binding ADR and check whether the change violates its content (not just whether the project rule says "no changes")
+4. **ENUMERATE the options** in plain English:
+   - Follow the ADR as currently written (what it costs technically)
+   - Modify or extend the ADR (what it costs in process + what it gains technically)
+   - Document an exception with rationale (what it costs in clarity + future-cost)
+5. **WAIT for explicit user direction** before proceeding
+
+### NFR-03 is a scope-discipline default, NOT a hard architectural rule
+
+NFR-03 says "no new ADRs in R6." This was a scope-discipline decision at spec authoring time to prevent ADR proliferation. Like any project rule, it can be revised per-case when the cost of NOT doing so is materially worse than the cost of doing so.
+
+**Concrete example**: R6 Wave 7 Q9 migration surfaced that `WorkingDocumentTools` cannot fit the `IToolHandler` contract without a streaming overload. The optimal answer (add a streaming method to the interface + small focused ADR) was blocked by NFR-03. After analysis, the user decided to revise NFR-03 for this specific case and accept a new ADR (ADR-032 "Streaming chat-tool contract"). The R7-deferral was avoided because the cost (3 days + 1 ADR doc) was bounded and the gain (10/10 chat tools migrated, no closeout known-limit) was clear.
+
+### Anti-pattern (do NOT do this)
+
+❌ "I noticed adding the JSON Schema validator NuGet would cost ~1 MB which exceeds the R6 ≤+5 MB budget per NFR-02, so I implemented runtime validation in the handler's ValidateChat instead." — This is silently working around the ADR. The right pattern is: "I noticed JSON Schema validator NuGet adds ~1 MB. Per NFR-02 this exceeds the R6 budget. The trade-off is: (a) accept the ~1 MB and have catalog-write-time validation, (b) defer NuGet and run validation at handler-validate-time but accept that malformed rows fail at LLM invocation. **Surfacing for your decision.**"
+
+### Pattern (do this)
+
+✅ Name the rule. Verify what it actually says (not what discipline says). Walk through the optimal answer + the cost of the workaround. Surface for explicit decision.
+
+This applies to ALL R6 tasks, especially sub-agent dispatch. Sub-agent prompts should explicitly enable this pattern; main session should validate the agent surfaced trade-offs vs working around them.
+
+---
+
 ## R6 Binding Decisions (Q1–Q11 resolved 2026-06-07)
 
 These are decided. Tasks reference them without re-prompting. Full table in [plan.md](plan.md) §2 "Key Technical Decisions".
@@ -102,7 +146,7 @@ These are decided. Tasks reference them without re-prompting. Full table in [pla
 - **Q1 + Q2**: Persona = standalone `sprk_aipersona` entity; most-specific-wins inheritance (SYS- < CUST- < playbook)
 - **Q5 (re-shaped)**: `outputSchema` on **action** (intrinsic shape); destination + widgetType on **node config** (per-playbook routing); `StructuredOutputStreamWidget` schema-aware; duplicate-fire fix at **CapabilityRouter** (not action metadata). Migrate 4 existing actions: summarize-chat, summarize-workspace, matter-prefill, project-prefill. **Pre-fill hook signatures + 45s timeout + `useAiPrefill` UNCHANGED per NFR-07.**
 - **Q7 (scope expansion)**: Build full memory management UI in R6 (was R7-deferred). Pinned Memory CRUD + visualization in Context pane. Phase C +1–2 weeks.
-- **Q9**: All 10 chat tools migrated in single Phase A batch (faster but riskier). Comprehensive regression test + rollback plan required.
+- **Q9 (revised 2026-06-07 after deep analysis)**: 10 chat tools migrated in THREE sub-waves grouped by migration shape — NOT a single big-bang. Wave 7 = 4 trivial tools (AnalysisQuery, KnowledgeRetrieval, TextRefinement, VerifyCitations). Wave 8 = 4 citation/SSE-state tools (DocumentSearch, WebSearch, CodeInterpreter, LegalResearch). Wave 9 = WorkingDocumentTools (with new **ADR-032 Streaming chat-tool contract** — NFR-03 revised per "ADRs Are Defaults" principle since the optimal technical answer doesn't fit current contract). AnalysisExecutionTools deleted (redundant with Pillar 3 `invoke_playbook`). 2 bridges (InvokeSummarize, InvokeInsightsQuery) deleted via task 023. Reasoning: deep analysis showed 10 tools are heterogeneous; sub-wave grouping reduces file-overlap risk + validates citations-in-metadata pattern at small scale before applying at scale.
 - **Q11**: New `IInvokePlaybookAi` facade per ADR-013 (not extension of `IWorkspacePrefillAi`).
 - **Pillar 6 split**: 6a (state model + persist + endpoint + prompt snapshot) → 6b (chat tools + affordances + conflict) + 6c (trace widget + events) + 7 + 9 parallel after 6a
 - **Handler order**: Wave 1 deterministic (4 parallel) → Wave 2 LLM-assisted (4 parallel)

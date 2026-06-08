@@ -1,6 +1,8 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using Json.Schema;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -431,10 +433,24 @@ public class AnalysisToolService : DataverseHttpServiceBase
     /// mapper, because the mapper must continue to work for playbook-only rows.
     /// </para>
     /// <para>
-    /// Validation scope: this method validates JSON well-formedness only (parsable by
-    /// <see cref="System.Text.Json.JsonDocument.Parse(string, System.Text.Json.JsonDocumentOptions)"/>).
-    /// It does NOT validate JSON Schema semantics (required keywords, type correctness) —
-    /// that's the adapter's responsibility per FR-08 separation-of-concerns.
+    /// Validation scope (R6 audit item 1 — strengthened 2026-06-07): this method now performs
+    /// TWO layers of validation:
+    /// </para>
+    /// <list type="number">
+    /// <item><b>JSON well-formedness</b> — parsable by
+    /// <see cref="System.Text.Json.JsonDocument.Parse(string, System.Text.Json.JsonDocumentOptions)"/>.</item>
+    /// <item><b>Semantic JSON Schema validity</b> — the value validates against the JSON
+    /// Schema Draft 2020-12 meta-schema via <c>JsonSchema.Net</c>. This catches rows where
+    /// an admin authored well-formed JSON that is not a legal schema (e.g., a properties
+    /// member whose value is a primitive). Malformed schemas log a warning and map to null
+    /// so the chat resolver (task 011) refuses to expose the tool to the LLM.</item>
+    /// </list>
+    /// <para>
+    /// This double-layer validation (write-time at the mapper + chat-session-start at the
+    /// <c>ToolHandlerToAIFunctionAdapter</c>) is intentional: admins editing
+    /// <c>sprk_analysistool</c> rows in Power Apps see warnings in BFF logs as soon as the
+    /// tool is loaded, and the adapter throws a clear exception if a malformed schema ever
+    /// reaches function-calling registration.
     /// </para>
     /// <para>
     /// Empty / whitespace-only strings are treated as null (no schema set on this row).
@@ -447,10 +463,10 @@ public class AnalysisToolService : DataverseHttpServiceBase
             return null;
         }
 
+        // Layer 1: well-formedness.
         try
         {
             using var _ = JsonDocument.Parse(rawValue);
-            return rawValue;
         }
         catch (JsonException ex)
         {
@@ -465,6 +481,61 @@ public class AnalysisToolService : DataverseHttpServiceBase
                 rawValue.Length);
             return null;
         }
+
+        // Layer 2: semantic JSON Schema validity (R6 audit item 1).
+        try
+        {
+            var node = JsonNode.Parse(rawValue);
+            if (node is null)
+            {
+                logger.LogWarning(
+                    "[R6-audit-1] sprk_jsonschema for tool {ToolId} parsed to null JsonNode; " +
+                    "mapping to null. Admins should set the column to a JSON object document.",
+                    toolId);
+                return null;
+            }
+
+            var metaResults = MetaSchemas.Draft202012.Evaluate(
+                node,
+                new EvaluationOptions
+                {
+                    OutputFormat = OutputFormat.List,
+                    ValidateAgainstMetaSchema = false  // we ARE the meta-schema evaluation
+                });
+
+            if (!metaResults.IsValid)
+            {
+                var firstErrors = metaResults.Details
+                    .Where(d => d.HasErrors && d.Errors is not null)
+                    .SelectMany(d => d.Errors!.Select(kv => $"{d.InstanceLocation}: {kv.Value}"))
+                    .Take(3)
+                    .ToArray();
+
+                logger.LogWarning(
+                    "[R6-audit-1] sprk_jsonschema for tool {ToolId} is well-formed JSON but is " +
+                    "not a valid JSON Schema (Draft 2020-12); mapping to null. " +
+                    "Schema length={Length}, errors={Errors}",
+                    toolId,
+                    rawValue.Length,
+                    firstErrors.Length > 0 ? string.Join("; ", firstErrors) : "(no detailed errors)");
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            // JsonSchema.Net can throw on some pathological inputs (e.g., $ref cycles).
+            // Map to null and log — same UX as malformed JSON: chat resolver refuses to
+            // expose the tool, admin sees a clear log entry.
+            logger.LogWarning(
+                ex,
+                "[R6-audit-1] sprk_jsonschema for tool {ToolId} failed semantic JSON Schema " +
+                "validation with an unexpected error; mapping to null. Schema length={Length}",
+                toolId,
+                rawValue.Length);
+            return null;
+        }
+
+        return rawValue;
     }
 
     #endregion

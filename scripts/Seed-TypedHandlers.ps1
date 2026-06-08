@@ -66,6 +66,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# R6 audit item 1 — dot-source the JSON Schema validator helper so seeds get
+# write-time validation (admins catch malformed schemas immediately instead of
+# silently passing them through to fail at LLM invocation).
+. (Join-Path $PSScriptRoot "Test-AnalysisToolSchemaValid.ps1")
+
 # -----------------------------------------------------------------------------
 # Row map — each entry maps the handler class name to its JSON seed file.
 # Wave-1 / Wave-2 sibling tasks ADD their entries here as they land.
@@ -187,6 +192,18 @@ foreach ($handlerClass in $RowFiles.Keys) {
     $toolCode = $payload["sprk_toolcode"]
 
     Write-Host "--- $handlerClass ($toolCode) ---"
+
+    # R6 audit item 1: catalog-write-time JSON Schema validation. We refuse to
+    # seed a row whose sprk_jsonschema is structurally invalid — admins see the
+    # error here rather than at LLM invocation. The BFF is still the authoritative
+    # validator at chat-session start; this is fast-feedback defense-in-depth.
+    if ($payload.Contains("sprk_jsonschema") -and -not [string]::IsNullOrWhiteSpace($payload["sprk_jsonschema"])) {
+        $schemaOk = Test-AnalysisToolSchemaValid -SchemaJson $payload["sprk_jsonschema"] -ToolName $toolCode
+        if (-not $schemaOk) {
+            Write-Error "[$toolCode] sprk_jsonschema failed structural validation. Fix the JSON in $jsonPath before re-running. (See warnings above.)"
+            continue
+        }
+    }
 
     if ($WhatIf) {
         Write-Host "  [WhatIf] Would UPSERT row from $jsonPath"

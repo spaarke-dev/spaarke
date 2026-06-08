@@ -277,6 +277,69 @@ public class ToolHandlerToAIFunctionAdapterTests
             .WithMessage("*'properties' must be a JSON object*");
     }
 
+    // ─── R6 audit item 1: semantic JSON Schema validation (Draft 2020-12) ──────────────
+    // The constructor now invokes JsonSchema.Net to validate the candidate schema against
+    // the JSON Schema Draft 2020-12 meta-schema. Schemas that are well-formed JSON +
+    // structurally object-rooted but semantically invalid as JSON Schema (e.g., property
+    // value that is a primitive instead of a schema object) are rejected at chat-session
+    // start, before the LLM ever sees them.
+
+    [Fact]
+    public void Constructor_SemanticInvalid_PropertyValueIsNumber_Throws()
+    {
+        // Well-formed JSON, top-level object, "properties" is an object — but the property
+        // value "query" is the integer 42 rather than a sub-schema. Draft 2020-12 rejects.
+        const string badSchema = """{"type":"object","properties":{"query":42}}""";
+        var tool = CreateTool(jsonSchema: badSchema);
+
+        Action act = () => new ToolHandlerToAIFunctionAdapter(
+            tool, new FakeChatHandler(), CreateContext);
+
+        act.Should().Throw<ArgumentException>()
+            .WithParameterName("tool")
+            .WithMessage("*R6-audit-1*not a valid JSON Schema*");
+    }
+
+    [Fact]
+    public void Constructor_SemanticInvalid_RequiredIsString_Throws()
+    {
+        // "required" must be an array of strings; here it's a string.
+        const string badSchema = """{"type":"object","required":"query"}""";
+        var tool = CreateTool(jsonSchema: badSchema);
+
+        Action act = () => new ToolHandlerToAIFunctionAdapter(
+            tool, new FakeChatHandler(), CreateContext);
+
+        act.Should().Throw<ArgumentException>()
+            .WithParameterName("tool")
+            .WithMessage("*R6-audit-1*not a valid JSON Schema*");
+    }
+
+    [Fact]
+    public void Constructor_SemanticValid_CanonicalSchema_Succeeds()
+    {
+        // The canonical function-calling shape used by every R6 typed handler.
+        // Must pass through the new semantic validator without complaint.
+        const string canonicalSchema = """
+        {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "Search query" },
+            "topK": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5 }
+          },
+          "required": ["query"],
+          "additionalProperties": false
+        }
+        """;
+        var tool = CreateTool(jsonSchema: canonicalSchema);
+
+        var sut = new ToolHandlerToAIFunctionAdapter(tool, new FakeChatHandler(), CreateContext);
+
+        sut.Should().NotBeNull();
+        sut.JsonSchema.GetProperty("properties").GetProperty("query")
+            .GetProperty("type").GetString().Should().Be("string");
+    }
+
     [Fact]
     public void Constructor_PlaybookOnlyHandler_Throws()
     {

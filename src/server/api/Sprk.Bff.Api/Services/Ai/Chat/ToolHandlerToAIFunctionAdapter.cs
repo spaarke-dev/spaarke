@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Json.Schema;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Services.Ai;
@@ -47,17 +49,27 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// is required.
 /// </para>
 /// <para>
-/// <b>JSON Schema validation scope (FR-08 separation-of-concerns)</b>: the constructor
-/// validates the supplied schema is well-formed JSON and has a top-level
-/// <c>"type": "object"</c> shape with a <c>"properties"</c> object. Deeper semantic
-/// validation (e.g., required-keyword correctness, per-property type validation against
-/// LLM arguments) is deferred to the underlying handler's
-/// <see cref="IToolHandler.ValidateChat"/>. Rationale: full JSON-Schema-2020-12 semantic
-/// validation requires a ~1 MB+ third-party library (<c>JsonSchema.Net</c> or equivalent),
-/// not currently a dependency — adding it would consume R6 publish-size budget (≤+5 MB)
-/// without proportionate benefit, because the LLM is constrained by the schema at the
-/// function-calling protocol layer (the schema becomes part of the function declaration
-/// sent to the model) and the handler is the next-line defense for semantic checks.
+/// <b>JSON Schema validation scope (FR-08 separation-of-concerns; R6 audit item 1)</b>:
+/// the constructor performs THREE layers of validation on the supplied schema:
+/// </para>
+/// <list type="number">
+/// <item><b>JSON well-formedness</b> — schema parses via <see cref="JsonDocument.Parse(string)"/>.</item>
+/// <item><b>Top-level shape</b> — root is a JSON object; if a <c>"properties"</c> member
+/// is present it is itself a JSON object (function-calling protocol invariant).</item>
+/// <item><b>Semantic JSON Schema validation</b> — the schema is itself validated against
+/// the JSON Schema Draft 2020-12 meta-schema via <c>JsonSchema.Net</c> (~300 KB
+/// compressed delta). This catches admin-edited schemas that are well-formed JSON but
+/// invalid JSON Schema — e.g., <c>"properties"</c> whose member value is a primitive
+/// rather than a schema object, malformed <c>"required"</c> arrays, illegal keyword
+/// combinations. Surfacing these at chat-session start is materially better UX than
+/// silent LLM-invocation-time failures.</item>
+/// </list>
+/// <para>
+/// Per-property argument validation (e.g., the LLM-supplied <c>query</c> value matches
+/// the schema's <c>{"type": "string"}</c> constraint) is still deferred to the underlying
+/// handler's <see cref="IToolHandler.ValidateChat"/> — the LLM is also constrained by
+/// the schema at the function-calling protocol layer (the schema becomes part of the
+/// function declaration sent to the model).
 /// </para>
 /// </remarks>
 public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
@@ -112,8 +124,10 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// <paramref name="tool"/>.Name is null/whitespace, or
     /// <paramref name="tool"/>.JsonSchema is null/whitespace, or
     /// <paramref name="tool"/>.JsonSchema is not parseable JSON, or
-    /// the parsed schema does not have a top-level <c>"type": "object"</c> with a
-    /// <c>"properties"</c> object.
+    /// the parsed schema root is not a JSON object, or
+    /// the parsed schema's <c>"properties"</c> member is present but is not a JSON object, or
+    /// the parsed schema does not itself validate against the JSON Schema Draft 2020-12
+    /// meta-schema (R6 audit item 1; semantic validation via <c>JsonSchema.Net</c>).
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// <paramref name="handler"/>.SupportedInvocationContexts does not include
@@ -192,6 +206,13 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
                 nameof(tool),
                 ex);
         }
+
+        // R6 audit item 1: semantic JSON Schema validation via JsonSchema.Net (~300 KB
+        // compressed delta). Catches admin-edited schemas that are well-formed JSON but
+        // invalid JSON Schema — e.g., properties whose value is a primitive rather than a
+        // schema object, illegal keyword shapes. Surfacing here (chat-session start) is
+        // materially better UX than LLM-invocation-time silent failures.
+        ValidateAgainstMetaSchema(tool, _jsonSchema);
 
         // FR-09 / D-A-09: defensive guard — task 009 added a default ValidateChat impl that
         // refuses chat invocation. Constructing the adapter for a handler that hasn't opted
@@ -343,6 +364,103 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             activity?.SetTag("sprk.tool.exceptionType", ex.GetType().FullName);
             activity?.SetStatus(ActivityStatusCode.Error, description: ex.GetType().Name);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// R6 audit item 1 — validates a candidate function-calling schema against the JSON
+    /// Schema Draft 2020-12 meta-schema. Throws <see cref="ArgumentException"/> with a
+    /// clear, admin-actionable error message on the first failure.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Implementation notes:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>Uses <c>JsonSchema.Net</c>'s <see cref="MetaSchemas.Draft202012"/> evaluator
+    /// — the canonical Draft 2020-12 meta-schema as published by json-schema.org.</item>
+    /// <item>Deserializing the schema text into <see cref="Json.Schema.JsonSchema"/> can
+    /// throw <see cref="JsonException"/> when the JSON cannot be coerced to a valid schema
+    /// object (e.g., a string at the root). We catch and re-throw as
+    /// <see cref="ArgumentException"/> so the upstream chat resolver / DI factory can
+    /// uniformly treat schema problems via one exception type.</item>
+    /// <item>Catalog-write-time validation (admins authoring rows in Dataverse) is the
+    /// complementary line of defense — see <c>scripts/Test-AnalysisToolSchemaValid.ps1</c>.
+    /// This adapter-level check ensures defense-in-depth: even if a row was authored
+    /// before write-time validation existed, the LLM is never handed a malformed schema.</item>
+    /// </list>
+    /// </remarks>
+    private static void ValidateAgainstMetaSchema(AnalysisTool tool, JsonElement schemaRoot)
+    {
+        JsonNode? schemaNode;
+        try
+        {
+            // Round-trip via raw JSON so we get a writable JsonNode the evaluator accepts.
+            // (JsonElement → JsonNode is awkward in .NET 8; serialize then parse.)
+            schemaNode = JsonNode.Parse(schemaRoot.GetRawText());
+        }
+        catch (JsonException ex)
+        {
+            // Should be unreachable — we already proved the text parses as JSON above —
+            // but defend against any future change to how _jsonSchema is materialized.
+            throw new ArgumentException(
+                $"[R6-audit-1] AnalysisTool '{tool.Name}' JsonSchema could not be re-parsed " +
+                $"for semantic validation: {ex.Message}",
+                nameof(tool),
+                ex);
+        }
+
+        if (schemaNode is null)
+        {
+            throw new ArgumentException(
+                $"[R6-audit-1] AnalysisTool '{tool.Name}' JsonSchema parsed to a null JsonNode; " +
+                "the schema must be a JSON object document.",
+                nameof(tool));
+        }
+
+        // Evaluate the candidate schema against the Draft 2020-12 meta-schema. This is
+        // the canonical "is this a valid JSON Schema?" check.
+        EvaluationResults metaResults;
+        try
+        {
+            metaResults = MetaSchemas.Draft202012.Evaluate(
+                schemaNode,
+                new EvaluationOptions
+                {
+                    OutputFormat = OutputFormat.List,
+                    ValidateAgainstMetaSchema = false  // we ARE the meta-schema evaluation
+                });
+        }
+        catch (Exception ex)
+        {
+            // JsonSchema.Net throws on certain malformed inputs that the parser accepts
+            // but the evaluator rejects (e.g., $ref cycles). Surface as an actionable error.
+            throw new ArgumentException(
+                $"[R6-audit-1] AnalysisTool '{tool.Name}' JsonSchema could not be evaluated " +
+                $"against the JSON Schema Draft 2020-12 meta-schema: {ex.Message}",
+                nameof(tool),
+                ex);
+        }
+
+        if (!metaResults.IsValid)
+        {
+            // Collect a compact, admin-actionable error summary. We deliberately keep
+            // the message short — full evaluation output is verbose and the failing keys
+            // (e.g., /properties/query/type) tell admins where the fix belongs.
+            var errors = metaResults.Details
+                .Where(d => d.HasErrors && d.Errors is not null)
+                .SelectMany(d => d.Errors!.Select(kv => $"{d.InstanceLocation}: {kv.Value}"))
+                .Take(5)
+                .ToArray();
+
+            var summary = errors.Length > 0
+                ? string.Join("; ", errors)
+                : "schema failed Draft 2020-12 meta-schema validation (no detailed errors reported)";
+
+            throw new ArgumentException(
+                $"[R6-audit-1] AnalysisTool '{tool.Name}' JsonSchema is well-formed JSON but " +
+                $"is not a valid JSON Schema (Draft 2020-12): {summary}",
+                nameof(tool));
         }
     }
 
