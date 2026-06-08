@@ -58,7 +58,7 @@ This is the **running tracker** — update as work completes. The design doc is 
 
 ---
 
-## Phase 2 — Refactor post-upload enqueue sites onto helper
+## Phase 2 — Refactor post-upload enqueue sites onto helper ✅ COMPLETE — commit `71b1af57`
 
 Scope revised 2026-06-08: helper is for **post-upload** contexts; the helper's fail-protections (feature flag, MIME skip-list, size cap, standard idempotency key) don't apply to explicit / admin / playbook-driven enqueues. Refactoring those would silently break configured behavior. See updated design doc §6 Phase 2 for the rationale.
 
