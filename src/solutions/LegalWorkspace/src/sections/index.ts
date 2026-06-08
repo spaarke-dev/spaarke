@@ -12,5 +12,8 @@ export { quickSummaryRegistration } from "./quickSummary.registration";
 export { latestUpdatesRegistration } from "./latestUpdates.registration";
 export { todoRegistration } from "./todo.registration";
 export { documentsRegistration } from "./documents.registration";
+export { projectsRegistration } from "./projects.registration";
+export { invoicesRegistration } from "./invoices.registration";
+export { workAssignmentsRegistration } from "./workAssignments.registration";
 export { dailyBriefingRegistration } from "./dailyBriefing/dailyBriefing.registration";
 export { calendarRegistration } from "./calendar.registration";

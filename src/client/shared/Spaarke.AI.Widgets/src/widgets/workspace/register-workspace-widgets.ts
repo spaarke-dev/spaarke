@@ -568,6 +568,104 @@ registerWorkspaceWidget(
 );
 
 // ---------------------------------------------------------------------------
+// ai-spaarke-ai-workspace-UI-r1 #4 (2026-06-08) — Dataverse entity-view widgets
+//
+// Four system widgets backed by the shared <DataverseEntityViewWidget>: a thin
+// wrapper around the Spaarke DataGrid framework. Each registration baked a
+// specific `configId` (the operator-created `sprk_gridconfiguration` row) into
+// the resolved component via the factory wrapper below.
+//
+// **DEPLOYMENT REQUIREMENT** — before these widgets render correctly, the
+// operator MUST create one `sprk_gridconfiguration` row per entity and replace
+// the placeholder constants below with the real GUIDs. See
+// `projects/ai-spaarke-ai-workspace-UI-r1/notes/entity-view-widget-deployment.md`
+// for the seed instructions. The widget falls back to a clear empty state when
+// `data.configId` resolves to an unknown record (DataGrid's invalid-config
+// guard); no production crash.
+// ---------------------------------------------------------------------------
+
+const ENTITY_VIEW_CONFIG_IDS = {
+  documents: 'REPLACE-ME-DOCUMENTS-CONFIG-ID',
+  projects: 'REPLACE-ME-PROJECTS-CONFIG-ID',
+  invoices: 'REPLACE-ME-INVOICES-CONFIG-ID',
+  workAssignments: 'REPLACE-ME-WORK-ASSIGNMENTS-CONFIG-ID',
+} as const;
+
+/**
+ * Build a lazy factory that resolves the shared `DataverseEntityViewWidget`
+ * pre-configured with a specific `configId`. The wrapper accepts the standard
+ * `WorkspaceWidgetProps<DataverseEntityViewWidgetData>` and merges the baked
+ * `configId` into `data` (caller-supplied `configId` still wins, which keeps
+ * the dispatcher path open for future overrides).
+ */
+function createEntityViewFactory(configId: string) {
+  return () =>
+    import('./DataverseEntityViewWidget').then(m => {
+      const Base = m.DataverseEntityViewWidget;
+      const Wrapped = (
+        props: import('../../types/widget-types').WorkspaceWidgetProps<
+          import('./DataverseEntityViewWidget').DataverseEntityViewWidgetData
+        >,
+      ): ReturnType<typeof Base> => {
+        const mergedData = { configId, ...(props.data ?? {}) };
+        return Base({ ...props, data: mergedData });
+      };
+      Wrapped.displayName = `DataverseEntityViewWidget(${configId})`;
+      return {
+        default: Wrapped as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+      };
+    });
+}
+
+registerWorkspaceWidget(
+  'documents-list',
+  {
+    displayName: 'Documents',
+    category: 'data',
+    icon: 'DocumentRegular',
+    allowMultiple: true,
+    defaultOrder: 200,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents),
+);
+
+registerWorkspaceWidget(
+  'projects-list',
+  {
+    displayName: 'Projects',
+    category: 'data',
+    icon: 'FolderRegular',
+    allowMultiple: true,
+    defaultOrder: 210,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects),
+);
+
+registerWorkspaceWidget(
+  'invoices-list',
+  {
+    displayName: 'Invoices',
+    category: 'data',
+    icon: 'ReceiptRegular',
+    allowMultiple: true,
+    defaultOrder: 220,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices),
+);
+
+registerWorkspaceWidget(
+  'work-assignments-list',
+  {
+    displayName: 'Work Assignments',
+    category: 'data',
+    icon: 'BriefcaseRegular',
+    allowMultiple: true,
+    defaultOrder: 230,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments),
+);
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from index.ts side-effect import)
 // ---------------------------------------------------------------------------
 
