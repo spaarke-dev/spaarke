@@ -23,6 +23,7 @@ public class AnalysisResultPersistence
     private readonly ExportServiceRegistry _exportRegistry;
     private readonly AiTelemetry? _telemetry;
     private readonly JobSubmissionService? _jobSubmissionService;
+    private readonly IPostUploadIndexingEnqueuer? _postUploadIndexingEnqueuer;
     private readonly ILogger<AnalysisResultPersistence> _logger;
 
     public AnalysisResultPersistence(
@@ -33,7 +34,8 @@ public class AnalysisResultPersistence
         ExportServiceRegistry exportRegistry,
         ILogger<AnalysisResultPersistence> logger,
         AiTelemetry? telemetry = null,
-        JobSubmissionService? jobSubmissionService = null)
+        JobSubmissionService? jobSubmissionService = null,
+        IPostUploadIndexingEnqueuer? postUploadIndexingEnqueuer = null)
     {
         _analysisService = analysisService;
         _documentService = documentService;
@@ -43,6 +45,7 @@ public class AnalysisResultPersistence
         _logger = logger;
         _telemetry = telemetry;
         _jobSubmissionService = jobSubmissionService;
+        _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
     }
 
     /// <summary>
@@ -234,10 +237,10 @@ public class AnalysisResultPersistence
         string? itemId,
         CancellationToken cancellationToken)
     {
-        if (_jobSubmissionService is null)
+        if (_postUploadIndexingEnqueuer is null)
         {
             _logger.LogDebug(
-                "JobSubmissionService not available -- skipping RAG indexing job enqueue for analysis {AnalysisId}",
+                "IPostUploadIndexingEnqueuer not available -- skipping RAG indexing job enqueue for analysis {AnalysisId}",
                 analysisId);
             return;
         }
@@ -250,47 +253,23 @@ public class AnalysisResultPersistence
             return;
         }
 
-        try
-        {
-            var idempotencyKey = $"{tenantId}:{documentId}";
+        // Phase 2 refactor (upload-indexing centralization): delegate to centralized helper.
+        // Original idempotency key was tenant:document scoped; helper's standard is
+        // rag-index-{driveId}-{itemId} which is the wider, drive+item canonical form.
+        // Same non-fatal try/catch + WARN logging is enforced inside the helper.
+        var request = new PostUploadIndexingRequest(
+            TenantId: tenantId,
+            DriveId: driveId,
+            ItemId: itemId,
+            FileName: string.Empty,
+            FileSizeBytes: null,
+            ContentType: null,
+            DocumentId: documentId,
+            ParentEntity: null,
+            SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
+            Source: "AnalysisOrchestration",
+            CorrelationId: analysisId);
 
-            var payload = new RagIndexingJobPayload
-            {
-                TenantId = tenantId,
-                DriveId = driveId,
-                ItemId = itemId,
-                DocumentId = documentId,
-                FileName = string.Empty,
-                Source = "AnalysisOrchestration",
-                EnqueuedAt = DateTimeOffset.UtcNow
-            };
-
-            var job = new JobContract
-            {
-                JobId = Guid.NewGuid(),
-                JobType = RagIndexingJobHandler.JobTypeName,
-                SubjectId = documentId,
-                CorrelationId = analysisId,
-                IdempotencyKey = idempotencyKey,
-                Attempt = 1,
-                MaxAttempts = 3,
-                Payload = JsonDocument.Parse(JsonSerializer.Serialize(payload)),
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-
-            await _jobSubmissionService.SubmitJobAsync(job, cancellationToken);
-
-            _logger.LogInformation(
-                "Enqueued RAG indexing job {JobId} for document {DocumentId}, analysis {AnalysisId}, " +
-                "idempotency key {IdempotencyKey}",
-                job.JobId, documentId, analysisId, idempotencyKey);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Failed to enqueue RAG indexing job for analysis {AnalysisId}, document {DocumentId}. " +
-                "Indexing will be retried by scheduled backfill.",
-                analysisId, documentId);
-        }
+        await _postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, cancellationToken);
     }
 }

@@ -47,7 +47,7 @@ public sealed class PostUploadIndexingEnqueuerTests
     }
 
     private static PostUploadIndexingRequest ValidRequest(
-        long size = 1024,
+        long? size = 1024,
         string contentType = "application/pdf",
         string fileName = "contract.pdf",
         string tenantId = "tenant-1",
@@ -240,6 +240,25 @@ public sealed class PostUploadIndexingEnqueuerTests
             .Returns(Task.CompletedTask);
         var sut = CreateSut();
         var request = ValidRequest(contentType: contentType, fileName: fileName);
+
+        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
+
+        result.JobSubmitted.Should().BeTrue();
+        result.SkipReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_NullFileSizeBytes_BypassesSizeChecks()
+    {
+        // Background workers (UploadFinalizationWorker, EmailToDocument) don't have size handy
+        // at the enqueue site. Passing null means "unknown" and skips size-based checks.
+        _jobSubmissionMock
+            .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _options.MaxIndexableBytes = 100; // tiny cap would normally reject any file
+        var sut = CreateSut();
+        var request = ValidRequest(size: null);
 
         var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
 

@@ -67,7 +67,9 @@ public interface IPostUploadIndexingEnqueuer
 /// <param name="FileName">File name (including extension). Required for skip-list
 /// evaluation and downstream display.</param>
 /// <param name="FileSizeBytes">File size in bytes. Zero triggers a skip
-/// (empty file = nothing to index).</param>
+/// (empty file = nothing to index). Null = unknown — size-based skips bypass.
+/// (Some callers, like background-finalization workers, don't have the size
+/// handy at the enqueue site.)</param>
 /// <param name="ContentType">MIME content type if known (may be null when not
 /// reported by the upload pipeline). Skip-list filtering uses this when present.</param>
 /// <param name="DocumentId">Optional Dataverse <c>sprk_document</c> ID. When the
@@ -92,7 +94,7 @@ public sealed record PostUploadIndexingRequest(
     string DriveId,
     string ItemId,
     string FileName,
-    long FileSizeBytes,
+    long? FileSizeBytes,
     string? ContentType,
     string? DocumentId,
     ParentEntityContext? ParentEntity,

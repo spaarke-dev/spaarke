@@ -519,6 +519,7 @@ public class InboundPipelineTests
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore — not used when ArchiveContainerId is null
             CreateMockJobSubmissionService(),
+            Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Options.Create(options),
             CreateConfiguration(),
@@ -826,6 +827,7 @@ public class InboundPipelineTests
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore intentionally null — upload throws but is caught (non-fatal)
             CreateMockJobSubmissionService(),
+            Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Options.Create(options),
             CreateConfiguration(),

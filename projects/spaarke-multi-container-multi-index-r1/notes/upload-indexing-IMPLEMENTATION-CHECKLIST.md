@@ -17,53 +17,60 @@ This is the **running tracker** — update as work completes. The design doc is 
 
 ---
 
-## Phase 1 — Helper + DI registration + tests (no behavior change)
+## Phase 1 — Helper + DI registration + tests (no behavior change) ✅ COMPLETE — commit `fd9dda7d`
 
 ### Code
-- [ ] Create `src/server/api/Sprk.Bff.Api/Services/Ai/IPostUploadIndexingEnqueuer.cs` (interface + `PostUploadIndexingRequest` record)
-- [ ] Create `src/server/api/Sprk.Bff.Api/Services/Ai/PostUploadIndexingEnqueuer.cs` (implementation extracting canonical pattern from `UploadFinalizationWorker.EnqueueRagIndexingAsync` lines 1280-1330)
-  - [ ] Feature-flag check (`Indexing:PostUploadEnqueueEnabled`, default true)
-  - [ ] Empty-file skip
-  - [ ] Missing-tenant guard (ERROR log, no enqueue)
-  - [ ] Content-type skip-list (§4.3) — but ensure `.msg/.eml` NOT skipped (per §8.5.2 caveat)
-  - [ ] Size-cap skip (default 200 MB, configurable)
-  - [ ] Null `SearchIndexName` still enqueues (handler fallback)
-  - [ ] Idempotency key `rag-index-{driveId}-{itemId}`
-  - [ ] Non-fatal try/catch around `SubmitJobAsync`
-  - [ ] Observability log line (§4.9)
-- [ ] DI registration in `Infrastructure/DI/AnalysisServicesModule.cs` at TOP of `AddAnalysisServicesModule` (above conditionals — same lesson as `ISearchIndexNameResolver`). Lifetime: scoped.
+- [x] Create `src/server/api/Sprk.Bff.Api/Services/Ai/IPostUploadIndexingEnqueuer.cs` (interface + `PostUploadIndexingRequest` record + `PostUploadIndexingResult` record)
+- [x] Create `src/server/api/Sprk.Bff.Api/Services/Ai/PostUploadIndexingEnqueuer.cs` (implementation extracting canonical pattern from `UploadFinalizationWorker.EnqueueRagIndexingAsync` lines 1280-1330)
+  - [x] Feature-flag check (`Indexing:PostUploadEnqueueEnabled`, default true)
+  - [x] Empty-file skip
+  - [x] Missing-tenant guard (ERROR log, no enqueue)
+  - [x] Content-type skip-list (§4.3) — `.msg/.eml/.pdf` confirmed NOT skipped per §8.5.2 caveat
+  - [x] Size-cap skip (default 200 MB, configurable)
+  - [x] Null `SearchIndexName` still enqueues (handler fallback)
+  - [x] Idempotency key `rag-index-{driveId}-{itemId}`
+  - [x] Non-fatal try/catch around `SubmitJobAsync`
+  - [x] Observability log line (§4.9)
+- [x] DI registration in `Infrastructure/DI/AnalysisServicesModule.cs` at TOP of `AddAnalysisServicesModule` (above conditionals — same lesson as `ISearchIndexNameResolver`). Lifetime: scoped.
+- [x] `Services/Jobs/JobSubmissionService.SubmitJobAsync` marked `virtual` to enable Moq interception in tests (1-line change, no semantic impact; existing `Mock<JobSubmissionService>` pattern in `InboundPipelineTests` benefits)
 
 ### Config
-- [ ] Add `Indexing:PostUploadEnqueueEnabled = true` to `appsettings.json` + dev/prod overrides
+- [x] Add `Indexing:PostUploadEnqueueEnabled = true` + `MaxIndexableBytes = 209715200` to `appsettings.template.json`
 
 ### Tests (`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PostUploadIndexingEnqueuerTests.cs`)
-- [ ] `HappyPath_SubmitsJob`
-- [ ] `EmptyFile_SkipsEnqueue`
-- [ ] `SkippableContentType_SkipsEnqueue` (test .zip, .exe; verify .msg/.pdf NOT skipped)
-- [ ] `LargeFile_SkipsEnqueue`
-- [ ] `NullSearchIndexName_StillEnqueues`
-- [ ] `MissingTenantId_SkipsAndLogsError`
-- [ ] `FeatureFlagOff_SkipsEnqueue`
-- [ ] `SubmitThrows_LogsWarningDoesNotPropagate`
+- [x] `EnqueueIfApplicableAsync_HappyPath_SubmitsJobWithCorrectPayload`
+- [x] `EnqueueIfApplicableAsync_EmptyFile_SkipsEnqueue`
+- [x] `EnqueueIfApplicableAsync_NonIndexableContentType_SkipsEnqueue` (theory: video/mp4, audio/wav, application/zip, application/x-7z-compressed)
+- [x] `EnqueueIfApplicableAsync_BinaryExtensionWithOctetStream_SkipsEnqueue` (theory: .exe, .dll, .iso)
+- [x] `EnqueueIfApplicableAsync_LegitimateBusinessFile_EnqueuesEvenAsOctetStream` (theory: .msg, .eml, .pdf, .docx — §8.5.2 caveat)
+- [x] `EnqueueIfApplicableAsync_FileExceedsMaxIndexableBytes_SkipsEnqueue`
+- [x] `EnqueueIfApplicableAsync_NullSearchIndexName_StillEnqueues`
+- [x] `EnqueueIfApplicableAsync_MissingTenantId_SkipsAndLogsError`
+- [x] `EnqueueIfApplicableAsync_MissingDriveId_SkipsEnqueue`
+- [x] `EnqueueIfApplicableAsync_FeatureFlagOff_SkipsEnqueue`
+- [x] `EnqueueIfApplicableAsync_SubmitThrows_LogsWarningDoesNotPropagate`
+- [x] `EnqueueIfApplicableAsync_ParentEntityProvided_FlowsThroughToPayload`
 
 ### Verification
-- [ ] `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors
-- [ ] `dotnet test tests/unit/Sprk.Bff.Api.Tests/` → all new tests pass, no regression in existing 6140
-- [ ] **Commit + push**: `feat(multi-container-multi-index-r1): Phase 1 — IPostUploadIndexingEnqueuer + DI + tests (no behavior change)`
+- [x] `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors
+- [x] `dotnet test tests/unit/Sprk.Bff.Api.Tests/` → **6161 passed / 0 failed / 109 skipped** (+21 over the 6140 baseline; zero regression)
+- [x] **Commit + push**: `fd9dda7d` — `feat(multi-container-multi-index-r1): Phase 1 — IPostUploadIndexingEnqueuer + DI + tests (no behavior change)`
 
 ---
 
-## Phase 2 — Refactor existing enqueue sites to use helper
+## Phase 2 — Refactor post-upload enqueue sites onto helper
 
-Replace inline `RagIndexingJobPayload` + `SubmitJobAsync` with `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync` calls. **Pure deduplication — zero behavior change.**
+Scope revised 2026-06-08: helper is for **post-upload** contexts; the helper's fail-protections (feature flag, MIME skip-list, size cap, standard idempotency key) don't apply to explicit / admin / playbook-driven enqueues. Refactoring those would silently break configured behavior. See updated design doc §6 Phase 2 for the rationale.
 
-### Sites to refactor (5 files; preserve existing behavior exactly)
-- [ ] `Workers/Office/UploadFinalizationWorker.cs` lines 1280-1330 — `EnqueueRagIndexingAsync` → helper call
-- [ ] `Services/Communication/IncomingCommunicationProcessor.cs` line 753 — Email-to-Document enqueue → helper call
-- [ ] `Services/Ai/AnalysisResultPersistence.cs` line 257 — AI workflow enqueue → helper call
-- [ ] `Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs` line 163 — AI node enqueue → helper call
-- [ ] `Api/Ai/KnowledgeBaseEndpoints.cs` line 385 — manual KB ingest enqueue → helper call
-- [ ] `Api/Ai/RagEndpoints.cs` line 833 — `/api/ai/rag/index-file` enqueue → helper call (DocumentUploadWizard still calls this endpoint; helper preserves identical behavior)
+### Sites refactored (3 post-upload contexts)
+- [x] `Workers/Office/UploadFinalizationWorker.cs` — `EnqueueRagIndexingAsync` → helper call (canonical pattern source); preserves `Source="OfficeAddin"` tag
+- [x] `Services/Communication/IncomingCommunicationProcessor.cs` — Email-to-Document `EnqueueRagIndexingAsync` → helper call; preserves `Source="InboundEmail"` tag
+- [x] `Services/Ai/AnalysisResultPersistence.cs` — `EnqueueRagIndexingJobAsync` → helper call; preserves `Source="AnalysisOrchestration"` tag. Idempotency key changes from `{tenant}:{document}` to standard `rag-index-{driveId}-{itemId}` (wider canonical form — handler is idempotent on chunk IDs either way)
+
+### Sites intentionally NOT refactored (3 explicit-call contexts)
+- [-] `Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs` — playbook-configured indexing; helper would silently break configured playbooks
+- [-] `Api/Ai/KnowledgeBaseEndpoints.cs` — admin force-reindex with intentional non-idempotent key
+- [-] `Api/Ai/RagEndpoints.IndexFile` — external API key callers explicitly invoking indexing; DocumentUploadWizard pre-Phase 4 still uses this endpoint, so behavior MUST be preserved unchanged
 
 ### Regression tests
 - [ ] Integration test: Office Add-in upload still enqueues (mock `IJobSubmissionService` records 1 call per upload)

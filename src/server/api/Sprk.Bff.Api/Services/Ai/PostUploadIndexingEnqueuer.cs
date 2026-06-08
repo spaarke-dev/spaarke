@@ -104,24 +104,26 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
             return PostUploadIndexingResult.Skipped("MissingSpeIdentifiers");
         }
 
-        // 4. Empty file (§4.5)
-        if (request.FileSizeBytes == 0)
+        // 4-5. Size-based skips only run when caller knows the size (§4.4, §4.5).
+        if (request.FileSizeBytes.HasValue)
         {
-            _logger.LogInformation(
-                "Skipping RAG enqueue: file is empty " +
-                "(File={FileName} Source={Source} CorrelationId={CorrelationId})",
-                request.FileName, request.Source, request.CorrelationId);
-            return PostUploadIndexingResult.Skipped("EmptyFile");
-        }
+            if (request.FileSizeBytes.Value == 0)
+            {
+                _logger.LogInformation(
+                    "Skipping RAG enqueue: file is empty " +
+                    "(File={FileName} Source={Source} CorrelationId={CorrelationId})",
+                    request.FileName, request.Source, request.CorrelationId);
+                return PostUploadIndexingResult.Skipped("EmptyFile");
+            }
 
-        // 5. Size cap (§4.4) — very large files overwhelm chunker + cost
-        if (request.FileSizeBytes > opts.MaxIndexableBytes)
-        {
-            _logger.LogInformation(
-                "Skipping RAG enqueue: file exceeds MaxIndexableBytes " +
-                "(File={FileName} SizeBytes={SizeBytes} MaxBytes={MaxBytes} Source={Source} CorrelationId={CorrelationId})",
-                request.FileName, request.FileSizeBytes, opts.MaxIndexableBytes, request.Source, request.CorrelationId);
-            return PostUploadIndexingResult.Skipped("FileTooLarge");
+            if (request.FileSizeBytes.Value > opts.MaxIndexableBytes)
+            {
+                _logger.LogInformation(
+                    "Skipping RAG enqueue: file exceeds MaxIndexableBytes " +
+                    "(File={FileName} SizeBytes={SizeBytes} MaxBytes={MaxBytes} Source={Source} CorrelationId={CorrelationId})",
+                    request.FileName, request.FileSizeBytes.Value, opts.MaxIndexableBytes, request.Source, request.CorrelationId);
+                return PostUploadIndexingResult.Skipped("FileTooLarge");
+            }
         }
 
         // 6. Content-type / extension skip-list (§4.3)

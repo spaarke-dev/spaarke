@@ -262,12 +262,25 @@ If post-upload indexing is dropped for an extended period (Service Bus outage, f
 - **Build clean, all tests green, no production behavior change yet**
 - Commit + push
 
-### Phase 2: Refactor existing enqueue sites to use helper
+### Phase 2: Refactor post-upload enqueue sites onto helper
 
-- `UploadFinalizationWorker.EnqueueRagIndexingAsync` → call helper
-- `EmailToDocumentJobHandler.EnqueueRagIndexingJobAsync` → call helper
-- Regression tests pass (Office Add-in + Email-to-Document still enqueue)
-- **No new enqueue sites yet, no production behavior change**
+**Refactored (3 sites — post-upload contexts where helper's fail-protections apply):**
+- `Workers/Office/UploadFinalizationWorker.EnqueueRagIndexingAsync` → call helper (canonical pattern source)
+- `Services/Communication/IncomingCommunicationProcessor.EnqueueRagIndexingAsync` → call helper (Email-to-Document)
+- `Services/Ai/AnalysisResultPersistence.EnqueueRagIndexingJobAsync` → call helper (post-analysis re-index)
+
+**Intentionally NOT refactored (3 sites — explicit/admin/playbook flows; revised 2026-06-08 during Phase 2):**
+
+| Site | Why not refactored |
+|---|---|
+| `Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs` | Playbook node author explicitly configured "deliver this to the index". Feature-flag/MIME skips would silently break configured playbooks; their payload carries `Metadata` + `ParentEntity` resolved from template context. |
+| `Api/Ai/KnowledgeBaseEndpoints.cs` (`/reindex/{documentId}`) | Admin "force reindex" with intentionally non-idempotent key `rag-reindex-{documentId}-{timestamp}`. Helper's standard key would dedupe legitimate retry calls. |
+| `Api/Ai/RagEndpoints.IndexFile` (`/api/ai/rag/index-file`) | External-API-key callers explicitly invoking indexing. Helper filters would block legitimate explicit calls. |
+
+The boundary: the helper is for *post-upload* contexts. *Explicit* indexing requests (admin, API key, playbook-configured) keep their own enqueue code because the safety rails don't apply.
+
+- Regression tests pass (Office Add-in + Email-to-Document + post-analysis still enqueue identically)
+- **No production behavior change** for the 3 refactored sites; **no change at all** for the 3 untouched sites
 - Commit + push
 
 ### Phase 3: Wire helper into all 5 missing endpoints
