@@ -933,4 +933,153 @@ public class ToolHandlerToAIFunctionAdapterTests
         result.Should().BeOfType<ToolResult>();
         ((ToolResult)result!).Success.Should().BeTrue();
     }
+
+    // ─── R6 Wave 9 (ADR-033): documentStreamWriter wiring ─────────────────────────────
+    //
+    // The adapter now optionally accepts a Func<DocumentStreamEvent, CancellationToken, Task>
+    // which it forwards onto every per-invocation ChatInvocationContext.DocumentStreamWriter.
+    // Existing fields (ChatSessionId, TenantId, KnowledgeScope, RequestedToolName,
+    // ToolArgumentsJson, DecisionId) MUST remain unaffected.
+    //
+    // Per ADR-033 §3.1 the typed handler (WorkingDocumentHandler, Stage 3) reads the field
+    // from context and degrades gracefully when null — the adapter MUST NOT coalesce null to
+    // a no-op delegate (that's a legacy-class-only fallback inside the factory's hardcoded
+    // WorkingDocumentTools block).
+
+    [Fact]
+    public async Task InvokeAsync_DocumentStreamWriter_NonNull_ForwardedToContext()
+    {
+        // ADR-033 §4.3: when the adapter is constructed with a non-null documentStreamWriter,
+        // each per-invocation ChatInvocationContext MUST carry that same delegate so handlers
+        // can emit Start / Token / End SSE events directly during streaming.
+        var emitted = new List<global::Sprk.Bff.Api.Models.Ai.Chat.DocumentStreamEvent>();
+        Task DocWriter(global::Sprk.Bff.Api.Models.Ai.Chat.DocumentStreamEvent ev, CancellationToken _)
+        {
+            emitted.Add(ev);
+            return Task.CompletedTask;
+        }
+
+        var handler = new FakeChatHandler();
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null,
+            citationAccumulator: null,
+            sseWriter: null,
+            documentStreamWriter: DocWriter);
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        handler.CapturedContext.Should().NotBeNull();
+        handler.CapturedContext!.DocumentStreamWriter.Should().NotBeNull(
+            "ADR-033: adapter must forward its constructor-supplied documentStreamWriter onto every per-call ChatInvocationContext");
+
+        // Round-trip verification: invoking the writer from inside the handler context
+        // MUST reach the adapter-supplied delegate (we capture into `emitted`).
+        var startEvent = new global::Sprk.Bff.Api.Models.Ai.Chat.DocumentStreamStartEvent(
+            OperationId: Guid.NewGuid(),
+            TargetPosition: "document",
+            OperationType: "replace");
+        await handler.CapturedContext.DocumentStreamWriter!(startEvent, CancellationToken.None);
+
+        emitted.Should().HaveCount(1);
+        emitted[0].Should().BeSameAs(startEvent);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DocumentStreamWriter_Null_LeavesContextFieldNull()
+    {
+        // ADR-033 §3.1: when documentStreamWriter is null (e.g., background processing path
+        // where httpContext is unavailable), the per-call context field MUST stay null —
+        // NOT coalesced to a no-op. The typed handler is responsible for null-check + degrade.
+        var handler = new FakeChatHandler();
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null,
+            citationAccumulator: null,
+            sseWriter: null,
+            documentStreamWriter: null);
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        handler.CapturedContext.Should().NotBeNull();
+        handler.CapturedContext!.DocumentStreamWriter.Should().BeNull(
+            "ADR-033 §3.1: null documentStreamWriter must remain null on context — handler degrades gracefully");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DocumentStreamWriter_DefaultsToNull_WhenOmitted()
+    {
+        // Backward compatibility: existing callers (citations/widget-only handlers, tests
+        // predating Wave 9) do not supply documentStreamWriter. The optional parameter
+        // MUST default to null and behavior MUST match the explicit-null path above.
+        var handler = new FakeChatHandler();
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null,
+            citationAccumulator: null,
+            sseWriter: null);
+        // documentStreamWriter intentionally omitted — default must be null.
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        handler.CapturedContext.Should().NotBeNull();
+        handler.CapturedContext!.DocumentStreamWriter.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DocumentStreamWriter_DoesNotAffectExistingContextFields()
+    {
+        // Regression: the new field MUST NOT alter ChatSessionId / TenantId / DecisionId /
+        // KnowledgeScope / RequestedToolName / ToolArgumentsJson behavior in any way.
+        Task DocWriter(global::Sprk.Bff.Api.Models.Ai.Chat.DocumentStreamEvent _, CancellationToken __) => Task.CompletedTask;
+
+        var handler = new FakeChatHandler();
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null,
+            citationAccumulator: null,
+            sseWriter: null,
+            documentStreamWriter: DocWriter);
+
+        var args = new AIFunctionArguments { ["query"] = "anything" };
+        await sut.InvokeAsync(args, CancellationToken.None);
+
+        handler.CapturedContext.Should().NotBeNull();
+        handler.CapturedContext!.ChatSessionId.Should().Be(TestSessionId);
+        handler.CapturedContext.TenantId.Should().Be(TestTenantId);
+        handler.CapturedContext.RequestedToolName.Should().Be(TestToolName);
+        handler.CapturedContext.ToolArgumentsJson.Should().NotBeNullOrEmpty();
+        handler.CapturedContext.DecisionId.Should().NotBe(Guid.Empty);
+        // KnowledgeScope is unset in CreateContext — verify Wave 9 didn't shadow it.
+        handler.CapturedContext.KnowledgeScope.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DocumentStreamWriter_FreshlyAttachedPerInvocation()
+    {
+        // Per-call construction (with-expression): each LLM tool invocation gets the SAME
+        // writer reference (it's adapter-scoped, not per-call). This mirrors the citation /
+        // sse-writer wiring and is what enables a typed handler to stream into the same SSE
+        // pipe across multiple tool calls in one chat turn.
+        Task DocWriter(global::Sprk.Bff.Api.Models.Ai.Chat.DocumentStreamEvent _, CancellationToken __) => Task.CompletedTask;
+
+        var handler = new FakeChatHandler();
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null,
+            citationAccumulator: null,
+            sseWriter: null,
+            documentStreamWriter: DocWriter);
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+        var firstWriter = handler.CapturedContext!.DocumentStreamWriter;
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+        var secondWriter = handler.CapturedContext!.DocumentStreamWriter;
+
+        firstWriter.Should().NotBeNull();
+        secondWriter.Should().NotBeNull();
+        firstWriter.Should().BeSameAs(secondWriter,
+            "the adapter-supplied writer is shared across invocations within one chat session");
+    }
 }

@@ -742,6 +742,33 @@ public class SprkChatAgentFactory
 
         var tools = new List<AIFunction>();
 
+        // ADR-033 (R6 Wave 9): hoisted document-stream SSE writer. Built ONCE per ResolveTools
+        // call and consumed in two places:
+        //   1. The legacy WorkingDocumentTools block below (which requires a non-null delegate,
+        //      so we coalesce to a no-op when httpContext is unavailable). This block exits
+        //      in Wave 9 Stage 4 once the typed WorkingDocumentHandler is the sole emitter.
+        //   2. The data-driven adapter construction (FR-11 block ~line 1290) where the writer
+        //      is passed to ToolHandlerToAIFunctionAdapter and forwarded onto each per-call
+        //      ChatInvocationContext.DocumentStreamWriter so the typed WorkingDocumentHandler
+        //      can emit Start → N×Token → End events directly during streaming.
+        //
+        // The adapter receives the NULLABLE variant (null when httpContext is unavailable)
+        // per ADR-033 §3.1 — the typed handler checks for null and degrades gracefully via
+        // ToolResult.Failure with a clear "no stream writer wired" message. The no-op
+        // fallback below is specific to the LEGACY WorkingDocumentTools class which
+        // requires a non-null delegate by ctor contract.
+        var documentStreamWriter = httpContext != null
+            ? Api.Ai.ChatEndpoints.CreateDocumentStreamSseWriter(httpContext.Response)
+            : null;
+
+        // ADR-033 Stage 4 (R6 Wave 9): parse the analysis id string carried on the chat
+        // context's AnalysisMetadata into a Guid for the typed-handler path. The legacy
+        // hardcoded WorkingDocumentTools block captures the string directly via ctor; the
+        // typed WorkingDocumentHandler reads ChatInvocationContext.AnalysisId (Guid?) which
+        // we forward through the adapter constructor below. Null when standalone chat
+        // (no analysis bound) or when the string isn't a parseable Guid.
+        Guid? analysisIdGuid = Guid.TryParse(analysisId, out var parsedAnalysisId) ? parsedAnalysisId : null;
+
         // Per-tool error isolation (AIPU2-063): each tool group is wrapped in its own
         // try-catch so that a failure in one group (constructor throws, missing config,
         // transient dependency fault) never prevents other healthy tools from resolving.
@@ -797,56 +824,44 @@ public class SprkChatAgentFactory
         // BuildRefineMessages directly — that path is NOT an LLM tool call.
 
         // --- WorkingDocumentTools ---
-        // Gated behind "write_back" capability (task 073).
-        // Requires IAnalysisOrchestrationService + IWorkingDocumentService + IChatClient.
-        // Only available when the playbook declares the "write_back" capability, preventing
-        // document mutation tools from appearing in read-only playbooks.
+        // REMOVED in R6 Wave 9 (Q9 chat-tool batch migration — closes Q9 at 10/10): replaced
+        // by the typed WorkingDocumentHandler (Services/Ai/Handlers/WorkingDocumentHandler.cs)
+        // auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010)
+        // and surfaced to the chat agent by the data-driven block below (FR-11) via three
+        // sprk_analysistool rows sharing a method discriminator in sprk_configuration:
+        //   - SYS-Working Document Edit          (WORKING-DOC-EDIT)           → method=EditWorkingDocument (streaming)
+        //   - SYS-Working Document Append Section (WORKING-DOC-APPEND-SECTION) → method=AppendSection (streaming)
+        //   - SYS-Working Document Write Back    (WORKING-DOC-WRITE-BACK)     → method=WriteBackToWorkingDocument (persistence; FR-12 safety)
         //
-        // WriteBackToWorkingDocumentAsync is included here and is listed in
-        // CompoundIntentDetector.WriteBackToolNames, ensuring it always triggers the
-        // plan preview gate before execution (spec FR-11, FR-12).
+        // Capability gate preservation: sprk_requiredcapability = "write_back" on all 3 rows.
+        // The data-driven block's IsCapabilityGateSatisfied replaces the hardcoded
+        // `if (capabilities.Contains(PlaybookCapabilities.WriteBack))` check above.
         //
-        // Document stream SSE writer: streaming token delivery for EditWorkingDocument
-        // and AppendSection is wired via the DocumentStreamEvent SSE plumbing below.
-        if (capabilities.Contains(PlaybookCapabilities.WriteBack) && analysisService != null)
-        {
-            attempted++;
-            try
-            {
-                var workingDocumentService = scopedProvider.GetService<IWorkingDocumentService>();
-                if (workingDocumentService != null)
-                {
-                    // R2-023: Wire real document stream SSE writer for streaming write-back
-                    // content to the client (spec FR-04). The delegate writes DocumentStreamEvent
-                    // objects as SSE frames via ChatEndpoints.WriteDocumentStreamSSEAsync.
-                    // Falls back to no-op when httpContext is unavailable (background processing).
-                    Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task> documentSSE =
-                        httpContext != null
-                            ? Api.Ai.ChatEndpoints.CreateDocumentStreamSseWriter(httpContext.Response)
-                            : (_, _) => Task.CompletedTask;
-
-                    var workingDocumentTools = new WorkingDocumentTools(
-                        _chatClient,
-                        documentSSE,
-                        analysisService,
-                        workingDocumentService,
-                        _logger,
-                        analysisId);
-                    tools.AddRange(workingDocumentTools.GetTools());
-                    resolved++;
-                }
-                else
-                {
-                    _logger.LogWarning("IWorkingDocumentService not available; WorkingDocumentTools will not be registered");
-                    failedTools.Add(nameof(WorkingDocumentTools));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve WorkingDocumentTools — skipping");
-                failedTools.Add(nameof(WorkingDocumentTools));
-            }
-        }
+        // ADR-033 binding pattern (R6 Wave 9 — first invocation of the side-channel
+        // operating principle):
+        //   The hoisted `documentStreamWriter` above is forwarded to the adapter via the
+        //   `documentStreamWriter:` parameter of `ToolHandlerToAIFunctionAdapter`. The
+        //   adapter sets it on every per-call ChatInvocationContext.DocumentStreamWriter.
+        //   The handler reads `context.DocumentStreamWriter` and emits DocumentStreamEvent
+        //   Start → N×Token → End directly during streaming. Null → ToolResult.Failure with
+        //   "no stream writer wired" diagnostic per ADR-033 §3.1.
+        //
+        //   The parsed `analysisIdGuid` above is forwarded to the adapter via the
+        //   `analysisId:` parameter. The adapter sets it on every per-call
+        //   ChatInvocationContext.AnalysisId. The handler reads it to fetch the current
+        //   working document (EditWorkingDocument / AppendSection) and to target the
+        //   write-back persistence (WriteBackToWorkingDocument).
+        //
+        // Plan-preview gate preservation (spec FR-11): WriteBackToWorkingDocument is still
+        //   listed in CompoundIntentDetector.WriteBackToolNames — the gate fires by tool
+        //   NAME, not by class, so the typed handler's "WriteBackToWorkingDocument" method
+        //   name continues to trigger plan preview before execution.
+        //
+        // FR-12 safety preservation: the typed handler routes write-back EXCLUSIVELY through
+        //   IWorkingDocumentService → IGenericEntityService (Dataverse); it NEVER calls
+        //   SpeFileStore, GraphServiceClient writes, or any SPE/SharePoint write operation.
+        //   WorkingDocumentHandlerTests asserts this via the explicit
+        //   `WriteBack_Never_CallsIChatClient_FR12Safety` test.
 
         // --- AnalysisExecutionTools ---
         // Gated behind "reanalyze" capability (task 079).
@@ -1283,13 +1298,23 @@ public class SprkChatAgentFactory
                         // Both are nullable on the adapter ctor; the data-driven block forwards
                         // whatever this factory has in scope (citationContext is created above at
                         // ~line 407; sseWriter is the optional ChatEndpoints SSE writer arg).
+                        //
+                        // R6 Wave 9 (ADR-033): also forward the hoisted documentStreamWriter
+                        // (null when httpContext is unavailable). The adapter sets it onto each
+                        // per-call ChatInvocationContext.DocumentStreamWriter so the typed
+                        // WorkingDocumentHandler can emit DocumentStreamEvent Start/Token/End
+                        // directly during streaming. Handlers that don't stream simply ignore
+                        // the context field; handlers that need it MUST null-check per
+                        // ADR-033 §3.1.
                         var adapter = new ToolHandlerToAIFunctionAdapter(
                             row,
                             handler,
                             contextFactory,
                             _logger,
                             citationAccumulator: citationContext,
-                            sseWriter: sseWriter);
+                            sseWriter: sseWriter,
+                            documentStreamWriter: documentStreamWriter,
+                            analysisId: analysisIdGuid);
                         tools.Add(adapter);
                         existingToolNames.Add(row.Name);
                         dataDrivenResolvedRows++;

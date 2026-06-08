@@ -93,6 +93,29 @@ public record ChatInvocationContext : ToolInvocationContextBase
     public Guid? MatterId { get; init; }
 
     /// <summary>
+    /// Optional analysis id from the active chat session (R6 Wave 9 / ADR-033 Stage 4).
+    /// Carries the deterministic <c>sprk_analysisoutput</c> row id when the chat session is
+    /// bound to an active analysis. Read by chat-side handlers that fetch or persist
+    /// working-document content (currently <c>WorkingDocumentHandler</c>) via the existing
+    /// <c>IAnalysisOrchestrationService</c> / <c>IWorkingDocumentService</c> surface.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mirrors the shape of <see cref="MatterId"/>: optional, init-only, Guid identifier
+    /// (no user content). Sourced from <c>ChatContext.AnalysisMetadata["analysisId"]</c>
+    /// at <see cref="Chat.SprkChatAgentFactory"/> resolution time; forwarded into the
+    /// per-call context by <see cref="Chat.ToolHandlerToAIFunctionAdapter"/> when wrapping
+    /// a chat-tool handler.
+    /// </para>
+    /// <para>
+    /// Null when standalone chat (no analysis bound) or when AnalysisMetadata doesn't carry
+    /// the id. Handlers that REQUIRE it MUST short-circuit with a clear diagnostic
+    /// (<c>ToolResult.Failure</c>) — never throw or fall back to a sentinel guid.
+    /// </para>
+    /// </remarks>
+    public Guid? AnalysisId { get; init; }
+
+    /// <summary>
     /// Optional playbook knowledge scope (R6 Wave 7c). When the chat session is bound to a
     /// playbook with knowledge sources, the data-driven block of
     /// <see cref="Chat.SprkChatAgentFactory"/> forwards the resolved
@@ -113,4 +136,18 @@ public record ChatInvocationContext : ToolInvocationContextBase
     /// </para>
     /// </remarks>
     public ChatKnowledgeScope? KnowledgeScope { get; init; }
+
+    /// <summary>
+    /// Optional per-request writer for document-stream SSE side-channel events.
+    /// Bound by ChatEndpoints when the active session/playbook is write-back-capable.
+    /// Handlers that emit DocumentStreamEvent (currently WorkingDocumentHandler) read this
+    /// field and emit directly during streaming. Null when document streaming is not wired
+    /// for the current request — handlers MUST check for null and degrade gracefully.
+    /// </summary>
+    /// <remarks>
+    /// ADR-033 binding pattern. ADR-015: this delegate is a side-effect emitter; it MUST
+    /// NOT be invoked from a logging context (the delegate writes content to the SSE pipe,
+    /// not to the structured-log sink).
+    /// </remarks>
+    public Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task>? DocumentStreamWriter { get; init; }
 }

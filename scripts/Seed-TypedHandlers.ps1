@@ -144,6 +144,15 @@ $RowFiles = @{
     # + ADR-018 kill switch + ADR-015 telemetry hygiene preserved by the handler.
     "LEGAL-RESEARCH"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-legal-research-row.json"
     "LEGAL-CASE-LOOKUP"                = "$RepoRoot/infra/dataverse/sprk_analysistool-legal-case-lookup-row.json"
+    # Wave 9 — WorkingDocumentHandler serves 3 rows via the method discriminator. All 3
+    # capability-gated via sprk_requiredcapability = 'write_back'. Implements ADR-033 (the
+    # first invocation of the ADRs-Are-Defaults operating principle): handler reads
+    # ChatInvocationContext.DocumentStreamWriter for the streaming methods (EditWorkingDocument
+    # + AppendSection) and ChatInvocationContext.AnalysisId for the persistence target
+    # (WriteBackToWorkingDocument). Closes Q9 chat-tool migration at 10/10.
+    "WORKING-DOC-EDIT"                 = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-edit-row.json"
+    "WORKING-DOC-APPEND-SECTION"       = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-append-section-row.json"
+    "WORKING-DOC-WRITE-BACK"           = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-write-back-row.json"
 }
 
 # -----------------------------------------------------------------------------

@@ -95,6 +95,8 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     private readonly JsonElement _jsonSchema;
     private readonly CitationContext? _citationAccumulator;
     private readonly Func<ChatSseEvent, CancellationToken, Task>? _sseWriter;
+    private readonly Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task>? _documentStreamWriter;
+    private readonly Guid? _analysisId;
 
     /// <summary>
     /// Constructs the adapter. Validates the tool's JSON Schema (well-formedness + top-level
@@ -137,6 +139,26 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// <see cref="ChatSseEvent"/>. When null, widget metadata is dropped silently. Failures are
     /// non-fatal (logged + skipped) — never propagate to LLM-visible errors.
     /// </param>
+    /// <param name="documentStreamWriter">
+    /// Optional document-stream SSE writer delegate (R6 Wave 9 / ADR-033). When non-null, the
+    /// adapter forwards it onto every per-invocation <see cref="ChatInvocationContext"/> via
+    /// <see cref="ChatInvocationContext.DocumentStreamWriter"/>. Handlers that emit
+    /// <see cref="Models.Ai.Chat.DocumentStreamEvent"/> (currently <c>WorkingDocumentHandler</c>)
+    /// read the field from the context and emit Start → N×Token → End events directly during
+    /// streaming. When null, the field stays null on the per-call context and handlers MUST
+    /// degrade gracefully (e.g., return <see cref="ToolResult.Failure"/> with a clear
+    /// "no stream writer wired" message per ADR-033 §3.1).
+    /// </param>
+    /// <param name="analysisId">
+    /// Optional analysis id from the active chat session (R6 Wave 9 / ADR-033 Stage 4). When
+    /// non-null, the adapter forwards it onto every per-invocation
+    /// <see cref="ChatInvocationContext"/> via <see cref="ChatInvocationContext.AnalysisId"/>.
+    /// Currently consumed by <c>WorkingDocumentHandler</c> (fetch + write-back operations
+    /// against <c>sprk_analysisoutput</c>). Sourced by <see cref="Chat.SprkChatAgentFactory"/>
+    /// from <c>ChatContext.AnalysisMetadata["analysisId"]</c>. Null when the chat session is
+    /// not bound to an analysis — handlers that require it MUST return
+    /// <see cref="ToolResult.Failure"/>.
+    /// </param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="tool"/>, <paramref name="handler"/>, or <paramref name="contextFactory"/>
     /// is null.
@@ -160,7 +182,9 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         Func<ChatInvocationContext> contextFactory,
         ILogger? logger = null,
         CitationContext? citationAccumulator = null,
-        Func<ChatSseEvent, CancellationToken, Task>? sseWriter = null)
+        Func<ChatSseEvent, CancellationToken, Task>? sseWriter = null,
+        Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task>? documentStreamWriter = null,
+        Guid? analysisId = null)
     {
         _tool = tool ?? throw new ArgumentNullException(nameof(tool));
         _handler = handler ?? throw new ArgumentNullException(nameof(handler));
@@ -168,6 +192,8 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         _logger = logger;
         _citationAccumulator = citationAccumulator;
         _sseWriter = sseWriter;
+        _documentStreamWriter = documentStreamWriter;
+        _analysisId = analysisId;
 
         if (string.IsNullOrWhiteSpace(tool.Name))
         {
@@ -311,7 +337,17 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         var context = baseContext with
         {
             RequestedToolName = _tool.Name,
-            ToolArgumentsJson = argsJson
+            ToolArgumentsJson = argsJson,
+            // ADR-033 (R6 Wave 9): forward the adapter-level document-stream writer onto
+            // the per-call context so handlers (currently WorkingDocumentHandler) can emit
+            // Start / Token / End events directly during streaming. Null when not wired —
+            // handlers MUST check for null per ADR-033 §3.1.
+            DocumentStreamWriter = _documentStreamWriter,
+            // ADR-033 Stage 4 (R6 Wave 9): forward the adapter-level analysis id onto the
+            // per-call context. WorkingDocumentHandler reads it to fetch the current working
+            // document and to target write-back persistence. Null when standalone chat —
+            // handlers that require it MUST return ToolResult.Failure with diagnostic.
+            AnalysisId = _analysisId
         };
 
         using var activity = ActivitySource.StartActivity("chat-tool.invoke");
