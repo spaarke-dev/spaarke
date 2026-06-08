@@ -14,9 +14,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | none |
-| **Step** | Wave 4a complete; ready for wave 4b (task 007) |
-| **Status** | 9/42 tasks complete (001 ✅ 002 ✅ 003 ✅ 006 ✅ 009 ✅ 010 ✅ 017 ✅ 018 ✅ 084 ✅). Phase 1 schema all done; Phase 1 BFF refactor (006) done; remaining Phase 1: 007 (BFF ExternalAccess) + 008 (external-spa) + 004 + 005 (schema cut). |
-| **Next Action** | Wave 4b: task 007 (ExternalAccess BFF refactor) — held sequential after 006 to avoid `dotnet build` contention on the same csproj. Then wave 4c: task 008 (external-spa). Then 004 + 005 (schema cut). |
+| **Step** | Phase 1 substantially done (schema + audit-surfaced refactors). Ready for Phase 2-4 in parallel. |
+| **Status** | 11/42 tasks complete (001 ✅ 002 ✅ 003 ✅ 006 ✅ 007 ✅ 008 ✅ 009 ✅ 010 ✅ 017 ✅ 018 ✅ 084 ✅). Phase 1 schema cut tasks 004+005 deferred to FINAL position — they need consumer cleanup in Phase 2-4 first (TodoDetail, SmartTodo, CreateTodoWizard, etc. still reference the legacy fields). |
+| **Next Action** | Wave 5: launch 011 (TodoDetail simplify) + 060 (DeepLinkBuilder) + 071 (Outlook indicator banner) in parallel — all unblocked, all in different parts of the codebase (no build contention). |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
