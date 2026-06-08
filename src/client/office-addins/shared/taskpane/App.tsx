@@ -3,8 +3,9 @@ import { FluentProvider, Spinner, makeStyles, tokens } from '@fluentui/react-com
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
-import { useOfficeTheme } from './hooks';
+import { useOfficeTheme, useLinkedTodosForCommunication } from './hooks';
 import { TaskPaneShell, type NavigationTab, type HostType } from './components/TaskPaneShell';
+import { LinkedTodosBanner } from './components/LinkedTodosBanner';
 import { SaveView } from './components/views/SaveView';
 import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
@@ -48,6 +49,24 @@ export interface AppProps {
   buildDate?: string;
   /** Whether to show error details (development mode) */
   showErrorDetails?: boolean;
+  /**
+   * `sprk_communicationid` of the saved Spaarke communication record for the
+   * current email, when known. When provided AND the host is Outlook, the
+   * LinkedTodosBanner queries the BFF for linked sprk_todo records and renders
+   * a pinned indicator (FR-28 / A-1).
+   *
+   * Source: task 070 (Outlook ribbon "Create To Do") is responsible for
+   * wiring email → communication lookup and threading the resulting id into
+   * this prop. When task 070 hasn't run yet (or the email is not saved to
+   * Spaarke), leave this undefined — the banner stays hidden.
+   */
+  communicationId?: string;
+  /**
+   * Optional callback when the user clicks "View list" on the LinkedTodosBanner.
+   * Host-supplied so the URL (SmartTodo Code Page filtered by communicationId)
+   * stays config-driven — keeps `LinkedTodosBanner` free of hardcoded org URLs.
+   */
+  onViewLinkedTodos?: (communicationId: string) => void;
 }
 
 export const App: React.FC<AppProps> = ({
@@ -57,6 +76,8 @@ export const App: React.FC<AppProps> = ({
   version = '1.0.1',
   buildDate,
   showErrorDetails = process.env.NODE_ENV === 'development',
+  communicationId,
+  onViewLinkedTodos,
 }) => {
   const styles = useStyles();
 
@@ -178,6 +199,19 @@ export const App: React.FC<AppProps> = ({
   const hostType: HostType = hostAdapter.getHostType() === 'outlook' ? 'outlook' : 'word';
   const displayTitle = title || 'Spaarke Add-in';
 
+  // Outlook taskpane banner indicator (smart-todo-decoupling-r3 FR-28 / A-1).
+  // The hook is inert when communicationId is undefined / not Outlook, so it
+  // safely no-ops on the Word add-in.
+  const indicatorTargetId = hostType === 'outlook' ? communicationId : undefined;
+  const linkedTodos = useLinkedTodosForCommunication(indicatorTargetId);
+  const handleViewLinkedTodos = useCallback(() => {
+    if (indicatorTargetId && onViewLinkedTodos) {
+      onViewLinkedTodos(indicatorTargetId);
+    }
+  }, [indicatorTargetId, onViewLinkedTodos]);
+  const showLinkedTodosBanner =
+    hostType === 'outlook' && indicatorTargetId !== undefined && (linkedTodos.isLoading || linkedTodos.error !== null || linkedTodos.count > 0);
+
   // Get user info
   const account = authService.getAccount();
   const userName = account?.name || account?.username;
@@ -239,6 +273,16 @@ export const App: React.FC<AppProps> = ({
         showErrorDetails={showErrorDetails}
         onError={handleError}
       >
+        {/* Linked Spaarke to-dos banner (Outlook only, smart-todo-decoupling-r3 FR-28) */}
+        {showLinkedTodosBanner && (
+          <LinkedTodosBanner
+            count={linkedTodos.count}
+            isLoading={linkedTodos.isLoading}
+            error={linkedTodos.error}
+            {...(onViewLinkedTodos ? { onViewList: handleViewLinkedTodos } : {})}
+          />
+        )}
+
         {/* Tab Content */}
         {currentTab === 'save' && (
           <SaveView

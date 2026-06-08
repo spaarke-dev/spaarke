@@ -46,6 +46,22 @@ public static class TodoSyncModule
     {
         var enabled = configuration.GetValue<bool>("Spaarke:Graph:TodoSync:Enabled");
 
+        // ─── DeepLinkBuilder (task 060 / FR-25) ────────────────────────────────────
+        // Composes its two inputs (OrgUrl + AppId) from sibling sub-paths
+        // (Spaarke:Environment:OrgUrl and Spaarke:ModelDrivenApps:DefaultAppId)
+        // rather than a single bind section. PostConfigure is used because the
+        // two values live in different sub-trees of "Spaarke" and AddOptions().Bind()
+        // only reads a single section.
+        services.AddOptions<DeepLinkBuilderOptions>()
+            .Configure<IConfiguration>((opts, cfg) =>
+            {
+                opts.OrgUrl = cfg[DeepLinkBuilderOptions.OrgUrlConfigKey] ?? string.Empty;
+                opts.AppId = cfg[DeepLinkBuilderOptions.AppIdConfigKey] ?? string.Empty;
+            });
+        // Singleton: validates config in its ctor (fail-fast on first resolution per
+        // CLAUDE.md §10 product-portability rule + spec.md A-9 / FR-25).
+        services.AddSingleton<IDeepLinkBuilder, DeepLinkBuilder>();
+
         // Pre-register BOTH concrete impls as singletons so the interface factory below can
         // resolve either. The Null-Object backfiller takes an ILogger ctor dep; the rest are
         // pure no-ops with no deps.

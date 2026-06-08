@@ -32,6 +32,18 @@ if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function () { /* noop in jsdom */ };
 }
 
+// ResizeObserver — jsdom does not implement this. Fluent v9 components
+// (MessageBar/useMessageBarReflow, Drawer, ScrollPosition) construct one in
+// layout effects. Without this polyfill, render throws "ResizeObserver is
+// not a constructor".
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() { /* noop */ }
+    unobserve() { /* noop */ }
+    disconnect() { /* noop */ }
+  };
+}
+
 // Range.prototype.getBoundingClientRect — jsdom implements ranges but the
 // `getBoundingClientRect()` on a Range returns undefined-shaped data. The
 // SprkChatHighlightRefine selection handler calls `range.getBoundingClientRect()`

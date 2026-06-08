@@ -34,7 +34,7 @@
 | 008 | Migrate `external-spa` to `sprk_todo` (audit-surfaced) | 1 | FULL | ✅ | 002, 007 | P1-W3 | — |
 | 009 | Customize `sprk_todo.statuscode` (Open/In Progress/Completed/Dismissed) — task-002 follow-up | 1 | STANDARD | ✅ | 002 | P1-W2.5 | ✅ |
 | 010 | Hoist Kanban primitives to `@spaarke/ui-components/Kanban/` | 2 | FULL | ✅ | 001 | P2-W1 | — |
-| 011 | Simplify `TodoDetail` to single-entity load/save | 2 | FULL | 🔲 | 002, 010 | P2-W2 | — |
+| 011 | Simplify `TodoDetail` to single-entity load/save | 2 | FULL | ✅ | 002, 010 | P2-W2 | — |
 | 012 | Update `@spaarke/ui-components` barrel + version bump | 2 | STANDARD | 🔲 | 010, 011 | P2-W3 | ✅ |
 | 015 | Add `Tasks.ReadWrite` delegated scope to AAD app | 6 | STANDARD | 🔲 | none | P6-W1 | ✅ |
 | 016 | Wire `Tasks.ReadWrite` through `GraphClientFactory` | 6 | FULL | 🔲 | 015 | P6-W2 | — |
@@ -49,7 +49,7 @@
 | 031 | Rewrite `CreateTodo` wizard to target `sprk_todo` | 4 | FULL | 🔲 | 002, 030 | P4-W2 | — |
 | 032 | Implement launch-context pre-fill | 4 | FULL | 🔲 | 031 | P4-W3 | ✅ |
 | 040 | "To Dos" subgrid on 11 parent forms (consolidated) | 5 | STANDARD | 🔲 | 002, 030, 031, 032 | P5-W1 | ✅ |
-| 060 | `DeepLinkBuilder` service | 7 | FULL | 🔲 | 002 | P7-W1 | ✅ |
+| 060 | `DeepLinkBuilder` service | 7 | FULL | ✅ | 002 | P7-W1 | ✅ |
 | 061 | Outbound sync pipeline (plugin + ServiceBus + handler) | 7 | FULL | 🔲 | 002, 009, 016, 018, 060 | P7-W2 | — |
 | 062 | Loop prevention (synchash + skip-flag + LWW) | 7 | FULL | 🔲 | 061 | P7-W3 | — |
 | 063 | `SpaarkeListProvisioner` (real impl) | 7 | FULL | 🔲 | 015, 016, 017, 018 | P7-W2 | ✅ |
@@ -57,7 +57,7 @@
 | 065 | `/api/graph/webhooks/todo` endpoint | 7 | FULL | 🔲 | 062, 064 | P7-W4 | — |
 | 066 | Initial backfill on opt-in (`$batch`, backoff, resumable) | 7 | FULL | 🔲 | 061, 063, 064 | P7-W5 | ✅ |
 | 070 | Outlook ribbon "Create To Do" action | 8 | FULL | 🔲 | 030, 031, 032 | P8-W1 | ✅ |
-| 071 | Outlook indicator banner for linked todos | 8 | FULL | 🔲 | 002 | P8-W1 | ✅ |
+| 071 | Outlook indicator banner for linked todos | 8 | FULL | ✅ | 002 | P8-W1 | ✅ |
 | 072 | Deploy Outlook add-in | 8 | STANDARD | 🔲 | 070, 071 | P8-W2 | ✅ |
 | 080 | Audit `TodoDetailSidePane` consumers (A-2) | 9 | STANDARD | 🔲 | 022 | P9-W1 | ✅ |
 | 081 | Retire or refactor `TodoDetailSidePane` | 9 | STANDARD | 🔲 | 080 | P9-W2 | ✅ |

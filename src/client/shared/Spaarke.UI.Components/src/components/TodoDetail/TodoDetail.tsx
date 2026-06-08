@@ -4,13 +4,19 @@
  * Layout (top to bottom):
  *   1. Description (editable, auto-expands, no scroll)
  *   2. Details: Record Type, Record link, Due Date, Assigned To
- *   3. To Do Notes (editable, auto-expands, no scroll) — from sprk_eventtodo
+ *   3. To Do Notes (editable, auto-expands, no scroll)
  *   4. To Do Score section (Priority, Effort, Urgency sliders)
- *   5. Sticky footer: Remove, Save, Completed buttons
+ *   5. Sticky footer: Dismiss, Save, Complete buttons
  *
- * Data spans TWO entities:
- *   - sprk_event: description, due date, scores, lookups
- *   - sprk_eventtodo: notes, completed flag/date, statuscode
+ * Single-entity model (R3 FR-09): all reads + writes target `sprk_todo`.
+ * The legacy two-entity (`sprk_event` + `sprk_eventtodo`) load/save was removed
+ * in smart-todo-decoupling-r3 Phase 2 (per OS-1: no compat shims).
+ *
+ * statuscode semantics (per task 009):
+ *   - 1          = Open       (statecode 0)
+ *   - 659490001  = In Progress(statecode 0)
+ *   - 2          = Completed  (statecode 1)
+ *   - 659490002  = Dismissed  (statecode 1)
  *
  * Context-agnostic (ADR-012): No Xrm, no PCF APIs.
  * All external I/O is via callback props.
@@ -44,7 +50,19 @@ import type {
   SelectionEvents,
 } from '@fluentui/react-components';
 import { SaveRegular, InfoRegular, DeleteRegular, CheckmarkRegular, OpenRegular } from '@fluentui/react-icons';
-import type { ITodoRecord, ITodoExtension, IEventFieldUpdates, ITodoExtensionUpdates, IContactOption } from './types';
+import type { ITodoRecord, ITodoFieldUpdates, IContactOption } from './types';
+
+// ---------------------------------------------------------------------------
+// statuscode + statecode constants (mirror task 009 customization)
+// ---------------------------------------------------------------------------
+
+/** statecode = Inactive (Active = 0, kept implicit via record.statecode value). */
+const STATECODE_INACTIVE = 1;
+
+/** statuscode = Completed (Inactive). statuscode=Open (1) is the active default. */
+const STATUSCODE_COMPLETED = 2;
+/** statuscode = Dismissed (Inactive). */
+const STATUSCODE_DISMISSED = 659490002;
 
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
@@ -254,6 +272,19 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     cursor: 'pointer',
   },
+  removeButton: {
+    color: tokens.colorPaletteRedForeground1,
+    marginRight: 'auto',
+  },
+  openIcon: {
+    fontSize: tokens.fontSizeBase200,
+  },
+  scoreCircleAlignRight: {
+    marginLeft: 'auto',
+  },
+  textareaMinHeight: {
+    minHeight: '160px',
+  },
   completeBtn: {
     backgroundColor: tokens.colorPaletteYellowBackground3,
     color: tokens.colorNeutralForeground1,
@@ -268,6 +299,9 @@ const useStyles = makeStyles({
       backgroundColor: tokens.colorPaletteGreenForeground2,
     },
   },
+  scoreSection: {
+    marginBottom: '20px',
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -275,35 +309,44 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export interface ITodoDetailProps {
+  /** The `sprk_todo` record (or null while loading / no selection). */
   record: ITodoRecord | null;
-  /** sprk_eventtodo extension record (notes, completed, statuscode). */
-  todoExtension: ITodoExtension | null;
   isLoading: boolean;
   error: string | null;
-  /** Save event fields (sprk_event). */
-  onSaveEventFields: (eventId: string, fields: IEventFieldUpdates) => Promise<{ success: boolean; error?: string }>;
-  /** Save todo extension fields (sprk_eventtodo). */
-  onSaveTodoExtFields: (todoId: string, fields: ITodoExtensionUpdates) => Promise<{ success: boolean; error?: string }>;
-  /** Deactivate sprk_eventtodo (statecode=1, statuscode=2) via direct REST API. */
-  onDeactivateTodoExt: (todoId: string) => Promise<{ success: boolean; error?: string }>;
-  /** Remove from To Do (sets sprk_todoflag=false, then closes pane). */
-  onRemoveTodo?: (eventId: string) => Promise<void>;
+  /**
+   * Save a subset of `sprk_todo` fields. Single Web API `updateRecord` call.
+   * Host implements via injected Web API client (no hardcoded URLs).
+   */
+  onSaveTodo: (todoId: string, fields: ITodoFieldUpdates) => Promise<{ success: boolean; error?: string }>;
+  /**
+   * Dismiss the to-do (sets statuscode = 659490002 / Dismissed, statecode = 1 / Inactive).
+   * Replaces the legacy "Remove from To Do" path that toggled `sprk_event.sprk_todoflag`.
+   *
+   * Hosts that prefer hard delete over Dismiss can implement this callback to call
+   * `deleteRecord("sprk_todo", id)` instead — the component is agnostic to the
+   * persistence semantics, it just invokes this callback when the user clicks "Dismiss".
+   */
+  onDismissTodo?: (todoId: string) => Promise<{ success: boolean; error?: string }>;
   /** Close the side pane. */
   onClose?: () => void;
   /**
-   * Search contacts by name for the Assigned To picker.
+   * Search the picker source (users or contacts) by name for the Assigned To picker.
    * Decoupled from Xrm — host provides the implementation (ADR-012).
+   *
+   * Note: `sprk_todo.sprk_assignedto` is a `systemuser` lookup. Hosts should resolve
+   * the picker against `systemuser` (or whichever picker source matches the host's
+   * binding). The IContactOption shape is generic (id + name).
    */
   onSearchContacts: (query: string) => Promise<IContactOption[]>;
   /**
-   * Open the regarding record (matter/project) in a new tab/window.
+   * Open the regarding record (matter/project/etc.) in a new tab/window.
    * Decoupled from Xrm — host provides the navigation implementation (ADR-012).
    * Called with the entity logical name and record ID.
    */
   onOpenRegardingRecord?: (entityName: string, recordId: string) => void;
 }
 
-/** Map record type display name to Dataverse entity logical name for navigation. */
+/** Map record-type display name to Dataverse entity logical name for navigation. */
 const RECORD_TYPE_ENTITY_MAP: Record<string, string> = {
   Matter: 'sprk_matter',
   Project: 'sprk_project',
@@ -316,13 +359,10 @@ const RECORD_TYPE_ENTITY_MAP: Record<string, string> = {
 export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
   ({
     record,
-    todoExtension,
     isLoading,
     error,
-    onSaveEventFields,
-    onSaveTodoExtFields,
-    onDeactivateTodoExt,
-    onRemoveTodo,
+    onSaveTodo,
+    onDismissTodo,
     onClose: _onClose,
     onSearchContacts,
     onOpenRegardingRecord,
@@ -333,14 +373,12 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
     const notesTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
-    // Editable field values (sprk_event fields)
+    // Editable field values (all on sprk_todo)
     const [description, setDescription] = React.useState('');
+    const [notes, setNotes] = React.useState('');
     const [dueDate, setDueDate] = React.useState('');
     const [priority, setPriority] = React.useState<number>(50);
     const [effort, setEffort] = React.useState<number>(50);
-
-    // Editable field value (sprk_eventtodo field)
-    const [toDoNotes, setToDoNotes] = React.useState('');
 
     // Assigned To state
     const [assignedToId, setAssignedToId] = React.useState<string | null>(null);
@@ -352,30 +390,32 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
     // Save state
     const [isSaving, setIsSaving] = React.useState(false);
-    const [isRemoving, setIsRemoving] = React.useState(false);
+    const [isDismissing, setIsDismissing] = React.useState(false);
     const [isCompleting, setIsCompleting] = React.useState(false);
     const [saveError, setSaveError] = React.useState<string | null>(null);
 
     // Snapshot of original values (for dirty detection)
     const origRef = React.useRef({
       description: '',
+      notes: '',
       dueDate: '',
       priority: 50,
       effort: 50,
       assignedToId: null as string | null,
-      toDoNotes: '',
     });
 
     // Reset when record changes
     React.useEffect(() => {
       if (record) {
         const desc = record.sprk_description ?? '';
+        const nts = record.sprk_notes ?? '';
         const dd = toDateInputValue(record.sprk_duedate);
         const pri = record.sprk_priorityscore ?? 50;
         const eff = record.sprk_effortscore ?? 50;
         const aId = record._sprk_assignedto_value ?? null;
         const aName = record['_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue'] ?? '';
         setDescription(desc);
+        setNotes(nts);
         setDueDate(dd);
         setPriority(pri);
         setEffort(eff);
@@ -386,34 +426,24 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         setIsEditingAssignedTo(false);
         setSaveError(null);
         origRef.current = {
-          ...origRef.current,
           description: desc,
+          notes: nts,
           dueDate: dd,
           priority: pri,
           effort: eff,
           assignedToId: aId,
         };
       }
-    }, [record?.sprk_eventid]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [record?.sprk_todoid]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Reset notes when todoExtension changes
-    React.useEffect(() => {
-      const notes = todoExtension?.sprk_todonotes ?? '';
-      setToDoNotes(notes);
-      origRef.current = { ...origRef.current, toDoNotes: notes };
-    }, [todoExtension?.sprk_eventtodoid]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // Dirty detection
-    const isEventDirty =
+    // Dirty detection (any tracked field changed)
+    const isDirty =
       description !== origRef.current.description ||
+      notes !== origRef.current.notes ||
       dueDate !== origRef.current.dueDate ||
       priority !== origRef.current.priority ||
       effort !== origRef.current.effort ||
       assignedToId !== origRef.current.assignedToId;
-
-    const isNotesDirty = toDoNotes !== origRef.current.toDoNotes;
-
-    const isDirty = isEventDirty || isNotesDirty;
 
     // --- Handlers ---
 
@@ -438,7 +468,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     }, [description]);
 
     const handleNotesChange = React.useCallback((_ev: unknown, data: { value: string }) => {
-      setToDoNotes(data.value);
+      setNotes(data.value);
       requestAnimationFrame(() => {
         const el = notesTextareaRef.current;
         if (!el) return;
@@ -455,7 +485,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       el.style.height = 'auto';
       el.style.height = `${el.scrollHeight}px`;
       el.style.overflowY = 'hidden';
-    }, [toDoNotes]);
+    }, [notes]);
 
     const handleDueDateChange = React.useCallback(
       (ev: React.ChangeEvent<HTMLInputElement>) => setDueDate(ev.target.value),
@@ -510,174 +540,121 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       []
     );
 
-    // Save dirty fields to the correct entities
+    /** Build an `ITodoFieldUpdates` from the current vs. original state (diff-based). */
+    const buildDirtyUpdates = React.useCallback((): ITodoFieldUpdates => {
+      const updates: ITodoFieldUpdates = {};
+      if (description !== origRef.current.description) {
+        updates.sprk_description = description;
+      }
+      if (notes !== origRef.current.notes) {
+        updates.sprk_notes = notes;
+      }
+      if (dueDate !== origRef.current.dueDate) {
+        updates.sprk_duedate = dueDate || null;
+      }
+      if (priority !== origRef.current.priority) {
+        updates.sprk_priorityscore = priority;
+      }
+      if (effort !== origRef.current.effort) {
+        updates.sprk_effortscore = effort;
+      }
+      if (assignedToId !== origRef.current.assignedToId) {
+        updates['sprk_AssignedTo@odata.bind'] = assignedToId ? `/systemusers(${assignedToId})` : null;
+      }
+      return updates;
+    }, [description, notes, dueDate, priority, effort, assignedToId]);
+
+    // Save: single updateRecord("sprk_todo", id, fields)
     const handleSave = React.useCallback(async () => {
       if (!record || !isDirty) return;
       setIsSaving(true);
       setSaveError(null);
 
       try {
-        // Save event fields if any changed
-        if (isEventDirty) {
-          const eventUpdates: IEventFieldUpdates = {};
-          if (description !== origRef.current.description) {
-            eventUpdates.sprk_description = description;
-          }
-          if (dueDate !== origRef.current.dueDate) {
-            eventUpdates.sprk_duedate = dueDate || null;
-          }
-          if (priority !== origRef.current.priority) {
-            eventUpdates.sprk_priorityscore = priority;
-          }
-          if (effort !== origRef.current.effort) {
-            eventUpdates.sprk_effortscore = effort;
-          }
-          if (assignedToId !== origRef.current.assignedToId) {
-            eventUpdates['sprk_AssignedTo@odata.bind'] = assignedToId ? `/contacts(${assignedToId})` : null;
-          }
-          const eventResult = await onSaveEventFields(record.sprk_eventid, eventUpdates);
-          if (!eventResult.success) {
-            setSaveError(eventResult.error ?? 'Failed to save event fields');
-            setIsSaving(false);
-            return;
-          }
+        const updates = buildDirtyUpdates();
+        const result = await onSaveTodo(record.sprk_todoid, updates);
+        if (!result.success) {
+          setSaveError(result.error ?? 'Failed to save');
+          setIsSaving(false);
+          return;
         }
-
-        // Save notes if changed (requires todoExtension record)
-        if (isNotesDirty && todoExtension?.sprk_eventtodoid) {
-          const extUpdates: ITodoExtensionUpdates = {
-            sprk_todonotes: toDoNotes,
-          };
-          const extResult = await onSaveTodoExtFields(todoExtension.sprk_eventtodoid, extUpdates);
-          if (!extResult.success) {
-            setSaveError(extResult.error ?? 'Failed to save notes');
-            setIsSaving(false);
-            return;
-          }
-        }
-
-        // Update snapshots on success
+        // Update snapshot on success
         origRef.current = {
           description,
+          notes,
           dueDate,
           priority,
           effort,
           assignedToId,
-          toDoNotes,
         };
       } catch {
         setSaveError('Save failed — unexpected error');
       } finally {
         setIsSaving(false);
       }
-    }, [
-      record,
-      todoExtension,
-      isDirty,
-      isEventDirty,
-      isNotesDirty,
-      description,
-      dueDate,
-      priority,
-      effort,
-      assignedToId,
-      toDoNotes,
-      onSaveEventFields,
-      onSaveTodoExtFields,
-    ]);
+    }, [record, isDirty, buildDirtyUpdates, onSaveTodo, description, notes, dueDate, priority, effort, assignedToId]);
 
-    // Remove from To Do: sets sprk_todoflag = false, notifies Kanban, closes pane
-    const handleRemoveTodo = React.useCallback(async () => {
-      if (!record || !onRemoveTodo) return;
-      setIsRemoving(true);
+    /**
+     * Dismiss: statuscode=659490002 (Dismissed), statecode=1 (Inactive).
+     *
+     * Per R3 OS-1 — the legacy "Remove from To Do" path that toggled
+     * `sprk_event.sprk_todoflag=false` is removed. The semantic equivalent for the new
+     * first-class `sprk_todo` model is statuscode=Dismissed. Hosts that prefer hard
+     * delete can implement the `onDismissTodo` callback as `deleteRecord("sprk_todo", id)`.
+     */
+    const handleDismiss = React.useCallback(async () => {
+      if (!record || !onDismissTodo) return;
+      setIsDismissing(true);
       setSaveError(null);
       try {
-        await onRemoveTodo(record.sprk_eventid);
+        const result = await onDismissTodo(record.sprk_todoid);
+        if (!result.success) {
+          setSaveError(result.error ?? 'Failed to dismiss');
+          setIsDismissing(false);
+        }
       } catch {
-        setSaveError('Failed to remove from To Do');
-        setIsRemoving(false);
+        setSaveError('Failed to dismiss — unexpected error');
+        setIsDismissing(false);
       }
-    }, [record, onRemoveTodo]);
+    }, [record, onDismissTodo]);
 
-    // Completed: saves dirty fields + marks sprk_eventtodo as completed
+    /**
+     * Complete: saves dirty fields + sets statecode=1 + statuscode=2 (Completed) +
+     * sprk_completedon. Single `updateRecord` call.
+     */
     const handleCompleted = React.useCallback(async () => {
       if (!record) return;
       setIsCompleting(true);
       setSaveError(null);
 
       try {
-        // Save any dirty event fields first
-        if (isEventDirty) {
-          const eventUpdates: IEventFieldUpdates = {};
-          if (description !== origRef.current.description) {
-            eventUpdates.sprk_description = description;
-          }
-          if (dueDate !== origRef.current.dueDate) {
-            eventUpdates.sprk_duedate = dueDate || null;
-          }
-          if (priority !== origRef.current.priority) {
-            eventUpdates.sprk_priorityscore = priority;
-          }
-          if (effort !== origRef.current.effort) {
-            eventUpdates.sprk_effortscore = effort;
-          }
-          if (assignedToId !== origRef.current.assignedToId) {
-            eventUpdates['sprk_AssignedTo@odata.bind'] = assignedToId ? `/contacts(${assignedToId})` : null;
-          }
-          const eventResult = await onSaveEventFields(record.sprk_eventid, eventUpdates);
-          if (!eventResult.success) {
-            setSaveError(eventResult.error ?? 'Failed to save event fields');
-            setIsCompleting(false);
-            return;
-          }
+        const updates: ITodoFieldUpdates = {
+          ...buildDirtyUpdates(),
+          statecode: STATECODE_INACTIVE,
+          statuscode: STATUSCODE_COMPLETED,
+          sprk_completedon: new Date().toISOString(),
+        };
+        const result = await onSaveTodo(record.sprk_todoid, updates);
+        if (!result.success) {
+          setSaveError(result.error ?? 'Failed to complete');
+          setIsCompleting(false);
+          return;
         }
-
-        // Mark as completed on sprk_eventtodo — TWO separate calls:
-        // 1) Data fields via callback  2) State change via deactivate callback
-        if (todoExtension?.sprk_eventtodoid) {
-          // 1) Save data fields (completed flag, date, notes) while record is still active
-          const dataUpdates: ITodoExtensionUpdates = {
-            sprk_completed: true,
-            sprk_completeddate: new Date().toISOString(),
-          };
-          if (isNotesDirty) {
-            dataUpdates.sprk_todonotes = toDoNotes;
-          }
-          const dataResult = await onSaveTodoExtFields(todoExtension.sprk_eventtodoid, dataUpdates);
-          if (!dataResult.success) {
-            setSaveError(dataResult.error ?? 'Failed to save completion data');
-            setIsCompleting(false);
-            return;
-          }
-
-          // 2) Deactivate via callback
-          const stateResult = await onDeactivateTodoExt(todoExtension.sprk_eventtodoid);
-          if (!stateResult.success) {
-            setSaveError(stateResult.error ?? 'Failed to deactivate record');
-            setIsCompleting(false);
-            return;
-          }
-        }
+        // Update snapshot to current values
+        origRef.current = {
+          description,
+          notes,
+          dueDate,
+          priority,
+          effort,
+          assignedToId,
+        };
       } catch {
         setSaveError('Failed to mark as completed — unexpected error');
       } finally {
         setIsCompleting(false);
       }
-    }, [
-      record,
-      todoExtension,
-      isEventDirty,
-      isNotesDirty,
-      description,
-      dueDate,
-      priority,
-      effort,
-      assignedToId,
-      toDoNotes,
-      onSaveEventFields,
-      onSaveTodoExtFields,
-      onDeactivateTodoExt,
-    ]);
+    }, [record, buildDirtyUpdates, onSaveTodo, description, notes, dueDate, priority, effort, assignedToId]);
 
     // Open regarding record — delegates to host via callback prop
     const handleOpenRegardingRecord = React.useCallback(() => {
@@ -709,13 +686,18 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     if (!record) {
       return (
         <div className={styles.emptyState}>
-          <Text>No event selected</Text>
+          <Text>No to-do selected</Text>
         </div>
       );
     }
 
     // Compute score from CURRENT field values (live preview)
     const score = computeScore(priority, effort, dueDate || record.sprk_duedate);
+
+    // Derived: is the record already inactive (Completed or Dismissed)?
+    const isInactive = record.statecode === STATECODE_INACTIVE;
+    const isCompleted = isInactive && record.statuscode === STATUSCODE_COMPLETED;
+    const isDismissed = isInactive && record.statuscode === STATUSCODE_DISMISSED;
 
     return (
       <div className={styles.container}>
@@ -739,7 +721,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               resize="none"
               textarea={{
                 ref: textareaRef,
-                style: { minHeight: '160px' },
+                className: styles.textareaMinHeight,
               }}
             />
           </div>
@@ -770,7 +752,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 <label className={styles.fieldLabel}>Record</label>
                 <Link className={styles.recordLink} onClick={handleOpenRegardingRecord} as="button">
                   {record.sprk_regardingrecordname}
-                  <OpenRegular style={{ fontSize: '12px' }} />
+                  <OpenRegular className={styles.openIcon} />
                 </Link>
               </div>
             )}
@@ -792,7 +774,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               ) : (
                 <Combobox
                   freeform
-                  placeholder="Search contacts..."
+                  placeholder="Search users..."
                   value={contactQuery}
                   onInput={handleContactInput}
                   onOptionSelect={handleContactSelect}
@@ -805,7 +787,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                   )}
                   {!isSearching && contactOptions.length === 0 && contactQuery.length >= 2 && (
                     <Option key="__empty" value="" text="" disabled>
-                      No contacts found
+                      No users found
                     </Option>
                   )}
                   {contactOptions.map(c => (
@@ -820,19 +802,19 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
           <div className={styles.divider} role="separator" />
 
-          {/* -- To Do Notes (from sprk_eventtodo) -- */}
+          {/* -- Notes (rich/multiline on sprk_todo.sprk_notes) -- */}
           <div className={styles.section}>
             <Text className={styles.sectionTitle} size={300}>
-              To Do Notes
+              Notes
             </Text>
             <Textarea
-              value={toDoNotes}
+              value={notes}
               onChange={handleNotesChange}
               placeholder="Add notes..."
               resize="none"
               textarea={{
                 ref: notesTextareaRef,
-                style: { minHeight: '160px' },
+                className: styles.textareaMinHeight,
               }}
             />
           </div>
@@ -840,7 +822,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           <div className={styles.divider} role="separator" />
 
           {/* -- To Do Score: title row with circle + info, then sliders -- */}
-          <div className={styles.section} style={{ marginBottom: '20px' }}>
+          <div className={`${styles.section} ${styles.scoreSection}`}>
             <div className={styles.sectionTitleRow}>
               <Text className={styles.sectionTitle} size={300}>
                 To Do Score
@@ -883,9 +865,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                   </div>
                 </PopoverSurface>
               </Popover>
-              <div className={styles.scoreCircle} style={{ marginLeft: 'auto' }}>
-                {Math.round(score.todoScore)}
-              </div>
+              <div className={`${styles.scoreCircle} ${styles.scoreCircleAlignRight}`}>{Math.round(score.todoScore)}</div>
             </div>
 
             <div className={styles.sliderRow}>
@@ -908,28 +888,32 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
         {/* -- Sticky footer -- */}
         <div className={styles.footer}>
-          {onRemoveTodo && (
+          {onDismissTodo && !isInactive && (
             <Button
               appearance="subtle"
               icon={<DeleteRegular />}
-              onClick={handleRemoveTodo}
-              disabled={isRemoving || isSaving || isCompleting}
-              style={{ color: tokens.colorPaletteRedForeground1, marginRight: 'auto' }}
+              onClick={handleDismiss}
+              disabled={isDismissing || isSaving || isCompleting}
+              className={styles.removeButton}
             >
-              {isRemoving ? 'Removing...' : 'Remove'}
+              {isDismissing ? 'Dismissing...' : 'Dismiss'}
             </Button>
           )}
           <Button
             appearance="primary"
             icon={<SaveRegular />}
             onClick={handleSave}
-            disabled={!isDirty || isSaving || isCompleting}
+            disabled={!isDirty || isSaving || isCompleting || isInactive}
           >
             {isSaving ? 'Saving...' : 'Save'}
           </Button>
-          {todoExtension?.statecode === 1 || todoExtension?.statuscode === 2 ? (
+          {isCompleted ? (
             <Button icon={<CheckmarkRegular />} disabled className={styles.completedBtn}>
               Completed
+            </Button>
+          ) : isDismissed ? (
+            <Button icon={<DeleteRegular />} disabled className={styles.completedBtn}>
+              Dismissed
             </Button>
           ) : (
             <Button
