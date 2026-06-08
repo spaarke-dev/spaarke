@@ -35,7 +35,7 @@
 | 009 | Customize `sprk_todo.statuscode` (Open/In Progress/Completed/Dismissed) — task-002 follow-up | 1 | STANDARD | ✅ | 002 | P1-W2.5 | ✅ |
 | 010 | Hoist Kanban primitives to `@spaarke/ui-components/Kanban/` | 2 | FULL | ✅ | 001 | P2-W1 | — |
 | 011 | Simplify `TodoDetail` to single-entity load/save | 2 | FULL | ✅ | 002, 010 | P2-W2 | — |
-| 012 | Update `@spaarke/ui-components` barrel + version bump | 2 | STANDARD | 🔲 | 010, 011 | P2-W3 | ✅ |
+| 012 | Update `@spaarke/ui-components` barrel + version bump (absorbed by 010+011) | 2 | STANDARD | ✅ | 010, 011 | P2-W3 | ✅ |
 | 015 | Add `Tasks.ReadWrite` delegated scope to AAD app | 6 | STANDARD | 🔲 | none | P6-W1 | ✅ |
 | 016 | Wire `Tasks.ReadWrite` through `GraphClientFactory` | 6 | FULL | 🔲 | 015 | P6-W2 | — |
 | 017 | Define `MicrosoftToDoSync` user-pref schema | 6 | STANDARD | ✅ | none | P6-W1 | ✅ |

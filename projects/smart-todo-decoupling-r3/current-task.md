@@ -14,9 +14,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | none |
-| **Step** | Phase 1 substantially done (schema + audit-surfaced refactors). Ready for Phase 2-4 in parallel. |
-| **Status** | 11/42 tasks complete (001 ✅ 002 ✅ 003 ✅ 006 ✅ 007 ✅ 008 ✅ 009 ✅ 010 ✅ 017 ✅ 018 ✅ 084 ✅). Phase 1 schema cut tasks 004+005 deferred to FINAL position — they need consumer cleanup in Phase 2-4 first (TodoDetail, SmartTodo, CreateTodoWizard, etc. still reference the legacy fields). |
-| **Next Action** | Wave 5: launch 011 (TodoDetail simplify) + 060 (DeepLinkBuilder) + 071 (Outlook indicator banner) in parallel — all unblocked, all in different parts of the codebase (no build contention). |
+| **Step** | 15/42 tasks complete; ready for wave 6 (020 + 030) |
+| **Status** | Foundation solid: Phase 1 schema work + BFF refactors done (001, 002, 003, 006, 007, 008, 009); Phase 2 shared lib done (010, 011, 012); Phase 6 Graph foundation partial (017, 018); Phase 7 DeepLinkBuilder done (060); Phase 8 indicator banner done (071); Phase 9 cleanup-fix done (084). |
+| **Next Action** | Wave 6: tasks 020 (SmartTodo Code Page repoint — also fixes consumer breakage from 011) + 030 (extend AssociateToStep to 11 entity targets) in parallel. Both depend on 012 (now ✅). 020 is a large task touching multiple files in SmartTodo. 030 is shared lib extension. Different packages → no build contention. |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
