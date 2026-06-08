@@ -24,7 +24,8 @@ import { DataverseEntityViewWidget } from "@spaarke/ai-widgets/widgets/workspace
  * **DEPLOYMENT REQUIREMENT**: replace before deploying. See
  * `projects/ai-spaarke-ai-workspace-UI-r1/notes/entity-view-widget-deployment.md`.
  */
-const WORK_ASSIGNMENTS_CONFIG_ID = "REPLACE-ME-WORK-ASSIGNMENTS-CONFIG-ID";
+// spaarkedev1 sprk_gridconfiguration: 'Active Work Assignments (Workspace)' (created 2026-06-08)
+const WORK_ASSIGNMENTS_CONFIG_ID = "9c5b0ee7-7a63-f111-ab0c-000d3a4d8152";
 
 export const workAssignmentsRegistration: SectionRegistration = {
   id: "work-assignments",

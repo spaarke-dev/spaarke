@@ -10,6 +10,24 @@
 > `configId` resolves to an unknown record — no production crash — but no
 > records will list until each configId points to a real row.
 
+## spaarkedev1 — wired (2026-06-08)
+
+| Entity | sprk_gridconfiguration GUID | Friendly name | Origin |
+|---|---|---|---|
+| `sprk_document` | `d99a4352-4913-f111-8343-7ced8d1dc988` | Semantic Search Documents View | Pre-existing |
+| `sprk_project` | `97ee98e7-7a63-f111-ab0c-70a8a53ec687` | Active Projects (Workspace) | Created 2026-06-08 |
+| `sprk_invoice` | `d021827b-9b5e-f111-ab0c-7c1e521545d7` | Invoice Matter Budget Performance | Pre-existing |
+| `sprk_workassignment` | `9c5b0ee7-7a63-f111-ab0c-000d3a4d8152` | Active Work Assignments (Workspace) | Created 2026-06-08 |
+
+All 8 placeholder constants in code have been replaced with these GUIDs.
+The four entity-view widgets now render against real data in spaarkedev1.
+
+**For other environments (e.g. prod, demo, hipc):** the operator steps below still
+apply — each environment needs its own four rows + a follow-up commit replacing
+the GUIDs for that branch / deployment target. Consider promoting these to
+environment-specific config (or a `sprk_dashboardconfiguration` Dataverse entity)
+in a follow-up if multi-env deploys become routine.
+
 ## What was built
 
 | Surface | File | configId constant |

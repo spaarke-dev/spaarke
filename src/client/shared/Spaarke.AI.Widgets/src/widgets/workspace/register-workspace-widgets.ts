@@ -584,11 +584,16 @@ registerWorkspaceWidget(
 // guard); no production crash.
 // ---------------------------------------------------------------------------
 
+// Real sprk_gridconfiguration GUIDs in spaarkedev1 (2026-06-08):
+//  - documents:        'Semantic Search Documents View'  (pre-existing)
+//  - projects:         'Active Projects (Workspace)'     (created 2026-06-08)
+//  - invoices:         'Invoice Matter Budget Performance' (pre-existing)
+//  - workAssignments:  'Active Work Assignments (Workspace)' (created 2026-06-08)
 const ENTITY_VIEW_CONFIG_IDS = {
-  documents: 'REPLACE-ME-DOCUMENTS-CONFIG-ID',
-  projects: 'REPLACE-ME-PROJECTS-CONFIG-ID',
-  invoices: 'REPLACE-ME-INVOICES-CONFIG-ID',
-  workAssignments: 'REPLACE-ME-WORK-ASSIGNMENTS-CONFIG-ID',
+  documents: 'd99a4352-4913-f111-8343-7ced8d1dc988',
+  projects: '97ee98e7-7a63-f111-ab0c-70a8a53ec687',
+  invoices: 'd021827b-9b5e-f111-ab0c-7c1e521545d7',
+  workAssignments: '9c5b0ee7-7a63-f111-ab0c-000d3a4d8152',
 } as const;
 
 /**

@@ -23,7 +23,8 @@ import { DataverseEntityViewWidget } from "@spaarke/ai-widgets/widgets/workspace
  * **DEPLOYMENT REQUIREMENT**: replace before deploying. See
  * `projects/ai-spaarke-ai-workspace-UI-r1/notes/entity-view-widget-deployment.md`.
  */
-const INVOICES_CONFIG_ID = "REPLACE-ME-INVOICES-CONFIG-ID";
+// spaarkedev1 sprk_gridconfiguration: 'Invoice Matter Budget Performance' (pre-existing)
+const INVOICES_CONFIG_ID = "d021827b-9b5e-f111-ab0c-7c1e521545d7";
 
 export const invoicesRegistration: SectionRegistration = {
   id: "invoices",

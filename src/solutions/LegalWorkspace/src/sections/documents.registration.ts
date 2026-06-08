@@ -37,7 +37,8 @@ import { DataverseEntityViewWidget } from "@spaarke/ai-widgets/widgets/workspace
  * for the operator setup. The DataGrid framework renders a clear empty state
  * when this id resolves to an unknown record.
  */
-const DOCUMENTS_CONFIG_ID = "REPLACE-ME-DOCUMENTS-CONFIG-ID";
+// spaarkedev1 sprk_gridconfiguration: 'Semantic Search Documents View' (pre-existing)
+const DOCUMENTS_CONFIG_ID = "d99a4352-4913-f111-8343-7ced8d1dc988";
 
 export const documentsRegistration: SectionRegistration = {
   id: "documents",
