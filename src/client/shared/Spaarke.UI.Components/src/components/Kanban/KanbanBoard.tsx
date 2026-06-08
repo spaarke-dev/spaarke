@@ -27,11 +27,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
-import {
-  DragDropContext,
-  Droppable,
-  Draggable,
-} from '@hello-pangea/dnd';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { IKanbanBoardProps } from './types';
 
 // ---------------------------------------------------------------------------
@@ -130,21 +126,14 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-function KanbanBoardInner<T>(
-  props: IKanbanBoardProps<T>,
-  _ref: React.Ref<HTMLDivElement>
-) {
+function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDivElement>) {
   const { columns, onDragEnd, renderCard, getItemId, ariaLabel, collapsedColumns, onToggleCollapse } = props;
   const styles = useStyles();
 
   return (
     <DragDropContext onDragEnd={onDragEnd}>
-      <div
-        className={styles.board}
-        role="region"
-        aria-label={ariaLabel ?? 'Kanban board'}
-      >
-        {columns.map((column) => {
+      <div className={styles.board} role="region" aria-label={ariaLabel ?? 'Kanban board'}>
+        {columns.map(column => {
           const isCollapsed = collapsedColumns?.has(column.id) ?? false;
 
           if (isCollapsed) {
@@ -155,7 +144,11 @@ function KanbanBoardInner<T>(
                 role="group"
                 aria-label={`${column.title} (collapsed)`}
                 onClick={() => onToggleCollapse?.(column.id)}
-                style={column.accentColor ? { borderTopWidth: '3px', borderTopStyle: 'solid', borderTopColor: column.accentColor } : undefined}
+                style={
+                  column.accentColor
+                    ? { borderTopWidth: '3px', borderTopStyle: 'solid', borderTopColor: column.accentColor }
+                    : undefined
+                }
               >
                 <div className={styles.columnCollapsedHeader}>
                   <span className={styles.columnCount}>{column.items.length}</span>
@@ -185,9 +178,7 @@ function KanbanBoardInner<T>(
               >
                 <div>
                   <span className={styles.columnTitle}>{column.title}</span>
-                  {column.subtitle && (
-                    <div className={styles.columnSubtitle}>{column.subtitle}</div>
-                  )}
+                  {column.subtitle && <div className={styles.columnSubtitle}>{column.subtitle}</div>}
                 </div>
                 <span className={styles.columnCount} aria-label={`${column.items.length} items`}>
                   {column.items.length}
@@ -196,21 +187,14 @@ function KanbanBoardInner<T>(
 
               {/* Droppable card list */}
               <Droppable droppableId={column.id}>
-                {(provided) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className={styles.cardList}
-                    role="list"
-                  >
-                    {column.items.length === 0 && (
-                      <div className={styles.emptyColumn}>No items</div>
-                    )}
+                {provided => (
+                  <div ref={provided.innerRef} {...provided.droppableProps} className={styles.cardList} role="list">
+                    {column.items.length === 0 && <div className={styles.emptyColumn}>No items</div>}
                     {column.items.map((item, index) => {
                       const itemId = getItemId(item);
                       return (
                         <Draggable key={itemId} draggableId={itemId} index={index}>
-                          {(dragProvided) => (
+                          {dragProvided => (
                             <div
                               ref={dragProvided.innerRef}
                               {...dragProvided.draggableProps}

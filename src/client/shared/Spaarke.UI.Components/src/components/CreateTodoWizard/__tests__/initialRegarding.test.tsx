@@ -32,10 +32,7 @@ import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { createMockNavigationService } from '../../../__mocks__/mockNavigationService';
 
 import { CreateRecordWizard } from '../../CreateRecordWizard';
-import type {
-  ICreateRecordWizardConfig,
-  IFinishContext,
-} from '../../CreateRecordWizard';
+import type { ICreateRecordWizardConfig, IFinishContext } from '../../CreateRecordWizard';
 import { TODO_REGARDING_TARGETS } from '../../AssociateToStep/types';
 import type { AssociationResult } from '../../AssociateToStep/types';
 
@@ -57,12 +54,13 @@ function makeWebApi() {
  *  stubs — these tests assert only on the AssociateToStep UI and the value the
  *  wizard hands to onFinish via `context.association`.
  */
-function renderWizardWithInitialAssociation(opts: {
-  initialAssociation?: AssociationResult;
-}) {
+function renderWizardWithInitialAssociation(opts: { initialAssociation?: AssociationResult }) {
   const navigationService = createMockNavigationService();
   const onFinish = jest
-    .fn<Promise<{ icon: React.ReactNode; title: string; body: React.ReactNode; actions: React.ReactNode }>, [IFinishContext]>()
+    .fn<
+      Promise<{ icon: React.ReactNode; title: string; body: React.ReactNode; actions: React.ReactNode }>,
+      [IFinishContext]
+    >()
     .mockResolvedValue({
       icon: null,
       title: 'done',
@@ -87,9 +85,7 @@ function renderWizardWithInitialAssociation(opts: {
     onFinish,
   };
 
-  renderWithProviders(
-    <CreateRecordWizard open={true} onClose={jest.fn()} webApi={makeWebApi()} config={config} />
-  );
+  renderWithProviders(<CreateRecordWizard open={true} onClose={jest.fn()} webApi={makeWebApi()} config={config} />);
 
   return { navigationService, onFinish };
 }

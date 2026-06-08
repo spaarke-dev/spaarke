@@ -8,16 +8,7 @@
  * Dependencies are injected via props -- no solution-specific imports.
  */
 import * as React from 'react';
-import {
-  Text,
-  Input,
-  Textarea,
-  Dropdown,
-  Option,
-  Field,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { searchUsersAsLookup } from './workAssignmentService';

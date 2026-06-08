@@ -26,21 +26,73 @@ import { createMockDataService } from '../../../__mocks__/mockDataService';
 const NAV_PROPS_RESPONSE = {
   value: [
     // Regarding lookups — one per supported parent
-    { ReferencingAttribute: 'sprk_regardingmatter',          ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',          ReferencedEntity: 'sprk_matter' },
-    { ReferencingAttribute: 'sprk_regardingproject',         ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject',         ReferencedEntity: 'sprk_project' },
-    { ReferencingAttribute: 'sprk_regardingevent',           ReferencingEntityNavigationPropertyName: 'sprk_RegardingEvent',           ReferencedEntity: 'sprk_event' },
-    { ReferencingAttribute: 'sprk_regardingcommunication',   ReferencingEntityNavigationPropertyName: 'sprk_RegardingCommunication',   ReferencedEntity: 'sprk_communication' },
-    { ReferencingAttribute: 'sprk_regardingworkassignment',  ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment',  ReferencedEntity: 'sprk_workassignment' },
-    { ReferencingAttribute: 'sprk_regardinginvoice',         ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice',         ReferencedEntity: 'sprk_invoice' },
-    { ReferencingAttribute: 'sprk_regardingbudget',          ReferencingEntityNavigationPropertyName: 'sprk_RegardingBudget',          ReferencedEntity: 'sprk_budget' },
-    { ReferencingAttribute: 'sprk_regardinganalysis',        ReferencingEntityNavigationPropertyName: 'sprk_RegardingAnalysis',        ReferencedEntity: 'sprk_analysis' },
-    { ReferencingAttribute: 'sprk_regardingorganization',    ReferencingEntityNavigationPropertyName: 'sprk_RegardingOrganization',    ReferencedEntity: 'sprk_organization' },
-    { ReferencingAttribute: 'sprk_regardingcontact',         ReferencingEntityNavigationPropertyName: 'sprk_RegardingContact',         ReferencedEntity: 'contact' },
-    { ReferencingAttribute: 'sprk_regardingdocument',        ReferencingEntityNavigationPropertyName: 'sprk_RegardingDocument',        ReferencedEntity: 'sprk_document' },
+    {
+      ReferencingAttribute: 'sprk_regardingmatter',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
+      ReferencedEntity: 'sprk_matter',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardingproject',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject',
+      ReferencedEntity: 'sprk_project',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardingevent',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingEvent',
+      ReferencedEntity: 'sprk_event',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardingcommunication',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingCommunication',
+      ReferencedEntity: 'sprk_communication',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardingworkassignment',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment',
+      ReferencedEntity: 'sprk_workassignment',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardinginvoice',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice',
+      ReferencedEntity: 'sprk_invoice',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardingbudget',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingBudget',
+      ReferencedEntity: 'sprk_budget',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardinganalysis',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingAnalysis',
+      ReferencedEntity: 'sprk_analysis',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardingorganization',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingOrganization',
+      ReferencedEntity: 'sprk_organization',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardingcontact',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingContact',
+      ReferencedEntity: 'contact',
+    },
+    {
+      ReferencingAttribute: 'sprk_regardingdocument',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingDocument',
+      ReferencedEntity: 'sprk_document',
+    },
     // Resolver fields
-    { ReferencingAttribute: 'sprk_regardingrecordtype',      ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',      ReferencedEntity: 'sprk_recordtype_ref' },
+    {
+      ReferencingAttribute: 'sprk_regardingrecordtype',
+      ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
+      ReferencedEntity: 'sprk_recordtype_ref',
+    },
     // Assignee
-    { ReferencingAttribute: 'sprk_assignedto',               ReferencingEntityNavigationPropertyName: 'sprk_AssignedTo',               ReferencedEntity: 'systemuser' },
+    {
+      ReferencingAttribute: 'sprk_assignedto',
+      ReferencingEntityNavigationPropertyName: 'sprk_AssignedTo',
+      ReferencedEntity: 'systemuser',
+    },
   ],
 };
 
@@ -273,9 +325,7 @@ describe('TodoService.createTodo', () => {
 
     // 1 entity-specific lookup (chosen) — bound via nav-prop (sprk_RegardingMatter)
     // GUID is normalized: braces stripped + lowercased
-    expect(payload['sprk_RegardingMatter@odata.bind']).toBe(
-      '/sprk_matters(abcdef12-3456-7890-abcd-ef1234567890)'
-    );
+    expect(payload['sprk_RegardingMatter@odata.bind']).toBe('/sprk_matters(abcdef12-3456-7890-abcd-ef1234567890)');
 
     // 3 resolver text/URL fields
     expect(payload['sprk_regardingrecordid']).toBe('abcdef12-3456-7890-abcd-ef1234567890');
@@ -293,17 +343,29 @@ describe('TodoService.createTodo', () => {
   it('populatesAllFifteenRegardingFields_forEachOfElevenTargets', async () => {
     // Lighter end-to-end version covering all 11 entity types in one shot
     const targets: Array<{ entityType: string; entitySet: string; expectedNavProp: string }> = [
-      { entityType: 'sprk_matter',          entitySet: 'sprk_matters',          expectedNavProp: 'sprk_RegardingMatter' },
-      { entityType: 'sprk_project',         entitySet: 'sprk_projects',         expectedNavProp: 'sprk_RegardingProject' },
-      { entityType: 'sprk_event',           entitySet: 'sprk_events',           expectedNavProp: 'sprk_RegardingEvent' },
-      { entityType: 'sprk_communication',   entitySet: 'sprk_communications',   expectedNavProp: 'sprk_RegardingCommunication' },
-      { entityType: 'sprk_workassignment',  entitySet: 'sprk_workassignments',  expectedNavProp: 'sprk_RegardingWorkAssignment' },
-      { entityType: 'sprk_invoice',         entitySet: 'sprk_invoices',         expectedNavProp: 'sprk_RegardingInvoice' },
-      { entityType: 'sprk_budget',          entitySet: 'sprk_budgets',          expectedNavProp: 'sprk_RegardingBudget' },
-      { entityType: 'sprk_analysis',        entitySet: 'sprk_analyses',         expectedNavProp: 'sprk_RegardingAnalysis' },
-      { entityType: 'sprk_organization',    entitySet: 'sprk_organizations',    expectedNavProp: 'sprk_RegardingOrganization' },
-      { entityType: 'contact',              entitySet: 'contacts',              expectedNavProp: 'sprk_RegardingContact' },
-      { entityType: 'sprk_document',        entitySet: 'sprk_documents',        expectedNavProp: 'sprk_RegardingDocument' },
+      { entityType: 'sprk_matter', entitySet: 'sprk_matters', expectedNavProp: 'sprk_RegardingMatter' },
+      { entityType: 'sprk_project', entitySet: 'sprk_projects', expectedNavProp: 'sprk_RegardingProject' },
+      { entityType: 'sprk_event', entitySet: 'sprk_events', expectedNavProp: 'sprk_RegardingEvent' },
+      {
+        entityType: 'sprk_communication',
+        entitySet: 'sprk_communications',
+        expectedNavProp: 'sprk_RegardingCommunication',
+      },
+      {
+        entityType: 'sprk_workassignment',
+        entitySet: 'sprk_workassignments',
+        expectedNavProp: 'sprk_RegardingWorkAssignment',
+      },
+      { entityType: 'sprk_invoice', entitySet: 'sprk_invoices', expectedNavProp: 'sprk_RegardingInvoice' },
+      { entityType: 'sprk_budget', entitySet: 'sprk_budgets', expectedNavProp: 'sprk_RegardingBudget' },
+      { entityType: 'sprk_analysis', entitySet: 'sprk_analyses', expectedNavProp: 'sprk_RegardingAnalysis' },
+      {
+        entityType: 'sprk_organization',
+        entitySet: 'sprk_organizations',
+        expectedNavProp: 'sprk_RegardingOrganization',
+      },
+      { entityType: 'contact', entitySet: 'contacts', expectedNavProp: 'sprk_RegardingContact' },
+      { entityType: 'sprk_document', entitySet: 'sprk_documents', expectedNavProp: 'sprk_RegardingDocument' },
     ];
 
     for (const t of targets) {
@@ -323,9 +385,7 @@ describe('TodoService.createTodo', () => {
 
       expect(result.success).toBe(true);
       const [, payload] = dataService.createRecord.mock.calls[0] as [string, Record<string, unknown>];
-      expect(payload[`${t.expectedNavProp}@odata.bind`]).toBe(
-        `/${t.entitySet}(11111111-1111-1111-1111-111111111111)`
-      );
+      expect(payload[`${t.expectedNavProp}@odata.bind`]).toBe(`/${t.entitySet}(11111111-1111-1111-1111-111111111111)`);
       expect(payload['sprk_regardingrecordid']).toBe('11111111-1111-1111-1111-111111111111');
       expect(payload['sprk_regardingrecordname']).toBe(`Parent of ${t.entityType}`);
     }

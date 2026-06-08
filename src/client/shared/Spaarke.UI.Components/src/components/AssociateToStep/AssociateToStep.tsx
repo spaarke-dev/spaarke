@@ -203,12 +203,7 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
       {/* Record type dropdown + Select Record button */}
       <div className={styles.formRow} data-testid="associate-to-step-form-row">
         <div className={styles.dropdownWrapper}>
-          <Label
-            id="associate-to-step-record-type-label"
-            size="small"
-            weight="semibold"
-            className={styles.fieldLabel}
-          >
+          <Label id="associate-to-step-record-type-label" size="small" weight="semibold" className={styles.fieldLabel}>
             Record Type
           </Label>
           <Dropdown

@@ -19,20 +19,13 @@ describe('KanbanCard primitive (shared — R2 baseline lock)', () => {
   // ─────────────────────────────────────────────────────────────────────
 
   it('renders without crashing', () => {
-    renderWithProviders(
-      <KanbanCard titleSlot={<span>My Item</span>} ariaLabel="My Item" />
-    );
+    renderWithProviders(<KanbanCard titleSlot={<span>My Item</span>} ariaLabel="My Item" />);
 
     expect(screen.getByText('My Item')).toBeInTheDocument();
   });
 
   it('uses role=listitem with the supplied ariaLabel', () => {
-    renderWithProviders(
-      <KanbanCard
-        titleSlot={<span>Title</span>}
-        ariaLabel="Title. Due Mar 5. Open."
-      />
-    );
+    renderWithProviders(<KanbanCard titleSlot={<span>Title</span>} ariaLabel="Title. Due Mar 5. Open." />);
 
     const item = screen.getByRole('listitem');
     expect(item).toHaveAttribute('aria-label', 'Title. Due Mar 5. Open.');
@@ -53,17 +46,13 @@ describe('KanbanCard primitive (shared — R2 baseline lock)', () => {
   // ─────────────────────────────────────────────────────────────────────
 
   it('is keyboard-focusable (tabIndex=0)', () => {
-    renderWithProviders(
-      <KanbanCard titleSlot={<span>T</span>} ariaLabel="T" />
-    );
+    renderWithProviders(<KanbanCard titleSlot={<span>T</span>} ariaLabel="T" />);
     expect(screen.getByRole('listitem')).toHaveAttribute('tabIndex', '0');
   });
 
   it('fires onClick when Enter is pressed', () => {
     const onClick = jest.fn();
-    renderWithProviders(
-      <KanbanCard titleSlot={<span>T</span>} ariaLabel="T" onClick={onClick} />
-    );
+    renderWithProviders(<KanbanCard titleSlot={<span>T</span>} ariaLabel="T" onClick={onClick} />);
 
     fireEvent.keyDown(screen.getByRole('listitem'), { key: 'Enter' });
     expect(onClick).toHaveBeenCalledTimes(1);
@@ -71,9 +60,7 @@ describe('KanbanCard primitive (shared — R2 baseline lock)', () => {
 
   it('fires onClick when Space is pressed', () => {
     const onClick = jest.fn();
-    renderWithProviders(
-      <KanbanCard titleSlot={<span>T</span>} ariaLabel="T" onClick={onClick} />
-    );
+    renderWithProviders(<KanbanCard titleSlot={<span>T</span>} ariaLabel="T" onClick={onClick} />);
 
     fireEvent.keyDown(screen.getByRole('listitem'), { key: ' ' });
     expect(onClick).toHaveBeenCalledTimes(1);
@@ -81,9 +68,7 @@ describe('KanbanCard primitive (shared — R2 baseline lock)', () => {
 
   it('fires onClick on mouse click', () => {
     const onClick = jest.fn();
-    renderWithProviders(
-      <KanbanCard titleSlot={<span>T</span>} ariaLabel="T" onClick={onClick} />
-    );
+    renderWithProviders(<KanbanCard titleSlot={<span>T</span>} ariaLabel="T" onClick={onClick} />);
 
     fireEvent.click(screen.getByRole('listitem'));
     expect(onClick).toHaveBeenCalledTimes(1);
@@ -111,9 +96,7 @@ describe('KanbanCard primitive (shared — R2 baseline lock)', () => {
   });
 
   it('omits score wrapper when scoreSlot not provided', () => {
-    const { container } = renderWithProviders(
-      <KanbanCard ariaLabel="x" titleSlot={<span>X</span>} />
-    );
+    const { container } = renderWithProviders(<KanbanCard ariaLabel="x" titleSlot={<span>X</span>} />);
 
     // Two columns expected: content + (no actions, no score)
     // Score wrapper uses aria-hidden — verify it's absent.

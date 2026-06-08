@@ -99,17 +99,17 @@ export interface RegardingTarget extends EntityTypeOption {
  * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
  */
 export const TODO_REGARDING_TARGETS: ReadonlyArray<RegardingTarget> = [
-  { label: 'Matter',          entityType: 'sprk_matter',          lookupAttribute: 'sprk_regardingmatter' },
-  { label: 'Project',         entityType: 'sprk_project',         lookupAttribute: 'sprk_regardingproject' },
-  { label: 'Event',           entityType: 'sprk_event',           lookupAttribute: 'sprk_regardingevent' },
-  { label: 'Communication',   entityType: 'sprk_communication',   lookupAttribute: 'sprk_regardingcommunication' },
-  { label: 'Work Assignment', entityType: 'sprk_workassignment',  lookupAttribute: 'sprk_regardingworkassignment' },
-  { label: 'Invoice',         entityType: 'sprk_invoice',         lookupAttribute: 'sprk_regardinginvoice' },
-  { label: 'Budget',          entityType: 'sprk_budget',          lookupAttribute: 'sprk_regardingbudget' },
-  { label: 'Analysis',        entityType: 'sprk_analysis',        lookupAttribute: 'sprk_regardinganalysis' },
-  { label: 'Organization',    entityType: 'sprk_organization',    lookupAttribute: 'sprk_regardingorganization' },
-  { label: 'Contact',         entityType: 'contact',              lookupAttribute: 'sprk_regardingcontact' },
-  { label: 'Document',        entityType: 'sprk_document',        lookupAttribute: 'sprk_regardingdocument' },
+  { label: 'Matter', entityType: 'sprk_matter', lookupAttribute: 'sprk_regardingmatter' },
+  { label: 'Project', entityType: 'sprk_project', lookupAttribute: 'sprk_regardingproject' },
+  { label: 'Event', entityType: 'sprk_event', lookupAttribute: 'sprk_regardingevent' },
+  { label: 'Communication', entityType: 'sprk_communication', lookupAttribute: 'sprk_regardingcommunication' },
+  { label: 'Work Assignment', entityType: 'sprk_workassignment', lookupAttribute: 'sprk_regardingworkassignment' },
+  { label: 'Invoice', entityType: 'sprk_invoice', lookupAttribute: 'sprk_regardinginvoice' },
+  { label: 'Budget', entityType: 'sprk_budget', lookupAttribute: 'sprk_regardingbudget' },
+  { label: 'Analysis', entityType: 'sprk_analysis', lookupAttribute: 'sprk_regardinganalysis' },
+  { label: 'Organization', entityType: 'sprk_organization', lookupAttribute: 'sprk_regardingorganization' },
+  { label: 'Contact', entityType: 'contact', lookupAttribute: 'sprk_regardingcontact' },
+  { label: 'Document', entityType: 'sprk_document', lookupAttribute: 'sprk_regardingdocument' },
 ] as const;
 
 // ---------------------------------------------------------------------------

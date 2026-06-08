@@ -147,11 +147,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
       [handleClick]
     );
 
-    const cardClassName = [
-      styles.card,
-      isSelected ? styles.cardSelected : '',
-      isCompleted ? styles.cardCompleted : '',
-    ]
+    const cardClassName = [styles.card, isSelected ? styles.cardSelected : '', isCompleted ? styles.cardCompleted : '']
       .filter(Boolean)
       .join(' ');
 
@@ -186,9 +182,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
           {metadataSlot}
         </div>
 
-        {actionsSlot != null && (
-          <div className={styles.actionsColumn}>{actionsSlot}</div>
-        )}
+        {actionsSlot != null && <div className={styles.actionsColumn}>{actionsSlot}</div>}
       </div>
     );
   }

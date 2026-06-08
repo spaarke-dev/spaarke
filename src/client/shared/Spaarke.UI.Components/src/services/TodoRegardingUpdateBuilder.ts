@@ -19,11 +19,7 @@
  * @see PolymorphicResolverService.applyResolverFields — the underlying primitive
  */
 
-import {
-  applyResolverFields,
-  type INavPropEntry,
-  type IPolymorphicWebApi,
-} from './PolymorphicResolverService';
+import { applyResolverFields, type INavPropEntry, type IPolymorphicWebApi } from './PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Target catalog (mirrors TODO_REGARDING_TARGETS in AssociateToStep/types.ts)
@@ -64,17 +60,62 @@ export interface ITodoRegardingTargetCatalogEntry {
  * @see src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md
  */
 export const TODO_REGARDING_CATALOG: ReadonlyArray<ITodoRegardingTargetCatalogEntry> = [
-  { entityType: 'sprk_matter',         entitySet: 'sprk_matters',         lookupAttribute: 'sprk_regardingmatter',         navPropHint: 'matter' },
-  { entityType: 'sprk_project',        entitySet: 'sprk_projects',        lookupAttribute: 'sprk_regardingproject',        navPropHint: 'project' },
-  { entityType: 'sprk_event',          entitySet: 'sprk_events',          lookupAttribute: 'sprk_regardingevent',          navPropHint: 'event' },
-  { entityType: 'sprk_communication',  entitySet: 'sprk_communications',  lookupAttribute: 'sprk_regardingcommunication',  navPropHint: 'communication' },
-  { entityType: 'sprk_workassignment', entitySet: 'sprk_workassignments', lookupAttribute: 'sprk_regardingworkassignment', navPropHint: 'workassignment' },
-  { entityType: 'sprk_invoice',        entitySet: 'sprk_invoices',        lookupAttribute: 'sprk_regardinginvoice',        navPropHint: 'invoice' },
-  { entityType: 'sprk_budget',         entitySet: 'sprk_budgets',         lookupAttribute: 'sprk_regardingbudget',         navPropHint: 'budget' },
-  { entityType: 'sprk_analysis',       entitySet: 'sprk_analyses',        lookupAttribute: 'sprk_regardinganalysis',       navPropHint: 'analysis' },
-  { entityType: 'sprk_organization',   entitySet: 'sprk_organizations',   lookupAttribute: 'sprk_regardingorganization',   navPropHint: 'organization' },
-  { entityType: 'contact',             entitySet: 'contacts',             lookupAttribute: 'sprk_regardingcontact',        navPropHint: 'contact' },
-  { entityType: 'sprk_document',       entitySet: 'sprk_documents',       lookupAttribute: 'sprk_regardingdocument',       navPropHint: 'document' },
+  {
+    entityType: 'sprk_matter',
+    entitySet: 'sprk_matters',
+    lookupAttribute: 'sprk_regardingmatter',
+    navPropHint: 'matter',
+  },
+  {
+    entityType: 'sprk_project',
+    entitySet: 'sprk_projects',
+    lookupAttribute: 'sprk_regardingproject',
+    navPropHint: 'project',
+  },
+  { entityType: 'sprk_event', entitySet: 'sprk_events', lookupAttribute: 'sprk_regardingevent', navPropHint: 'event' },
+  {
+    entityType: 'sprk_communication',
+    entitySet: 'sprk_communications',
+    lookupAttribute: 'sprk_regardingcommunication',
+    navPropHint: 'communication',
+  },
+  {
+    entityType: 'sprk_workassignment',
+    entitySet: 'sprk_workassignments',
+    lookupAttribute: 'sprk_regardingworkassignment',
+    navPropHint: 'workassignment',
+  },
+  {
+    entityType: 'sprk_invoice',
+    entitySet: 'sprk_invoices',
+    lookupAttribute: 'sprk_regardinginvoice',
+    navPropHint: 'invoice',
+  },
+  {
+    entityType: 'sprk_budget',
+    entitySet: 'sprk_budgets',
+    lookupAttribute: 'sprk_regardingbudget',
+    navPropHint: 'budget',
+  },
+  {
+    entityType: 'sprk_analysis',
+    entitySet: 'sprk_analyses',
+    lookupAttribute: 'sprk_regardinganalysis',
+    navPropHint: 'analysis',
+  },
+  {
+    entityType: 'sprk_organization',
+    entitySet: 'sprk_organizations',
+    lookupAttribute: 'sprk_regardingorganization',
+    navPropHint: 'organization',
+  },
+  { entityType: 'contact', entitySet: 'contacts', lookupAttribute: 'sprk_regardingcontact', navPropHint: 'contact' },
+  {
+    entityType: 'sprk_document',
+    entitySet: 'sprk_documents',
+    lookupAttribute: 'sprk_regardingdocument',
+    navPropHint: 'document',
+  },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -144,9 +185,7 @@ export async function buildTodoRegardingUpdate(
       // and column-name@odata.bind in update payloads, but to maximize
       // compatibility we use the discovered navprop when available).
       const navProp = navProps.find(
-        n =>
-          n.referencedEntity === other.entityType &&
-          n.columnName.toLowerCase().includes(other.navPropHint)
+        n => n.referencedEntity === other.entityType && n.columnName.toLowerCase().includes(other.navPropHint)
       );
       const key = navProp?.navPropName ?? other.lookupAttribute;
       entity[`${key}@odata.bind`] = null;
@@ -186,17 +225,13 @@ export async function buildTodoRegardingUpdate(
  *                   resolve the canonical nav-prop names so the resulting
  *                   payload survives renaming of the underlying nav-props.
  */
-export function buildTodoRegardingClear(
-  navProps: INavPropEntry[]
-): ITodoRegardingUpdate {
+export function buildTodoRegardingClear(navProps: INavPropEntry[]): ITodoRegardingUpdate {
   const entity: ITodoRegardingUpdate = {};
 
   // 1. Null all 11 entity-specific lookups.
   for (const target of TODO_REGARDING_CATALOG) {
     const navProp = navProps.find(
-      n =>
-        n.referencedEntity === target.entityType &&
-        n.columnName.toLowerCase().includes(target.navPropHint)
+      n => n.referencedEntity === target.entityType && n.columnName.toLowerCase().includes(target.navPropHint)
     );
     const key = navProp?.navPropName ?? target.lookupAttribute;
     entity[`${key}@odata.bind`] = null;
@@ -204,9 +239,7 @@ export function buildTodoRegardingClear(
 
   // 2. Null the resolver record-type lookup.
   const recordTypeNavProp = navProps.find(
-    n =>
-      n.referencedEntity === 'sprk_recordtype_ref' &&
-      n.columnName.toLowerCase().includes('regardingrecordtype')
+    n => n.referencedEntity === 'sprk_recordtype_ref' && n.columnName.toLowerCase().includes('regardingrecordtype')
   );
   const recordTypeKey = recordTypeNavProp?.navPropName ?? 'sprk_RegardingRecordType';
   entity[`${recordTypeKey}@odata.bind`] = null;
@@ -235,9 +268,7 @@ export function buildTodoRegardingClear(
  */
 const _navPropCache: Record<string, INavPropEntry[]> = {};
 
-export async function discoverTodoNavProps(
-  fetchImpl: typeof fetch = globalThis.fetch
-): Promise<INavPropEntry[]> {
+export async function discoverTodoNavProps(fetchImpl: typeof fetch = globalThis.fetch): Promise<INavPropEntry[]> {
   const cacheKey = 'sprk_todo';
   if (_navPropCache[cacheKey]) {
     return _navPropCache[cacheKey];

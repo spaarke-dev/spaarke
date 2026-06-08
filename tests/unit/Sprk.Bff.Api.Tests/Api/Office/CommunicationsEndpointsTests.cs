@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Caching.Distributed;
@@ -17,6 +18,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Office;
 using Xunit;
@@ -382,8 +384,8 @@ internal sealed class AllowAllAuthHandler : AuthenticationHandler<Authentication
         var claims = new[]
         {
             new Claim("oid", "test-user-oid"),
-            new Claim(ClaimTypes.NameIdentifier, "test-user-id"),
-            new Claim(ClaimTypes.Email, "test@example.com"),
+            new Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "test-user-id"),
+            new Claim(System.Security.Claims.ClaimTypes.Email, "test@example.com"),
             new Claim("tid", "test-tenant-id")
         };
         var identity = new ClaimsIdentity(claims, "Test");

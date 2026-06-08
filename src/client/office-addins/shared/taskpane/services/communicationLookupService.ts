@@ -81,7 +81,7 @@ function buildEndpoint(internetMessageId: string): string {
  *                          "not saved".
  */
 export async function findCommunicationByMessageId(
-  internetMessageId: string | undefined,
+  internetMessageId: string | undefined
 ): Promise<CommunicationLookupResult | null> {
   // Defensive: undefined / empty / whitespace → no-op without a network call.
   if (!internetMessageId) {

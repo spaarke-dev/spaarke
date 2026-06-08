@@ -33,18 +33,16 @@ describe('createTodoLauncher', () => {
       expect(url.searchParams.get(CREATE_TODO_LAUNCH_PARAMS.ACTION)).toBe(CREATE_TODO_ACTION);
       expect(url.searchParams.get(CREATE_TODO_LAUNCH_PARAMS.REGARDING_TYPE)).toBe('sprk_communication');
       expect(url.searchParams.get(CREATE_TODO_LAUNCH_PARAMS.REGARDING_ID)).toBe(
-        'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', // lowercased
+        'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' // lowercased
       );
       expect(url.searchParams.get(CREATE_TODO_LAUNCH_PARAMS.REGARDING_NAME)).toBe('Q4 planning kickoff');
     });
 
     it('strips braces from a Dataverse-formatted GUID', () => {
       const url = new URL(
-        buildCreateTodoLaunchUrl({ ...baseInput, communicationId: '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}' }),
+        buildCreateTodoLaunchUrl({ ...baseInput, communicationId: '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}' })
       );
-      expect(url.searchParams.get(CREATE_TODO_LAUNCH_PARAMS.REGARDING_ID)).toBe(
-        'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      );
+      expect(url.searchParams.get(CREATE_TODO_LAUNCH_PARAMS.REGARDING_ID)).toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
     });
 
     it('encodes special chars in recordName via URLSearchParams', () => {
@@ -62,8 +60,9 @@ describe('createTodoLauncher', () => {
       const url = new URL(
         buildCreateTodoLaunchUrl({
           ...baseInput,
-          codePageBaseUrl: 'https://contoso.crm.dynamics.com/main.aspx?pagetype=webresource&webresourceName=sprk_smarttodo',
-        }),
+          codePageBaseUrl:
+            'https://contoso.crm.dynamics.com/main.aspx?pagetype=webresource&webresourceName=sprk_smarttodo',
+        })
       );
 
       // Existing params from the base URL survive.
@@ -74,28 +73,26 @@ describe('createTodoLauncher', () => {
     });
 
     it('supports overriding entityType (for the task 040 parent-form reuse path)', () => {
-      const url = new URL(
-        buildCreateTodoLaunchUrl({ ...baseInput, entityType: 'sprk_matter' }),
-      );
+      const url = new URL(buildCreateTodoLaunchUrl({ ...baseInput, entityType: 'sprk_matter' }));
       expect(url.searchParams.get(CREATE_TODO_LAUNCH_PARAMS.REGARDING_TYPE)).toBe('sprk_matter');
     });
 
     it('throws when codePageBaseUrl is empty', () => {
-      expect(() =>
-        buildCreateTodoLaunchUrl({ ...baseInput, codePageBaseUrl: '' }),
-      ).toThrow(/codePageBaseUrl is required/);
+      expect(() => buildCreateTodoLaunchUrl({ ...baseInput, codePageBaseUrl: '' })).toThrow(
+        /codePageBaseUrl is required/
+      );
     });
 
     it('throws when codePageBaseUrl is whitespace', () => {
-      expect(() =>
-        buildCreateTodoLaunchUrl({ ...baseInput, codePageBaseUrl: '   ' }),
-      ).toThrow(/codePageBaseUrl is required/);
+      expect(() => buildCreateTodoLaunchUrl({ ...baseInput, codePageBaseUrl: '   ' })).toThrow(
+        /codePageBaseUrl is required/
+      );
     });
 
     it('throws when communicationId is empty', () => {
-      expect(() =>
-        buildCreateTodoLaunchUrl({ ...baseInput, communicationId: '' }),
-      ).toThrow(/communicationId is required/);
+      expect(() => buildCreateTodoLaunchUrl({ ...baseInput, communicationId: '' })).toThrow(
+        /communicationId is required/
+      );
     });
 
     it('tolerates an empty recordName (renders a generic AssociateToStep card)', () => {

@@ -92,10 +92,7 @@ export {
   discoverTodoNavProps,
   _resetTodoNavPropCacheForTests,
 } from './TodoRegardingUpdateBuilder';
-export type {
-  ITodoRegardingTargetCatalogEntry,
-  ITodoRegardingUpdate,
-} from './TodoRegardingUpdateBuilder';
+export type { ITodoRegardingTargetCatalogEntry, ITodoRegardingUpdate } from './TodoRegardingUpdateBuilder';
 export { renderMarkdown, SPRK_MARKDOWN_CSS } from './renderMarkdown';
 export type { RenderMarkdownOptions } from './renderMarkdown';
 export { SprkChatBridge } from './SprkChatBridge';

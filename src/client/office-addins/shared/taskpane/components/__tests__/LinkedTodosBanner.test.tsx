@@ -17,9 +17,15 @@ import { LinkedTodosBanner } from '../LinkedTodosBanner';
 // Fluent v9 MessageBar uses ResizeObserver for reflow detection; jsdom doesn't
 // provide one. Stub a no-op implementation so render() doesn't throw.
 class ResizeObserverMock {
-  observe(): void { /* no-op */ }
-  unobserve(): void { /* no-op */ }
-  disconnect(): void { /* no-op */ }
+  observe(): void {
+    /* no-op */
+  }
+  unobserve(): void {
+    /* no-op */
+  }
+  disconnect(): void {
+    /* no-op */
+  }
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverMock;
@@ -172,9 +178,7 @@ describe('LinkedTodosBanner', () => {
 
   describe('host className override (Spaarke convention)', () => {
     it('accepts a className prop applied LAST so host overrides win', () => {
-      const { container } = renderWithProvider(
-        <LinkedTodosBanner count={1} className="host-override-class" />
-      );
+      const { container } = renderWithProvider(<LinkedTodosBanner count={1} className="host-override-class" />);
       // FluentProvider wraps our component, so dig into descendants.
       const overridden = container.querySelector('.host-override-class');
       expect(overridden).not.toBeNull();

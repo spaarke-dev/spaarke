@@ -15,11 +15,7 @@
  */
 
 import { act, renderHook, waitFor } from '@testing-library/react';
-import {
-  useCreateTodoFromEmail,
-  type CurrentEmailReader,
-  type SaveEmailToSpaarkeFn,
-} from '../useCreateTodoFromEmail';
+import { useCreateTodoFromEmail, type CurrentEmailReader, type SaveEmailToSpaarkeFn } from '../useCreateTodoFromEmail';
 import { apiClient, ApiClientError } from '@shared/services';
 
 // Mock the apiClient (used by the lookup service inside the hook).
@@ -70,7 +66,7 @@ describe('useCreateTodoFromEmail', () => {
           saveEmailToSpaarke,
           codePageBaseUrl: FAKE_CODE_PAGE,
           windowOpen,
-        }),
+        })
       );
 
       expect(result.current.state.kind).toBe('idle');
@@ -102,7 +98,7 @@ describe('useCreateTodoFromEmail', () => {
           title: 'Not Found',
           status: 404,
           detail: 'No sprk_communication',
-        }),
+        })
       );
 
       const windowOpen = jest.fn().mockReturnValue({ closed: false } as unknown as Window);
@@ -117,7 +113,7 @@ describe('useCreateTodoFromEmail', () => {
           saveEmailToSpaarke,
           codePageBaseUrl: FAKE_CODE_PAGE,
           windowOpen,
-        }),
+        })
       );
 
       await act(async () => {
@@ -141,7 +137,7 @@ describe('useCreateTodoFromEmail', () => {
           type: 'about:blank',
           title: 'Not Found',
           status: 404,
-        }),
+        })
       );
 
       const windowOpen = jest.fn();
@@ -153,7 +149,7 @@ describe('useCreateTodoFromEmail', () => {
           saveEmailToSpaarke,
           codePageBaseUrl: FAKE_CODE_PAGE,
           windowOpen,
-        }),
+        })
       );
 
       await act(async () => {
@@ -176,7 +172,7 @@ describe('useCreateTodoFromEmail', () => {
           title: 'Internal Server Error',
           status: 500,
           detail: 'lookup boom',
-        }),
+        })
       );
 
       const saveEmailToSpaarke = jest.fn();
@@ -188,7 +184,7 @@ describe('useCreateTodoFromEmail', () => {
           saveEmailToSpaarke,
           codePageBaseUrl: FAKE_CODE_PAGE,
           windowOpen,
-        }),
+        })
       );
 
       await act(async () => {
@@ -210,7 +206,7 @@ describe('useCreateTodoFromEmail', () => {
           saveEmailToSpaarke: jest.fn(),
           codePageBaseUrl: FAKE_CODE_PAGE,
           windowOpen,
-        }),
+        })
       );
 
       await act(async () => {
@@ -234,7 +230,7 @@ describe('useCreateTodoFromEmail', () => {
           saveEmailToSpaarke: jest.fn(),
           codePageBaseUrl: FAKE_CODE_PAGE,
           windowOpen: jest.fn(),
-        }),
+        })
       );
 
       await act(async () => {
@@ -254,7 +250,7 @@ describe('useCreateTodoFromEmail', () => {
           saveEmailToSpaarke: jest.fn(),
           codePageBaseUrl: FAKE_CODE_PAGE,
           windowOpen: jest.fn().mockReturnValue({ closed: false } as unknown as Window),
-        }),
+        })
       );
 
       await act(async () => {

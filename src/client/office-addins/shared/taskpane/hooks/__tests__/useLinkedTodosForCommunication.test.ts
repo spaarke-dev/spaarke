@@ -82,9 +82,7 @@ describe('useLinkedTodosForCommunication', () => {
       const response: LinkedTodosResponse = { count: 0, todos: [] };
       mockGet.mockResolvedValueOnce(response);
 
-      const { result } = renderHook(() =>
-        useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000001')
-      );
+      const { result } = renderHook(() => useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000001'));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(result.current.count).toBe(0);
@@ -95,15 +93,11 @@ describe('useLinkedTodosForCommunication', () => {
     it('renders count=1 when one todo is linked', async () => {
       const response: LinkedTodosResponse = {
         count: 1,
-        todos: [
-          { sprk_todoid: 'todo-1', sprk_name: 'Follow up on email', statecode: 0 },
-        ],
+        todos: [{ sprk_todoid: 'todo-1', sprk_name: 'Follow up on email', statecode: 0 }],
       };
       mockGet.mockResolvedValueOnce(response);
 
-      const { result } = renderHook(() =>
-        useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000002')
-      );
+      const { result } = renderHook(() => useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000002'));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(result.current.count).toBe(1);
@@ -122,9 +116,7 @@ describe('useLinkedTodosForCommunication', () => {
       };
       mockGet.mockResolvedValueOnce(response);
 
-      const { result } = renderHook(() =>
-        useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000003')
-      );
+      const { result } = renderHook(() => useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000003'));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(result.current.count).toBe(5);
@@ -134,9 +126,7 @@ describe('useLinkedTodosForCommunication', () => {
     it('calls the BFF with the correct linked-todos endpoint', async () => {
       mockGet.mockResolvedValueOnce({ count: 0, todos: [] });
 
-      renderHook(() =>
-        useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000004')
-      );
+      renderHook(() => useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000004'));
 
       await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
       expect(mockGet).toHaveBeenCalledWith(
@@ -202,10 +192,13 @@ describe('useLinkedTodosForCommunication', () => {
       const id = '00000000-0000-0000-0000-000000000b01';
 
       mockGet.mockResolvedValueOnce({ count: 1, todos: [{ sprk_todoid: 't1', sprk_name: 'Old', statecode: 0 }] });
-      mockGet.mockResolvedValueOnce({ count: 2, todos: [
-        { sprk_todoid: 't1', sprk_name: 'Old', statecode: 0 },
-        { sprk_todoid: 't2', sprk_name: 'New', statecode: 0 },
-      ] });
+      mockGet.mockResolvedValueOnce({
+        count: 2,
+        todos: [
+          { sprk_todoid: 't1', sprk_name: 'Old', statecode: 0 },
+          { sprk_todoid: 't2', sprk_name: 'New', statecode: 0 },
+        ],
+      });
 
       const { result } = renderHook(() => useLinkedTodosForCommunication(id));
       await waitFor(() => expect(result.current.count).toBe(1));
@@ -290,9 +283,7 @@ describe('useLinkedTodosForCommunication', () => {
         })
       );
 
-      const { result } = renderHook(() =>
-        useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000e01')
-      );
+      const { result } = renderHook(() => useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000e01'));
 
       // After initial effect runs, isLoading should flip to true.
       await waitFor(() => expect(result.current.isLoading).toBe(true));
@@ -318,9 +309,7 @@ describe('useLinkedTodosForCommunication', () => {
         ],
       });
 
-      const { result } = renderHook(() =>
-        useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000f01')
-      );
+      const { result } = renderHook(() => useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000f01'));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(result.current.count).toBe(2);
@@ -329,9 +318,7 @@ describe('useLinkedTodosForCommunication', () => {
     it('coerces missing todos array to empty array', async () => {
       mockGet.mockResolvedValueOnce({ count: 7 });
 
-      const { result } = renderHook(() =>
-        useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000f02')
-      );
+      const { result } = renderHook(() => useLinkedTodosForCommunication('00000000-0000-0000-0000-000000000f02'));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(result.current.count).toBe(7);

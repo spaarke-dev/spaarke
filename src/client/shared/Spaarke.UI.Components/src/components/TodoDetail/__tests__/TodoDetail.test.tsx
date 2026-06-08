@@ -48,52 +48,28 @@ const noopSearch = async () => [];
 describe('TodoDetail — render states', () => {
   it('renders the loading spinner when isLoading is true', () => {
     renderWithProviders(
-      <TodoDetail
-        record={null}
-        isLoading
-        error={null}
-        onSaveTodo={noop}
-        onSearchContacts={noopSearch}
-      />
+      <TodoDetail record={null} isLoading error={null} onSaveTodo={noop} onSearchContacts={noopSearch} />
     );
     expect(screen.getByText(/Loading/i)).toBeInTheDocument();
   });
 
   it('renders the error text when error is set', () => {
     renderWithProviders(
-      <TodoDetail
-        record={null}
-        isLoading={false}
-        error="Boom"
-        onSaveTodo={noop}
-        onSearchContacts={noopSearch}
-      />
+      <TodoDetail record={null} isLoading={false} error="Boom" onSaveTodo={noop} onSearchContacts={noopSearch} />
     );
     expect(screen.getByText('Boom')).toBeInTheDocument();
   });
 
   it('renders the empty state when no record is selected', () => {
     renderWithProviders(
-      <TodoDetail
-        record={null}
-        isLoading={false}
-        error={null}
-        onSaveTodo={noop}
-        onSearchContacts={noopSearch}
-      />
+      <TodoDetail record={null} isLoading={false} error={null} onSaveTodo={noop} onSearchContacts={noopSearch} />
     );
     expect(screen.getByText(/No to-do selected/i)).toBeInTheDocument();
   });
 
   it('renders sprk_todo fields when a record is provided', () => {
     renderWithProviders(
-      <TodoDetail
-        record={baseRecord}
-        isLoading={false}
-        error={null}
-        onSaveTodo={noop}
-        onSearchContacts={noopSearch}
-      />
+      <TodoDetail record={baseRecord} isLoading={false} error={null} onSaveTodo={noop} onSearchContacts={noopSearch} />
     );
     // description value drives the description textarea
     expect(screen.getByPlaceholderText(/Add a description/i)).toHaveValue('Do the thing');
@@ -223,13 +199,7 @@ describe('TodoDetail — complete (single updateRecord)', () => {
       statuscode: 2,
     };
     renderWithProviders(
-      <TodoDetail
-        record={completed}
-        isLoading={false}
-        error={null}
-        onSaveTodo={noop}
-        onSearchContacts={noopSearch}
-      />
+      <TodoDetail record={completed} isLoading={false} error={null} onSaveTodo={noop} onSearchContacts={noopSearch} />
     );
     expect(screen.getByRole('button', { name: /Completed/i })).toBeDisabled();
   });
@@ -263,13 +233,7 @@ describe('TodoDetail — dismiss', () => {
 
   it('does NOT render the Dismiss button when onDismissTodo prop is omitted', () => {
     renderWithProviders(
-      <TodoDetail
-        record={baseRecord}
-        isLoading={false}
-        error={null}
-        onSaveTodo={noop}
-        onSearchContacts={noopSearch}
-      />
+      <TodoDetail record={baseRecord} isLoading={false} error={null} onSaveTodo={noop} onSearchContacts={noopSearch} />
     );
     expect(screen.queryByRole('button', { name: /^Dismiss$/i })).not.toBeInTheDocument();
   });

@@ -1,12 +1,6 @@
 import { useCallback, useState } from 'react';
-import {
-  findCommunicationByMessageId,
-  type CommunicationLookupResult,
-} from '../services/communicationLookupService';
-import {
-  openCreateTodoWizard,
-  type BuildCreateTodoLaunchUrlInput,
-} from '../services/createTodoLauncher';
+import { findCommunicationByMessageId, type CommunicationLookupResult } from '../services/communicationLookupService';
+import { openCreateTodoWizard, type BuildCreateTodoLaunchUrlInput } from '../services/createTodoLauncher';
 
 /**
  * useCreateTodoFromEmail.ts
@@ -132,15 +126,12 @@ export interface UseCreateTodoFromEmailResult {
  * <Button disabled={isBusy} onClick={() => void start()}>Create To Do</Button>
  * ```
  */
-export function useCreateTodoFromEmail(
-  options: UseCreateTodoFromEmailOptions,
-): UseCreateTodoFromEmailResult {
+export function useCreateTodoFromEmail(options: UseCreateTodoFromEmailOptions): UseCreateTodoFromEmailResult {
   const { emailReader, saveEmailToSpaarke, codePageBaseUrl, windowOpen } = options;
 
   const [state, setState] = useState<CreateTodoFlowState>({ kind: 'idle' });
 
-  const isBusy =
-    state.kind === 'looking-up' || state.kind === 'saving' || state.kind === 'launching';
+  const isBusy = state.kind === 'looking-up' || state.kind === 'saving' || state.kind === 'launching';
 
   const reset = useCallback(() => setState({ kind: 'idle' }), []);
 
@@ -155,26 +146,22 @@ export function useCreateTodoFromEmail(
           // entityType defaults to 'sprk_communication' per FR-27 — explicit for clarity.
           entityType: 'sprk_communication',
         };
-        const opened = windowOpen
-          ? openCreateTodoWizard(launchInput, windowOpen)
-          : openCreateTodoWizard(launchInput);
+        const opened = windowOpen ? openCreateTodoWizard(launchInput, windowOpen) : openCreateTodoWizard(launchInput);
         if (!opened) {
           // Popup blocked — surface a clear message.
           setState({
             kind: 'error',
-            message:
-              'The browser blocked the To Do window. Please allow popups for this site and try again.',
+            message: 'The browser blocked the To Do window. Please allow popups for this site and try again.',
           });
           return;
         }
         setState({ kind: 'opened', communication });
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to launch the Create To Do wizard.';
+        const message = err instanceof Error ? err.message : 'Failed to launch the Create To Do wizard.';
         setState({ kind: 'error', message });
       }
     },
-    [codePageBaseUrl, windowOpen],
+    [codePageBaseUrl, windowOpen]
   );
 
   const start = useCallback(async (): Promise<void> => {
@@ -189,8 +176,7 @@ export function useCreateTodoFromEmail(
     try {
       internetMessageId = await emailReader.getInternetMessageId();
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to read the current email.';
+      const message = err instanceof Error ? err.message : 'Failed to read the current email.';
       setState({ kind: 'error', message });
       return;
     }
@@ -211,9 +197,7 @@ export function useCreateTodoFromEmail(
       existing = await findCommunicationByMessageId(internetMessageId);
     } catch (err) {
       const message =
-        err instanceof Error
-          ? err.message
-          : 'Failed to look up whether this email is already saved to Spaarke.';
+        err instanceof Error ? err.message : 'Failed to look up whether this email is already saved to Spaarke.';
       setState({ kind: 'error', message });
       return;
     }
@@ -232,8 +216,7 @@ export function useCreateTodoFromEmail(
     try {
       saved = await saveEmailToSpaarke();
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to save the email to Spaarke.';
+      const message = err instanceof Error ? err.message : 'Failed to save the email to Spaarke.';
       setState({ kind: 'error', message });
       return;
     }

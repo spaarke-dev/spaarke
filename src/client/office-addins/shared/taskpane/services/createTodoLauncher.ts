@@ -98,13 +98,9 @@ function normaliseGuid(id: string): string {
  *
  * @throws {Error} when `codePageBaseUrl` or `communicationId` is missing.
  */
-export function buildCreateTodoLaunchUrl(
-  input: BuildCreateTodoLaunchUrlInput,
-): string {
+export function buildCreateTodoLaunchUrl(input: BuildCreateTodoLaunchUrlInput): string {
   if (!input.codePageBaseUrl || input.codePageBaseUrl.trim().length === 0) {
-    throw new Error(
-      'buildCreateTodoLaunchUrl: codePageBaseUrl is required (set SMARTTODO_CODEPAGE_URL env var)',
-    );
+    throw new Error('buildCreateTodoLaunchUrl: codePageBaseUrl is required (set SMARTTODO_CODEPAGE_URL env var)');
   }
   if (!input.communicationId || input.communicationId.trim().length === 0) {
     throw new Error('buildCreateTodoLaunchUrl: communicationId is required');
@@ -118,10 +114,7 @@ export function buildCreateTodoLaunchUrl(
   const url = new URL(input.codePageBaseUrl);
   url.searchParams.set(CREATE_TODO_LAUNCH_PARAMS.ACTION, CREATE_TODO_ACTION);
   url.searchParams.set(CREATE_TODO_LAUNCH_PARAMS.REGARDING_TYPE, entityType);
-  url.searchParams.set(
-    CREATE_TODO_LAUNCH_PARAMS.REGARDING_ID,
-    normaliseGuid(input.communicationId),
-  );
+  url.searchParams.set(CREATE_TODO_LAUNCH_PARAMS.REGARDING_ID, normaliseGuid(input.communicationId));
   url.searchParams.set(CREATE_TODO_LAUNCH_PARAMS.REGARDING_NAME, recordName);
   return url.toString();
 }
@@ -142,8 +135,7 @@ export const CREATE_TODO_WINDOW_FEATURES = 'width=720,height=820,resizable=yes,s
  */
 export function openCreateTodoWizard(
   input: BuildCreateTodoLaunchUrlInput,
-  windowOpen: (url: string, target: string, features: string) => Window | null = (u, t, f) =>
-    window.open(u, t, f),
+  windowOpen: (url: string, target: string, features: string) => Window | null = (u, t, f) => window.open(u, t, f)
 ): Window | null {
   const url = buildCreateTodoLaunchUrl(input);
   return windowOpen(url, '_blank', CREATE_TODO_WINDOW_FEATURES);

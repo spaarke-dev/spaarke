@@ -71,9 +71,7 @@ describe('TODO_REGARDING_TARGETS preset', () => {
   });
 
   it('mapsEachTargetToCorrectLookupAttribute', () => {
-    const byEntityType = Object.fromEntries(
-      TODO_REGARDING_TARGETS.map(t => [t.entityType, t.lookupAttribute])
-    );
+    const byEntityType = Object.fromEntries(TODO_REGARDING_TARGETS.map(t => [t.entityType, t.lookupAttribute]));
 
     expect(byEntityType['sprk_matter']).toBe('sprk_regardingmatter');
     expect(byEntityType['sprk_project']).toBe('sprk_regardingproject');

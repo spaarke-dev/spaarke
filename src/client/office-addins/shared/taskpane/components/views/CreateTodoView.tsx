@@ -148,8 +148,8 @@ function renderStateBody(state: CreateTodoFlowState, styles: ReturnType<typeof u
     case 'idle':
       return (
         <Text className={styles.body}>
-          Create a Spaarke To Do linked to this email. If the email isn&apos;t yet saved
-          to Spaarke, we&apos;ll save it first, then open the wizard.
+          Create a Spaarke To Do linked to this email. If the email isn&apos;t yet saved to Spaarke, we&apos;ll save it
+          first, then open the wizard.
         </Text>
       );
     case 'looking-up':
@@ -212,11 +212,7 @@ function renderStateBody(state: CreateTodoFlowState, styles: ReturnType<typeof u
   }
 }
 
-export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
-  hostAdapter,
-  saveEmailToSpaarke,
-  codePageBaseUrl,
-}) => {
+export const CreateTodoView: React.FC<CreateTodoViewProps> = ({ hostAdapter, saveEmailToSpaarke, codePageBaseUrl }) => {
   const styles = useStyles();
   const emailReader = useMemo(() => buildEmailReader(hostAdapter), [hostAdapter]);
 
@@ -239,11 +235,7 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
 
       <div className={styles.actions}>
         {state.kind === 'opened' ? (
-          <Button
-            appearance="primary"
-            icon={<CheckmarkCircleRegular />}
-            onClick={reset}
-          >
+          <Button appearance="primary" icon={<CheckmarkCircleRegular />} onClick={reset}>
             Done
           </Button>
         ) : state.kind === 'error' ? (

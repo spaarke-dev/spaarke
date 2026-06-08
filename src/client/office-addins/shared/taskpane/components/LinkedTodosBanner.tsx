@@ -82,9 +82,7 @@ export interface LinkedTodosBannerProps {
  * Pluralize "to-do" for the banner title.
  */
 function formatTitle(count: number): string {
-  return count === 1
-    ? 'This email has 1 Spaarke to-do'
-    : `This email has ${count} Spaarke to-dos`;
+  return count === 1 ? 'This email has 1 Spaarke to-do' : `This email has ${count} Spaarke to-dos`;
 }
 
 export const LinkedTodosBanner: React.FC<LinkedTodosBannerProps> = ({

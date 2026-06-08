@@ -120,10 +120,7 @@ export class TodoService {
    *
    * @returns A `ICreateTodoResult` — never throws.
    */
-  async createTodo(
-    formValues: ICreateTodoFormState,
-    regarding?: AssociationResult | null
-  ): Promise<ICreateTodoResult> {
+  async createTodo(formValues: ICreateTodoFormState, regarding?: AssociationResult | null): Promise<ICreateTodoResult> {
     // 1. Build core sprk_todo entity body (scalar fields only)
     const entity: Record<string, unknown> = {
       sprk_name: formValues.title.trim(),

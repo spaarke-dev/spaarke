@@ -43,11 +43,7 @@ export {
   __clearLinkedTodosCache,
   __linkedTodosCache,
 } from './useLinkedTodosForCommunication';
-export type {
-  LinkedTodo,
-  LinkedTodosResponse,
-  UseLinkedTodosResult,
-} from './useLinkedTodosForCommunication';
+export type { LinkedTodo, LinkedTodosResponse, UseLinkedTodosResult } from './useLinkedTodosForCommunication';
 
 // Create To Do from email click flow (smart-todo-decoupling-r3 FR-27 / task 070)
 export { useCreateTodoFromEmail } from './useCreateTodoFromEmail';

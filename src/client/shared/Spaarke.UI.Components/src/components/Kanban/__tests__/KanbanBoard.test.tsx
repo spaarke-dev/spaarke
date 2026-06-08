@@ -54,8 +54,8 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
       <KanbanBoard<ITestItem>
         columns={makeColumns()}
         onDragEnd={jest.fn()}
-        renderCard={(item) => <span>{item.name}</span>}
-        getItemId={(item) => item.id}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
       />
     );
 
@@ -67,8 +67,8 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
       <KanbanBoard<ITestItem>
         columns={makeColumns()}
         onDragEnd={jest.fn()}
-        renderCard={(item) => <span>{item.name}</span>}
-        getItemId={(item) => item.id}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
       />
     );
 
@@ -80,8 +80,8 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
       <KanbanBoard<ITestItem>
         columns={makeColumns()}
         onDragEnd={jest.fn()}
-        renderCard={(item) => <span>{item.name}</span>}
-        getItemId={(item) => item.id}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
         ariaLabel="Smart To Do Kanban board"
       />
     );
@@ -98,8 +98,8 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
       <KanbanBoard<ITestItem>
         columns={makeColumns()}
         onDragEnd={jest.fn()}
-        renderCard={(item) => <span>{item.name}</span>}
-        getItemId={(item) => item.id}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
       />
     );
 
@@ -112,8 +112,8 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
       <KanbanBoard<ITestItem>
         columns={makeColumns()}
         onDragEnd={jest.fn()}
-        renderCard={(item) => <span>{item.name}</span>}
-        getItemId={(item) => item.id}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
       />
     );
 
@@ -127,8 +127,8 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
       <KanbanBoard<ITestItem>
         columns={makeColumns()}
         onDragEnd={jest.fn()}
-        renderCard={(item) => <span>{item.name}</span>}
-        getItemId={(item) => item.id}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
       />
     );
 
@@ -140,8 +140,8 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
       <KanbanBoard<ITestItem>
         columns={makeColumns()}
         onDragEnd={jest.fn()}
-        renderCard={(item) => <span>{item.name}</span>}
-        getItemId={(item) => item.id}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
       />
     );
 
@@ -159,7 +159,7 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
         columns={makeColumns()}
         onDragEnd={jest.fn()}
         renderCard={renderCard}
-        getItemId={(item) => item.id}
+        getItemId={item => item.id}
       />
     );
 
@@ -179,8 +179,8 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
       <KanbanBoard<ITestItem>
         columns={makeColumns()}
         onDragEnd={jest.fn()}
-        renderCard={(item) => <span>{item.name}</span>}
-        getItemId={(item) => item.id}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
         collapsedColumns={collapsed}
       />
     );

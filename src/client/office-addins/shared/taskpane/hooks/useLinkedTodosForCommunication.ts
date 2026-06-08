@@ -106,9 +106,7 @@ function buildEndpoint(communicationId: string): string {
  *                        to Spaarke. When undefined, the hook is inert.
  * @returns Banner-ready state: count, todos, isLoading, error, fromCache, refresh.
  */
-export function useLinkedTodosForCommunication(
-  communicationId: string | undefined
-): UseLinkedTodosResult {
+export function useLinkedTodosForCommunication(communicationId: string | undefined): UseLinkedTodosResult {
   // Normalize "empty/whitespace" → undefined so callers can pass through raw
   // strings without per-call guards.
   const normalizedId = useMemo(() => {
@@ -130,69 +128,64 @@ export function useLinkedTodosForCommunication(
   // Track the in-flight request so unmount / id-change can ignore stale results.
   const inFlightIdRef = useRef<string | null>(null);
 
-  const fetchLinkedTodos = useCallback(
-    async (idToFetch: string, options: { force?: boolean } = {}): Promise<void> => {
-      const { force = false } = options;
+  const fetchLinkedTodos = useCallback(async (idToFetch: string, options: { force?: boolean } = {}): Promise<void> => {
+    const { force = false } = options;
 
-      // Cache hit — return synchronously without a network round-trip.
-      if (!force) {
-        const cachedEntry = __linkedTodosCache.get(idToFetch);
-        if (cachedEntry) {
-          setCount(cachedEntry.count);
-          setTodos(cachedEntry.todos);
-          setFromCache(true);
-          setIsLoading(false);
-          setError(null);
-          return;
-        }
-      }
-
-      inFlightIdRef.current = idToFetch;
-      setIsLoading(true);
-      setError(null);
-      setFromCache(false);
-
-      try {
-        const response = await apiClient.get<LinkedTodosResponse>(
-          buildEndpoint(idToFetch)
-        );
-
-        // Guard against stale responses if the user switched emails mid-flight.
-        if (inFlightIdRef.current !== idToFetch) {
-          return;
-        }
-
-        // Normalize defensively — server SHOULD always return both fields, but
-        // be tolerant of partial payloads.
-        const safeResponse: LinkedTodosResponse = {
-          count: typeof response?.count === 'number' ? response.count : (response?.todos?.length ?? 0),
-          todos: Array.isArray(response?.todos) ? response.todos : [],
-        };
-
-        __linkedTodosCache.set(idToFetch, safeResponse);
-        setCount(safeResponse.count);
-        setTodos(safeResponse.todos);
+    // Cache hit — return synchronously without a network round-trip.
+    if (!force) {
+      const cachedEntry = __linkedTodosCache.get(idToFetch);
+      if (cachedEntry) {
+        setCount(cachedEntry.count);
+        setTodos(cachedEntry.todos);
+        setFromCache(true);
+        setIsLoading(false);
         setError(null);
-      } catch (err) {
-        if (inFlightIdRef.current !== idToFetch) {
-          return;
-        }
-        const message =
-          err instanceof ApiClientError
-            ? err.error.detail || err.error.title || 'Failed to load linked to-dos'
-            : err instanceof Error
-              ? err.message
-              : 'Failed to load linked to-dos';
-        setError(message);
-        // Do NOT cache failures — next render attempt will retry.
-      } finally {
-        if (inFlightIdRef.current === idToFetch) {
-          setIsLoading(false);
-        }
+        return;
       }
-    },
-    []
-  );
+    }
+
+    inFlightIdRef.current = idToFetch;
+    setIsLoading(true);
+    setError(null);
+    setFromCache(false);
+
+    try {
+      const response = await apiClient.get<LinkedTodosResponse>(buildEndpoint(idToFetch));
+
+      // Guard against stale responses if the user switched emails mid-flight.
+      if (inFlightIdRef.current !== idToFetch) {
+        return;
+      }
+
+      // Normalize defensively — server SHOULD always return both fields, but
+      // be tolerant of partial payloads.
+      const safeResponse: LinkedTodosResponse = {
+        count: typeof response?.count === 'number' ? response.count : (response?.todos?.length ?? 0),
+        todos: Array.isArray(response?.todos) ? response.todos : [],
+      };
+
+      __linkedTodosCache.set(idToFetch, safeResponse);
+      setCount(safeResponse.count);
+      setTodos(safeResponse.todos);
+      setError(null);
+    } catch (err) {
+      if (inFlightIdRef.current !== idToFetch) {
+        return;
+      }
+      const message =
+        err instanceof ApiClientError
+          ? err.error.detail || err.error.title || 'Failed to load linked to-dos'
+          : err instanceof Error
+            ? err.message
+            : 'Failed to load linked to-dos';
+      setError(message);
+      // Do NOT cache failures — next render attempt will retry.
+    } finally {
+      if (inFlightIdRef.current === idToFetch) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
 
   // Reset banner state immediately when communicationId becomes undefined
   // (user switched to an unsaved email), without leaking the previous count.

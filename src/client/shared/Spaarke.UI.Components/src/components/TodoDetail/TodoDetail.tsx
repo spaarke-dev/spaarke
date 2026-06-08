@@ -49,7 +49,16 @@ import type {
   OptionOnSelectData,
   SelectionEvents,
 } from '@fluentui/react-components';
-import { SaveRegular, InfoRegular, DeleteRegular, CheckmarkRegular, OpenRegular, EditRegular, DismissRegular, AddCircleRegular } from '@fluentui/react-icons';
+import {
+  SaveRegular,
+  InfoRegular,
+  DeleteRegular,
+  CheckmarkRegular,
+  OpenRegular,
+  EditRegular,
+  DismissRegular,
+  AddCircleRegular,
+} from '@fluentui/react-icons';
 import type { ITodoRecord, ITodoFieldUpdates, IContactOption } from './types';
 
 // ---------------------------------------------------------------------------
@@ -879,12 +888,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               <div className={styles.fieldRow}>
                 <label className={styles.fieldLabel}>Record</label>
                 <div className={styles.regardingRow}>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<AddCircleRegular />}
-                    onClick={onChangeRegarding}
-                  >
+                  <Button appearance="subtle" size="small" icon={<AddCircleRegular />} onClick={onChangeRegarding}>
                     Set Regarding…
                   </Button>
                 </div>
@@ -999,7 +1003,9 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                   </div>
                 </PopoverSurface>
               </Popover>
-              <div className={`${styles.scoreCircle} ${styles.scoreCircleAlignRight}`}>{Math.round(score.todoScore)}</div>
+              <div className={`${styles.scoreCircle} ${styles.scoreCircleAlignRight}`}>
+                {Math.round(score.todoScore)}
+              </div>
             </div>
 
             <div className={styles.sliderRow}>

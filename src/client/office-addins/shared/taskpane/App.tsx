@@ -230,9 +230,7 @@ export const App: React.FC<AppProps> = ({
   // `createTodoConfig` is supplied, the CreateTodoView replaces the default tabs.
   // Outlook-only — the action makes no sense in Word.
   const showCreateTodoView =
-    initialAction === 'createTodo' &&
-    createTodoConfig !== undefined &&
-    hostAdapter.getHostType() === 'outlook';
+    initialAction === 'createTodo' && createTodoConfig !== undefined && hostAdapter.getHostType() === 'outlook';
 
   // Outlook taskpane banner indicator (smart-todo-decoupling-r3 FR-28 / A-1).
   // The hook is inert when communicationId is undefined / not Outlook, so it
@@ -245,7 +243,9 @@ export const App: React.FC<AppProps> = ({
     }
   }, [indicatorTargetId, onViewLinkedTodos]);
   const showLinkedTodosBanner =
-    hostType === 'outlook' && indicatorTargetId !== undefined && (linkedTodos.isLoading || linkedTodos.error !== null || linkedTodos.count > 0);
+    hostType === 'outlook' &&
+    indicatorTargetId !== undefined &&
+    (linkedTodos.isLoading || linkedTodos.error !== null || linkedTodos.count > 0);
 
   // Get user info
   const account = authService.getAccount();

@@ -39,18 +39,34 @@ import type { INavPropEntry, IPolymorphicWebApi } from '../PolymorphicResolverSe
  */
 function buildTodoNavProps(): INavPropEntry[] {
   return [
-    { columnName: 'sprk_regardingmatter',         navPropName: 'sprk_RegardingMatter',         referencedEntity: 'sprk_matter' },
-    { columnName: 'sprk_regardingproject',        navPropName: 'sprk_RegardingProject',        referencedEntity: 'sprk_project' },
-    { columnName: 'sprk_regardingevent',          navPropName: 'sprk_RegardingEvent',          referencedEntity: 'sprk_event' },
-    { columnName: 'sprk_regardingcommunication',  navPropName: 'sprk_RegardingCommunication',  referencedEntity: 'sprk_communication' },
-    { columnName: 'sprk_regardingworkassignment', navPropName: 'sprk_RegardingWorkAssignment', referencedEntity: 'sprk_workassignment' },
-    { columnName: 'sprk_regardinginvoice',        navPropName: 'sprk_RegardingInvoice',        referencedEntity: 'sprk_invoice' },
-    { columnName: 'sprk_regardingbudget',         navPropName: 'sprk_RegardingBudget',         referencedEntity: 'sprk_budget' },
-    { columnName: 'sprk_regardinganalysis',       navPropName: 'sprk_RegardingAnalysis',       referencedEntity: 'sprk_analysis' },
-    { columnName: 'sprk_regardingorganization',   navPropName: 'sprk_RegardingOrganization',   referencedEntity: 'sprk_organization' },
-    { columnName: 'sprk_regardingcontact',        navPropName: 'sprk_RegardingContact',        referencedEntity: 'contact' },
-    { columnName: 'sprk_regardingdocument',       navPropName: 'sprk_RegardingDocument',       referencedEntity: 'sprk_document' },
-    { columnName: 'sprk_regardingrecordtype',     navPropName: 'sprk_RegardingRecordType',     referencedEntity: 'sprk_recordtype_ref' },
+    { columnName: 'sprk_regardingmatter', navPropName: 'sprk_RegardingMatter', referencedEntity: 'sprk_matter' },
+    { columnName: 'sprk_regardingproject', navPropName: 'sprk_RegardingProject', referencedEntity: 'sprk_project' },
+    { columnName: 'sprk_regardingevent', navPropName: 'sprk_RegardingEvent', referencedEntity: 'sprk_event' },
+    {
+      columnName: 'sprk_regardingcommunication',
+      navPropName: 'sprk_RegardingCommunication',
+      referencedEntity: 'sprk_communication',
+    },
+    {
+      columnName: 'sprk_regardingworkassignment',
+      navPropName: 'sprk_RegardingWorkAssignment',
+      referencedEntity: 'sprk_workassignment',
+    },
+    { columnName: 'sprk_regardinginvoice', navPropName: 'sprk_RegardingInvoice', referencedEntity: 'sprk_invoice' },
+    { columnName: 'sprk_regardingbudget', navPropName: 'sprk_RegardingBudget', referencedEntity: 'sprk_budget' },
+    { columnName: 'sprk_regardinganalysis', navPropName: 'sprk_RegardingAnalysis', referencedEntity: 'sprk_analysis' },
+    {
+      columnName: 'sprk_regardingorganization',
+      navPropName: 'sprk_RegardingOrganization',
+      referencedEntity: 'sprk_organization',
+    },
+    { columnName: 'sprk_regardingcontact', navPropName: 'sprk_RegardingContact', referencedEntity: 'contact' },
+    { columnName: 'sprk_regardingdocument', navPropName: 'sprk_RegardingDocument', referencedEntity: 'sprk_document' },
+    {
+      columnName: 'sprk_regardingrecordtype',
+      navPropName: 'sprk_RegardingRecordType',
+      referencedEntity: 'sprk_recordtype_ref',
+    },
   ];
 }
 
@@ -113,9 +129,7 @@ describe('TODO_REGARDING_CATALOG', () => {
   });
 
   it('mapsEachEntityToCorrectEntitySet', () => {
-    const byEntityType = Object.fromEntries(
-      TODO_REGARDING_CATALOG.map(t => [t.entityType, t.entitySet]),
-    );
+    const byEntityType = Object.fromEntries(TODO_REGARDING_CATALOG.map(t => [t.entityType, t.entitySet]));
     expect(byEntityType['sprk_matter']).toBe('sprk_matters');
     expect(byEntityType['sprk_project']).toBe('sprk_projects');
     expect(byEntityType['sprk_event']).toBe('sprk_events');
@@ -151,7 +165,7 @@ describe('buildTodoRegardingUpdate — null → Matter', () => {
       navProps,
       { entityType: 'sprk_matter' },
       'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      'Smith v. Jones',
+      'Smith v. Jones'
     );
 
     // 4 resolver fields
@@ -159,9 +173,7 @@ describe('buildTodoRegardingUpdate — null → Matter', () => {
     expect(payload['sprk_regardingrecordname']).toBe('Smith v. Jones');
     expect(payload['sprk_regardingrecordurl']).toMatch(/etn=sprk_matter/);
     expect(payload['sprk_regardingrecordurl']).toMatch(/id=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/);
-    expect(payload['sprk_RegardingRecordType@odata.bind']).toBe(
-      '/sprk_recordtype_refs(rt-test-guid-0001)',
-    );
+    expect(payload['sprk_RegardingRecordType@odata.bind']).toBe('/sprk_recordtype_refs(rt-test-guid-0001)');
   });
 
   it('bindsSelectedEntitySpecificLookup', async () => {
@@ -173,12 +185,10 @@ describe('buildTodoRegardingUpdate — null → Matter', () => {
       navProps,
       { entityType: 'sprk_matter' },
       'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      'Smith v. Jones',
+      'Smith v. Jones'
     );
 
-    expect(payload['sprk_RegardingMatter@odata.bind']).toBe(
-      '/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)',
-    );
+    expect(payload['sprk_RegardingMatter@odata.bind']).toBe('/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)');
   });
 
   it('clearsAllOtherTenLookups', async () => {
@@ -190,13 +200,11 @@ describe('buildTodoRegardingUpdate — null → Matter', () => {
       navProps,
       { entityType: 'sprk_matter' },
       'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      'Smith v. Jones',
+      'Smith v. Jones'
     );
 
     // The 10 NON-selected lookups must be explicitly null.
-    const nonMatterBindKeys = ALL_ELEVEN_BIND_KEYS.filter(
-      k => k !== 'sprk_RegardingMatter@odata.bind',
-    );
+    const nonMatterBindKeys = ALL_ELEVEN_BIND_KEYS.filter(k => k !== 'sprk_RegardingMatter@odata.bind');
     for (const k of nonMatterBindKeys) {
       expect(payload[k]).toBeNull();
     }
@@ -211,12 +219,10 @@ describe('buildTodoRegardingUpdate — null → Matter', () => {
       navProps,
       { entityType: 'sprk_matter' },
       '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}',
-      'Smith v. Jones',
+      'Smith v. Jones'
     );
 
-    expect(payload['sprk_RegardingMatter@odata.bind']).toBe(
-      '/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)',
-    );
+    expect(payload['sprk_RegardingMatter@odata.bind']).toBe('/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)');
     expect(payload['sprk_regardingrecordid']).toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
   });
 });
@@ -235,13 +241,11 @@ describe('buildTodoRegardingUpdate — Matter → Project', () => {
       navProps,
       { entityType: 'sprk_project' },
       'ffffffff-0000-1111-2222-333333333333',
-      'Project Phoenix',
+      'Project Phoenix'
     );
 
     // New project lookup is bound
-    expect(payload['sprk_RegardingProject@odata.bind']).toBe(
-      '/sprk_projects(ffffffff-0000-1111-2222-333333333333)',
-    );
+    expect(payload['sprk_RegardingProject@odata.bind']).toBe('/sprk_projects(ffffffff-0000-1111-2222-333333333333)');
 
     // Previous matter lookup is cleared (null)
     expect(payload['sprk_RegardingMatter@odata.bind']).toBeNull();
@@ -256,15 +260,13 @@ describe('buildTodoRegardingUpdate — Matter → Project', () => {
       navProps,
       { entityType: 'sprk_project' },
       'ffffffff-0000-1111-2222-333333333333',
-      'Project Phoenix',
+      'Project Phoenix'
     );
 
     expect(payload['sprk_regardingrecordid']).toBe('ffffffff-0000-1111-2222-333333333333');
     expect(payload['sprk_regardingrecordname']).toBe('Project Phoenix');
     expect(payload['sprk_regardingrecordurl']).toMatch(/etn=sprk_project/);
-    expect(payload['sprk_RegardingRecordType@odata.bind']).toBe(
-      '/sprk_recordtype_refs(rt-test-guid-0001)',
-    );
+    expect(payload['sprk_RegardingRecordType@odata.bind']).toBe('/sprk_recordtype_refs(rt-test-guid-0001)');
   });
 
   it('clearsAllNineOtherLookupsTooNotJustTheImmediatePrior', async () => {
@@ -276,13 +278,11 @@ describe('buildTodoRegardingUpdate — Matter → Project', () => {
       navProps,
       { entityType: 'sprk_project' },
       'ffffffff-0000-1111-2222-333333333333',
-      'Project Phoenix',
+      'Project Phoenix'
     );
 
     // The 10 NON-project lookups (incl. matter) must all be null.
-    const nonProjectBindKeys = ALL_ELEVEN_BIND_KEYS.filter(
-      k => k !== 'sprk_RegardingProject@odata.bind',
-    );
+    const nonProjectBindKeys = ALL_ELEVEN_BIND_KEYS.filter(k => k !== 'sprk_RegardingProject@odata.bind');
     for (const k of nonProjectBindKeys) {
       expect(payload[k]).toBeNull();
     }
@@ -348,13 +348,7 @@ describe('buildTodoRegardingUpdate — all 11 targets', () => {
       const navProps = buildTodoNavProps();
       const recordId = 'aaaaaaaa-1111-1111-1111-111111111111';
 
-      const payload = await buildTodoRegardingUpdate(
-        webApi,
-        navProps,
-        { entityType },
-        recordId,
-        'Display Name',
-      );
+      const payload = await buildTodoRegardingUpdate(webApi, navProps, { entityType }, recordId, 'Display Name');
 
       // The nav-prop name for this catalog entry is the PascalCase form.
       const expectedNavProp = navProps.find(n => n.referencedEntity === entityType)!.navPropName;
@@ -365,7 +359,7 @@ describe('buildTodoRegardingUpdate — all 11 targets', () => {
 
       // Sanity check: lookupAttribute is referenced by the catalog (compile-time alignment)
       expect(lookupAttribute).toMatch(/^sprk_regarding/);
-    },
+    }
   );
 });
 
@@ -384,8 +378,8 @@ describe('buildTodoRegardingUpdate — error handling', () => {
         navProps,
         { entityType: 'sprk_unknown_entity' },
         'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-        'X',
-      ),
+        'X'
+      )
     ).rejects.toThrow(/Unknown entity type/);
   });
 });
@@ -416,10 +410,8 @@ describe('discoverTodoNavProps', () => {
     const result = await discoverTodoNavProps(mockFetch as unknown as typeof fetch);
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "EntityDefinitions(LogicalName='sprk_todo')/ManyToOneRelationships",
-      ),
-      expect.objectContaining({ credentials: 'include' }),
+      expect.stringContaining("EntityDefinitions(LogicalName='sprk_todo')/ManyToOneRelationships"),
+      expect.objectContaining({ credentials: 'include' })
     );
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
@@ -475,7 +467,7 @@ describe('regardingrecordurl shape (FR-13 link target)', () => {
         navProps,
         { entityType: target.entityType },
         'aaaaaaaa-1111-1111-1111-111111111111',
-        'Test',
+        'Test'
       );
       const url = payload['sprk_regardingrecordurl'] as string;
       expect(url).toMatch(/main\.aspx/);

@@ -9,9 +9,7 @@
  *   - URL-encoding handles RFC-5322 ids with special chars (`<`, `>`, `@`, `+`)
  */
 
-import {
-  findCommunicationByMessageId,
-} from '../communicationLookupService';
+import { findCommunicationByMessageId } from '../communicationLookupService';
 import { apiClient, ApiClientError } from '@shared/services';
 
 // Mock the apiClient module.
@@ -79,9 +77,7 @@ describe('communicationLookupService', () => {
       // RFC-5322 message ids commonly contain `<`, `>`, `@`, and `+`.
       await findCommunicationByMessageId('<a+b@host.example.com>');
 
-      expect(mockGet).toHaveBeenCalledWith(
-        expect.stringContaining(encodeURIComponent('<a+b@host.example.com>')),
-      );
+      expect(mockGet).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent('<a+b@host.example.com>')));
     });
 
     it('tolerates a server response that omits the subject', async () => {
@@ -110,7 +106,7 @@ describe('communicationLookupService', () => {
           title: 'Not Found',
           status: 404,
           detail: 'No sprk_communication found for the given internetMessageId',
-        }),
+        })
       );
 
       const result = await findCommunicationByMessageId('<unknown@host>');
@@ -126,7 +122,7 @@ describe('communicationLookupService', () => {
           title: 'Internal Server Error',
           status: 500,
           detail: 'oops',
-        }),
+        })
       );
 
       await expect(findCommunicationByMessageId('<x@y>')).rejects.toThrow(/oops/);
@@ -138,7 +134,7 @@ describe('communicationLookupService', () => {
           type: 'about:blank',
           title: 'Unauthorized',
           status: 401,
-        }),
+        })
       );
 
       await expect(findCommunicationByMessageId('<x@y>')).rejects.toThrow();
