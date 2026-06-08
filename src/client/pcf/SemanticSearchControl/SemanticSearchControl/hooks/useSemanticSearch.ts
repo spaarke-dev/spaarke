@@ -94,7 +94,20 @@ interface UseSemanticSearchResult {
 export function useSemanticSearch(
   apiService: SemanticSearchApiService,
   scope: SearchScope,
-  scopeId: string | null
+  scopeId: string | null,
+  /**
+   * FR-PCF-02 (Wave 9 wiring) — Azure AI Search index name forwarded into
+   * every search/searchUnion/loadMore call. Sourced from the PCF manifest's
+   * `searchIndexName` bound property (task 030) which itself binds to the
+   * scope record's `sprk_searchindexname` Dataverse field.
+   *
+   * - Non-empty trimmed string → forwarded to the BFF in the request body
+   *   so the request routes to that index.
+   * - `null` / `undefined` / empty / whitespace → service omits the field
+   *   entirely (per `SemanticSearchApiService.transformRequest`) and the
+   *   BFF falls through to its tenant default index chain (FR-BFF-04).
+   */
+  searchIndexName?: string | null
 ): UseSemanticSearchResult {
   // Search state
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -143,16 +156,20 @@ export function useSemanticSearch(
         // union of semantic + associated docs (Item 8 Part B). The wrapper
         // delegates to plain `search()` for all other paths so existing
         // behavior is preserved verbatim.
-        const response = await apiService.searchUnion({
-          query: searchQuery,
-          scope,
-          scopeId,
-          filters,
-          options: {
-            ...DEFAULT_OPTIONS,
-            offset: 0,
+        const response = await apiService.searchUnion(
+          {
+            query: searchQuery,
+            scope,
+            scopeId,
+            filters,
+            options: {
+              ...DEFAULT_OPTIONS,
+              offset: 0,
+            },
           },
-        });
+          // FR-PCF-02 (Wave 9 wiring) — forward manifest-bound index name.
+          searchIndexName ?? undefined
+        );
 
         setResults(response.results);
         setTotalCount(response.totalCount);
@@ -164,7 +181,7 @@ export function useSemanticSearch(
         setState('error');
       }
     },
-    [apiService, scope, scopeId]
+    [apiService, scope, scopeId, searchIndexName]
   );
 
   /**
@@ -185,16 +202,22 @@ export function useSemanticSearch(
       // only — the Dataverse-associated path returns its full small N up
       // front and has no meaningful "next page". Newly appended semantic
       // docs are deduped by id below so the union remains coherent.
-      const response = await apiService.search({
-        query,
-        scope,
-        scopeId,
-        filters: filtersRef.current,
-        options: {
-          ...DEFAULT_OPTIONS,
-          offset: results.length,
+      const response = await apiService.search(
+        {
+          query,
+          scope,
+          scopeId,
+          filters: filtersRef.current,
+          options: {
+            ...DEFAULT_OPTIONS,
+            offset: results.length,
+          },
         },
-      });
+        // FR-PCF-02 (Wave 9 wiring) — forward manifest-bound index name on
+        // the paginated semantic path too, so subsequent pages route to the
+        // same index as the initial union.
+        searchIndexName ?? undefined
+      );
 
       // Append new results to existing, defensive-deduping by documentId so
       // any overlap with the initial associated-only page is collapsed.
@@ -210,7 +233,7 @@ export function useSemanticSearch(
       setError(searchError);
       setState('error');
     }
-  }, [apiService, scope, scopeId, query, results.length, state, hasMore]);
+  }, [apiService, scope, scopeId, query, results.length, state, hasMore, searchIndexName]);
 
   /**
    * Clear all results and reset state
