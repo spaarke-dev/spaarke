@@ -1,9 +1,10 @@
 # Project Plan: Spaarke Multi-Container Multi-Index Routing
 
 > **Last Updated**: 2026-06-07
-> **Status**: Ready for Tasks
+> **Status**: Complete (with deferred Invoice wizard + 3 UAT pending in-browser)
 > **Spec**: [spec.md](spec.md)
 > **Design**: [design.md](design.md)
+> **Wrap-up**: see `notes/lessons-learned.md` + `notes/handoffs/post-uat-fixes-and-indexer-finding.md`
 
 ---
 
