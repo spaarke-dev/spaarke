@@ -103,25 +103,35 @@ public sealed class InvokePlaybookHandler : IToolHandler
 
     private const string CacheKeyPrefix = "invoke-playbook:visibility:";
 
-    private readonly IInvokePlaybookAi _invokePlaybookAi;
+    // DI-cycle break (2026-06-08): IInvokePlaybookAi is resolved lazily via IServiceProvider
+    // to break the cycle introduced when this handler became an IToolHandler. The auto-
+    // discovered IEnumerable<IToolHandler> backing IToolHandlerRegistry includes this
+    // handler, and the facade transitively reaches back to IToolHandlerRegistry via
+    // IPlaybookOrchestrationService → IAnalysisOrchestrationService → IToolHandlerRegistry.
+    // Lazy resolution defers the dependency edge until first call, which is after the
+    // container is fully built and no longer cycle-detecting.
+    private readonly IServiceProvider _serviceProvider;
     private readonly IPlaybookService _playbookService;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger<InvokePlaybookHandler> _logger;
 
     public InvokePlaybookHandler(
-        IInvokePlaybookAi invokePlaybookAi,
+        IServiceProvider serviceProvider,
         IPlaybookService playbookService,
         IHttpContextAccessor httpContextAccessor,
         IMemoryCache memoryCache,
         ILogger<InvokePlaybookHandler> logger)
     {
-        _invokePlaybookAi = invokePlaybookAi ?? throw new ArgumentNullException(nameof(invokePlaybookAi));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    private IInvokePlaybookAi InvokePlaybookAi =>
+        _serviceProvider.GetRequiredService<IInvokePlaybookAi>();
 
     /// <inheritdoc />
     public string HandlerId => HandlerIdValue;
@@ -319,7 +329,7 @@ public sealed class InvokePlaybookHandler : IToolHandler
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var result = await _invokePlaybookAi
+            var result = await InvokePlaybookAi
                 .InvokePlaybookAsync(playbookId, parameters, invocationContext, cancellationToken)
                 .ConfigureAwait(false);
 

@@ -62,12 +62,20 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         _httpContextAccessor = accessor;
     }
 
-    private InvokePlaybookHandler CreateHandler() => new(
-        _invokeFacadeMock.Object,
-        _playbookServiceMock.Object,
-        _httpContextAccessor,
-        _memoryCache,
-        CreateLogger<InvokePlaybookHandler>());
+    private InvokePlaybookHandler CreateHandler()
+    {
+        // Post DI-cycle-break (2026-06-08): handler takes IServiceProvider; the facade is
+        // resolved lazily. Build a minimal provider that exposes only the facade mock.
+        var services = new ServiceCollection();
+        services.AddSingleton(_invokeFacadeMock.Object);
+        var sp = services.BuildServiceProvider();
+        return new InvokePlaybookHandler(
+            sp,
+            _playbookServiceMock.Object,
+            _httpContextAccessor,
+            _memoryCache,
+            CreateLogger<InvokePlaybookHandler>());
+    }
 
     private static AnalysisTool BuildInvokeTool() =>
         BuildAnalysisTool(
@@ -636,8 +644,11 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
             .ReturnsAsync(BuildVisiblePlaybook(playbookId));
 
         var noHttpAccessor = new HttpContextAccessor { HttpContext = null };
+        var services = new ServiceCollection();
+        services.AddSingleton(_invokeFacadeMock.Object);
+        var sp = services.BuildServiceProvider();
         var handler = new InvokePlaybookHandler(
-            _invokeFacadeMock.Object,
+            sp,
             _playbookServiceMock.Object,
             noHttpAccessor,
             _memoryCache,
