@@ -49,7 +49,7 @@
 | 031 | Rewrite `CreateTodo` wizard + remove CreateWorkAssignment addTodo (audit-folded) | 4 | FULL | ✅ | 002, 030 | P4-W2 | — |
 | 032 | Implement launch-context pre-fill | 4 | FULL | ✅ | 031 | P4-W3 | ✅ |
 | 013 | Cleanup LegalWorkspace legacy to-do refs (audit-surfaced; CreateTodo + CreateWorkAssignment + useTodoItems) | 2 | FULL | ✅ | 010, 011, 023, 030, 031 | P2-W4 | — |
-| 014 | Cleanup DailyBriefing `useInlineTodoCreate.ts` (audit-surfaced; surfaced by 013) | 2 | STANDARD | 🔲 | 002 | P2-W5 | ✅ |
+| 014 | Cleanup DailyBriefing `useInlineTodoCreate.ts` (audit-surfaced; surfaced by 013) | 2 | STANDARD | ✅ | 002 | P2-W5 | ✅ |
 | 040 | "To Dos" subgrid on 11 parent forms (consolidated; 10 ribbon XMLs drafted, deploy deferred) | 5 | STANDARD | ✅ | 002, 030, 031, 032 | P5-W1 | ✅ |
 | 060 | `DeepLinkBuilder` service | 7 | FULL | ✅ | 002 | P7-W1 | ✅ |
 | 061 | Outbound sync pipeline (plugin + ServiceBus + handler) | 7 | FULL | 🔲 | 002, 009, 016, 018, 060 | P7-W2 | — |
