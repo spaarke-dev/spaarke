@@ -37,6 +37,16 @@ public static class AnalysisServicesModule
         // expectations + Dataverse Web API client lifetime).
         services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
 
+        // multi-container-multi-index-r1 upload-indexing-centralization (scope extension) — TRULY UNCONDITIONAL.
+        // IPostUploadIndexingEnqueuer is the single seam for post-upload RAG indexing. Wired into 5 BFF
+        // upload endpoints (Phase 3) so every file written to SPE through the BFF gets enqueued for tenant
+        // indexing automatically. Depends only on JobSubmissionService (Singleton, registered in ConfigurationModule)
+        // and IOptions<PostUploadIndexingOptions>. Lifetime: scoped (matches DI scope of consumer endpoints).
+        // See projects/spaarke-multi-container-multi-index-r1/notes/upload-indexing-centralization-design.md.
+        services.Configure<Sprk.Bff.Api.Configuration.PostUploadIndexingOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Configuration.PostUploadIndexingOptions.SectionName));
+        services.AddScoped<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
+
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
