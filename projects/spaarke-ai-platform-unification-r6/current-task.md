@@ -1,8 +1,8 @@
 # Current Task State — spaarke-ai-platform-unification-r6
 
-> **Last Updated**: 2026-06-08 (Wave 8 complete; rows deployed to Dataverse)
+> **Last Updated**: 2026-06-08 (Wave 9 complete; Q9 chat-tool migration closes at 10/10)
 > **Recovery**: Read "Quick Recovery" section first
-> **Last Commit**: `3eb7d17d` (Wave 8 — 4 citation/SSE-state chat tools migrated)
+> **Last Commit**: `3ccb5304` (Wave 9 — WorkingDocument migrated + ADR-033 streaming side channel)
 > **Branch**: `work/spaarke-ai-platform-unification-r6` (pushed to origin; clean working tree)
 
 ---
@@ -11,11 +11,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | A (data-driven foundation) — ~30 of ~30 Phase A tasks except Wave 9/10/exit-gate |
-| **Wave** | 8 COMPLETE (4 handlers migrated, 7 seed rows deployed to Spaarke Dev) |
-| **Last Committed Wave** | 8 (`3eb7d17d`) |
-| **Status** | ✅ Wave 8 complete. Build clean (0 errors, 16 baseline warnings). 115/115 new Wave 8 handler tests pass. 3549/3571 broader AI services sweep passes (0 failed, 22 skipped). All 7 Wave 8 seed rows deployed to `spaarkedev1.crm.dynamics.com`. |
-| **Next Action** | Wave 9 — requires ADR-032 (Streaming chat-tool contract) — this is a **confirmation trigger** per project CLAUDE.md (ADR file modification, public contract change, new ADR needed). STOP and confirm direction with user before dispatch. |
+| **Phase** | A (data-driven foundation) — Wave 10 (cleanup) + Phase A exit gate remaining |
+| **Wave** | 9 COMPLETE — Q9 chat-tool migration closes at **10/10** ✅ |
+| **Last Committed Wave** | 9 (`3ccb5304`) |
+| **Status** | ✅ Wave 9 complete. ADR-033 written (concise + full + INDEX). WorkingDocumentHandler migrated. ChatInvocationContext gains 2 fields (DocumentStreamWriter + AnalysisId). Build 0 errors, 16 baseline warnings. 3594/3616 AI services sweep passes (0 failed, +40 from Wave 9, +5 from Stage 2, baseline 3549). 3 new Dataverse rows deployed. First invocation of the "ADRs Are Defaults" principle in R6 — surfaced the over-engineered first framing AND a Stage-3 sub-agent stop-and-surface gap, both resolved cleanly. |
+| **Next Action** | Wave 10 (cleanup wave) — delete AnalysisExecutionTools (replaced by Pillar 3 invoke_playbook) + delete InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges (replaced by Pillar 3) + optionally delete the 10 now-unused legacy migrated tool classes (per-class audit needed for non-LLM consumers). Low risk; no ADR needed. |
 
 ### ✅ Wave 7c verification (2026-06-08, post-compaction)
 
@@ -75,12 +75,14 @@ R6 is migrating 10 pre-R5 chat tool C# classes to data-driven `IToolHandler` imp
 | `52201189` | W7c (checkpoint) | KnowledgeRetrieval + VerifyCitations handlers + tests + 3 seed rows; verified post-compaction 450/450 tests green |
 | `b7c089cc` | W7c marker | current-task.md update; 450/450 verification documented |
 | `3eb7d17d` | W8 | 4 handlers (DocumentSearch, WebSearch, CodeInterpreter, LegalResearch) + 7 seed rows + 115 new tests; factory −81 lines; deployed to Spaarke Dev 2026-06-08 |
+| `2f8b7a79` | W8 marker | current-task.md update; W8 verification documented |
+| `3ccb5304` | W9 | ADR-033 (concise + full + INDEX) + WorkingDocumentHandler + 3 seed rows + 40 new tests; ChatInvocationContext gains DocumentStreamWriter + AnalysisId; legacy WorkingDocumentTools factory block removed (REMOVED comment matches W7/7c/8 pattern); deployed to Spaarke Dev 2026-06-08. **Q9 closes at 10/10** ✅ |
 
 ### Pending
 
 | Wave | Tasks | Notes |
 |---|---|---|
-| **9 (NEXT — CONFIRMATION TRIGGER)** | ADR-032 Streaming chat-tool contract + IToolHandler streaming overload + WorkingDocumentTools migration | Requires new ADR (NFR-03 revision per ADRs-Are-Defaults principle). Must confirm with user before dispatch. |
+| **10 (NEXT)** | Delete AnalysisExecutionTools (replaced by Pillar 3 invoke_playbook) + delete InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges (replaced by Pillar 3) + optionally delete now-unused legacy migrated tool classes (per-class audit needed for non-LLM consumers — TextRefinementTools has known RefineTextAsync consumer in ChatEndpoints, so likely kept) | Cleanup; no ADR needed. Low risk. |
 | 9 | ADR-032 Streaming chat-tool contract + WorkingDocumentTools | Per "ADRs are defaults" principle — yielded NFR-03 for this case |
 | 10 | Delete AnalysisExecutionTools (replaced by Pillar 3 invoke_playbook) + delete InvokeSummarize + InvokeInsightsQueryTool bridges (task 023) | Cleanup |
 | 028, 029 | Phase A integration test + Phase A exit gate | MUST address the 9 pre-existing WorkspaceEndpointsTests failures before exit |
