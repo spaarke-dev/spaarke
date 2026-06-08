@@ -95,6 +95,7 @@ import {
   CheckmarkRegular,
   PinRegular,
   PinFilled,
+  PersonRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
@@ -186,6 +187,11 @@ const useStyles = makeStyles({
   activeMarker: {
     color: tokens.colorBrandForeground1,
     flexShrink: 0,
+  },
+  personalMarker: {
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase300,
   },
   emptyHint: {
     paddingTop: tokens.spacingVerticalXS,
@@ -735,6 +741,14 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
                   <div className={styles.layoutRow}>
                     {pinSlot}
                     <span className={styles.tabLabel}>{layout.name}</span>
+                    {!layout.isSystem && (
+                      <Tooltip content="Personal workspace" relationship="label">
+                        <PersonRegular
+                          className={styles.personalMarker}
+                          aria-label="Personal workspace"
+                        />
+                      </Tooltip>
+                    )}
                     {isActive && (
                       <CheckmarkRegular className={styles.activeMarker} />
                     )}

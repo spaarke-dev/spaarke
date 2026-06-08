@@ -96,7 +96,6 @@ import {
   shorthands,
   Dropdown,
   Option,
-  Input,
   Label,
   Button,
   Tooltip,
@@ -110,7 +109,10 @@ import {
 
 import { EventsPageProvider, useEventsPageContext } from '../../context/EventsPageContext';
 import { CalendarSection } from '../../components/CalendarSection/CalendarSection';
-import type { IEventDateInfo } from '../../components/CalendarSection/CalendarSection';
+import type {
+  IEventDateInfo,
+  CalendarFilterOutput,
+} from '../../components/CalendarSection/CalendarSection';
 import { addMonths, startOfMonth } from '../../utils/dateMath';
 
 // Cross-package SOURCE imports. Deep paths (not the @spaarke/ui-components
@@ -301,12 +303,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     ...shorthands.padding('8px'),
     ...shorthands.gap('8px'),
-    overflowY: 'auto',
+    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): root no longer scrolls.
+    // The grid container owns its own scroll so the filter row + calendar
+    // strip stay anchored at the top while only the event grid scrolls.
+    overflow: 'hidden',
     boxSizing: 'border-box',
-    scrollbarWidth: 'none',
-    '::-webkit-scrollbar': {
-      display: 'none',
-    },
   },
   dateRangeRow: {
     display: 'flex',
@@ -314,9 +315,17 @@ const useStyles = makeStyles({
     alignItems: 'flex-end',
     flexWrap: 'wrap',
     rowGap: '12px',
+    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): restore Griffel atomic-
+    // CSS spacing between filter fields. Task 033b regressed this to inline
+    // `marginRight: 28` per-field; this columnGap replaces those overrides
+    // and is the canonical spacing source for all fields in the row.
+    columnGap: tokens.spacingHorizontalXXL,
     flexShrink: 0,
     ...shorthands.padding('4px', '4px', '8px', '4px'),
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
+    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): subtle brand-accent
+    // border instead of neutral; provides the "color title line" the user
+    // requested without disrupting the dark-mode palette.
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorBrandStroke2),
   },
   dateRangeField: {
     display: 'flex',
@@ -326,7 +335,10 @@ const useStyles = makeStyles({
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
+    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): brand-tinted label color
+    // (subtle), keeping ADR-021 compliance (semantic token, dark-mode safe).
+    color: tokens.colorBrandForeground2,
+    fontWeight: tokens.fontWeightSemibold,
     marginBottom: '4px',
   },
   filterActions: {
@@ -360,7 +372,14 @@ const useStyles = makeStyles({
     flex: '1 1 auto',
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '320px',
+    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): fit the event grid to
+    // the widget container. `minHeight: 0` lets the flex child shrink below
+    // its intrinsic content height so the DataGrid can size to the
+    // remaining space and scroll internally instead of pushing the root
+    // beyond its bounds. `overflow: hidden` clips any DataGrid bleed
+    // (header sticky / footer pagination) to the container edge.
+    minHeight: 0,
+    overflow: 'hidden',
     marginTop: tokens.spacingVerticalL,
   },
 });
@@ -443,10 +462,13 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     });
   }, []);
 
-  // ── Day-cell selection (task 118) ────────────────────────────────────────
-  // Day-click bypasses pending/applied; selectedDate drives a one-day
-  // hostFilter directly in the useMemo below.
-  const [selectedDate, setSelectedDate] = React.useState<Date | null>(null);
+  // ── Day-cell selection ───────────────────────────────────────────────────
+  // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): the previous `selectedDate`
+  // single-day state has been removed. Day clicks now drive the range via
+  // `pending.fromDate` / `pending.toDate` exclusively (CalendarSection runs in
+  // `clickMode='range'`, emits `single` / `range` / `clear` via
+  // `onFilterChange`, and `onCalendarFilter` below mirrors that into pending
+  // state). One source of truth for date filtering.
 
   // ── Event-day derivation (task 120) ──────────────────────────────────────
   const lastAutoAnchorSignatureRef = React.useRef<string | null>(null);
@@ -547,14 +569,19 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
   const [applied, setApplied] = React.useState<ICalendarFilterSet>(initialFilterSet);
 
   const hasUnapplied = !filterSetsEqual(pending, applied);
-  const hasAnyApplied = !filterSetIsEmpty(applied) || selectedDate !== null;
+  const hasAnyApplied = !filterSetIsEmpty(applied);
 
-  // ── hostFilters useMemo (Task 033b — the rewire) ─────────────────────────
-  // Map applied + selectedDate to a flat HostFilterCondition[] (task 033a API).
-  // selectedDate (day-click) takes precedence over the filter row's range
-  // when both are present — the original divergence effect handled this by
-  // clearing selectedDate when range fired; here we express the priority
-  // directly so there's only one source of truth.
+  // ── hostFilters useMemo ──────────────────────────────────────────────────
+  // Map applied → flat HostFilterCondition[] (task 033a API).
+  //
+  // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): single source of truth for
+  // date filtering — `applied.fromDate` / `applied.toDate` (the range set by
+  // CalendarSection day clicks in `clickMode='range'`). When the user has
+  // not chosen a date-field, default to `sprk_duedate` so the range still
+  // filters something meaningful. When both ends of the range equal the same
+  // day (the "first-click-only" interim state), this emits a single-day
+  // `on` filter — exactly what the user expects to see after the first
+  // click before they pick the second.
   const hostFilters = React.useMemo<HostFilterCondition[]>(() => {
     const conditions: HostFilterCondition[] = [];
 
@@ -574,33 +601,34 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
       });
     }
 
-    // Date filter: selectedDate wins if set; otherwise fall through to the
-    // applied dateField / from / to range. dateField "(none)" → no date filter.
-    if (selectedDate) {
-      const iso = toIsoDate(selectedDate);
+    if (applied.fromDate || applied.toDate) {
       const effectiveDateField =
-        applied.dateField && applied.dateField !== DATE_FIELD_NONE ? applied.dateField : 'sprk_duedate';
-      conditions.push({
-        attribute: effectiveDateField,
-        operator: 'on',
-        value: iso,
-      });
-    } else if (applied.dateField && applied.dateField !== DATE_FIELD_NONE) {
+        applied.dateField && applied.dateField !== DATE_FIELD_NONE
+          ? applied.dateField
+          : 'sprk_duedate';
       if (applied.fromDate && applied.toDate) {
-        conditions.push({
-          attribute: applied.dateField,
-          operator: 'between',
-          value: [applied.fromDate, applied.toDate],
-        });
+        if (applied.fromDate === applied.toDate) {
+          conditions.push({
+            attribute: effectiveDateField,
+            operator: 'on',
+            value: applied.fromDate,
+          });
+        } else {
+          conditions.push({
+            attribute: effectiveDateField,
+            operator: 'between',
+            value: [applied.fromDate, applied.toDate],
+          });
+        }
       } else if (applied.fromDate) {
         conditions.push({
-          attribute: applied.dateField,
+          attribute: effectiveDateField,
           operator: 'on-or-after',
           value: applied.fromDate,
         });
       } else if (applied.toDate) {
         conditions.push({
-          attribute: applied.dateField,
+          attribute: effectiveDateField,
           operator: 'on-or-before',
           value: applied.toDate,
         });
@@ -608,7 +636,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     }
 
     return conditions;
-  }, [applied, selectedDate]);
+  }, [applied]);
 
   // ── Apply + Clear handlers ───────────────────────────────────────────────
   const onApply = React.useCallback(() => {
@@ -618,15 +646,34 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
   const onClear = React.useCallback(() => {
     setPending(EMPTY_FILTER_SET);
     setApplied(EMPTY_FILTER_SET);
-    setSelectedDate(null);
   }, []);
 
-  // ── Day-cell click handler (task 118 — preserved) ────────────────────────
-  // Updates only selectedDate; hostFilters useMemo recomputes and the
-  // grid re-fetches.
-  const onDaySelect = React.useCallback((date: Date | null) => {
-    setSelectedDate(date);
-  }, []);
+  // ── Calendar range click handler ─────────────────────────────────────────
+  // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): CalendarSection runs in
+  // `clickMode='range'` and emits three filter shapes:
+  //   • `{ type: 'single', date }` after the first click — range start picked,
+  //     range end still pending. We mirror this as `fromDate=toDate=date` so
+  //     the grid filters to the chosen day immediately.
+  //   • `{ type: 'range', start, end }` after the second click — finalize.
+  //   • `{ type: 'clear' }` when the calendar's third-click reset occurs (or
+  //     the host's Clear button — but we drive that via setPending directly).
+  // The Apply button stays the gate to push `pending` → `applied` so all
+  // filter changes (date + type + status) feel coherent.
+  const onCalendarFilter = React.useCallback(
+    (filter: CalendarFilterOutput | null) => {
+      if (!filter || filter.type === 'clear') {
+        setPending(prev => ({ ...prev, fromDate: '', toDate: '' }));
+        return;
+      }
+      if (filter.type === 'single') {
+        setPending(prev => ({ ...prev, fromDate: filter.date, toDate: filter.date }));
+        return;
+      }
+      // 'range'
+      setPending(prev => ({ ...prev, fromDate: filter.start, toDate: filter.end }));
+    },
+    [],
+  );
 
   // ── Month navigation handlers (task 116) ─────────────────────────────────
   const onPrevMonth = React.useCallback(
@@ -682,7 +729,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     <div className={styles.root}>
       {/* (1) Filter row — preserved AS-IS from task 130/136 per Q2 sign-off. */}
       <div className={styles.dateRangeRow}>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
+        <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Event Type</Label>
           <Dropdown
             value={eventTypeDisplay}
@@ -705,7 +752,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             ))}
           </Dropdown>
         </div>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
+        <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Event Status</Label>
           <Dropdown
             value={eventStatusDisplay}
@@ -728,7 +775,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             ))}
           </Dropdown>
         </div>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
+        <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
           <Dropdown
             value={dateFieldDisplay}
@@ -745,22 +792,10 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             ))}
           </Dropdown>
         </div>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
-          <Label className={styles.dateRangeLabel}>From</Label>
-          <Input
-            type="date"
-            value={pending.fromDate}
-            onChange={(_e, data) => setPending(prev => ({ ...prev, fromDate: data.value }))}
-          />
-        </div>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
-          <Label className={styles.dateRangeLabel}>To</Label>
-          <Input
-            type="date"
-            value={pending.toDate}
-            onChange={(_e, data) => setPending(prev => ({ ...prev, toDate: data.value }))}
-          />
-        </div>
+        {/* ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): explicit From / To
+            date inputs removed. The range is now picked entirely by clicking
+            days on the calendar strip (first click = From, second click = To,
+            third click resets). See `onCalendarFilter` for the wiring. */}
         <div className={styles.filterActions}>
           {hasUnapplied && (
             <Button appearance="primary" size="small" onClick={onApply} aria-label="Apply filters">
@@ -800,18 +835,11 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
           <div ref={stripRef} className={styles.calendarStrip}>
             <CalendarSection
               eventDates={eventDates as IEventDateInfo[]}
-              onFilterChange={() => {
-                /* No-op: calendar strip's onFilterChange was previously the
-                   day-click dispatch path through context. Day-click now flows
-                   through onSelectDate → setSelectedDate → hostFilters useMemo.
-                   This handler is kept on the CalendarSection prop surface for
-                   API stability but does nothing in the DataGrid-backed widget. */
-              }}
+              onFilterChange={onCalendarFilter}
               viewDate={viewDate}
               monthsToShow={monthsToShow}
               layout="horizontal"
-              selectedDate={selectedDate}
-              onSelectDate={onDaySelect}
+              clickMode="range"
             />
           </div>
           <Tooltip content="Next month (Shift+click: jump by window)" relationship="label">

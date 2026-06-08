@@ -115,6 +115,7 @@ export class BrowserMsalStrategy implements AuthStrategy {
 
   private readonly _msalConfig: Configuration;
   private readonly _scope: string;
+  private readonly _requireSilentOnly: boolean;
   private _instance: PublicClientApplication | null = null;
   private _initPromise: Promise<void> | null = null;
 
@@ -137,6 +138,7 @@ export class BrowserMsalStrategy implements AuthStrategy {
       },
     };
     this._scope = config.bffApiScope;
+    this._requireSilentOnly = config.requireSilentOnly;
   }
 
   async acquire(): Promise<TokenResult> {
@@ -170,6 +172,20 @@ export class BrowserMsalStrategy implements AuthStrategy {
     }
 
     // 3. acquireTokenPopup — last resort
+    //
+    // Suppressed when `requireSilentOnly` is set (e.g. by a popup/child host
+    // like WorkspaceLayoutWizard that does not want to surface an involuntary
+    // sign-in dialog every time its window opens with an empty MSAL cache).
+    // Per ADR-028 INV-5: a popup MUST only fire when the user explicitly
+    // triggered an auth-dependent action. A wizard load is NOT explicit
+    // user intent to authenticate.
+    if (this._requireSilentOnly) {
+      console.info(
+        '[BrowserMsalStrategy] silent acquisition exhausted; acquireTokenPopup suppressed (requireSilentOnly=true)',
+      );
+      return { accessToken: '', expiresOn: 0 };
+    }
+
     try {
       const loginHint = resolveLoginHint(msal);
       console.warn('[BrowserMsalStrategy] falling back to acquireTokenPopup (regression in steady state)');
