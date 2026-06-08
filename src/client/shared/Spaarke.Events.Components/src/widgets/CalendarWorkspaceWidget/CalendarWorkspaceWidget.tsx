@@ -90,16 +90,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Dropdown,
-  Option,
-  Label,
-  Button,
-  Tooltip,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, shorthands, Dropdown, Option, Label, Button, Tooltip } from '@fluentui/react-components';
 import {
   ChevronLeft20Regular,
   ChevronRight20Regular,
@@ -109,10 +100,7 @@ import {
 
 import { EventsPageProvider, useEventsPageContext } from '../../context/EventsPageContext';
 import { CalendarSection } from '../../components/CalendarSection/CalendarSection';
-import type {
-  IEventDateInfo,
-  CalendarFilterOutput,
-} from '../../components/CalendarSection/CalendarSection';
+import type { IEventDateInfo, CalendarFilterOutput } from '../../components/CalendarSection/CalendarSection';
 import { addMonths, startOfMonth } from '../../utils/dateMath';
 
 // Cross-package SOURCE imports. Deep paths (not the @spaarke/ui-components
@@ -603,9 +591,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
 
     if (applied.fromDate || applied.toDate) {
       const effectiveDateField =
-        applied.dateField && applied.dateField !== DATE_FIELD_NONE
-          ? applied.dateField
-          : 'sprk_duedate';
+        applied.dateField && applied.dateField !== DATE_FIELD_NONE ? applied.dateField : 'sprk_duedate';
       if (applied.fromDate && applied.toDate) {
         if (applied.fromDate === applied.toDate) {
           conditions.push({
@@ -659,21 +645,18 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
   //     the host's Clear button — but we drive that via setPending directly).
   // The Apply button stays the gate to push `pending` → `applied` so all
   // filter changes (date + type + status) feel coherent.
-  const onCalendarFilter = React.useCallback(
-    (filter: CalendarFilterOutput | null) => {
-      if (!filter || filter.type === 'clear') {
-        setPending(prev => ({ ...prev, fromDate: '', toDate: '' }));
-        return;
-      }
-      if (filter.type === 'single') {
-        setPending(prev => ({ ...prev, fromDate: filter.date, toDate: filter.date }));
-        return;
-      }
-      // 'range'
-      setPending(prev => ({ ...prev, fromDate: filter.start, toDate: filter.end }));
-    },
-    [],
-  );
+  const onCalendarFilter = React.useCallback((filter: CalendarFilterOutput | null) => {
+    if (!filter || filter.type === 'clear') {
+      setPending(prev => ({ ...prev, fromDate: '', toDate: '' }));
+      return;
+    }
+    if (filter.type === 'single') {
+      setPending(prev => ({ ...prev, fromDate: filter.date, toDate: filter.date }));
+      return;
+    }
+    // 'range'
+    setPending(prev => ({ ...prev, fromDate: filter.start, toDate: filter.end }));
+  }, []);
 
   // ── Month navigation handlers (task 116) ─────────────────────────────────
   const onPrevMonth = React.useCallback(

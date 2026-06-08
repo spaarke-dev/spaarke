@@ -605,7 +605,7 @@ function createEntityViewFactory(configId: string) {
       const Wrapped = (
         props: import('../../types/widget-types').WorkspaceWidgetProps<
           import('./DataverseEntityViewWidget').DataverseEntityViewWidgetData
-        >,
+        >
       ): ReturnType<typeof Base> => {
         const mergedData = { configId, ...(props.data ?? {}) };
         return Base({ ...props, data: mergedData });
@@ -626,7 +626,7 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 200,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents),
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents)
 );
 
 registerWorkspaceWidget(
@@ -638,7 +638,7 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 210,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects),
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects)
 );
 
 registerWorkspaceWidget(
@@ -650,7 +650,7 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 220,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices),
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices)
 );
 
 registerWorkspaceWidget(
@@ -662,7 +662,7 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 230,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments),
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments)
 );
 
 // ---------------------------------------------------------------------------
@@ -690,7 +690,7 @@ function createMetricsDashboardFactory(dashboardId: string) {
       const Wrapped = (
         props: import('../../types/widget-types').WorkspaceWidgetProps<
           import('./MetricsDashboardWidget').MetricsDashboardWidgetData
-        >,
+        >
       ): ReturnType<typeof Base> => {
         const mergedData = { dashboardId, ...(props.data ?? {}) };
         return Base({ ...props, data: mergedData });
@@ -711,7 +711,7 @@ registerWorkspaceWidget(
     allowMultiple: false,
     defaultOrder: 300,
   },
-  createMetricsDashboardFactory('matters-dashboard'),
+  createMetricsDashboardFactory('matters-dashboard')
 );
 
 // ---------------------------------------------------------------------------

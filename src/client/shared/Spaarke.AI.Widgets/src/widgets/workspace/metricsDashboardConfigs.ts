@@ -179,12 +179,8 @@ const MATTERS_DASHBOARD: MetricsDashboardConfig = {
   ],
 };
 
-export const METRICS_DASHBOARDS: readonly MetricsDashboardConfig[] = [
-  MATTERS_DASHBOARD,
-] as const;
+export const METRICS_DASHBOARDS: readonly MetricsDashboardConfig[] = [MATTERS_DASHBOARD] as const;
 
-export function getMetricsDashboardConfig(
-  id: string,
-): MetricsDashboardConfig | undefined {
+export function getMetricsDashboardConfig(id: string): MetricsDashboardConfig | undefined {
   return METRICS_DASHBOARDS.find(d => d.id === id);
 }

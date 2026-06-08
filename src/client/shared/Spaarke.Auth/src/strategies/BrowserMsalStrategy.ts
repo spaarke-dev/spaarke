@@ -181,7 +181,7 @@ export class BrowserMsalStrategy implements AuthStrategy {
     // user intent to authenticate.
     if (this._requireSilentOnly) {
       console.info(
-        '[BrowserMsalStrategy] silent acquisition exhausted; acquireTokenPopup suppressed (requireSilentOnly=true)',
+        '[BrowserMsalStrategy] silent acquisition exhausted; acquireTokenPopup suppressed (requireSilentOnly=true)'
       );
       return { accessToken: '', expiresOn: 0 };
     }

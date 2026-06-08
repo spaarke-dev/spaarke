@@ -112,9 +112,7 @@ function locateXrm(): any | null {
 // Component
 // ---------------------------------------------------------------------------
 
-export const DataverseEntityViewWidget: React.FC<
-  WorkspaceWidgetProps<DataverseEntityViewWidgetData>
-> = ({ data }) => {
+export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseEntityViewWidgetData>> = ({ data }) => {
   const styles = useStyles();
 
   const xrm = React.useMemo(() => locateXrm(), []);

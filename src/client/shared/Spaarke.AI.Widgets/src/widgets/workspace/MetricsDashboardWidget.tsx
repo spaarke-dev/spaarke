@@ -56,11 +56,7 @@ import {
 } from '@fluentui/react-icons';
 import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/services/XrmDataverseClient';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
-import {
-  getMetricsDashboardConfig,
-  type MetricsDashboardConfig,
-  type MetricsCard,
-} from './metricsDashboardConfigs';
+import { getMetricsDashboardConfig, type MetricsDashboardConfig, type MetricsCard } from './metricsDashboardConfigs';
 
 // ---------------------------------------------------------------------------
 // Widget data contract
@@ -212,11 +208,7 @@ interface CardData {
   error?: string;
 }
 
-function useCardData(
-  card: MetricsCard,
-  client: XrmDataverseClient | null,
-  filterTabId: string,
-): CardData {
+function useCardData(card: MetricsCard, client: XrmDataverseClient | null, filterTabId: string): CardData {
   const [state, setState] = React.useState<CardData>({
     records: [],
     loading: true,
@@ -265,10 +257,7 @@ function useCardData(
 // Card body renderers
 // ---------------------------------------------------------------------------
 
-const NumberCardBody: React.FC<{ count: number; label: string }> = ({
-  count,
-  label,
-}) => {
+const NumberCardBody: React.FC<{ count: number; label: string }> = ({ count, label }) => {
   const styles = useStyles();
   return (
     <div className={styles.cardBody}>
@@ -278,10 +267,7 @@ const NumberCardBody: React.FC<{ count: number; label: string }> = ({
   );
 };
 
-const ChartPlaceholderBody: React.FC<{ kind: 'bar' | 'donut'; sample: number }> = ({
-  kind,
-  sample,
-}) => {
+const ChartPlaceholderBody: React.FC<{ kind: 'bar' | 'donut'; sample: number }> = ({ kind, sample }) => {
   const styles = useStyles();
   return (
     <div className={styles.cardBody}>
@@ -312,22 +298,16 @@ const DashboardCard: React.FC<{
 
   const body = (() => {
     if (loading) return <Spinner size="small" label="Loading…" />;
-    if (error)
-      return <div className={styles.emptyState}>{error}</div>;
-    if (records.length === 0)
-      return <div className={styles.emptyState}>No records.</div>;
-    if (card.visual === 'number')
-      return <NumberCardBody count={records.length} label={card.label} />;
+    if (error) return <div className={styles.emptyState}>{error}</div>;
+    if (records.length === 0) return <div className={styles.emptyState}>No records.</div>;
+    if (card.visual === 'number') return <NumberCardBody count={records.length} label={card.label} />;
     return <ChartPlaceholderBody kind={card.visual} sample={records.length} />;
   })();
 
   return (
     <div className={styles.card} data-testid={`metrics-card-${card.id}`}>
       <div className={styles.cardHeader}>
-        <Tooltip
-          content={isSelected ? 'Remove from report' : 'Add to report'}
-          relationship="label"
-        >
+        <Tooltip content={isSelected ? 'Remove from report' : 'Add to report'} relationship="label">
           <Button
             appearance="subtle"
             size="small"
@@ -351,10 +331,7 @@ const DashboardCard: React.FC<{
             </Tooltip>
           )}
           {card.drillThrough && (
-            <Tooltip
-              content={card.drillThrough.actionLabel ?? 'Open in grid'}
-              relationship="label"
-            >
+            <Tooltip content={card.drillThrough.actionLabel ?? 'Open in grid'} relationship="label">
               <Button
                 appearance="subtle"
                 size="small"
@@ -375,9 +352,7 @@ const DashboardCard: React.FC<{
 // Widget
 // ---------------------------------------------------------------------------
 
-export const MetricsDashboardWidget: React.FC<
-  WorkspaceWidgetProps<MetricsDashboardWidgetData>
-> = ({ data }) => {
+export const MetricsDashboardWidget: React.FC<WorkspaceWidgetProps<MetricsDashboardWidgetData>> = ({ data }) => {
   const styles = useStyles();
 
   const xrm = React.useMemo(() => locateXrm(), []);
@@ -388,58 +363,45 @@ export const MetricsDashboardWidget: React.FC<
 
   const config: MetricsDashboardConfig | undefined = React.useMemo(
     () => getMetricsDashboardConfig(data?.dashboardId ?? ''),
-    [data?.dashboardId],
+    [data?.dashboardId]
   );
 
-  const [activeTabId, setActiveTabId] = React.useState<string>(
-    () => config?.filterTabs[0]?.id ?? '',
-  );
-  const [selectedCardIds, setSelectedCardIds] = React.useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
+  const [activeTabId, setActiveTabId] = React.useState<string>(() => config?.filterTabs[0]?.id ?? '');
+  const [selectedCardIds, setSelectedCardIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
-  const handleSelectChange = React.useCallback(
-    (cardId: string, selected: boolean) => {
-      setSelectedCardIds(prev => {
-        const next = new Set(prev);
-        if (selected) next.add(cardId);
-        else next.delete(cardId);
-        return next;
-      });
-    },
-    [],
-  );
+  const handleSelectChange = React.useCallback((cardId: string, selected: boolean) => {
+    setSelectedCardIds(prev => {
+      const next = new Set(prev);
+      if (selected) next.add(cardId);
+      else next.delete(cardId);
+      return next;
+    });
+  }, []);
 
-  const handleDrillThrough = React.useCallback(
-    (card: MetricsCard) => {
-      // Phase A stub — Phase B opens a Custom Page hosting <DataGrid configId>
-      // via Xrm.Navigation.navigateTo. For now, log the intent.
-      // eslint-disable-next-line no-console
-      console.info('[MetricsDashboardWidget] drill-through', {
-        cardId: card.id,
-        gridConfigId: card.drillThrough?.gridConfigId,
-        fetchXml: card.fetchXml,
-      });
-    },
-    [],
-  );
+  const handleDrillThrough = React.useCallback((card: MetricsCard) => {
+    // Phase A stub — Phase B opens a Custom Page hosting <DataGrid configId>
+    // via Xrm.Navigation.navigateTo. For now, log the intent.
+    // eslint-disable-next-line no-console
+    console.info('[MetricsDashboardWidget] drill-through', {
+      cardId: card.id,
+      gridConfigId: card.drillThrough?.gridConfigId,
+      fetchXml: card.fetchXml,
+    });
+  }, []);
 
-  const handleAiSummary = React.useCallback(
-    (card: MetricsCard, records: ReadonlyArray<Record<string, unknown>>) => {
-      // Phase A stub — Phase B dispatches to the playbook engine carrying
-      // { playbookId, fetchXml, results, cardContext }. For now, log the
-      // intent so we can see the payload that will travel.
-      // eslint-disable-next-line no-console
-      console.info('[MetricsDashboardWidget] AI summary intent', {
-        cardId: card.id,
-        playbookId: card.aiSummary?.playbookId,
-        promptHint: card.aiSummary?.promptHint,
-        recordCount: records.length,
-        fetchXml: card.fetchXml,
-      });
-    },
-    [],
-  );
+  const handleAiSummary = React.useCallback((card: MetricsCard, records: ReadonlyArray<Record<string, unknown>>) => {
+    // Phase A stub — Phase B dispatches to the playbook engine carrying
+    // { playbookId, fetchXml, results, cardContext }. For now, log the
+    // intent so we can see the payload that will travel.
+    // eslint-disable-next-line no-console
+    console.info('[MetricsDashboardWidget] AI summary intent', {
+      cardId: card.id,
+      playbookId: card.aiSummary?.playbookId,
+      promptHint: card.aiSummary?.promptHint,
+      recordCount: records.length,
+      fetchXml: card.fetchXml,
+    });
+  }, []);
 
   const handleAddToReport = React.useCallback(() => {
     // Phase A stub — Phase B decides the report artifact shape (PDF, Code
@@ -456,8 +418,7 @@ export const MetricsDashboardWidget: React.FC<
       <div className={styles.root}>
         <div className={styles.emptyState}>
           <Text>
-            Dashboard config not found:{' '}
-            <code>{data?.dashboardId ?? '(none)'}</code>. See{' '}
+            Dashboard config not found: <code>{data?.dashboardId ?? '(none)'}</code>. See{' '}
             <code>metricsDashboardConfigs.ts</code>.
           </Text>
         </div>
@@ -482,9 +443,7 @@ export const MetricsDashboardWidget: React.FC<
       <div className={styles.tabRow}>
         <TabList
           selectedValue={activeTabId}
-          onTabSelect={(_: unknown, d: SelectTabData) =>
-            setActiveTabId(String(d.value))
-          }
+          onTabSelect={(_: unknown, d: SelectTabData) => setActiveTabId(String(d.value))}
         >
           {config.filterTabs.map(tab => (
             <Tab key={tab.id} value={tab.id}>
