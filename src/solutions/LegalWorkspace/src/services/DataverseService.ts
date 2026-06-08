@@ -16,7 +16,7 @@
  */
 
 import { IResult, ok, fail, tryCatch } from '../types/result';
-import { IMatter, IEvent, IProject, IDocument, IInvoice, IUserPreference } from '../types/entities';
+import { IMatter, IEvent, ITodo, IProject, IDocument, IInvoice, IUserPreference } from '../types/entities';
 import { TodoStatus, EventFilterCategory } from '../types/enums';
 import type { IWebApi, WebApiEntity } from '../types/xrm';
 import {
@@ -36,15 +36,29 @@ import {
 } from './queryHelpers';
 
 // ---------------------------------------------------------------------------
-// Option set integer constants (Dataverse choice field values)
-// These match the Dataverse option set values for sprk_todostatus.
+// statuscode + statecode constants for sprk_todo (per task 009 customization)
 // ---------------------------------------------------------------------------
 
-const TODO_STATUS_VALUES: Record<TodoStatus, number> = {
-  Open: 100000000,
-  Completed: 100000001,
-  Dismissed: 100000002,
+/**
+ * sprk_todo.statuscode values:
+ *   1          = Open       (statecode 0 / Active)
+ *   659490001  = In Progress(statecode 0 / Active)
+ *   2          = Completed  (statecode 1 / Inactive)
+ *   659490002  = Dismissed  (statecode 1 / Inactive)
+ *
+ * Maps the legacy TodoStatus string discriminator onto sprk_todo lifecycle.
+ * "Restored" is not a distinct status — restore = set statuscode back to Open.
+ */
+const TODO_STATUSCODE_VALUES: Record<TodoStatus, number> = {
+  Open: 1,
+  Completed: 2,
+  Dismissed: 659490002,
 };
+
+/** Active statecode for sprk_todo (0 = Active). */
+const STATECODE_ACTIVE = 0;
+/** Inactive statecode for sprk_todo (1 = Inactive). */
+const STATECODE_INACTIVE = 1;
 
 // ---------------------------------------------------------------------------
 // Xrm.WebApi result shape helpers
@@ -78,6 +92,19 @@ function mapEventFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
     eventTypeName: (e[`_sprk_eventtype_ref_value${FV}`] as string) ?? '',
     regardingRecordTypeName: (e[`_sprk_regardingrecordtype_value${FV}`] as string) ?? '',
     assignedToName: (e[`_sprk_assignedto_value${FV}`] as string) ?? '',
+  }));
+}
+
+/**
+ * Map formatted-value annotations on `sprk_todo` records into typed display
+ * properties (assignedToName, statuscodeName) so UI components can read a
+ * single property without collision risk.
+ */
+function mapTodoFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
+  return entities.map(e => ({
+    ...e,
+    assignedToName: (e[`_sprk_assignedto_value${FV}`] as string) ?? '',
+    statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
   }));
 }
 
@@ -420,56 +447,62 @@ export class DataverseService {
   }
 
   // -------------------------------------------------------------------------
-  // To-Do CRUD operations
+  // To-Do CRUD operations (sprk_todo — first-class entity per R3 FR-09 / FR-11)
   // -------------------------------------------------------------------------
 
   /**
-   * Retrieve active (non-dismissed) to-do items for the Smart To Do list.
+   * Retrieve active (non-dismissed) to-do items for the Smart To Do widget.
    *
-   * Returns sprk_event records where todoflag=true and todostatus != Dismissed.
-   * Sort: priorityscore desc, duedate asc.
+   * Returns `sprk_todo` records where statecode = 0 (Active) and statuscode in
+   * (Open, In Progress). Ownership predicate uses the workspace scope context
+   * (my / all). Sort: priorityscore desc, duedate asc.
    *
-   * @param userId - The GUID of the current user
-   * @returns      IResult<IEvent[]>
+   * Per R3 FR-29 / OS-1, this no longer queries `sprk_event` with todoflag.
+   *
+   * @param userId  - The GUID of the current user
+   * @param options - Workspace scope context
    */
-  async getActiveTodos(userId: string, options: { scope?: 'my' | 'all'; businessUnitId?: string } = {}): Promise<IResult<IEvent[]>> {
+  async getActiveTodos(userId: string, options: { scope?: 'my' | 'all'; businessUnitId?: string } = {}): Promise<IResult<ITodo[]>> {
     const ctx = options.scope ? { userId, scope: options.scope, businessUnitId: options.businessUnitId } : undefined;
     const query = buildTodoItemsQuery(userId, ctx);
     return tryCatch(async () => {
-      const result = await this._webApi.retrieveMultipleRecords('sprk_event', query);
-      return toTypedArray<IEvent>(mapEventFormattedValues(result.entities));
+      const result = await this._webApi.retrieveMultipleRecords('sprk_todo', query);
+      return toTypedArray<ITodo>(mapTodoFormattedValues(result.entities));
     }, 'TODOS_FETCH_ERROR');
   }
 
   /**
    * Retrieve dismissed to-do items (collapsible dismissed section).
    *
-   * Returns sprk_event records where todoflag=true and todostatus=Dismissed.
+   * Returns `sprk_todo` records where statuscode = 659490002 (Dismissed).
    *
-   * @param userId - The GUID of the current user
-   * @returns      IResult<IEvent[]>
+   * @param userId  - The GUID of the current user
+   * @param options - Workspace scope context
    */
-  async getDismissedTodos(userId: string, options: { scope?: 'my' | 'all'; businessUnitId?: string } = {}): Promise<IResult<IEvent[]>> {
+  async getDismissedTodos(userId: string, options: { scope?: 'my' | 'all'; businessUnitId?: string } = {}): Promise<IResult<ITodo[]>> {
     const ctx = options.scope ? { userId, scope: options.scope, businessUnitId: options.businessUnitId } : undefined;
     const query = buildDismissedTodoQuery(userId, ctx);
     return tryCatch(async () => {
-      const result = await this._webApi.retrieveMultipleRecords('sprk_event', query);
-      return toTypedArray<IEvent>(mapEventFormattedValues(result.entities));
+      const result = await this._webApi.retrieveMultipleRecords('sprk_todo', query);
+      return toTypedArray<ITodo>(mapTodoFormattedValues(result.entities));
     }, 'DISMISSED_TODOS_FETCH_ERROR');
   }
 
   /**
-   * Create a new manual to-do item as a sprk_event record.
+   * Create a new manual to-do as a `sprk_todo` record.
    *
    * Sets:
-   *   sprk_todoflag    = true
-   *   sprk_todosource  = 'User'   (manually created by the user)
-   *   sprk_todostatus  = 0 (Open)
-   *   _ownerid_value   = userId   (assign to the current user)
+   *   sprk_name   = title
+   *   statuscode  = 1 (Open)
+   *   statecode   = 0 (Active)
+   *   ownerid     = userId
+   *
+   * Per OS-1: no `sprk_todoflag` write. Per FR-09: the source field is no
+   * longer modelled on the entity — provenance lives in audit logs instead.
    *
    * @param title  - The subject / title for the to-do item
    * @param userId - The GUID of the current user (will be set as owner)
-   * @returns      IResult<string> — the new sprk_eventid GUID on success
+   * @returns      IResult<string> — the new sprk_todoid GUID on success
    */
   async createTodo(title: string, userId: string): Promise<IResult<string>> {
     if (!title || title.trim().length === 0) {
@@ -477,105 +510,62 @@ export class DataverseService {
     }
 
     const record: WebApiEntity = {
-      sprk_eventname: title.trim(),
-      sprk_todoflag: true,
-      sprk_todosource: 100000001, // User
-      sprk_todostatus: TODO_STATUS_VALUES.Open,
-      // Assign owner — Xrm.WebApi uses a special bind syntax for lookups:
-      // "systemuserid@odata.bind": "/systemusers({userId})"
+      sprk_name: title.trim(),
+      statecode: STATECODE_ACTIVE,
+      statuscode: TODO_STATUSCODE_VALUES.Open,
+      // Assign owner via the standard OData bind for `ownerid`.
       'ownerid@odata.bind': `/systemusers(${userId})`,
     };
 
     return tryCatch(async () => {
-      const result = await this._webApi.createRecord('sprk_event', record);
+      const result = await this._webApi.createRecord('sprk_todo', record);
       return result.id;
     }, 'TODO_CREATE_ERROR');
   }
 
   /**
-   * Update the todostatus on an existing sprk_event to-do item.
+   * Update the statuscode/statecode on an existing `sprk_todo` item.
    *
-   * Used for:
-   *   - Checkbox toggle: Open → Completed
-   *   - Restore dismissed: Dismissed → Open
+   * Status transitions (per task 009):
+   *   - Open       → statecode 0 / statuscode 1
+   *   - Completed  → statecode 1 / statuscode 2
+   *   - Dismissed  → statecode 1 / statuscode 659490002
    *
-   * @param eventId - The sprk_eventid GUID to update
-   * @param status  - The new TodoStatus value ('Open', 'Completed', 'Dismissed')
-   * @returns       IResult<void>
+   * @param todoId - The sprk_todoid GUID to update
+   * @param status - The new TodoStatus value ('Open', 'Completed', 'Dismissed')
    */
-  async updateTodoStatus(eventId: string, status: TodoStatus): Promise<IResult<void>> {
-    const record: WebApiEntity = {
-      sprk_todostatus: TODO_STATUS_VALUES[status],
-    };
+  async updateTodoStatus(todoId: string, status: TodoStatus): Promise<IResult<void>> {
+    const statuscode = TODO_STATUSCODE_VALUES[status];
+    const statecode = status === 'Open' ? STATECODE_ACTIVE : STATECODE_INACTIVE;
+    const record: WebApiEntity = { statecode, statuscode };
 
     return tryCatch(async () => {
-      await this._webApi.updateRecord('sprk_event', eventId, record);
+      await this._webApi.updateRecord('sprk_todo', todoId, record);
     }, 'TODO_STATUS_UPDATE_ERROR');
   }
 
   /**
-   * Toggle the todoflag on a sprk_event record.
+   * Dismiss a to-do item by setting its status to Dismissed.
    *
-   * Used for:
-   *   - "Add to To Do" in AI Summary dialog footer (legacy)
+   * The item moves from the active list to the collapsible "dismissed"
+   * section and can be restored later via `updateTodoStatus(id, 'Open')`.
    *
-   * NOTE (R3 FR-14): No longer driven by FeedTodoSyncContext, which became a
-   * stateless notification bus. The flag column on `sprk_event` is being
-   * removed in R3 — this method exists only for the AISummaryDialog stub
-   * and will be deleted alongside the schema cut.
-   *
-   * When flagging (flagged=true):
-   *   - Sets sprk_todoflag = true
-   *   - Sets sprk_todosource = 'User'  (user-initiated via flag button)
-   *   - Leaves sprk_todostatus unchanged (Open is the default on new records)
-   *
-   * When unflagging (flagged=false):
-   *   - Sets sprk_todoflag = false
-   *   - Leaves todostatus as-is (does not auto-dismiss)
-   *
-   * @param eventId - The sprk_eventid GUID to update
-   * @param flagged - true to flag (add to To Do), false to unflag
-   * @returns       IResult<void>
+   * @param todoId - The sprk_todoid GUID to dismiss
    */
-  async toggleTodoFlag(eventId: string, flagged: boolean): Promise<IResult<void>> {
-    const record: WebApiEntity = flagged
-      ? {
-          sprk_todoflag: true,
-          sprk_todosource: 100000001, // User
-        }
-      : {
-          sprk_todoflag: false,
-        };
-
-    return tryCatch(async () => {
-      await this._webApi.updateRecord('sprk_event', eventId, record);
-    }, 'TODO_FLAG_TOGGLE_ERROR');
-  }
-
-  /**
-   * Dismiss a to-do item by setting its status to 'Dismissed'.
-   *
-   * The item will move from the active to-do list to the collapsible
-   * "dismissed" section. todoflag remains true so it can be recovered.
-   *
-   * @param eventId - The sprk_eventid GUID to dismiss
-   * @returns       IResult<void>
-   */
-  async dismissTodo(eventId: string): Promise<IResult<void>> {
-    return this.updateTodoStatus(eventId, 'Dismissed');
+  async dismissTodo(todoId: string): Promise<IResult<void>> {
+    return this.updateTodoStatus(todoId, 'Dismissed');
   }
 
   /**
    * Delete a to-do record entirely (hard delete).
-   * Only used for user-created items where the user explicitly removes it.
-   * System-generated and flagged items should use dismissTodo instead.
+   * Reserved for user-created items where the user explicitly removes it.
+   * Prefer `dismissTodo` to preserve audit history.
    *
-   * @param eventId - The sprk_eventid GUID to delete
-   * @returns       IResult<void>
+   * @param todoId - The sprk_todoid GUID to delete
    */
-  async deleteTodo(eventId: string): Promise<IResult<void>> {
+  async deleteTodo(todoId: string): Promise<IResult<void>> {
     return tryCatch(async () => {
-      await this._webApi.deleteRecord('sprk_event', eventId);
+      await this._webApi.deleteRecord('sprk_todo', todoId);
     }, 'TODO_DELETE_ERROR');
   }
 
@@ -664,44 +654,51 @@ export class DataverseService {
   }
 
   /**
-   * Update the Kanban column assignment for a to-do event.
+   * Update the Kanban column assignment for a to-do.
    *
-   * @param eventId - The sprk_eventid GUID
-   * @param column - The column choice value (0=Today, 1=Tomorrow, 2=Future)
-   * @returns IResult<void>
+   * Method name retained as `updateEventColumn` to keep the `useKanbanColumns`
+   * hook signature stable; the value is a `sprk_todoid` and the target is
+   * `sprk_todo` (R3 FR-29 / OS-1).
+   *
+   * @param todoId - The sprk_todoid GUID
+   * @param column - sprk_todocolumn choice (100000000=Today, 100000001=Tomorrow, 100000002=Future)
    */
-  async updateEventColumn(eventId: string, column: number): Promise<IResult<void>> {
+  async updateEventColumn(todoId: string, column: number): Promise<IResult<void>> {
     return tryCatch(async () => {
-      await this._webApi.updateRecord('sprk_event', eventId, {
+      await this._webApi.updateRecord('sprk_todo', todoId, {
         sprk_todocolumn: column,
       });
-    }, 'EVENT_COLUMN_UPDATE_ERROR');
+    }, 'TODO_COLUMN_UPDATE_ERROR');
   }
 
   /**
-   * Update the pin/lock state for a to-do event.
+   * Update the pin/lock state for a to-do.
    *
-   * @param eventId - The sprk_eventid GUID
+   * Method name retained as `updateEventPinned` for hook compatibility; the
+   * value is a `sprk_todoid` and the target is `sprk_todo`.
+   *
+   * @param todoId - The sprk_todoid GUID
    * @param pinned - true to pin (lock in current column), false to unpin
-   * @returns IResult<void>
    */
-  async updateEventPinned(eventId: string, pinned: boolean): Promise<IResult<void>> {
+  async updateEventPinned(todoId: string, pinned: boolean): Promise<IResult<void>> {
     return tryCatch(async () => {
-      await this._webApi.updateRecord('sprk_event', eventId, {
+      await this._webApi.updateRecord('sprk_todo', todoId, {
         sprk_todopinned: pinned,
       });
-    }, 'EVENT_PIN_UPDATE_ERROR');
+    }, 'TODO_PIN_UPDATE_ERROR');
   }
 
   /**
-   * Batch update Kanban column assignments for multiple events.
+   * Batch update Kanban column assignments for multiple to-do items.
    * Used by the Recalculate action to reassign unpinned items.
    *
    * Executes sequential updateRecord calls (Xrm.WebApi has no $batch support).
    * Returns count of successes and failures.
    *
+   * Param-name retained as `eventId` for backward compatibility with the hook
+   * signature; the value is a `sprk_todoid`.
+   *
    * @param updates - Array of { eventId, column } pairs
-   * @returns IResult<{ succeeded: number; failed: number }>
    */
   async batchUpdateEventColumns(
     updates: Array<{ eventId: string; column: number }>
@@ -711,7 +708,7 @@ export class DataverseService {
 
     for (const update of updates) {
       try {
-        await this._webApi.updateRecord('sprk_event', update.eventId, {
+        await this._webApi.updateRecord('sprk_todo', update.eventId, {
           sprk_todocolumn: update.column,
         });
         succeeded++;
@@ -724,18 +721,20 @@ export class DataverseService {
   }
 
   /**
-   * Update the description of a to-do event.
+   * Update the description of a to-do.
    *
-   * @param eventId - The sprk_eventid GUID
+   * Method name retained as `updateEventDescription` for compatibility; target
+   * is `sprk_todo`.
+   *
+   * @param todoId - The sprk_todoid GUID
    * @param description - The new description text
-   * @returns IResult<void>
    */
-  async updateEventDescription(eventId: string, description: string): Promise<IResult<void>> {
+  async updateEventDescription(todoId: string, description: string): Promise<IResult<void>> {
     return tryCatch(async () => {
-      await this._webApi.updateRecord('sprk_event', eventId, {
+      await this._webApi.updateRecord('sprk_todo', todoId, {
         sprk_description: description,
       });
-    }, 'EVENT_DESCRIPTION_UPDATE_ERROR');
+    }, 'TODO_DESCRIPTION_UPDATE_ERROR');
   }
 
   // -------------------------------------------------------------------------
@@ -803,7 +802,6 @@ export class DataverseService {
       'sprk_eventid',
       'sprk_eventname',
       '_sprk_eventtype_ref_value',
-      'sprk_todoflag',
       'sprk_regardingrecordid',
       'sprk_regardingrecordname',
       'modifiedon',

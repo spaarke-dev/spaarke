@@ -10,7 +10,7 @@
 
 | Metric | Value |
 |---|---|
-| **Total tasks** | 43 (38 from initial decomposition + 3 audit-surfaced: 006/007/008 + 1 task-002 follow-up: 009 + 1 audit-surfaced LegalWorkspace cleanup: 013) |
+| **Total tasks** | 44 (38 from initial decomposition + 3 audit-surfaced: 006/007/008 + 1 task-002 follow-up: 009 + 1 LegalWorkspace cleanup: 013 + 1 DailyBriefing cleanup: 014) |
 | **Phases** | 9 (Phase 1 Schema · 2 Shared-Lib · 3 Code Page · 4 Wizard · 5 Subgrids · 6 Graph Foundation · 7 Sync Engine · 8 Outlook · 9 Cleanup) + final wrap-up |
 | **FULL-rigor tasks** | 22 |
 | **STANDARD-rigor tasks** | 11 |
@@ -27,8 +27,8 @@
 | 001 | Audit `sprk_eventtodo` and `sprk_event.sprk_todo*` references | 1 | STANDARD | ✅ | none | P1-W1 | ✅ |
 | 002 | Create `sprk_todo` custom entity (full attribute set) | 1 | FULL | ✅ | 001 | P1-W2 | — |
 | 003 | Register `sprk_todo` in `sprk_recordtype_ref` | 1 | STANDARD | ✅ | 002 | P1-W3 | ✅ |
-| 004 | Remove four to-do fields from `sprk_event` (FINAL schema cut) | 1 | FULL | 🔲 | 001, 006, 007, 008, 011, 013, 020, 023, 031 | P1-W-FINAL | — |
-| 005 | Delete `sprk_eventtodo` entity (FINAL schema cut) | 1 | FULL | 🔲 | 001, 004, 007, 008, 011, 013, 020, 023, 031 | P1-W-FINAL | — |
+| 004 | Remove four to-do fields from `sprk_event` (FINAL schema cut) | 1 | FULL | 🔲 | 001, 006, 007, 008, 011, 013, 014, 020, 023, 031 | P1-W-FINAL | — |
+| 005 | Delete `sprk_eventtodo` entity (FINAL schema cut) | 1 | FULL | 🔲 | 001, 004, 007, 008, 011, 013, 014, 020, 023, 031 | P1-W-FINAL | — |
 | 006 | Refactor `TodoGenerationService` to create `sprk_todo` (audit-surfaced) | 1 | FULL | ✅ | 002 | P1-W2.5 | ✅ |
 | 007 | Refactor `ExternalAccess` BFF surface to `sprk_todo` (audit-surfaced) | 1 | FULL | ✅ | 002 | P1-W2.5 | ✅ |
 | 008 | Migrate `external-spa` to `sprk_todo` (audit-surfaced) | 1 | FULL | ✅ | 002, 007 | P1-W3 | — |
@@ -48,7 +48,8 @@
 | 030 | Extend `AssociateToStep` to all 11 entity targets | 4 | FULL | ✅ | 002, 010, 012 | P4-W1 | — |
 | 031 | Rewrite `CreateTodo` wizard + remove CreateWorkAssignment addTodo (audit-folded) | 4 | FULL | ✅ | 002, 030 | P4-W2 | — |
 | 032 | Implement launch-context pre-fill | 4 | FULL | ✅ | 031 | P4-W3 | ✅ |
-| 013 | Cleanup LegalWorkspace legacy to-do refs (audit-surfaced; CreateTodo + CreateWorkAssignment + useTodoItems) | 2 | FULL | 🔲 | 010, 011, 023, 030, 031 | P2-W4 | — |
+| 013 | Cleanup LegalWorkspace legacy to-do refs (audit-surfaced; CreateTodo + CreateWorkAssignment + useTodoItems) | 2 | FULL | ✅ | 010, 011, 023, 030, 031 | P2-W4 | — |
+| 014 | Cleanup DailyBriefing `useInlineTodoCreate.ts` (audit-surfaced; surfaced by 013) | 2 | STANDARD | 🔲 | 002 | P2-W5 | ✅ |
 | 040 | "To Dos" subgrid on 11 parent forms (consolidated) | 5 | STANDARD | 🔲 | 002, 030, 031, 032 | P5-W1 | ✅ |
 | 060 | `DeepLinkBuilder` service | 7 | FULL | ✅ | 002 | P7-W1 | ✅ |
 | 061 | Outbound sync pipeline (plugin + ServiceBus + handler) | 7 | FULL | 🔲 | 002, 009, 016, 018, 060 | P7-W2 | — |

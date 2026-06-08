@@ -4,6 +4,12 @@
  *
  * Fields: Name (required, default "Assign Work"), Description, Priority,
  *         Due Date, Final Due Date, Assigned To (systemuser).
+ *
+ * Per R3 FR-29 / OS-1 (task 013): the legacy "Add a 'To Do' Item" checkbox was
+ * removed because it wrote `sprk_event.sprk_todoflag = true` — that column is
+ * being deleted in the Phase 1 schema cut. Users who want a companion
+ * `sprk_todo` should launch the shared CreateTodoWizard with the work-assignment
+ * event as the regarding record.
  */
 import * as React from 'react';
 import {
@@ -13,10 +19,8 @@ import {
   Dropdown,
   Option,
   Field,
-  Checkbox,
   makeStyles,
   tokens,
-  mergeClasses,
 } from '@fluentui/react-components';
 import { LookupField } from '../../../../../client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField';
 import type { ILookupItem } from '../../../../../client/shared/Spaarke.UI.Components/src/types/LookupTypes';
@@ -73,12 +77,6 @@ const useStyles = makeStyles({
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
-  },
-  todoCheckbox: {
-    color: tokens.colorNeutralForeground1,
-  },
-  todoCheckboxActive: {
-    color: tokens.colorBrandForeground1,
   },
 });
 
@@ -147,13 +145,6 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
         assignedToId: item?.id ?? '',
         assignedToName: item?.name ?? '',
       }));
-    },
-    []
-  );
-
-  const handleTodoChange = React.useCallback(
-    (_e: unknown, data: { checked: boolean | 'mixed' }) => {
-      setFormValues((prev) => ({ ...prev, addTodo: data.checked === true }));
     },
     []
   );
@@ -238,15 +229,6 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
         </Field>
       </div>
 
-      <Checkbox
-        checked={formValues.addTodo}
-        onChange={handleTodoChange}
-        label="Add a 'To Do' Item"
-        className={mergeClasses(
-          styles.todoCheckbox,
-          formValues.addTodo && styles.todoCheckboxActive
-        )}
-      />
     </div>
   );
 };

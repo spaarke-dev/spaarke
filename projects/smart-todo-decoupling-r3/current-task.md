@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none |
-| **Step** | 15/42 tasks complete; ready for wave 6 (020 + 030) |
-| **Status** | Foundation solid: Phase 1 schema work + BFF refactors done (001, 002, 003, 006, 007, 008, 009); Phase 2 shared lib done (010, 011, 012); Phase 6 Graph foundation partial (017, 018); Phase 7 DeepLinkBuilder done (060); Phase 8 indicator banner done (071); Phase 9 cleanup-fix done (084). |
-| **Next Action** | Wave 6: tasks 020 (SmartTodo Code Page repoint — also fixes consumer breakage from 011) + 030 (extend AssociateToStep to 11 entity targets) in parallel. Both depend on 012 (now ✅). 020 is a large task touching multiple files in SmartTodo. 030 is shared lib extension. Different packages → no build contention. |
+| **Task** | 013 — LegalWorkspace legacy to-do refactor |
+| **Step** | Context loaded; starting Step 1 (inventory) |
+| **Status** | FULL rigor. 13 files surveyed; planning complete. About to execute. |
+| **Next Action** | Step 1: Inventory legacy refs in LegalWorkspace (done — 13 files). Then begin refactor: types → queryHelpers → DataverseService → hooks → SmartToDo widget → CreateTodo → CreateWorkAssignment → ActivityFeed → QuickSummary → xrmProvider. |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->

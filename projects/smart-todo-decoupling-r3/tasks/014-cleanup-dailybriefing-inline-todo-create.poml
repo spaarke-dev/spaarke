@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Cleanup `DailyBriefing/useInlineTodoCreate.ts` legacy `sprk_todoflag` write (audit-surfaced by task 013)</title>
+    <phase>Phase 2: Shared-Lib Hoist (audit-surfaced follow-up)</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>002</dependencies>
+    <blocks>004, 005</blocks>
+    <tags>react, typescript, frontend, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Small surface — one hook file + likely a few related files. STANDARD rigor.</rigor-reason>
+    <parallel-group>P2-W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor `src/solutions/DailyBriefing/src/hooks/useInlineTodoCreate.ts` to create `sprk_todo` records instead of writing `sprk_todoflag` on `sprk_event`. This was the final remaining functional `sprk_todoflag` writer outside the BFF (per task 013's schema-cut readiness audit). After this completes, the schema cut (tasks 004 + 005) can proceed without breaking DailyBriefing.
+
+    Apply the same pattern established by tasks 020 (SmartTodo) + 013 (LegalWorkspace): consume the shared `CreateTodoWizard` from `@spaarke/ui-components`, OR if the inline-create flow needs to be programmatic (no wizard UI), build the sprk_todo record body directly + use `PolymorphicResolverService.applyResolverFields` for any regarding context.
+  </prompt>
+
+  <role>Spaarke Code Page developer with shared-lib consumer experience.</role>
+
+  <goal>Zero `sprk_todoflag` + `sprk_eventtodo` references in `src/solutions/DailyBriefing/`. DailyBriefing's inline-todo-create flow creates sprk_todo records. Build clean. Schema cut tasks 004 + 005 unblocked.</goal>
+
+  <context>
+    <background>Task 013 (LegalWorkspace cleanup) discovered this last remaining functional consumer during its schema-cut readiness check on 2026-06-08. Audit Section 2D classified it but no task was assigned.</background>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/hooks/useInlineTodoCreate.ts</file>
+      <file>src/solutions/DailyBriefing/src/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/ (reference for shared wizard)</file>
+      <file>src/solutions/SmartTodo/src/services/DataverseService.ts (reference for sprk_todo create patterns)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-29">Zero `sprk_todoflag` + `sprk_eventtodo` references in `src/solutions/DailyBriefing/` after this task. JSDoc migration notes OK.</constraint>
+    <constraint source="OS-1">No compat shim.</constraint>
+    <constraint source="ADR-024">Use `PolymorphicResolverService.applyResolverFields` if regarding context is present.</constraint>
+    <constraint source="NFR-01">Fluent v9 (if any UI touched).</constraint>
+    <constraint source="Product portability">No hardcoded org URLs / tenant IDs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+      <file>src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/solutions/DailyBriefing/src/hooks/useInlineTodoCreate.ts` and any tightly-coupled callers. Understand the inline-create flow (is it programmatic, dialog-based, or otherwise?).</step>
+    <step order="2">Grep `src/solutions/DailyBriefing/src/` for all `sprk_todoflag`, `sprk_eventtodo`, `sprk_event.sprk_todostatus` (or similar) references. Inventory the full scope.</step>
+    <step order="3">Refactor the hook to create sprk_todo records: build the record body with sprk_name, sprk_notes, sprk_duedate, sprk_priorityscore, sprk_effortscore, ownerid, sprk_assignedto + any regarding context (use applyResolverFields for atomic resolver-field population).</step>
+    <step order="4">Update any related types, services, and component callers in DailyBriefing.</step>
+    <step order="5">If DailyBriefing has a SmartToDo or todo-display widget, repoint it to sprk_todo (similar to LegalWorkspace task 013).</step>
+    <step order="6">Run `npm run build` in `src/solutions/DailyBriefing/` — clean.</step>
+    <step order="7">Repo grep `src/solutions/DailyBriefing/src/` for `sprk_todoflag` + `sprk_eventtodo` — confirm 0 functional hits.</step>
+    <step order="8">**Final schema-cut readiness check**: repo-wide grep for `sprk_todoflag` excluding `.claude/archive/` + this project's audit/spec/plan + JSDoc migration notes + frozen historical projects + compiled bundle artifacts → confirm 0 functional hits. This is the gate that unblocks tasks 004 + 005.</step>
+    <step order="9">Update TASK-INDEX.md status to ✅.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/solutions/DailyBriefing/src/hooks/useInlineTodoCreate.ts` (refactored)</output>
+    <output type="code">Related callers / display components in DailyBriefing (if affected)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero `sprk_todoflag` functional hits in `src/solutions/DailyBriefing/src/`.</criterion>
+    <criterion testable="true">Zero `sprk_eventtodo` references in `src/solutions/DailyBriefing/src/`.</criterion>
+    <criterion testable="true">`npm run build` in DailyBriefing clean.</criterion>
+    <criterion testable="true">Repo-wide `sprk_todoflag` functional hits = 0 (schema-cut gate).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

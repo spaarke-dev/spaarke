@@ -1,13 +1,16 @@
 /**
- * TodoDetailPane — Expandable side pane showing full event details with
+ * TodoDetailPane — Expandable side pane showing full todo details with
  * editable description field.
  *
  * Layout:
- *   Header: Event name + close button
+ *   Header: Todo name + close button
  *   Description: Editable textarea with save button (shown when dirty)
  *   Details: Priority, effort, due, and assigned badges
  *   To Do Score: Breakdown showing weighted components
  *   Actions: Edit, Email (stub), Teams (stub), AI Summary (stub)
+ *
+ * Per R3 FR-29 / OS-1: this pane operates on `sprk_todo` records (not the
+ * legacy `sprk_event` + `sprk_todoflag` shape).
  *
  * Design constraints:
  *   - ALL colours from Fluent UI v9 semantic tokens — zero hardcoded hex/rgb
@@ -30,7 +33,7 @@ import {
   ChatRegular,
   SparkleRegular,
 } from "@fluentui/react-icons";
-import { IEvent } from "../../types/entities";
+import { ITodo } from "../../types/entities";
 import { PriorityLevel, EffortLevel } from "../../types/enums";
 import { computeTodoScore, ITodoScoreBreakdown } from "../../utils/todoScoreUtils";
 import { computeDueLabel, parseDueDate, DueUrgency } from "../../utils/dueLabelUtils";
@@ -41,10 +44,10 @@ import { navigateToEntity } from "../../utils/navigation";
 // ---------------------------------------------------------------------------
 
 export interface ITodoDetailPaneProps {
-  /** The event to display. Null when pane should show empty state. */
-  event: IEvent | null;
+  /** The todo to display. Null when pane should show empty state. */
+  todo: ITodo | null;
   /** Called when description is saved. Parent handles Dataverse write. */
-  onSaveDescription: (eventId: string, description: string) => Promise<void>;
+  onSaveDescription: (todoId: string, description: string) => Promise<void>;
   /** Called when close button is clicked. */
   onClose: () => void;
 }
@@ -111,17 +114,17 @@ const DUE_BADGE_STYLE: Record<Exclude<DueUrgency, "none">, React.CSSProperties> 
 // ---------------------------------------------------------------------------
 
 /**
- * Map sprk_priority option-set integer to a display label string.
- *   0 = Low, 1 = Normal, 2 = High, 3 = Urgent
+ * Map sprk_priorityscore (0-100) to a display label string.
+ *
+ * Per R3 FR-09: sprk_todo carries a native 0-100 priority score. We bucket
+ * for the badge: >=75 Urgent, >=50 High, >=25 Normal, otherwise Low.
  */
-function derivePriorityLabel(priority: number | undefined): PriorityLevel | null {
-  switch (priority) {
-    case 0: return "Low";
-    case 1: return "Normal";
-    case 2: return "High";
-    case 3: return "Urgent";
-    default: return null;
-  }
+function derivePriorityLabel(priorityScore: number | undefined): PriorityLevel | null {
+  if (priorityScore === undefined || priorityScore === null) return null;
+  if (priorityScore >= 75) return "Urgent";
+  if (priorityScore >= 50) return "High";
+  if (priorityScore >= 25) return "Normal";
+  return "Low";
 }
 
 /**
@@ -227,7 +230,7 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const TodoDetailPane: React.FC<ITodoDetailPaneProps> = React.memo(
-  ({ event, onSaveDescription }) => {
+  ({ todo, onSaveDescription }) => {
     const styles = useStyles();
 
     // -- Description editing state --
@@ -235,48 +238,48 @@ export const TodoDetailPane: React.FC<ITodoDetailPaneProps> = React.memo(
     const [isDirty, setIsDirty] = React.useState(false);
     const [isSaving, setIsSaving] = React.useState(false);
 
-    // Reset description state when event changes
+    // Reset description state when todo changes
     React.useEffect(() => {
-      if (event) {
-        const initial = event.sprk_description ?? "";
+      if (todo) {
+        const initial = todo.sprk_description ?? "";
         setDescriptionValue(initial);
         setIsDirty(false);
         setIsSaving(false);
       }
-      // Only reset when the selected event identity changes
+      // Only reset when the selected todo identity changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [event?.sprk_eventid]);
+    }, [todo?.sprk_todoid]);
 
     // -- Handlers --
 
     const handleDescriptionChange = React.useCallback(
       (_ev: React.ChangeEvent<HTMLTextAreaElement>, data: { value: string }) => {
         setDescriptionValue(data.value);
-        // Compare with the original value from the event
-        setIsDirty(data.value !== (event?.sprk_description ?? ""));
+        // Compare with the original value from the todo
+        setIsDirty(data.value !== (todo?.sprk_description ?? ""));
       },
-      [event?.sprk_description]
+      [todo?.sprk_description]
     );
 
     const handleSave = React.useCallback(async () => {
-      if (!event || !isDirty) return;
+      if (!todo || !isDirty) return;
       setIsSaving(true);
       try {
-        await onSaveDescription(event.sprk_eventid, descriptionValue);
+        await onSaveDescription(todo.sprk_todoid, descriptionValue);
         setIsDirty(false);
       } finally {
         setIsSaving(false);
       }
-    }, [event, isDirty, descriptionValue, onSaveDescription]);
+    }, [todo, isDirty, descriptionValue, onSaveDescription]);
 
     const handleEdit = React.useCallback(() => {
-      if (!event) return;
+      if (!todo) return;
       navigateToEntity({
         action: "openRecord",
-        entityName: "sprk_event",
-        entityId: event.sprk_eventid,
+        entityName: "sprk_todo",
+        entityId: todo.sprk_todoid,
       });
-    }, [event]);
+    }, [todo]);
 
     const handleEmail = React.useCallback(() => {
       console.info("[TodoDetailPane] Email action — stub");
@@ -291,7 +294,7 @@ export const TodoDetailPane: React.FC<ITodoDetailPaneProps> = React.memo(
     }, []);
 
     // -- Empty state --
-    if (!event) {
+    if (!todo) {
       return (
         <div className={styles.pane}>
           <div className={styles.emptyState}>
@@ -302,11 +305,11 @@ export const TodoDetailPane: React.FC<ITodoDetailPaneProps> = React.memo(
     }
 
     // -- Derived display values --
-    const priorityLevel = derivePriorityLabel(event.sprk_priority);
-    const effortLevel = deriveEffortLabel(event.sprk_effortscore);
-    const dueDate = parseDueDate(event.sprk_duedate);
+    const priorityLevel = derivePriorityLabel(todo.sprk_priorityscore);
+    const effortLevel = deriveEffortLabel(todo.sprk_effortscore);
+    const dueDate = parseDueDate(todo.sprk_duedate);
     const dueLabel = computeDueLabel(dueDate);
-    const breakdown: ITodoScoreBreakdown = computeTodoScore(event);
+    const breakdown: ITodoScoreBreakdown = computeTodoScore(todo);
 
     return (
       <div className={styles.pane}>
@@ -322,7 +325,7 @@ export const TodoDetailPane: React.FC<ITodoDetailPaneProps> = React.memo(
               onChange={handleDescriptionChange}
               resize="vertical"
               rows={4}
-              aria-label="Event description"
+              aria-label="To Do description"
             />
             {isDirty && (
               <Button
@@ -382,12 +385,12 @@ export const TodoDetailPane: React.FC<ITodoDetailPaneProps> = React.memo(
                 </InlineBadge>
               </div>
             )}
-            {event.assignedToName && (
+            {todo.assignedToName && (
               <div className={styles.detailRow}>
                 <Text size={200} className={styles.detailLabel}>
                   Assigned:
                 </Text>
-                <Text size={200}>{event.assignedToName}</Text>
+                <Text size={200}>{todo.assignedToName}</Text>
               </div>
             )}
           </div>
