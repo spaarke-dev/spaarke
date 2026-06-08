@@ -1,0 +1,65 @@
+{
+  "_comment_top": "R6 task 105 (D-H-05, FR-13) — seed row for the EntityExtractorHandler typed handler (LLM-assisted NER).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'EntityExtractorHandler' (= nameof handler class).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_toolcode first; UPSERTs.",
+  "_comment_toolcode": "sprk_toolcode kept SHORT (<=10 chars) because Spaarke Dev's sprk_toolcode column has 10-char max length (per task 101/104 caveat). 'ENT-EXT@v1' = 10 chars exactly.",
+  "sprk_name": "SYS-Entity Extractor",
+  "sprk_toolcode": "ENT-EXT@v1",
+  "sprk_description": "LLM-assisted Named Entity Recognition (NER) with code-based validation + normalization. Extracts organizations, persons, locations, dates, money, emails, phone numbers, and URLs from free text. Configurable type filter (entityTypes) and confidence threshold (confidenceThreshold). Output entities are deterministically validated + normalized (ISO 8601 dates, lowercased emails, sanitized phones, uppercase currency codes).",
+  "sprk_handlerclass": "EntityExtractorHandler",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). FR-13 acceptance: invocable from both playbook orchestration and chat-driven function calling.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "EntityExtractorHandler Request",
+    "description": "Argument shape for chat-driven invocation of EntityExtractorHandler. The 'text' field carries the input to scan for entities; optional 'entityTypes' and 'confidenceThreshold' override the row's default configuration for a single invocation.",
+    "type": "object",
+    "required": ["text"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Free-text input to scan for entities. The handler extracts every recognizable entity matching the configured types and returns structured + normalized output."
+      },
+      "entityTypes": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "organization",
+            "person",
+            "location",
+            "date",
+            "money",
+            "email",
+            "phone",
+            "url"
+          ]
+        },
+        "description": "Optional subset of entity types to extract. When omitted, all supported types are extracted."
+      },
+      "confidenceThreshold": {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "description": "Optional override for the minimum LLM confidence to include in results (0.0-1.0). Defaults to 0.6 if omitted."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "Default configuration. Per-invocation tool args / playbook config may override entityTypes / confidenceThreshold / modelDeployment per row.",
+    "entityTypes": [
+      "organization",
+      "person",
+      "location",
+      "date",
+      "money",
+      "email",
+      "phone",
+      "url"
+    ],
+    "confidenceThreshold": 0.6
+  },
+  "_comment_configuration": "entityTypes lists all 8 supported types; restrict to subset for finer-grained playbook workflows (e.g., contracts → ['organization','person','date','money']). confidenceThreshold = 0.6 balances precision vs. recall; raise to 0.8+ for high-stakes flows. modelDeployment intentionally OMITTED — defaults to ModelSelectorOptions.ToolHandlerModel (gpt-4o-mini)."
+}

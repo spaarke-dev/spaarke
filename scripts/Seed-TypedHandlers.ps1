@@ -74,11 +74,15 @@ $RepoRoot = (Resolve-Path "$PSScriptRoot/..").Path
 
 $RowFiles = @{
     # Wave 1 — pure deterministic
-    "DateExtractorHandler"          = "$RepoRoot/infra/dataverse/sprk_analysistool-date-extractor-row.json"
-    "FinancialCalculatorHandler"    = "$RepoRoot/infra/dataverse/sprk_analysistool-financial-calculator-row.json"
-    "ClauseComparisonHandler"       = "$RepoRoot/infra/dataverse/sprk_analysistool-clause-comparison-row.json"
-    # The sibling Wave-1 task (104) and the Wave-2 tasks (105–108) extend
-    # this map with their own JSON files.
+    "DateExtractorHandler"             = "$RepoRoot/infra/dataverse/sprk_analysistool-date-extractor-row.json"
+    "FinancialCalculatorHandler"       = "$RepoRoot/infra/dataverse/sprk_analysistool-financial-calculator-row.json"
+    "ClauseComparisonHandler"          = "$RepoRoot/infra/dataverse/sprk_analysistool-clause-comparison-row.json"
+    "FinancialCalculationToolHandler"  = "$RepoRoot/infra/dataverse/sprk_analysistool-financial-calculation-row.json"
+    # Wave 2 — LLM-assisted
+    "EntityExtractorHandler"           = "$RepoRoot/infra/dataverse/sprk_analysistool-entity-extractor-row.json"
+    "ClauseAnalyzerHandler"            = "$RepoRoot/infra/dataverse/sprk_analysistool-clause-analyzer-row.json"
+    "RiskDetectorHandler"              = "$RepoRoot/infra/dataverse/sprk_analysistool-risk-detector-row.json"
+    "InvoiceExtractionToolHandler"     = "$RepoRoot/infra/dataverse/sprk_analysistool-invoice-extractor-row.json"
 }
 
 # -----------------------------------------------------------------------------

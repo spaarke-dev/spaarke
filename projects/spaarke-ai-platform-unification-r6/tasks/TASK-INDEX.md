@@ -161,10 +161,10 @@
 | 102 | H-G1 | `FinancialCalculatorHandler` (pure deterministic) (D-H-02) | ✅ | FULL | true | 100 |
 | 103 | H-G1 | `ClauseComparisonHandler` (pure deterministic) (D-H-03) | ✅ | FULL | true | 100 |
 | 104 | H-G1 | `FinancialCalculationToolHandler` (pure deterministic) (D-H-04) | ✅ | FULL | true | 100 |
-| 105 | H-G2 | `EntityExtractorHandler` (LLM-assisted NER) (D-H-05) | 🔲 | FULL | true | 104 |
+| 105 | H-G2 | `EntityExtractorHandler` (LLM-assisted NER) (D-H-05) | ✅ | FULL | true | 104 |
 | 106 | H-G2 | `ClauseAnalyzerHandler` (LLM-assisted clause structuring) (D-H-06) | 🔲 | FULL | true | 104 |
-| 107 | H-G2 | `RiskDetectorHandler` (LLM-assisted + severity scoring) (D-H-07) | 🔲 | FULL | true | 104 |
-| 108 | H-G2 | `InvoiceExtractionToolHandler` (LLM-assisted + line-item arithmetic) (D-H-08) | 🔲 | FULL | true | 104 |
+| 107 | H-G2 | `RiskDetectorHandler` (LLM-assisted + severity scoring) (D-H-07) | ✅ | FULL | true | 104 |
+| 108 | H-G2 | `InvoiceExtractionToolHandler` (LLM-assisted + line-item arithmetic) (D-H-08) | ✅ | FULL | true | 104 |
 | 109 | H-G3 | Handler dispatch tests (playbook + chat) (D-H-09/10) | 🔲 | STANDARD | false | 105, 106, 107, 108 |
 
 ### Wrap-up (1 task)

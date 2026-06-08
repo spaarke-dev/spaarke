@@ -1,0 +1,81 @@
+{
+  "_comment_top": "R6 task 107 (D-H-07, FR-15) — seed row for the RiskDetectorHandler typed handler (LLM-assisted risk identification + deterministic code-based severity scoring).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'RiskDetectorHandler' (= nameof handler class).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_toolcode first; UPSERTs.",
+  "_comment_toolcode": "sprk_toolcode kept SHORT (<=10 chars) because Spaarke Dev's sprk_toolcode column has 10-char max length (per task 101/104 caveat). 'RISK-DET@1' = 10 chars exactly.",
+  "sprk_name": "SYS-Risk Detector",
+  "sprk_toolcode": "RISK-DET@1",
+  "sprk_description": "LLM-assisted risk identification with deterministic code-based severity scoring. The LLM identifies risks across legal, financial, operational, reputational, compliance, data-privacy, and contract categories with raw confidence values; the handler then assigns a final severity bucket (low / medium / high / critical) using a configurable per-category-weight × confidence formula. Severity is deterministic — identical LLM output + identical configuration produces byte-identical severity output across runs (FR-15 binding for legal-review reproducibility).",
+  "sprk_handlerclass": "RiskDetectorHandler",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). FR-15 acceptance: invocable from both playbook orchestration (contract review workflows) and chat-driven function calling (ad-hoc risk inspection).",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "RiskDetectorHandler Request",
+    "description": "Argument shape for chat-driven invocation of RiskDetectorHandler. The 'text' field carries the input to scan for risks; optional 'riskCategories', 'severityLevels', and 'confidenceThreshold' override the row's default configuration for a single invocation.",
+    "type": "object",
+    "required": ["text"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Free-text input to scan for risks (contract section, email thread, transaction summary). The handler invokes the LLM with this text + configured category enum + confidence threshold, then applies deterministic severity scoring + filtering."
+      },
+      "riskCategories": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "legal",
+            "financial",
+            "operational",
+            "reputational",
+            "compliance",
+            "data-privacy",
+            "contract"
+          ]
+        },
+        "description": "Optional subset of risk categories to detect. When omitted, all 7 supported categories are detected."
+      },
+      "severityLevels": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "description": "Optional allow-list of severity buckets to emit. When omitted, all 4 buckets pass through. Restricting (e.g., ['high','critical']) filters out lower-severity risks before output."
+      },
+      "confidenceThreshold": {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "description": "Optional override for the minimum LLM confidence to include in results (0.0-1.0). Defaults to 0.6 if omitted."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "Default configuration. Per-invocation tool args may override riskCategories / severityLevels / confidenceThreshold / categoryWeights. Defaults reflect legal-domain priorities — privacy + legal at top, operational + reputational lower. Restrict via riskCategories for narrower workflows (e.g., ['legal','contract'] for redline review). Tighten via severityLevels for high-stakes flows (e.g., ['high','critical'] for partner review).",
+    "riskCategories": [
+      "legal",
+      "financial",
+      "operational",
+      "reputational",
+      "compliance",
+      "data-privacy",
+      "contract"
+    ],
+    "severityLevels": ["low", "medium", "high", "critical"],
+    "categoryWeights": {
+      "legal": 1.0,
+      "data-privacy": 1.0,
+      "compliance": 0.95,
+      "financial": 0.9,
+      "contract": 0.8,
+      "operational": 0.7,
+      "reputational": 0.7
+    },
+    "confidenceThreshold": 0.6
+  },
+  "_comment_configuration": "categoryWeights drive the severity rubric: finalScore = categoryWeights[cat] × llmConfidence; bucket boundaries are low (<0.25), medium (<0.5), high (<0.75), critical (>=0.75). Raise weights to push categories toward critical (e.g., legal=1.0 + confidence=0.95 = critical). Lower weights (operational=0.7) require higher confidence to escalate. confidenceThreshold=0.6 balances precision vs. recall; raise to 0.8+ for high-stakes review."
+}

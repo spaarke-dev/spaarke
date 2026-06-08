@@ -1,0 +1,67 @@
+{
+  "_comment_top": "R6 task 106 (D-H-06, FR-14) — seed row for the ClauseAnalyzerHandler typed handler.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'ClauseAnalyzerHandler' (= nameof handler class).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_toolcode first; UPSERTs.",
+  "_comment_toolcode": "sprk_toolcode is capped at 10 chars by Dataverse — 'CLZ-AN@v1' is 9 chars.",
+  "sprk_name": "SYS-Clause Analyzer",
+  "sprk_toolcode": "CLZ-AN@v1",
+  "sprk_description": "LLM-assisted contract clause structuring. Identifies typed clauses (indemnity, liability, termination, payment, ip-assignment, confidentiality, governing-law, warranty, force-majeure, assignment) and returns per-clause structured fields plus non-overlapping span boundaries. Configurable clauseTypes filter and optional obligation / party extraction. Distinct from ClauseComparisonHandler (which DIFFS two clauses deterministically).",
+  "sprk_handlerclass": "ClauseAnalyzerHandler",
+  "sprk_availableincontexts_value": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). FR-14: clause structuring is useful from both playbook nodes (post-extraction) and the chat surface (ad-hoc structuring of user-supplied clause text).",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ClauseAnalyzerHandler Request",
+    "type": "object",
+    "required": ["text"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Input contract text to structure into typed clauses.",
+        "minLength": 1
+      },
+      "clauseTypes": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "indemnity",
+            "liability",
+            "termination",
+            "payment",
+            "ip-assignment",
+            "confidentiality",
+            "governing-law",
+            "warranty",
+            "force-majeure",
+            "assignment"
+          ]
+        },
+        "description": "Subset of clause types to extract. Defaults to all supported types."
+      },
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "extractObligations": {
+            "type": "boolean",
+            "default": false,
+            "description": "Emit per-clause obligation bullets."
+          },
+          "extractParties": {
+            "type": "boolean",
+            "default": false,
+            "description": "Emit per-clause party list."
+          }
+        }
+      }
+    }
+  },
+  "sprk_configuration": {
+    "options": {
+      "extractObligations": true,
+      "extractParties": true
+    }
+  },
+  "_comment_configuration": "Default policy: extract all supported clause types; emit obligations + parties. Per-invocation requests may override clauseTypes and options."
+}

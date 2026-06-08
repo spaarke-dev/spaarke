@@ -1,0 +1,69 @@
+{
+  "_comment_top": "R6 task 108 (D-H-08, FR-19) — seed row for the InvoiceExtractionToolHandler typed handler.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'InvoiceExtractionToolHandler' (= nameof handler class).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_toolcode first; UPSERTs.",
+  "_comment_toolcode": "sprk_toolcode column has 10-char max (per task 104 note). 'INVEXT@v1' = 9 chars; well under cap.",
+  "sprk_name": "SYS-Invoice Extractor",
+  "sprk_toolcode": "INVEXT@v1",
+  "sprk_description": "LLM-assisted invoice extraction with deterministic decimal line-item arithmetic. Extracts invoice header (number, dates, vendor, customer) and line items (description, quantity, unit price, tax rate, tax amount, line total) from invoice document text. Code-side decimal math verifies line totals, subtotal, tax total, discount total, and grand total per configured tax method (inclusive/exclusive) and discount order (pre-tax/post-tax). Arithmetic mismatches surface in arithmeticErrors[] (NOT auto-corrected — FR-19 binding).",
+  "sprk_handlerclass": "InvoiceExtractionToolHandler",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). FR-19 acceptance: invocable from both playbook orchestration (AP automation, vendor reviews) and chat-driven function calling (ad-hoc invoice analysis).",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "InvoiceExtractionToolHandler Request",
+    "description": "Argument shape for chat-driven invocation of InvoiceExtractionToolHandler. The 'text' field carries the invoice document body to extract from.",
+    "type": "object",
+    "required": ["text"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Invoice document text body. Plain text extracted from PDF / DOCX upstream by the document pipeline. The LLM extracts header + line items; deterministic code computes totals."
+      },
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "extractLineItems": {
+            "type": "boolean",
+            "default": true,
+            "description": "When false, extract header only; skip line-item extraction (faster, header-only summaries)."
+          },
+          "validateArithmetic": {
+            "type": "boolean",
+            "default": true,
+            "description": "When false, suppress arithmeticErrors[] in the output (still computes totals)."
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3,
+            "description": "ISO-4217 currency code hint when the invoice text is ambiguous (e.g., bare '$' in a multi-currency tenant)."
+          }
+        }
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "Default configuration. Per-invocation playbook config may override taxMethod / discountOrder / roundingMode / decimalPrecision / expectedCurrencies / modelDeployment / extractLineItems / validateArithmetic per row.",
+    "taxMethod": "exclusive",
+    "discountOrder": "pre-tax",
+    "roundingMode": "banker",
+    "decimalPrecision": 2,
+    "expectedCurrencies": ["USD", "EUR", "GBP", "JPY", "CAD"],
+    "extractLineItems": true,
+    "validateArithmetic": true
+  },
+  "_comment_configuration_keys": [
+    "taxMethod: 'exclusive' (default; tax computed on subtotal, added on top) or 'inclusive' (line totals include tax; subtotal back-derived).",
+    "discountOrder: 'pre-tax' (default; discount reduces subtotal before tax) or 'post-tax' (discount applied to grandTotal after tax).",
+    "roundingMode: 'banker' (default; MidpointRounding.ToEven) or 'away_from_zero' (MidpointRounding.AwayFromZero).",
+    "decimalPrecision: 0-8; default 2 (USD/EUR/GBP/CAD); set 0 for JPY-style zero-fraction currencies.",
+    "expectedCurrencies: ISO-4217 codes the handler will accept; LLM output with currency outside this list returns VALIDATION_FAILED.",
+    "modelDeployment: optional Azure OpenAI deployment override; defaults to ModelSelectorOptions.ToolHandlerModel (gpt-4o-mini).",
+    "extractLineItems: when false, skip line-item extraction (header-only).",
+    "validateArithmetic: when false, omit arithmeticErrors[] from output (still computes totals)."
+  ]
+}

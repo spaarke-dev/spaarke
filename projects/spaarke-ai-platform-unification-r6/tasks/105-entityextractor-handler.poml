@@ -2,7 +2,17 @@
   <metadata>
     <title>D-H-05 `EntityExtractorHandler` (FR-13, Wave 2 — LLM-Assisted NER)</title>
     <phase>Parallel — 8 Typed Tool Handlers</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Wave 2 H-G2. EntityExtractorHandler.cs (LLM-assisted NER with code-based validation +
+      normalization for 8 entity types: organization/person/location/date/money/email/phone/url).
+      32 tests pass; per-tenant cache verified (ADR-014); ADR-015 telemetry hygiene enforced
+      (input text + entity values blocked from logs); Structured Outputs via
+      IOpenAiClient.GetStructuredCompletionRawAsync. Zero new NuGet. Seed row deployed via
+      ENT-EXT@v1 (10-char toolcode). Both Playbook + Chat contexts supported.
+      adr-check: PASSED. code-review: PASSED. See task-105-completion.md.
+    </completion-notes>
     <estimated-effort>8 hours</estimated-effort>
     <dependencies>104</dependencies>
     <blocks>109</blocks>
