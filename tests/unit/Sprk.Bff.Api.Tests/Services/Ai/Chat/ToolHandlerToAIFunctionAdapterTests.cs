@@ -3,6 +3,8 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Xunit;
@@ -653,5 +655,282 @@ public class ToolHandlerToAIFunctionAdapterTests
             await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
 
         await act.Should().NotThrowAsync();
+    }
+
+    // ─── R6 Wave 7b: ToolResult.Metadata post-processing (citations + widget) ─────────
+    //
+    // The adapter now optionally receives a CitationContext accumulator + an SSE writer
+    // delegate. When handlers return ToolResult.Metadata with the well-known keys
+    // ("citations", "widget"), the adapter performs side effects so handlers stay pure.
+    // Existing behavior (null Metadata) MUST be preserved unchanged.
+
+    private static FakeChatHandler MakeHandlerWithMetadata(
+        IEnumerable<ToolResultCitation>? citations = null,
+        ToolResultWidget? widget = null)
+    {
+        var metadata = new Dictionary<string, object?>();
+        if (citations is not null)
+            metadata[ToolResultMetadataKeys.Citations] = citations;
+        if (widget is not null)
+            metadata[ToolResultMetadataKeys.Widget] = widget;
+
+        return new FakeChatHandler
+        {
+            ExecuteChatImpl = (_, t, _) => Task.FromResult(new ToolResult
+            {
+                HandlerId = "FakeChatHandler",
+                ToolId = t.Id,
+                ToolName = t.Name,
+                Success = true,
+                Data = JsonSerializer.SerializeToElement(new { ok = true }),
+                Summary = "ok",
+                Execution = ToolExecutionMetadata.Empty,
+                Metadata = metadata.Count == 0 ? null : metadata
+            })
+        };
+    }
+
+    [Fact]
+    public async Task PostProcessing_NoMetadata_PreservesExistingBehavior()
+    {
+        // Baseline: handlers that don't set Metadata must continue to work unchanged
+        // even when citationAccumulator + sseWriter are passed.
+        var accumulator = new CitationContext();
+        var emitted = 0;
+        Task SseWriter(ChatSseEvent _, CancellationToken __) { emitted++; return Task.CompletedTask; }
+
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), new FakeChatHandler(), CreateContext,
+            logger: null, citationAccumulator: accumulator, sseWriter: SseWriter);
+
+        var result = await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        accumulator.Count.Should().Be(0);
+        emitted.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PostProcessing_CitationsMetadata_WithAccumulator_AddsToContext()
+    {
+        var accumulator = new CitationContext();
+        var citations = new[]
+        {
+            new ToolResultCitation("chunk-1", "Doc A", PageNumber: 3, Excerpt: "preview text 1"),
+            new ToolResultCitation("chunk-2", "Doc B", PageNumber: null, Excerpt: "preview text 2",
+                SourceType: "web", Url: "https://example.com", Snippet: "snippet")
+        };
+
+        var handler = MakeHandlerWithMetadata(citations: citations);
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null, citationAccumulator: accumulator);
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        accumulator.Count.Should().Be(2);
+        var emitted = accumulator.GetCitations();
+        emitted[0].ChunkId.Should().Be("chunk-1");
+        emitted[0].SourceName.Should().Be("Doc A");
+        emitted[0].PageNumber.Should().Be(3);
+        emitted[1].ChunkId.Should().Be("chunk-2");
+        emitted[1].SourceType.Should().Be("web");
+        emitted[1].Url.Should().Be("https://example.com");
+    }
+
+    [Fact]
+    public async Task PostProcessing_CitationsMetadata_NullAccumulator_DropsSilently()
+    {
+        // Backward-compat: when accumulator is null, citations must be dropped without throwing.
+        var citations = new[] { new ToolResultCitation("chunk-1", "Doc A", Excerpt: "preview") };
+        var handler = MakeHandlerWithMetadata(citations: citations);
+
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null, citationAccumulator: null);
+
+        Func<Task> act = async () =>
+            await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task PostProcessing_WidgetMetadata_WithSseWriter_EmitsSourcePane()
+    {
+        var emitted = new List<ChatSseEvent>();
+        Task SseWriter(ChatSseEvent ev, CancellationToken _) { emitted.Add(ev); return Task.CompletedTask; }
+
+        var widget = new ToolResultWidget(
+            PaneType: "source_pane",
+            WidgetType: "DocumentViewer",
+            Data: new { filename = "matter.pdf", page = 1 },
+            CitationId: "1");
+
+        var handler = MakeHandlerWithMetadata(widget: widget);
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null, citationAccumulator: null, sseWriter: SseWriter);
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        emitted.Should().HaveCount(1);
+        emitted[0].Type.Should().Be("source_pane");
+        emitted[0].Data.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task PostProcessing_WidgetMetadata_OutputPane_EmitsOutputPane()
+    {
+        var emitted = new List<ChatSseEvent>();
+        Task SseWriter(ChatSseEvent ev, CancellationToken _) { emitted.Add(ev); return Task.CompletedTask; }
+
+        var widget = new ToolResultWidget(
+            PaneType: "output_pane",
+            WidgetType: "SearchResults",
+            Data: new { hits = new[] { new { title = "x" } } });
+
+        var handler = MakeHandlerWithMetadata(widget: widget);
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null, citationAccumulator: null, sseWriter: SseWriter);
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        emitted.Should().HaveCount(1);
+        emitted[0].Type.Should().Be("output_pane");
+    }
+
+    [Fact]
+    public async Task PostProcessing_WidgetMetadata_NullSseWriter_DropsSilently()
+    {
+        var widget = new ToolResultWidget("source_pane", "DocumentViewer", new { x = 1 });
+        var handler = MakeHandlerWithMetadata(widget: widget);
+
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null, citationAccumulator: null, sseWriter: null);
+
+        Func<Task> act = async () =>
+            await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task PostProcessing_MalformedCitations_LogsWarning_DoesNotThrow()
+    {
+        // Citations metadata is not a valid array (it's a string, not even valid JSON-array).
+        var handler = new FakeChatHandler
+        {
+            ExecuteChatImpl = (_, t, _) => Task.FromResult(new ToolResult
+            {
+                HandlerId = "FakeChatHandler",
+                ToolId = t.Id,
+                ToolName = t.Name,
+                Success = true,
+                Execution = ToolExecutionMetadata.Empty,
+                Metadata = new Dictionary<string, object?>
+                {
+                    [ToolResultMetadataKeys.Citations] = "not a valid array"
+                }
+            })
+        };
+
+        var accumulator = new CitationContext();
+        var loggerMock = new Mock<ILogger>();
+        loggerMock.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: loggerMock.Object, citationAccumulator: accumulator);
+
+        Func<Task> act = async () =>
+            await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        accumulator.Count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PostProcessing_UnknownPaneType_LogsWarning_DoesNotEmit()
+    {
+        var emitted = 0;
+        Task SseWriter(ChatSseEvent _, CancellationToken __) { emitted++; return Task.CompletedTask; }
+
+        var widget = new ToolResultWidget("garbage_pane", "X", new { });
+        var handler = MakeHandlerWithMetadata(widget: widget);
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null, citationAccumulator: null, sseWriter: SseWriter);
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        emitted.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PostProcessing_Telemetry_DoesNotLogCitationOrWidgetContent_Adr015()
+    {
+        // ADR-015 binding: post-processing must log COUNTS / OUTCOMES only.
+        // NEVER citation excerpt text or widget data content.
+        const string excerptSentinel = "EXCERPT_TEXT_SENTINEL_SHOULD_NOT_APPEAR_IN_LOGS_42";
+        const string widgetSentinel = "WIDGET_DATA_SENTINEL_SHOULD_NOT_APPEAR_IN_LOGS_77";
+
+        var citations = new[]
+        {
+            new ToolResultCitation("chunk-1", "Doc A", Excerpt: excerptSentinel)
+        };
+        var widget = new ToolResultWidget(
+            PaneType: "source_pane",
+            WidgetType: "DocumentViewer",
+            Data: new { secret = widgetSentinel });
+
+        var handler = MakeHandlerWithMetadata(citations: citations, widget: widget);
+        var accumulator = new CitationContext();
+        var emitted = new List<ChatSseEvent>();
+        Task SseWriter(ChatSseEvent ev, CancellationToken _) { emitted.Add(ev); return Task.CompletedTask; }
+
+        var loggerMock = new Mock<ILogger>();
+        loggerMock.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: loggerMock.Object,
+            citationAccumulator: accumulator,
+            sseWriter: SseWriter);
+
+        await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        // Walk every captured log invocation; assert the sentinels never appear.
+        foreach (var invocation in loggerMock.Invocations)
+        {
+            foreach (var arg in invocation.Arguments)
+            {
+                var s = arg?.ToString() ?? string.Empty;
+                s.Should().NotContain(excerptSentinel,
+                    "ADR-015: citation excerpt content must never be logged by post-processing");
+                s.Should().NotContain(widgetSentinel,
+                    "ADR-015: widget data content must never be logged by post-processing");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task PostProcessing_SseWriterThrows_NonFatal_HandlerResultStillReturned()
+    {
+        // Cross-cutting infrastructure failures must NOT bubble up to the LLM as tool errors.
+        Task SseWriter(ChatSseEvent _, CancellationToken __) => throw new InvalidOperationException("sink down");
+
+        var widget = new ToolResultWidget("source_pane", "DocumentViewer", new { x = 1 });
+        var handler = MakeHandlerWithMetadata(widget: widget);
+        var sut = new ToolHandlerToAIFunctionAdapter(
+            CreateTool(), handler, CreateContext,
+            logger: null, citationAccumulator: null, sseWriter: SseWriter);
+
+        var result = await sut.InvokeAsync(new AIFunctionArguments(), CancellationToken.None);
+
+        result.Should().BeOfType<ToolResult>();
+        ((ToolResult)result!).Success.Should().BeTrue();
     }
 }

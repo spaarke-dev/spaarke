@@ -67,7 +67,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
             OwnerType = ScopeOwnerType.System,
             IsImmutable = false,
             AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts),
-            JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger)
+            JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger),
+            RequiredCapability = MapRequiredCapability(entity.RequiredCapability)
         };
 
         var mappingSource = !string.IsNullOrEmpty(entity.HandlerClass) ? "HandlerClass" : "GenericAnalysisHandler (fallback)";
@@ -97,7 +98,7 @@ public class AnalysisToolService : DataverseHttpServiceBase
 
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration,sprk_availableincontexts,sprk_jsonschema",
+            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration,sprk_availableincontexts,sprk_jsonschema,sprk_requiredcapability",
             expandClause: "sprk_ToolTypeId($select=sprk_name)",
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
@@ -139,7 +140,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
                 OwnerType = ScopeOwnerType.System,
                 IsImmutable = false,
                 AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts),
-                JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger)
+                JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger),
+                RequiredCapability = MapRequiredCapability(entity.RequiredCapability)
             };
         }).ToArray();
 
@@ -538,6 +540,34 @@ public class AnalysisToolService : DataverseHttpServiceBase
         return rawValue;
     }
 
+    /// <summary>
+    /// Map nullable raw Dataverse <c>sprk_requiredcapability</c> single-line text value to
+    /// the DTO's <see cref="AnalysisTool.RequiredCapability"/> string. Wave 7b — per-playbook
+    /// capability filter infrastructure.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Treats empty / whitespace-only strings as null (no capability gate). The chat-side
+    /// resolver in <c>SprkChatAgentFactory.ResolveTools()</c> uses case-insensitive matching,
+    /// so this mapper does NOT canonicalize the casing — admins editing the column in the
+    /// maker UI may type any casing variant and the filter still applies correctly.
+    /// </para>
+    /// <para>
+    /// Trims surrounding whitespace to defend against admin input like <c>"verify_citations "</c>
+    /// — the comparator would otherwise miss the canonical value. NEVER throws; null / empty
+    /// rows simply skip the capability gate (always-available, matching pre-Wave-7b behavior).
+    /// </para>
+    /// </remarks>
+    internal static string? MapRequiredCapability(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return null;
+        }
+
+        return rawValue.Trim();
+    }
+
     #endregion
 
     #region Private DTOs
@@ -582,6 +612,15 @@ public class AnalysisToolService : DataverseHttpServiceBase
         /// </summary>
         [JsonPropertyName("sprk_jsonschema")]
         public string? JsonSchema { get; set; }
+
+        /// <summary>
+        /// Canonical playbook capability constant for the per-playbook capability filter
+        /// added in Wave 7b. Backed by the <c>sprk_requiredcapability</c> single-line
+        /// text (NVARCHAR(100)) attribute. Nullable — null means "always available"
+        /// (no capability gate), which is the default for existing tool rows.
+        /// </summary>
+        [JsonPropertyName("sprk_requiredcapability")]
+        public string? RequiredCapability { get; set; }
     }
 
     internal class ToolTypeReference

@@ -316,6 +316,137 @@ public class SprkChatAgentFactoryToolResolutionTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // R6 Wave 7b — IsCapabilityGateSatisfied (per-tool capability filter)
+    // The helper extracted from the data-driven block of ResolveTools() to preserve
+    // the today-hardcoded `if (capabilities.Contains(PlaybookCapabilities.X))` gates
+    // for the 6 capability-gated tools as they migrate in Waves 7c / 8 / 9.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void IsCapabilityGateSatisfied_NullRequiredCapability_AlwaysPasses()
+    {
+        // Wave 7b backward-compat: pre-migration rows have null RequiredCapability
+        // and must continue to register regardless of the playbook's capability set.
+        // This preserves the today-behavior of AnalysisQuery, TextRefinement, and the
+        // 8 typed handler rows (none of which have a capability gate).
+        var capabilities = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "search" };
+
+        InvokeIsCapabilityGateSatisfied(null, capabilities).Should().BeTrue(
+            "Wave 7b: null RequiredCapability = always-available (existing pre-Wave-7b behavior)");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t")]
+    public void IsCapabilityGateSatisfied_WhitespaceRequiredCapability_AlwaysPasses(string requiredCap)
+    {
+        // Defensive: an empty / whitespace value on the column behaves the same as null.
+        var capabilities = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "search" };
+
+        InvokeIsCapabilityGateSatisfied(requiredCap, capabilities).Should().BeTrue(
+            "Wave 7b: empty/whitespace RequiredCapability = no gate (treated as null)");
+    }
+
+    [Fact]
+    public void IsCapabilityGateSatisfied_MatchingCapability_Passes()
+    {
+        // A tool requiring 'verify_citations' must register when the playbook's
+        // capability set contains 'verify_citations'.
+        var capabilities = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "search", "analyze", "verify_citations"
+        };
+
+        InvokeIsCapabilityGateSatisfied("verify_citations", capabilities).Should().BeTrue(
+            "Wave 7b: explicit match in the playbook's capability set exposes the tool");
+    }
+
+    [Fact]
+    public void IsCapabilityGateSatisfied_MissingCapability_Fails()
+    {
+        // A tool requiring 'verify_citations' must NOT register when the playbook's
+        // capability set lacks 'verify_citations'. Preserves the security boundary
+        // that the hardcoded `if (capabilities.Contains(PlaybookCapabilities.VerifyCitations))`
+        // gate enforces today.
+        var capabilities = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "search", "analyze"
+        };
+
+        InvokeIsCapabilityGateSatisfied("verify_citations", capabilities).Should().BeFalse(
+            "Wave 7b: missing capability withholds the tool from the LLM's function schema " +
+            "(replaces the hardcoded `if (capabilities.Contains(X))` gate)");
+    }
+
+    [Theory]
+    [InlineData("verify_citations", "verify_citations")]   // exact match
+    [InlineData("VERIFY_CITATIONS", "verify_citations")]   // capability set holds upper, tool requires lower
+    [InlineData("verify_citations", "VERIFY_CITATIONS")]   // capability set holds lower, tool requires upper
+    [InlineData("Verify_Citations", "verify_citations")]   // mixed case
+    [InlineData("verify_citations", "Verify_Citations")]
+    public void IsCapabilityGateSatisfied_CaseInsensitive_Passes(string requiredCap, string playbookCap)
+    {
+        // Wave 7b: matching is case-insensitive because canonical capability names
+        // are lowercase snake_case but admins editing the column may type variants.
+        // The today-hardcoded `Contains` calls use string-default (case-sensitive),
+        // but those values are compile-time constants — the data-driven case must be
+        // more forgiving because the source is admin-edited Dataverse text.
+        var capabilities = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { playbookCap };
+
+        InvokeIsCapabilityGateSatisfied(requiredCap, capabilities).Should().BeTrue(
+            $"Wave 7b: '{requiredCap}' vs '{playbookCap}' must match case-insensitively");
+    }
+
+    [Fact]
+    public void IsCapabilityGateSatisfied_EmptyCapabilitySet_FailsGatedTool()
+    {
+        // Standalone chat with NO capabilities + a gated tool → withhold the tool.
+        // The agent still operates (NFR-01 conversational primacy) with whatever
+        // un-gated tools resolved.
+        var capabilities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        InvokeIsCapabilityGateSatisfied("verify_citations", capabilities).Should().BeFalse(
+            "Wave 7b: empty capability set withholds every gated tool");
+    }
+
+    [Fact]
+    public void IsCapabilityGateSatisfied_EmptyCapabilitySet_PassesUngatedTool()
+    {
+        // Standalone chat with NO capabilities + an un-gated tool → register it.
+        // Mirrors today's behavior for tools that have no `if (capabilities.Contains(X))` block.
+        var capabilities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        InvokeIsCapabilityGateSatisfied(null, capabilities).Should().BeTrue(
+            "Wave 7b: empty capability set still passes un-gated tools (null RequiredCapability)");
+    }
+
+    [Fact]
+    public void IsCapabilityGateSatisfied_AllSixCapabilityGatedTools_Roundtrip()
+    {
+        // Smoke test the six canonical capability strings that the today-hardcoded
+        // blocks gate on. All six must round-trip through the matcher correctly when
+        // the playbook capability set contains the matching value.
+        var allSixGated = new[]
+        {
+            PlaybookCapabilities.WriteBack,
+            PlaybookCapabilities.Reanalyze,
+            PlaybookCapabilities.WebSearch,
+            PlaybookCapabilities.CodeInterpreter,
+            PlaybookCapabilities.LegalResearch,
+            PlaybookCapabilities.VerifyCitations
+        };
+
+        foreach (var capability in allSixGated)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { capability };
+
+            InvokeIsCapabilityGateSatisfied(capability, set).Should().BeTrue(
+                $"Wave 7b: '{capability}' must round-trip through the matcher");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // Reflection helpers — access the private static FR-11 helpers on the factory.
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -340,6 +471,14 @@ public class SprkChatAgentFactoryToolResolutionTests
             "(task 011 wiring contract).");
         return (Guid?)method!.Invoke(null, new object?[] { scope });
     }
+
+    // Wave 7b: IsCapabilityGateSatisfied is `internal static` — Sprk.Bff.Api.csproj
+    // exposes internals to Sprk.Bff.Api.Tests, so we can call it directly. Wrapper
+    // keeps the per-test setup terse and gives a single seam if the signature evolves.
+    private static bool InvokeIsCapabilityGateSatisfied(
+        string? requiredCapability,
+        IReadOnlySet<string> capabilities) =>
+        SprkChatAgentFactory.IsCapabilityGateSatisfied(requiredCapability, capabilities);
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Test doubles — minimal IToolHandler implementations.

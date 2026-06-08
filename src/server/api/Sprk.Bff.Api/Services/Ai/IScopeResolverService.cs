@@ -793,6 +793,47 @@ public record AnalysisTool
     /// </para>
     /// </remarks>
     public string? JsonSchema { get; init; }
+
+    /// <summary>
+    /// Canonical playbook capability constant (e.g., <c>"verify_citations"</c>,
+    /// <c>"write_back"</c>, <c>"web_search"</c>, <c>"code_interpreter"</c>,
+    /// <c>"legal_research"</c>, <c>"reanalyze"</c>) that the current playbook's
+    /// capability set MUST contain for this tool to be registered with the chat
+    /// agent at session start. Null = always available (existing behavior pre-Wave-7b).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in R6 Pillar 2 (Wave 7b). Backed by the <c>sprk_requiredcapability</c>
+    /// single-line text (NVARCHAR(100)) attribute on the <c>sprk_analysistool</c>
+    /// Dataverse entity. Matches the canonical string constants in
+    /// <see cref="Sprk.Bff.Api.Models.Ai.Chat.PlaybookCapabilities"/>.
+    /// </para>
+    /// <para>
+    /// <b>Filter enforcement</b>: Applied at chat-session start in the data-driven
+    /// block of <c>SprkChatAgentFactory.ResolveTools()</c>. When non-null, the tool
+    /// is skipped unless the effective capability set (playbook-resolved or
+    /// <c>CoreCapabilities</c> for standalone chat) contains a case-insensitive match
+    /// for this value. Null skips the gate (the tool always registers). This
+    /// REPLACES the hardcoded <c>if (capabilities.Contains(X))</c> blocks for the
+    /// 6 capability-gated tools (VerifyCitations, LegalResearch, WebSearch,
+    /// CodeInterpreter, WriteBack, Reanalyze) as they migrate in Waves 7c / 8 / 9.
+    /// </para>
+    /// <para>
+    /// <b>NOT a feature flag (ADR-018)</b>: this is a per-tool authorization filter
+    /// on existing tools, analogous to ACL entries — not a kill-switch. Feature flags
+    /// are config-driven and binary on/off across an entire feature surface; this
+    /// field is data-driven per-row authorization, with the canonical capability
+    /// list defined in code (<c>PlaybookCapabilities</c>) and the per-playbook
+    /// allow-list stored in Dataverse on <c>sprk_analysisplaybook</c>.
+    /// </para>
+    /// <para>
+    /// <b>Case-insensitive matching</b>: the chat resolver uses
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/> when comparing this value
+    /// against the playbook's capability set, because canonical capability names
+    /// are lowercase snake_case but admins editing the column may type variants.
+    /// </para>
+    /// </remarks>
+    public string? RequiredCapability { get; init; }
 }
 
 /// <summary>

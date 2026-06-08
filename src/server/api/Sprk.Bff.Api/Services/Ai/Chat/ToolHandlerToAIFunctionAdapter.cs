@@ -4,7 +4,10 @@ using System.Text.Json.Nodes;
 using Json.Schema;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -90,6 +93,8 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     private readonly Func<ChatInvocationContext> _contextFactory;
     private readonly ILogger? _logger;
     private readonly JsonElement _jsonSchema;
+    private readonly CitationContext? _citationAccumulator;
+    private readonly Func<ChatSseEvent, CancellationToken, Task>? _sseWriter;
 
     /// <summary>
     /// Constructs the adapter. Validates the tool's JSON Schema (well-formedness + top-level
@@ -116,6 +121,22 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// <param name="logger">
     /// Optional logger for diagnostic events (ADR-015: IDs + outcome + duration ONLY).
     /// </param>
+    /// <param name="citationAccumulator">
+    /// Optional per-chat-turn citation accumulator (R6 Wave 7b). When non-null AND the handler
+    /// returns <see cref="ToolResult.Metadata"/> containing <see cref="ToolResultMetadataKeys.Citations"/>,
+    /// the adapter forwards each citation envelope into the accumulator via
+    /// <see cref="CitationContext.AddCitation"/>. When null, citation metadata is dropped silently
+    /// (backward-compat for callers that don't need accumulation). Per ADR-014 the accumulator is
+    /// per-chat-session (= per-tenant scope); per ADR-015 citations carry deterministic source
+    /// identifiers only — NEVER user message content.
+    /// </param>
+    /// <param name="sseWriter">
+    /// Optional SSE writer delegate (R6 Wave 7b). When non-null AND the handler returns
+    /// <see cref="ToolResult.Metadata"/> containing <see cref="ToolResultMetadataKeys.Widget"/>,
+    /// the adapter emits the corresponding <c>source_pane</c> or <c>output_pane</c>
+    /// <see cref="ChatSseEvent"/>. When null, widget metadata is dropped silently. Failures are
+    /// non-fatal (logged + skipped) — never propagate to LLM-visible errors.
+    /// </param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="tool"/>, <paramref name="handler"/>, or <paramref name="contextFactory"/>
     /// is null.
@@ -137,12 +158,16 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         AnalysisTool tool,
         IToolHandler handler,
         Func<ChatInvocationContext> contextFactory,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        CitationContext? citationAccumulator = null,
+        Func<ChatSseEvent, CancellationToken, Task>? sseWriter = null)
     {
         _tool = tool ?? throw new ArgumentNullException(nameof(tool));
         _handler = handler ?? throw new ArgumentNullException(nameof(handler));
         _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
         _logger = logger;
+        _citationAccumulator = citationAccumulator;
+        _sseWriter = sseWriter;
 
         if (string.IsNullOrWhiteSpace(tool.Name))
         {
@@ -339,6 +364,13 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
                 activity?.SetStatus(ActivityStatusCode.Error, description: result.ErrorCode);
             }
 
+            // R6 Wave 7b: post-process well-known metadata keys for citation accumulation +
+            // widget event emission. Failures here are non-fatal — handlers stay pure
+            // input/output; this is cross-cutting infrastructure that MUST NOT bleed into
+            // tool-call success/failure visible to the LLM.
+            await PostProcessMetadataAsync(result, context.DecisionId, cancellationToken)
+                .ConfigureAwait(false);
+
             // Return the ToolResult itself; Microsoft.Extensions.AI will serialize it back
             // to the LLM. Downstream chat-agent middleware may transform this further.
             return result;
@@ -365,6 +397,288 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             activity?.SetStatus(ActivityStatusCode.Error, description: ex.GetType().Name);
             throw;
         }
+    }
+
+    /// <summary>
+    /// R6 Wave 7b — post-processes well-known metadata keys returned by chat-side handlers.
+    /// Forwards citation envelopes into the per-chat-turn <see cref="CitationContext"/> and
+    /// emits widget envelopes as <see cref="ChatSseEvent"/> via the SSE writer delegate.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Resilience contract: failures here are NEVER fatal. The adapter logs ADR-015-compliant
+    /// counts/buckets and proceeds. Citation/widget emission is cross-cutting infrastructure —
+    /// the handler's primary success/failure surface is its <see cref="ToolResult"/>, which
+    /// is returned to the LLM regardless of post-processing outcome.
+    /// </para>
+    /// <para>
+    /// ADR-015 logging hygiene: this method logs counts and outcome only — never citation
+    /// excerpts, widget data content, or source identifiers beyond what the ADR-015 telemetry
+    /// rules already allow (deterministic IDs).
+    /// </para>
+    /// </remarks>
+    private async Task PostProcessMetadataAsync(
+        ToolResult result,
+        Guid decisionId,
+        CancellationToken cancellationToken)
+    {
+        if (result.Metadata is null || result.Metadata.Count == 0)
+        {
+            return;
+        }
+
+        // Citations — accumulate into the per-turn context if both metadata + accumulator present.
+        if (result.Metadata.TryGetValue(ToolResultMetadataKeys.Citations, out var citationsObj)
+            && citationsObj is not null)
+        {
+            if (_citationAccumulator is null)
+            {
+                // No accumulator wired (likely non-chat path or older factory wiring). Drop silently.
+                _logger?.LogDebug(
+                    "[Wave7b] chat-tool '{ToolName}' returned citations metadata but no accumulator wired; " +
+                    "decisionId={DecisionId}",
+                    _tool.Name, decisionId);
+            }
+            else
+            {
+                var added = TryAccumulateCitations(citationsObj, decisionId);
+                // ADR-015: count + outcome only. Never citation text.
+                _logger?.LogInformation(
+                    "[Wave7b][ADR-015] chat-tool '{ToolName}' citations accumulated: decisionId={DecisionId} count={Count}",
+                    _tool.Name, decisionId, added);
+            }
+        }
+
+        // Widget — emit a single SSE event via the writer if both metadata + writer present.
+        if (result.Metadata.TryGetValue(ToolResultMetadataKeys.Widget, out var widgetObj)
+            && widgetObj is not null)
+        {
+            if (_sseWriter is null)
+            {
+                _logger?.LogDebug(
+                    "[Wave7b] chat-tool '{ToolName}' returned widget metadata but no sseWriter wired; " +
+                    "decisionId={DecisionId}",
+                    _tool.Name, decisionId);
+            }
+            else
+            {
+                await TryEmitWidgetAsync(widgetObj, decisionId, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Accepts the handler-supplied citations value (record array, JSON string, JsonElement,
+    /// or IEnumerable of envelope-shaped objects) and forwards each into the accumulator.
+    /// Returns the count successfully added. Malformed entries are logged-and-skipped.
+    /// </summary>
+    private int TryAccumulateCitations(object citationsObj, Guid decisionId)
+    {
+        if (_citationAccumulator is null) return 0;
+
+        try
+        {
+            // Normalize to JsonElement array for uniform parsing. Handlers may supply either
+            // ToolResultCitation records directly, a JsonElement, a JSON-string, or another
+            // IEnumerable; serialize-then-parse covers all of those at low cost.
+            JsonElement arrayElement;
+            if (citationsObj is JsonElement preElement)
+            {
+                arrayElement = preElement;
+            }
+            else if (citationsObj is string jsonText)
+            {
+                using var doc = JsonDocument.Parse(jsonText);
+                arrayElement = doc.RootElement.Clone();
+            }
+            else
+            {
+                var bytes = JsonSerializer.SerializeToUtf8Bytes(citationsObj);
+                using var doc = JsonDocument.Parse(bytes);
+                arrayElement = doc.RootElement.Clone();
+            }
+
+            if (arrayElement.ValueKind != JsonValueKind.Array)
+            {
+                _logger?.LogWarning(
+                    "[Wave7b] chat-tool '{ToolName}' citations metadata is not a JSON array (was {Kind}); skipping. " +
+                    "decisionId={DecisionId}",
+                    _tool.Name, arrayElement.ValueKind, decisionId);
+                return 0;
+            }
+
+            int added = 0;
+            foreach (var item in arrayElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+
+                var chunkId = GetStringProp(item, "chunkId", "ChunkId");
+                var sourceName = GetStringProp(item, "sourceName", "SourceName");
+                if (string.IsNullOrWhiteSpace(chunkId) || string.IsNullOrWhiteSpace(sourceName))
+                {
+                    continue;
+                }
+
+                int? pageNumber = TryGetIntProp(item, "pageNumber", "PageNumber");
+                var excerpt = GetStringProp(item, "excerpt", "Excerpt") ?? string.Empty;
+                var sourceType = GetStringProp(item, "sourceType", "SourceType");
+                var url = GetStringProp(item, "url", "Url");
+                var snippet = GetStringProp(item, "snippet", "Snippet");
+
+                _citationAccumulator.AddCitation(
+                    chunkId: chunkId!,
+                    sourceName: sourceName!,
+                    pageNumber: pageNumber,
+                    excerpt: excerpt,
+                    sourceType: sourceType,
+                    url: url,
+                    snippet: snippet);
+                added++;
+            }
+            return added;
+        }
+        catch (JsonException ex)
+        {
+            // Malformed JSON in metadata — log type + decision id; never the content.
+            _logger?.LogWarning(
+                "[Wave7b] chat-tool '{ToolName}' citations metadata could not be parsed as JSON " +
+                "({ExceptionType}); skipping accumulation. decisionId={DecisionId}",
+                _tool.Name, ex.GetType().Name, decisionId);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(
+                "[Wave7b] chat-tool '{ToolName}' citation accumulation failed unexpectedly " +
+                "({ExceptionType}); skipping. decisionId={DecisionId}",
+                _tool.Name, ex.GetType().Name, decisionId);
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Accepts the handler-supplied widget value, derives the pane type, and emits the
+    /// corresponding <c>source_pane</c> or <c>output_pane</c> SSE event via the writer.
+    /// Malformed envelopes or writer failures are logged-and-skipped.
+    /// </summary>
+    private async Task TryEmitWidgetAsync(
+        object widgetObj,
+        Guid decisionId,
+        CancellationToken cancellationToken)
+    {
+        if (_sseWriter is null) return;
+
+        try
+        {
+            // Normalize to JsonElement for uniform reading.
+            JsonElement envelope;
+            if (widgetObj is JsonElement preElement)
+            {
+                envelope = preElement;
+            }
+            else if (widgetObj is string jsonText)
+            {
+                using var doc = JsonDocument.Parse(jsonText);
+                envelope = doc.RootElement.Clone();
+            }
+            else
+            {
+                var bytes = JsonSerializer.SerializeToUtf8Bytes(widgetObj);
+                using var doc = JsonDocument.Parse(bytes);
+                envelope = doc.RootElement.Clone();
+            }
+
+            if (envelope.ValueKind != JsonValueKind.Object)
+            {
+                _logger?.LogWarning(
+                    "[Wave7b] chat-tool '{ToolName}' widget metadata is not a JSON object (was {Kind}); skipping. " +
+                    "decisionId={DecisionId}",
+                    _tool.Name, envelope.ValueKind, decisionId);
+                return;
+            }
+
+            var paneType = GetStringProp(envelope, "paneType", "PaneType");
+            var widgetType = GetStringProp(envelope, "widgetType", "WidgetType");
+            if (string.IsNullOrWhiteSpace(paneType) || string.IsNullOrWhiteSpace(widgetType))
+            {
+                _logger?.LogWarning(
+                    "[Wave7b] chat-tool '{ToolName}' widget metadata missing paneType or widgetType; skipping. " +
+                    "decisionId={DecisionId}",
+                    _tool.Name, decisionId);
+                return;
+            }
+
+            // Data payload may be absent — pass an empty object in that case to keep the
+            // SSE frame structurally valid.
+            object dataPayload;
+            if (envelope.TryGetProperty("data", out var dataElement)
+                || envelope.TryGetProperty("Data", out dataElement))
+            {
+                dataPayload = dataElement;
+            }
+            else
+            {
+                dataPayload = new { };
+            }
+
+            ChatSseEvent? sseEvent = paneType switch
+            {
+                "source_pane" => ChatSseEventFactory.CreateSourcePaneEvent(
+                    widgetType!, dataPayload, GetStringProp(envelope, "citationId", "CitationId")),
+                "output_pane" => ChatSseEventFactory.CreateOutputPaneEvent(widgetType!, dataPayload),
+                _ => null
+            };
+
+            if (sseEvent is null)
+            {
+                _logger?.LogWarning(
+                    "[Wave7b] chat-tool '{ToolName}' widget paneType '{PaneType}' is not recognized; skipping. " +
+                    "decisionId={DecisionId}",
+                    _tool.Name, paneType, decisionId);
+                return;
+            }
+
+            await _sseWriter(sseEvent, cancellationToken).ConfigureAwait(false);
+
+            // ADR-015: log pane + widget type + decisionId only. NEVER widget data content.
+            _logger?.LogInformation(
+                "[Wave7b][ADR-015] chat-tool '{ToolName}' widget emitted: " +
+                "paneType={PaneType} widgetType={WidgetType} decisionId={DecisionId}",
+                _tool.Name, paneType, widgetType, decisionId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancellation propagates — caller already aborted.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // SSE writer faults are non-fatal — the handler's ToolResult still flows to LLM.
+            _logger?.LogWarning(
+                "[Wave7b] chat-tool '{ToolName}' widget emission failed ({ExceptionType}); skipping. " +
+                "decisionId={DecisionId}",
+                _tool.Name, ex.GetType().Name, decisionId);
+        }
+    }
+
+    /// <summary>Reads a string property from a JsonElement, trying the first then alternate name.</summary>
+    private static string? GetStringProp(JsonElement element, string primary, string alternate)
+    {
+        if (element.TryGetProperty(primary, out var p) && p.ValueKind == JsonValueKind.String)
+            return p.GetString();
+        if (element.TryGetProperty(alternate, out var a) && a.ValueKind == JsonValueKind.String)
+            return a.GetString();
+        return null;
+    }
+
+    /// <summary>Reads an integer property from a JsonElement, trying first then alternate name.</summary>
+    private static int? TryGetIntProp(JsonElement element, string primary, string alternate)
+    {
+        if (element.TryGetProperty(primary, out var p) && p.ValueKind == JsonValueKind.Number
+            && p.TryGetInt32(out var v1)) return v1;
+        if (element.TryGetProperty(alternate, out var a) && a.ValueKind == JsonValueKind.Number
+            && a.TryGetInt32(out var v2)) return v2;
+        return null;
     }
 
     /// <summary>

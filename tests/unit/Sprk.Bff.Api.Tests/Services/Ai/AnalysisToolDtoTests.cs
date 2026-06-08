@@ -487,6 +487,157 @@ public class AnalysisToolDtoTests
             "warning must carry the R6-audit-1 marker so log filters can find it");
     }
 
+    // =========================================================================
+    // R6 Wave 7b (2026-06-08) — RequiredCapability field tests.
+    // The per-playbook capability filter infrastructure that the data-driven
+    // block in SprkChatAgentFactory.ResolveTools() consults to skip tools whose
+    // sprk_requiredcapability isn't in the current playbook's capability set.
+    // Wave 7c (VerifyCitations) + Wave 8 (LegalResearch / WebSearch /
+    // CodeInterpreter) + Wave 9 (WorkingDocumentTools) populate this field on
+    // their migrated rows.
+    // =========================================================================
+
+    [Fact]
+    public void AnalysisTool_DefaultConstruction_RequiredCapabilityIsNull()
+    {
+        // Wave 7b backward-compat: pre-Wave-7b rows have null RequiredCapability
+        // → always-available behavior matches today's hardcoded chat-tool registration.
+        var tool = new AnalysisTool
+        {
+            Id = Guid.NewGuid(),
+            Name = "SYS-AnalysisQuery",
+            Type = ToolType.Custom
+        };
+
+        tool.RequiredCapability.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("verify_citations")]
+    [InlineData("write_back")]
+    [InlineData("web_search")]
+    [InlineData("code_interpreter")]
+    [InlineData("legal_research")]
+    [InlineData("reanalyze")]
+    public void AnalysisTool_SerializeDeserialize_RoundTripsRequiredCapability(string capability)
+    {
+        // Arrange — every canonical capability value must survive a System.Text.Json
+        // round-trip. The BFF returns this field to clients via the listing endpoints;
+        // the wire contract must remain stable.
+        var original = new AnalysisTool
+        {
+            Id = Guid.NewGuid(),
+            Name = "GatedTool",
+            Type = ToolType.Custom,
+            AvailableInContexts = ToolAvailabilityContext.Chat,
+            RequiredCapability = capability
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(original);
+        var roundTripped = JsonSerializer.Deserialize<AnalysisTool>(json);
+
+        // Assert
+        roundTripped.Should().NotBeNull();
+        roundTripped!.RequiredCapability.Should().Be(capability);
+    }
+
+    [Fact]
+    public void AnalysisTool_SerializeDeserialize_NullRequiredCapabilityPreserved()
+    {
+        // Backward-compat invariant: null wire value remains null DTO value (rows
+        // without a capability gate stay always-available).
+        var original = new AnalysisTool
+        {
+            Id = Guid.NewGuid(),
+            Name = "UnGatedTool",
+            Type = ToolType.Custom,
+            RequiredCapability = null
+        };
+
+        var json = JsonSerializer.Serialize(original);
+        var roundTripped = JsonSerializer.Deserialize<AnalysisTool>(json);
+
+        roundTripped.Should().NotBeNull();
+        roundTripped!.RequiredCapability.Should().BeNull();
+    }
+
+    [Fact]
+    public void AnalysisTool_WithExpression_PreservesRequiredCapability()
+    {
+        // Wave 7b: verify the property is a true record member (caught at compile
+        // time if someone forgets the { get; init; } accessor).
+        var original = new AnalysisTool
+        {
+            Id = Guid.NewGuid(),
+            Name = "VerifyCitations",
+            Type = ToolType.Custom,
+            RequiredCapability = "verify_citations"
+        };
+
+        var modified = original with { Name = "RenamedVerifyCitations" };
+
+        modified.RequiredCapability.Should().Be("verify_citations");
+        modified.Name.Should().Be("RenamedVerifyCitations");
+    }
+
+    // -------------------------------------------------------------------------
+    // MapRequiredCapability — null / whitespace / value contract.
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void MapRequiredCapability_NullRaw_ReturnsNull()
+    {
+        // Pre-Wave-7b rows: column is null → DTO field stays null (always-available).
+        AnalysisToolService.MapRequiredCapability(null).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("   ")]
+    [InlineData("\t\r\n")]
+    public void MapRequiredCapability_EmptyOrWhitespace_ReturnsNull(string rawValue)
+    {
+        // Whitespace-only strings are treated the same as null — no capability gate set.
+        AnalysisToolService.MapRequiredCapability(rawValue).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("verify_citations", "verify_citations")]
+    [InlineData("write_back", "write_back")]
+    [InlineData("web_search", "web_search")]
+    [InlineData("VERIFY_CITATIONS", "VERIFY_CITATIONS")]  // case preserved (filter is case-insensitive)
+    public void MapRequiredCapability_KnownCapability_ReturnsValue(string rawValue, string expected)
+    {
+        // Canonical capability constants pass through unchanged. Case is preserved
+        // because the chat-side filter performs case-insensitive comparison.
+        AnalysisToolService.MapRequiredCapability(rawValue).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(" verify_citations ", "verify_citations")]
+    [InlineData("  write_back", "write_back")]
+    [InlineData("web_search   ", "web_search")]
+    public void MapRequiredCapability_TrimsSurroundingWhitespace(string rawValue, string expected)
+    {
+        // Defensive: admins editing the column in Power Apps may add leading/trailing
+        // whitespace. Trim so the case-insensitive comparator at the filter still matches.
+        AnalysisToolService.MapRequiredCapability(rawValue).Should().Be(expected);
+    }
+
+    [Fact]
+    public void MapRequiredCapability_UnknownCapability_ReturnsValueAsTyped()
+    {
+        // Forward-compat safety: an unknown capability value (e.g., admin types
+        // "future_capability" before the matching playbook capability is defined)
+        // passes through unchanged. The filter then no-ops for current playbooks
+        // (no match), effectively withholding the tool until a playbook with that
+        // capability exists — matching the desired "gate first, define later" UX.
+        AnalysisToolService.MapRequiredCapability("future_capability")
+            .Should().Be("future_capability");
+    }
+
     private sealed class TestLogger : ILogger
     {
         public int WarningCount { get; private set; }

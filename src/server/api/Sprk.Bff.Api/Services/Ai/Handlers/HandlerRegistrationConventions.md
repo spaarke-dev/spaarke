@@ -70,8 +70,36 @@ Each handler ships a corresponding `sprk_analysistool` row whose `sprk_handlercl
 | `sprk_availableincontexts` | `Both` (Playbook + Chat) | Per task 007 D-A-07 |
 | `sprk_jsonschema` | `{ "type": "object", ... }` | LLM tool-call argument schema (task 008 D-A-08) |
 | `sprk_configuration` | `{ ... }` | Handler-specific config JSON |
+| `sprk_requiredcapability` | `verify_citations` (optional) | Per-playbook capability gate (Wave 7b). See "Capability-Gated Tools" below. |
 
 **Migration**: New handler PRs MUST include the Dataverse seed (CSV or PowerShell snippet) for at least one `sprk_analysistool` row pointing at the handler. Without the seed, the handler is dead code at runtime.
+
+### Capability-Gated Tools (`sprk_requiredcapability`)
+
+Some chat tools are intentionally restricted to playbooks that opt-in via the `sprk_analysisplaybook.sprk_playbookcapabilities` multi-select choice. Examples (Waves 7c / 8 / 9):
+
+| Tool | `sprk_requiredcapability` value | Why gated |
+|---|---|---|
+| VerifyCitations | `verify_citations` | Legal review boundary — only legal playbooks need verify_citations exposed to the LLM |
+| LegalResearch | `legal_research` | Bing Grounding cost + governance scope (ADR-015) |
+| WebSearch | `web_search` | External egress — only playbooks with explicit web-search permission |
+| CodeInterpreter | `code_interpreter` | Sandbox code execution — explicit data-governance opt-in (ADR-018) |
+| WorkingDocumentTools (write_back) | `write_back` | Mutating tool — limited to playbooks that target the active document |
+
+**Contract** (R6 Wave 7b infrastructure):
+
+- When `sprk_requiredcapability` is **null/empty**, the tool is **always available** in chat (default — applies to every existing pre-Wave-7b row including the 8 typed handlers + AnalysisQuery + TextRefinement).
+- When **set**, the canonical string must match (case-insensitive) one of the values in `Models/Ai/Chat/PlaybookCapabilities.cs` (e.g., `"verify_citations"`, `"write_back"`, `"web_search"`, `"code_interpreter"`, `"legal_research"`, `"reanalyze"`).
+- The filter is enforced **at chat-session start** in the data-driven block of `SprkChatAgentFactory.ResolveTools()` (`IsCapabilityGateSatisfied`). Rows whose capability is NOT in the current playbook's set are silently skipped (logged at Debug level for diagnosis, never at Information or Warning — ADR-015 telemetry).
+- For **standalone chat** (no playbook), the effective capability set is `PlaybookCapabilities.CoreCapabilities`. Gated tools are NOT exposed in standalone chat unless their capability happens to be in `CoreCapabilities` (today: `search`, `analyze`, `selection_revise`, `summarize`, `insights_query`).
+
+**Important — this is NOT a feature flag (ADR-018)**: feature flags gate underlying service registrations (e.g., the LegalResearch Bing Grounding service has its own `Foundry.LegalResearchAssistant:Enabled` kill-switch). `sprk_requiredcapability` is per-tool authorization on top of those flags. A tool with a working service registration but a missing capability for the current playbook will not be offered to the LLM at all — it remains absent from the function-calling schema.
+
+**Migration responsibility**: Each capability-gated tool migration PR (Waves 7c / 8 / 9) is responsible for:
+
+1. Setting `sprk_requiredcapability` on the migrated row to the canonical `PlaybookCapabilities` value.
+2. Removing the corresponding hardcoded `if (capabilities.Contains(PlaybookCapabilities.X))` block from `SprkChatAgentFactory.ResolveTools()`.
+3. Updating the per-handler test fixture with at least one positive (capability present) and one negative (capability missing) assertion.
 
 ### (4) Tests using `TypedToolHandlerTestFixture` + the 4 contract assertions
 
@@ -186,6 +214,87 @@ public sealed class YourChatAwareHandler : IToolHandler
 ```
 
 The Dataverse `sprk_availableincontexts` column on the corresponding `sprk_analysistool` row MUST match this declaration (must include `Chat` if `SupportedInvocationContexts` includes `Chat`).
+
+---
+
+## Returning Citations + Widget Events from Chat-side Handlers (R6 Wave 7b)
+
+Chat-side handlers (Wave 7c KnowledgeRetrieval, Wave 8 DocumentSearch / WebSearch / CodeInterpreter / LegalResearch / VerifyCitations) need to emit citations + pane widget events as side effects. The pre-R5 hardcoded tools accomplished this by mutating a shared `CitationContext` accumulator and calling an `SseWriter` delegate captured at construction. Under the R6 `IToolHandler` contract, handlers are pure-input/pure-output via the synchronous `ToolResult` return — the cross-cutting work belongs in the adapter, not the handler.
+
+### The pattern: return metadata from the handler; the adapter does the side effects
+
+```csharp
+public async Task<ToolResult> ExecuteChatAsync(
+    ChatInvocationContext context,
+    AnalysisTool tool,
+    CancellationToken cancellationToken)
+{
+    // ... do retrieval / search / etc. — return pure data ...
+    var searchHits = await _ragService.SearchAsync(query, ct: cancellationToken);
+
+    var citations = searchHits.Select(h => new ToolResultCitation(
+        ChunkId: h.ChunkId,
+        SourceName: h.DocumentName,
+        PageNumber: h.PageNumber,
+        Excerpt: h.Snippet)).ToArray();
+
+    var widget = new ToolResultWidget(
+        PaneType: "source_pane",
+        WidgetType: "DocumentViewer",
+        Data: new { filename = topHit.DocumentName, page = topHit.PageNumber },
+        CitationId: "1");
+
+    return ToolResult.Ok(
+        handlerId: HandlerId,
+        toolId: tool.Id,
+        toolName: tool.Name,
+        data: new { hits = searchHits.Select(h => h.Excerpt) },
+        summary: $"Found {searchHits.Count} results.") with
+    {
+        Metadata = new Dictionary<string, object?>
+        {
+            [ToolResultMetadataKeys.Citations] = citations,
+            [ToolResultMetadataKeys.Widget]    = widget,
+        }
+    };
+}
+```
+
+The adapter (`ToolHandlerToAIFunctionAdapter`) reads these well-known keys after `ExecuteChatAsync` returns and:
+
+1. Forwards each `ToolResultCitation` into the per-chat-turn `CitationContext.AddCitation(...)` (provided by the chat factory at adapter construction).
+2. Emits `ToolResultWidget` as a `source_pane` or `output_pane` `ChatSseEvent` via the constructor-supplied SSE writer delegate.
+
+### Why this shape
+
+| Concern | Where it lives |
+|---|---|
+| Citation accumulation | Adapter (it has the per-turn `CitationContext`) |
+| Widget SSE emission | Adapter (it has the SSE writer) |
+| Business logic (search, refine, retrieve) | Handler |
+| Telemetry (ADR-015: counts + decisionId only) | Adapter |
+| Resilience (writer faults are non-fatal) | Adapter |
+
+The handler stays a pure function: same input → same output, no shared-state surprises, easy to unit-test, easy to dispatch from either playbook or chat contexts.
+
+### Backward compat
+
+- Handlers that don't set `Metadata` (existing 8 typed handlers; AnalysisQuery; TextRefinement) get null and the adapter performs no post-processing.
+- Adapter constructor's `citationAccumulator` + `sseWriter` are both optional (default null). When null, metadata is dropped silently — the handler's `ToolResult` still returns to the LLM unchanged.
+- The chat factory (`SprkChatAgentFactory.ResolveTools`) passes both when constructing the per-chat-session adapter for each data-driven tool row.
+
+### ADR-015 binding
+
+Citations + widget envelopes carry deterministic source identifiers + display metadata ONLY. NEVER user-message content. The adapter telemetry logs counts/buckets only — verified by sentinel-string test (`PostProcessing_Telemetry_DoesNotLogCitationOrWidgetContent_Adr015`).
+
+### Constants + envelope shapes
+
+| Key | Constant | Envelope record |
+|---|---|---|
+| `"citations"` | `ToolResultMetadataKeys.Citations` | `ToolResultCitation` (ChunkId, SourceName, PageNumber?, Excerpt, SourceType?, Url?, Snippet?) |
+| `"widget"` | `ToolResultMetadataKeys.Widget` | `ToolResultWidget` (PaneType, WidgetType, Data, CitationId?) |
+
+The adapter normalizes the metadata value through JSON serialization so handlers may supply records, anonymous objects, `JsonElement`, or even JSON strings — all round-trip cleanly. Malformed entries are logged-and-skipped (non-fatal).
 
 ---
 

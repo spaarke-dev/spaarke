@@ -1279,6 +1279,7 @@ public class SprkChatAgentFactory
         var dataDrivenAttemptedRows = 0;
         var dataDrivenResolvedRows = 0;
         var dataDrivenSkippedDuplicates = 0;
+        var dataDrivenSkippedCapability = 0;
         var dataDrivenFailedRows = new List<string>();
         try
         {
@@ -1350,6 +1351,37 @@ public class SprkChatAgentFactory
                         continue;
                     }
 
+                    // R6 Wave 7b: per-playbook capability filter. When sprk_requiredcapability
+                    // is set on a tool row, the row is only registered if the current
+                    // playbook's capabilities (or CoreCapabilities in standalone-chat mode)
+                    // include a CASE-INSENSITIVE match. This REPLACES the hardcoded
+                    // `if (capabilities.Contains(PlaybookCapabilities.X))` gates removed in
+                    // Waves 7c (VerifyCitations), 8 (LegalResearch / WebSearch /
+                    // CodeInterpreter), and 9 (WorkingDocumentTools) — preserving today's
+                    // security boundary for capability-gated tools.
+                    //
+                    // ADR-018 distinction: this is NOT a feature flag — it is per-tool
+                    // authorization based on the current playbook's capability set
+                    // (resolved earlier at ~line 287 from sprk_analysisplaybook.sprk_playbookcapabilities).
+                    // The capability set is data-driven; the kill-switch surface remains
+                    // unchanged (LegalResearch / CodeInterpreter / WebSearch ADR-018 flags
+                    // continue to gate the underlying service registrations they always have).
+                    //
+                    // Tools with null sprk_requiredcapability bypass this gate (always-available),
+                    // which is the default for existing pre-Wave-7b rows. Migrating chat tools
+                    // (Waves 7c / 8 / 9) populate this field with their canonical
+                    // PlaybookCapabilities constant (e.g., "verify_citations", "write_back").
+                    if (!IsCapabilityGateSatisfied(row.RequiredCapability, capabilities))
+                    {
+                        dataDrivenSkippedCapability++;
+                        _logger.LogDebug(
+                            "[FR-11/Wave-7b] Skipping data-driven tool '{ToolName}' (id={ToolId}) — " +
+                            "requires capability '{RequiredCapability}' not in current playbook's " +
+                            "capability set. Tenant={TenantId}.",
+                            row.Name, row.Id, row.RequiredCapability, tenantId);
+                        continue;
+                    }
+
                     if (string.IsNullOrWhiteSpace(row.HandlerClass))
                     {
                         _logger.LogWarning(
@@ -1386,8 +1418,19 @@ public class SprkChatAgentFactory
 
                     try
                     {
+                        // R6 Wave 7b: pass the per-chat-turn citationContext + sseWriter so
+                        // handlers can return citations + widget metadata via ToolResult.Metadata
+                        // and the adapter performs the side effects (accumulation + SSE emission).
+                        // Both are nullable on the adapter ctor; the data-driven block forwards
+                        // whatever this factory has in scope (citationContext is created above at
+                        // ~line 407; sseWriter is the optional ChatEndpoints SSE writer arg).
                         var adapter = new ToolHandlerToAIFunctionAdapter(
-                            row, handler, contextFactory, _logger);
+                            row,
+                            handler,
+                            contextFactory,
+                            _logger,
+                            citationAccumulator: citationContext,
+                            sseWriter: sseWriter);
                         tools.Add(adapter);
                         existingToolNames.Add(row.Name);
                         dataDrivenResolvedRows++;
@@ -1419,11 +1462,13 @@ public class SprkChatAgentFactory
                 _logger.LogInformation(
                     "[FR-11] Data-driven chat-tool discovery: tenant={TenantId} " +
                     "attempted={AttemptedRows} resolved={ResolvedRows} " +
-                    "skippedDuplicates={SkippedDuplicates} failed={FailedRows}",
+                    "skippedDuplicates={SkippedDuplicates} skippedCapability={SkippedCapability} " +
+                    "failed={FailedRows}",
                     tenantId,
                     dataDrivenAttemptedRows,
                     dataDrivenResolvedRows,
                     dataDrivenSkippedDuplicates,
+                    dataDrivenSkippedCapability,
                     dataDrivenFailedRows.Count);
             }
         }
@@ -1601,6 +1646,59 @@ public class SprkChatAgentFactory
         if (!string.Equals(knowledgeScope.ParentEntityType, "sprk_matter", StringComparison.OrdinalIgnoreCase))
             return null;
         return Guid.TryParse(knowledgeScope.ParentEntityId, out var parsed) ? parsed : null;
+    }
+
+    /// <summary>
+    /// R6 Wave 7b: Per-tool capability gate for the data-driven block of
+    /// <see cref="ResolveTools"/>. Returns <c>true</c> when the tool's
+    /// <see cref="AnalysisTool.RequiredCapability"/> is null/empty (always-available) OR
+    /// the current playbook's capability set contains a case-insensitive match.
+    /// Replaces the 6 hardcoded <c>if (capabilities.Contains(PlaybookCapabilities.X))</c>
+    /// gates as their tools migrate to the data-driven path in Waves 7c / 8 / 9.
+    /// </summary>
+    /// <param name="requiredCapability">
+    /// The canonical capability constant the tool requires (e.g.,
+    /// <c>"verify_citations"</c>) or null when the tool has no capability gate.
+    /// Whitespace-only values are treated as null (defensive: the
+    /// <c>MapRequiredCapability</c> mapper already trims, but this helper does not
+    /// assume the field has been pre-canonicalized).
+    /// </param>
+    /// <param name="capabilities">
+    /// The effective capability set for this chat turn — either the playbook's
+    /// capabilities or <c>CoreCapabilities</c> for standalone chat.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>Case-insensitive matching</b>: canonical capability names are lowercase
+    /// snake_case (e.g., <c>"verify_citations"</c>). Admins editing the column in
+    /// Power Apps may type uppercase variants, so the comparator uses
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/>.
+    /// </para>
+    /// <para>
+    /// <b>ADR-018 distinction</b>: this is per-tool authorization, NOT a feature flag.
+    /// Feature flags gate underlying service registrations (e.g., the LegalResearch
+    /// Bing Grounding service has its own kill-switch); this helper gates only whether
+    /// the chat agent is OFFERED the tool, complementing — not replacing — those flags.
+    /// </para>
+    /// </remarks>
+    internal static bool IsCapabilityGateSatisfied(
+        string? requiredCapability,
+        IReadOnlySet<string> capabilities)
+    {
+        if (string.IsNullOrWhiteSpace(requiredCapability))
+        {
+            return true;
+        }
+
+        foreach (var capability in capabilities)
+        {
+            if (string.Equals(capability, requiredCapability, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
