@@ -14,9 +14,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | none |
-| **Step** | Ready for Phase 1 Dataverse schema work + parallel BFF refactor |
-| **Status** | Wave 1 + Wave 2 complete (001 ✅ 010 ✅ 018 ✅ 084 ✅); 3 new tasks added per user decisions (006, 007, 008); 41 total tasks. |
-| **Next Action** | Task 002 (create `sprk_todo` entity in `https://spaarkedev1.crm.dynamics.com/`). Once 002 completes, tasks 003 + 006 + 007 run in parallel (P1-W2.5 wave); then 008; then 004 + 005. Task 015 (AAD scope) can run independently — user has instructions. |
+| **Step** | Wave 3 complete; ready for wave 4 (003 + 006 + 007 + 009 in parallel) |
+| **Status** | Waves 1+2+3 complete (001 ✅ 002 ✅ 010 ✅ 017 ✅ 018 ✅ 084 ✅); 42 total tasks (added 009 for statuscode customization gap surfaced by task 002). |
+| **Next Action** | Wave 4 parallel launch: tasks 003 (record-type ref), 006 (TodoGenerationService refactor), 007 (ExternalAccess BFF refactor), 009 (statuscode customization). Then 008 (external-spa). Then 004+005 (schema cut). |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
