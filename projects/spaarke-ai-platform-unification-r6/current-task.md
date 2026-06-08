@@ -1,8 +1,8 @@
 # Current Task State — spaarke-ai-platform-unification-r6
 
-> **Last Updated**: 2026-06-08 (by context-handoff before compaction at ~21% remaining)
+> **Last Updated**: 2026-06-08 (post-compaction, Wave 7c verified)
 > **Recovery**: Read "Quick Recovery" section first
-> **Last Commit**: `66da08ca` (Wave 7b infra — adapter citations/widget + sprk_requiredcapability filter)
+> **Last Commit**: `52201189` (checkpoint = Wave 7c content; verified post-compaction by 450/450 tests passing)
 > **Branch**: `work/spaarke-ai-platform-unification-r6` (pushed to origin; clean working tree)
 
 ---
@@ -11,28 +11,29 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | A (data-driven foundation) — ~25 of ~30 Phase A tasks complete |
-| **Wave** | 7c PARTIAL (work on disk, not yet verified end-to-end) |
-| **Last Committed Wave** | 7b infra (`66da08ca`) |
-| **Status** | ⚠️ Uncommitted Wave 7c work present — handlers + seed rows + tests on disk; build is CLEAN (0 errors) but full test suite has not yet been run + the work has not been committed |
-| **Next Action** | (1) Run full test suite to verify Wave 7c work; (2) commit Wave 7c as one atomic commit; (3) push; (4) proceed to Wave 8 (4 citation/SSE-state tools) |
+| **Phase** | A (data-driven foundation) — ~26 of ~30 Phase A tasks complete |
+| **Wave** | 7c VERIFIED (committed in checkpoint `52201189`; full tests green post-compaction) |
+| **Last Committed Wave** | 7c (`52201189` — packaged as "checkpoint" but contents are the Wave 7c work) |
+| **Status** | ✅ Wave 7c complete. Build clean (0 errors, 16 baseline warnings). 55/55 new handler tests pass. 450/450 broader handler+adapter+factory sweep passes. No regressions. |
+| **Next Action** | Wave 8 dispatch — 4 citation/SSE-state migrations (DocumentSearch, WebSearch, CodeInterpreter, LegalResearch) using validated Wave 7b infra pattern |
 
-### ⚠️ Uncommitted Wave 7c partial work (on disk; build clean; tests NOT yet run)
+### ✅ Wave 7c verification (2026-06-08, post-compaction)
 
-These files exist on disk but are not yet committed. Source: somewhere between Wave 7b commit and current state, an agent (or manual edit) produced this work. Build verified clean. **Test suite has NOT yet been run against this state.**
+The Wave 7c content was committed pre-compaction as a "checkpoint" (commit `52201189`) because the test suite had not yet been run at that time. Post-compaction verification:
 
+- `dotnet build src/server/api/Sprk.Bff.Api/`: **0 errors, 16 baseline warnings** ✅
+- `dotnet test --filter "Handlers.KnowledgeRetrievalHandlerTests|Handlers.VerifyCitationsHandlerTests"`: **55/55 PASS** (266ms) ✅
+- `dotnet test --filter "Services.Ai.Handlers|ToolHandlerToAIFunctionAdapter|SprkChatAgentFactory"`: **450/450 PASS** (368ms) ✅
+
+Wave 7c content (in commit `52201189`):
 - NEW: `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/KnowledgeRetrievalHandler.cs` (730 LOC)
 - NEW: `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/VerifyCitationsHandler.cs` (535 LOC)
 - NEW: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/KnowledgeRetrievalHandlerTests.cs` (580 LOC)
 - NEW: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/VerifyCitationsHandlerTests.cs` (508 LOC)
-- NEW: `infra/dataverse/sprk_analysistool-knowledge-source-get-row.json`
-- NEW: `infra/dataverse/sprk_analysistool-knowledge-base-search-row.json`
-- NEW: `infra/dataverse/sprk_analysistool-citation-verify-row.json`
-- MODIFIED: `src/server/api/Sprk.Bff.Api/Services/Ai/ChatInvocationContext.cs` (likely adds KnowledgeScope field — Wave 7b infra question that was flagged)
-- MODIFIED: `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs` (likely removes hardcoded KnowledgeRetrievalTools + VerifyCitationsTool blocks)
-- MODIFIED: `scripts/Seed-TypedHandlers.ps1` (likely adds 3 new $RowFiles entries)
-
-**Recommended action on resume**: run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` to verify; if tests pass, commit as one Wave 7c commit; if tests fail, investigate before committing.
+- NEW: 3 Dataverse seed row JSON files (`knowledge-source-get`, `knowledge-base-search`, `citation-verify`)
+- MODIFIED: `ChatInvocationContext.cs` (adds `KnowledgeScope` field)
+- MODIFIED: `SprkChatAgentFactory.cs` (removes hardcoded `KnowledgeRetrievalTools` + `VerifyCitationsTool` registration blocks)
+- MODIFIED: `scripts/Seed-TypedHandlers.ps1` (adds 3 `$RowFiles` entries)
 
 ### Files Modified Since Last Compaction (committed in `66da08ca`)
 - `src/server/api/Sprk.Bff.Api/Services/Ai/ToolResult.cs` — added Metadata field + ToolResultMetadataKeys + envelope records
@@ -71,52 +72,52 @@ R6 is migrating 10 pre-R5 chat tool C# classes to data-driven `IToolHandler` imp
 | `2147ed05` | Audit | Item 4 consolidation (Option A) + Item 2 R7 deferral |
 | `9e3d4f93` | W7 partial | AnalysisQuery + TextRefinement migrated (2 of 4 trivial); KnowledgeRetrieval + VerifyCitations surfaced gaps |
 | `66da08ca` | W7b infra | ToolResult.Metadata + adapter post-process; sprk_requiredcapability column + filter |
+| `52201189` | W7c (checkpoint) | KnowledgeRetrieval + VerifyCitations handlers + tests + 3 seed rows; verified post-compaction 450/450 tests green |
 
 ### Pending
 
 | Wave | Tasks | Notes |
 |---|---|---|
-| **7c (NEXT)** | KnowledgeRetrieval + VerifyCitations re-attempt | Using new Wave 7b infra |
-| 8 | DocumentSearch + WebSearch + CodeInterpreter + LegalResearch | 4 citation/SSE-state migrations using validated pattern |
+| **8 (NEXT)** | DocumentSearch + WebSearch + CodeInterpreter + LegalResearch | 4 citation/SSE-state migrations using validated Wave 7b pattern |
 | 9 | ADR-032 Streaming chat-tool contract + WorkingDocumentTools | Per "ADRs are defaults" principle — yielded NFR-03 for this case |
 | 10 | Delete AnalysisExecutionTools (replaced by Pillar 3 invoke_playbook) + delete InvokeSummarize + InvokeInsightsQueryTool bridges (task 023) | Cleanup |
 | 028, 029 | Phase A integration test + Phase A exit gate | MUST address the 9 pre-existing WorkspaceEndpointsTests failures before exit |
 
 ---
 
-## Wave 7c Dispatch Plan (next action)
+## Wave 8 Dispatch Plan (next action)
 
-Dispatch 2 parallel sub-agents:
+Migrate 4 citation/SSE-state chat tools to data-driven `IToolHandler` implementations, using the validated Wave 7b infrastructure (ToolResult.Metadata citations/widget envelope + adapter post-processing + sprk_requiredcapability filter).
 
-### Sub-agent A: KnowledgeRetrievalHandler
-- **Files**: NEW `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/KnowledgeRetrievalHandler.cs` + 2 seed rows (`infra/dataverse/sprk_analysistool-knowledge-source-get-row.json` + `sprk_analysistool-knowledge-base-search-row.json`)
-- **Hardcoded block to remove**: `SprkChatAgentFactory.cs` lines ~816-846 (`--- KnowledgeRetrievalTools ---`)
-- **Uses Wave 7b infra**: returns `ToolResult { Metadata = { citations, widget } }`; adapter post-processes
-- **Open design question to handle**: Does `ChatInvocationContext` carry `KnowledgeScope`? If not, agent should either (a) extend context, or (b) resolve via DI accessor. Stop-and-surface if non-trivial.
-- **2 LLM functions, same handler**: dispatch via `sprk_configuration.method` discriminator (TextRefinement pattern)
-- **Capability gate**: This tool is NOT capability-gated in the hardcoded version → `sprk_requiredcapability = null`
-- **Descriptive toolcodes**: `KNOWLEDGE-SOURCE-GET`, `KNOWLEDGE-BASE-SEARCH`
+### Targets
+1. **DocumentSearchTools** — search SharePoint-Embedded indexed documents; returns citations + widget
+2. **WebSearchTools** — Bing/web search; returns citations
+3. **CodeInterpreterTools** — Python sandbox; returns rich widget output
+4. **LegalResearchTools** — legal corpus retrieval; returns citations + capability-gated
 
-### Sub-agent B: VerifyCitationsHandler
-- **Files**: NEW `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/VerifyCitationsHandler.cs` + 1 seed row (`infra/dataverse/sprk_analysistool-citation-verify-row.json`)
-- **Hardcoded block to remove**: `SprkChatAgentFactory.cs` lines ~1223-1265 (`--- VerifyCitationsTool ---`)
-- **Uses Wave 7b infra**: capability filter via `sprk_requiredcapability = "verify_citations"` (matches existing `PlaybookCapabilities.VerifyCitations`)
-- **Single LLM function**: 1 row, no method dispatch needed
-- **Capability gate preserved**: row sets `sprk_requiredcapability = "verify_citations"` — Wave 7b filter ensures only playbooks with that capability see the tool
-- **Descriptive toolcode**: `CITATION-VERIFY`
+### Pattern (apply to each)
+- NEW `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/{Tool}Handler.cs` returning `ToolResult { Metadata = { citations, widget } }`
+- Remove hardcoded block in `SprkChatAgentFactory.cs` (registration replaced by data-driven row enumeration)
+- NEW `infra/dataverse/sprk_analysistool-{toolcode}-row.json` seed row(s) — descriptive UPPER-KEBAB-CASE toolcode (no `@v1` suffix)
+- Set `sprk_requiredcapability` correctly: null if open to all playbooks; capability key if gated (LegalResearch likely gated)
+- Append `$RowFiles` map entry in `scripts/Seed-TypedHandlers.ps1`
+- Unit tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/{Tool}HandlerTests.cs`
+- Bookkeeping note `projects/spaarke-ai-platform-unification-r6/notes/wave-08-{tool}-migration.md`
 
-### Both agents must
-- Follow project CLAUDE.md "ADRs Are Defaults" principle — stop-and-surface on any new trade-off
-- Use bookkeeping pattern: write `projects/spaarke-ai-platform-unification-r6/notes/wave-07c-{handler}-migration.md`; NOT touch current-task.md or TASK-INDEX.md
-- Add to `scripts/Seed-TypedHandlers.ps1` `$RowFiles` map (append-only)
-- Run idempotent seed deploy + MCP verify
-- Add unit tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/{Handler}Tests.cs`
+### Dispatch decision (parallel vs serial)
+4 sub-agents working in different handler files = parallel-safe. All edit the same `SprkChatAgentFactory.cs` to remove their hardcoded blocks → file-overlap risk. **Recommended**: dispatch 4 in parallel BUT each agent only removes their own labeled `--- {Tool}Tools ---` block; main session resolves any merge artifacts in factory file before commit.
 
-### After Wave 7c completes (main session)
-- Build verify (`dotnet build src/server/api/Sprk.Bff.Api/`)
-- Test verify (`dotnet test tests/unit/Sprk.Bff.Api.Tests/`)
-- Commit + push as one Wave 7c commit
-- Proceed to Wave 8 (4 citation/SSE-state migrations using same pattern)
+### Stop-and-surface triggers
+Per CLAUDE.md "ADRs Are Defaults" principle. Likely triggers in Wave 8:
+- Tool needs streaming chat-tool contract (defer to Wave 9 ADR-032 path) → surface, don't extend interface unilaterally
+- Tool has per-session stateful coupling beyond ChatInvocationContext → surface
+- Tool requires new ChatInvocationContext field → name the field + scope, then proceed (low risk; same pattern as Wave 7c KnowledgeScope)
+
+### After Wave 8 completes (main session)
+- Build verify
+- Full handler+adapter sweep verify
+- Commit + push as one Wave 8 commit
+- Proceed to Wave 9 (ADR-032 + WorkingDocumentTools)
 
 ---
 
@@ -196,10 +197,10 @@ Memory files at `C:\Users\RalphSchroeder\.claude\projects\c--code-files-spaarke-
 When context returns:
 
 1. **First**: read this file's "Quick Recovery" section
-2. **Verify clean state**: `git status` (should show working tree clean; last commit `66da08ca`)
+2. **Verify clean state**: `git status` (should show working tree clean; last commit `52201189`)
 3. **Verify branch**: `git branch --show-current` should show `work/spaarke-ai-platform-unification-r6`
-4. **Continue with Wave 7c**: dispatch 2 parallel sub-agents per "Wave 7c Dispatch Plan" section above
-5. **After Wave 7c**: build verify + commit + push; then Wave 8 (4 parallel handler migrations)
+4. **Continue with Wave 8**: dispatch 4 parallel sub-agents per "Wave 8 Dispatch Plan" section above
+5. **After Wave 8**: build verify + commit + push; then Wave 9 (ADR-032 + WorkingDocumentTools)
 
 To get the prior session's full final status: read commit messages from `git log --oneline -15` for the wave-by-wave landed work.
 
