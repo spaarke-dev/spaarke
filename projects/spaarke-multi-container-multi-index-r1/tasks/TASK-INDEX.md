@@ -34,7 +34,7 @@
 | 031 | PCF — `SemanticSearchApiService.search()` includes `searchIndexName` (FR-PCF-02) | D | ✅ | 030 | Group D1 | FULL |
 | 032 | PCF — `NavigationService` includes `searchIndexName` + full filter parity envelope (FR-PCF-03 + FR-PARITY-01) | D + D.1 | ✅ | 030 | Group D1 | FULL |
 | 033 | PCF — 5-location version bump v1.1.73 → v1.1.74 (FR-PCF-04) | D | ✅ | 031, 032 | — | STANDARD |
-| 034 | PCF unit + UI tests (request shape, envelope shape, dark-mode) | D | 🔲 | 033 | — | STANDARD |
+| 034 | PCF unit + UI tests (request shape, envelope shape, dark-mode) | D | ✅ | 033 | — | STANDARD |
 | 035 | PCF build + deploy via `/pcf-deploy` (NFR-10 clean-rebuild) | D — Deploy | 🔲 | 034 | — | STANDARD |
 | 040 | Code page — extend `types/index.ts` `AppUrlParams` + `parseUrlParams.ts` (FR-CP-01) | E — Code page | ✅ | 035 | — | FULL |
 | 041 | Code page — `App.tsx` removes void-discards + seeds filter state (FR-CP-02 + FR-CP-03) | E | ✅ | 040 | — | FULL |
