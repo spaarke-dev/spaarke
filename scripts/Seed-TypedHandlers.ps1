@@ -153,6 +153,14 @@ $RowFiles = @{
     "WORKING-DOC-EDIT"                 = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-edit-row.json"
     "WORKING-DOC-APPEND-SECTION"       = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-append-section-row.json"
     "WORKING-DOC-WRITE-BACK"           = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-write-back-row.json"
+    # R6 Pillar 3 / Q11 / task 021 — InvokePlaybookHandler: single row exposing the generic
+    # invoke_playbook(playbookId, parameters) chat tool. Dispatches to ANY tenant-accessible
+    # playbook via the IInvokePlaybookAi facade (task 020). Replaces the specialized
+    # InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges (deleted in Wave 10 /
+    # task 023). sprk_requiredcapability = null (intentional — generic dispatcher available
+    # to all playbooks; per-playbook authorization enforced inside the facade + the handler's
+    # tenant-visibility check via IPlaybookService). sprk_availableincontexts = Chat (100000001).
+    "INVOKE-PLAYBOOK"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-invoke-playbook-row.json"
 }
 
 # -----------------------------------------------------------------------------
