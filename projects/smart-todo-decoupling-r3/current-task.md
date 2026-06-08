@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-07 (wave 2 complete; awaiting human decisions on escalation + environment coordination)
+> **Last Updated**: 2026-06-08 (R3 32/46 tasks done; PR #373 open with auto-merge; **READ `notes/resume-point-2026-06-08.md` FIRST**)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 013 — LegalWorkspace legacy to-do refactor |
-| **Step** | Context loaded; starting Step 1 (inventory) |
-| **Status** | FULL rigor. 13 files surveyed; planning complete. About to execute. |
-| **Next Action** | Step 1: Inventory legacy refs in LegalWorkspace (done — 13 files). Then begin refactor: types → queryHelpers → DataverseService → hooks → SmartToDo widget → CreateTodo → CreateWorkAssignment → ActivityFeed → QuickSummary → xrmProvider. |
+| **Task** | none (R3 PR #373 awaiting auto-merge) |
+| **Step** | Session-end checkpoint |
+| **Status** | 32/46 tasks done. PR auto-merge enabled (SQUASH). BFF + SmartTodo deployed to spaarkedev1. Outlook end-to-end functional. |
+| **Next Action** | **READ `projects/smart-todo-decoupling-r3/notes/resume-point-2026-06-08.md`** for full state-snapshot. After PR merges: pick from 14 remaining tasks (most blocked on task 015 AAD scope add by user) OR start follow-on project. |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
