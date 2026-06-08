@@ -270,6 +270,8 @@ public class AnalysisResultPersistence
             Source: "AnalysisOrchestration",
             CorrelationId: analysisId);
 
-        await _postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, cancellationToken);
+        // App-only path: re-indexing after AI analysis. Originally an MI-uploaded file path
+        // (writer-identity rule per sdap-auth-patterns.md Pattern 4).
+        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, cancellationToken);
     }
 }

@@ -367,6 +367,12 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>(_ =>
             null!); // not exercised by upload tests
 
+        // IPostUploadIndexingEnqueuer is needed by PersistDocumentAsync (Phase 3a — sync OBO
+        // post-upload indexing). Same registration pattern as SpeFileStore above — endpoint
+        // parameter binding requires the type to resolve at startup; not exercised by upload tests.
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(_ =>
+            Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>());
+
         builder.WebHost.UseTestServer();
         _app = builder.Build();
 

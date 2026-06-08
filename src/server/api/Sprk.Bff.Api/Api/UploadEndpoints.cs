@@ -93,7 +93,7 @@ public static class UploadEndpoints
                         Source: "DirectContainerUpload",
                         CorrelationId: traceId);
 
-                    await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, ct);
+                    await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, context, ct);
                 }
 
                 // Fire-and-forget: create notification for the uploading user (must not block response)

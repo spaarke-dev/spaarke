@@ -38,15 +38,13 @@ public static class AnalysisServicesModule
         services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
 
         // multi-container-multi-index-r1 upload-indexing-centralization (scope extension) — TRULY UNCONDITIONAL.
-        // IPostUploadIndexingEnqueuer is the single seam for post-upload RAG indexing. Wired into 5 BFF
-        // upload endpoints (Phase 3) so every file written to SPE through the BFF gets enqueued for tenant
-        // indexing automatically. Depends only on JobSubmissionService (Singleton) + IOptions + ILogger —
-        // all singleton-friendly. Lifetime: Singleton (stateless; usable from BackgroundService consumers
-        // like UploadFinalizationWorker without scope juggling).
+        // IPostUploadIndexingEnqueuer is the single seam for post-upload RAG indexing.
+        // Phase 3 (2026-06-08) — dispatches sync OBO indexing via IFileIndexingService.IndexFileAsync
+        // (Pattern 4 — see sdap-auth-patterns.md). Scoped lifetime because IFileIndexingService is scoped.
         // See projects/spaarke-multi-container-multi-index-r1/notes/upload-indexing-centralization-design.md.
         services.Configure<Sprk.Bff.Api.Configuration.PostUploadIndexingOptions>(
             configuration.GetSection(Sprk.Bff.Api.Configuration.PostUploadIndexingOptions.SectionName));
-        services.AddSingleton<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
+        services.AddScoped<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
 
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)

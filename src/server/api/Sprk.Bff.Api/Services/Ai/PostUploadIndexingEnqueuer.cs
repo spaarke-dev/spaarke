@@ -8,31 +8,49 @@ namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
 /// Default implementation of <see cref="IPostUploadIndexingEnqueuer"/>.
-/// Extracts the canonical enqueue pattern previously duplicated across
-/// <c>UploadFinalizationWorker</c>, <c>IncomingCommunicationProcessor</c>,
-/// <c>AnalysisResultPersistence</c>, <c>DeliverToIndexNodeExecutor</c>,
-/// <c>KnowledgeBaseEndpoints</c>, and <c>RagEndpoints.IndexFile</c>.
+/// Dispatches RAG indexing synchronously in the OBO request scope via
+/// <see cref="IFileIndexingService.IndexFileAsync"/>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Lifetime: <b>Scoped</b>. Matches <see cref="JobSubmissionService"/> +
-/// downstream consumer expectations (per-request DI graph).
+/// **History**: Originally (Phase 1 — commit fd9dda7d) this helper enqueued
+/// a Service Bus job via <c>JobSubmissionService.SubmitJobAsync</c> consumed by
+/// <c>RagIndexingJobHandler</c> running under MI auth. UAT (2026-06-08) revealed
+/// the MI handler 403'd on user-OBO-uploaded files — SPE container ACLs include
+/// the writer's identity, and Spaarke's MI is intentionally NOT registered on
+/// the container type as a guest app (per <c>sdap-auth-patterns.md</c> Pattern 4
+/// + <c>managed-identity-resource-rbac.md</c>).
 /// </para>
 /// <para>
-/// See <c>projects/spaarke-multi-container-multi-index-r1/notes/upload-indexing-centralization-design.md</c>
-/// §3 + §4 for the full architecture + 11 fail-protection features.
+/// **Fix**: dispatch synchronously inline using <see cref="IFileIndexingService.IndexFileAsync"/>
+/// which uses OBO (user's token, threaded through <see cref="HttpContext"/>). This is the same
+/// path that the production <c>/api/ai/rag/index-file</c> and <c>/api/ai/rag/send-to-index</c>
+/// endpoints have always used — and that DocumentUploadWizard's <c>uploadOrchestrator.triggerRagIndexing</c>
+/// already calls. The 4 Create* wizards (Matter / Project / WorkAssignment / Event) now converge on
+/// this same proven OBO indexing path through this helper.
+/// </para>
+/// <para>
+/// **Trade-off**: upload request now waits ~5-10 s for indexing to complete (chunk + embed + write
+/// to AI Search). The "fast response + async indexing" goal of Phase 1's design is impossible to
+/// honor with the existing SPE permission model — async would require either MI guest-app
+/// registration on the container type (architectural deviation from Pattern 4) or OBO token
+/// persistence (complex; tokens expire).
+/// </para>
+/// <para>
+/// **Lifetime**: <b>Scoped</b> (changed from Singleton in Phase 1). Required because
+/// <see cref="IFileIndexingService"/> is scoped — it depends on per-request services.
 /// </para>
 /// </remarks>
 public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
 {
-    // Content-type prefixes that have no extractable text (skip enqueue).
+    // Content-type prefixes that have no extractable text (skip indexing).
     private static readonly string[] SkipPrefixes =
     {
         "video/",
         "audio/",
     };
 
-    // Exact content types that are non-indexable archives (skip enqueue).
+    // Exact content types that are non-indexable archives.
     private static readonly HashSet<string> SkipExact = new(StringComparer.OrdinalIgnoreCase)
     {
         "application/zip",
@@ -44,23 +62,25 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         "application/gzip",
     };
 
-    // Extensions to skip when content-type is octet-stream or missing (binaries that
-    // can't be text-indexed). Note: .msg / .eml are NOT in this list — they may carry
-    // extractable text. .pdf is NOT here — OCR may still work for scanned PDFs.
+    // Extensions to skip when content-type is octet-stream or missing.
+    // NOTE: .msg / .eml / .pdf are intentionally NOT in this list.
     private static readonly HashSet<string> SkipExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".exe", ".dll", ".bin", ".iso", ".dmg", ".img", ".so", ".dylib",
     };
 
+    private readonly IFileIndexingService _fileIndexingService;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly IOptions<PostUploadIndexingOptions> _options;
     private readonly ILogger<PostUploadIndexingEnqueuer> _logger;
 
     public PostUploadIndexingEnqueuer(
+        IFileIndexingService fileIndexingService,
         JobSubmissionService jobSubmissionService,
         IOptions<PostUploadIndexingOptions> options,
         ILogger<PostUploadIndexingEnqueuer> logger)
     {
+        _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -68,27 +88,29 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
 
     public async Task<PostUploadIndexingResult> EnqueueIfApplicableAsync(
         PostUploadIndexingRequest request,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(httpContext);
 
         var opts = _options.Value;
 
-        // 1. Feature flag — emergency disable (§4.10)
+        // 1. Feature flag — emergency disable
         if (!opts.PostUploadEnqueueEnabled)
         {
             _logger.LogInformation(
-                "Skipping RAG enqueue: feature flag Indexing:PostUploadEnqueueEnabled is off " +
+                "Skipping RAG indexing: feature flag Indexing:PostUploadEnqueueEnabled is off " +
                 "(File={FileName} Source={Source} CorrelationId={CorrelationId})",
                 request.FileName, request.Source, request.CorrelationId);
             return PostUploadIndexingResult.Skipped("FeatureFlagDisabled");
         }
 
-        // 2. Tenant context required (§4.7) — missing indicates misconfigured upload path
+        // 2. Tenant context required — missing indicates misconfigured upload path
         if (string.IsNullOrWhiteSpace(request.TenantId))
         {
             _logger.LogError(
-                "Skipping RAG enqueue: TenantId is missing — likely misconfigured upload path " +
+                "Skipping RAG indexing: TenantId is missing — likely misconfigured upload path " +
                 "(File={FileName} DriveId={DriveId} ItemId={ItemId} Source={Source} CorrelationId={CorrelationId})",
                 request.FileName, request.DriveId, request.ItemId, request.Source, request.CorrelationId);
             return PostUploadIndexingResult.Skipped("MissingTenantId");
@@ -98,19 +120,19 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         if (string.IsNullOrWhiteSpace(request.DriveId) || string.IsNullOrWhiteSpace(request.ItemId))
         {
             _logger.LogWarning(
-                "Skipping RAG enqueue: DriveId or ItemId is empty " +
+                "Skipping RAG indexing: DriveId or ItemId is empty " +
                 "(File={FileName} DriveId={DriveId} ItemId={ItemId} Source={Source} CorrelationId={CorrelationId})",
                 request.FileName, request.DriveId, request.ItemId, request.Source, request.CorrelationId);
             return PostUploadIndexingResult.Skipped("MissingSpeIdentifiers");
         }
 
-        // 4-5. Size-based skips only run when caller knows the size (§4.4, §4.5).
+        // 4-5. Size-based skips only run when caller knows the size.
         if (request.FileSizeBytes.HasValue)
         {
             if (request.FileSizeBytes.Value == 0)
             {
                 _logger.LogInformation(
-                    "Skipping RAG enqueue: file is empty " +
+                    "Skipping RAG indexing: file is empty " +
                     "(File={FileName} Source={Source} CorrelationId={CorrelationId})",
                     request.FileName, request.Source, request.CorrelationId);
                 return PostUploadIndexingResult.Skipped("EmptyFile");
@@ -119,27 +141,28 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
             if (request.FileSizeBytes.Value > opts.MaxIndexableBytes)
             {
                 _logger.LogInformation(
-                    "Skipping RAG enqueue: file exceeds MaxIndexableBytes " +
+                    "Skipping RAG indexing: file exceeds MaxIndexableBytes " +
                     "(File={FileName} SizeBytes={SizeBytes} MaxBytes={MaxBytes} Source={Source} CorrelationId={CorrelationId})",
                     request.FileName, request.FileSizeBytes.Value, opts.MaxIndexableBytes, request.Source, request.CorrelationId);
                 return PostUploadIndexingResult.Skipped("FileTooLarge");
             }
         }
 
-        // 6. Content-type / extension skip-list (§4.3)
+        // 6. Content-type / extension skip-list
         if (IsNonIndexableContent(request.ContentType, request.FileName))
         {
             _logger.LogInformation(
-                "Skipping RAG enqueue: content type / extension is non-indexable " +
+                "Skipping RAG indexing: content type / extension is non-indexable " +
                 "(File={FileName} ContentType={ContentType} Source={Source} CorrelationId={CorrelationId})",
                 request.FileName, request.ContentType ?? "(null)", request.Source, request.CorrelationId);
             return PostUploadIndexingResult.Skipped("NonIndexableContentType");
         }
 
-        // 7. Build + submit the job. Non-fatal try/catch — RAG indexing must NEVER fail the upload (§4.1)
+        // 7. Dispatch — synchronous OBO indexing via IFileIndexingService. Non-fatal try/catch:
+        //    RAG indexing must NEVER fail the upload contract with the caller.
         try
         {
-            var jobPayload = new RagIndexingJobPayload
+            var fileIndexRequest = new FileIndexRequest
             {
                 TenantId = request.TenantId,
                 DriveId = request.DriveId,
@@ -147,32 +170,13 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 FileName = request.FileName,
                 DocumentId = request.DocumentId,
                 ParentEntity = request.ParentEntity,
-                SearchIndexName = request.SearchIndexName, // null is OK — handler runs ISearchIndexNameResolver chain (§4.6)
-                Source = request.Source,
-                EnqueuedAt = DateTimeOffset.UtcNow,
+                SearchIndexName = request.SearchIndexName,
             };
 
-            var job = new JobContract
-            {
-                JobId = Guid.NewGuid(),
-                JobType = RagIndexingJobHandler.JobTypeName,
-                SubjectId = request.DocumentId ?? request.ItemId,
-                CorrelationId = request.CorrelationId,
-                IdempotencyKey = $"rag-index-{request.DriveId}-{request.ItemId}", // §4.2
-                Attempt = 1,
-                MaxAttempts = 3,
-                CreatedAt = DateTimeOffset.UtcNow,
-                Payload = JsonDocument.Parse(JsonSerializer.Serialize(jobPayload)),
-            };
-
-            await _jobSubmissionService.SubmitJobAsync(job, ct);
-
-            // §4.9 observability — single structured log line per successful enqueue
             _logger.LogInformation(
-                "[PostUploadIndexingEnqueuer] Enqueued RAG indexing job {JobId} for {FileName} " +
+                "[PostUploadIndexingEnqueuer] Starting sync OBO indexing for {FileName} " +
                 "(DriveId={DriveId} ItemId={ItemId} DocumentId={DocumentId} " +
                 "SearchIndexName={SearchIndexName} Source={Source} TenantId={TenantId} CorrelationId={CorrelationId})",
-                job.JobId,
                 request.FileName,
                 request.DriveId,
                 request.ItemId,
@@ -182,14 +186,37 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 request.TenantId,
                 request.CorrelationId);
 
-            return PostUploadIndexingResult.Submitted(job.JobId);
+            var result = await _fileIndexingService.IndexFileAsync(fileIndexRequest, httpContext, ct);
+
+            if (result.Success)
+            {
+                _logger.LogInformation(
+                    "[PostUploadIndexingEnqueuer] OBO indexing succeeded for {FileName} — {ChunksIndexed} chunks in {DurationMs} ms " +
+                    "(DocumentId={DocumentId} Source={Source} CorrelationId={CorrelationId})",
+                    request.FileName,
+                    result.ChunksIndexed,
+                    (int)result.Duration.TotalMilliseconds,
+                    request.DocumentId ?? "(none)",
+                    request.Source,
+                    request.CorrelationId);
+                return PostUploadIndexingResult.Submitted(Guid.NewGuid());
+            }
+
+            _logger.LogWarning(
+                "[PostUploadIndexingEnqueuer] OBO indexing returned failure for {FileName}: {Error} " +
+                "(Source={Source} CorrelationId={CorrelationId})",
+                request.FileName,
+                result.ErrorMessage ?? "(no message)",
+                request.Source,
+                request.CorrelationId);
+            return PostUploadIndexingResult.Failed(result.ErrorMessage ?? "IndexingFailed");
         }
         catch (Exception ex)
         {
-            // §4.1 non-fatal: log + swallow. The SPE upload already succeeded; indexing is best-effort.
-            // Operator can re-trigger manually via POST /api/ai/rag/index-file (§4.11).
+            // Non-fatal: log + swallow. The SPE upload already succeeded; indexing is best-effort.
+            // Operator can re-trigger manually via POST /api/ai/rag/send-to-index (the ribbon command).
             _logger.LogWarning(ex,
-                "[PostUploadIndexingEnqueuer] Failed to enqueue RAG indexing for {FileName} " +
+                "[PostUploadIndexingEnqueuer] OBO indexing threw for {FileName} " +
                 "(DriveId={DriveId} ItemId={ItemId} Source={Source} CorrelationId={CorrelationId}): {Error}",
                 request.FileName,
                 request.DriveId,
@@ -201,13 +228,109 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<PostUploadIndexingResult> EnqueueAppOnlyIfApplicableAsync(
+        PostUploadIndexingRequest request,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var opts = _options.Value;
+
+        // Same applicability checks as the OBO path
+        if (!opts.PostUploadEnqueueEnabled)
+        {
+            _logger.LogInformation(
+                "Skipping app-only RAG enqueue: feature flag disabled (File={FileName} Source={Source})",
+                request.FileName, request.Source);
+            return PostUploadIndexingResult.Skipped("FeatureFlagDisabled");
+        }
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+        {
+            _logger.LogError(
+                "Skipping app-only RAG enqueue: TenantId missing (File={FileName} Source={Source})",
+                request.FileName, request.Source);
+            return PostUploadIndexingResult.Skipped("MissingTenantId");
+        }
+        if (string.IsNullOrWhiteSpace(request.DriveId) || string.IsNullOrWhiteSpace(request.ItemId))
+        {
+            _logger.LogWarning(
+                "Skipping app-only RAG enqueue: missing SPE identifiers (File={FileName} Source={Source})",
+                request.FileName, request.Source);
+            return PostUploadIndexingResult.Skipped("MissingSpeIdentifiers");
+        }
+        if (request.FileSizeBytes.HasValue)
+        {
+            if (request.FileSizeBytes.Value == 0)
+            {
+                return PostUploadIndexingResult.Skipped("EmptyFile");
+            }
+            if (request.FileSizeBytes.Value > opts.MaxIndexableBytes)
+            {
+                return PostUploadIndexingResult.Skipped("FileTooLarge");
+            }
+        }
+        if (IsNonIndexableContent(request.ContentType, request.FileName))
+        {
+            return PostUploadIndexingResult.Skipped("NonIndexableContentType");
+        }
+
+        // Dispatch via Service Bus — non-fatal try/catch.
+        // This is the Phase 1 pattern. MUST only be called for MI-written files
+        // (Office Add-in finalize, Email-to-Document, post-analysis re-index).
+        try
+        {
+            var jobPayload = new RagIndexingJobPayload
+            {
+                TenantId = request.TenantId,
+                DriveId = request.DriveId,
+                ItemId = request.ItemId,
+                FileName = request.FileName,
+                DocumentId = request.DocumentId,
+                ParentEntity = request.ParentEntity,
+                SearchIndexName = request.SearchIndexName,
+                Source = request.Source,
+                EnqueuedAt = DateTimeOffset.UtcNow,
+            };
+
+            var job = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = RagIndexingJobHandler.JobTypeName,
+                SubjectId = request.DocumentId ?? request.ItemId,
+                CorrelationId = request.CorrelationId,
+                IdempotencyKey = $"rag-index-{request.DriveId}-{request.ItemId}",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(jobPayload)),
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(job, ct);
+
+            _logger.LogInformation(
+                "[PostUploadIndexingEnqueuer] Enqueued app-only RAG indexing job {JobId} for {FileName} " +
+                "(DriveId={DriveId} ItemId={ItemId} DocumentId={DocumentId} Source={Source})",
+                job.JobId, request.FileName, request.DriveId, request.ItemId,
+                request.DocumentId ?? "(none)", request.Source);
+
+            return PostUploadIndexingResult.Submitted(job.JobId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[PostUploadIndexingEnqueuer] Failed to enqueue app-only RAG indexing for {FileName}: {Error}",
+                request.FileName, ex.Message);
+            return PostUploadIndexingResult.Failed(ex.GetType().Name);
+        }
+    }
+
     /// <summary>
     /// Returns true if the content type / file extension indicates the file has no
-    /// extractable text and should not be enqueued for indexing.
+    /// extractable text and should not be indexed.
     /// </summary>
     /// <remarks>
-    /// <para>Conservative: when in doubt, returns false (let the handler attempt extraction).</para>
-    /// <para>.msg / .eml / .pdf are intentionally NOT skipped — see §8.5.2 of the design doc.</para>
+    /// .msg / .eml / .pdf are intentionally NOT skipped.
     /// </remarks>
     private static bool IsNonIndexableContent(string? contentType, string fileName)
     {
@@ -227,7 +350,6 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
             }
         }
 
-        // If content-type is missing or octet-stream, fall back to extension skip-list for known binaries.
         var isOctetStreamOrMissing = string.IsNullOrWhiteSpace(contentType) ||
             string.Equals(contentType, "application/octet-stream", StringComparison.OrdinalIgnoreCase);
 

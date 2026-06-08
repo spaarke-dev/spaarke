@@ -765,7 +765,7 @@ public static class ChatDocumentEndpoints
                     Source: "ChatPersist",
                     CorrelationId: httpContext.TraceIdentifier);
 
-                await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, httpContext.RequestAborted);
+                await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, httpContext, httpContext.RequestAborted);
             }
             catch (Exception ex)
             {

@@ -42,15 +42,47 @@ namespace Sprk.Bff.Api.Services.Ai;
 public interface IPostUploadIndexingEnqueuer
 {
     /// <summary>
-    /// Enqueues a RAG indexing job for the just-uploaded SPE file if all
-    /// applicability checks pass. Never throws.
+    /// Synchronously indexes a USER-OBO-uploaded SPE file in the OBO request scope
+    /// via <see cref="IFileIndexingService.IndexFileAsync"/>. Use from BFF endpoints
+    /// that handle user-initiated uploads (Create* wizards, SprkChat persist).
     /// </summary>
     /// <param name="request">Upload outcome + context. <see cref="PostUploadIndexingRequest.TenantId"/>,
     /// <see cref="PostUploadIndexingRequest.DriveId"/>, <see cref="PostUploadIndexingRequest.ItemId"/>,
-    /// and <see cref="PostUploadIndexingRequest.FileName"/> are required for a viable enqueue.</param>
+    /// and <see cref="PostUploadIndexingRequest.FileName"/> are required.</param>
+    /// <param name="httpContext">HTTP context — required for OBO token extraction. The indexing
+    /// runs as the user (same identity that just wrote the file to SPE), which is the only identity
+    /// guaranteed read access on the file's SPE ACL (per <c>sdap-auth-patterns.md</c> Pattern 4).</param>
     /// <param name="ct">Cancellation token (request-scope).</param>
-    /// <returns>Result indicating whether the job was submitted, skipped, or failed.</returns>
+    /// <returns>Result indicating whether indexing succeeded, was skipped, or failed.</returns>
+    /// <remarks>
+    /// **SPE writer-identity rule** (per Pattern 4): user-OBO-uploaded files can ONLY be read by
+    /// the same user, unless the reader's app id is explicitly registered on the SPE container type.
+    /// Spaarke's MI is intentionally NOT registered. Therefore this method MUST dispatch synchronously
+    /// in the OBO request scope. NEVER enqueue a Service Bus job for a user-OBO-uploaded file — the
+    /// MI-based handler will 403 on the SPE download.
+    /// </remarks>
     Task<PostUploadIndexingResult> EnqueueIfApplicableAsync(
+        PostUploadIndexingRequest request,
+        HttpContext httpContext,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Asynchronously enqueues RAG indexing of an MI-WRITTEN SPE file via Service Bus.
+    /// Use from background workers (<c>UploadFinalizationWorker</c>,
+    /// <c>IncomingCommunicationProcessor</c>, <c>AnalysisResultPersistence</c>) where
+    /// the file was written by MI itself — MI can read its own writes via the SPE ACL.
+    /// </summary>
+    /// <param name="request">Indexing request. Same shape as the OBO method.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Result indicating whether the job was submitted, skipped, or failed.</returns>
+    /// <remarks>
+    /// **SPE writer-identity rule** (per Pattern 4): this method may ONLY be called from contexts
+    /// where the file in question was written by the BFF's Managed Identity (Office Add-in
+    /// finalization, Email-to-Document processing, internal AI workflow re-index). Calling this
+    /// for user-OBO-uploaded files will 403 when the Service Bus job handler attempts the SPE
+    /// download under MI auth.
+    /// </remarks>
+    Task<PostUploadIndexingResult> EnqueueAppOnlyIfApplicableAsync(
         PostUploadIndexingRequest request,
         CancellationToken ct);
 }

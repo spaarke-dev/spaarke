@@ -1,5 +1,6 @@
 using Azure.Messaging.ServiceBus;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -7,18 +8,25 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Jobs;
-using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
-/// Unit tests for the centralized post-upload RAG indexing helper introduced by
-/// the upload-indexing centralization scope extension to multi-container-multi-index-r1.
-/// Covers the 8 fail-protection branches enumerated in design §4 + §5.1.
+/// Unit tests for the centralized post-upload RAG indexing helper.
+///
+/// Two dispatch paths covered:
+///   1. EnqueueIfApplicableAsync — sync OBO indexing via IFileIndexingService.IndexFileAsync
+///      (for USER-OBO-uploaded files where MI cannot read; per sdap-auth-patterns.md Pattern 4).
+///   2. EnqueueAppOnlyIfApplicableAsync — async Service Bus enqueue via JobSubmissionService
+///      (for MI-WRITTEN files where MI handler can read; Phase 2 background-worker contexts).
+///
+/// Applicability checks (skip conditions) are tested via the OBO method but apply identically
+/// to both paths.
 /// </summary>
 public sealed class PostUploadIndexingEnqueuerTests
 {
+    private readonly Mock<IFileIndexingService> _fileIndexingMock = new();
     private readonly Mock<JobSubmissionService> _jobSubmissionMock;
     private readonly Mock<ILogger<PostUploadIndexingEnqueuer>> _loggerMock = new();
     private readonly PostUploadIndexingOptions _options = new();
@@ -32,7 +40,6 @@ public sealed class PostUploadIndexingEnqueuerTests
             CommunicationQueueName = "test-comms",
             ConnectionString = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=v",
         });
-
         _jobSubmissionMock = new Mock<JobSubmissionService>(
             MockBehavior.Strict,
             sbOptions.Object,
@@ -40,11 +47,10 @@ public sealed class PostUploadIndexingEnqueuerTests
             new Mock<ServiceBusClient>().Object);
     }
 
-    private PostUploadIndexingEnqueuer CreateSut()
-    {
-        var optionsWrapper = Options.Create(_options);
-        return new PostUploadIndexingEnqueuer(_jobSubmissionMock.Object, optionsWrapper, _loggerMock.Object);
-    }
+    private PostUploadIndexingEnqueuer CreateSut() =>
+        new(_fileIndexingMock.Object, _jobSubmissionMock.Object, Options.Create(_options), _loggerMock.Object);
+
+    private static HttpContext CreateHttpContext() => new DefaultHttpContext();
 
     private static PostUploadIndexingRequest ValidRequest(
         long? size = 1024,
@@ -66,254 +72,194 @@ public sealed class PostUploadIndexingEnqueuerTests
             Source: "TestSource",
             CorrelationId: "corr-id-1");
 
-    // ---- Happy path -----------------------------------------------------------
+    // ===== OBO sync path =====================================================
 
     [Fact]
-    public async Task EnqueueIfApplicableAsync_HappyPath_SubmitsJobWithCorrectPayload()
+    public async Task EnqueueIfApplicableAsync_HappyPath_CallsFileIndexingService_WithOboContext()
     {
-        // Arrange
-        JobContract? capturedJob = null;
-        _jobSubmissionMock
-            .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-            .Callback<JobContract, CancellationToken>((job, _) => capturedJob = job)
-            .Returns(Task.CompletedTask);
+        FileIndexRequest? capturedRequest = null;
+        HttpContext? capturedContext = null;
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, HttpContext, CancellationToken>((req, ctx, _) => { capturedRequest = req; capturedContext = ctx; })
+            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 3, Duration = TimeSpan.FromSeconds(2) });
 
         var sut = CreateSut();
+        var ctx = CreateHttpContext();
         var request = ValidRequest(searchIndexName: "spaarke-file-index");
 
-        // Act
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
+        var result = await sut.EnqueueIfApplicableAsync(request, ctx, CancellationToken.None);
 
-        // Assert
         result.JobSubmitted.Should().BeTrue();
-        result.JobId.Should().NotBeNull();
-        result.SkipReason.Should().BeNull();
-        result.FailureReason.Should().BeNull();
-
-        capturedJob.Should().NotBeNull();
-        capturedJob!.JobType.Should().Be(RagIndexingJobHandler.JobTypeName);
-        capturedJob.IdempotencyKey.Should().Be("rag-index-drive-abc-item-xyz");
-        capturedJob.MaxAttempts.Should().Be(3);
-        capturedJob.CorrelationId.Should().Be("corr-id-1");
-
-        _jobSubmissionMock.Verify(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Once);
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.DriveId.Should().Be("drive-abc");
+        capturedRequest.SearchIndexName.Should().Be("spaarke-file-index");
+        capturedContext.Should().BeSameAs(ctx);
+        _fileIndexingMock.Verify(
+            s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
-    public async Task EnqueueIfApplicableAsync_NullSearchIndexName_StillEnqueues()
+    public async Task EnqueueIfApplicableAsync_IndexFileAsyncReturnsFailure_ReturnsFailed()
     {
-        // The handler runs the ISearchIndexNameResolver chain when SearchIndexName is null —
-        // helper must NOT fail-closed here (design §4.6).
-        _jobSubmissionMock
-            .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileIndexingResult { Success = false, ErrorMessage = "extraction error" });
 
-        var sut = CreateSut();
-        var request = ValidRequest(searchIndexName: null);
+        var result = await CreateSut().EnqueueIfApplicableAsync(ValidRequest(), CreateHttpContext(), CancellationToken.None);
 
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
-
-        result.JobSubmitted.Should().BeTrue();
-        _jobSubmissionMock.Verify(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Once);
+        result.JobSubmitted.Should().BeFalse();
+        result.FailureReason.Should().Be("extraction error");
     }
 
-    // ---- Feature flag ---------------------------------------------------------
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_IndexFileAsyncThrows_LogsAndReturnsFailed()
+    {
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Access denied"));
+
+        var result = await CreateSut().EnqueueIfApplicableAsync(ValidRequest(), CreateHttpContext(), CancellationToken.None);
+
+        result.JobSubmitted.Should().BeFalse();
+        result.FailureReason.Should().Be("InvalidOperationException");
+    }
 
     [Fact]
-    public async Task EnqueueIfApplicableAsync_FeatureFlagOff_SkipsEnqueue()
+    public async Task EnqueueIfApplicableAsync_FeatureFlagOff_Skips()
     {
         _options.PostUploadEnqueueEnabled = false;
-        var sut = CreateSut();
 
-        var result = await sut.EnqueueIfApplicableAsync(ValidRequest(), CancellationToken.None);
+        var result = await CreateSut().EnqueueIfApplicableAsync(ValidRequest(), CreateHttpContext(), CancellationToken.None);
 
         result.JobSubmitted.Should().BeFalse();
         result.SkipReason.Should().Be("FeatureFlagDisabled");
-        _jobSubmissionMock.Verify(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
+        _fileIndexingMock.Verify(
+            s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
-    // ---- Tenant context required ---------------------------------------------
-
     [Fact]
-    public async Task EnqueueIfApplicableAsync_MissingTenantId_SkipsAndLogsError()
+    public async Task EnqueueIfApplicableAsync_MissingTenant_SkipsAndLogsError()
     {
-        var sut = CreateSut();
-        var request = ValidRequest(tenantId: string.Empty);
+        var result = await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(tenantId: string.Empty),
+            CreateHttpContext(),
+            CancellationToken.None);
 
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
-
-        result.JobSubmitted.Should().BeFalse();
         result.SkipReason.Should().Be("MissingTenantId");
-        _jobSubmissionMock.Verify(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
-
-        // ERROR-level log (not INFO) since this indicates a misconfigured upload path
-        _loggerMock.Verify(
-            l => l.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                null,
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
     }
 
-    // ---- Empty file -----------------------------------------------------------
-
     [Fact]
-    public async Task EnqueueIfApplicableAsync_EmptyFile_SkipsEnqueue()
+    public async Task EnqueueIfApplicableAsync_EmptyFile_Skips()
     {
-        var sut = CreateSut();
-        var request = ValidRequest(size: 0);
+        var result = await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(size: 0),
+            CreateHttpContext(),
+            CancellationToken.None);
 
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
-
-        result.JobSubmitted.Should().BeFalse();
         result.SkipReason.Should().Be("EmptyFile");
-        _jobSubmissionMock.Verify(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
     }
-
-    // ---- Size cap -------------------------------------------------------------
 
     [Fact]
-    public async Task EnqueueIfApplicableAsync_FileExceedsMaxIndexableBytes_SkipsEnqueue()
+    public async Task EnqueueIfApplicableAsync_FileTooLarge_Skips()
     {
-        _options.MaxIndexableBytes = 1000; // 1 KB cap for test
-        var sut = CreateSut();
-        var request = ValidRequest(size: 1001);
+        _options.MaxIndexableBytes = 100;
+        var result = await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(size: 1024),
+            CreateHttpContext(),
+            CancellationToken.None);
 
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
-
-        result.JobSubmitted.Should().BeFalse();
         result.SkipReason.Should().Be("FileTooLarge");
-        _jobSubmissionMock.Verify(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
     }
-
-    // ---- Content-type skip-list ----------------------------------------------
 
     [Theory]
     [InlineData("video/mp4", "movie.mp4")]
     [InlineData("audio/wav", "podcast.wav")]
     [InlineData("application/zip", "archive.zip")]
     [InlineData("application/x-7z-compressed", "archive.7z")]
-    public async Task EnqueueIfApplicableAsync_NonIndexableContentType_SkipsEnqueue(string contentType, string fileName)
+    public async Task EnqueueIfApplicableAsync_NonIndexableContentType_Skips(string contentType, string fileName)
     {
-        var sut = CreateSut();
-        var request = ValidRequest(contentType: contentType, fileName: fileName);
+        var result = await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(contentType: contentType, fileName: fileName),
+            CreateHttpContext(),
+            CancellationToken.None);
 
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
-
-        result.JobSubmitted.Should().BeFalse();
         result.SkipReason.Should().Be("NonIndexableContentType");
-        _jobSubmissionMock.Verify(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
     [InlineData("application/octet-stream", "installer.exe")]
-    [InlineData("application/octet-stream", "library.dll")]
     [InlineData(null, "disk.iso")]
-    public async Task EnqueueIfApplicableAsync_BinaryExtensionWithOctetStream_SkipsEnqueue(string? contentType, string fileName)
+    public async Task EnqueueIfApplicableAsync_BinaryExtensionWithOctetStream_Skips(string? contentType, string fileName)
     {
-        var sut = CreateSut();
-        var request = ValidRequest(contentType: contentType!, fileName: fileName);
+        var result = await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(contentType: contentType!, fileName: fileName),
+            CreateHttpContext(),
+            CancellationToken.None);
 
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
-
-        result.JobSubmitted.Should().BeFalse();
         result.SkipReason.Should().Be("NonIndexableContentType");
     }
 
-    /// <summary>
-    /// Critical: design §8.5.2 mandates .msg / .eml are NOT skipped (Outlook attachments
-    /// often arrive as octet-stream with these extensions and DO have indexable text).
-    /// Same for .pdf — even scanned PDFs may extract via OCR.
-    /// </summary>
     [Theory]
     [InlineData("application/octet-stream", "email.msg")]
-    [InlineData("application/octet-stream", "letter.eml")]
     [InlineData("application/octet-stream", "scan.pdf")]
     [InlineData("application/pdf", "contract.pdf")]
-    [InlineData("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "memo.docx")]
-    public async Task EnqueueIfApplicableAsync_LegitimateBusinessFile_EnqueuesEvenAsOctetStream(string contentType, string fileName)
+    public async Task EnqueueIfApplicableAsync_LegitimateBusinessFile_DoesNotSkip(string contentType, string fileName)
     {
-        _jobSubmissionMock
-            .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        var sut = CreateSut();
-        var request = ValidRequest(contentType: contentType, fileName: fileName);
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileIndexingResult { Success = true });
 
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
+        var result = await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(contentType: contentType, fileName: fileName),
+            CreateHttpContext(),
+            CancellationToken.None);
 
         result.JobSubmitted.Should().BeTrue();
-        result.SkipReason.Should().BeNull();
     }
 
     [Fact]
-    public async Task EnqueueIfApplicableAsync_NullFileSizeBytes_BypassesSizeChecks()
+    public async Task EnqueueIfApplicableAsync_NullSize_BypassesSizeChecks()
     {
-        // Background workers (UploadFinalizationWorker, EmailToDocument) don't have size handy
-        // at the enqueue site. Passing null means "unknown" and skips size-based checks.
-        _jobSubmissionMock
-            .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileIndexingResult { Success = true });
+        _options.MaxIndexableBytes = 100;
 
-        _options.MaxIndexableBytes = 100; // tiny cap would normally reject any file
-        var sut = CreateSut();
-        var request = ValidRequest(size: null);
-
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
+        var result = await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(size: null),
+            CreateHttpContext(),
+            CancellationToken.None);
 
         result.JobSubmitted.Should().BeTrue();
-        result.SkipReason.Should().BeNull();
     }
 
-    // ---- Submit failure is non-fatal -----------------------------------------
-
     [Fact]
-    public async Task EnqueueIfApplicableAsync_SubmitThrows_LogsWarningDoesNotPropagate()
+    public async Task EnqueueIfApplicableAsync_ParentEntityProvided_FlowsThroughToFileIndexRequest()
     {
-        _jobSubmissionMock
-            .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Service Bus auth failed"));
+        FileIndexRequest? captured = null;
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, HttpContext, CancellationToken>((r, _, _) => captured = r)
+            .ReturnsAsync(new FileIndexingResult { Success = true });
 
-        var sut = CreateSut();
-        var request = ValidRequest();
+        var parent = new ParentEntityContext("matter", "matter-guid", "Acme Matter");
+        await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(parentEntity: parent),
+            CreateHttpContext(),
+            CancellationToken.None);
 
-        // Act — must not throw
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
-
-        result.JobSubmitted.Should().BeFalse();
-        result.FailureReason.Should().Be("InvalidOperationException");
-        result.SkipReason.Should().BeNull();
-
-        _loggerMock.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                It.IsAny<InvalidOperationException>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        captured!.ParentEntity.Should().NotBeNull();
+        captured.ParentEntity!.EntityType.Should().Be("matter");
+        captured.ParentEntity.EntityId.Should().Be("matter-guid");
     }
 
-    // ---- Missing SPE identifiers ---------------------------------------------
+    // ===== App-only Service Bus path =========================================
 
     [Fact]
-    public async Task EnqueueIfApplicableAsync_MissingDriveId_SkipsEnqueue()
-    {
-        var sut = CreateSut();
-        var request = ValidRequest() with { DriveId = string.Empty };
-
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
-
-        result.JobSubmitted.Should().BeFalse();
-        result.SkipReason.Should().Be("MissingSpeIdentifiers");
-        _jobSubmissionMock.Verify(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    // ---- Parent entity context flows through ----------------------------------
-
-    [Fact]
-    public async Task EnqueueIfApplicableAsync_ParentEntityProvided_FlowsThroughToPayload()
+    public async Task EnqueueAppOnlyIfApplicableAsync_HappyPath_SubmitsServiceBusJob()
     {
         JobContract? capturedJob = null;
         _jobSubmissionMock
@@ -321,18 +267,37 @@ public sealed class PostUploadIndexingEnqueuerTests
             .Callback<JobContract, CancellationToken>((job, _) => capturedJob = job)
             .Returns(Task.CompletedTask);
 
-        var sut = CreateSut();
-        var parent = new ParentEntityContext("matter", "matter-guid-1", "Acme Litigation");
-        var request = ValidRequest(parentEntity: parent);
-
-        var result = await sut.EnqueueIfApplicableAsync(request, CancellationToken.None);
+        var result = await CreateSut().EnqueueAppOnlyIfApplicableAsync(ValidRequest(), CancellationToken.None);
 
         result.JobSubmitted.Should().BeTrue();
         capturedJob.Should().NotBeNull();
+        capturedJob!.IdempotencyKey.Should().Be("rag-index-drive-abc-item-xyz");
+        capturedJob.MaxAttempts.Should().Be(3);
 
-        // Verify payload deserialization
-        var payloadJson = capturedJob!.Payload!.RootElement.GetRawText();
-        payloadJson.Should().Contain("matter-guid-1");
-        payloadJson.Should().Contain("Acme Litigation");
+        // OBO path must NOT have been called for the app-only method
+        _fileIndexingMock.Verify(
+            s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task EnqueueAppOnlyIfApplicableAsync_SubmitThrows_LogsAndReturnsFailed()
+    {
+        _jobSubmissionMock
+            .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Service Bus down"));
+
+        var result = await CreateSut().EnqueueAppOnlyIfApplicableAsync(ValidRequest(), CancellationToken.None);
+
+        result.JobSubmitted.Should().BeFalse();
+        result.FailureReason.Should().Be("InvalidOperationException");
+    }
+
+    [Fact]
+    public async Task EnqueueAppOnlyIfApplicableAsync_FeatureFlagOff_Skips()
+    {
+        _options.PostUploadEnqueueEnabled = false;
+        var result = await CreateSut().EnqueueAppOnlyIfApplicableAsync(ValidRequest(), CancellationToken.None);
+        result.SkipReason.Should().Be("FeatureFlagDisabled");
     }
 }

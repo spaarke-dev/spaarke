@@ -111,7 +111,7 @@ public static class OBOEndpoints
                         Source: "OboContainerUpload",
                         CorrelationId: ctx.TraceIdentifier);
 
-                    await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, ct);
+                    await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, ctx, ct);
                 }
 
                 return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);

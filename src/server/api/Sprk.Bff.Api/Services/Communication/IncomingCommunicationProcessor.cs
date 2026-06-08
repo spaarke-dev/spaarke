@@ -757,7 +757,9 @@ public sealed class IncomingCommunicationProcessor
             Source: "InboundEmail",
             CorrelationId: communicationId.ToString("N"));
 
-        await _postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, ct);
+        // App-only path: Email-to-Document uploads inbound mail attachments AS MI, so MI can
+        // read them (writer-identity rule per sdap-auth-patterns.md Pattern 4).
+        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct);
     }
 
     /// <summary>

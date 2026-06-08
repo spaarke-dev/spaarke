@@ -1322,7 +1322,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Source: "OfficeAddin",
             CorrelationId: correlationId);
 
-        await _postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, cancellationToken);
+        // App-only path: Office Add-in finalization uploads files AS MI, so MI can read them
+        // (writer-identity rule per sdap-auth-patterns.md Pattern 4).
+        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, cancellationToken);
     }
 
     /// <summary>
