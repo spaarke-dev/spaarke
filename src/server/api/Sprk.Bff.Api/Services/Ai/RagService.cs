@@ -488,8 +488,15 @@ public partial class RagService : IRagService
     }
 
     /// <inheritdoc />
+    public Task<IReadOnlyList<IndexResult>> IndexDocumentsBatchAsync(
+        IEnumerable<KnowledgeDocument> documents,
+        CancellationToken cancellationToken = default)
+        => IndexDocumentsBatchAsync(documents, searchIndexName: null, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<IndexResult>> IndexDocumentsBatchAsync(
         IEnumerable<KnowledgeDocument> documents,
+        string? searchIndexName,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(documents);
@@ -575,13 +582,32 @@ public partial class RagService : IRagService
 
         // Index in batches (Azure AI Search limit is 1000 per batch)
         var deploymentConfig = await _deploymentService.GetDeploymentConfigAsync(tenantId, cancellationToken);
-        var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — when a caller supplies an
+        // explicit searchIndexName, route via the 3-arg GetSearchClientAsync(tenantId, indexName, ct)
+        // overload (Phase B / FR-BFF-01..04). That overload validates against
+        // AiSearchOptions.AllowedIndexes and throws SdapProblemException(INDEX_NOT_ALLOWED, 400)
+        // on miss (FR-BFF-02 / NFR-08). When null/whitespace, fall through to the 2-arg overload
+        // which preserves byte-for-byte NFR-02 backward-compat (existing 2-tier chain).
+        var searchClient = string.IsNullOrWhiteSpace(searchIndexName)
+            ? await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken)
+            : await _deploymentService.GetSearchClientAsync(tenantId, searchIndexName, cancellationToken);
 
         // Observability: surface the write destination for every batch — without this,
         // a misconfigured deployment (wrong index name, wrong model) is invisible to operators.
         _logger.LogInformation(
             "Resolved deployment for tenant {TenantId}: Model={Model}, IndexName={IndexName}, Endpoint={Endpoint}, BatchSize={BatchSize}",
             tenantId, deploymentConfig.Model, deploymentConfig.IndexName, searchClient.Endpoint, documentList.Count);
+
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3, verbose write logging) —
+        // emit a structured-log line at INFO per write batch surfacing the resolved searchIndexName
+        // (the per-record sprk_searchindexname value, or "(tenant-default)" when null) alongside
+        // the Azure Search endpoint. Lets operators audit which physical index each batch landed in
+        // — critical for the UAT scenario where "files in SPE but not in the expected index" was
+        // root-caused by per-record routing not being threaded end-to-end (bff-extensions.md §F.1).
+        _logger.LogInformation(
+            "Indexing batch: TenantId={TenantId} SearchIndexName={SearchIndexName} ResolvedEndpoint={Endpoint} BatchSize={BatchSize}",
+            tenantId, searchIndexName ?? "(tenant-default)", searchClient.Endpoint, documentList.Count);
 
         var results = new List<IndexResult>();
 

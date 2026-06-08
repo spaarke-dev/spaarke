@@ -68,8 +68,44 @@ public interface IRagService
     /// <param name="documents">The document chunks to index.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Results for each indexed document.</returns>
+    /// <remarks>
+    /// This 2-argument overload preserves the original signature exactly so all existing
+    /// callers (and Moq expression-tree setups using <c>It.IsAny&lt;...&gt;()</c> matchers) continue
+    /// to compile and behave UNCHANGED — backward compatibility is the binding requirement
+    /// (multi-container-multi-index-r1 spec NFR-02). It delegates to the 3-argument
+    /// overload below with <c>searchIndexName = null</c>, which routes via the tenant-
+    /// default chain.
+    /// </remarks>
     Task<IReadOnlyList<IndexResult>> IndexDocumentsBatchAsync(
         IEnumerable<KnowledgeDocument> documents,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Batch-indexes documents, routing the batch to a named Azure AI Search index.
+    /// FR-BFF-07 / multi-container-multi-index-r1 indexer-routing-fix: when
+    /// <paramref name="searchIndexName"/> is non-empty, the batch is written to that index
+    /// after allow-list validation (FR-BFF-02). When null/empty, falls through to the tenant-
+    /// default chain (existing 2-arg behavior).
+    /// </summary>
+    /// <param name="documents">The document chunks to index.</param>
+    /// <param name="searchIndexName">
+    /// Optional explicit Azure AI Search index name. When non-null/whitespace, the underlying
+    /// <c>IKnowledgeDeploymentService.GetSearchClientAsync(tenantId, indexName, ct)</c> 3-arg
+    /// overload validates the value against <c>AiSearchOptions.AllowedIndexes</c> and rejects
+    /// non-allow-listed values with <c>SdapProblemException(INDEX_NOT_ALLOWED, 400)</c>. When
+    /// null/whitespace, the existing 2-tier fall-through chain applies
+    /// (<c>sprk_aiknowledgedeployment</c> → <c>AiSearchOptions.KnowledgeIndexName</c>) —
+    /// byte-for-byte backward-compatible (FR-BFF-04 / NFR-02).
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Results for each indexed document.</returns>
+    /// <exception cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException">
+    /// Thrown with code <c>INDEX_NOT_ALLOWED</c> (status 400) when <paramref name="searchIndexName"/>
+    /// is non-empty AND not present in <c>AiSearchOptions.AllowedIndexes</c>.
+    /// </exception>
+    Task<IReadOnlyList<IndexResult>> IndexDocumentsBatchAsync(
+        IEnumerable<KnowledgeDocument> documents,
+        string? searchIndexName,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -310,9 +310,19 @@ public static class RagEndpoints
     /// <summary>
     /// Batch index multiple document chunks.
     /// </summary>
+    /// <remarks>
+    /// multi-container-multi-index-r1 indexer-routing-fix (Tier 3): the optional
+    /// <paramref name="searchIndexName"/> query parameter routes the batch to a specific
+    /// Azure AI Search index (validated against <c>AiSearchOptions.AllowedIndexes</c>; rejected
+    /// values surface as <c>400 INDEX_NOT_ALLOWED</c> per ADR-019 + NFR-08). Omit the parameter
+    /// to fall through to the tenant-default chain (NFR-02 backward-compat). The OBO contract is
+    /// preserved: rejection is a hard 400 — there is NO default-fall-back on synchronous endpoints
+    /// (that behavior is only for background jobs per the indexer-routing-fix task brief).
+    /// </remarks>
     private static async Task<IResult> IndexDocumentsBatch(
         IEnumerable<KnowledgeDocument> documents,
         IRagService ragService,
+        [FromQuery] string? searchIndexName,
         CancellationToken cancellationToken)
     {
         var docList = documents.ToList();
@@ -329,13 +339,21 @@ public static class RagEndpoints
 
         try
         {
-            var results = await ragService.IndexDocumentsBatchAsync(docList, cancellationToken);
+            var results = await ragService.IndexDocumentsBatchAsync(docList, searchIndexName, cancellationToken);
             return Results.Ok(results);
         }
         catch (FeatureDisabledException ex)
         {
             // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
             return ex.AsFeatureDisabled503();
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
+        {
+            // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — rethrow so the
+            // global UseExceptionHandler middleware renders the canonical ProblemDetails
+            // (e.g., 400 INDEX_NOT_ALLOWED). Without this, the generic Exception catch below
+            // would convert it to 500 and break the NFR-08 contract.
+            throw;
         }
         catch (Exception ex)
         {

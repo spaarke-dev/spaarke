@@ -300,6 +300,16 @@ public static class AnalysisServicesModule
         //   impl registered AddRagServices line 422. Lifetime: scoped (matches real FileIndexingService).
         services.AddScoped<IFileIndexingService, NullFileIndexingService>();
 
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) —
+        // ISearchIndexNameResolver is a pure Dataverse-lookup helper consumed unconditionally
+        // by 3 background-indexing entry points (RagIndexingJobHandler,
+        // BulkRagIndexingJobHandler, IndexingWorkerHostedService). It has NO compound-AI-kill-switch
+        // dependency (delegates to IGenericEntityService which is always registered) so it is
+        // registered UNCONDITIONALLY here — symmetric registration, no asymmetric-registration
+        // anti-pattern (bff-extensions.md §F.1). Lifetime: scoped (Dataverse Web API client
+        // lifetime; the resolver itself is stateless).
+        services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
+
         // B2 — SprkChatAgentFactory (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B2.
         // Real impl registered unconditionally inside AddAiModule (only invoked on compound-ON path).
         // The Null subclass uses the protected base ctor that bypasses AI deps; consumed unconditionally

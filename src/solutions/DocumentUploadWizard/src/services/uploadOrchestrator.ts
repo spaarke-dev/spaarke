@@ -357,6 +357,7 @@ export async function orchestrateUpload(
                 successfulRecords,
                 config,
                 logger,
+                resolvedSearchIndexName || undefined,
             ).then(() => {
                 // Update progress to "complete" for all successful files
                 for (const cr of successfulRecords) {
@@ -425,6 +426,7 @@ async function kickOffBackgroundTasks(
     successfulRecords: CreateResult[],
     config: UploadOrchestratorConfig,
     logger: ILogger,
+    searchIndexName?: string,
 ): Promise<void> {
     const tasks: Promise<void>[] = [];
 
@@ -454,6 +456,7 @@ async function kickOffBackgroundTasks(
                 config.parentContext,
                 config,
                 logger,
+                searchIndexName,
             ).catch((err) => {
                 logger.warn("UploadOrchestrator", `RAG indexing failed for ${record.fileName} (non-critical)`, err);
             }),
@@ -486,6 +489,7 @@ async function triggerRagIndexing(
     parentContext: UploadOrchestratorConfig["parentContext"],
     config: UploadOrchestratorConfig,
     logger: ILogger,
+    searchIndexName?: string,
 ): Promise<void> {
     // Map Dataverse logical name (e.g., "sprk_matter") to the short form the BFF stores
     // ("matter"). Mirrors the convention used by RagEndpoints.SendToIndex when building
@@ -516,6 +520,7 @@ async function triggerRagIndexing(
                     tenantId,
                     documentId,
                     parentEntity,
+                    searchIndexName,
                 }),
             },
         );

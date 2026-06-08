@@ -144,6 +144,22 @@ public sealed record FileIndexRequest
     /// Null for documents not associated with a specific entity.
     /// </remarks>
     public ParentEntityContext? ParentEntity { get; init; }
+
+    /// <summary>
+    /// multi-container-multi-index-r1 indexer-routing-fix (FR-BFF-07 / FR-PCF-02 / NFR-02) — optional
+    /// explicit Azure AI Search index name to target for this indexing operation. When provided
+    /// (non-null / non-whitespace), the BFF write boundary
+    /// <see cref="IRagService.IndexDocumentsBatchAsync(IEnumerable{KnowledgeDocument}, string?, System.Threading.CancellationToken)"/>
+    /// routes via the 3-argument <see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, string?, System.Threading.CancellationToken)"/>
+    /// overload which validates the value against <c>AiSearchOptions.AllowedIndexes</c>
+    /// (rejecting non-allow-listed values with <c>INDEX_NOT_ALLOWED</c> → 400 per FR-BFF-02 /
+    /// NFR-08). When null or whitespace, the resolver falls through to the existing 2-tier
+    /// chain (<c>sprk_aiknowledgedeployment</c> Dataverse entity → <c>AiSearchOptions.KnowledgeIndexName</c>
+    /// fallback) — byte-for-byte backward-compatible with all existing callers (FR-BFF-04 /
+    /// NFR-02). Routes per-record `sprk_searchindexname` end-to-end across all three document-
+    /// creation routes (Wizard OBO, Email-to-Document, Office Add-in).
+    /// </summary>
+    public string? SearchIndexName { get; init; }
 }
 
 /// <summary>
@@ -209,6 +225,22 @@ public sealed record ContentIndexRequest
     /// Null for documents not associated with a specific entity.
     /// </remarks>
     public ParentEntityContext? ParentEntity { get; init; }
+
+    /// <summary>
+    /// multi-container-multi-index-r1 indexer-routing-fix (FR-BFF-07 / FR-PCF-02 / NFR-02) — optional
+    /// explicit Azure AI Search index name to target for this indexing operation. When provided
+    /// (non-null / non-whitespace), the BFF write boundary
+    /// <see cref="IRagService.IndexDocumentsBatchAsync(IEnumerable{KnowledgeDocument}, string?, System.Threading.CancellationToken)"/>
+    /// routes via the 3-argument <see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, string?, System.Threading.CancellationToken)"/>
+    /// overload which validates the value against <c>AiSearchOptions.AllowedIndexes</c>
+    /// (rejecting non-allow-listed values with <c>INDEX_NOT_ALLOWED</c> → 400 per FR-BFF-02 /
+    /// NFR-08). When null or whitespace, the resolver falls through to the existing 2-tier
+    /// chain (<c>sprk_aiknowledgedeployment</c> Dataverse entity → <c>AiSearchOptions.KnowledgeIndexName</c>
+    /// fallback) — byte-for-byte backward-compatible with all existing callers (FR-BFF-04 /
+    /// NFR-02). Routes per-record `sprk_searchindexname` end-to-end for pre-extracted content
+    /// (e.g., email body) — same routing surface as the file-based entry points.
+    /// </summary>
+    public string? SearchIndexName { get; init; }
 }
 
 /// <summary>
