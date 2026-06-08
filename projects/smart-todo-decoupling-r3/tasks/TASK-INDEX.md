@@ -26,13 +26,13 @@
 |----|-------|-------|-------|--------|--------------|----------------|---------------|
 | 001 | Audit `sprk_eventtodo` and `sprk_event.sprk_todo*` references | 1 | STANDARD | ✅ | none | P1-W1 | ✅ |
 | 002 | Create `sprk_todo` custom entity (full attribute set) | 1 | FULL | ✅ | 001 | P1-W2 | — |
-| 003 | Register `sprk_todo` in `sprk_recordtype_ref` | 1 | STANDARD | 🔲 | 002 | P1-W3 | ✅ |
+| 003 | Register `sprk_todo` in `sprk_recordtype_ref` | 1 | STANDARD | ✅ | 002 | P1-W3 | ✅ |
 | 004 | Remove four to-do fields from `sprk_event` | 1 | FULL | 🔲 | 001, 006, 007, 008 | P1-W4 | — |
 | 005 | Delete `sprk_eventtodo` entity | 1 | FULL | 🔲 | 001, 004, 007, 008 | P1-W4 | — |
-| 006 | Refactor `TodoGenerationService` to create `sprk_todo` (audit-surfaced) | 1 | FULL | 🔲 | 002 | P1-W2.5 | ✅ |
+| 006 | Refactor `TodoGenerationService` to create `sprk_todo` (audit-surfaced) | 1 | FULL | ✅ | 002 | P1-W2.5 | ✅ |
 | 007 | Refactor `ExternalAccess` BFF surface to `sprk_todo` (audit-surfaced) | 1 | FULL | 🔲 | 002 | P1-W2.5 | ✅ |
 | 008 | Migrate `external-spa` to `sprk_todo` (audit-surfaced) | 1 | FULL | 🔲 | 002, 007 | P1-W3 | — |
-| 009 | Customize `sprk_todo.statuscode` (Open/In Progress/Completed/Dismissed) — task-002 follow-up | 1 | STANDARD | 🔲 | 002 | P1-W2.5 | ✅ |
+| 009 | Customize `sprk_todo.statuscode` (Open/In Progress/Completed/Dismissed) — task-002 follow-up | 1 | STANDARD | ✅ | 002 | P1-W2.5 | ✅ |
 | 010 | Hoist Kanban primitives to `@spaarke/ui-components/Kanban/` | 2 | FULL | ✅ | 001 | P2-W1 | — |
 | 011 | Simplify `TodoDetail` to single-entity load/save | 2 | FULL | 🔲 | 002, 010 | P2-W2 | — |
 | 012 | Update `@spaarke/ui-components` barrel + version bump | 2 | STANDARD | 🔲 | 010, 011 | P2-W3 | ✅ |

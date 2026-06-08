@@ -14,9 +14,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | none |
-| **Step** | Wave 3 complete; ready for wave 4 (003 + 006 + 007 + 009 in parallel) |
-| **Status** | Waves 1+2+3 complete (001 ✅ 002 ✅ 010 ✅ 017 ✅ 018 ✅ 084 ✅); 42 total tasks (added 009 for statuscode customization gap surfaced by task 002). |
-| **Next Action** | Wave 4 parallel launch: tasks 003 (record-type ref), 006 (TodoGenerationService refactor), 007 (ExternalAccess BFF refactor), 009 (statuscode customization). Then 008 (external-spa). Then 004+005 (schema cut). |
+| **Step** | Wave 4a complete; ready for wave 4b (task 007) |
+| **Status** | 9/42 tasks complete (001 ✅ 002 ✅ 003 ✅ 006 ✅ 009 ✅ 010 ✅ 017 ✅ 018 ✅ 084 ✅). Phase 1 schema all done; Phase 1 BFF refactor (006) done; remaining Phase 1: 007 (BFF ExternalAccess) + 008 (external-spa) + 004 + 005 (schema cut). |
+| **Next Action** | Wave 4b: task 007 (ExternalAccess BFF refactor) — held sequential after 006 to avoid `dotnet build` contention on the same csproj. Then wave 4c: task 008 (external-spa). Then 004 + 005 (schema cut). |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->

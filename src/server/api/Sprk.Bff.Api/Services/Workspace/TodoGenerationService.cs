@@ -68,7 +68,8 @@ internal sealed class TaskScanRecord
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Periodic <see cref="BackgroundService"/> that auto-generates to-do items for actionable conditions.
+/// Periodic <see cref="BackgroundService"/> that auto-generates <c>sprk_todo</c>
+/// records for actionable conditions.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -79,50 +80,65 @@ internal sealed class TaskScanRecord
 ///
 /// <para><strong>Rules (5 total)</strong></para>
 /// <list type="number">
-///   <item>Overdue events → "Overdue: {event name}"</item>
-///   <item>Budget &gt;85% utilization → "Budget Alert: {matter name}"</item>
-///   <item>Deadline within 14 days → "Deadline: {event name} (due {date})"</item>
-///   <item>Pending invoices → "Invoice Pending: {invoice name}"</item>
-///   <item>Assigned tasks → "Assigned: {task subject}"</item>
+///   <item>Overdue events → "Overdue: {event name}" (regarding: <c>sprk_event</c>)</item>
+///   <item>Budget &gt;85% utilization → "Budget Alert: {matter name}" (regarding: <c>sprk_matter</c>)</item>
+///   <item>Deadline within 14 days → "Deadline: {event name} (due {date})" (regarding: <c>sprk_event</c>)</item>
+///   <item>Pending invoices → "Invoice Pending: {invoice name}" (regarding: <c>sprk_invoice</c>)</item>
+///   <item>Assigned tasks → "Assigned: {task subject}" (standalone, no regarding)</item>
 /// </list>
 ///
+/// <para><strong>Output entity</strong>: <c>sprk_todo</c> (first-class custom entity per
+/// smart-todo-decoupling-r3 D-1). Previously created <c>sprk_event</c> records with
+/// <c>sprk_todoflag=true</c>; that legacy model was removed in r3 Phase 1.
+/// All regarding associations go through <see cref="TodoRegardingBuilder"/> which
+/// enforces ADR-024 (one specific lookup + 4 resolver fields, set atomically).</para>
+///
 /// <para><strong>Idempotency</strong>: Before creating a to-do, the service queries
-/// Dataverse for an existing <c>sprk_event</c> record with the same title,
-/// <c>sprk_todosource='System'</c>, and <c>sprk_todostatus</c> not equal to <c>'Dismissed'</c>.
+/// <c>sprk_todo</c> for an existing record with the same name and not Dismissed.
 /// If a match is found the item is skipped.</para>
 ///
 /// <para><strong>Error handling</strong>: Each candidate is wrapped in its own try/catch.
 /// A single failure never blocks the remaining items.</para>
 ///
 /// <para>Per ADR-001: BackgroundService only — no Azure Functions.</para>
-/// <para>Per ADR-010: Registered via <see cref="WorkspaceModule"/> extension method.</para>
+/// <para>Per ADR-010: Registered via <see cref="Infrastructure.DI.WorkspaceModule"/> extension method.</para>
+/// <para>Per ADR-024: All regarding fields applied via <see cref="TodoRegardingBuilder"/>.</para>
 /// </remarks>
 public sealed class TodoGenerationService : BackgroundService
 {
     // ──────────────────────────────────────────────────────────────────────────
-    // Dataverse field / value constants for to-do items
+    // Dataverse field / value constants for sprk_todo
     // ──────────────────────────────────────────────────────────────────────────
 
-    /// <summary>sprk_todoflag field name on sprk_event.</summary>
-    private const string FieldTodoFlag = "sprk_todoflag";
+    /// <summary>Logical name of the to-do entity.</summary>
+    internal const string EntityTodo = "sprk_todo";
 
-    /// <summary>sprk_todosource field name on sprk_event. Value: 'System'.</summary>
-    private const string FieldTodoSource = "sprk_todosource";
+    /// <summary>Primary name field on sprk_todo.</summary>
+    private const string FieldTodoName = "sprk_name";
 
-    /// <summary>sprk_todostatus field name on sprk_event. Open='Open', Dismissed='Dismissed'.</summary>
-    private const string FieldTodoStatus = "sprk_todostatus";
+    /// <summary>Rich-notes field on sprk_todo (replaces legacy sprk_eventtodo.sprk_todonotes).</summary>
+    private const string FieldTodoNotes = "sprk_notes";
 
-    /// <summary>Primary name field on sprk_event.</summary>
-    private const string FieldEventName = "sprk_eventname";
+    /// <summary>Due-date field on sprk_todo.</summary>
+    private const string FieldTodoDueDate = "sprk_duedate";
 
-    /// <summary>Value stored in sprk_todosource for system-generated items.</summary>
-    private const string TodoSourceSystem = "System";
+    /// <summary>Priority score (0-100) on sprk_todo.</summary>
+    private const string FieldTodoPriorityScore = "sprk_priorityscore";
 
-    /// <summary>Value stored in sprk_todostatus for new open items.</summary>
-    private const string TodoStatusOpen = "Open";
+    /// <summary>Effort score (0-100) on sprk_todo.</summary>
+    private const string FieldTodoEffortScore = "sprk_effortscore";
 
-    /// <summary>Value stored in sprk_todostatus for items the user dismissed.</summary>
-    private const string TodoStatusDismissed = "Dismissed";
+    /// <summary>Owner attribute (User/Team) on sprk_todo.</summary>
+    private const string FieldOwnerId = "ownerid";
+
+    /// <summary>Status reason values for sprk_todo (see entity-schema.md).</summary>
+    private const int StatusCodeOpen = 1;        // Active
+    private const int StatusCodeCompleted = 2;   // Inactive
+    private const int StatusCodeDismissed = 3;   // Inactive
+
+    /// <summary>statecode values for sprk_todo.</summary>
+    private const int StateCodeActive = 0;
+    private const int StateCodeInactive = 1;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Fields
@@ -138,8 +154,12 @@ public sealed class TodoGenerationService : BackgroundService
     // which crashes the host with HTTP 500.30 because BackgroundService
     // resolution happens during IHost.StartAsync().
     // INTENTIONAL: Keeps IDataverseService — casts to DataverseServiceClientImpl for FetchXML queries
-    // and uses QueryEventsAsync + CreateAsync across multiple domain groups.
+    // and uses CreateAsync across multiple domain groups.
     private IDataverseService? _dataverse;
+
+    // Lazily resolved alongside _dataverse so the regarding builder
+    // can use the same lifetime semantics (no eager Dataverse touch at host startup).
+    private TodoRegardingBuilder? _regardingBuilder;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Constructor
@@ -191,11 +211,14 @@ public sealed class TodoGenerationService : BackgroundService
         try
         {
             _dataverse = _serviceProvider.GetRequiredService<IDataverseService>();
+            var commService = _serviceProvider.GetRequiredService<ICommunicationDataverseService>();
+            var builderLogger = _serviceProvider.GetRequiredService<ILogger<TodoRegardingBuilder>>();
+            _regardingBuilder = new TodoRegardingBuilder(commService, builderLogger);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "TodoGenerationService failed to resolve IDataverseService. " +
+                "TodoGenerationService failed to resolve Dataverse dependencies. " +
                 "Service will not run. This does not affect app startup.");
             return;
         }
@@ -293,8 +316,8 @@ public sealed class TodoGenerationService : BackgroundService
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Scans for overdue sprk_event records (duedate &lt; today, sprk_todoflag != true)
-    /// and creates "Overdue: {event name}" to-dos.
+    /// Scans for overdue <c>sprk_event</c> records (duedate &lt; today) and creates
+    /// "Overdue: {event name}" <c>sprk_todo</c> records regarding each event.
     /// </summary>
     private async Task<(int Created, int Skipped, int Failed)> ProcessOverdueEventsAsync(
         DateTime today, CancellationToken ct)
@@ -308,18 +331,13 @@ public sealed class TodoGenerationService : BackgroundService
         IEnumerable<EventEntity> overdueEvents;
         try
         {
-            // Query events with duedate < today — sprk_todoflag filter applied client-side
-            // because the QueryEventsAsync API does not expose a todoflag filter.
-            // TODO: Replace with a more targeted Dataverse query that adds
-            //   $filter=sprk_todoflag ne true and sprk_duedate lt {today:yyyy-MM-dd}
-            // once the interface exposes a generic query path.
             var (items, _) = await _dataverse!.QueryEventsAsync(
                 dueDateTo: today.AddDays(-1), // duedate < today
                 top: 100,
                 ct: ct);
 
-            // Exclude events that are already to-do items themselves.
-            overdueEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6); // Not Completed/Cancelled
+            // Exclude completed/cancelled events.
+            overdueEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
         }
         catch (Exception ex)
         {
@@ -340,9 +358,11 @@ public sealed class TodoGenerationService : BackgroundService
                     continue;
                 }
 
-                await CreateTodoEventAsync(
+                await CreateTodoAsync(
                     name: todoTitle,
-                    regardingEventId: evt.Id,
+                    regardingEntityName: "sprk_event",
+                    regardingId: evt.Id,
+                    regardingDisplayName: evt.Name,
                     ct: ct);
 
                 _logger.LogInformation(
@@ -369,7 +389,7 @@ public sealed class TodoGenerationService : BackgroundService
 
     /// <summary>
     /// Scans for matters with utilizationpercent &gt; threshold and creates
-    /// "Budget Alert: {matter name}" to-dos.
+    /// "Budget Alert: {matter name}" <c>sprk_todo</c> records regarding each matter.
     /// </summary>
     private async Task<(int Created, int Skipped, int Failed)> ProcessBudgetAlertsAsync(
         CancellationToken ct)
@@ -406,9 +426,11 @@ public sealed class TodoGenerationService : BackgroundService
                     continue;
                 }
 
-                await CreateTodoEventAsync(
+                await CreateTodoAsync(
                     name: todoTitle,
-                    regardingMatterId: matter.Id,
+                    regardingEntityName: "sprk_matter",
+                    regardingId: matter.Id,
+                    regardingDisplayName: matter.Name,
                     ct: ct);
 
                 _logger.LogInformation(
@@ -434,8 +456,8 @@ public sealed class TodoGenerationService : BackgroundService
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Scans for sprk_event records with duedate within the deadline window and creates
-    /// "Deadline: {event name} (due {date})" to-dos.
+    /// Scans for <c>sprk_event</c> records with duedate within the deadline window and creates
+    /// "Deadline: {event name} (due {date})" <c>sprk_todo</c> records regarding each event.
     /// </summary>
     private async Task<(int Created, int Skipped, int Failed)> ProcessDeadlineProximityAsync(
         DateTime today, CancellationToken ct)
@@ -459,7 +481,7 @@ public sealed class TodoGenerationService : BackgroundService
                 top: 100,
                 ct: ct);
 
-            // Exclude events that are already to-do items and completed/cancelled events.
+            // Exclude completed/cancelled events.
             upcomingEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
         }
         catch (Exception ex)
@@ -486,9 +508,11 @@ public sealed class TodoGenerationService : BackgroundService
                     continue;
                 }
 
-                await CreateTodoEventAsync(
+                await CreateTodoAsync(
                     name: todoTitle,
-                    regardingEventId: evt.Id,
+                    regardingEntityName: "sprk_event",
+                    regardingId: evt.Id,
+                    regardingDisplayName: evt.Name,
                     dueDate: evt.DueDate,
                     ct: ct);
 
@@ -515,7 +539,8 @@ public sealed class TodoGenerationService : BackgroundService
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Scans for pending invoice records and creates "Invoice Pending: {invoice name}" to-dos.
+    /// Scans for pending invoice records and creates "Invoice Pending: {invoice name}"
+    /// <c>sprk_todo</c> records regarding each invoice.
     /// </summary>
     private async Task<(int Created, int Skipped, int Failed)> ProcessPendingInvoicesAsync(
         CancellationToken ct)
@@ -550,9 +575,11 @@ public sealed class TodoGenerationService : BackgroundService
                     continue;
                 }
 
-                await CreateTodoEventAsync(
+                await CreateTodoAsync(
                     name: todoTitle,
-                    regardingInvoiceId: invoice.Id,
+                    regardingEntityName: "sprk_invoice",
+                    regardingId: invoice.Id,
+                    regardingDisplayName: invoice.Name,
                     ct: ct);
 
                 _logger.LogInformation(
@@ -574,12 +601,12 @@ public sealed class TodoGenerationService : BackgroundService
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Rule 5: Assigned tasks
+    // Rule 5: Assigned tasks (standalone — no regarding parent)
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Scans for task-type events assigned to the service account and creates
-    /// "Assigned: {task subject}" to-dos.
+    /// Scans for active <c>sprk_event</c> records and creates "Assigned: {task subject}"
+    /// standalone <c>sprk_todo</c> records (no regarding parent).
     /// </summary>
     private async Task<(int Created, int Skipped, int Failed)> ProcessAssignedTasksAsync(
         CancellationToken ct)
@@ -614,7 +641,8 @@ public sealed class TodoGenerationService : BackgroundService
                     continue;
                 }
 
-                await CreateTodoEventAsync(
+                // Standalone — no regarding parent
+                await CreateTodoAsync(
                     name: todoTitle,
                     ct: ct);
 
@@ -641,44 +669,32 @@ public sealed class TodoGenerationService : BackgroundService
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns <c>true</c> if a system-generated to-do with <paramref name="title"/>
+    /// Returns <c>true</c> if a <c>sprk_todo</c> with <paramref name="title"/>
     /// already exists and has not been dismissed.
     /// </summary>
     /// <remarks>
     /// A to-do is considered a duplicate when ALL of the following match:
     /// <list type="bullet">
-    ///   <item>sprk_eventname = <paramref name="title"/> (exact match)</item>
-    ///   <item>sprk_todosource = 'System'</item>
-    ///   <item>sprk_todostatus != 'Dismissed'</item>
+    ///   <item><c>sprk_name</c> = <paramref name="title"/> (exact match)</item>
+    ///   <item><c>statuscode</c> != Dismissed (3)</item>
     /// </list>
     /// Dismissed to-dos are intentionally excluded — users who dismissed them
     /// must not see them re-appear on the next run.
     /// </remarks>
     internal async Task<bool> TodoExistsAsync(string title, CancellationToken ct)
     {
-        // QueryEventsAsync doesn't filter on custom todo fields, so we query all
-        // sprk_events and filter client-side for the system-todo matching.
-        // TODO: When a generic query API is available, replace this with a targeted
-        // Dataverse OData filter:
-        //   sprk_eventname eq '{title}'
-        //   and sprk_todosource eq 'System'
-        //   and sprk_todostatus ne 'Dismissed'
-        // For now, use the name-based query and project/filter in memory.
+        var query = new QueryExpression(EntityTodo)
+        {
+            ColumnSet = new ColumnSet("sprk_todoid", "sprk_name", "statuscode"),
+            TopCount = 1,
+            NoLock = true
+        };
 
-        // We use a narrow duedate window (no filter) and top=100 per rule.
-        // The title is unique enough (includes entity name) that duplicates
-        // within the first 100 results will always be caught.
-        var (items, _) = await _dataverse!.QueryEventsAsync(top: 100, ct: ct);
+        query.Criteria.AddCondition("sprk_name", ConditionOperator.Equal, title);
+        query.Criteria.AddCondition("statuscode", ConditionOperator.NotEqual, StatusCodeDismissed);
 
-        return items.Any(e =>
-            string.Equals(e.Name, title, StringComparison.OrdinalIgnoreCase));
-
-        // NOTE: The above uses the name as a proxy. In production, the Dataverse query
-        // should add sprk_todosource and sprk_todostatus filters so dismissed items
-        // are excluded at the database level. The full OData filter should be:
-        //   sprk_eventname eq '{escapedTitle}'
-        //   and sprk_todosource eq 'System'
-        //   and sprk_todostatus ne 'Dismissed'
+        var results = await _dataverse!.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count > 0;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -686,38 +702,74 @@ public sealed class TodoGenerationService : BackgroundService
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Creates a single sprk_event record with to-do flags set.
-    /// All created to-dos have: sprk_todoflag=true, sprk_todosource='System', sprk_todostatus='Open'.
+    /// Creates a single <c>sprk_todo</c> record. When
+    /// <paramref name="regardingEntityName"/> is non-null, the matching specific
+    /// regarding lookup and all four resolver fields are populated atomically by
+    /// <see cref="TodoRegardingBuilder"/> (ADR-024).
     /// </summary>
-    internal async Task<Guid> CreateTodoEventAsync(
+    /// <param name="name">Card title (<c>sprk_name</c>).</param>
+    /// <param name="regardingEntityName">Optional regarding parent entity logical name.</param>
+    /// <param name="regardingId">Required when <paramref name="regardingEntityName"/> is non-null.</param>
+    /// <param name="regardingDisplayName">Display name of the regarding parent (for the resolver name field).</param>
+    /// <param name="notes">Optional rich notes (<c>sprk_notes</c>).</param>
+    /// <param name="dueDate">Optional due date (<c>sprk_duedate</c>).</param>
+    /// <param name="priorityScore">Optional priority score 0-100 (<c>sprk_priorityscore</c>).</param>
+    /// <param name="effortScore">Optional effort score 0-100 (<c>sprk_effortscore</c>).</param>
+    /// <param name="ownerId">Optional owner (user or team) — written to <c>ownerid</c>.</param>
+    /// <param name="ownerEntityName">Owner entity logical name (e.g. <c>systemuser</c> or <c>team</c>). Required when <paramref name="ownerId"/> is set.</param>
+    /// <param name="ct">Cancellation token.</param>
+    internal async Task<Guid> CreateTodoAsync(
         string name,
-        Guid? regardingEventId = null,
-        Guid? regardingMatterId = null,
-        Guid? regardingInvoiceId = null,
+        string? regardingEntityName = null,
+        Guid? regardingId = null,
+        string? regardingDisplayName = null,
+        string? notes = null,
         DateTime? dueDate = null,
+        int? priorityScore = null,
+        int? effortScore = null,
+        Guid? ownerId = null,
+        string? ownerEntityName = null,
         CancellationToken ct = default)
     {
-        var entity = new Entity("sprk_event")
+        var entity = new Entity(EntityTodo)
         {
-            [FieldEventName] = name,
-            [FieldTodoFlag] = true,
-            [FieldTodoSource] = TodoSourceSystem,
-            [FieldTodoStatus] = TodoStatusOpen,
-            ["statuscode"] = 3,  // Open
-            ["statecode"] = 0    // Active
+            [FieldTodoName] = name,
+            ["statuscode"] = new OptionSetValue(StatusCodeOpen),
+            ["statecode"] = new OptionSetValue(StateCodeActive)
         };
 
+        if (!string.IsNullOrEmpty(notes))
+            entity[FieldTodoNotes] = notes;
+
         if (dueDate.HasValue)
-            entity["sprk_duedate"] = dueDate.Value;
+            entity[FieldTodoDueDate] = dueDate.Value;
 
-        if (regardingEventId.HasValue)
-            entity["sprk_relatedevent@odata.bind"] = $"/sprk_events({regardingEventId.Value})";
+        if (priorityScore.HasValue)
+            entity[FieldTodoPriorityScore] = priorityScore.Value;
 
-        if (regardingMatterId.HasValue)
-            entity["sprk_regardingmatter@odata.bind"] = $"/sprk_matters({regardingMatterId.Value})";
+        if (effortScore.HasValue)
+            entity[FieldTodoEffortScore] = effortScore.Value;
 
-        if (regardingInvoiceId.HasValue)
-            entity["sprk_regardinginvoice@odata.bind"] = $"/sprk_invoices({regardingInvoiceId.Value})";
+        if (ownerId.HasValue && !string.IsNullOrEmpty(ownerEntityName))
+            entity[FieldOwnerId] = new EntityReference(ownerEntityName, ownerId.Value);
+
+        // ADR-024: regarding fields applied atomically by the builder when present.
+        if (!string.IsNullOrEmpty(regardingEntityName) && regardingId.HasValue && regardingId.Value != Guid.Empty)
+        {
+            if (_regardingBuilder is null)
+            {
+                throw new InvalidOperationException(
+                    "TodoRegardingBuilder not initialized. Service was called before ExecuteAsync " +
+                    "completed lazy resolution of Dataverse dependencies.");
+            }
+
+            await _regardingBuilder.ApplyResolverFieldsAsync(
+                entity,
+                regardingEntityName,
+                regardingId.Value,
+                regardingDisplayName ?? string.Empty,
+                ct);
+        }
 
         return await _dataverse!.CreateAsync(entity, ct);
     }
@@ -789,14 +841,13 @@ public sealed class TodoGenerationService : BackgroundService
     }
 
     /// <summary>
-    /// Queries task-type events assigned to any user that are open/active.
-    /// Scans sprk_event records where sprk_todoflag is false (not already a to-do),
-    /// statecode is Active, and statuscode is Open (3).
+    /// Queries task-type events (active + open sprk_event records).
     /// </summary>
     /// <remarks>
     /// Uses QueryExpression via ServiceClient.
     /// Explicit column selection per ADR-002.
-    /// Task-type events are identified by statuscode=Open and not being to-do items themselves.
+    /// Note: r3 Phase 1 removed the legacy <c>sprk_todoflag</c> field from <c>sprk_event</c>,
+    /// so we no longer filter on it. All active+open events are candidates.
     /// </remarks>
     private async Task<IEnumerable<TaskScanRecord>> QueryAssignedTasksAsync(CancellationToken ct)
     {
@@ -810,8 +861,6 @@ public sealed class TodoGenerationService : BackgroundService
 
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);  // Active
         query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, 3); // Open
-        // Exclude events that are already to-do items
-        query.Criteria.AddCondition("sprk_todoflag", ConditionOperator.NotEqual, true);
 
         var results = await serviceClient.RetrieveMultipleAsync(query, ct);
 
@@ -854,5 +903,19 @@ public sealed class TodoGenerationService : BackgroundService
             nextRun = nextRun.AddDays(1); // Already past today's window — wait until tomorrow
 
         return nextRun - now;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Test seam
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Internal test seam: allows unit tests to inject a pre-built
+    /// <see cref="TodoRegardingBuilder"/> so creation paths can exercise resolver
+    /// field population without running the full BackgroundService loop.
+    /// </summary>
+    internal void SetRegardingBuilderForTest(TodoRegardingBuilder builder)
+    {
+        _regardingBuilder = builder ?? throw new ArgumentNullException(nameof(builder));
     }
 }

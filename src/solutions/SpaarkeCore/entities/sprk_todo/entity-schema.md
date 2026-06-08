@@ -89,7 +89,7 @@ At most ONE specific regarding lookup is populated at a time. The four resolver 
 | ownerid | Owner | Owner (User/Team) | Standard ownership |
 | owningbusinessunit | Owning Business Unit | Lookup → businessunit | Standard |
 | statecode | Status | State | 0 = Active / 1 = Inactive |
-| statuscode | Status Reason | Status | 1 = Open (Active), 2 = Completed (Inactive), 3 = Dismissed (Inactive) |
+| statuscode | Status Reason | Status | See "statuscode (Status Reason)" below — 4 values (Open / In Progress / Completed / Dismissed) per FR-24 |
 | createdon | Created On | DateTime | Record creation timestamp |
 | modifiedon | Modified On | DateTime | Last modification timestamp |
 | createdby | Created By | Lookup | User who created the record |
@@ -107,11 +107,20 @@ At most ONE specific regarding lookup is populated at a time. The four resolver 
 
 ### statuscode (Status Reason)
 
-| Value | Label | statecode |
-|-------|-------|-----------|
-| 1 | Open | 0 (Active) |
-| 2 | Completed | 1 (Inactive) |
-| 3 | Dismissed | 1 (Inactive) |
+Customized per smart-todo-decoupling-r3 task 009. Four values that map bidirectionally to
+Microsoft Graph `todoTask.status` per FR-24. Mirrors the `sprk_communication` Spaarke
+convention: OOB defaults (1, 2) renamed in place; additional values use the `659490001+`
+custom range.
+
+| Value | Label | statecode | Graph `todoTask.status` |
+|-------|-------|-----------|-------------------------|
+| 1 | Open | 0 (Active) | `notStarted` |
+| 659490001 | In Progress | 0 (Active) | `inProgress` |
+| 2 | Completed | 1 (Inactive) | `completed` |
+| 659490002 | Dismissed | 1 (Inactive) | `deferred` |
+
+**Deployment**: `scripts/Customize-SprkTodoStatuscode.ps1` (idempotent; scoped to SpaarkeCore
+solution via `SolutionUniqueName` parameter on `InsertStatusValue`/`UpdateOptionValue`).
 
 ## Notes
 
