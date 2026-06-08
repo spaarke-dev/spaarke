@@ -37,8 +37,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import { DataGrid } from '../../../../Spaarke.UI.Components/src/components/DataGrid';
-import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/services/XrmDataverseClient';
+import { DataGrid, XrmDataverseClient } from '@spaarke/ui-components';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 
 // ---------------------------------------------------------------------------
@@ -115,10 +114,13 @@ function locateXrm(): any | null {
 export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseEntityViewWidgetData>> = ({ data }) => {
   const styles = useStyles();
 
+  // XrmDataverseClient resolves Xrm lazily on each call — no constructor arg.
+  // We still frame-walk here so the widget can show an empty state in dev
+  // (where Xrm is not present) instead of crashing on the first BFF call.
   const xrm = React.useMemo(() => locateXrm(), []);
   const dataverseClient = React.useMemo(() => {
     if (!xrm?.WebApi) return null;
-    return new XrmDataverseClient(xrm.WebApi);
+    return new XrmDataverseClient();
   }, [xrm]);
 
   if (!dataverseClient) {

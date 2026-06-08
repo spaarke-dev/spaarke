@@ -54,7 +54,7 @@ import {
   CheckboxUncheckedRegular,
   DocumentBulletListRegular,
 } from '@fluentui/react-icons';
-import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/services/XrmDataverseClient';
+import { XrmDataverseClient } from '@spaarke/ui-components';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import { getMetricsDashboardConfig, type MetricsDashboardConfig, type MetricsCard } from './metricsDashboardConfigs';
 
@@ -234,7 +234,8 @@ function useCardData(card: MetricsCard, client: XrmDataverseClient | null, filte
       .retrieveMultipleRecords(entity, card.fetchXml)
       .then(result => {
         if (cancelled) return;
-        setState({ records: result.records, loading: false });
+        // FetchMultipleResult shape: { entities, moreRecords, pagingCookie? }
+        setState({ records: result.entities, loading: false });
       })
       .catch(err => {
         if (cancelled) return;
@@ -358,7 +359,8 @@ export const MetricsDashboardWidget: React.FC<WorkspaceWidgetProps<MetricsDashbo
   const xrm = React.useMemo(() => locateXrm(), []);
   const dataverseClient = React.useMemo(() => {
     if (!xrm?.WebApi) return null;
-    return new XrmDataverseClient(xrm.WebApi);
+    // XrmDataverseClient takes no constructor arg; resolves Xrm lazily.
+    return new XrmDataverseClient();
   }, [xrm]);
 
   const config: MetricsDashboardConfig | undefined = React.useMemo(

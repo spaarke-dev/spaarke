@@ -607,7 +607,11 @@ function createEntityViewFactory(configId: string) {
           import('./DataverseEntityViewWidget').DataverseEntityViewWidgetData
         >
       ): ReturnType<typeof Base> => {
-        const mergedData = { configId, ...(props.data ?? {}) };
+        // Caller-supplied configId wins; baked-in configId is the default.
+        const mergedData = {
+          ...(props.data ?? {}),
+          configId: props.data?.configId ?? configId,
+        };
         return Base({ ...props, data: mergedData });
       };
       Wrapped.displayName = `DataverseEntityViewWidget(${configId})`;
@@ -692,7 +696,10 @@ function createMetricsDashboardFactory(dashboardId: string) {
           import('./MetricsDashboardWidget').MetricsDashboardWidgetData
         >
       ): ReturnType<typeof Base> => {
-        const mergedData = { dashboardId, ...(props.data ?? {}) };
+        const mergedData = {
+          ...(props.data ?? {}),
+          dashboardId: props.data?.dashboardId ?? dashboardId,
+        };
         return Base({ ...props, data: mergedData });
       };
       Wrapped.displayName = `MetricsDashboardWidget(${dashboardId})`;
