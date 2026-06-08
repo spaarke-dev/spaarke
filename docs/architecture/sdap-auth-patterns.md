@@ -150,9 +150,27 @@ OBO exchanges the user's BFF token for a Graph token. The exchange result is cac
 
 **API version**: OBO clients use v1.0 endpoint. App-only clients use beta endpoint (for SPE admin operations).
 
-### Pattern 4: OBO for AI File Access
+### Pattern 4: OBO for AI File Access (incl. Post-Upload RAG Indexing)
 
 AI analysis services **must use OBO** (`DownloadFileAsUserAsync(httpContext, ...)`) to download SPE files. App-only tokens do not have SPE container-level permissions. `HttpContext` must be propagated through the entire call chain from endpoint to file access: endpoint handler -> service -> `DriveItemOperations` -> `IGraphClientFactory.ForUserAsync(httpContext)`.
+
+#### Writer-Identity Matching Rule (binding — 2026-06-08, post-Phase-3a UAT incident)
+
+**The identity that READS an SPE file must match the identity that WROTE it**, unless the reader's app id is explicitly registered as a guest app on the SPE container type. Spaarke's MI is intentionally NOT registered (per [`managed-identity-resource-rbac.md`](../../.claude/patterns/auth/managed-identity-resource-rbac.md) — MI grants cover Key Vault, Cognitive Services, Cosmos; **not SPE**). This produces a hard constraint on which dispatch mechanism is allowed for any background SPE operation:
+
+| File written by | Read by (later) | Allowed dispatch | Why |
+|---|---|---|---|
+| **User (OBO)** via wizard upload, PCF, Code Page | **User (OBO)** — same request scope | **Sync inline only** (`IFileIndexingService.IndexFileAsync(httpContext, ...)`) | User wrote the file; only the same user can read it. Service Bus jobs run later under MI which is NOT on the ACL. |
+| **MI (app-only)** via Office Add-in finalize, Email-to-Document, post-analysis re-index | MI (app-only) — background | **Async Service Bus + `RagIndexingJobHandler`** OR sync `IFileIndexingService.IndexFileAppOnlyAsync` | MI is the writer; MI is on the file's ACL. |
+| User (OBO) | MI (app-only) — background | **❌ NOT ALLOWED — will 403** | Writer-identity mismatch. The 2026-06-08 Phase 3a UAT incident proved this empirically. |
+
+**`IPostUploadIndexingEnqueuer` enforces this split**:
+- `EnqueueIfApplicableAsync(request, httpContext, ct)` — for user-OBO-uploaded files (sync OBO via `IndexFileAsync`)
+- `EnqueueAppOnlyIfApplicableAsync(request, ct)` — for MI-written files (async Service Bus enqueue)
+
+Each method's XML doc carries the explicit warning so future callers pick the right path at write time.
+
+**Operational consequence**: synchronous OBO indexing means the user-upload request response time includes indexing latency (~5-10 s for typical PDF). This is unavoidable without either (a) registering the MI as a guest app on the SPE container type — an architectural change that deviates from Spaarke's current SPE permission model — or (b) persisting OBO tokens across requests (token TTL makes this fragile). Both alternatives were rejected on 2026-06-08; the sync OBO path is canonical.
 
 ### Pattern 5: Dataverse Authorization — Direct Query Pattern
 
