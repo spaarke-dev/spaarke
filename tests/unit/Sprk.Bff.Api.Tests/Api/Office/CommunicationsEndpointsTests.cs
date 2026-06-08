@@ -66,7 +66,7 @@ public class CommunicationsEndpointsTests : IClassFixture<OfficeCommunicationsTe
     public async Task GetByMessageId_WithoutAuth_Returns401()
     {
         // Arrange
-        using var anonFactory = new OfficeCommunicationsTestWebAppFactory(disableAuth: true);
+        using var anonFactory = OfficeCommunicationsTestWebAppFactory.CreateAnonymous();
         var anonClient = anonFactory.CreateClient();
 
         // Act
@@ -141,7 +141,7 @@ public class CommunicationsEndpointsTests : IClassFixture<OfficeCommunicationsTe
     public async Task GetLinkedTodos_WithoutAuth_Returns401()
     {
         // Arrange
-        using var anonFactory = new OfficeCommunicationsTestWebAppFactory(disableAuth: true);
+        using var anonFactory = OfficeCommunicationsTestWebAppFactory.CreateAnonymous();
         var anonClient = anonFactory.CreateClient();
         var commId = Guid.NewGuid();
 
@@ -246,10 +246,12 @@ public sealed class OfficeCommunicationsTestWebAppFactory : WebApplicationFactor
 
     public OfficeCommunicationsTestWebAppFactory() : this(disableAuth: false) { }
 
-    public OfficeCommunicationsTestWebAppFactory(bool disableAuth)
+    private OfficeCommunicationsTestWebAppFactory(bool disableAuth)
     {
         _disableAuth = disableAuth;
     }
+
+    public static OfficeCommunicationsTestWebAppFactory CreateAnonymous() => new(disableAuth: true);
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
