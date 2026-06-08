@@ -221,7 +221,7 @@ public class ExternalDataService
                      "sprk_todocolumn,sprk_todopinned,statecode,statuscode,createdon," +
                      "_sprk_regardingproject_value,sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl";
         var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
-        var url = $"{GetApiUrl()}/sprk_todoes?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
+        var url = $"{GetApiUrl()}/sprk_todos?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
 
         var rows = await GetCollectionAsync<TodoRow>(url, ct);
         return rows.Select(MapTodo).ToList();
@@ -270,7 +270,7 @@ public class ExternalDataService
         body["sprk_regardingproject@odata.bind"] = $"/sprk_projects({projectId})";
         await ApplyResolverFieldsAsync(body, "sprk_project", projectId, projectDisplayName, ct);
 
-        var url = $"{GetApiUrl()}/sprk_todoes";
+        var url = $"{GetApiUrl()}/sprk_todos";
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         httpRequest.Headers.Add("OData-MaxVersion", "4.0");
@@ -326,7 +326,7 @@ public class ExternalDataService
             return;
         }
 
-        var url = $"{GetApiUrl()}/sprk_todoes({todoId})";
+        var url = $"{GetApiUrl()}/sprk_todos({todoId})";
         using var httpRequest = new HttpRequestMessage(HttpMethod.Patch, url);
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         httpRequest.Headers.Add("OData-MaxVersion", "4.0");

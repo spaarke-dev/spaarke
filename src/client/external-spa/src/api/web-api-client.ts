@@ -106,7 +106,7 @@ export interface ODataEvent {
 }
 
 /**
- * A To-Do record (sprk_todo EntitySet: sprk_todoes).
+ * A To-Do record (sprk_todo EntitySet: sprk_todos).
  *
  * NEW in R3 task 007 — replaces the legacy event-as-todo boolean-toggle
  * pattern. The BFF synthesises this DTO from `sprk_todo` records scoped to
