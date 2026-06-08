@@ -1,0 +1,36 @@
+{
+  "_comment_top": "R6 Wave 7 (Q9 batch migration) — seed row for the TextRefinementHandler 'refine' method.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'TextRefinementHandler'. The handler reads sprk_configuration.method = 'refine' to dispatch to the refine pipeline.",
+  "_comment_method_dispatch": "Three rows (TEXT-REFINE / TEXT-KEYPOINTS / TEXT-SUMMARY) share one handler class. Each row's sprk_configuration.method discriminator selects the internal method. This preserves the pre-R6 three-tool LLM exposure while keeping a single handler.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Text Refinement",
+  "sprk_toolcode": "TEXT-REFINE",
+  "sprk_description": "Reformat or improve the clarity of a text passage per a given instruction. Use when the user wants to rewrite, simplify, expand, reformat, or restyle content. Output is plain refined text — no preamble or commentary.",
+  "sprk_handlerclass": "TextRefinementHandler",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). Q9 batch migration: invocable from both playbook orchestration and chat-driven function calling.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "TextRefinementHandler.RefineText Request",
+    "description": "Argument shape for chat-driven invocation of the refine method. The 'text' field carries the content to refine; 'instruction' is the specific refinement directive.",
+    "type": "object",
+    "required": ["text", "instruction"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The text passage to refine. The handler does NOT pre-process this — it is the literal input to the LLM."
+      },
+      "instruction": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The refinement instruction (e.g., 'rewrite in formal language', 'simplify this paragraph', 'convert to bullet points')."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "method = 'refine' is the dispatch discriminator. This row exposes only RefineText.",
+    "method": "refine"
+  }
+}

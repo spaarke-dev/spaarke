@@ -676,9 +676,10 @@ public class SprkChatAgentFactory
     ///
     /// Tools gated by playbook capabilities (AnalysisExecutionTools, WebSearchTools) are only
     /// included when the playbook declares the corresponding capability. Ungated tools
-    /// (DocumentSearchTools, AnalysisQueryTools, KnowledgeRetrievalTools, TextRefinementTools)
-    /// are registered based on service availability — task 047 will refactor these to be
-    /// capability-gated as well.
+    /// (DocumentSearchTools, KnowledgeRetrievalTools, TextRefinementTools) are registered based
+    /// on service availability — task 047 will refactor these to be capability-gated as well.
+    /// AnalysisQueryTools was migrated to typed handler AnalysisQueryHandler in R6 Wave 7
+    /// (data-driven via the SYS-Analysis Query sprk_analysistool row + the FR-11 block below).
     ///
     /// AIPU2-061: When <paramref name="routingResult"/> is provided and confident (Layer 1 or 2),
     /// only tools whose names appear in the router-selected tool set are included. This implements
@@ -783,35 +784,14 @@ public class SprkChatAgentFactory
             failedTools.Add(nameof(DocumentSearchTools));
         }
 
-        // --- AnalysisQueryTools ---
-        // Requires IAnalysisOrchestrationService.
-        attempted++;
-        if (analysisService != null)
-        {
-            try
-            {
-                var analysisQueryTools = new AnalysisQueryTools(analysisService, tenantId);
-                tools.Add(AIFunctionFactory.Create(
-                    analysisQueryTools.GetAnalysisResultAsync,
-                    name: "GetAnalysisResult",
-                    description: "Retrieve full analysis results for a specific document by analysis ID."));
-                tools.Add(AIFunctionFactory.Create(
-                    analysisQueryTools.GetAnalysisSummaryAsync,
-                    name: "GetAnalysisSummary",
-                    description: "Retrieve the executive summary of a document analysis."));
-                resolved++;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve AnalysisQueryTools — skipping");
-                failedTools.Add(nameof(AnalysisQueryTools));
-            }
-        }
-        else
-        {
-            _logger.LogWarning("IAnalysisOrchestrationService not available; AnalysisQueryTools will not be registered");
-            failedTools.Add(nameof(AnalysisQueryTools));
-        }
+        // --- AnalysisQueryTools (R6 Wave 7 — migrated to typed handler AnalysisQueryHandler) ---
+        // The legacy hardcoded registration was removed in R6 Wave 7. The replacement
+        // AnalysisQueryHandler (Services/Ai/Handlers/AnalysisQueryHandler.cs) is auto-discovered
+        // via ToolFrameworkExtensions.AddToolHandlersFromAssembly and surfaced to the chat agent
+        // by the data-driven block below (FR-11) once the SYS-Analysis Query sprk_analysistool
+        // row is seeded (see infra/dataverse/sprk_analysistool-analysis-query-row.json +
+        // scripts/Seed-TypedHandlers.ps1). One row + 'method' enum discriminator exposes
+        // GetAnalysisResult vs GetAnalysisSummary as a single LLM tool with a method parameter.
 
         // --- KnowledgeRetrievalTools ---
         // Requires IRagService, accepts knowledge scope for domain filtering.
@@ -846,30 +826,14 @@ public class SprkChatAgentFactory
         }
 
         // --- TextRefinementTools ---
-        // Requires IChatClient (always available — constructor arg, not DI lookup).
-        attempted++;
-        try
-        {
-            var textRefinementTools = new TextRefinementTools(_chatClient);
-            tools.Add(AIFunctionFactory.Create(
-                textRefinementTools.RefineTextAsync,
-                name: "RefineText",
-                description: "Reformat or improve the clarity of a text passage per the given instruction."));
-            tools.Add(AIFunctionFactory.Create(
-                textRefinementTools.ExtractKeyPointsAsync,
-                name: "ExtractKeyPoints",
-                description: "Extract the most important key points from a text passage."));
-            tools.Add(AIFunctionFactory.Create(
-                textRefinementTools.GenerateSummaryAsync,
-                name: "GenerateSummary",
-                description: "Generate a concise summary of text in bullet, paragraph, or tldr format."));
-            resolved++;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to resolve TextRefinementTools — skipping");
-            failedTools.Add(nameof(TextRefinementTools));
-        }
+        // REMOVED in R6 Wave 7 (Q9 chat-tool batch migration): replaced by the typed
+        // TextRefinementHandler (Services/Ai/Handlers/TextRefinementHandler.cs) registered
+        // via three sprk_analysistool Dataverse rows (TEXT-REFINE / TEXT-KEYPOINTS /
+        // TEXT-SUMMARY) sharing a method-discriminator in sprk_configuration. The chat
+        // adapter (ToolHandlerToAIFunctionAdapter) exposes each row as a distinct
+        // AIFunction to the LLM. The class TextRefinementTools is retained for
+        // ChatEndpoints.RefineTextAsync (SSE streaming refine endpoint) which uses
+        // BuildRefineMessages directly — that path is NOT an LLM tool call.
 
         // --- WorkingDocumentTools ---
         // Gated behind "write_back" capability (task 073).

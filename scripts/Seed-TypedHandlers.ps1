@@ -15,15 +15,21 @@
       - RiskDetectorHandler               (task 107, FR-15)
       - InvoiceExtractionToolHandler      (task 108, FR-16)
 
-    Source rows are JSON files in infra/dataverse/ (one per handler). This script reads
-    each row, upserts to sprk_analysistools. Upsert key is sprk_handlerclass with a safety
-    filter requiring sprk_name to start with 'SYS-' (post-R6 audit item 4 consolidation,
-    2026-06-08): handler class is the stable runtime routing key, the SYS- prefix prevents
-    accidental PATCH of legacy non-R6 rows even if a handler-class string collision occurs
-    in the future. PATCH if drift, POST if missing.
+    Wave-7 (Q9 chat-tool batch migration — trivial group):
+      - TextRefinementHandler             (3 rows via method-discriminator)
+          TEXT-REFINE / TEXT-KEYPOINTS / TEXT-SUMMARY
 
-    Wave-1 + Wave-2 tasks each contribute their own row JSON file to infra/dataverse/
-    and add an entry to the $RowFiles map below.
+    Source rows are JSON files in infra/dataverse/ (one per row, not per handler). This
+    script reads each row, upserts to sprk_analysistools. Upsert key is sprk_toolcode with
+    a safety filter requiring sprk_name to start with 'SYS-' (refined 2026-06-08 from the
+    earlier handler-class key when Wave-7 introduced rows sharing one handler class via
+    method-discriminator): toolcode is unique per row even when multiple rows share a
+    handler class. The SYS- prefix prevents accidental PATCH of legacy non-R6 rows even
+    if a toolcode collision occurs in the future. PATCH if drift, POST if missing.
+
+    Wave-1, Wave-2, and Wave-7 tasks each contribute their own row JSON file to
+    infra/dataverse/ and add an entry to the $RowFiles map below. Map keys are the
+    sprk_toolcode (unique per row).
 
 .PARAMETER DataverseUrl
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL or Spaarke Dev.
@@ -91,6 +97,16 @@ $RowFiles = @{
     "ClauseAnalyzerHandler"            = "$RepoRoot/infra/dataverse/sprk_analysistool-clause-analyzer-row.json"
     "RiskDetectorHandler"              = "$RepoRoot/infra/dataverse/sprk_analysistool-risk-detector-row.json"
     "InvoiceExtractionToolHandler"     = "$RepoRoot/infra/dataverse/sprk_analysistool-invoice-extractor-row.json"
+    # Wave 7 — chat-tool migration (legacy hardcoded tool → typed handler)
+    "AnalysisQueryHandler"             = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-query-row.json"
+    # Wave 7 — TextRefinementHandler serves 3 rows via the method-discriminator in
+    # sprk_configuration (refine / keypoints / summary). Because the handler class is
+    # the same for all three, the upsert key MUST be sprk_toolcode (not handler-class)
+    # for these rows — see Find-ExistingRow's $ToolCode parameter (added 2026-06-08).
+    # Map keys are the unique sprk_toolcode values; iteration variable is just a label.
+    "TEXT-REFINE"                      = "$RepoRoot/infra/dataverse/sprk_analysistool-text-refine-row.json"
+    "TEXT-KEYPOINTS"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-text-keypoints-row.json"
+    "TEXT-SUMMARY"                     = "$RepoRoot/infra/dataverse/sprk_analysistool-text-summary-row.json"
 }
 
 # -----------------------------------------------------------------------------
@@ -119,13 +135,16 @@ function Get-DataverseAccessToken {
 
 # -----------------------------------------------------------------------------
 # Find existing row by sprk_handlerclass (idempotency key) WITH sprk_name 'SYS-%'
-# safety filter.
+# safety filter, optionally disambiguated by sprk_toolcode.
 #
-# Why sprk_handlerclass not sprk_toolcode?
-#   Per R6 audit item 4 consolidation (2026-06-08), sprk_toolcode is now a
-#   descriptive human-readable identifier that may legitimately rename over time
-#   without breaking runtime routing. sprk_handlerclass = nameof(handler) is the
-#   stable runtime key; routing has always been by handler class, not toolcode.
+# Why sprk_handlerclass + (optional) sprk_toolcode?
+#   Per R6 audit item 4 consolidation (2026-06-07), sprk_handlerclass = nameof(handler)
+#   is the stable runtime routing key. For 1:1 handler→row rows (Wave 1, Wave 2)
+#   handler-class alone is unique. For multi-row-per-handler rows (Wave 7
+#   TextRefinementHandler — 3 rows via method-discriminator, 2026-06-08), the
+#   $ToolCode parameter must be supplied to disambiguate. Caller behavior:
+#     - If only $HandlerClass given → match by handler-class (existing behavior).
+#     - If both given → match by handler-class AND toolcode (Wave 7 path).
 #
 # Why the 'SYS-%' name filter?
 #   Pre-R6 legacy seed-data (`scripts/seed-data/Deploy-Tools.ps1`) created
@@ -139,7 +158,8 @@ function Find-ExistingRow {
     param(
         [string]$BaseUrl,
         [string]$Token,
-        [string]$HandlerClass
+        [string]$HandlerClass,
+        [string]$ToolCode
     )
     $headers = @{
         "Authorization"      = "Bearer $Token"
@@ -149,6 +169,9 @@ function Find-ExistingRow {
         "Prefer"             = "odata.include-annotations=*"
     }
     $filter = "sprk_handlerclass eq '$HandlerClass' and startswith(sprk_name,'SYS-')"
+    if (-not [string]::IsNullOrWhiteSpace($ToolCode)) {
+        $filter = "$filter and sprk_toolcode eq '$ToolCode'"
+    }
     $query = "$BaseUrl/api/data/v9.2/sprk_analysistools?`$filter=$filter&`$select=sprk_analysistoolid,sprk_name,sprk_handlerclass,sprk_toolcode"
     try {
         $response = Invoke-RestMethod -Uri $query -Headers $headers -Method Get -ErrorAction Stop
@@ -196,24 +219,27 @@ Write-Host "  Rows        : $($RowFiles.Keys -join ', ')"
 Write-Host "  Preview     : $WhatIf"
 Write-Host ""
 
-Write-Host "  Upsert key  : sprk_handlerclass with sprk_name LIKE 'SYS-%' safety filter"
+Write-Host "  Upsert key  : sprk_handlerclass + sprk_toolcode (when multi-row-per-handler) with sprk_name LIKE 'SYS-%' safety filter"
 Write-Host ""
 
 if (-not $WhatIf) {
     $token = Get-DataverseAccessToken -ResourceUrl $DataverseUrl
 }
 
-foreach ($handlerClass in $RowFiles.Keys) {
-    $jsonPath = $RowFiles[$handlerClass]
+foreach ($rowKey in $RowFiles.Keys) {
+    $jsonPath = $RowFiles[$rowKey]
     if (-not (Test-Path $jsonPath)) {
-        Write-Warning "Row JSON file missing for $handlerClass at $jsonPath — skipping."
+        Write-Warning "Row JSON file missing for $rowKey at $jsonPath — skipping."
         continue
     }
 
     $payload = Get-PayloadFromRowJson -JsonFilePath $jsonPath
     $toolCode = $payload["sprk_toolcode"]
+    # NOTE: read handler class from the payload (not the map key) because Wave 7
+    # rows use toolcode as the map key, since one handler class serves multiple rows.
+    $handlerClass = $payload["sprk_handlerclass"]
 
-    Write-Host "--- $handlerClass ($toolCode) ---"
+    Write-Host "--- $rowKey ($toolCode → $handlerClass) ---"
 
     # R6 audit item 1: catalog-write-time JSON Schema validation. We refuse to
     # seed a row whose sprk_jsonschema is structurally invalid — admins see the
@@ -235,7 +261,9 @@ foreach ($handlerClass in $RowFiles.Keys) {
         continue
     }
 
-    $existing = Find-ExistingRow -BaseUrl $DataverseUrl -Token $token -HandlerClass $handlerClass
+    # When multiple rows share a handler class (Wave 7 TextRefinementHandler),
+    # pass the toolcode to disambiguate the upsert lookup.
+    $existing = Find-ExistingRow -BaseUrl $DataverseUrl -Token $token -HandlerClass $handlerClass -ToolCode $toolCode
 
     $headers = @{
         "Authorization"      = "Bearer $token"
