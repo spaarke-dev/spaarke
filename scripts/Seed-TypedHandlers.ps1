@@ -16,8 +16,11 @@
       - InvoiceExtractionToolHandler      (task 108, FR-16)
 
     Source rows are JSON files in infra/dataverse/ (one per handler). This script reads
-    each row, upserts to sprk_analysistools (query by sprk_toolcode first; PATCH if drift,
-    POST if missing).
+    each row, upserts to sprk_analysistools. Upsert key is sprk_handlerclass with a safety
+    filter requiring sprk_name to start with 'SYS-' (post-R6 audit item 4 consolidation,
+    2026-06-08): handler class is the stable runtime routing key, the SYS- prefix prevents
+    accidental PATCH of legacy non-R6 rows even if a handler-class string collision occurs
+    in the future. PATCH if drift, POST if missing.
 
     Wave-1 + Wave-2 tasks each contribute their own row JSON file to infra/dataverse/
     and add an entry to the $RowFiles map below.
@@ -115,13 +118,28 @@ function Get-DataverseAccessToken {
 }
 
 # -----------------------------------------------------------------------------
-# Find existing row by sprk_toolcode (idempotency key).
+# Find existing row by sprk_handlerclass (idempotency key) WITH sprk_name 'SYS-%'
+# safety filter.
+#
+# Why sprk_handlerclass not sprk_toolcode?
+#   Per R6 audit item 4 consolidation (2026-06-08), sprk_toolcode is now a
+#   descriptive human-readable identifier that may legitimately rename over time
+#   without breaking runtime routing. sprk_handlerclass = nameof(handler) is the
+#   stable runtime key; routing has always been by handler class, not toolcode.
+#
+# Why the 'SYS-%' name filter?
+#   Pre-R6 legacy seed-data (`scripts/seed-data/Deploy-Tools.ps1`) created
+#   `Clause Analyzer`/`Date Extractor`/etc. rows with the same sprk_handlerclass
+#   values but no SYS- prefix. The audit item 4 consolidation PATCHed those into
+#   `SYS-*` canonical rows. The startswith filter ensures future runs only touch
+#   the R6 canonical row even if some other system pathway reintroduces a
+#   non-SYS handler-class collision.
 # -----------------------------------------------------------------------------
 function Find-ExistingRow {
     param(
         [string]$BaseUrl,
         [string]$Token,
-        [string]$ToolCode
+        [string]$HandlerClass
     )
     $headers = @{
         "Authorization"      = "Bearer $Token"
@@ -130,7 +148,8 @@ function Find-ExistingRow {
         "Accept"             = "application/json"
         "Prefer"             = "odata.include-annotations=*"
     }
-    $query = "$BaseUrl/api/data/v9.2/sprk_analysistools?`$filter=sprk_toolcode eq '$ToolCode'&`$select=sprk_analysistoolid,sprk_name,sprk_handlerclass,sprk_toolcode"
+    $filter = "sprk_handlerclass eq '$HandlerClass' and startswith(sprk_name,'SYS-')"
+    $query = "$BaseUrl/api/data/v9.2/sprk_analysistools?`$filter=$filter&`$select=sprk_analysistoolid,sprk_name,sprk_handlerclass,sprk_toolcode"
     try {
         $response = Invoke-RestMethod -Uri $query -Headers $headers -Method Get -ErrorAction Stop
         if ($response.value -and $response.value.Count -gt 0) {
@@ -177,6 +196,9 @@ Write-Host "  Rows        : $($RowFiles.Keys -join ', ')"
 Write-Host "  Preview     : $WhatIf"
 Write-Host ""
 
+Write-Host "  Upsert key  : sprk_handlerclass with sprk_name LIKE 'SYS-%' safety filter"
+Write-Host ""
+
 if (-not $WhatIf) {
     $token = Get-DataverseAccessToken -ResourceUrl $DataverseUrl
 }
@@ -213,7 +235,7 @@ foreach ($handlerClass in $RowFiles.Keys) {
         continue
     }
 
-    $existing = Find-ExistingRow -BaseUrl $DataverseUrl -Token $token -ToolCode $toolCode
+    $existing = Find-ExistingRow -BaseUrl $DataverseUrl -Token $token -HandlerClass $handlerClass
 
     $headers = @{
         "Authorization"      = "Bearer $token"

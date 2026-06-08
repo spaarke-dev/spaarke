@@ -7,8 +7,8 @@
   "sprk_toolcode": "CLAUSE-ANALYZER",
   "sprk_description": "LLM-assisted contract clause structuring. Identifies typed clauses (indemnity, liability, termination, payment, ip-assignment, confidentiality, governing-law, warranty, force-majeure, assignment) and returns per-clause structured fields plus non-overlapping span boundaries. Configurable clauseTypes filter and optional obligation / party extraction. Distinct from ClauseComparisonHandler (which DIFFS two clauses deterministically).",
   "sprk_handlerclass": "ClauseAnalyzerHandler",
-  "sprk_availableincontexts_value": 100000002,
-  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). FR-14: clause structuring is useful from both playbook nodes (post-extraction) and the chat surface (ad-hoc structuring of user-supplied clause text).",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). FR-14: clause structuring is useful from both playbook nodes (post-extraction) and the chat surface (ad-hoc structuring of user-supplied clause text). R6 audit item 4 (2026-06-08): renamed key from sprk_availableincontexts_value (OData read-only annotation) to sprk_availableincontexts (writable column) — see audit-item-04 note Finding A.",
   "sprk_jsonschema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "ClauseAnalyzerHandler Request",

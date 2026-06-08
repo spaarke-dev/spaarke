@@ -7,8 +7,8 @@
   "sprk_toolcode": "FINANCIAL-CALCULATOR",
   "sprk_description": "Pure deterministic financial math: sum, tax, discount, FX conversion (configured rate table), weighted average, and aggregation by category. All money math uses decimal; mixed-currency operations are rejected. NO LLM call.",
   "sprk_handlerclass": "FinancialCalculatorHandler",
-  "sprk_availableincontexts_value": 100000000,
-  "_comment_availableincontexts": "100000000 = Playbook (this handler is invoked from Playbook nodes after upstream extraction; no chat-direct invocation in R6).",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat) per user direction 2026-06-08 (audit item 4 Finding B override) — consistent with FR-13..FR-20 acceptance that all 8 typed handlers are chat-exposable. R6 audit item 4 also renamed key from sprk_availableincontexts_value (OData read-only annotation) to sprk_availableincontexts (writable column) per Finding A.",
   "sprk_jsonschema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "FinancialCalculatorHandler Request",

@@ -1,37 +1,64 @@
 {
-  "_comment": "Seed row for FinancialCalculationToolHandler (R6 task 104, FR-20). Pure-deterministic formula handler. Deploy via PAC CLI Web API POST or Power Automate dataflow. sprk_handlerclass MUST equal the C# class name for auto-discovery to route correctly.",
-  "_task": "spaarke-ai-platform-unification-r6 / task 104 (D-H-04)",
-  "_handlerSource": "src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/FinancialCalculationToolHandler.cs",
-  "_dataverseEntity": "sprk_analysistool",
-  "row": {
-    "sprk_name": "Financial Calculation (formula)",
-    "sprk_description": "Pure-deterministic, currency-aware financial formulas: simple/compound interest, present/future value, loan payment (amortization), ROI. All monetary math uses decimal. No LLM call.",
-    "sprk_tooltype": 7,
-    "_tooltype_comment": "ToolType.FinancialCalculator = 7 (from IScopeResolverService.cs)",
-    "sprk_handlerclass": "FinancialCalculationToolHandler",
-    "_comment_toolcode": "R6 audit item 4 (2026-06-07): sprk_toolcode column extended manually from 10 to 100 chars. Renamed from 'FIN-CALC-FORMULA@v1' to descriptive 'FINANCIAL-CALCULATION'. NO @v1 suffix per cross-environment migration policy.",
-    "sprk_toolcode": "FINANCIAL-CALCULATION",
-    "sprk_availableincontexts": 100000000,
-    "_availableincontexts_comment": "ToolAvailabilityContext.Playbook = 100000000 — formula handler exposed to playbook orchestration only by default. Promote to Both (100000002) once chat-facing JSON schema for inputs is authored.",
-    "sprk_ownertype": "SYS",
-    "sprk_isimmutable": true,
-    "sprk_configuration": "{\n  \"formula\": \"simple_interest\",\n  \"inputs\": {\n    \"principal\": 1000.00,\n    \"rate\": 0.05,\n    \"time\": 2\n  },\n  \"options\": {\n    \"precision\": 2,\n    \"rounding\": \"banker\",\n    \"compoundingFrequency\": 1,\n    \"currency\": \"USD\"\n  }\n}",
-    "_configuration_comment": "Default config = simple_interest with textbook values ($1000 @ 5% for 2y → $100). Per-invocation playbook nodes override formula + inputs at runtime via the AnalysisTool.Configuration override; this seed only documents the contract shape.",
-    "sprk_jsonschema": "{\n  \"$schema\": \"https://json-schema.org/draft-07/schema#\",\n  \"title\": \"FinancialCalculationToolHandler input\",\n  \"type\": \"object\",\n  \"properties\": {\n    \"formula\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"simple_interest\",\n        \"compound_interest\",\n        \"present_value\",\n        \"future_value\",\n        \"loan_payment\",\n        \"roi\"\n      ]\n    },\n    \"inputs\": {\n      \"type\": \"object\",\n      \"description\": \"Named decimal parameters. Required keys per formula: simple_interest=[principal,rate,time]; compound_interest=[principal,rate,time]; present_value=[futureValue,rate,time]; future_value=[presentValue,rate,time]; loan_payment=[principal,rate,periods]; roi=[gain,cost].\"\n    },\n    \"options\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"precision\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 8, \"default\": 2 },\n        \"rounding\": { \"type\": \"string\", \"enum\": [\"banker\", \"away_from_zero\"], \"default\": \"banker\" },\n        \"compoundingFrequency\": { \"type\": \"integer\", \"minimum\": 1, \"maximum\": 365, \"default\": 1 },\n        \"currency\": { \"type\": \"string\", \"default\": \"USD\" }\n      }\n    }\n  },\n  \"required\": [\"formula\", \"inputs\"]\n}"
-  },
-  "deployment": {
-    "_instructions": [
-      "Deploy to Spaarke Dev via PAC CLI Web API (or Power Automate dataflow):",
-      "  pac dataverse-api create --entity sprk_analysistool --body $row",
-      "Verify after deploy:",
-      "  GET /api/data/v9.2/sprk_analysistools?$filter=sprk_handlerclass eq 'FinancialCalculationToolHandler'",
-      "Expected: one row returned with sprk_toolcode = 'FIN-CALC-FORMULA@v1'."
-    ],
-    "adrCompliance": {
-      "ADR-010": "Auto-discovery picks up handler — NO manual DI line.",
-      "ADR-013": "Handler in Services/Ai/Handlers/; CRUD-side code routes through PublicContracts facades (not relevant for this deterministic handler).",
-      "ADR-015": "Telemetry surface is handler name + formula name + outcome + duration + IDs ONLY. Never input values.",
-      "ADR-029": "Zero new NuGet packages; BFF publish-size delta ≪ 0.5 MB."
+  "_comment_top": "R6 task 104 (D-H-04, FR-20) — seed row for the FinancialCalculationToolHandler typed handler (pure-deterministic formula handler).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'FinancialCalculationToolHandler' (= nameof handler class). Source: src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/FinancialCalculationToolHandler.cs",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_toolcode first; UPSERTs to sprk_analysistool entity.",
+  "_comment_toolcode": "R6 audit item 4 (2026-06-07): sprk_toolcode column extended manually from 10 to 100 chars. Renamed from 'FIN-CALC-FORMULA@v1' to descriptive 'FINANCIAL-CALCULATION'. NO @v1 suffix per cross-environment migration policy.",
+  "_comment_envelope": "R6 audit item 4 (2026-06-08) Finding C: file restructured from nested {row:{...}} envelope to flat shape so Get-PayloadFromRowJson in Seed-TypedHandlers.ps1 (which iterates top-level properties) emits the correct sprk_* payload. Previous _task / _handlerSource / _dataverseEntity / deployment keys folded into _comment_* prose above (script skips any key starting with _comment).",
+  "_comment_adr_compliance": "ADR-010: auto-discovery picks up handler — NO manual DI line. ADR-013: handler in Services/Ai/Handlers/; CRUD-side code routes through PublicContracts facades (not relevant for this deterministic handler). ADR-015: telemetry surface is handler name + formula name + outcome + duration + IDs ONLY; never input values. ADR-029: zero new NuGet packages; BFF publish-size delta << 0.5 MB.",
+  "sprk_name": "SYS-Financial Calculation (formula)",
+  "sprk_toolcode": "FINANCIAL-CALCULATION",
+  "sprk_description": "Pure-deterministic, currency-aware financial formulas: simple/compound interest, present/future value, loan payment (amortization), ROI. All monetary math uses decimal. No LLM call.",
+  "sprk_handlerclass": "FinancialCalculationToolHandler",
+  "_comment_dropped_fields": "R6 audit item 4 (2026-06-08) Finding C: original nested envelope had sprk_tooltype:7, sprk_ownertype:'SYS', sprk_isimmutable:true. MCP describe(tables/sprk_analysistool) confirms NONE of these are real columns on the entity (real columns: sprk_tooltypeid LOOKUP to sprk_aitooltype; no ownertype/isimmutable fields). Dropped during flattening — they would have been silently rejected by Dataverse Web API anyway. SYS-prefix on sprk_name is the human signal for 'system-owned'.",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat) per user direction 2026-06-08 (audit item 4 Finding B override) — consistent with FR-13..FR-20 acceptance that all 8 typed handlers are chat-exposable. Previous default was 100000000 (Playbook-only) pending chat-facing JSON schema; that schema is now provided in sprk_jsonschema below, so Both is appropriate.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "FinancialCalculationToolHandler Request",
+    "description": "Argument shape for chat-driven invocation of FinancialCalculationToolHandler. Selects a formula and supplies named decimal inputs; the handler returns the computed value rounded per options.",
+    "type": "object",
+    "required": ["formula", "inputs"],
+    "properties": {
+      "formula": {
+        "type": "string",
+        "enum": [
+          "simple_interest",
+          "compound_interest",
+          "present_value",
+          "future_value",
+          "loan_payment",
+          "roi"
+        ],
+        "description": "Which financial formula to evaluate."
+      },
+      "inputs": {
+        "type": "object",
+        "description": "Named decimal parameters. Required keys per formula: simple_interest=[principal,rate,time]; compound_interest=[principal,rate,time]; present_value=[futureValue,rate,time]; future_value=[presentValue,rate,time]; loan_payment=[principal,rate,periods]; roi=[gain,cost]."
+      },
+      "options": {
+        "type": "object",
+        "properties": {
+          "precision": { "type": "integer", "minimum": 0, "maximum": 8, "default": 2 },
+          "rounding": { "type": "string", "enum": ["banker", "away_from_zero"], "default": "banker" },
+          "compoundingFrequency": { "type": "integer", "minimum": 1, "maximum": 365, "default": 1 },
+          "currency": { "type": "string", "default": "USD" }
+        }
+      }
     }
-  }
+  },
+  "sprk_configuration": {
+    "formula": "simple_interest",
+    "inputs": {
+      "principal": 1000.00,
+      "rate": 0.05,
+      "time": 2
+    },
+    "options": {
+      "precision": 2,
+      "rounding": "banker",
+      "compoundingFrequency": 1,
+      "currency": "USD"
+    }
+  },
+  "_comment_configuration": "Default config = simple_interest with textbook values ($1000 @ 5% for 2y → $100). Per-invocation playbook nodes / chat tool calls override formula + inputs at runtime via the AnalysisTool.Configuration override; this seed only documents the contract shape."
 }
