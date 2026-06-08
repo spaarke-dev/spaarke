@@ -284,38 +284,34 @@ export class MatterService {
     // chain handles the fallback server-side. We log a warning instead of
     // aborting matter creation.
     // -------------------------------------------------------------------------
+    // Align with WorkAssignment pattern: pass IDataService directly + applyUserBuDefaults.
+    // (Earlier attempt used _toWebApiLike adapter + applyDefaultSearchIndexName which
+    // worked in tests but failed silently in the deployed wizard — root cause unclear,
+    // pragmatic fix is to converge on the proven pattern.) INV-5 still enforced
+    // per-field by applyUserBuDefaults — the host-injected this._containerId set
+    // above is preserved.
     try {
       const userId = _tryGetCurrentUserId();
       if (userId) {
-        const webApi = _toWebApiLike(this._dataService);
-        const buDefaults = await EntityCreationService.resolveUserBuDefaults(webApi, userId);
-        const wasSet = EntityCreationService.applyDefaultSearchIndexName(entity, buDefaults.searchIndexName);
-        if (wasSet) {
-          console.info(
-            '[MatterService] Cascaded sprk_searchindexname from user BU:',
-            buDefaults.searchIndexName,
-            '(BU:',
-            buDefaults.businessUnitId,
-            ')'
-          );
-        } else if (buDefaults.searchIndexName) {
-          console.info('[MatterService] sprk_searchindexname already explicitly set on payload — preserving (INV-5).');
-        } else {
-          console.info(
-            '[MatterService] User BU has no sprk_searchindexname — leaving payload field unset; BFF tenant-default chain will apply.'
-          );
-        }
-      } else {
-        console.warn(
-          '[MatterService] Xrm.Utility.getUserId() unavailable — skipping sprk_searchindexname BU cascade. BFF tenant-default will apply server-side.'
+        const defaults = await EntityCreationService.resolveUserBuDefaults(this._dataService, userId);
+        const applied = EntityCreationService.applyUserBuDefaults(entity, defaults);
+        console.info(
+          '[MatterService] BU cascade — containerIdSet:',
+          applied.containerIdSet,
+          'searchIndexNameSet:',
+          applied.searchIndexNameSet,
+          '(BU:',
+          defaults.businessUnitId,
+          ', searchIndexName:',
+          defaults.searchIndexName,
+          ')'
         );
+      } else {
+        console.warn('[MatterService] BU cascade skipped: current user ID could not be resolved.');
       }
     } catch (err) {
-      // Cascade is best-effort; never block matter creation on it.
-      console.warn(
-        '[MatterService] Failed to cascade sprk_searchindexname from user BU (non-fatal):',
-        err instanceof Error ? err.message : err
-      );
+      // Non-fatal: log and continue. BFF tenant-default chain handles routing if fields are unset.
+      console.warn('[MatterService] BU cascade failed (non-fatal):', err);
     }
 
     // Generate matter number: {matterTypeCode}-{random 6 digits}

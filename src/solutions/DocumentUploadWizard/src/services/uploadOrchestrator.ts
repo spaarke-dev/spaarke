@@ -40,6 +40,7 @@ import {
 import type { EntityConfigResolver } from "@spaarke/ui-components/services/document-upload";
 
 import { authenticatedFetch } from "@spaarke/auth";
+import { resolveSearchIndexNameForRecord } from "../components/AssociateToStep";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -264,10 +265,49 @@ export async function orchestrateUpload(
             documentName: "", // Will fall back to file name per file in DocumentRecordService
         };
 
+        // FR-WIZ-07 (multi-container-multi-index-r1): resolve `sprk_searchindexname`
+        // via the 3-step chain (parent's value → parent-owning-BU's value → empty)
+        // and pass it through to DocumentRecordService so each Document gets the
+        // correct index identifier persisted at create time. Non-fatal: any error
+        // resolves to empty → BFF tenant-default chain applies server-side.
+        let resolvedSearchIndexName: string = "";
+        try {
+            // Resolver expects host-context Xrm.WebApi. Use the same window-walking
+            // pattern resolveSpeContainerId uses elsewhere — this code runs inside
+            // a code-page hosted in Power Apps, so Xrm is available on window/parent/top.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const xrm: any =
+                (window as any).Xrm ??
+                (window.parent as any)?.Xrm ??
+                (window.top as any)?.Xrm;
+            if (xrm?.WebApi) {
+                resolvedSearchIndexName = await resolveSearchIndexNameForRecord(
+                    xrm.WebApi,
+                    config.parentContext.parentEntityName,
+                    config.parentContext.parentRecordId,
+                );
+                logger.info(
+                    "UploadOrchestrator",
+                    `Resolved sprk_searchindexname: ${resolvedSearchIndexName || "(empty — tenant default applies)"}`,
+                );
+            } else {
+                logger.warn(
+                    "UploadOrchestrator",
+                    "Xrm.WebApi unavailable — skipping sprk_searchindexname resolution; BFF tenant-default chain will apply",
+                );
+            }
+        } catch (err) {
+            logger.warn(
+                "UploadOrchestrator",
+                `sprk_searchindexname resolution failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
+
         const createResults = await documentRecordService.createDocuments(
             successfulUploads,
             config.parentContext,
             formData,
+            resolvedSearchIndexName || undefined,
         );
 
         // Map creation results back to fileResults
