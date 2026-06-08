@@ -263,6 +263,13 @@ public static class AnalysisServicesModule
         // compound-OFF DI graph remains uniform across all four PublicContracts facades.
         services.AddScoped<IRecordMatchingAi, NullRecordMatchingAi>();
 
+        // L1 — IInvokePlaybookAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
+        // R6 Pillar 3 / Q11 / task 020 — generic playbook-invocation facade for the chat-tool
+        // dispatch path (task 021 InvokePlaybookHandler), the M365 Copilot agent gateway, and
+        // future R7+ consumers. Symmetric registration with the real impl per the
+        // asymmetric-registration anti-pattern guard (CLAUDE.md §10 F.1).
+        services.AddScoped<IInvokePlaybookAi, NullInvokePlaybookAi>();
+
         // L1 — IInsightsAi (P3 Fail-Fast). Real impl (InsightsOrchestrator) registered in
         // AddPublicContractsFacade. Consumed by /api/insights/ask + /api/insights/search +
         // /api/insights/assistant/query endpoints (Zone B) AND by the D-P8 SPE-upload
@@ -525,6 +532,16 @@ public static class AnalysisServicesModule
         services.AddScoped<IInvoiceAi, InvoiceAi>();
         services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
         services.AddScoped<IRecordMatchingAi, RecordMatchingAi>();
+
+        // R6 Pillar 3 / Q11 / task 020 — IInvokePlaybookAi facade. Consumed by task 021
+        // InvokePlaybookHandler (chat-tool dispatch path) + future M365 Copilot agent
+        // gateway + future R7+ consumers. Wraps IPlaybookOrchestrationService — same
+        // pattern + same lifetime as IWorkspacePrefillAi above. ADR-013 facade boundary:
+        // the implementation is the only allowed translation point between the
+        // orchestration-internal PlaybookStreamEvent / NodeOutput / PlaybookRunMetrics
+        // and the domain-shape PlaybookInvocationResult consumed by CRUD-side callers.
+        // Null peer (NullInvokePlaybookAi) registered in AddNullObjectsForCompoundOff.
+        services.AddScoped<IInvokePlaybookAi, InvokePlaybookAi>();
 
         // ── 2026-06-04 audit Migration PR #1 — relocated from InsightsFacadeModule ────────
         // IPlaybookExecutionEngine — Scoped (transitively consumes Scoped
