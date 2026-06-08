@@ -1,10 +1,13 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Graph;
 using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Validation;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -21,8 +24,14 @@ public static class UploadEndpoints
             string containerId,
             string path,
             HttpRequest req,
+            [FromQuery] string? searchIndexName,
+            [FromQuery] string? parentEntityType,
+            [FromQuery] string? parentEntityId,
+            [FromQuery] string? parentEntityName,
             SpeFileStore speFileStore,
             NotificationService notificationService,
+            IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
+            IConfiguration configuration,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct) =>
@@ -52,6 +61,40 @@ public static class UploadEndpoints
 
                 // Stream directly to Graph SDK (no memory buffering)
                 var item = await speFileStore.UploadSmallAsync(containerId, path, req.Body, ct);
+
+                // multi-container-multi-index-r1 upload-indexing-centralization (Phase 3):
+                // enqueue RAG indexing for the just-uploaded file. Non-fatal — helper swallows
+                // failures so the upload contract with the caller is preserved.
+                if (item is not null && !string.IsNullOrWhiteSpace(item.Id))
+                {
+                    var tenantId = configuration["TENANT_ID"] ?? configuration["AzureAd:TenantId"] ?? string.Empty;
+                    var uploadedFileName = Path.GetFileName(path);
+
+                    ParentEntityContext? parentEntity = null;
+                    if (!string.IsNullOrWhiteSpace(parentEntityType) &&
+                        !string.IsNullOrWhiteSpace(parentEntityId))
+                    {
+                        parentEntity = new ParentEntityContext(
+                            parentEntityType,
+                            parentEntityId,
+                            parentEntityName ?? string.Empty);
+                    }
+
+                    var indexingRequest = new PostUploadIndexingRequest(
+                        TenantId: tenantId,
+                        DriveId: containerId,
+                        ItemId: item.Id,
+                        FileName: uploadedFileName,
+                        FileSizeBytes: item.Size,
+                        ContentType: null, // FileHandleDto doesn't carry MIME — helper infers from extension
+                        DocumentId: null,
+                        ParentEntity: parentEntity,
+                        SearchIndexName: searchIndexName,
+                        Source: "DirectContainerUpload",
+                        CorrelationId: traceId);
+
+                    await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, ct);
+                }
 
                 // Fire-and-forget: create notification for the uploading user (must not block response)
                 var userOid = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value

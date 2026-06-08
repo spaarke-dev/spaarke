@@ -6,6 +6,8 @@ using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -50,7 +52,13 @@ public static class OBOEndpoints
         // PUT: small upload (as user)
         app.MapPut("/api/obo/containers/{id}/files/{*path}", async (
             string id, string path, HttpRequest req, HttpContext ctx,
+            [FromQuery] string? searchIndexName,
+            [FromQuery] string? parentEntityType,
+            [FromQuery] string? parentEntityId,
+            [FromQuery] string? parentEntityName,
             [FromServices] SpeFileStore speFileStore,
+            [FromServices] IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
+            [FromServices] IConfiguration configuration,
             [FromServices] ILogger<Program> logger,
             CancellationToken ct) =>
         {
@@ -69,6 +77,43 @@ public static class OBOEndpoints
                 var item = await speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct);
 
                 logger.LogInformation("OBO upload successful - DriveItemId: {ItemId}", item?.Id);
+
+                // multi-container-multi-index-r1 upload-indexing-centralization (Phase 3):
+                // enqueue RAG indexing for the just-uploaded file. Non-fatal — helper swallows
+                // failures so the upload contract with the caller is preserved. Optional query
+                // params let the wizard pre-resolve and pass searchIndexName + parent entity
+                // context, avoiding race conditions with downstream sprk_document creation.
+                if (item is not null && !string.IsNullOrWhiteSpace(item.Id))
+                {
+                    var tenantId = configuration["TENANT_ID"] ?? configuration["AzureAd:TenantId"] ?? string.Empty;
+                    var fileName = Path.GetFileName(path);
+
+                    ParentEntityContext? parentEntity = null;
+                    if (!string.IsNullOrWhiteSpace(parentEntityType) &&
+                        !string.IsNullOrWhiteSpace(parentEntityId))
+                    {
+                        parentEntity = new ParentEntityContext(
+                            parentEntityType,
+                            parentEntityId,
+                            parentEntityName ?? string.Empty);
+                    }
+
+                    var indexingRequest = new PostUploadIndexingRequest(
+                        TenantId: tenantId,
+                        DriveId: driveId,
+                        ItemId: item.Id,
+                        FileName: fileName,
+                        FileSizeBytes: item.Size,
+                        ContentType: null, // FileHandleDto doesn't carry MIME — helper infers from extension
+                        DocumentId: null,
+                        ParentEntity: parentEntity,
+                        SearchIndexName: searchIndexName,
+                        Source: "OboContainerUpload",
+                        CorrelationId: ctx.TraceIdentifier);
+
+                    await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, ct);
+                }
+
                 return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
             }
             catch (UnauthorizedAccessException ex)
