@@ -28,6 +28,15 @@ public static class AnalysisServicesModule
         // RecordSummarizeInvocation; task 007 cleanup may call RecordSessionFilesIndexSize.
         services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
 
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — TRULY UNCONDITIONAL.
+        // ISearchIndexNameResolver is consumed by RagIndexingJobHandler / BulkRagIndexingJobHandler /
+        // IndexingWorkerHostedService — all 3 are registered unconditionally as scoped IJobHandler / IHostedService.
+        // The resolver delegates to IGenericEntityService (registered unconditionally via GraphModule).
+        // Registered HERE at the top of the module (above the documentIntelligence/analysis conditionals)
+        // so it resolves correctly on BOTH AI-ON and AI-OFF paths. Lifetime: scoped (matches consumer
+        // expectations + Dataverse Web API client lifetime).
+        services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
+
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
@@ -300,15 +309,13 @@ public static class AnalysisServicesModule
         //   impl registered AddRagServices line 422. Lifetime: scoped (matches real FileIndexingService).
         services.AddScoped<IFileIndexingService, NullFileIndexingService>();
 
-        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) —
-        // ISearchIndexNameResolver is a pure Dataverse-lookup helper consumed unconditionally
-        // by 3 background-indexing entry points (RagIndexingJobHandler,
-        // BulkRagIndexingJobHandler, IndexingWorkerHostedService). It has NO compound-AI-kill-switch
-        // dependency (delegates to IGenericEntityService which is always registered) so it is
-        // registered UNCONDITIONALLY here — symmetric registration, no asymmetric-registration
-        // anti-pattern (bff-extensions.md §F.1). Lifetime: scoped (Dataverse Web API client
-        // lifetime; the resolver itself is stateless).
-        services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
+        // ⚠ NOTE: ISearchIndexNameResolver was incorrectly placed HERE (inside
+        // AddNullObjectsForCompoundOff) — that method only runs on the AI-OFF path,
+        // so RagIndexingJobHandler / BulkRagIndexingJobHandler / IndexingWorkerHostedService
+        // failed at startup in the AI-ON live env with
+        // "Unable to resolve service for type ISearchIndexNameResolver".
+        // FIXED 2026-06-08: registration moved to the TOP of AddAnalysisServicesModule
+        // (above the documentIntelligence/analysis conditionals) so it's truly unconditional.
 
         // B2 — SprkChatAgentFactory (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B2.
         // Real impl registered unconditionally inside AddAiModule (only invoked on compound-ON path).
