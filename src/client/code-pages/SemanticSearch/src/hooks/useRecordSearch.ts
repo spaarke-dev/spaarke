@@ -18,7 +18,14 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { search as searchRecords } from '../services/RecordSearchApiService';
-import type { RecordSearchResult, RecordSearchResponse, SearchFilters, SearchState, ApiError } from '../types';
+import type {
+  RecordSearchRequest,
+  RecordSearchResult,
+  RecordSearchResponse,
+  SearchFilters,
+  SearchState,
+  ApiError,
+} from '../types';
 
 /** Number of results fetched per page */
 const PAGE_SIZE = 20;
@@ -42,12 +49,46 @@ export interface UseRecordSearchReturn {
   errorMessage: string | null;
   /** Search execution duration in milliseconds, or null if no search has completed */
   searchTime: number | null;
-  /** Execute a new record search, clearing previous results */
-  search: (query: string, recordTypes: string[], filters: SearchFilters) => void;
+  /**
+   * Execute a new record search, clearing previous results.
+   *
+   * @param query - Search query text.
+   * @param recordTypes - Dataverse entity logical names to search.
+   * @param filters - Active search filters.
+   * @param searchIndexName - Optional Azure AI Search index name to route the
+   *   request to (FR-CP-04 / FR-PCF-03 — sourced from the
+   *   `searchIndexName` URL envelope param parsed by `parseUrlParams`).
+   *   When non-empty (after trimming), the value is forwarded in the BFF
+   *   request body so the server resolves the request against that index.
+   *   When null / undefined / empty / whitespace-only, the field is OMITTED
+   *   entirely from the body and the BFF falls through to its existing
+   *   tenant default index chain (FR-BFF-04). Empty string MUST NOT be
+   *   sent — absence is the protocol signal for "use server default".
+   */
+  search: (query: string, recordTypes: string[], filters: SearchFilters, searchIndexName?: string | null) => void;
   /** Load the next page of results (appends to existing) */
   loadMore: () => void;
   /** Reset all state to initial idle values */
   reset: () => void;
+}
+
+/**
+ * FR-CP-04 — Build the conditional `searchIndexName` body fragment.
+ *
+ *   - Non-empty trimmed string → `{ searchIndexName: <trimmed> }` (the BFF
+ *     validates against `appsettings.AiSearch.AllowedIndexes` and returns
+ *     400 INDEX_NOT_ALLOWED on miss).
+ *   - null / undefined / empty / whitespace-only → `{}` so the key is
+ *     OMITTED entirely from the body and the BFF falls through to its
+ *     existing tenant default index chain (FR-BFF-04). Sending `""` is
+ *     incorrect — absence is the protocol signal for "use server default".
+ *
+ * Returned as a partial fragment so the caller can `...spread` it onto the
+ * request body, preserving the property's absence when empty.
+ */
+function buildSearchIndexNameFragment(searchIndexName: string | null | undefined): { searchIndexName?: string } {
+  const trimmed = typeof searchIndexName === 'string' ? searchIndexName.trim() : '';
+  return trimmed.length > 0 ? { searchIndexName: trimmed } : {};
 }
 
 /**
@@ -108,6 +149,9 @@ export function useRecordSearch(): UseRecordSearchReturn {
   const currentQueryRef = useRef('');
   const currentRecordTypesRef = useRef<string[]>([]);
   const currentFiltersRef = useRef<SearchFilters | null>(null);
+  // FR-CP-04 — captured at search() time so loadMore() reuses the same
+  // index routing across pages. null means "not provided / use BFF default".
+  const currentSearchIndexNameRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // --- Derived ---
@@ -119,50 +163,63 @@ export function useRecordSearch(): UseRecordSearchReturn {
    * Cancels any in-flight request before starting. Stores query, recordTypes,
    * and filters in refs so loadMore() can reuse them for subsequent pages.
    */
-  const search = useCallback((query: string, recordTypes: string[], filters: SearchFilters): void => {
-    // Cancel any in-flight request
-    abortControllerRef.current?.abort();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+  const search = useCallback(
+    (query: string, recordTypes: string[], filters: SearchFilters, searchIndexName?: string | null): void => {
+      // Cancel any in-flight request
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-    // Store for loadMore
-    currentQueryRef.current = query;
-    currentRecordTypesRef.current = recordTypes;
-    currentFiltersRef.current = filters;
+      // Store for loadMore (FR-CP-04: same index routing across pages)
+      currentQueryRef.current = query;
+      currentRecordTypesRef.current = recordTypes;
+      currentFiltersRef.current = filters;
+      currentSearchIndexNameRef.current =
+        typeof searchIndexName === 'string' && searchIndexName.trim().length > 0 ? searchIndexName.trim() : null;
 
-    // Reset state for new search
-    setResults([]);
-    setTotalCount(0);
-    setErrorMessage(null);
-    setSearchTime(null);
-    setSearchState('loading');
+      // Reset state for new search
+      setResults([]);
+      setTotalCount(0);
+      setErrorMessage(null);
+      setSearchTime(null);
+      setSearchState('loading');
 
-    searchRecords({
-      query,
-      recordTypes,
-      options: {
-        limit: PAGE_SIZE,
-        offset: 0,
-        hybridMode: filters.searchMode,
-      },
-    })
-      .then((response: RecordSearchResponse) => {
-        // If this request was cancelled, discard the result
-        if (controller.signal.aborted) return;
+      // FR-CP-04 — Conditionally include `searchIndexName` in the body. The
+      // spread + cast pattern keeps `RecordSearchRequest` untouched while
+      // still forwarding the field to the BFF. JSON.stringify in the API
+      // service serializes the field when present; when absent the key is
+      // omitted entirely (NOT sent as empty string).
+      const requestBody = {
+        query,
+        recordTypes,
+        options: {
+          limit: PAGE_SIZE,
+          offset: 0,
+          hybridMode: filters.searchMode,
+        },
+        ...buildSearchIndexNameFragment(searchIndexName),
+      } as RecordSearchRequest;
 
-        setResults(response.results);
-        setTotalCount(response.metadata.totalCount);
-        setSearchTime(response.metadata.searchTime);
-        setSearchState('success');
-      })
-      .catch((err: unknown) => {
-        // If this request was cancelled, do not surface the error
-        if (controller.signal.aborted) return;
+      searchRecords(requestBody)
+        .then((response: RecordSearchResponse) => {
+          // If this request was cancelled, discard the result
+          if (controller.signal.aborted) return;
 
-        setErrorMessage(extractErrorMessage(err));
-        setSearchState('error');
-      });
-  }, []);
+          setResults(response.results);
+          setTotalCount(response.metadata.totalCount);
+          setSearchTime(response.metadata.searchTime);
+          setSearchState('success');
+        })
+        .catch((err: unknown) => {
+          // If this request was cancelled, do not surface the error
+          if (controller.signal.aborted) return;
+
+          setErrorMessage(extractErrorMessage(err));
+          setSearchState('error');
+        });
+    },
+    []
+  );
 
   /**
    * Load the next page of results, appending to the existing set.
@@ -186,7 +243,10 @@ export function useRecordSearch(): UseRecordSearchReturn {
     // Capture current length for offset (stable at call time)
     const currentLength = results.length;
 
-    searchRecords({
+    // FR-CP-04 — Reuse the same `searchIndexName` captured at search() time
+    // so pagination stays bound to the same index. Cast + spread mirrors
+    // the pattern in search() above.
+    const requestBody = {
       query: currentQueryRef.current,
       recordTypes: currentRecordTypesRef.current,
       options: {
@@ -194,7 +254,10 @@ export function useRecordSearch(): UseRecordSearchReturn {
         offset: currentLength,
         hybridMode: filters.searchMode,
       },
-    })
+      ...buildSearchIndexNameFragment(currentSearchIndexNameRef.current),
+    } as RecordSearchRequest;
+
+    searchRecords(requestBody)
       .then((response: RecordSearchResponse) => {
         if (controller.signal.aborted) return;
 
@@ -219,6 +282,7 @@ export function useRecordSearch(): UseRecordSearchReturn {
     currentQueryRef.current = '';
     currentRecordTypesRef.current = [];
     currentFiltersRef.current = null;
+    currentSearchIndexNameRef.current = null;
 
     setResults([]);
     setTotalCount(0);

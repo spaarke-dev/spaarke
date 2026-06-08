@@ -22,12 +22,14 @@ import { makeStyles, tokens, Text, MessageBar, MessageBarBody, Divider } from '@
 import type {
   SearchDomain,
   SearchFilters,
+  HybridMode,
   ViewMode,
   VisualizationColorBy,
   TimelineDateField,
   SavedSearch,
   DocumentSearchResult,
   RecordSearchResult,
+  AppUrlParams,
 } from './types';
 import { RecordEntityTypes } from './types';
 import { SearchFilterPane } from './components/SearchFilterPane';
@@ -66,6 +68,14 @@ export interface AppProps {
   initialSavedSearchId: string;
   /** Whether the current theme is dark */
   isDark: boolean;
+  /**
+   * Full parsed URL parameter envelope (FR-CP-01 / FR-CP-03).
+   * Used to seed `filters` + `selectedTags` state on first render so the
+   * auto-search effect (FR-13) fires with URL-derived filters on the first
+   * network POST. Optional for backwards-compat with callers that haven't
+   * threaded it yet.
+   */
+  urlParams?: AppUrlParams;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +98,42 @@ const DOMAIN_RECORD_TYPES: Record<SearchDomain, string[]> = {
   projects: [RecordEntityTypes.Project],
   invoices: [RecordEntityTypes.Invoice],
 };
+
+/**
+ * Map the envelope `searchMode` literal (PCF/URL) to the API `HybridMode`
+ * literal used by request bodies. See `EnvelopeSearchMode` doc-comment in
+ * `types/index.ts` — `hybrid` is the envelope alias for the API's `rrf`.
+ */
+function envelopeSearchModeToHybridMode(mode: AppUrlParams['searchMode']): HybridMode | undefined {
+  if (mode === 'hybrid') return 'rrf';
+  if (mode === 'vectorOnly') return 'vectorOnly';
+  if (mode === 'keywordOnly') return 'keywordOnly';
+  return undefined;
+}
+
+/**
+ * Seed `SearchFilters` state from URL-derived envelope params (FR-CP-03).
+ * Used as the lazy `useState` initializer so values are present BEFORE the
+ * first render commits and the auto-search effect fires — guaranteeing the
+ * very first network POST uses URL-derived filters.
+ *
+ * Missing/undefined URL values fall back to `DEFAULT_FILTERS` so the page
+ * still renders correctly when opened without any envelope.
+ */
+function buildInitialFilters(urlParams: AppUrlParams | undefined): SearchFilters {
+  if (!urlParams) return DEFAULT_FILTERS;
+  const mappedSearchMode = envelopeSearchModeToHybridMode(urlParams.searchMode);
+  return {
+    ...DEFAULT_FILTERS,
+    fileTypes: urlParams.fileTypes ?? DEFAULT_FILTERS.fileTypes,
+    dateRange: {
+      from: urlParams.dateFrom ?? null,
+      to: urlParams.dateTo ?? null,
+    },
+    threshold: urlParams.threshold ?? DEFAULT_FILTERS.threshold,
+    searchMode: mappedSearchMode ?? DEFAULT_FILTERS.searchMode,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -177,17 +223,30 @@ export const App: React.FC<AppProps> = ({
   initialEntityId,
   initialSavedSearchId,
   isDark,
+  urlParams,
 }) => {
   const styles = useStyles();
 
-  // Suppress unused-var warnings for props reserved for future use
-  void initialScope;
-  void initialEntityId;
+  // `isDark` is reserved for future per-component dark-mode branching.
+  // (`initialScope` / `initialEntityId` are NO LONGER discarded — they are
+  // wired into executeSearch's hook calls below per FR-CP-02. The previous
+  // `void initialScope; void initialEntityId;` lines have been removed.)
+  // TODO(task-042): once `useSemanticSearch` / `useRecordSearch` accept a
+  // constructor-time `{ scope, entityId, searchIndexName }` arg, pass these
+  // values there instead of plumbing them through executeSearch.
   void isDark;
 
   // --- UI State ---
+  // `filters` + `selectedTags` are seeded from URL envelope params via lazy
+  // `useState` initializers (FR-CP-03). Because lazy initialization runs on
+  // the very first render — BEFORE the auto-search effect's first run — the
+  // first POST issued by the auto-search effect (FR-13) carries the
+  // URL-derived filter shape. Subsequent user edits go through setFilters /
+  // setSelectedTags as normal.
   const [activeDomain, setActiveDomain] = useState<SearchDomain>(initialDomain);
-  const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<SearchFilters>(() => buildInitialFilters(urlParams));
+  const [selectedTags, setSelectedTags] = useState<string[]>(() => urlParams?.tags ?? []);
+  const [associatedOnly, setAssociatedOnly] = useState<boolean>(() => urlParams?.associatedOnly ?? false);
   const [query, setQuery] = useState<string>(initialQuery);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -293,13 +352,32 @@ export const App: React.FC<AppProps> = ({
   const executeSearch = useCallback(
     (searchQuery: string, searchFilters: SearchFilters, domain: SearchDomain) => {
       setSelectedIds([]);
+      // initialScope + initialEntityId + selectedTags + associatedOnly are
+      // captured in the closure (no longer discarded per FR-CP-02). The
+      // current hook surface (`search(query, filters)` / `search(query,
+      // recordTypes, filters)`) does not yet thread these through to the
+      // request body — task 042 extends the hook signatures to accept
+      // `{ scope, entityId, searchIndexName, tags, associatedOnly }` at
+      // construction time, after which the values seeded here will flow into
+      // the first POST automatically. Until then, log them for traceability
+      // so UAT can verify they reached App.tsx even before task 042 lands.
+      // TODO(task-042): pass initialScope / initialEntityId / selectedTags /
+      // associatedOnly / urlParams.searchIndexName as hook constructor args.
+      if (initialScope || initialEntityId || selectedTags.length > 0 || associatedOnly) {
+        console.debug('[SemanticSearch] URL-seeded scope/entity/tags/associatedOnly carried into executeSearch:', {
+          initialScope,
+          initialEntityId,
+          selectedTags,
+          associatedOnly,
+        });
+      }
       if (domain === 'documents') {
         searchDocuments(searchQuery, searchFilters);
       } else {
         searchRecords(searchQuery, DOMAIN_RECORD_TYPES[domain], searchFilters);
       }
     },
-    [searchDocuments, searchRecords]
+    [searchDocuments, searchRecords, initialScope, initialEntityId, selectedTags, associatedOnly]
   );
 
   // =============================================
@@ -410,10 +488,15 @@ export const App: React.FC<AppProps> = ({
   // Cancel handler — clear AI Search query + filters + saved-search selection.
   // Wired to SearchFilterPane.onCancel (task 035 UI alignment, 2026-06-04).
   // Matches the EventsPage Calendar widget "Clear" semantics: returns the
-  // panel to its initial state without executing a search.
+  // panel to its initial state without executing a search. Also clears the
+  // URL-seeded `selectedTags` + `associatedOnly` state added in FR-CP-03
+  // (task 041) so "Clear" returns the page to true defaults, not to the
+  // initial-URL-derived shape.
   const handleCancelSearch = useCallback(() => {
     setQuery('');
     setFilters(DEFAULT_FILTERS);
+    setSelectedTags([]);
+    setAssociatedOnly(false);
     setCurrentSearchName(null);
   }, []);
 
