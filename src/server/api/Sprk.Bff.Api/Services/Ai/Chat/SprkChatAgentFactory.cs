@@ -753,36 +753,17 @@ public class SprkChatAgentFactory
         var failedTools = new List<string>();
 
         // --- DocumentSearchTools ---
-        // Requires IRagService, accepts knowledge scope for domain filtering.
-        // sseWriter is forwarded so both search methods can emit output_pane SSE events with
-        // structured SearchResults widget data alongside their text responses (Gap 1 fix).
-        attempted++;
-        if (ragService != null)
-        {
-            try
-            {
-                var documentSearchTools = new DocumentSearchTools(ragService, tenantId, knowledgeScope, citationContext, sseWriter);
-                tools.Add(AIFunctionFactory.Create(
-                    documentSearchTools.SearchDocumentsAsync,
-                    name: "SearchDocuments",
-                    description: "Search the knowledge index for document content relevant to the user's query."));
-                tools.Add(AIFunctionFactory.Create(
-                    documentSearchTools.SearchDiscoveryAsync,
-                    name: "SearchDiscovery",
-                    description: "Perform a broad discovery search across all indexed documents for the tenant."));
-                resolved++;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve DocumentSearchTools — skipping");
-                failedTools.Add(nameof(DocumentSearchTools));
-            }
-        }
-        else
-        {
-            _logger.LogWarning("IRagService not available; DocumentSearchTools will not be registered");
-            failedTools.Add(nameof(DocumentSearchTools));
-        }
+        // REMOVED in R6 Wave 8 (Q9 chat-tool batch migration): replaced by the typed
+        // DocumentSearchHandler (Services/Ai/Handlers/DocumentSearchHandler.cs) auto-discovered
+        // via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
+        // chat agent by the data-driven block below (FR-11) via two sprk_analysistool rows:
+        //   - SYS-Document Search    (DOCUMENT-SEARCH)    → method=SearchDocuments (knowledge-scoped, MinScore=0.7, topK=5)
+        //   - SYS-Document Discovery (DOCUMENT-DISCOVERY) → method=SearchDiscovery (tenant-wide, MinScore=0.5, topK=10)
+        // Both rows set sprk_requiredcapability = null (always available — gating mirrors the
+        // legacy `ragService != null` condition; handler's DI resolution is the runtime gate).
+        // Citations + widget metadata + output_pane SSE events are returned via
+        // ToolResult.Metadata and the adapter performs side effects (Wave 7b infrastructure).
+        // Tenant isolation (ADR-014) preserved via ChatInvocationContext.TenantId.
 
         // --- AnalysisQueryTools (R6 Wave 7 — migrated to typed handler AnalysisQueryHandler) ---
         // The legacy hardcoded registration was removed in R6 Wave 7. The replacement
@@ -1021,148 +1002,65 @@ public class SprkChatAgentFactory
         }
 
         // --- WebSearchTools ---
-        // Gated behind "web_search" capability (task 089).
-        // Only available when the playbook explicitly enables web search. Many playbooks
-        // deal with confidential internal documents and should not reach out to the public
-        // internet. The "web_search" capability provides admin control over which contexts
-        // allow external web queries (ADR-015: external content governance).
+        // REMOVED in R6 Wave 8 (Q9 chat-tool batch migration): replaced by the typed
+        // WebSearchHandler (Services/Ai/Handlers/WebSearchHandler.cs) auto-discovered via
+        // ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
+        // chat agent by the data-driven block below (FR-11) via one sprk_analysistool row:
+        //   - SYS-Web Search (WEB-SEARCH) → WebSearchHandler (single function, no method discriminator)
         //
-        // R2-017: Real Bing Web Search v7 API integration with scope-guided search (FR-10),
-        // citation generation, and graceful mock fallback when API key is not configured.
-        // Factory-instantiated (ADR-010): reads config directly, no new DI registration.
-        if (capabilities.Contains(PlaybookCapabilities.WebSearch))
-        {
-            attempted++;
-            try
-            {
-                var httpClientFactory = scopedProvider.GetRequiredService<IHttpClientFactory>();
-                var configuration = scopedProvider.GetRequiredService<IConfiguration>();
-                var bingApiKey = configuration["BingSearch:ApiKey"];
-                var bingEndpoint = configuration["BingSearch:Endpoint"];
-                var bingMaxResults = 10;
-                if (int.TryParse(configuration["BingSearch:MaxResults"], out var parsedMax))
-                    bingMaxResults = parsedMax;
-
-                // ScopeSearchGuidance from ChatKnowledgeScope — populated by R2-020
-                // (AnalysisChatContextResolver). Null until R2-020 is complete.
-                var scopeSearchGuidance = knowledgeScope?.ScopeSearchGuidance;
-
-                var webSearchTools = new WebSearchTools(
-                    _logger, httpClientFactory, citationContext,
-                    bingApiKey, bingEndpoint, bingMaxResults, scopeSearchGuidance);
-                tools.Add(AIFunctionFactory.Create(
-                    webSearchTools.SearchWebAsync,
-                    name: "SearchWeb",
-                    description: "Search the web for information relevant to the user's query. Use when the question cannot be answered from internal documents alone."));
-                resolved++;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve WebSearchTools — skipping");
-                failedTools.Add(nameof(WebSearchTools));
-            }
-        }
+        // Capability gate preservation (Wave 7b infrastructure):
+        //   The hardcoded `if (capabilities.Contains(PlaybookCapabilities.WebSearch))` check is
+        //   replaced by sprk_requiredcapability = "web_search" on the row. The data-driven
+        //   block's IsCapabilityGateSatisfied enforces the same admin-controlled boundary.
+        //
+        // Behavior preserved verbatim by the handler:
+        //   - Static SemaphoreSlim(2,2) Bing concurrency gate (ADR-016)
+        //   - 5s HTTP timeout, 10s semaphore acquire timeout
+        //   - Graceful mock fallback when BingSearch:ApiKey is not configured
+        //   - FR-10 scope-guided search via ChatInvocationContext.KnowledgeScope.ScopeSearchGuidance
+        //   - ADR-015 telemetry: query length + result count + timing only; no result bodies above Debug
+        // Citations returned via ToolResult.Metadata (Wave 7b infrastructure).
 
         // --- CodeInterpreterTools ---
-        // Gated behind "code_interpreter" capability (AIPU-070).
-        // Only available when the playbook explicitly enables sandbox code execution.
-        // Data governance (ADR-015): tools only accept caller-supplied data excerpts.
-        // Kill switch (ADR-018): CodeInterpreterOptions.Enabled checked before every invocation.
-        // Rate limiting (ADR-016): static SemaphoreSlim bounded by MaxConcurrency.
-        // Factory-instantiated (ADR-010): CodeInterpreterBridge resolved from DI; no new registration.
-        if (capabilities.Contains(PlaybookCapabilities.CodeInterpreter))
-        {
-            attempted++;
-            try
-            {
-                var codeInterpreterBridge = scopedProvider.GetService<CodeInterpreterBridge>();
-                var codeInterpreterOptions = scopedProvider.GetService<IOptions<CodeInterpreterOptions>>();
-                if (codeInterpreterBridge != null && codeInterpreterOptions != null)
-                {
-                    var codeInterpreterTools = new CodeInterpreterTools(
-                        codeInterpreterBridge, codeInterpreterOptions, _logger, citationContext);
-                    tools.Add(AIFunctionFactory.Create(
-                        codeInterpreterTools.AnalyzeDataAsync,
-                        name: "AnalyzeData",
-                        description: "Analyze tabular or CSV data to answer a specific question. Use when the user wants statistics, trends, or comparisons derived from structured data."));
-                    tools.Add(AIFunctionFactory.Create(
-                        codeInterpreterTools.GenerateChartAsync,
-                        name: "GenerateChart",
-                        description: "Generate a chart image (bar, line, or pie) from a JSON data series. Use when the user wants a visual chart from structured data."));
-                    resolved++;
-                }
-                else
-                {
-                    _logger.LogWarning("CodeInterpreterBridge or CodeInterpreterOptions not available; CodeInterpreterTools will not be registered");
-                    failedTools.Add(nameof(CodeInterpreterTools));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve CodeInterpreterTools — skipping");
-                failedTools.Add(nameof(CodeInterpreterTools));
-            }
-        }
+        // REMOVED in R6 Wave 8 (Q9 chat-tool batch migration): replaced by the typed
+        // CodeInterpreterHandler (Services/Ai/Handlers/CodeInterpreterHandler.cs) auto-discovered
+        // via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
+        // chat agent by the data-driven block below (FR-11) via two sprk_analysistool rows:
+        //   - SYS-Code Analyze Data    (CODE-ANALYZE) → method=AnalyzeData
+        //   - SYS-Code Generate Chart  (CODE-CHART)   → method=GenerateChart
+        //
+        // Capability gate preservation: sprk_requiredcapability = "code_interpreter" on both
+        // rows; data-driven block's IsCapabilityGateSatisfied replaces the hardcoded check.
+        //
+        // Behavior preserved verbatim by the handler:
+        //   - ADR-018 kill switch (CodeInterpreterOptions.Enabled) checked before every invocation
+        //   - ADR-016 static SemaphoreSlim concurrency gate
+        //   - ADR-015 data governance: only caller-supplied data excerpts; no external fetch
+        //   - Chart bytes returned as base64 inside Metadata["widget"] (ChartViewer envelope)
+        //     AND inline as markdown image data URI in the chat-visible text (dual rendering).
 
         // --- LegalResearchTools ---
-        // Gated behind "legal_research" capability (AIPU-071).
-        // Only available when the playbook explicitly enables legal research. Legal research
-        // tools invoke Azure AI Foundry Bing Grounding (not the Bing Web Search REST API),
-        // requiring both the AgentServiceClient and BingGroundingOptions to be configured.
+        // REMOVED in R6 Wave 8 (Q9 chat-tool batch migration): replaced by the typed
+        // LegalResearchHandler (Services/Ai/Handlers/LegalResearchHandler.cs) auto-discovered
+        // via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
+        // chat agent by the data-driven block below (FR-11) via two sprk_analysistool rows:
+        //   - SYS-Legal Research      (LEGAL-RESEARCH)     → method=ResearchLegal
+        //   - SYS-Legal Case Lookup   (LEGAL-CASE-LOOKUP)  → method=LookupCase
         //
-        // ADR-015 CRITICAL: Legal queries may contain client names, matter references, and PII.
-        // QuerySanitizer.Sanitize() is applied inside each tool method before the query is
-        // forwarded to Bing. Only query length, result count, and timing are logged.
+        // Capability gate preservation: sprk_requiredcapability = "legal_research" on both
+        // rows; data-driven block's IsCapabilityGateSatisfied replaces the hardcoded check.
         //
-        // ADR-018: BingGroundingOptions.Enabled kill switch is checked inside each tool method;
-        // when disabled, a user-readable string is returned immediately without any network call.
+        // Behavior preserved verbatim by the handler:
+        //   - ADR-015 PII sanitization (QuerySanitizer.Sanitize) before every Bing call
+        //   - ADR-018 kill switch (BingGroundingOptions.Enabled) returns user-readable string when disabled
+        //   - ADR-015 telemetry: query length + result count + timing only; no query text above Debug
+        //   - Uses Azure AI Foundry Bing Grounding via AgentServiceClient (NOT Bing Web Search REST)
         //
-        // Factory-instantiated (ADR-010): no new DI registration; AgentServiceClient and
-        // IOptions<BingGroundingOptions> are resolved from the scoped DI provider.
-        if (capabilities.Contains(PlaybookCapabilities.LegalResearch))
-        {
-            attempted++;
-            try
-            {
-                var agentServiceClient = scopedProvider.GetService<AgentServiceClient>();
-                var bingGroundingOptions = scopedProvider.GetService<IOptions<BingGroundingOptions>>();
-
-                if (agentServiceClient != null && bingGroundingOptions != null)
-                {
-                    var legalResearchTools = new LegalResearchTools(
-                        agentServiceClient,
-                        bingGroundingOptions,
-                        _logger,
-                        citationContext);
-
-                    tools.Add(AIFunctionFactory.Create(
-                        legalResearchTools.ResearchLegalAsync,
-                        name: "ResearchLegal",
-                        description: "Research a broad legal topic, doctrine, statute, or regulatory requirement " +
-                                     "using authoritative public legal sources. Do not include client names or matter references."));
-
-                    tools.Add(AIFunctionFactory.Create(
-                        legalResearchTools.LookupCaseAsync,
-                        name: "LookupCase",
-                        description: "Look up a specific legal case by its standard citation (e.g., 123 F.3d 456 " +
-                                     "(9th Cir. 2020)). Returns the case holding and a source URL from an authoritative legal database."));
-                    resolved++;
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "LegalResearchTools requires AgentServiceClient and BingGroundingOptions — " +
-                        "one or both are not registered. LegalResearchTools will not be available. " +
-                        "Ensure AgentService and BingGrounding configuration sections are present.");
-                    failedTools.Add(nameof(LegalResearchTools));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve LegalResearchTools — skipping");
-                failedTools.Add(nameof(LegalResearchTools));
-            }
-        }
+        // Concurrency simplification (Wave 8): the legacy double-semaphore (handler-level
+        // BingGroundingOptions.MaxConcurrency + SDK-level AgentServiceOptions.MaxConcurrency)
+        // is collapsed to just the SDK gate. BingGroundingOptions.MaxConcurrency is no longer
+        // consulted at runtime; the property is retained for now (unmodified) and may be pruned
+        // in a follow-up. Concurrency-exhaustion still degrades gracefully via the SDK.
 
         // --- VerifyCitationsTool ---
         // REMOVED in R6 Wave 7c: replaced by the typed VerifyCitationsHandler

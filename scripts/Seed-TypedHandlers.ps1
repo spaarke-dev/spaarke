@@ -123,6 +123,27 @@ $RowFiles = @{
     # IsCapabilityGateSatisfied filter in SprkChatAgentFactory.ResolveTools replaces the
     # hardcoded `if (capabilities.Contains(PlaybookCapabilities.VerifyCitations))` gate.
     "CITATION-VERIFY"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-citation-verify-row.json"
+    # Wave 8 — DocumentSearchHandler serves 2 rows via the method discriminator in
+    # sprk_configuration (SearchDocuments / SearchDiscovery). Both rows are always-available
+    # (sprk_requiredcapability = null); runtime gating comes from the handler's IRagService
+    # DI dependency.
+    "DOCUMENT-SEARCH"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-document-search-row.json"
+    "DOCUMENT-DISCOVERY"               = "$RepoRoot/infra/dataverse/sprk_analysistool-document-discovery-row.json"
+    # Wave 8 — WebSearchHandler: single row, capability-gated via sprk_requiredcapability =
+    # 'web_search'. Replaces the hardcoded `if (capabilities.Contains(PlaybookCapabilities.WebSearch))`
+    # gate. Behavior preserved verbatim (static SemaphoreSlim(2,2), 5s HTTP timeout, mock fallback,
+    # FR-10 scope guidance).
+    "WEB-SEARCH"                       = "$RepoRoot/infra/dataverse/sprk_analysistool-web-search-row.json"
+    # Wave 8 — CodeInterpreterHandler serves 2 rows via the method discriminator. Both
+    # capability-gated via sprk_requiredcapability = 'code_interpreter'. ADR-018 kill switch
+    # + ADR-016 rate limiting + ADR-015 data governance preserved by the handler.
+    "CODE-ANALYZE"                     = "$RepoRoot/infra/dataverse/sprk_analysistool-code-analyze-row.json"
+    "CODE-CHART"                       = "$RepoRoot/infra/dataverse/sprk_analysistool-code-chart-row.json"
+    # Wave 8 — LegalResearchHandler serves 2 rows via the method discriminator. Both
+    # capability-gated via sprk_requiredcapability = 'legal_research'. ADR-015 PII sanitization
+    # + ADR-018 kill switch + ADR-015 telemetry hygiene preserved by the handler.
+    "LEGAL-RESEARCH"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-legal-research-row.json"
+    "LEGAL-CASE-LOOKUP"                = "$RepoRoot/infra/dataverse/sprk_analysistool-legal-case-lookup-row.json"
 }
 
 # -----------------------------------------------------------------------------
