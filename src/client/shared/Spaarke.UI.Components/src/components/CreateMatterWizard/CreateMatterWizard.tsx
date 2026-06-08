@@ -46,7 +46,7 @@ import type { IDataService, INavigationService } from '../../types/serviceInterf
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
-import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type { AuthenticatedFetchFn, IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 import type { AssociationResult } from '../AssociateToStep/types';
 
 // ---------------------------------------------------------------------------
@@ -183,6 +183,18 @@ export interface ICreateMatterWizardProps {
    * will be skipped.
    */
   resolveSpeContainerId?: () => Promise<string>;
+  /**
+   * Resolves the current user's owning Business Unit cascade defaults
+   * (`sprk_containerid`, `sprk_searchindexname`) for application to the
+   * `sprk_matter` create payload.
+   *
+   * Aligned with the proven CreateProjectWizard pattern: the host (solution
+   * `main.tsx`) implements this using
+   * `Xrm.Utility.getGlobalContext().userSettings.userId` and calls
+   * {@link EntityCreationService.resolveUserBuDefaults}. Required for
+   * `sprk_searchindexname` to be populated on new matters (FR-WIZ-01).
+   */
+  resolveUserBuDefaults?: () => Promise<IUserBuCascadeDefaults>;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +229,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   navigationService,
   embedded,
   resolveSpeContainerId,
+  resolveUserBuDefaults,
 }) => {
   // -- Entity-specific form state --
   const [step2Valid, setStep2Valid] = React.useState(false);
@@ -351,13 +364,33 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
           };
         }
 
+        // FR-WIZ-01: resolve BU-derived cascade defaults (sprk_containerid +
+        // sprk_searchindexname) BEFORE creating the matter. Non-fatal — if the
+        // host doesn't provide `resolveUserBuDefaults` or it throws, the matter
+        // is still created without the cascade fields applied (caller will see
+        // sprk_searchindexname unset; BFF tenant-default chain handles fallback).
+        let cascadeDefaults: IUserBuCascadeDefaults | undefined;
+        if (resolveUserBuDefaults) {
+          try {
+            cascadeDefaults = await resolveUserBuDefaults();
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            console.warn('[CreateMatterWizard] BU cascade resolution failed (non-fatal):', message);
+          }
+        }
+
         const service = new MatterService(
           dataService,
           authenticatedFetch,
           bffBaseUrl,
           context.speContainerId || undefined
         );
-        const result = await service.createMatter(mergedFormValues, context.uploadedFiles, followOnActions);
+        const result = await service.createMatter(
+          mergedFormValues,
+          context.uploadedFiles,
+          followOnActions,
+          cascadeDefaults
+        );
 
         if (result.status === 'error') {
           throw new Error(result.errorMessage ?? 'An unknown error occurred.');

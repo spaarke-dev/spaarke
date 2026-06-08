@@ -22,9 +22,12 @@ import type { ICreateMatterFormState } from './formTypes';
 import type { IUploadedFile } from './wizardTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
-import type { IWebApiLike } from '../../types/WebApiLike';
 import { EntityCreationService } from '../../services/EntityCreationService';
-import type { IUploadProgress, AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type {
+  IUploadProgress,
+  AuthenticatedFetchFn,
+  IUserBuCascadeDefaults,
+} from '../../services/EntityCreationService';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by AssignCounselStep search results)
@@ -144,60 +147,6 @@ function _resolveNavProp(navPropMap: Record<string, string>, columnLogical: stri
   return navPropMap[columnLogical] ?? columnLogical;
 }
 
-/**
- * Best-effort resolution of the current Dataverse user GUID from the host Xrm global.
- *
- * Matches the established `SummarizeFilesWizard.getBusinessUnitContainerId` pattern:
- * walks `window`, `window.parent`, `window.top` (cross-origin safe) looking for
- * `Xrm.Utility.getUserId()`. Returns `null` when unavailable so callers can degrade
- * gracefully — `sprk_searchindexname` cascade is optional and the BFF tenant-default
- * chain handles the fallback server-side.
- *
- * @returns Current user GUID (braces stripped), or `null` if Xrm is unreachable.
- */
-function _tryGetCurrentUserId(): string | null {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent && window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getUserId) {
-        const raw = xrm.Utility.getUserId() as string;
-        const cleaned = raw.replace(/^\{|\}$/g, '');
-        if (cleaned) return cleaned;
-      }
-    } catch {
-      // Cross-origin frame — skip
-    }
-  }
-  return null;
-}
-
-/**
- * Adapt an {@link IDataService} into an {@link IWebApiLike} suitable for
- * `EntityCreationService.resolveUserBuDefaults`. The shapes differ in two ways:
- *  - `retrieveMultipleRecords` return type is wrapped in `{ entities }` (same).
- *  - `IWebApiLike` allows an optional `maxPageSize` (we ignore it — `IDataService`
- *    does not surface it but the cascade resolver never sets it).
- */
-function _toWebApiLike(dataService: IDataService): IWebApiLike {
-  return {
-    retrieveRecord: (entityType, id, options) => dataService.retrieveRecord(entityType, id, options),
-    retrieveMultipleRecords: (entityType, options) => dataService.retrieveMultipleRecords(entityType, options),
-  };
-}
-
 // ---------------------------------------------------------------------------
 // MatterService class
 // ---------------------------------------------------------------------------
@@ -238,17 +187,38 @@ export class MatterService {
 
   /**
    * Full matter creation flow:
-   *   1. Create sprk_matter record
+   *   1. Create sprk_matter record (with BU cascade applied if defaults provided)
    *   2. Upload files to SPE via BFF (using EntityCreationService)
    *   3. Create sprk_document records linking files to the matter
    *   4. Execute selected follow-on actions
    *
    * Returns ICreateMatterResult -- never throws.
+   *
+   * BU cascade (FR-WIZ-01): when `cascadeDefaults` is provided, applies
+   * `sprk_containerid` AND `sprk_searchindexname` from the user's owning Business
+   * Unit via {@link EntityCreationService.applyUserBuDefaults}. INV-5 enforced
+   * per-field — explicit values pre-existing on the payload are preserved.
+   *
+   * Aligned with the proven CreateProjectWizard pattern: the caller (typically
+   * `CreateMatterWizard.tsx` via `resolveUserBuDefaults` prop) resolves defaults
+   * using the host's `Xrm.Utility.getGlobalContext().userSettings.userId`. This
+   * replaces a prior broken inline implementation that called the non-existent
+   * `Xrm.Utility.getUserId()` API and silently skipped the cascade in the
+   * Code Page iframe runtime.
+   *
+   * @param form Form state captured by the wizard.
+   * @param uploadedFiles Files to upload to SPE after the matter is created.
+   * @param followOnActions Optional follow-on workflow steps (assign counsel, etc.).
+   * @param cascadeDefaults Optional BU-derived defaults (containerId, searchIndexName).
+   *   When omitted/undefined the cascade step is a no-op (legacy behavior preserved
+   *   for tests that omit it). Wizard call sites pass the resolved value.
+   * @param onUploadProgress Optional callback fired during SPE file uploads.
    */
   async createMatter(
     form: ICreateMatterFormState,
     uploadedFiles: IUploadedFile[],
     followOnActions: IFollowOnActions,
+    cascadeDefaults?: IUserBuCascadeDefaults,
     onUploadProgress?: (progress: IUploadProgress) => void
   ): Promise<ICreateMatterResult> {
     const warnings: string[] = [];
@@ -271,47 +241,18 @@ export class MatterService {
       entity['sprk_containerid'] = this._containerId;
     }
 
-    // -------------------------------------------------------------------------
-    // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): cascade `sprk_searchindexname`
-    // from the current user's owning Business Unit onto the create payload.
+    // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): cascade `sprk_containerid`
+    // AND `sprk_searchindexname` from the current user's owning Business Unit.
+    // INV-5 enforced per-field by applyUserBuDefaults — the host-injected
+    // this._containerId set above is preserved if already present on the payload.
     //
-    // INV-5 contract: if the payload already has an explicit non-empty value
-    // (e.g. set by a form field default), DO NOT overwrite.
-    // `EntityCreationService.applyDefaultSearchIndexName` enforces this guard.
-    //
-    // Non-fatal: if userId resolution fails (no Xrm host), or BU has no
-    // `sprk_searchindexname`, leave the field unset — the BFF tenant-default
-    // chain handles the fallback server-side. We log a warning instead of
-    // aborting matter creation.
-    // -------------------------------------------------------------------------
-    // Align with WorkAssignment pattern: pass IDataService directly + applyUserBuDefaults.
-    // (Earlier attempt used _toWebApiLike adapter + applyDefaultSearchIndexName which
-    // worked in tests but failed silently in the deployed wizard — root cause unclear,
-    // pragmatic fix is to converge on the proven pattern.) INV-5 still enforced
-    // per-field by applyUserBuDefaults — the host-injected this._containerId set
-    // above is preserved.
-    try {
-      const userId = _tryGetCurrentUserId();
-      if (userId) {
-        const defaults = await EntityCreationService.resolveUserBuDefaults(this._dataService, userId);
-        const applied = EntityCreationService.applyUserBuDefaults(entity, defaults);
-        console.info(
-          '[MatterService] BU cascade — containerIdSet:',
-          applied.containerIdSet,
-          'searchIndexNameSet:',
-          applied.searchIndexNameSet,
-          '(BU:',
-          defaults.businessUnitId,
-          ', searchIndexName:',
-          defaults.searchIndexName,
-          ')'
-        );
-      } else {
-        console.warn('[MatterService] BU cascade skipped: current user ID could not be resolved.');
-      }
-    } catch (err) {
-      // Non-fatal: log and continue. BFF tenant-default chain handles routing if fields are unset.
-      console.warn('[MatterService] BU cascade failed (non-fatal):', err);
+    // Defaults are resolved upstream by the wizard component (using the host's
+    // Xrm.Utility.getGlobalContext().userSettings.userId) and passed in via the
+    // `cascadeDefaults` parameter. Same dependency-injection pattern as
+    // CreateProjectWizard.tsx (verified working).
+    if (cascadeDefaults) {
+      const applied = EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults);
+      console.info('[MatterService] BU cascade applied:', applied, '(BU:', cascadeDefaults.businessUnitId, ')');
     }
 
     // Generate matter number: {matterTypeCode}-{random 6 digits}
@@ -375,10 +316,20 @@ export class MatterService {
 
     // -- Step 2: Upload files to SPE via BFF + create document records --
     if (uploadedFiles.length > 0 && this._containerId) {
+      // Phase 3b (upload-indexing-centralization): forward parent entity context +
+      // pre-resolved searchIndexName as query params so the BFF helper enqueues the
+      // RAG indexing job with the correct routing immediately — no race condition
+      // with downstream sprk_document creation.
       const uploadResult = await this._entityService.uploadFilesToSpe(
         this._containerId,
         uploadedFiles,
-        onUploadProgress
+        onUploadProgress,
+        {
+          searchIndexName: cascadeDefaults?.searchIndexName,
+          parentEntityType: 'sprk_matter',
+          parentEntityId: matterId,
+          parentEntityName: form.matterName.trim(),
+        }
       );
 
       if (!uploadResult.success) {

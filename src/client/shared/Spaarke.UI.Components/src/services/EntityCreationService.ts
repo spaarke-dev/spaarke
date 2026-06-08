@@ -295,14 +295,33 @@ export class EntityCreationService {
    * Uses: PUT /api/obo/containers/{containerId}/files/{path}
    * Each file is uploaded individually with Bearer token auth.
    *
+   * Optionally forwards the parent entity context + pre-resolved searchIndexName
+   * as query params so the BFF's centralized post-upload indexing helper
+   * (IPostUploadIndexingEnqueuer) can route the indexing job to the correct
+   * tenant index — closes the race condition where the sprk_document record
+   * isn't yet created at upload time (Phase 3b of upload-indexing-centralization).
+   *
    * @param containerId SPE container/drive ID for the target storage
    * @param files Files to upload
    * @param onProgress Optional progress callback
+   * @param indexingContext Optional context forwarded to the BFF helper:
+   *   - searchIndexName: BU-resolved index name (from resolveUserBuDefaults)
+   *   - parentEntityType/Id/Name: the parent record this upload links to
+   *     (e.g., "sprk_matter" + matterId + matterName). When provided, the
+   *     server-side ISearchIndexNameResolver chain uses these directly,
+   *     bypassing the document lookup that would race with sprk_document
+   *     creation downstream.
    */
   async uploadFilesToSpe(
     containerId: string,
     files: IUploadedFile[],
-    onProgress?: (progress: IUploadProgress) => void
+    onProgress?: (progress: IUploadProgress) => void,
+    indexingContext?: {
+      searchIndexName?: string;
+      parentEntityType?: string;
+      parentEntityId?: string;
+      parentEntityName?: string;
+    }
   ): Promise<IFileUploadResult> {
     if (files.length === 0) {
       return {
@@ -317,6 +336,25 @@ export class EntityCreationService {
     const uploadedFiles: ISpeFileMetadata[] = [];
     const errors: Array<{ fileName: string; error: string }> = [];
 
+    // Build indexing query string once (Phase 3b — forwarded to BFF helper).
+    const indexingQuery = (() => {
+      if (!indexingContext) return '';
+      const params: string[] = [];
+      if (indexingContext.searchIndexName) {
+        params.push(`searchIndexName=${encodeURIComponent(indexingContext.searchIndexName)}`);
+      }
+      if (indexingContext.parentEntityType) {
+        params.push(`parentEntityType=${encodeURIComponent(indexingContext.parentEntityType)}`);
+      }
+      if (indexingContext.parentEntityId) {
+        params.push(`parentEntityId=${encodeURIComponent(indexingContext.parentEntityId)}`);
+      }
+      if (indexingContext.parentEntityName) {
+        params.push(`parentEntityName=${encodeURIComponent(indexingContext.parentEntityName)}`);
+      }
+      return params.length > 0 ? `?${params.join('&')}` : '';
+    })();
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const fileName = encodeURIComponent(file.name);
@@ -330,7 +368,7 @@ export class EntityCreationService {
 
       try {
         const response = await this._authenticatedFetch(
-          `${this._bffBaseUrl}/api/obo/containers/${containerId}/files/${fileName}`,
+          `${this._bffBaseUrl}/api/obo/containers/${containerId}/files/${fileName}${indexingQuery}`,
           {
             method: 'PUT',
             body: file.file,
