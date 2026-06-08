@@ -43,7 +43,7 @@
               of-type="SingleLine.Text" usage="bound" required="false" />
 
     <!-- Bound: Azure AI Search index name from scope record (FR-PCF-01, multi-container-multi-index-r1) -->
-    <property name="searchIndexName" display-name-key="Search Index Name" description-key="Azure AI Search index name bound from the scope record's sprk_searchindexname field; routes search requests to the correct index"
+    <property name="searchIndexName" display-name-key="Search Index Name" description-key="Azure AI Search index name bound from the scope record sprk_searchindexname field; routes search requests to the correct index"
               of-type="SingleLine.Text" usage="bound" required="false" />
 
     <!-- Input: Show/hide filter panel -->
