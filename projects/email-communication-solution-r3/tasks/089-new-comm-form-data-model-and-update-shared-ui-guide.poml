@@ -1,0 +1,147 @@
+<task id="089" project="email-communication-solution-r3">
+  <metadata>
+    <title>NEW `docs/data-model/sprk_communication-form.md` + UPDATE `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md` (EmailComposer section)</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>077</dependencies>
+    <blocks>093</blocks>
+    <tags>docs, data-model</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>One new data-model doc + one shared-lib guide update; both reference Code Page as canonical form (replaces standard Dataverse form) which is a significant semantic change</rigor-reason>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Land TWO documentation deliverables per FR-27 items #4 and #9.
+
+    (a) Create NEW `docs/data-model/sprk_communication-form.md` — documents the EmailComposer Code Page as the canonical form for `sprk_communication` (replacing the auto-generated Dataverse standard form per FR-19 Surface 2). Cover: the 3 entry surfaces (FR-19) + the admin fallback per NFR-07 (standard form retained as reversible admin/debug fallback). Cross-link with the existing `docs/data-model/sprk_communication.md` (entity schema doc).
+
+    (b) UPDATE `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md` — add an EmailComposer section pointing to the new `docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md` (created in task 085). Brief overview + cross-link, not duplicate content.
+  </prompt>
+
+  <role>
+    Spaarke data-model + shared-lib documentation author. Familiar with the `docs/data-model/` convention (one file per entity / form-customization) and the SHARED-UI-COMPONENTS-GUIDE structure.
+  </role>
+
+  <goal>
+    Two docs landed:
+    (a) `docs/data-model/sprk_communication-form.md` exists documenting Code Page as the canonical form, the 3 entry surfaces, and the admin fallback form.
+    (b) `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md` has a new EmailComposer section with brief overview + link to `EMAIL-COMPOSER-COMPONENT-GUIDE.md`.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-19 Surface 2: the EmailComposer Code Page replaces the auto-generated `sprk_communication` standard form via Form Component Control. The standard form is retained as an admin/debug fallback (NFR-07 reversibility).
+
+      A data-model doc documenting this form-replacement decision did not exist before R3. This task creates it.
+
+      SHARED-UI-COMPONENTS-GUIDE.md is the canonical guide to shared lib components; it must reference the new EmailComposer component family.
+    </background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication-form.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-27 #4">sprk_communication-form.md MUST be a new data-model doc</constraint>
+    <constraint source="FR-27 #9">SHARED-UI-COMPONENTS-GUIDE.md MUST gain an EmailComposer section</constraint>
+    <constraint source="FR-19">Doc (a) MUST cover all 3 entry surfaces</constraint>
+    <constraint source="NFR-07">Doc (a) MUST cover admin fallback form (reversibility)</constraint>
+    <constraint source="ADR-033">Doc (a) MUST reference ADR-033</constraint>
+    <constraint source="project">Doc (b) MUST NOT duplicate EMAIL-COMPOSER-COMPONENT-GUIDE.md content — only overview + link</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+      <file>src/client/code-pages/EmailComposer/</file>
+    </files>
+    <patterns>
+      <pattern name="data-model doc exemplar" location="docs/data-model/sprk_communication.md">
+        Existing entity schema doc for sprk_communication — the new form doc should sit alongside it as a companion focused on form customization rather than entity schema.
+      </pattern>
+      <pattern name="shared-lib guide exemplar" location="docs/guides/SHARED-UI-COMPONENTS-GUIDE.md">
+        Current shared lib guide structure — extend with a new section, don't replace.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing `docs/data-model/sprk_communication.md` for the structural model + tone.</step>
+    <step order="2">Read existing `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md` to find the right insertion point for the EmailComposer section.</step>
+    <step order="3">Read FR-19 + NFR-07 + ADR-033 for the canonical form-replacement semantics.</step>
+    <step order="4">Read `src/client/code-pages/EmailComposer/` to confirm what shipped (Code Page artifact name, URL parameter conventions).</step>
+    <step order="5">**Author (a)** `docs/data-model/sprk_communication-form.md` with sections:
+      - Purpose + scope (canonical form replacement)
+      - Canonical form: EmailComposer Code Page (`sprk_emailcomposer`)
+      - 3 entry surfaces (FR-19):
+        1. Ribbon button "+ New Email" on `sprk_communication` views
+        2. Form Component Control swap (default form → Code Page)
+        3. Embeddable launch from other Code Pages
+      - Admin fallback form (NFR-07 — standard form retained, reversible)
+      - URL parameter convention (`mode`, `id`, `to`, `cc`, `subject`, etc.)
+      - 5 modes (compose/view/reply/forward/draft)
+      - Related: ADR-033, EMAIL-COMPOSER-COMPONENT-GUIDE.md, sprk_communication.md (entity schema)
+    </step>
+    <step order="6">**Update (b)** `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md`: add an "EmailComposer" section:
+      - Brief overview (engine + 3 wrappers + typed wrapper)
+      - When to use which (1-line decision pointer)
+      - Link to full guide: `docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md`
+      - Link to ADR-033
+      Keep it terse — full docs live elsewhere.
+    </step>
+    <step order="7">Cross-link both new/updated docs (form doc references shared-lib guide and vice versa).</step>
+    <step order="8">Verify CLAUDE.md §16 pointer table reaches the new data-model doc (likely via `docs/data-model/` row).</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 089 ✅ completed.</step>
+    <step order="10">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read existing data-model + shared-lib guide</tool>
+    <tool name="write">Create form data-model doc</tool>
+    <tool name="edit">Update shared-lib guide</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/data-model/sprk_communication-form.md (NEW — canonical form replacement documented)</output>
+    <output type="docs">docs/guides/SHARED-UI-COMPONENTS-GUIDE.md (UPDATED — EmailComposer section added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/data-model/sprk_communication-form.md` exists.</criterion>
+    <criterion testable="true">Form doc covers all 3 entry surfaces (ribbon, FCC swap, embeddable).</criterion>
+    <criterion testable="true">Form doc covers admin fallback per NFR-07.</criterion>
+    <criterion testable="true">Form doc references ADR-033.</criterion>
+    <criterion testable="true">`docs/guides/SHARED-UI-COMPONENTS-GUIDE.md` has an EmailComposer section with link to EMAIL-COMPOSER-COMPONENT-GUIDE.md.</criterion>
+    <criterion testable="true">SHARED-UI guide section does NOT duplicate full guide content (overview only).</criterion>
+    <criterion testable="true">Cross-links exist between both files.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical findings from project pipeline (relevant here):
+    - Code Page `sprk_emailcomposer` deployed in Wave 2 — verify deployment name/path before documenting.
+    - 3 entry surfaces deployed in Wave 2 (tasks 037, 038, 040) — verify status before documenting "as shipped".
+
+    Parallel-safe with tasks 085, 088, 090, 091 (different files in `docs/`).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`.
+    </protocol>
+  </execution>
+</task>

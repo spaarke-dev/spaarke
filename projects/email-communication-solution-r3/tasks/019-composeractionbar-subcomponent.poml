@@ -1,0 +1,128 @@
+<task id="019" project="email-communication-solution-r3">
+  <metadata>
+    <title>ComposerActionBar sub-component — Send / Save Draft / Cancel + view-mode actions</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>028</blocks>
+    <tags>react, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Action bar component; no architecture decisions; uses Fluent v9 button primitives. STANDARD covers it.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-01, FR-10</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build `<ComposerActionBar />` at `subcomponents/ComposerActionBar.tsx`. Renders the action buttons appropriate for the current `mode`. Hidden entirely when `mount='inline'` (wizard frame owns navigation per NFR-03).
+
+    Per-mode action sets:
+    - `compose`: Send (primary), Save Draft, Cancel
+    - `view`: Edit, Reply, Forward, Close (no Send)
+    - `reply`: Send (primary), Save Draft, Cancel
+    - `forward`: Send (primary), Save Draft, Cancel
+    - `draft`: Send (primary), Save Draft (re-saves), Discard, Close
+
+    Props:
+    - `mode: EmailComposerMode`
+    - `mount: EmailComposerMount` (used only to decide whether to render at all)
+    - `isSending: boolean` (disables Send + shows spinner)
+    - `isDirty: boolean` (enables Save Draft only when dirty)
+    - `onSend, onSaveDraft, onCancel, onEdit, onReply, onForward, onClose, onDiscard` callbacks (engine wires them to reducer actions / imperative handle methods)
+
+    Layout: `page` mount uses bottom-right primary-action chrome; `dialog` mount uses dialog footer chrome. Both visually similar — `mount` prop drives spacing tokens but action set is the same.
+
+    Render NOTHING when `mount === 'inline'` (return `null`).
+  </prompt>
+
+  <role>
+    Frontend developer; Fluent v9 Button + Toolbar primitives; familiar with the conditional-render-by-mode pattern.
+  </role>
+
+  <goal>
+    `<ComposerActionBar />` compiles + lint-clean. All 5 modes render the correct action sets. `mount='inline'` returns null. Send disabled when `isSending`. Save Draft disabled when `!isDirty`.
+  </goal>
+
+  <context>
+    <background>
+      Per NFR-03 mount variants: inline = wizard owns nav; dialog/page = composer owns. ActionBar is the locus of this distinction.
+
+      Per FR-10: view mode shows Edit/Reply/Forward/Close instead of Send/Cancel — composer "knows" it's read-only.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/ComposerActionBar.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (UPDATE — ActionsRegion slot)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only — `Button` (primary + subtle), `Spinner`</constraint>
+    <constraint source="NFR-03">Returns null when `mount === 'inline'` (wizard chrome owns nav)</constraint>
+    <constraint source="NFR-09">Buttons keyboard accessible; Send button has `aria-describedby` when disabled with reason (e.g., "validation errors prevent send")</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `ComposerActionBar.tsx`:
+      - Props per prompt
+      - Early return `null` if `mount === 'inline'`
+      - Switch on `mode` to render the correct button set
+      - Send is `appearance='primary'`, others `appearance='subtle'` or default
+      - Send shows `&lt;Spinner /&gt;` when `isSending`
+      - Save Draft disabled when `!isDirty`
+      - Bottom-right layout for `page`; dialog footer layout for `dialog`</step>
+    <step order="2">Wire into engine's `ActionsRegion` slot in `EmailComposer.tsx` — engine passes mode, mount, isSending, isDirty, and callbacks that dispatch reducer actions or invoke imperative handle stubs.</step>
+    <step order="3">Update `EmailComposer/index.ts` — export `ComposerActionBar`.</step>
+    <step order="4">Smoke test all 5 modes in dev: verify correct button set; verify inline mount → no bar rendered.</step>
+    <step order="5">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="6">Update `TASK-INDEX.md`: 019 ✅.</step>
+    <step order="7">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="write">ComposerActionBar.tsx</tool>
+    <tool name="edit">EmailComposer.tsx slot, index.ts</tool>
+    <tool name="bash">npm run build + lint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/subcomponents/ComposerActionBar.tsx (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.tsx (UPDATED — ActionsRegion slot)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ComposerActionBar.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">`compose`/`reply`/`forward` modes render: Send, Save Draft, Cancel.</criterion>
+    <criterion testable="true">`view` mode renders: Edit, Reply, Forward, Close (NO Send).</criterion>
+    <criterion testable="true">`draft` mode renders: Send, Save Draft, Discard, Close.</criterion>
+    <criterion testable="true">`mount='inline'` returns null (NFR-03).</criterion>
+    <criterion testable="true">Send disabled when `isSending`; shows Spinner.</criterion>
+    <criterion testable="true">Save Draft disabled when `!isDirty`.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Engine's stub `send()` / `saveDraft()` (from task 011) are wired here. Task 020 (validation contract) hardens the Send disabled-on-error behavior; task 028 unit-tests it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor. Step 9.5 skipped.
+    </protocol>
+  </execution>
+</task>

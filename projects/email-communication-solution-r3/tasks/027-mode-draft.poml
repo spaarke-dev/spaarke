@@ -1,0 +1,155 @@
+<task id="027" project="email-communication-solution-r3">
+  <metadata>
+    <title>Draft mode — load/save draft + send-transition (statuscode Draft → Sent)</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>028</blocks>
+    <tags>react, frontend, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Draft mode mutates an existing record (Save Draft updates; Send transitions statuscode); needs careful handling of optimistic-concurrency and re-load on resume; user-data preservation matters. FULL appropriate.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-13</fr-refs>
+  </metadata>
+
+  <prompt>
+    Implement `draft` mode behavior in `EmailComposer/modes/draftMode.ts` (pure logic) + integration in the reducer + send path.
+
+    Load behavior (FR-13):
+    - Engine receives `sourceRecord` for the draft from SendEmailPage wrapper (loaded via Xrm.WebApi.retrieveRecord('sprk_communication', communicationId) where the wrapper's load checks `statuscode === Draft`)
+    - All editable fields populated from sourceRecord (similar to compose pre-fill, but the record exists)
+    - The composer is now editing AN EXISTING RECORD, not creating a new one — important for the saveDraft + send paths
+
+    Save Draft behavior:
+    - Calls a new `updateCommunicationDraft(communicationId, fields)` typed wrapper (likely needs adding to `communicationApi.ts`) — PATCH/PUT to `sprk_communication` (via Xrm.WebApi or BFF) updating mutable fields: subject, body, bodyFormat, recipients (collection), attachments
+    - Does NOT transition statuscode (still Draft)
+    - Validation: only `TO_INVALID_EMAIL` blocks Save Draft (allows empty subject/body) — per task 020 contract
+
+    Send behavior:
+    - Validates fully (all canonical codes)
+    - Posts to `/api/communications/send` via `sendCommunication()` with `existingCommunicationId: communicationId` — server-side logic: if existingCommunicationId present, update the record + transition statuscode to Sent + invoke Graph SendMail (vs the compose path which creates a new record + sends)
+    - **Note**: this may require a coordination check with Wave 0 task 005 (`sendCommunication()` wrapper refinements) — if `existingCommunicationId` is not yet in the wrapper API, add it as part of this task and coordinate the BFF DTO `SendCommunicationRequest.ExistingCommunicationId` field (per FR-22 Wave 0 spec). If the BFF doesn't yet support it, document the gap in task notes; ship the client-side intent; coordinate BFF update via PR description (may require ad-hoc Wave 0 follow-up).
+
+    Discard behavior:
+    - Delete the draft record (via Xrm.WebApi.deleteRecord) + invoke `onClose`
+
+    Files:
+    - `modes/draftMode.ts` (NEW) — load logic + save/send flag computation
+    - Update reducer to handle `mode === 'draft' &amp;&amp; sourceRecord` initialState
+    - Update engine send-path to include `existingCommunicationId` when in draft mode
+    - Update `communicationApi.ts` if `updateCommunicationDraft()` doesn't exist; or use Xrm.WebApi directly
+  </prompt>
+
+  <role>
+    React + TypeScript developer comfortable with Dataverse upsert semantics + Xrm.WebApi + the existing-record-vs-new-record send distinction.
+  </role>
+
+  <goal>
+    Draft mode loads a Draft `sprk_communication` record; Save Draft updates it (statuscode unchanged); Send transitions to Sent + invokes Graph SendMail. Discard deletes the record. `npm run build` + `npm run lint` clean.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-13: drafts are first-class — composer needs to round-trip them. The server-side path supports it: `sprk_communication` rows with `statuscode = Draft` simply aren't picked up by the send pipeline. The composer is responsible for the statuscode transition on send.
+
+      Xrm.WebApi vs BFF for draft save: per `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`, mutating Dataverse records from a Code Page should use Xrm.WebApi (host-context preferred) unless there's a side effect (e.g., authorization, audit) that only the BFF provides. Draft updates have no side effects beyond Dataverse → Xrm.WebApi.updateRecord is fine for Save Draft.
+
+      Send IS a side-effect path → must go through BFF `/api/communications/send`. The BFF needs to know "this is an existing record, transition it; don't create a new one." That's the `existingCommunicationId` field.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/modes/draftMode.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (UPDATE — saveDraft + send for draft mode)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (POSSIBLY UPDATE — existingCommunicationId field)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs (COORDINATE — ExistingCommunicationId field)</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">Send errors as SendCommunicationError</constraint>
+    <constraint source="ADR-024">Polymorphic resolver unchanged</constraint>
+    <constraint source="ADR-033">Draft logic in canonical engine — no parallel draft UI</constraint>
+    <constraint source="project">Save Draft via Xrm.WebApi.updateRecord (Code Page) or BFF fallback (wizard context) per DATA-ACCESS-DECISION-CRITERIA.md</constraint>
+    <constraint source="project">Send via BFF `/api/communications/send` with `existingCommunicationId` field — coordinate Wave 0 update if missing</constraint>
+    <constraint source="project">Validation: Save Draft blocked only on `TO_INVALID_EMAIL`; Send blocked on full canonical set (task 020 contract)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `modes/draftMode.ts`:
+      - `deriveDraftState(sourceRecord: IComposerSourceRecord): Partial&lt;EmailComposerState&gt;` — populates state from existing record + marks `existingCommunicationId` for downstream use
+      - `mapStateToDraftUpdate(state): Record&lt;string, unknown&gt;` — converts state slots → Dataverse field shape for Xrm.WebApi.updateRecord
+      - `mapStateToSendRequest(state): SendCommunicationRequest &amp; { existingCommunicationId }` — converts state → send request including existing ID</step>
+    <step order="2">Update reducer:
+      - `initialState` handles `mode === 'draft' &amp;&amp; sourceRecord` — applies `deriveDraftState`
+      - New state slot: `existingCommunicationId?: string` (set when draft loads)</step>
+    <step order="3">Update `EmailComposer.tsx`:
+      - `saveDraft()` real impl: if `existingCommunicationId` present, call `Xrm.WebApi.updateRecord('sprk_communication', existingCommunicationId, mapStateToDraftUpdate(state))`; else fallback (compose mode draft: first-save creates a new record, sets `existingCommunicationId`)
+      - `send()` for draft mode: include `existingCommunicationId` in the request body
+      - `discard()` new method on imperative handle: `Xrm.WebApi.deleteRecord('sprk_communication', existingCommunicationId)` + invoke `onClose`</step>
+    <step order="4">Check `communicationApi.ts` (post Wave 0 task 005) for `existingCommunicationId` field:
+      - If present: use
+      - If missing: add as optional field on `SendCommunicationRequest` type; coordinate with BFF — if BFF DTO `SendCommunicationRequest.cs` doesn't have it, document gap + add an ad-hoc Wave 0 follow-up note (may require parallel BFF PR)</step>
+    <step order="5">Wire ComposerActionBar's Discard button (added in task 019 for draft mode) to invoke `discard()`.</step>
+    <step order="6">Smoke test in dev: load a known draft record, edit subject, click Save Draft → record updated; reload → edits preserved; click Send → statuscode → Sent + Graph SendMail invoked.</step>
+    <step order="7">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="7.5">Step 9.5 quality gates — code-review + adr-check.</step>
+    <step order="8">Update `TASK-INDEX.md`: 027 ✅.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="write">draftMode.ts</tool>
+    <tool name="edit">reducer, EmailComposer.tsx saveDraft+send+discard, possibly communicationApi.ts</tool>
+    <tool name="bash">npm run build + lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/modes/draftMode.ts (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.reducer.ts (UPDATED — draft initialState + existingCommunicationId slot)</output>
+    <output type="file">EmailComposer/EmailComposer.tsx (UPDATED — saveDraft/send/discard for draft)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (POSSIBLY UPDATED — existingCommunicationId field)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Draft loads from sourceRecord; all editable fields populated.</criterion>
+    <criterion testable="true">Save Draft updates the existing record (statuscode unchanged); validation blocks only TO_INVALID_EMAIL.</criterion>
+    <criterion testable="true">Send transitions statuscode to Sent + invokes Graph SendMail (via BFF) using existingCommunicationId.</criterion>
+    <criterion testable="true">Discard deletes the record + invokes `onClose`.</criterion>
+    <criterion testable="true">Save Draft via Xrm.WebApi.updateRecord per DATA-ACCESS-DECISION-CRITERIA.md.</criterion>
+    <criterion testable="true">Send via BFF `/api/communications/send`.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Compose-mode-first-save: when a user clicks Save Draft from compose mode (no existing record), the path is "create + statuscode Draft". This could be added either as a creation via Xrm.WebApi.createRecord OR a new BFF endpoint. For Wave 1, simpler to use Xrm.WebApi.createRecord('sprk_communication', { ...mapStateToDraftUpdate(state), statuscode: Draft }) and set `existingCommunicationId` to the returned id. Document the choice.
+
+    `existingCommunicationId` BFF coordination: if the BFF doesn't accept it, this task's send-from-draft path doesn't work end-to-end. The fallback is "client just doesn't transition statuscode; server treats it as a new record". The Owner may need to weigh in on whether to add the BFF field as part of Wave 0 follow-up or to defer draft-from-page send to a later wave. Document in PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 9.5 mandatory.
+    </protocol>
+  </execution>
+</task>

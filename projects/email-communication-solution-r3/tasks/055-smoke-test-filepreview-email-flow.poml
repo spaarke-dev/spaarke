@@ -1,0 +1,167 @@
+<task id="055" project="email-communication-solution-r3">
+  <metadata>
+    <title>Smoke test FilePreviewDialog "Send by Email" flow end-to-end in dev</title>
+    <phase>Wave 3 — SendEmailDialog + FilePreview</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>054</dependencies>
+    <blocks>060</blocks>
+    <tags>testing, e2e-test, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Manual smoke test; not code or architectural change. STANDARD covers the documentation + verification rigor; FULL would be over-application for a smoke test.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential gate before Wave 4 starts (blocks 060). Manual browser test; not safely parallelized with other deploy/smoke tasks against the same dev environment.</parallel-reason>
+    <fr-refs>FR-14</fr-refs>
+  </metadata>
+
+  <prompt>
+    Manually smoke-test the FilePreviewDialog "Send by Email" flow end-to-end in the dev environment, verifying the migration from Wave 3 is functionally correct.
+
+    Test scenario:
+    1. Sign into LegalWorkspace in dev
+    2. Navigate to a Matter (or other parent record) with at least one attached `sprk_document`
+    3. Open the document via FilePreview surface
+    4. Click the "Send by Email" action
+    5. Verify: the canonical `<SendEmailDialog />` opens with the previewed file pre-attached
+    6. Fill: To = a test recipient address, Subject = "Wave 3 smoke test", Body = any non-empty text
+    7. Click Send
+    8. Verify: success Fluent toast appears in FilePreview parent; dialog closes
+    9. Verify in Dataverse: outbound `sprk_communication` record created with `statuscode = Sent`, `sprk_internetmessageid` populated (Wave 0 task 003 outcome), correct attachment linked
+
+    Failure scenarios to also test:
+    - Send with no recipient → validation error appears via canonical wrapper (no inline error rendering in FilePreview)
+    - Send with malformed recipient → canonical validation code triggers
+    - Network failure scenario (simulated if possible) → `onError` receives `SendCommunicationError`; banner appears with `correlationId`
+
+    Document all results in `notes/test-results/055-filepreview-smoke.md` per CLAUDE.md test-results convention.
+  </prompt>
+
+  <role>
+    QA / smoke-test engineer authoritative on Spaarke dev environment flows. Familiar with LegalWorkspace navigation, FilePreview surface, Dataverse record verification, and the canonical Communication architecture's expected behavior.
+  </role>
+
+  <goal>
+    The FilePreviewDialog → SendEmailDialog → outbound `sprk_communication` round-trip is verified working in dev. Smoke results documented in `notes/test-results/055-filepreview-smoke.md` including: positive test pass/fail, validation error tests, error path test, screenshots (optional but recommended), outbound record GUID for audit traceability.
+  </goal>
+
+  <context>
+    <background>
+      The Wave 3 migration of FilePreviewDialog (task 051) replaced inline `fetch` with the canonical `<SendEmailDialog />` wrapper. The functional correctness of this migration cannot be inferred from build/lint/adr-check — only an end-to-end smoke test against a real dev environment can confirm.
+
+      Key behaviors to verify:
+      - The wrapper opens correctly when triggered from FilePreview
+      - The previewed file is pre-attached (via `attachmentSources` config in task 051)
+      - The recipient field accepts and validates emails per the canonical contract (FR-05)
+      - Send succeeds → success Fluent toast + `onSent` callback fires + dialog closes
+      - Send fails (validation) → typed validation errors surface via canonical wrapper (FR-08)
+      - Send fails (server error) → `SendCommunicationError` reaches FilePreview's `onError`, banner displays `correlationId`
+      - Outbound `sprk_communication` record has `sprk_internetmessageid` populated (verifies Wave 0 task 003 + Wave 3 integration in same flow)
+
+      The dev environment URL comes from `notes/wave-3-deploy.md` (produced by task 054).
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/wave-3-deploy.md (dev environment URL from task 054)</file>
+      <file>projects/email-communication-solution-r3/notes/test-results/055-filepreview-smoke.md (NEW — smoke result)</file>
+      <file>src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx (the migrated file under test)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-14">Acceptance: "FilePreview file-email flow works end-to-end in dev." This task is the verification.</constraint>
+    <constraint source="ADR-019">Error path uses typed `SendCommunicationError`; verify in error scenario test (step 8 below) that `correlationId` is captured and displayed.</constraint>
+    <constraint source="ADR-021">Success / error UI uses Fluent v9 chrome (toast + banner). Verify visually.</constraint>
+    <constraint source="ADR-033">Verify NO inline `fetch` fires from the migrated flow — observe Network panel in browser DevTools; only `/api/communications/send` request from the canonical wrapper's `sendCommunication()` should appear.</constraint>
+    <constraint source="project">Test results MUST be documented in `notes/test-results/055-filepreview-smoke.md`. PR description summarizes pass/fail status.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/email-communication-solution-r3/notes/wave-3-deploy.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `notes/wave-3-deploy.md` to confirm dev environment URL and that deploy succeeded.</step>
+    <step order="2">Set up the test data: identify (or create) a Matter in dev with at least one attached `sprk_document`. Note the Matter GUID + document name.</step>
+    <step order="3">Positive test: open the document in FilePreview → click "Send by Email" → verify canonical `<SendEmailDialog />` opens with the file pre-attached → fill To/Subject/Body → click Send → verify success toast → confirm dialog closes.</step>
+    <step order="4">Dataverse verification: query `sprk_communication` for the record just created. Verify: `statuscode = Sent` (or transition state), `sprk_internetmessageid` populated (or warn-logged failure if step 4 returned a known-issue case from Wave 0 task 003), correct attachment associated. Record the new `sprk_communicationid` GUID in smoke notes.</step>
+    <step order="5">Validation test 1: open dialog again → leave To empty → click Send → verify FR-08 canonical `TO_REQUIRED` error renders in canonical wrapper (not as inline FilePreview error).</step>
+    <step order="6">Validation test 2: open dialog → fill To with `not-a-valid-email` → click Send → verify FR-08 `TO_INVALID_EMAIL` error renders.</step>
+    <step order="7">Network panel check: during positive test (step 3), open browser DevTools Network tab. Confirm: exactly ONE POST request to `/api/communications/send` originating from the canonical wrapper. No other `communications/send` requests from FilePreview itself.</step>
+    <step order="8">Optional: simulate error path (e.g., disable network mid-send OR send with intentionally invalid recipient that triggers server-side rejection). Verify: `SendCommunicationError` surfaces in `onError`; FilePreview displays error banner with `correlationId`.</step>
+    <step order="9">Compile results into `notes/test-results/055-filepreview-smoke.md` with structure:
+      <code>
+      # Wave 3 FilePreview Smoke Test
+      Date: [date]
+      Tester: [name]
+      Environment: [dev URL from wave-3-deploy.md]
+
+      ## Positive flow
+      - Result: ✅ PASS / ❌ FAIL
+      - sprk_communicationid: [GUID]
+      - sprk_internetmessageid populated: yes / no
+      - Notes: ...
+
+      ## Validation tests
+      - TO_REQUIRED: ✅ PASS / ❌ FAIL
+      - TO_INVALID_EMAIL: ✅ PASS / ❌ FAIL
+
+      ## Error path
+      - SendCommunicationError surfaces: ✅ PASS / ❌ FAIL / SKIPPED
+      - correlationId displayed: yes / no
+
+      ## Network observation
+      - Single POST to /api/communications/send: ✅ confirmed / ❌ multiple requests / ❌ inline fetch detected
+
+      ## Issues / Defects
+      [List any defects to file]
+      </code>
+    </step>
+    <step order="10">If smoke test fails on positive flow OR network observation reveals inline fetch: escalate to tasks 051 / 053 / 050 for fix. Do NOT mark task 055 complete until smoke passes (or owner approves a known-deferred defect).</step>
+    <step order="11">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 055 ✅ completed.</step>
+    <step order="12">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (060 — Wave 4 start).</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">Verify dev environment URL from deploy notes</tool>
+    <tool name="write">Create `notes/test-results/055-filepreview-smoke.md`</tool>
+    <tool name="browser">Manual interaction in dev environment (per ui-test skill if Chrome automation available; otherwise manual)</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/email-communication-solution-r3/notes/test-results/055-filepreview-smoke.md (NEW — smoke result)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Positive flow: send-email from FilePreview succeeds → outbound `sprk_communication` record created with `statuscode = Sent`.</criterion>
+    <criterion testable="true">`sprk_internetmessageid` populated on outbound record (or documented warn-logged failure per FR-22 best-effort).</criterion>
+    <criterion testable="true">Validation tests: `TO_REQUIRED` and `TO_INVALID_EMAIL` errors surface via canonical wrapper.</criterion>
+    <criterion testable="true">Network panel confirms ONE POST to `/api/communications/send` per send action; no inline fetch from FilePreview.</criterion>
+    <criterion testable="true">`notes/test-results/055-filepreview-smoke.md` documents all test results with pass/fail and traceable record GUIDs.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 055 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `sprk_internetmessageid` verification (step 4) tests cross-wave integration: Wave 0 task 003 (server post-send capture) + Wave 3 (client wrapper) together. If the field is null on the outbound record, root-cause to Wave 0 first (server didn't capture) before suspecting Wave 3.
+
+    Browser automation: if the `ui-test` skill / Chrome integration is available, the test can be partially scripted. Otherwise, manual browser testing is acceptable for a smoke test. Document the testing mode in smoke notes.
+
+    The `notes/test-results/` directory may not exist yet — create it. Per CLAUDE.md §3, `notes/` is project-internal and NOT subject to the `.claude/` write boundary.
+
+    This task gates the start of Wave 4 (task 060). Do not advance to Wave 4 with an unresolved Wave 3 smoke failure — the SummarizeFilesDialog migration in Wave 4 follows the same canonical pattern, so a Wave 3 defect will likely manifest in Wave 4 too.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 (adr-check + code-review) SKIPPED for STANDARD rigor — this is a smoke test, not a code change.
+    </protocol>
+  </execution>
+</task>

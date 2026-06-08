@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>`WebhookGateResolver` — POST to configured URL with HMAC signing; resumes on callback (ADR-028)</title>
+    <phase>Phase 3: IGateResolver + Approval Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>035</blocks>
+    <tags>bff-api, ai, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements `IGateResolver` for agent-to-agent webhook path with HMAC-SHA256 signing per ADR-028; security-sensitive code (signing + callback validation); modifies `.cs` files in `Sprk.Bff.Api`; tags include bff-api + ai + auth; audit-critical per ADR-015</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group D resolver implementations (031, 032, 033, 034) each touch a separate file under `Services/Ai/ActionEngine/Gates/`; no file overlap; consume contract from task 030 (complete)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement `WebhookGateResolver : IGateResolver` at `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateResolver.cs`. On `ResolveAsync`, POST a signed payload to the Action-configured webhook URL (HMAC-SHA256 per ADR-028); record `Pending`; resume on signed callback `POST /api/ai/gates/webhook/callback`. Validate HMAC signature on every callback; reject with ProblemDetails 401 if invalid. Store the HMAC secret in Key Vault (no plaintext in `appsettings*.json`). Audit per ADR-015 on initial POST AND terminal callback. Used for agent-to-agent integrations and external approval systems.
+  </prompt>
+
+  <role>
+    Senior Spaarke BFF engineer with HMAC + webhook-security background. You write code that fails closed (invalid signature = 401 + audit-log; never resolves the gate), uses `IHttpClientFactory` (not `new HttpClient`), and treats every external URL as untrusted (allowlist or per-Action configured).
+  </role>
+
+  <goal>
+    Concrete deliverables:
+    1. **`WebhookGateResolver` class** implementing `IGateResolver.ResolveAsync` — POSTs signed envelope to Action's webhook URL; returns `Pending`.
+    2. **HMAC-SHA256 signing** per ADR-028 — `X-Spaarke-Signature` header carrying `sha256={hex_digest}`; `X-Spaarke-Timestamp` header (UTC ISO 8601); body = canonical JSON envelope.
+    3. **Callback endpoint** `POST /api/ai/gates/webhook/callback` — validates HMAC (timestamp skew &lt;5 min; signature match); body: `{ correlationId, decision, reason?, signedAtUtc }`; resolves the pending gate.
+    4. **Webhook URL allowlist** — per-Action configured URL (stored in `sprk_action.governance` block); reject any URL not in the configured allowlist with ProblemDetails 400 + audit + log warning.
+    5. **HMAC secret in Key Vault** — secret name `action-engine-webhook-hmac-key`; loaded via existing `DefaultAzureCredential` (MI) chain per ADR-028. NO plaintext secret in `appsettings*.json`.
+    6. **Idempotency** — duplicate callbacks for the same `correlationId` are safe (idempotent resolve).
+    7. **Audit hook** — `IAuditService.LogGateDecision(...)` on:
+       (a) initial outbound POST (`Pending`),
+       (b) terminal callback (`Approved`/`Rejected`),
+       (c) HMAC validation failure (`Rejected` with reason `"hmac validation failed"` + structured log).
+    8. **DI registration** in `AddGatesFeature()` — `GateType.Conditional` keyed default; Action Definition can override per-instance.
+
+    Deliverable locations:
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateResolver.cs`
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateSignatureValidator.cs`
+    - Extend `src/server/api/Sprk.Bff.Api/Api/Ai/GateEndpoints.cs` (from task 032) with the callback endpoint
+    - Tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/WebhookGateResolverTests.cs`
+    - Tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/WebhookGateSignatureValidatorTests.cs`
+  </goal>
+
+  <context>
+    <background>
+      Per design §5, the webhook resolver is the agent-to-agent integration path — e.g., when a downstream system (Outside Counsel approval workflow, contract-management system) needs to vet an Action before it executes. The pattern is: BFF POSTs a signed envelope to the external URL; the external system processes the request and POSTs a signed response to our callback endpoint; we resolve the gate based on the callback's decision.
+
+      ADR-028 specifies HMAC-SHA256 with `X-Spaarke-Signature: sha256={hex}` + `X-Spaarke-Timestamp` headers. The signature covers the request body + timestamp; replay protection requires timestamp skew check (&lt;5 min).
+
+      Security posture: this resolver is the highest-risk path in Phase 3. Failure mode if implemented incorrectly: an attacker forges a callback to approve a gate. Mitigations: (a) HMAC validation with constant-time compare, (b) timestamp skew &lt;5 min, (c) URL allowlist per-Action, (d) audit on every outcome including validation failures, (e) Key Vault for the HMAC secret.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateSignatureValidator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/GateEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Configuration/KeyVaultSecretProvider.cs</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/WebhookGateResolverTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/WebhookGateSignatureValidatorTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization on callback endpoint. BUT — callback is unauthenticated by user identity; auth = HMAC signature validation. Document this exception in code comments + PR.</constraint>
+    <constraint source="ADR-010">Feature-module DI. This task adds: `WebhookGateResolver`, `WebhookGateSignatureValidator`, `HttpClient` named-config (3 slots tracked in `AddGatesFeature()`).</constraint>
+    <constraint source="ADR-013">AI Architecture. BFF placement.</constraint>
+    <constraint source="ADR-015">Audit per gate decision INCLUDING HMAC validation failures. Tier 2 hash + Tier 3 work history.</constraint>
+    <constraint source="ADR-019">ProblemDetails for callback endpoint errors (400 invalid URL allowlist, 401 invalid signature, 404 unknown correlationId).</constraint>
+    <constraint source="ADR-028">HMAC-SHA256 signing on outbound; HMAC validation on inbound callback; `DefaultAzureCredential` (MI) for Key Vault secret fetch; NO plaintext secrets in `appsettings*.json`. Constant-time signature compare to prevent timing attacks.</constraint>
+    <constraint source="ADR-029">Publish-size delta ≤ 5 MB compressed. This task adds ≤500 LoC + no new packages (System.Security.Cryptography is BCL); expected delta &lt; 0.1 MB.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF; HMAC secret rotation procedure documented; no new HIGH-sev CVEs; publish-size impact verified.</constraint>
+    <constraint source="project">URL allowlist per-Action stored on Action Definition `governance` block; reject any non-allowlisted URL.</constraint>
+    <constraint source="project">Default routing: `GateType.Conditional` keyed default. Action Definitions override per design §5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke Auth v2 binding" location=".claude/patterns/auth/spaarke-sso-binding.md">Server outbound uses MI (`DefaultAzureCredential`); inbound HMAC validation uses Key Vault secret.</pattern>
+      <pattern name="Endpoint filters" location=".claude/patterns/api/endpoint-filters.md">Callback endpoint has HMAC validation as its auth filter; document the exception clearly.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: working tree clean, branch `work/ai-spaarke-action-engine-r1`, baseline build passes, task 030 ✅ + task 032 in flight (we extend `GateEndpoints.cs` from 032). Load knowledge. Declare RIGOR LEVEL: FULL.</step>
+    <step order="1">Read ADR-028 (Spaarke Auth v2), `auth-deployment-setup.md`, and task 030's contract. Understand the HMAC envelope shape required by downstream Spaarke webhook consumers (if any pattern exists; otherwise define canonically here).</step>
+    <step order="2">Create `WebhookGateSignatureValidator.cs` — pure validator class. Two methods: `SignOutbound(body, timestamp, secret) =&gt; signature` and `ValidateInbound(body, timestamp, signature, secret) =&gt; bool`. Use `HMACSHA256` from BCL. Constant-time compare via `CryptographicOperations.FixedTimeEquals`. Timestamp skew check (&lt;5 min).</step>
+    <step order="3">Create `WebhookGateResolver.cs` — ctor injects `IHttpClientFactory`, `IKeyVaultSecretProvider`, `WebhookGateSignatureValidator`, `IAuditService`, `IActionRegistryService` (to look up Action's webhook URL + allowlist), `ILogger`. `ResolveAsync`: validate URL against allowlist → fetch HMAC secret → sign envelope → POST → audit `Pending` → return `Pending`.</step>
+    <step order="4">Build canonical envelope JSON: `{ correlationId, actionRunId, toolDispatchId, gateType, requestedByUserId, surfaceHint, payload, expiresAtUtc }`. Use `JsonSerializer` with stable property ordering (`PropertyNamingPolicy = JsonNamingPolicy.CamelCase`, `PropertyNameCaseInsensitive = false`).</step>
+    <step order="5">Extend `GateEndpoints.cs` (from task 032) with `POST /api/ai/gates/webhook/callback`. Apply a custom endpoint filter `WebhookHmacValidationFilter` that validates the `X-Spaarke-Signature` + `X-Spaarke-Timestamp` headers before the endpoint executes. On invalid signature: audit `Rejected` w/ reason `"hmac validation failed"`, return `Results.Problem(statusCode: 401, title: "Invalid signature", ...)`. On valid: resolve the pending gate via `IGateApprovalChannel.ResolvePendingAsync` (extending channel from task 032 to support webhook resolution too — OR introduce `IWebhookGateResolutionStore` if cleaner).</step>
+    <step order="6">Configure `HttpClient` for outbound via named factory `WebhookGate` with sensible defaults: 10-sec timeout, retry only on transient errors (no retry on 4xx), no auth header beyond HMAC headers (the receiving endpoint authenticates US, not the other way around).</step>
+    <step order="7">Wire Key Vault secret loading: secret name `action-engine-webhook-hmac-key`. Document the deployment procedure in `notes/deployment/033-webhook-hmac-secret-rotation.md` (manual rotation in MVP; automation deferred).</step>
+    <step order="8">Register DI in `AddGatesFeature()`: `services.AddHttpClient("WebhookGate", ...); services.AddSingleton&lt;WebhookGateSignatureValidator&gt;(); services.AddKeyedScoped&lt;IGateResolver, WebhookGateResolver&gt;(GateType.Conditional);`. ADR-010 budget check.</step>
+    <step order="9">Write unit tests:
+      (a) `Validator_SignAndValidate_RoundTrip` — sign body+timestamp, validate succeeds.
+      (b) `Validator_TamperedBody_ValidationFails`.
+      (c) `Validator_ExpiredTimestamp_ValidationFails` (skew &gt; 5 min).
+      (d) `Validator_ConstantTimeCompare_NoTimingLeak` — assert use of `FixedTimeEquals`.
+      (e) `Resolver_HappyPath_PostsSignedAndReturnsPending`.
+      (f) `Resolver_DisallowedUrl_RejectsImmediately` — URL not in Action allowlist → audit reject, return `Rejected`.
+      (g) `Resolver_HttpClientFails_HandlesGracefully` — surface failure as audit + return `Rejected` (do NOT throw out of `ResolveAsync`).
+      (h) `Callback_ValidHmac_ResolvesPending` — endpoint integration test.
+      (i) `Callback_InvalidHmac_Returns401AndAuditsRejection`.
+      (j) `Callback_DuplicateCallback_IsIdempotent`.</step>
+    <step order="10">Build + run tests: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0; `dotnet test` passes new tests. Measure publish-size delta; expect &lt; 0.1 MB. Record in `notes/measurements/033-publish-size-delta.md`.</step>
+    <step order="9.5">Run quality gates: `code-review` (security-critical — constant-time compare verified, replay protection verified, no plaintext secrets, ProblemDetails correctness), `adr-check` (ADR-001/008/010/013/015/019/028/029). MANDATORY human escalation per CLAUDE.md §6 if any concern about HMAC implementation correctness.</step>
+    <step order="10.5">Update `tasks/TASK-INDEX.md`: 033 ✅. Update `current-task.md`.</step>
+    <step order="11">Commit + push. Add `notes/deployment/033-webhook-hmac-secret-rotation.md` covering rotation procedure for Ops.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size measurement</tool>
+    <tool name="git">Commit and push</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateSignatureValidator.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/GateEndpoints.cs (extended with callback endpoint)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (extended)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/WebhookGateResolverTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/WebhookGateSignatureValidatorTests.cs</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/measurements/033-publish-size-delta.md</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/deployment/033-webhook-hmac-secret-rotation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WebhookGateResolver.cs` + `WebhookGateSignatureValidator.cs` exist and compile.</criterion>
+    <criterion testable="true">10 unit/integration tests pass covering signing, validation, replay, tampering, URL allowlist, callback HMAC, idempotency.</criterion>
+    <criterion testable="true">HMAC signature uses `HMACSHA256` from BCL with constant-time compare (`CryptographicOperations.FixedTimeEquals`).</criterion>
+    <criterion testable="true">Timestamp skew check rejects requests &gt; 5 min old or &gt; 5 min in the future.</criterion>
+    <criterion testable="true">URL allowlist enforced — non-allowlisted URLs result in audit `Rejected` outcome (test assertion).</criterion>
+    <criterion testable="true">HMAC secret loaded from Key Vault via `DefaultAzureCredential` (MI); NO plaintext in `appsettings*.json`. Verified by grep of repo.</criterion>
+    <criterion testable="true">Callback endpoint returns ProblemDetails 401 on invalid HMAC; audit log records the rejection.</criterion>
+    <criterion testable="true">Audit hook called on (a) initial outbound POST, (b) terminal callback, (c) HMAC validation failure.</criterion>
+    <criterion testable="true">Publish-size delta &lt; 0.1 MB compressed; recorded.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass at Step 9.5; security-critical review confirms no constant-time compare bypass, no plaintext secrets, ADR-028 satisfied.</criterion>
+    <criterion testable="true">Secret rotation procedure documented in `notes/deployment/033-webhook-hmac-secret-rotation.md`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Security review is MANDATORY at Step 9.5 — per CLAUDE.md §6 "security-sensitive code" triggers human escalation. The HMAC implementation is the load-bearing primitive; mistakes here have outsized impact.
+
+    Resume coupling with `IGateApprovalChannel` from task 032: webhook callbacks resolve the same pending-TCS dictionary the in-chat resolver uses. This unifies the resolution path. If unification proves awkward (e.g., session-bound TCS doesn't fit webhook lifecycle), introduce `IWebhookGateResolutionStore` as a separate scoped/singleton store and document the deviation in `notes/decisions/033-resolution-store-design.md`.
+
+    URL allowlist storage: Action Definition's `governance` JSON block has a `webhookAllowedUrls: string[]` field; the resolver loads via `IActionRegistryService.GetActionAsync(actionRunId.ActionId)`. Phase 4 task 040 finalizes the Action governance block schema; coordinate if changes needed.
+
+    Outbound `HttpClient` MUST NOT follow redirects (`AllowAutoRedirect = false`) — redirects bypass the URL allowlist.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. Security-critical task — escalate per CLAUDE.md §6 if any HMAC implementation question arises.
+    </protocol>
+  </execution>
+</task>

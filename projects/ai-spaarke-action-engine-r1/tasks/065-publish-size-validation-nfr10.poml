@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Run `dotnet publish --runtime linux-x64`; measure compressed delta vs baseline; verify ≤ 5 MB (NFR-10 / G8)</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>045</dependencies>
+    <blocks>070, 090</blocks>
+    <tags>bff-api, deploy, performance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy-adjacent quality gate with explicit NFR-10 target; documents results; Phase 6 mandatory check</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent measurement task; no file overlap with load test (064) or CVE scan (066)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Measure the BFF publish-size delta after all Action Engine code lands. Run `dotnet publish --runtime linux-x64 --self-contained false` BEFORE the Action Engine surface (rewind via git) and AFTER (current HEAD). Compare compressed sizes; verify delta ≤ 5 MB per NFR-10 / ADR-029. Document results.
+  </prompt>
+
+  <role>
+    Senior Spaarke platform engineer with BFF publish-hygiene expertise (ADR-029) and `bff-extensions.md` governance familiarity. Comfortable comparing zip artifacts and tracing package bloat sources via `dotnet list package`.
+  </role>
+
+  <goal>
+    A measurement report at `projects/ai-spaarke-action-engine-r1/notes/spikes/publish-size-final-measurement.md` documenting:
+    - Baseline publish size (compressed) from master / pre-Action-Engine
+    - Current publish size (compressed) from `work/ai-spaarke-action-engine-r1`
+    - Delta (compressed MB)
+    - PASS/FAIL judgement against the 5 MB cap
+    - If FAIL: top 5 bloat sources from `dotnet list package --include-transitive` diff + proposed mitigations
+
+    NFR-10 / G8 verifiable from the report.
+  </goal>
+
+  <context>
+    <background>
+      G8 codifies the deploy-hygiene contract: Action Engine cannot regress the BFF baseline (~60 MB compressed per `azure-deployment.md`) by more than 5 MB. NuGet additions are the most common bloat source. The architecture spike (task 001) measured a preliminary estimate; this task is the production-final measurement.
+
+      ADR-029 is the binding rule. `bff-extensions.md` §A.3 makes it a pre-merge gate.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/spikes/publish-size-final-measurement.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/spikes/publish-size-measurement.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Framework-dependent linux-x64 publish. Sourcemap exclusion. Compressed delta ≤ 5 MB compressed (NFR-10).</constraint>
+    <constraint source="bff-extensions.md">§A.3 binding: every BFF addition MUST verify publish-size impact before merging.</constraint>
+    <constraint source="project">Use `dotnet publish src/server/api/Sprk.Bff.Api/ --configuration Release --runtime linux-x64 --self-contained false`; zip the output; compare compressed sizes.</constraint>
+    <constraint source="project">Do NOT add `&lt;PublishTrimmed&gt;true&lt;/PublishTrimmed&gt;` or `&lt;PublishAot&gt;true&lt;/PublishAot&gt;` to address size (bff-extensions.md MUST NOT rules).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/spikes/publish-size-measurement.md</file>
+    </files>
+    <patterns>
+      <pattern name="Publish-size measurement" location=".claude/constraints/bff-extensions.md">Standard before/after compressed-zip comparison pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: task 045 (final BFF surface) complete; current branch is `work/ai-spaarke-action-engine-r1`.</step>
+    <step order="1">Read knowledge files (especially `ADR-029` and `bff-extensions.md`); review task 001 spike measurement for baseline reference.</step>
+    <step order="2">Identify the master/baseline commit (pre-Action-Engine — first commit on this branch where Action Engine code is empty); use `git rev-parse` to capture SHA.</step>
+    <step order="3">In a clean worktree (or stash + checkout pattern), check out baseline SHA; run `dotnet publish src/server/api/Sprk.Bff.Api/ --configuration Release --runtime linux-x64 --self-contained false -o /tmp/baseline-publish`; zip the output; capture compressed size.</step>
+    <step order="4">Restore HEAD; run the same publish command into `/tmp/current-publish`; zip; capture compressed size.</step>
+    <step order="5">Compute delta = current - baseline (compressed MB). If delta ≤ 5 MB → PASS; if &gt; 5 MB → FAIL + investigate bloat.</step>
+    <step order="6">Run `dotnet list package --include-transitive` for baseline vs current; diff the two; identify the top 5 added/grown packages (by approximate MB).</step>
+    <step order="7">Write report at `projects/ai-spaarke-action-engine-r1/notes/spikes/publish-size-final-measurement.md`: baseline size, current size, delta, PASS/FAIL, top bloat sources (if FAIL), mitigations (if FAIL).</step>
+    <step order="8">If FAIL: escalate as a risk (update plan.md Risk Register R1 status); propose mitigations (e.g., consume AI Search via existing client; drop unused Semantic Kernel sub-package). Do NOT proceed to task 070 (deploy) until PASS.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD (measurement task).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 065 status ✅. Update `current-task.md`: G8 verified (or escalated).</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, publish, package-listing</tool>
+    <tool name="git">Branch / worktree manipulation for baseline restore</tool>
+    <tool name="terminal">Shell commands (zip, du)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/spikes/publish-size-final-measurement.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/plan.md (Risk Register update if FAIL)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">**G8**: BFF publish-size delta ≤ 5 MB compressed (verified by `dotnet publish --runtime linux-x64` before/after — NFR-10). Report at `notes/spikes/publish-size-final-measurement.md` shows PASS.</criterion>
+    <criterion testable="true">Baseline and current measurements are taken with identical `dotnet publish` flags (framework-dependent, linux-x64, Release).</criterion>
+    <criterion testable="true">If FAIL, the report includes top 5 bloat sources and proposed mitigations.</criterion>
+    <criterion testable="true">No `&lt;PublishTrimmed&gt;` or `&lt;PublishAot&gt;` properties added to the csproj.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task directly verifies graduation gate **G8** (spec.md Success Criteria #8; NFR-10). ADR-029 is the binding rule; `bff-extensions.md` §A.3 makes it pre-merge mandatory. Task 070 (BFF deploy) is gated on this passing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Declare RIGOR LEVEL: STANDARD. Follow task-execute skill.
+    </protocol>
+  </execution>
+</task>

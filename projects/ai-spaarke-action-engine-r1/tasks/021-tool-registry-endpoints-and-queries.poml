@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Tool Registry — CRUD &amp; Query Endpoints</title>
+    <phase>Phase 2: Tool Registry + Discovery</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>030, 040</blocks>
+    <tags>bff-api, api, endpoints, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF endpoint code with endpoint-filter auth (ADR-008), ProblemDetails (ADR-019), audit middleware (ADR-015); blocks Phase 3+ discovery UI work; tags include bff-api + ai + endpoints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct scope (endpoints) from Group C meta-tools (022/023/024 — service implementations) and from tasks 025/026 (registration + dispatch). Endpoints depend only on task 020's data model. Touches `Api/Ai/ToolRegistryEndpoints.cs` + `EndpointMappingExtensions.cs` registration — no file overlap with siblings.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement `ToolRegistryEndpoints.cs` — the BFF Minimal API endpoint surface for Tool Registry CRUD + query operations. Endpoints serve the Tool Registry admin UI (Phase 5 surfaces) and the Action authoring UI. Apply ADR-008 endpoint-filter authorization, ADR-019 ProblemDetails error responses, and wire the endpoints into `EndpointMappingExtensions.cs` via a `MapToolRegistryEndpoints()` extension.
+  </prompt>
+
+  <role>
+    Senior .NET 8 Minimal API engineer with strong familiarity with the Spaarke BFF endpoint conventions (`Api/` folder + `EndpointMappingExtensions.cs` registration site), endpoint-filter authorization (ADR-008), and ProblemDetails error responses (ADR-019).
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **CRUD endpoints** — GET (list, by-id), POST (create), PUT (update), DELETE — backed by the `sprk_toolregistry` Dataverse entity (read/write via existing Dataverse client). All endpoints apply endpoint-filter auth per ADR-008.
+    2. **Query endpoints** — `GET /api/tool-registry?classification=&amp;costClass=&amp;isAlwaysOn=` filtered queries used by the admin UI and by the `FindResources` semantic-search filter step (e.g., authorization filter).
+    3. **Registration** — `MapToolRegistryEndpoints()` extension added to `EndpointMappingExtensions.cs`; route group prefix `/api/tool-registry`. ProblemDetails error responses for 400/404/409/500.
+
+    Deliverable: `src/server/api/Sprk.Bff.Api/Api/Ai/ToolRegistryEndpoints.cs` + extension method in `EndpointMappingExtensions.cs`; integration test stub at `tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Ai/ToolRegistryEndpointsTests.cs`.
+  </goal>
+
+  <context>
+    <background>
+      Task 020 produced the `ToolRegistryEntry` data model. This task wires that model into BFF endpoint surface. Consumers:
+      - Tool Registry admin UI (Phase 5 SpaarkeAi extensions) for human-managed Tool registration
+      - `FindResourcesTool` (task 022) calls neither this endpoint nor the Dataverse entity directly — it queries AI Search. But the admin UI does write via these endpoints, which trigger the AI Search indexer (out-of-band, task 016 already wired).
+      - Action authoring UI for Tool selection
+
+      Existing BFF endpoint patterns to mirror:
+      - `Endpoints/EndpointMappingExtensions.cs` line ~157 — `MapActionEndpoints()` slot adjacent
+      - `Api/Ai/ChatEndpoints.cs` — pattern for AI-prefixed endpoint groups
+      - Endpoint-filter auth pattern: `.AddEndpointFilter&lt;RequireSdapPermissionFilter&gt;("ToolRegistry.Manage")` or similar
+
+      `EndpointMappingExtensions.cs` is shared with other Phase 2 / Phase 4 tasks; ONLY this task adds the `MapToolRegistryEndpoints()` call site. Tasks 025 / 040 add their own slots at distinct line ranges — no merge conflict expected if each task touches its own line range.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ToolRegistryEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/EndpointMappingExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModel.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Filters/RequireSdapPermissionFilter.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Ai/ToolRegistryEndpointsTests.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API. Endpoint groups via `app.MapGroup("/api/tool-registry")`. No controllers.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization REQUIRED on every endpoint via `.AddEndpointFilter&lt;&gt;()`. NO global middleware. Read endpoints: `ToolRegistry.Read`; Write endpoints: `ToolRegistry.Manage`.</constraint>
+    <constraint source="ADR-010">DI minimalism. Endpoint dependencies (Dataverse client, JsonSerializerOptions from task 020) resolved via `[FromServices]`. No service-locator anti-patterns.</constraint>
+    <constraint source="ADR-013">PublicContracts boundary. This endpoint is BFF-internal — does NOT need facade exposure. But the response shape (ToolRegistryEntry) lives in AE-internal namespace; that's OK because the endpoint is the seam.</constraint>
+    <constraint source="ADR-015">Audit middleware applies automatically; no manual audit calls. Tier 2 hash will fingerprint the request/response body.</constraint>
+    <constraint source="ADR-019">All error responses use ProblemDetails (RFC 7807). 400 = validation; 404 = not found; 409 = duplicate ToolId; 500 = unexpected. Include `traceId`.</constraint>
+    <constraint source="ADR-029">No new NuGet packages. Use existing Dataverse client (`IDataverseClient` or equivalent) for reads/writes.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge: placement justification (in BFF — endpoint serves AE-managed admin UI; latency-sensitive write path triggers index refresh). No CRUD→AI direct deps.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Minimal API endpoint definition" location=".claude/patterns/api/endpoint-definition.md">`MapGroup` + endpoint method extraction; `[FromServices]` for DI; explicit return types.</pattern>
+      <pattern name="Endpoint filter auth" location=".claude/patterns/api/endpoint-filters.md">`.AddEndpointFilter&lt;RequireSdapPermissionFilter&gt;(permission)` per endpoint; ADR-008 binding.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm baseline build passes; task 020 merged or its branch loadable; baseline `EndpointMappingExtensions.cs` line numbers known.</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;`. Pay attention to ADR-008 (endpoint filter), ADR-019 (ProblemDetails), `.claude/patterns/api/endpoint-definition.md`, and bff-extensions.md.</step>
+    <step order="2">Sketch endpoint surface: `GET /api/tool-registry` (list with filter query params), `GET /api/tool-registry/{toolId}` (by-id), `POST /api/tool-registry` (create), `PUT /api/tool-registry/{toolId}` (update), `DELETE /api/tool-registry/{toolId}` (soft-delete via `IsActive=false`). Document expected status codes + ProblemDetails error shapes.</step>
+    <step order="3">Implement `ToolRegistryEndpoints.cs`: static class with `MapToolRegistryEndpoints(this IEndpointRouteBuilder app)` extension. Each endpoint method is a static handler. Use the model from task 020. Apply `.AddEndpointFilter&lt;RequireSdapPermissionFilter&gt;("ToolRegistry.Read")` to read endpoints and `("ToolRegistry.Manage")` to writes.</step>
+    <step order="4">Implement query endpoint filtering by `classification`, `costClass`, `isAlwaysOnInAssistant`, `discoverabilitySearchable`, plus a `phase` filter that returns Tools eligible for a given phase (NOT in deny list). Wire to Dataverse client.</step>
+    <step order="5">Wire ProblemDetails for all error paths. 400 = validation (e.g., missing required fields on create); 404 = ToolId not found; 409 = duplicate ToolId on create; 500 = unexpected — include `traceId` from Activity.Current.</step>
+    <step order="6">Add `MapToolRegistryEndpoints()` call into `EndpointMappingExtensions.cs`. Locate the existing `MapActionEndpoints()` slot (task 040 will add that; for now place adjacent under `// AI Action Engine endpoints` comment). Verify the route prefix doesn't collide with existing groups.</step>
+    <step order="7">Write integration test stub at `tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Ai/ToolRegistryEndpointsTests.cs`: smoke tests for each verb. Use `WebApplicationFactory&lt;Program&gt;`. Verify (a) 401 without auth, (b) 403 without permission, (c) 200/201/204 with permission, (d) ProblemDetails shape on 404.</step>
+    <step order="8">Verify build + tests: `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/ --filter "FullyQualifiedName~ToolRegistry"`.</step>
+    <step order="9">Verify NFR-10: no new NuGet packages. `git diff src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` shows zero package changes.</step>
+    <step order="9.5">Run quality gates: `code-review` on new files; `adr-check` verifies ADR-008 (endpoint filters on EVERY endpoint), ADR-010 (no service-locator anti-patterns), ADR-019 (ProblemDetails everywhere), ADR-029 (no new packages).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 021 ✅. Update `current-task.md` accordingly.</step>
+    <step order="11">Document any deviations in `projects/ai-spaarke-action-engine-r1/notes/handoffs/`. Commit with brief recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, format</tool>
+    <tool name="git">State + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ToolRegistryEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/EndpointMappingExtensions.cs (extended with MapToolRegistryEndpoints call)</output>
+    <output type="tests">tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Ai/ToolRegistryEndpointsTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All five CRUD verbs implemented (GET list, GET by-id, POST, PUT, DELETE) on route prefix `/api/tool-registry`.</criterion>
+    <criterion testable="true">Every endpoint has `.AddEndpointFilter&lt;RequireSdapPermissionFilter&gt;(...)` applied — verified by grep + ADR-008 adr-check.</criterion>
+    <criterion testable="true">Query endpoint supports filtering by `classification`, `costClass`, `isAlwaysOnInAssistant`, `phase` query params — verified by integration test.</criterion>
+    <criterion testable="true">All error responses use ProblemDetails shape (RFC 7807) with `traceId` — verified by ADR-019 adr-check + integration test 404 case.</criterion>
+    <criterion testable="true">`MapToolRegistryEndpoints()` registered in `EndpointMappingExtensions.cs`; route prefix doesn't collide with existing groups.</criterion>
+    <criterion testable="true">Integration tests pass: 401 unauthenticated, 403 forbidden, 200/201/204 happy path, 404 ProblemDetails — `dotnet test --filter "ToolRegistry"` exits 0.</criterion>
+    <criterion testable="true">No new NuGet packages added (NFR-10 preserved).</criterion>
+    <criterion testable="true">Supports spec gate G11 (every Action Engine endpoint has endpoint-filter auth) — verified by adr-check Step 9.5.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    `EndpointMappingExtensions.cs` is a shared file touched by Phase 2 task 025 (always-on Tools wire-up) and Phase 4 task 040 (`MapActionEndpoints`). Each task adds its own call line at a distinct location. Use a comment marker (`// Action Engine endpoints — task 021/025/040`) to make per-task additions clearly attributable.
+
+    Audit middleware (ADR-015) hashes request/response automatically — no manual audit calls needed in this task.
+
+    DELETE is soft-delete (`IsActive=false`) not hard-delete, because Tool Registry rows are referenced by historical `sprk_actionrun` records and audit trail.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with reason from `&lt;rigor-reason&gt;`. Follow task-execute skill for pre-execution checklist, checkpointing every 3 steps, quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

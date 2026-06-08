@@ -1,0 +1,117 @@
+<task id="083" project="email-communication-solution-r3">
+  <metadata>
+    <title>Delete the `sprk_communication_send` web resource record in Dataverse (dev environment)</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>081, 082</dependencies>
+    <blocks>084</blocks>
+    <tags>dataverse, cleanup, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Live Dataverse deletion of a deployed web resource — recoverable in dev but production-deferred; requires confirmation that no live ribbon entry depends on it</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential — depends on both 081 and 082 completing source-file removal first</parallel-reason>
+    <fr-refs>FR-24</fr-refs>
+  </metadata>
+
+  <prompt>
+    Delete the `sprk_communication_send` web resource record from the Dataverse dev environment. This is the live deployed copy that ribbon entry points historically loaded at runtime. Source files have been removed by tasks 081 (primary copy) and 082 (duplicate); this task removes the Dataverse record itself.
+
+    PRODUCTION DEPLOYMENT IS DEFERRED — this task targets ONLY the dev environment. Production deletion happens during the release flow (after Wave 6 merges to master and goes through the canonical release process).
+  </prompt>
+
+  <role>
+    Dataverse deployment specialist. Familiar with web resource lifecycle in Dataverse (record deletion via Web API or PAC CLI, publish customizations, ribbon refresh).
+  </role>
+
+  <goal>
+    The `sprk_communication_send` web resource record no longer exists in the Dataverse dev environment. After deletion, all ribbon entry surfaces (now backed by `sprk_emailcomposer` Code Page from Wave 2) continue to function with no broken loads.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-24 acceptance criteria: "web resource record deleted in dev". The record was created when `sprk_communication_send.js` was first deployed. Now that all entry points use the EmailComposer Code Page (Wave 2) and source files are deleted (tasks 081, 082), this record is dead in Dataverse.
+
+      Production environment deletion is deferred to the release flow — this is by intent per CLAUDE.md "PRODUCTION DEPLOYMENT IS DEFERRED" convention; release scripts handle production cleanup separately.
+    </background>
+    <relevant-files>
+      <file>notes/research/080-webresource-entry-point-audit.md</file>
+      <file>infrastructure/dataverse/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-24">Dataverse web resource record MUST be deleted in dev environment</constraint>
+    <constraint source="FR-24">All ribbon entry surfaces MUST remain functional after deletion (via Code Page)</constraint>
+    <constraint source="project">PRODUCTION environment deletion deferred to release flow — this task is dev-only</constraint>
+    <constraint source="project">No code-page consumer may break — verify via smoke test of Code Page entry surfaces (Wave 2 surfaces)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>notes/research/080-webresource-entry-point-audit.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-deploy skill" location=".claude/skills/dataverse-deploy/SKILL.md">
+        Deploy + record management via PAC CLI — for web resource record deletion (`pac webresource delete` or equivalent).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify tasks 081 and 082 are both ✅ completed (source files deleted).</step>
+    <step order="2">Confirm dev environment connection: `pac auth list` and `pac org who` to identify target environment. Confirm it is DEV not PROD.</step>
+    <step order="3">Query for the web resource record: `pac webresource list --filter "name='sprk_communication_send'"` or via Web API. Record the GUID for the deletion command.</step>
+    <step order="4">Delete the web resource record: `pac webresource delete --name sprk_communication_send` (or equivalent Web API DELETE call).</step>
+    <step order="5">Publish customizations: `pac solution publish` or via Maker portal — ensures the deletion is fully propagated.</step>
+    <step order="6">Smoke-test ALL ribbon entry surfaces from Wave 2 (per `notes/research/080-webresource-entry-point-audit.md`):
+      - Ribbon button "+ New Email" on Active Communications view — launches EmailComposer Code Page
+      - Ribbon button "+ New Email" on My Communications view
+      - Ribbon button on related-record subgrids (matter, project, event)
+      - Form Component Control on `sprk_communication` form (existing record opens in Code Page view mode)
+    Document each surface smoke-test result.</step>
+    <step order="7">Verify in browser console: no 404 errors loading `sprk_communication_send.js` on any of the smoke-tested surfaces.</step>
+    <step order="8">Document the deletion in `notes/research/083-dataverse-record-deletion.md` — include: pre-deletion verification, GUID deleted, smoke test results, production-deferred note.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 083 ✅ completed.</step>
+    <step order="10">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="pac-cli">Web resource record query + deletion</tool>
+    <tool name="dataverse-deploy">If pac webresource doesn't suffice; Web API fallback</tool>
+    <tool name="browser-smoke-test">Verify Wave 2 entry surfaces remain functional</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">`sprk_communication_send` web resource record DELETED in dev environment</output>
+    <output type="notes">notes/research/083-dataverse-record-deletion.md (NEW — deletion record + smoke test results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Web resource record `sprk_communication_send` no longer exists in dev environment (verified via `pac webresource list`).</criterion>
+    <criterion testable="true">All Wave 2 entry surfaces functional post-deletion (ribbon "+ New Email" + Form Component Control).</criterion>
+    <criterion testable="true">Browser console shows zero 404s for `sprk_communication_send.js` on any tested surface.</criterion>
+    <criterion testable="true">Production deletion explicitly deferred (documented in `notes/research/083-dataverse-record-deletion.md`).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical findings from project pipeline (relevant here):
+    - Task 080 audit verdict is the binding pre-condition; if it flagged any non-replaced entry point, that must be resolved before this task runs.
+    - PRODUCTION deletion happens via the canonical release flow — NOT in this task. Document the deferral clearly.
+
+    If a remediation entry point was discovered in task 080 and not yet replaced, STOP this task and resolve first.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Step 2 environment confirmation prevents accidental production deletion. Step 6 smoke tests are the success gate.
+    </protocol>
+  </execution>
+</task>

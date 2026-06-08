@@ -1,0 +1,177 @@
+<task id="076" project="email-communication-solution-r3">
+  <metadata>
+    <title>Build + deploy all 5 wizard solutions + LegalWorkspace (single PR per Owner Clarification)</title>
+    <phase>Wave 5 — 5-Wizard Migration + DocumentEmailWizard Fix + Forks</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>071, 072, 073, 074, 075</dependencies>
+    <blocks>077</blocks>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Build + deploy task; no new code logic. STANDARD rigor per CLAUDE.md decision tree (deploy tag without architectural change — the architectural changes shipped in 070–075).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Aggregates all Wave 5 code changes into a single PR + single deploy; must occur after all five preceding tasks (071–075) land. Blocks 077 (smoke tests need the deploy first).</parallel-reason>
+    <fr-refs>FR-16, FR-17, FR-25</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build and deploy ALL 5 wizard solutions (CreateMatter, CreateProject, CreateEvent, CreateTodo, CreateWorkAssignment) PLUS the LegalWorkspace solution to dev. Per Owner Clarification (CLAUDE.md decisions row "Single PR for 5-wizard migration"), this ships as ONE consolidated PR — not 5 per-wizard PRs.
+
+    The consolidated Wave 5 PR includes the diffs from tasks 070–075:
+    - **EntityCreationService.sendEmail() adapter** (task 070)
+    - **Shared SendEmailStep canonical wrapper** (task 071 — migrates Project/Event/Todo/WorkAssignment in one file)
+    - **CreateMatterWizard SendEmailStep canonical wrapper** (task 072)
+    - **WorkAssignmentWizardDialog import fix** (task 073)
+    - **LegalWorkspace CreateMatter fork delete** (task 074)
+    - **DocumentEmailWizard latent bug fix + canonical attachmentDriveItemIds** (task 075)
+
+    The PR description MUST structure per-wizard sections so reviewers can navigate the consolidated diff. Use the template in step 5 below.
+
+    Note empirical narrowing in PR description: per CLAUDE.md DELTA #9, only CreateMatter has a LegalWorkspace fork; spec FR-25's "5 wizards" phrasing is narrowed to 1 file by empirical reality.
+  </prompt>
+
+  <role>
+    Spaarke release engineer. Authoritative on `dataverse-deploy` skill conventions, the `npm run build:prod` PCF rule (AP-1 from CLAUDE.md), and PR description structure for consolidated Wave 5 PRs.
+  </role>
+
+  <goal>
+    A single PR on `work/email-communication-solution-r3` consolidates all Wave 5 code changes (tasks 070–075) with a structured per-wizard PR description. All 5 wizard solutions + LegalWorkspace solution build and deploy cleanly to dev. CI passes. Task 077 (smoke tests) can begin.
+  </goal>
+
+  <context>
+    <background>
+      Owner Clarification "Single PR for 5-wizard migration (Wave 5)" (per CLAUDE.md decisions table, 2026-06-05): "Minimizes CI/CD overhead. Wave 5 ships as one large PR; per-wizard sections in PR description". The risk (R3 in plan.md — single-PR unreviewable) is mitigated by structured PR description that allows reviewers to navigate by wizard.
+
+      Build commands per CLAUDE.md §11:
+      - Shared lib: `npm run build` from `src/client/shared/Spaarke.UI.Components/`
+      - LegalWorkspace: solution-specific build (per `dataverse-deploy` skill)
+      - PCFs: `npm run build:prod` (NOT `npm run build` — see AP-1 in `.claude/FAILURE-MODES.md`)
+
+      Wizard solutions are typically deployed via `dataverse-deploy` skill. Re-verify per-solution build commands at step 1.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/</file>
+      <file>src/solutions/LegalWorkspace/</file>
+      <file>src/client/pcf/</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Owner Clarification">Single PR for all Wave 5 wizard migrations (per CLAUDE.md decisions table)</constraint>
+    <constraint source="CLAUDE.md §11">PCF builds use `npm run build:prod`, not `npm run build` (AP-1)</constraint>
+    <constraint source="CLAUDE.md §11">Vite solutions use `npm install --legacy-peer-deps --no-audit --no-fund`, not `npm ci`</constraint>
+    <constraint source="ADR-033">No regressions in canonical wrapper behavior across all 5 wizards</constraint>
+    <constraint source="project">PR description MUST include per-wizard sections so reviewers can navigate the consolidated diff</constraint>
+    <constraint source="project">PR description MUST reflect empirical narrowing of FR-25 (LegalWorkspace forks: 1 file not 5)</constraint>
+    <constraint source="project">Do NOT touch `.claude/` files in this task (Wave 5 prohibition)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load CLAUDE.md (decisions table — single-PR clarification), spec.md FR-16/FR-17/FR-25, plan.md Wave 5 + R3 risk register.</step>
+    <step order="2">Verify all tasks 070, 071, 072, 073, 074, 075 are ✅ in TASK-INDEX.md; abort if any pending.</step>
+    <step order="3">Run shared lib build: `npm run build` in `src/client/shared/Spaarke.UI.Components/`; capture output. Confirm clean.</step>
+    <step order="4">Run LegalWorkspace solution build per `dataverse-deploy` skill; capture output. Confirm clean.</step>
+    <step order="5">Run build for any wizard solutions that ship as separate Dataverse solutions (CreateMatter, CreateProject, CreateEvent, CreateTodo, CreateWorkAssignment may be packaged together or separately — confirm per repo structure).</step>
+    <step order="6">Deploy each built solution to dev via `dataverse-deploy` skill conventions; capture deployment logs.</step>
+    <step order="7">Stage all Wave 5 changes via `git add` (specific files only — no `-A`); avoid `.env` / local secrets. Per CLAUDE.md §1.4 git protocol, NEVER use `git add -A`.</step>
+    <step order="8">Commit with a structured per-wizard message per `push-to-github` skill conventions. Co-Authored-By footer required.</step>
+    <step order="9">Push and open PR with the per-wizard description template:
+```
+## Wave 5 — 5-Wizard Migration + DocumentEmailWizard Fix + LegalWorkspace Consolidation
+
+This consolidated PR ships Wave 5 of email-communication-solution-r3 per Owner Clarification (single PR for all wizard migrations).
+
+### Empirical narrowing (per CLAUDE.md DELTA #9)
+Spec FR-25 referenced "5 LegalWorkspace forks" but empirical scan confirmed only CreateMatter is a fork. Project/Event/Todo/WorkAssignment dirs in LegalWorkspace exist but have NO SendEmailStep file. Wave 5 LegalWorkspace cleanup is 1 file delete, not 5.
+
+### Per-wizard sections
+
+#### EntityCreationService adapter (task 070)
+- `sendEmail()` refactored to ≤30 LOC thin adapter over `sendCommunication()`
+
+#### CreateProject + CreateEvent + CreateTodo + CreateWorkAssignment (task 071)
+- Shared `CreateRecordWizard/steps/SendEmailStep.tsx` migrated to canonical `<SendEmailStep />` wrapper
+- One file change migrates 4 wizards (all consume the shared file)
+
+#### CreateMatter (task 072)
+- `CreateMatterWizard/SendEmailStep.tsx` migrated to canonical `<SendEmailStep />` wrapper
+- Separate file from the shared step (historical divergence)
+
+#### WorkAssignmentWizardDialog (task 073)
+- Cross-package source-path import resolved to `@spaarke/ui-components`
+
+#### LegalWorkspace (task 074)
+- `CreateMatter/SendEmailStep.tsx` fork deleted
+- LegalWorkspace caller now imports canonical from `@spaarke/ui-components`
+
+#### DocumentEmailWizard latent bug fix (task 075) — FR-17
+- Line 494 latent bug fixed: now uses `attachmentDriveItemIds` sourced from `driveItemId`, not `documentId`
+- Closes a known production bug (attachments silently failed)
+
+### Build + deploy
+- Shared lib build clean
+- LegalWorkspace solution deployed to dev
+- 5 wizard solutions deployed to dev
+
+### Test plan
+Task 077 covers smoke tests for all 5 wizards + DocumentEmailWizard regression test.
+```
+</step>
+    <step order="10">Confirm PR opens cleanly; CI builds + lint succeed.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: mark task 076 ✅ completed; verify 077 is no longer blocked.</step>
+    <step order="12">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">`npm run build` + `npm run lint` in shared lib; solution builds per `dataverse-deploy`</tool>
+    <tool name="dataverse-deploy">Deploy LegalWorkspace + wizard solutions</tool>
+    <tool name="push-to-github">Commit + push + open PR with structured per-wizard description</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Shared lib build clean; LegalWorkspace + 5 wizard solutions deployed to dev</output>
+    <output type="pr">Single consolidated PR on `work/email-communication-solution-r3` with structured per-wizard description</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tasks 070–075 are ✅ in TASK-INDEX.md before this task starts.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` succeed in `src/client/shared/Spaarke.UI.Components/`.</criterion>
+    <criterion testable="true">LegalWorkspace solution + 5 wizard solutions deploy to dev without errors.</criterion>
+    <criterion testable="true">A single PR is opened with title referencing Wave 5 + per-wizard structured description.</criterion>
+    <criterion testable="true">PR description includes empirical narrowing note (LegalWorkspace forks: 1 not 5).</criterion>
+    <criterion testable="true">CI build + lint pass on the PR.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task's diff.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Owner Clarification (CLAUDE.md decisions table): "Single PR for 5-wizard migration (Wave 5)". Plan.md R3 risk acknowledges single-PR unreviewability risk; mitigation is the structured per-wizard description.
+
+    Do NOT touch `.claude/` paths in this task — Wave 5 prohibition. ADR / pattern / constraint updates are scoped to Wave 6.
+
+    Empirical narrowing must be in the PR description so reviewers understand why LegalWorkspace deletes are 1 file not 5.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>`. Apply STANDARD rigor — quality gates at Step 9.5 SKIPPED. This is a build + deploy + PR task; the architectural changes already shipped in tasks 070–075. Verify clean builds, clean deploys, structured PR description, and no `.claude/` modifications.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Always-on Tools — Register SearchDocuments, QueryDataverse, GetCurrentEntityContext on every session</title>
+    <phase>Phase 2: Tool Registry + Discovery</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>052</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF code wire-up affecting every Assistant chat session; ADR-008/ADR-010/ADR-015 binding; tags include bff-api + ai</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct scope from Group C (meta-tools — different files under `MetaTools/`). Touches `Services/Ai/ActionEngine/AlwaysOnTools/` + a Chat session registration site in `SprkChatAgent` or kernel-builder extension. May touch `EndpointMappingExtensions.cs` if a chat-session bootstrap line is added — coordinate with task 021 which also touches that file (different line ranges).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Register the three always-on foundational Tools — `SearchDocuments`, `QueryDataverse`, `GetCurrentEntityContext` — with every Assistant session, alongside the three meta-tools (`FindResources`, `GetResourceDetail`, `InvokeResource` from tasks 022/023/024). These three are high-frequency primitives that should be directly callable by the LLM without the `FindResources` discovery hop. Wire them to existing BFF services (no new logic — these wrap existing capabilities as `[KernelFunction]`-decorated facades).
+  </prompt>
+
+  <role>
+    Senior .NET 8 / Semantic Kernel engineer familiar with the `SprkChatAgent` / kernel-builder bootstrap pattern, existing BFF services for document search (SPE / AI Search), Dataverse query, and surface-context resolution.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **Three thin always-on Tool implementations** — `SearchDocumentsTool`, `QueryDataverseTool`, `GetCurrentEntityContextTool` — each a `[KernelFunction]`-decorated facade over an existing service (no new business logic; wrap and forward).
+    2. **Per-session registration wire-up** — `AddActionEngineModule()` extension registers these three Tools (plus the three meta-tools from 022/023/024) into the SK kernel bootstrap for every chat session. Default playbook seed (task 052) references these by name.
+    3. **Context-aware promotion plumbing** — leverage `IsAlwaysOnInAssistant` + `PromoteInContexts` flags from the data model (task 020). These three are universally always-on; the registration code also reads `PromoteInContexts` from Tool Registry to promote Tools per surface context (e.g., matter-specific Tools on Matter form). The promotion logic lives here; the universally always-on three are the seed.
+
+    Deliverable: `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/AlwaysOnTools/` folder with three Tool files + session-registration wire-up + tests.
+  </goal>
+
+  <context>
+    <background>
+      Design.md §4.5 + §7.4.2 documents the always-on Tool pattern: "high-frequency Tools as always-on — skip the FindResources hop." The three foundational Tools (`SearchDocuments`, `QueryDataverse`, `GetCurrentEntityContext`) are universally always-on per design.md §7.4.3 system prompt directive: "Use your tools (`SearchDocuments`, `QueryDataverse`, `FindResources`) to look up the answer; cite the source in your response."
+
+      Existing services to wrap:
+      - **SearchDocuments**: wraps SPE / AI Search document query. Existing service: check `Services/Ai/` for an AI Search abstraction or use `Azure.Search.Documents` directly against the documents index.
+      - **QueryDataverse**: wraps Dataverse client query (parameterized fetch). Existing service: `IDataverseClient` already DI-registered.
+      - **GetCurrentEntityContext**: reads `surfaceContext` from the chat session (entity type + id from `sprk_aichatcontextmap` resolution). Existing service: `ISurfaceContextResolver` or equivalent — established by Phase 5 SpaarkeAi launcher work; for Phase 2 this task may need to introduce a minimal `ISurfaceContextProvider` interface that Phase 5 fills in.
+
+      Per-session registration:
+      - SK kernel is built per-session in `SprkChatAgent` (or a kernel-factory). This task adds a Tool-registration step in that bootstrap.
+      - The data model from task 020 (`ToolRegistryEntry.IsAlwaysOnInAssistant` flag) drives a registry query: at session start, query Tool Registry for `IsAlwaysOnInAssistant = true` AND (`PromoteInContexts` empty OR contains current surface context). Register all matching Tools.
+      - The three universal Tools are seeded with `IsAlwaysOnInAssistant = true` + `PromoteInContexts = []` (universal).
+
+      EndpointMappingExtensions.cs may need a line added if a new chat-session bootstrap endpoint is exposed; otherwise this task only touches the kernel builder + AddActionEngineModule.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/AlwaysOnTools/SearchDocumentsTool.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/AlwaysOnTools/QueryDataverseTool.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/AlwaysOnTools/GetCurrentEntityContextTool.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/AlwaysOnTools/AlwaysOnToolRegistrar.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/AlwaysOnTools/AlwaysOnToolRegistrarTests.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. Tools run in-proc.</constraint>
+    <constraint source="ADR-008">Endpoint-filter auth at the chat endpoint. Tool-level permission checks happen at dispatch (task 026) — these always-on facades MUST NOT re-implement auth; they delegate.</constraint>
+    <constraint source="ADR-010">DI minimalism. `AlwaysOnToolRegistrar` registered once via `AddActionEngineModule()`. Existing services (Dataverse client, AI Search client, surface context resolver) injected — no new singletons.</constraint>
+    <constraint source="ADR-013">PublicContracts boundary. These three Tools are internal SK facades — NOT exposed via the PublicContracts facade. CRUD-side callers reach equivalent capability via existing Dataverse/SPE clients, not these wrappers.</constraint>
+    <constraint source="ADR-015">Audit Tier 2 + Tier 3 applies via dispatch path (task 026) when the LLM calls these Tools. No manual audit calls needed in the facades themselves.</constraint>
+    <constraint source="ADR-019">Errors from the wrapped service surface as `KernelFunctionResult` with error; LLM sees the structured error and can adapt.</constraint>
+    <constraint source="ADR-029">No new NuGet packages. Wrap existing services.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge: placement justification (in BFF — latency-critical chat-agent registration). Zero publish-size delta.</constraint>
+    <constraint source="project">Design.md §7.4.2: high-frequency Tools as always-on. `IsAlwaysOnInAssistant` flag + `PromoteInContexts` filter drive context-aware promotion at session start.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Semantic Kernel function registration" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">`[KernelFunction]` + `[Description]`; LLM tool selection relies on descriptive names + descriptions.</pattern>
+      <pattern name="Feature-module DI" location=".claude/patterns/api/service-registration.md">`AddActionEngineModule()` extension; ≤15 non-framework registrations per ADR-010.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm baseline build passes; task 020 merged or branch-loadable; `SprkChatAgent.cs` kernel bootstrap site identified (line range where existing tools are registered).</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;`. Pay attention to design.md §4.5 + §7.4.2 + §7.4.3 (the always-on Tool registration model and system prompt directive).</step>
+    <step order="2">Identify the underlying services to wrap:
+      - SearchDocuments → existing AI Search client or SPE search service. If absent, escalate (DO NOT introduce new search infrastructure).
+      - QueryDataverse → existing `IDataverseClient` or equivalent. Confirm it supports parameterized fetch with entity-type + filter.
+      - GetCurrentEntityContext → `ISurfaceContextProvider` interface. If absent, introduce a minimal stub here that returns `null` (Phase 5 fills in the actual implementation via `ChatLaunchContext`).</step>
+    <step order="3">Implement `SearchDocumentsTool.cs`: `[KernelFunction, Description("Search Spaarke document storage for documents matching the query. Returns top results with citations.")]` `Task&lt;SearchResult[]&gt; SearchDocumentsAsync(string query, int topK = 5)`. Inject the search service; forward + map results.</step>
+    <step order="4">Implement `QueryDataverseTool.cs`: `[KernelFunction, Description("Query Dataverse for records of a specified entity type matching a filter. Returns lightweight record summaries with citation IDs.")]` `Task&lt;DataverseQueryResult[]&gt; QueryDataverseAsync(string entityType, string filter)`. Inject Dataverse client; respect caller's data-access scope.</step>
+    <step order="5">Implement `GetCurrentEntityContextTool.cs`: `[KernelFunction, Description("Return the current entity context (entity type + id) for this Assistant session — e.g., the matter the user opened the chat from.")]` `Task&lt;EntityContext?&gt; GetCurrentEntityContextAsync()`. Returns null when no surface context (e.g., SpaarkeAi landing).</step>
+    <step order="6">Implement `AlwaysOnToolRegistrar.cs`: at session start, queries Tool Registry for `IsAlwaysOnInAssistant = true` AND (`PromoteInContexts` empty OR includes current surface context). Registers matching Tools (including the three universal facades) into the kernel for the session. Place in `Services/Ai/ActionEngine/AlwaysOnTools/`. Expose `RegisterAlwaysOnToolsAsync(Kernel kernel, ISurfaceContext context)`.</step>
+    <step order="7">Wire `AlwaysOnToolRegistrar` into the kernel bootstrap. Locate the existing tool-registration call site in `SprkChatAgent.cs` (or kernel-builder factory). Add `await registrar.RegisterAlwaysOnToolsAsync(kernel, currentContext);` adjacent to existing registrations. Verify ordering: meta-tools (022/023/024) + always-on tools (this task) all registered before the first LLM call.</step>
+    <step order="8">Register `AlwaysOnToolRegistrar` + each Tool in `AddActionEngineModule()`. Stay under the ≤15 non-framework registration count (ADR-010). If close to budget, consolidate Tools behind a single registrar.</step>
+    <step order="9">Write unit tests at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/AlwaysOnTools/`: (a) `SearchDocumentsTool` forwards correctly to underlying service, (b) `QueryDataverseTool` respects entity-type filter, (c) `GetCurrentEntityContextTool` returns null when no context + populated when context present, (d) `AlwaysOnToolRegistrar` registers expected Tools given a mocked Tool Registry response, (e) registrar respects `PromoteInContexts` filter (entity-specific Tools only register when surface matches).</step>
+    <step order="9.5">Run quality gates: `code-review` on the new files; `adr-check` verifies ADR-008 (no in-facade auth re-implementation), ADR-010 (DI count under budget — verify with grep on `Services.Add*` in `AddActionEngineModule`), ADR-013 (NOT exposed via PublicContracts), ADR-029 (no new packages). Build + tests pass.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 025 ✅. Update `current-task.md`. Note dependency on Phase 5 for actual `ISurfaceContextProvider` implementation (stub in this task).</step>
+    <step order="11">Document the DI count budget status (current vs ADR-010 limit) and any deviations in `projects/ai-spaarke-action-engine-r1/notes/handoffs/`. Commit with brief recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, format</tool>
+    <tool name="git">State + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/AlwaysOnTools/SearchDocumentsTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/AlwaysOnTools/QueryDataverseTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/AlwaysOnTools/GetCurrentEntityContextTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/AlwaysOnTools/AlwaysOnToolRegistrar.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs (kernel-bootstrap call site)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (Tool + registrar registrations)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/AlwaysOnTools/AlwaysOnToolRegistrarTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All three always-on Tools (`SearchDocumentsTool`, `QueryDataverseTool`, `GetCurrentEntityContextTool`) exist with `[KernelFunction]` decoration and forward to existing services without re-implementing business logic.</criterion>
+    <criterion testable="true">`AlwaysOnToolRegistrar.RegisterAlwaysOnToolsAsync` queries the Tool Registry for `IsAlwaysOnInAssistant = true` Tools and registers them into the per-session kernel — verified by unit test.</criterion>
+    <criterion testable="true">`PromoteInContexts` filter applied: entity-specific Tools register only when surface context matches — verified by unit test.</criterion>
+    <criterion testable="true">Wire-up in `SprkChatAgent` kernel bootstrap: every chat session has the three universal Tools + the three meta-tools (from 022/023/024) registered before the first LLM call — verified by integration smoke test (start session → list registered kernel functions).</criterion>
+    <criterion testable="true">DI registration stays under ADR-010 ≤15 non-framework count — verified by grep + manual count in `AddActionEngineModule`.</criterion>
+    <criterion testable="true">NOT exposed via `PublicContracts/IActionEngineFacade.cs` (ADR-013) — verified by grep.</criterion>
+    <criterion testable="true">No new NuGet packages added (NFR-10 preserved). All Tools wrap existing services.</criterion>
+    <criterion testable="true">Supports spec gates G2 (conversational invocation) + G7 (hallucination guardrails — system prompt §7.4.3 directs LLM to use these always-on Tools to ground responses).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `ISurfaceContextProvider` interface introduced here is Phase 5's collaborator. Phase 5 task 050 (SpaarkeAi `ChatLaunchContext` parsing) fills in the actual implementation. The Phase 2 stub returns null context — chat sessions launched without surface context (e.g., SpaarkeAi landing) work correctly even before Phase 5.
+
+    DI budget watch (ADR-010 ≤15 non-framework registrations): this task adds up to 5 (three Tools + registrar + surface context provider stub). Consolidate Tools behind the registrar if needed — register only the registrar in DI, then have the registrar build the Tools internally.
+
+    The system prompt §7.4.3 directive references these Tools by name. If a Tool name changes here, update `design.md §7.4.3` to keep the prompt directive accurate, and ensure the default playbook seed (task 052) references the correct names.
+
+    EndpointMappingExtensions.cs note: this task may NOT need to touch that file if the existing chat endpoint already handles session bootstrap inside `SprkChatAgent`. Verify before assuming a registration line is needed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with reason from `&lt;rigor-reason&gt;`. Follow task-execute skill for checkpoint protocol every 3 steps and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

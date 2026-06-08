@@ -1,0 +1,123 @@
+<task id="087" project="email-communication-solution-r3">
+  <metadata>
+    <title>Update `.claude/FAILURE-MODES.md` AP-4 + `.claude/constraints/bff-extensions.md` (Communication sensitive surface)</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>077, 001</dependencies>
+    <blocks>093</blocks>
+    <tags>docs, failure-modes, constraints</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Updates two binding `.claude/` files that the agent loads on Communication and BFF tasks; correctness affects future task quality gates</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/` — main-session-only (permission boundary per CLAUDE.md §3)</parallel-reason>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Update TWO binding `.claude/` files. Both updates close out R3 documentation deliverables per FR-27 items #6 and #7.
+
+    (a) `.claude/FAILURE-MODES.md` AP-4 section: add a note that the `attachmentDriveItemIds` rename (FR-21) closes the latent bug class historically known as AP-4 — the DocumentEmailWizard line 494 bug (sending `sprk_document` GUIDs instead of `driveItem` IDs) is fixed in Wave 5 task 075; the field rename means new callers can't repeat the mistake.
+
+    (b) `.claude/constraints/bff-extensions.md`: add a "Communication as sensitive surface" section citing ADR-033. This signals that future BFF-touching tasks must treat Communication endpoints with the same care as other sensitive surfaces (AI orchestration, auth).
+
+    **⚠ PR #360 COLLISION WARNING**: Active PR #360 (`audit-r1-docs-update`) touches `.claude/constraints/`. CHECK FOR REBASE NEED before editing `bff-extensions.md`.
+  </prompt>
+
+  <role>
+    Spaarke meta-documentation maintainer. Familiar with `.claude/FAILURE-MODES.md` AP-N anti-pattern conventions AND `.claude/constraints/bff-extensions.md` binding pre-merge checklist conventions.
+  </role>
+
+  <goal>
+    Both files updated:
+    (a) `.claude/FAILURE-MODES.md` AP-4 has a clear note: "Closed by R3 FR-21 (`attachmentDriveItemIds` rename); DocumentEmailWizard line 494 fixed in R3 Wave 5 task 075; new callers cannot repeat this bug class."
+    (b) `.claude/constraints/bff-extensions.md` has a new section "Communication as sensitive surface" citing ADR-033, instructing future BFF-touching tasks to load ADR-033 alongside the bff-extensions checklist.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-27 #6 and #7, two `.claude/` files need updates. They're grouped here because both are meta-documentation files that gate future task quality.
+
+      FAILURE-MODES.md AP-4 historically documented the "driveItem ID vs document GUID confusion" failure mode. R3 closes that bug class by renaming the field at the API boundary (FR-21) and fixing the DocumentEmailWizard latent bug at line 494 (FR-17 / Wave 5 task 075).
+
+      bff-extensions.md is the binding pre-merge checklist for BFF additions. Communication endpoints are now "sensitive" because they touch user identity, Graph API, and SPE archival — adding a section signals future tasks to apply extra rigor.
+    </background>
+    <relevant-files>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3">Touches `.claude/` — main-session-only (sub-agent write boundary)</constraint>
+    <constraint source="FR-27 #6">FAILURE-MODES.md AP-4 update is REQUIRED</constraint>
+    <constraint source="FR-27 #7">bff-extensions.md "Communication as sensitive surface" addition is REQUIRED</constraint>
+    <constraint source="ADR-033">Both updates MUST cite ADR-033 explicitly</constraint>
+    <constraint source="project">PR #360 collision: `.claude/constraints/` is in scope; check rebase need before editing bff-extensions.md</constraint>
+    <constraint source="project">ADR-033 must exist (created in Wave 0 task 001) — dependency confirmed by `dependencies` field</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">**Rebase check**: `gh pr view 360 --json files` — confirm whether PR #360 touches `.claude/constraints/bff-extensions.md` specifically. If yes: notify, recommend coordinated rebase. If no: proceed.</step>
+    <step order="2">Read current `.claude/FAILURE-MODES.md` AP-4 section to understand the existing failure mode description.</step>
+    <step order="3">Read current `.claude/constraints/bff-extensions.md` to find the appropriate insertion point for "Communication as sensitive surface" (likely a "Sensitive Surfaces" section or analog).</step>
+    <step order="4">**Update (a)**: Add to `.claude/FAILURE-MODES.md` AP-4 a closing note: cite R3 FR-21 (field rename) + Wave 5 task 075 (DocumentEmailWizard line 494 fix) + ADR-033 (canonical pattern prevents recurrence). Keep AP-4 historical context — do NOT delete the original failure mode; ADD a "Resolution" or "Closed By" subsection.</step>
+    <step order="5">**Update (b)**: Add to `.claude/constraints/bff-extensions.md` a new section "Communication as sensitive surface" (or extend existing sensitive surfaces section) with:
+      - Pointer to ADR-033 as binding architecture
+      - Note that Communication endpoints touch user identity, Microsoft Graph, SPE archival
+      - Instruction that future BFF-touching tasks adding/modifying Communication endpoints MUST load ADR-033 alongside the bff-extensions checklist
+      - Pointer to `docs/architecture/communication-service-architecture.md` for server-side surface inventory
+    </step>
+    <step order="6">Verify ADR-033 is loadable from both files (check file paths resolve in pointer table per CLAUDE.md §16).</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: mark task 087 ✅ completed.</step>
+    <step order="8">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh-pr">Check PR #360 collision for bff-extensions.md</tool>
+    <tool name="read">Read current files + ADR-033</tool>
+    <tool name="edit">Apply both updates</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/FAILURE-MODES.md (UPDATED — AP-4 closed-by note)</output>
+    <output type="docs">.claude/constraints/bff-extensions.md (UPDATED — Communication as sensitive surface)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.claude/FAILURE-MODES.md` AP-4 has a "Closed by" or "Resolution" note citing FR-21 + Wave 5 task 075 + ADR-033.</criterion>
+    <criterion testable="true">`.claude/constraints/bff-extensions.md` has a "Communication as sensitive surface" section citing ADR-033.</criterion>
+    <criterion testable="true">Both files render cleanly (no Markdown errors).</criterion>
+    <criterion testable="true">PR #360 rebase check explicitly performed (recorded in current-task.md).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **PR #360 COLLISION**: This task touches `.claude/constraints/` which is also in scope of active PR #360. The step 1 rebase check is non-negotiable. If the specific file is touched: STOP and coordinate.
+
+    Empirical findings from project pipeline (relevant here):
+    - ADR-033 must exist before this task can complete (dependency on task 001).
+    - DocumentEmailWizard line 494 fix shipped in Wave 5 task 075 — verify before citing it.
+    - AP-4 in FAILURE-MODES.md may have a different number than expected; verify by reading the file.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Step 1 PR #360 rebase check is the binding pre-condition for the bff-extensions.md update.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Architecture Spike — Runtime Topology &amp; Scheduler Choice</title>
+    <phase>Phase 0: Architecture Spike</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>010, 011, 012, 013, 014, 015, 016, 020, 021, 022, 023, 024, 025, 026, 030, 031, 032, 033, 034, 035, 036, 040, 041, 042, 043, 044, 045, 050, 051, 052, 053, 054, 055, 060, 061, 062, 063, 064, 065, 066, 070, 071, 072, 073, 090</blocks>
+    <tags>bff-api, ai, architecture, spike, azure</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Architecture decision with downstream blast radius across all Phase 1+ tasks; modifies plan.md and produces runtime ADR draft; tags include bff-api + ai</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single critical-path task; blocks all subsequent work; main-session execution to preserve context for downstream task generation</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Resolve the three blocking architecture questions from spec.md §15 before any Phase 1+ implementation begins: (1) Azure-native scheduler choice for cron-triggered Action dispatch, (2) BFF publish-size delta validation against the ≤5MB cap (NFR-10), and (3) Hybrid D runtime confirmation that existing `SprkChatAgent` + `UseFunctionInvocation` suffices for all multi-step probabilistic Action scenarios without introducing Microsoft Agent Framework as a separate MVP runtime.
+  </prompt>
+
+  <role>
+    Senior Spaarke platform architect with deep BFF (.NET 8 Minimal API) experience, Azure-native scheduling expertise (Logic Apps timer, Service Bus scheduled messages, Functions timer, Container Apps Jobs), and familiarity with the Insights Engine Track B Hybrid D pattern. You decide with empirical evidence (measurements, prototypes) not opinion.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **Scheduler choice documented** — Selected option (Logic Apps / Service Bus scheduled / Functions timer / Container Apps Jobs) with rationale matrix covering: cost, operational complexity, integration with existing `ServiceBusJobProcessor`, max cron resolution, multi-tenant isolation, observability.
+    2. **Publish-size measurement** — Empirical delta of an Action Engine module skeleton (no real implementation; just the module shape + AI Search client + meta-tool registration stubs) vs current baseline. Verify delta ≤5MB compressed per ADR-029 / NFR-10.
+    3. **Hybrid D confirmation** — Document why `SprkChatAgent` + `UseFunctionInvocation` is sufficient for all probabilistic Action scenarios in MVP scope, OR identify the specific scenario(s) requiring an alternate runtime and re-scope MVP.
+
+    Deliverable: Runtime ADR draft at `projects/ai-spaarke-action-engine-r1/notes/decisions/runtime-topology-ADR-draft.md` AND `plan.md` Phase 4 section updated with confirmed scheduler topology.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md §15 lists 15 open questions; the first three are blocking and tagged for this spike. The downstream blast radius is large — 44 subsequent tasks depend on the topology decisions here. Getting it wrong means rework across Phase 4 (Action runtime), Phase 5 (Templates with scheduled triggers), and Phase 6 (deployment).
+
+      Existing canonical patterns to study:
+      - Insights Engine Track B uses Azure-native Functions timer + BFF dispatch (same Hybrid D shape we're considering)
+      - `ServiceBusJobProcessor.cs` already routes job messages to `IJobHandler&lt;T&gt;` implementations; the question is whether the scheduler should publish to Service Bus (uniform path) or call BFF directly (one fewer hop, but bypasses the existing job machinery)
+      - `AnalysisOrchestrationService.cs` is the pattern reference for `ActionOrchestrationService` (next phase)
+      - `SprkChatAgent.cs` + `UseFunctionInvocation` is the existing probabilistic agent runtime — Microsoft Agent Framework would be the alternative if multi-step + tool-use + branching exceed what `UseFunctionInvocation` can handle reliably
+
+      Binding governance: `.claude/constraints/bff-extensions.md` MUST be loaded and answered. Every BFF addition cites placement criteria.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/decisions/runtime-topology-ADR-draft.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/spikes/publish-size-measurement.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. No Azure Functions for in-proc Action execution. Scheduler MAY be Azure-native (Logic Apps timer / Service Bus scheduled / Functions timer / Container Apps Jobs) — choose with rationale.</constraint>
+    <constraint source="ADR-004">Background work uses `IJobHandler&lt;T&gt;` contract; consumed by `ServiceBusJobProcessor`. Scheduler output MUST be compatible (or route through SB if not native SB).</constraint>
+    <constraint source="ADR-010">DI minimalism: `AddActionEngineModule()` extension. ≤15 non-framework DI registrations.</constraint>
+    <constraint source="ADR-013">AI Architecture (refined 2026-05-20). BFF placement is the default but MUST be justified per decision criteria. CRUD-side consumers reach AE via `PublicContracts/` facade.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta MUST be ≤ 5 MB compressed (NFR-10). Framework-dependent linux-x64. Sourcemap exclusion.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist binding: placement decision stated, ADRs cited, publish-size baseline regression checked, no new CRUD→AI dependencies, feature-module DI.</constraint>
+    <constraint source="project">Hybrid D pattern: BFF + Azure-native scheduler (same as Insights Engine Track B). Confirm or replace with rationale.</constraint>
+    <constraint source="project">No Microsoft Agent Framework as separate runtime in MVP unless empirically required for a specific Action scenario.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/jobs-architecture.md</file>
+      <file>docs/architecture/background-workers-architecture.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job Contract pattern" location=".claude/patterns/api/background-workers.md">Existing `IJobHandler&lt;T&gt;` + `ServiceBusJobProcessor` consumption pattern; scheduler output MUST be SB-compatible or route through SB.</pattern>
+      <pattern name="Feature-module DI" location=".claude/patterns/api/service-registration.md">`AddActionEngineModule()` extension; ≤15 non-framework registrations per ADR-010.</pattern>
+      <pattern name="Insights Engine Track B Hybrid D" location="docs/architecture/AI-ARCHITECTURE.md">Same pattern shape; document why it transfers to Action Engine or why it doesn't.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes. (task-execute Step 0)</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;` — especially spec.md §15 (open questions), design.md §6 (Runtime and Hosting), and `bff-extensions.md` (binding governance).</step>
+    <step order="2">Build comparison matrix for scheduler options (Logic Apps timer / Service Bus scheduled message / Functions timer / Container Apps Jobs). Columns: cost at expected volume (assume 100–1000 scheduled Actions/day per tenant); operational complexity (deployment, monitoring, alerting); integration cost with existing `ServiceBusJobProcessor`; max cron resolution; multi-tenant isolation; observability via App Insights; failure-mode handling. Save to `notes/spikes/scheduler-comparison.md`.</step>
+    <step order="3">Recommend a scheduler choice with explicit rationale. If recommendation is anything other than the default (Service Bus scheduled message, which integrates seamlessly with `ServiceBusJobProcessor`), justify the deviation against ADR-001 + ADR-004 + the bff-extensions.md pre-merge checklist.</step>
+    <step order="4">Build Action Engine module skeleton in a scratch branch or local-only path: create `Services/Ai/ActionEngine/` folder with placeholder `ActionOrchestrationService.cs` (just the class shell + DI registration), `PublicContracts/IActionEngineFacade.cs` (interface only), `Models/ActionDefinition.cs` (data class), and `AddActionEngineModule()` extension. Add Azure AI Search client NuGet reference (`Azure.Search.Documents`). Add `Microsoft.SemanticKernel` references ONLY if not already transitively present (check with `dotnet list package --include-transitive | grep SemanticKernel`).</step>
+    <step order="5">Measure publish-size delta: run `dotnet publish src/server/api/Sprk.Bff.Api/ --configuration Release --runtime linux-x64 --self-contained false` BEFORE and AFTER the skeleton additions. Capture compressed delta (zip the publish output, compare). Record measurements in `notes/spikes/publish-size-measurement.md`. Verify delta ≤ 5 MB compressed. If delta exceeds budget, identify which package is the bloat source and propose mitigations (e.g., use existing AI Search client if already loaded; consume Semantic Kernel only via existing surface).</step>
+    <step order="6">**Hybrid D runtime confirmation**: enumerate the multi-step probabilistic Action scenarios in MVP scope (from spec.md and the three starter Templates in design.md). For each, validate whether `SprkChatAgent` + `UseFunctionInvocation` handles: multi-step tool-call chains, conditional branching, parameter elicitation, error recovery. Document scenario-by-scenario in `notes/spikes/hybrid-d-validation.md`. If any scenario requires Microsoft Agent Framework, scope it OUT of MVP (defer to R2) — do not introduce a new runtime in MVP.</step>
+    <step order="7">**Revert spike artifacts**: roll back the module skeleton from step 4 (we don't want spike code in main). Task 014 will properly create the production skeleton with the chosen scheduler integration baked in. Confirm `git status` is clean except for the new files under `projects/ai-spaarke-action-engine-r1/notes/`.</step>
+    <step order="8">Write the runtime ADR draft at `projects/ai-spaarke-action-engine-r1/notes/decisions/runtime-topology-ADR-draft.md` covering: scheduler choice + rationale, publish-size measurement + headroom, Hybrid D confirmation + MVP scope confirmation. Use ADR-001-style format (Status / Context / Decision / Consequences). This becomes the basis for the formal ADR added to `docs/adr/` during Phase 6.</step>
+    <step order="9">Update `plan.md` Phase 4 deliverables to reference the confirmed scheduler choice. Update Risk Register: mark R1 (publish-size) and R2 (scheduler choice) status as resolved (or escalated if measurements failed budget).</step>
+    <step order="9.5">Run quality gates: `code-review` on `notes/decisions/runtime-topology-ADR-draft.md` (substantive review, not just lint); `adr-check` is N/A here (no code) but verify the draft cites ADRs explicitly.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 001 status ✅, record scheduler choice in the "Decisions" appendix. Update `current-task.md`: task 001 complete; next action: "begin Phase 1 (Group A: tasks 010, 011, 012, 013 parallel)".</step>
+    <step order="11">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and measure publish size of BFF API</tool>
+    <tool name="git">Confirm state and revert spike artifacts</tool>
+    <tool name="terminal">Run shell commands for measurements</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/runtime-topology-ADR-draft.md</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/spikes/scheduler-comparison.md</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/spikes/publish-size-measurement.md</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/spikes/hybrid-d-validation.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/plan.md (Phase 4 + Risk Register updated)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Scheduler choice document exists at `notes/spikes/scheduler-comparison.md` with a 4-row comparison matrix and explicit recommendation. Rationale cites ADR-001 and ADR-004.</criterion>
+    <criterion testable="true">Publish-size measurement document exists at `notes/spikes/publish-size-measurement.md` with before/after compressed sizes and delta ≤ 5 MB. If exceeded, mitigations are documented and either resolved or escalated as a risk.</criterion>
+    <criterion testable="true">Hybrid D validation document exists at `notes/spikes/hybrid-d-validation.md` with scenario-by-scenario assessment of every MVP-scope probabilistic Action. Conclusion: SprkChatAgent + UseFunctionInvocation suffices, OR specific scenarios deferred to R2 with rationale.</criterion>
+    <criterion testable="true">Runtime ADR draft exists at `notes/decisions/runtime-topology-ADR-draft.md` in ADR-001-style format (Status / Context / Decision / Consequences).</criterion>
+    <criterion testable="true">`plan.md` Phase 4 references the confirmed scheduler choice. Risk Register R1 + R2 statuses updated.</criterion>
+    <criterion testable="true">Spike artifacts (module skeleton from step 4) reverted; `git status` shows only new files under `projects/ai-spaarke-action-engine-r1/notes/` (and `plan.md` update).</criterion>
+    <criterion testable="true">Baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md §15 questions 1–3 (the blocking ones). Questions 4–15 are non-blocking and resolved by their owning phase tasks.
+
+    The publish-size measurement is the highest-risk axis. If the skeleton already eats >2 MB compressed before any real implementation, expect Phase 4+ to push over budget. In that case, propose package boundary changes (e.g., consume AI Search via existing client rather than new direct reference) and re-measure.
+
+    Do NOT introduce Microsoft Agent Framework as a separate runtime in MVP. If a scenario truly requires it, defer that scenario to R2 — do not balloon the MVP runtime surface.
+
+    `.claude/constraints/bff-extensions.md` answers must be visible in the ADR draft. The PR for task 014 (BFF module skeleton) will cite this ADR draft as its placement justification.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

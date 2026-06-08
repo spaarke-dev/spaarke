@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Integration test `ActionEngine.IntegrationTests.MetaTools` — discovery flow: FindResources → GetResourceDetail → InvokeResource (G2)</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>022, 023, 024</dependencies>
+    <blocks>070, 071, 090</blocks>
+    <tags>testing, integration-test, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration test with explicit ADR-013 / ADR-022 constraints; creates new test file; Phase 6 quality gate task</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent test class; no file overlap with peer integration tests in Group F (060, 062, 063)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the `ActionEngine.IntegrationTests.MetaTools` integration test suite that proves graduation criterion G2: conversational invocation resolves user intent → Tool via the three meta-tools (`FindResources` → `GetResourceDetail` → `InvokeResource`) and executes. Cover the full discovery flow from natural-language intent through Tool execution with parameter resolution.
+  </prompt>
+
+  <role>
+    Senior Spaarke AI platform engineer with deep BFF integration-testing experience and familiarity with `SprkChatAgent` + `UseFunctionInvocation` Tool-calling patterns. Comfortable with fake Azure AI Search client substitutes and deterministic LLM response stubs.
+  </role>
+
+  <goal>
+    `tests/integration/Sprk.Bff.Api.Tests/ActionEngine/MetaToolsIntegrationTests.cs` exists with at least 3 tests covering:
+    1. `FindResources` returns ranked `ResourceCandidate[]` with id, descriptions, parameter schema
+    2. `GetResourceDetail` returns full schema + `SourceHints` per parameter
+    3. End-to-end discovery: user intent → `FindResources` → `GetResourceDetail` → `InvokeResource` → `ResourceExecutionResult` (or gate-pending status if `humanGate.required = true`)
+    All tests pass; graduation criterion G2 is verifiable from `dotnet test --filter FullyQualifiedName~MetaTools`.
+  </goal>
+
+  <context>
+    <background>
+      G2 codifies the conversational-invocation contract that makes the Action Engine usable from the SpaarkeAi Assistant. The three meta-tools are the discovery substrate the LLM uses to resolve user intent against the Tool Registry. If these tests don't pass, the Assistant cannot reliably surface and invoke Tools — the core demo collapses.
+
+      The meta-tools are registered on every Assistant session (per spec §FR-10..FR-12). Tests must verify they work in isolation (one-shot) and in sequence (the full discovery flow).
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.Tests/ActionEngine/MetaToolsIntegrationTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/FindResourcesTool.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/GetResourceDetailTool.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/InvokeResourceTool.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/IToolHandlerRegistry.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Test substitutes for AI Search MUST be in-memory fakes; no real Azure AI Search calls in CI.</constraint>
+    <constraint source="ADR-022">Tests live in `tests/integration/Sprk.Bff.Api.Tests/`; use `WebApplicationFactory&lt;Program&gt;`.</constraint>
+    <constraint source="ADR-008">Tests MUST exercise endpoint-filter authorization — call meta-tools via the Assistant session endpoint, not by direct DI injection.</constraint>
+    <constraint source="ADR-015">Audit chain assertions: Tier 2 hash-only; no verbatim user intent in assertions.</constraint>
+    <constraint source="NFR-01">FindResources latency is tested separately in task 064 (load test). This task validates correctness only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-022-test-organization.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="WebApplicationFactory integration test" location=".claude/patterns/testing/integration-tests.md">Reuse for meta-tool discovery flow tests.</pattern>
+      <pattern name="Fake ISearchClient" location=".claude/patterns/testing/mocking-patterns.md">In-memory candidates returned per query intent — keep CI offline.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: working tree clean; tasks 022, 023, 024 (three meta-tools) complete in TASK-INDEX.md.</step>
+    <step order="1">Read knowledge files; study task 060 test file as the harness pattern; identify the existing meta-tool registration path in DI.</step>
+    <step order="2">Create `tests/integration/Sprk.Bff.Api.Tests/ActionEngine/MetaToolsIntegrationTests.cs` with `WebApplicationFactory` fixture; register fake `ISearchClient` returning deterministic candidates for known intent strings.</step>
+    <step order="3">Add `FindResources_RankedCandidates_ReturnsResourceCandidateArray` test: invoke `FindResources("send email to outside counsel", topK: 5)`; assert returns at least 1 candidate; assert each candidate has `Id`, `Description`, `ParameterSchema`, `SourceHints` populated.</step>
+    <step order="4">Add `GetResourceDetail_ResolvesFullSchema_WithSourceHints` test: invoke with a known resource id; assert returns full schema + per-parameter SourceHints (`auto-resolvable-from-context` vs `requires-user-input`).</step>
+    <step order="5">Add `EndToEndDiscovery_IntentToInvocation_SucceedsOrGatesPending` test: simulate user intent → FindResources → GetResourceDetail → InvokeResource with parameter blob; assert either `ResourceExecutionResult` with success status OR `humanGate-pending` status for gate-required Tools.</step>
+    <step order="6">Run `dotnet test --filter FullyQualifiedName~MetaTools` and verify all 3 tests pass.</step>
+    <step order="7">Run full `dotnet test` to confirm no regression.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD (testing tag).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 061 status ✅. Update `current-task.md`: G2 verified.</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test runner</tool>
+    <tool name="terminal">Shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/ActionEngine/MetaToolsIntegrationTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">**G2**: Conversational invocation resolves user intent → Tool. End-to-end discovery test passes via `dotnet test --filter FullyQualifiedName~MetaTools`.</criterion>
+    <criterion testable="true">All three meta-tools (`FindResources`, `GetResourceDetail`, `InvokeResource`) are individually exercised by at least one test each.</criterion>
+    <criterion testable="true">The end-to-end test covers both successful invocation AND humanGate-pending paths.</criterion>
+    <criterion testable="true">Full `dotnet test` suite passes after additions.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task directly verifies graduation gate **G2** (spec.md Success Criteria #2). Performance is verified separately in task 064 (load test for NFR-01).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Declare RIGOR LEVEL: STANDARD. Follow task-execute skill.
+    </protocol>
+  </execution>
+</task>

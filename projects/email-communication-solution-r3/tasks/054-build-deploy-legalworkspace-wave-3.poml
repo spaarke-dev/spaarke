@@ -1,0 +1,133 @@
+<task id="054" project="email-communication-solution-r3">
+  <metadata>
+    <title>Build + deploy LegalWorkspace solution to dev (Wave 3)</title>
+    <phase>Wave 3 — SendEmailDialog + FilePreview</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>051, 053</dependencies>
+    <blocks>055</blocks>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; mechanical build + deploy steps invoking the existing `dataverse-deploy` skill. No code changes; no architectural decisions. Failure modes are well-understood (build errors, deploy auth failures, solution conflicts) and handled by the skill.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential: depends on 051 (FilePreviewDialog migration) and 053 (consumer audit complete). Must produce a clean dev deploy before smoke test 055 can run. Cannot parallelize with other deploy tasks targeting LegalWorkspace.</parallel-reason>
+    <fr-refs>FR-14</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build and deploy the `LegalWorkspace` solution to the dev environment via the `dataverse-deploy` skill. This deploy ships the Wave 3 migrations:
+    - `FilePreviewDialog.tsx` now consumes canonical `<SendEmailDialog />` (task 051)
+    - Any additional consumers migrated by task 053
+    - Implicit dependency on `@spaarke/ui-components` shipping the canonical wrapper (already published by Wave 1)
+
+    Pre-deploy checks: confirm `@spaarke/ui-components` is at a version that includes the canonical wrapper (Wave 1 + task 050/052 outputs). Confirm `npm run build` is clean in LegalWorkspace. Confirm no straggling lint errors.
+
+    Post-deploy verification: open the deployed LegalWorkspace in the dev environment, navigate to a file preview surface, confirm no console errors on page load (deferred E2E click-test is task 055).
+  </prompt>
+
+  <role>
+    Deployment engineer familiar with the `dataverse-deploy` skill conventions for LegalWorkspace solution builds. Knows the build pipeline (Vite + `npm install --legacy-peer-deps --no-audit --no-fund` per CLAUDE.md §11), the solution-import path, and the dev environment target.
+  </role>
+
+  <goal>
+    LegalWorkspace solution deployed to dev with Wave 3 Bug-fix changes shipped. `npm run build` clean. `npm run lint` clean. Solution imported successfully (no Dataverse import errors). Smoke loading the LegalWorkspace surface in dev shows no JavaScript console errors. Ready for task 055 (functional smoke test).
+  </goal>
+
+  <context>
+    <background>
+      LegalWorkspace is the React/Vite solution at `src/solutions/LegalWorkspace/`. It bundles `@spaarke/ui-components` and ships as a Dataverse web resource via the existing deploy pipeline.
+
+      Wave 3 changes affecting this deploy:
+      - `FilePreviewDialog.tsx` migrated to canonical `<SendEmailDialog />` (task 051)
+      - Removed inline `fetch` + legacy `onSend` callback
+      - Added `onSent` / `onError` handlers + Fluent toast/banner for results
+
+      Per CLAUDE.md §11, LegalWorkspace's `package-lock.json` may be stale — use `npm install --legacy-peer-deps --no-audit --no-fund` not `npm ci`. The build script in the solution handles this automatically.
+
+      Per `dataverse-deploy` skill: the deploy is solution-scoped. Multiple solutions can be co-resident in dev. The deploy does NOT touch BFF or schema — those are separate pipelines.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/ (build root)</file>
+      <file>src/solutions/LegalWorkspace/package.json</file>
+      <file>src/solutions/LegalWorkspace/vite.config.ts (or equivalent build config)</file>
+      <file>src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx (migrated by task 051)</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md (deploy procedure reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">Use `npm install --legacy-peer-deps --no-audit --no-fund` for LegalWorkspace; do NOT use `npm ci`.</constraint>
+    <constraint source="project">Deploy targets DEV environment only — do NOT deploy to prod from this task.</constraint>
+    <constraint source="ADR-033">No code changes during deploy — this task is mechanical packaging only. Any code-level issue surfaced by the build escalates back to task 051 / 053 / 050.</constraint>
+    <constraint source="repo">Solution import MUST succeed without errors. Warnings acceptable if pre-existing.</constraint>
+    <constraint source="project">Document the deploy result (timestamp + dev environment URL) in `notes/wave-3-deploy.md`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Pre-deploy check: verify `src/solutions/LegalWorkspace/` builds clean. Run from the solution root:
+      <code>
+      npm install --legacy-peer-deps --no-audit --no-fund
+      npm run build
+      npm run lint
+      </code>
+      If any step fails, escalate to tasks 051 / 053 / 050 — do NOT attempt deploy with broken build.
+    </step>
+    <step order="2">Confirm `@spaarke/ui-components` resolves to a version containing the canonical wrapper. Inspect `node_modules/@spaarke/ui-components/dist/index.d.ts` (or equivalent) for `SendEmailDialog` export and the canonical `ISendEmailDialogProps` shape (no `onSend`).</step>
+    <step order="3">Invoke `dataverse-deploy` skill with target = dev environment + solution = LegalWorkspace. Follow the skill's deploy procedure for solution-scoped deploys.</step>
+    <step order="4">Monitor deploy output. On success: capture the deploy timestamp + dev environment URL. On failure: capture the error message, escalate based on category:
+      - Build error → escalate to task 051
+      - Solution-import conflict → escalate to project owner
+      - Auth failure → re-authenticate per `dataverse-deploy` skill troubleshooting
+    </step>
+    <step order="5">Post-deploy: navigate to LegalWorkspace in dev (browser). Open the JS console. Load a page that surfaces FilePreviewDialog (open a file). Confirm zero console errors during load. NOTE: clicking "Send by Email" is task 055 — do NOT execute the send from this task.</step>
+    <step order="6">Write deploy summary to `notes/wave-3-deploy.md`: timestamp, dev environment URL, console-error check result, any warnings observed.</step>
+    <step order="7">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 054 ✅ completed.</step>
+    <step order="8">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (055).</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">Run build + lint locally</tool>
+    <tool name="dataverse-deploy">Solution deploy to dev</tool>
+    <tool name="write">Create `notes/wave-3-deploy.md` deploy summary</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/email-communication-solution-r3/notes/wave-3-deploy.md (NEW — deploy summary)</output>
+    <output type="deploy">LegalWorkspace solution deployed to dev environment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/solutions/LegalWorkspace/` `npm run build` exits 0.</criterion>
+    <criterion testable="true">`src/solutions/LegalWorkspace/` `npm run lint` exits 0.</criterion>
+    <criterion testable="true">`dataverse-deploy` skill reports successful solution import to dev environment.</criterion>
+    <criterion testable="true">LegalWorkspace surface loads in dev with zero JS console errors on page load.</criterion>
+    <criterion testable="true">`notes/wave-3-deploy.md` exists with timestamp + dev URL + console-check result.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 054 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deploy escalation policy: if any deploy step fails, fix the upstream code task FIRST, then re-run this task — do NOT patch around it. The Wave 3 code is settled by tasks 050–053; if the deploy fails, that signals an upstream defect that needs fixing in its source task.
+
+    Console-error scan in step 5 is a pre-flight check for task 055 (functional smoke). A clean page load does NOT prove the send-email flow works — it only proves the migrated code does not crash on render. Functional verification is task 055.
+
+    `dataverse-deploy` skill conventions: per `.claude/skills/dataverse-deploy/SKILL.md`. If the skill is unavailable or has changed since project pipeline ran, fall back to the manual deploy procedure in `docs/guides/PCF-DEPLOYMENT-GUIDE.md` (the solution-import steps are analogous).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 (adr-check + code-review) SKIPPED for STANDARD rigor. Invoke `dataverse-deploy` skill for deploy procedure.
+    </protocol>
+  </execution>
+</task>

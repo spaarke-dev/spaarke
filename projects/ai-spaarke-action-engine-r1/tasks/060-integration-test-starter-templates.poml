@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Integration test `ActionEngine.IntegrationTests.StarterTemplates` — three Templates author + execute end-to-end (G1)</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>053, 054, 055</dependencies>
+    <blocks>070, 071, 090</blocks>
+    <tags>testing, integration-test, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration test with explicit ADR-013 / ADR-022 constraints; creates new test file; Phase 6 quality gate task</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent test class; no file overlap with peer integration tests in Group F (061, 062, 063)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the `ActionEngine.IntegrationTests.StarterTemplates` integration test suite that proves graduation criterion G1: the three starter Templates (Summarize a matter, Send weekly task digest, Find similar matters) author and execute end-to-end via both manual and (where applicable) scheduled invocation paths. Use BFF integration-test harness against a test Dataverse environment with the seeded default playbook.
+  </prompt>
+
+  <role>
+    Senior Spaarke platform engineer with deep BFF (.NET 8 Minimal API) integration-testing experience. Familiar with xUnit + `WebApplicationFactory` patterns, in-memory test substitutes for Dataverse + Azure AI Search, and the existing `AnalysisOrchestrationService` integration-test pattern as reference.
+  </role>
+
+  <goal>
+    `tests/integration/Sprk.Bff.Api.Tests/ActionEngine/StarterTemplatesIntegrationTests.cs` exists with at least one integration test per starter Template (3 tests minimum), each:
+    1. Authors the Template via solution-source JSON (or fixture loader)
+    2. Creates an `sprk_actioninstance` row with parameter values
+    3. Dispatches via `/actions/{id}/run` for manual + via `ScheduledActionDispatchJobHandler` for the scheduled one
+    4. Asserts a successful `sprk_actionrun` record with `Status = Completed`
+    5. Asserts the Tool dispatch audit chain (ADR-015 Tier 2 hash) wrote at least one entry per Tool invocation
+    All tests pass against the test harness. Graduation criterion G1 is verifiable from `dotnet test --filter FullyQualifiedName~StarterTemplates`.
+  </goal>
+
+  <context>
+    <background>
+      G1 is the single most user-visible graduation gate — the three starter Templates are the demo surface for MVP acceptance. This test suite codifies the contract: every Template must author + execute end-to-end without manual intervention beyond the in-test gate-approval shim. Test failures here are MVP-blocking.
+
+      The three Templates have different execution shapes:
+      - **Summarize a matter** — Deterministic Dataverse query + AI narrative Tool; output to chat surface; no gate
+      - **Send weekly task digest** — Cron-triggered; Deterministic query + template-rendered email; `SendEmail` requires gate (use `AutoApproveGateResolver` shim in tests)
+      - **Find similar matters** — Hybrid: Azure AI Search semantic + Dataverse hydration; citations rendered to chat
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.Tests/ActionEngine/StarterTemplatesIntegrationTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ActionOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs</file>
+      <file>src/solutions/SpaarkeAi/templates/summarize-matter.json</file>
+      <file>src/solutions/SpaarkeAi/templates/weekly-task-digest.json</file>
+      <file>src/solutions/SpaarkeAi/templates/find-similar-matters.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Test substitutes for AI clients MUST be in-memory fakes (no real Azure OpenAI in CI). Mock `IOpenAiClient` + `ISearchClient` per existing AI test patterns.</constraint>
+    <constraint source="ADR-022">Integration tests live in `tests/integration/Sprk.Bff.Api.Tests/`. Use `WebApplicationFactory&lt;Program&gt;` per existing pattern.</constraint>
+    <constraint source="ADR-015">Tests MUST assert audit chain writes Tier 2 hash-only entries per Tool dispatch; MUST NOT log verbatim prompt or response content in assertions.</constraint>
+    <constraint source="ADR-004">Scheduled trigger test MUST exercise `IJobHandler&lt;T&gt;` directly via `ScheduledActionDispatchJobHandler.HandleAsync(...)` — not by waiting on Service Bus.</constraint>
+    <constraint source="project">No test may persist state across runs; each test creates + tears down its Action + ActionInstance + ActionRun records.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-022-test-organization.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="WebApplicationFactory integration test" location=".claude/patterns/testing/integration-tests.md">Existing BFF integration-test harness pattern; reuse for AE Template tests.</pattern>
+      <pattern name="In-memory AI client substitutes" location=".claude/patterns/testing/mocking-patterns.md">Fake `IOpenAiClient` / `ISearchClient` that returns deterministic shapes — keeps CI offline.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean; load `.claude/constraints/testing.md` + `bff-extensions.md`; verify task 053, 054, 055 (starter Templates) are completed in TASK-INDEX.md.</step>
+    <step order="1">Read all knowledge files; study existing AI integration tests in `tests/integration/Sprk.Bff.Api.Tests/` for the `WebApplicationFactory` setup + in-memory client substitute patterns.</step>
+    <step order="2">Create `tests/integration/Sprk.Bff.Api.Tests/ActionEngine/` folder. Add `StarterTemplatesIntegrationTests.cs` with `WebApplicationFactory&lt;Program&gt;` fixture; register fake `IOpenAiClient`, fake `ISearchClient`, in-memory Dataverse facade.</step>
+    <step order="3">Add `SummarizeMatter_EndToEnd_ReturnsCompletedRun` test: author Template via fixture loader; create ActionInstance; POST `/actions/{id}/run`; assert HTTP 200; load `sprk_actionrun` record; assert Status == Completed + audit chain has entries for `QueryDataverse` + `MatterSummary` AI Tool.</step>
+    <step order="4">Add `WeeklyTaskDigest_ScheduledDispatch_RendersAndDelivers` test: author scheduled Template; create ActionInstance; invoke `ScheduledActionDispatchJobHandler.HandleAsync(jobMessage)` directly; use `AutoApproveGateResolver` test override; assert Run completed; assert `SendEmail` Tool was dispatched.</step>
+    <step order="5">Add `FindSimilarMatters_Hybrid_RanksWithCitations` test: stub the AI Search client to return 3 candidate results; author Template; invoke; assert results contain matter IDs + similarity rationale + citations; assert audit chain logs both `SearchDocuments` + `QueryDataverse` Tools.</step>
+    <step order="6">Run `dotnet test --filter FullyQualifiedName~StarterTemplates` and verify all 3 tests pass. If any fail, fix the test (do not modify production code — that's task 053/054/055 territory).</step>
+    <step order="7">Verify ADR-015 compliance: scan assertions for any verbatim prompt or response content; if found, replace with hash-only or shape-only checks. Audit chain assertions check `auditEntry.HashOnly == true` for Tier 2.</step>
+    <step order="8">Update `tests/integration/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` if new test discovery is needed (typically not required for xUnit).</step>
+    <step order="9">Run `dotnet test` (full suite) to confirm no regression in other test suites.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD (testing tag).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 060 status ✅. Update `current-task.md`: task 060 complete; G1 verified.</step>
+    <step order="11">Document any deviation in `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test runner</tool>
+    <tool name="terminal">Shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/ActionEngine/StarterTemplatesIntegrationTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">**G1**: Three starter Templates author + execute end-to-end via manual and scheduled invocation (verified by `StarterTemplates` test suite passing). All 3 tests in `StarterTemplatesIntegrationTests.cs` PASS via `dotnet test --filter FullyQualifiedName~StarterTemplates`.</criterion>
+    <criterion testable="true">Every Tool dispatch in the test scenarios writes at least one audit-chain entry (assertion present in each test).</criterion>
+    <criterion testable="true">No verbatim prompt/response content appears in test assertions (ADR-015 Tier 2 hash-only respected).</criterion>
+    <criterion testable="true">Scheduled-trigger test invokes `ScheduledActionDispatchJobHandler.HandleAsync(...)` directly without depending on real Service Bus.</criterion>
+    <criterion testable="true">Full `dotnet test` suite passes after additions (no regressions).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task directly verifies graduation gate **G1** from spec.md §Success Criteria #1 and plan.md §7 Acceptance Criteria. The 3 starter Templates are demo surface for product-owner acceptance — failures here block MVP sign-off.
+
+    Use the existing `AnalysisOrchestrationService` integration test as the pattern reference for `WebApplicationFactory` + fake AI clients. Do NOT introduce real Azure OpenAI or Azure AI Search calls in CI — keep everything in-memory.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: STANDARD with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist and proactive checkpointing.
+    </protocol>
+  </execution>
+</task>

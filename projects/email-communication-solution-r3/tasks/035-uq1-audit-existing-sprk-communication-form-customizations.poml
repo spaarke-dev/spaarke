@@ -1,0 +1,154 @@
+<task id="035" project="email-communication-solution-r3">
+  <metadata>
+    <title>Audit existing `sprk_communication` standard form customizations (UQ1 resolution)</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>038</blocks>
+    <tags>dataverse, audit, docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation/audit task; outputs a research note that gates the Form Component Control swap decision. No code changes.</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only audit work; only blocks 038 (Form Component Control swap). Can parallelize with 031–034 (which are sequential among themselves but independent of this audit).</parallel-reason>
+    <fr-refs>FR-19 (Surface 2 prep), UQ1</fr-refs>
+  </metadata>
+
+  <prompt>
+    Resolve spec UQ1: when the Form Component Control replaces the default `sprk_communication` form (FR-19 Surface 2 in task 038), what happens to existing customizations on the standard form? Audit and document.
+
+    Investigate the dev environment's standard `sprk_communication` form for:
+    - Custom JavaScript handlers (form onload, field onchange, save handlers)
+    - Business rules
+    - Field visibility / required rules (form-level + field-level)
+    - Calculated / rollup fields on the entity (independent of form but affect display)
+    - Custom command bar / ribbon items beyond the OOB
+    - Sub-grids, related-record displays
+
+    For each finding, determine the migration path: (a) port to Code Page (EmailComposer surface), (b) carry to admin-fallback form (kept per NFR-07), or (c) retire as obsolete.
+
+    Produce `projects/email-communication-solution-r3/notes/research/035-form-customization-audit.md` with the inventory + migration decisions. This gates task 038's Form Component Control swap decision.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse customization analyst. Familiar with Dataverse form customization layers, business rules, JavaScript handlers, and the Dataverse solution explorer.
+  </role>
+
+  <goal>
+    A research note at `projects/email-communication-solution-r3/notes/research/035-form-customization-audit.md` containing:
+    1. Inventory of all customizations on standard `sprk_communication` form in dev
+    2. For each customization, the migration path (port / fallback / retire)
+    3. Risk assessment for the Form Component Control swap (R1 in plan.md risk register)
+    4. Recommendation for task 038: proceed / proceed with mitigations / escalate
+
+    Decision is binding for task 038 (Form Component Control swap).
+  </goal>
+
+  <context>
+    <background>
+      Spec UQ1: "Standard form customizations migration. When Form Component Control replaces the default `sprk_communication` form (FR-19 Surface 2), what happens to existing custom JavaScript / business rules / field visibility on the standard form?"
+
+      Per NFR-07 (reversibility), the standard form MUST be retained as an admin/debug fallback. That gives a place for customizations that can't migrate to the Code Page. But we need to know the inventory first.
+
+      Plan.md Risk R1: "Form Component Control swap breaks existing customizations" — mitigation is this audit + NFR-07 fallback form.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/research/035-form-customization-audit.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec UQ1">Resolve by Wave 2; blocks Form Component Control swap (task 038)</constraint>
+    <constraint source="NFR-07">Standard form retained as admin fallback regardless of audit findings</constraint>
+    <constraint source="project">Audit dev environment ONLY — do not modify Dataverse customizations in this task</constraint>
+    <constraint source="project">Research note format follows existing `notes/research/` patterns in other projects (R1/R2)</constraint>
+    <constraint source="project">If no dev-environment access available, document the audit via metadata files (`Customizations.xml` in the solution) + flag for owner to confirm</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/data-model/ (existing data model docs for sprk_communication if any)</file>
+    </files>
+    <patterns>
+      <pattern name="Research note location" location="projects/email-communication-solution-r3/notes/research/">
+        Per project convention, audit and spike outputs live in `notes/research/NNN-{topic}.md` named after the task.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec UQ1 + FR-19 Surface 2 + NFR-07 to confirm audit scope.</step>
+    <step order="2">Identify access path to the dev environment's `sprk_communication` form customizations:
+      - Option A: Dataverse MCP tools (`dataverse-mcp-usage` skill) for metadata retrieval
+      - Option B: Pull solution from dev via PAC CLI (`pac solution export`) and inspect `Customizations.xml`
+      - Option C: Direct Dataverse Maker portal inspection (manual, may require human)
+      Choose the path with fastest reliable output.
+    </step>
+    <step order="3">Inventory customizations on standard `sprk_communication` form:
+      - Form metadata: locate FormXml for "Information" or default main form
+      - Extract: `<events>` (JavaScript handlers — onload, onchange, onsave); `<controls>` (custom control bindings); `<sections>` + `<rows>` (layout); any embedded calculated field references
+      - Business rules: query `workflow` table for entity = `sprk_communication`, category = Business Rule
+      - JavaScript web resources referenced: `<event>` handlers → web resource paths
+    </step>
+    <step order="4">For each customization, classify migration path:
+      - **Port to Code Page**: validation logic, prefill logic, simple field-level behaviors → re-implement inside `<EmailComposer />` engine if scoped, or as Code Page App-level logic
+      - **Carry to admin fallback**: edge-case customizations not yet supported by EmailComposer → stays on standard form
+      - **Retire**: obsolete customizations (e.g., references to retired `sprk_communication_send.js` — these will go in Wave 6)
+    </step>
+    <step order="5">Assess risk: estimate "% of customer usage hits these customizations" if data available; otherwise flag any HIGH-impact customizations (e.g., custom JS that gates record creation) for owner review.</step>
+    <step order="6">Write `notes/research/035-form-customization-audit.md` with sections:
+      - Summary (1 paragraph)
+      - Audit methodology (which path used)
+      - Inventory table (Customization | Type | Location | Migration path | Risk)
+      - Recommendation for task 038 (proceed / mitigations / escalate)
+      - Open questions for owner
+    </step>
+    <step order="7">If recommendation is "escalate" (HIGH-risk customizations found), flag in `current-task.md` for owner review BEFORE task 038 starts.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 035 ✅ completed; note recommendation outcome.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task (036 if dependencies satisfied).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read spec + project docs</tool>
+    <tool name="dataverse-mcp-usage">Query Dataverse metadata if MCP available</tool>
+    <tool name="bash">PAC CLI export if used</tool>
+    <tool name="write">Create research note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/035-form-customization-audit.md (NEW)</output>
+    <output type="decision">Recommendation logged in `current-task.md` for task 038 (proceed / mitigations / escalate)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Research note exists at `projects/email-communication-solution-r3/notes/research/035-form-customization-audit.md`.</criterion>
+    <criterion testable="true">Note contains: methodology, inventory table, migration paths, recommendation, open questions.</criterion>
+    <criterion testable="true">Recommendation for task 038 is explicit (proceed / mitigations / escalate).</criterion>
+    <criterion testable="true">If HIGH-risk customizations found, owner-escalation flag set in `current-task.md`.</criterion>
+    <criterion testable="true">No Dataverse customizations modified in this task (audit only).</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallelization: this task is `parallel-group=G` (parallel with tasks 031, 032, 033, 034 which run sequentially among themselves). Specifically, this audit only requires task 030 (scaffold) to be done — the actual Code Page integration isn't a dependency.
+
+    If the dev environment has zero customizations on the standard form (most likely outcome for a relatively new entity like `sprk_communication`), document that explicitly — it de-risks task 038 significantly and lets task 038 proceed without mitigations.
+
+    The audit's HIGH-risk threshold is subjective; a JS handler that BLOCKS save under certain conditions is HIGH-risk; a cosmetic field-visibility rule is LOW-risk.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 are SKIPPED for STANDARD rigor.
+    </protocol>
+  </execution>
+</task>

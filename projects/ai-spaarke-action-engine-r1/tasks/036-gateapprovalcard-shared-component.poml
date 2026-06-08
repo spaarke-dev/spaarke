@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>`GateApprovalCard` Fluent v9 component in `Spaarke.UI.Components` (ADR-021 dark-mode tested); used by `InteractiveInChatGateResolver` and SpaarkeAi</title>
+    <phase>Phase 3: IGateResolver + Approval Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>050, 062</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements canonical shared UI component for approval surface used across Spaarke (SpaarkeAi + future Teams/M365 Copilot); modifies `.tsx` files in shared component library; tags include pcf/react/fluent-ui/frontend; ADR-021 dark-mode test required; UI tests defined</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Different surface (`Spaarke.UI.Components` package, not `Sprk.Bff.Api`); no file overlap with Group D BFF resolver tasks (031–034); safe to run alongside Group D — consumes only the SSE event vocabulary contract defined in task 030 + 032's `notes/decisions/032-sse-gate-events.md`</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build `GateApprovalCard` Fluent UI v9 component at `src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/` (new folder). Render gate-request details (gate type, summary, payload preview, approver-role hint, countdown timer for 5-min timeout) and provide Approve/Reject controls with optional rejection reason. Exports via `src/index.ts`. Used by `InteractiveInChatGateResolver` (SpaarkeAi surface in Phase 5) and future Teams/M365 Copilot surfaces. MUST use Fluent v9 semantic tokens (ADR-021 dark-mode tested). MUST be stateless from data fetching — props-driven, with `onApprove` + `onReject` callbacks.
+  </prompt>
+
+  <role>
+    Senior Spaarke frontend engineer with Fluent UI v9 + React 18 expertise. You build accessible, dark-mode-compliant, semantically-tokenized components. You separate presentation from data fetching — the card is purely props-driven so any host (chat panel, Teams card, M365 Copilot) can mount it without coupling to the SSE channel.
+  </role>
+
+  <goal>
+    Concrete deliverables:
+    1. **`GateApprovalCard` component** — props: `gateRequest: GateCardProps` (correlationId, gateType, summary, payloadPreview, authorizedApproverRoles, surfaceHint, timeoutSeconds, requestedByDisplayName), `onApprove: () =&gt; void | Promise&lt;void&gt;`, `onReject: (reason: string) =&gt; void | Promise&lt;void&gt;`, `disabled?: boolean`, `className?: string`.
+    2. **Countdown timer** — visible countdown of remaining seconds; styled to indicate urgency (color shift &lt;60 sec). Pure visual; the resolver enforces the actual timeout server-side per task 035.
+    3. **Reject-with-reason flow** — clicking Reject opens an inline `Textarea` for optional reason; submit fires `onReject(reason)`.
+    4. **Dark mode** — uses `tokens.colorNeutralBackground*`, `tokens.colorNeutralForeground*`, etc. NO hardcoded colors. Tested under both themes (ADR-021).
+    5. **Storybook story** (if Storybook exists in `Spaarke.UI.Components`; else stub component example) — variants: default, near-timeout, dark mode, disabled.
+    6. **Unit tests** (Jest + React Testing Library) — render assertions, click handlers, accessibility.
+    7. **Export** via `src/index.ts` so consumers (`@spaarke/ui-components`) can `import { GateApprovalCard } from '@spaarke/ui-components'`.
+    8. **TypeScript types** — `GateCardProps` exported alongside the component; mirror server-side `GateRequest` field names where consumer-facing.
+    9. **UI tests** (executed by `task-execute` Step 9.7 via `ui-test` skill against deployed SpaarkeAi).
+
+    Deliverable locations:
+    - `src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.tsx`
+    - `src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.types.ts`
+    - `src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.styles.ts`
+    - `src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/index.ts`
+    - `src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.test.tsx`
+    - `src/client/shared/Spaarke.UI.Components/src/index.ts` (export added)
+  </goal>
+
+  <context>
+    <background>
+      Per design §5 and spec FR-17, `GateApprovalCard` is the canonical approval-surface UI primitive across Spaarke. Surfaces consuming it: SpaarkeAi (Phase 5 — primary MVP consumer), Teams cards (R2), M365 Copilot (R3), Insights Engine Precedent Board (R2 — see coordination assessment §4.6).
+
+      The component is intentionally STATELESS from data fetching:
+      - The hosting surface fetches gate state (via SSE event in SpaarkeAi, via Teams card payload, etc.).
+      - The hosting surface invokes server actions (POST `/api/ai/gates/in-chat/respond` for SpaarkeAi; Teams bot action for Teams).
+      - The component renders + emits user intent.
+
+      ADR-021 dark-mode parity is non-negotiable. Every visual element uses Fluent v9 semantic tokens; no `#hexcode` or `rgb(...)` literals.
+
+      The `notes/decisions/032-sse-gate-events.md` (from task 032) documents the SSE event payload that SpaarkeAi parses to populate `GateCardProps`. Coordinate that contract.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.styles.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.test.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/decisions/032-sse-gate-events.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">UI Surface Architecture. Code Page (SpaarkeAi) hosts the card; shared component library is the home.</constraint>
+    <constraint source="ADR-011">Component library conventions (if applicable to project). Use shared component patterns per `Spaarke.UI.Components` conventions.</constraint>
+    <constraint source="ADR-012">Shared component library. `GateApprovalCard` MUST live in `Spaarke.UI.Components`; MUST use Fluent UI v9; MUST NOT reference PCF-specific APIs (consumable from any React 18 host).</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + dark mode. Semantic tokens only. Dark-mode parity tested.</constraint>
+    <constraint source="project">Stateless from data fetching: props-driven, with `onApprove` + `onReject` callbacks. Hosting surface owns the data flow.</constraint>
+    <constraint source="project">Countdown timer is purely visual; server-side `GateTimeoutService` (task 035) enforces actual timeout.</constraint>
+    <constraint source="project">SSE event vocabulary defined in `notes/decisions/032-sse-gate-events.md` — the card's `GateCardProps` shape MUST be parseable from that payload.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-ui-surface-architecture.md</file>
+      <file>.claude/adr/ADR-011-component-library.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-dark-mode.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 component authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Component file structure (Card.tsx + Card.types.ts + Card.styles.ts + index.ts + Card.test.tsx).</pattern>
+      <pattern name="Fluent v9 theming" location=".claude/patterns/ui/fluent-v9-theming.md">Semantic tokens via `useStyles` + `tokens` import from `@fluentui/react-components`. NO hardcoded colors.</pattern>
+      <pattern name="Shared component export" location="src/client/shared/Spaarke.UI.Components/src/index.ts">Add `export * from './components/GateApprovalCard';` to surface the component.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: working tree clean, branch `work/ai-spaarke-action-engine-r1`, baseline build passes. Task 030 ✅ (need `GateRequest` field names + `GateType` enum for the props contract). Task 032 in flight OR ✅ — read `notes/decisions/032-sse-gate-events.md` for the SSE event shape if available; otherwise coordinate the contract here and feed back. Load knowledge. Declare RIGOR LEVEL: FULL.</step>
+    <step order="1">Create folder `src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/`.</step>
+    <step order="2">Create `GateApprovalCard.types.ts` — export `GateCardProps` interface mirroring server-side `GateRequest` field names (camelCase TS): `correlationId`, `gateType` (string union mirroring 5-value enum), `summary`, `payloadPreview?: string`, `authorizedApproverRoles: string[]`, `surfaceHint?: string`, `timeoutSeconds: number`, `requestedByDisplayName: string`, `requestedAtUtc: string`. Export `GateApprovalCardProps = { gateRequest: GateCardProps; onApprove: () =&gt; void | Promise&lt;void&gt;; onReject: (reason: string) =&gt; void | Promise&lt;void&gt;; disabled?: boolean; className?: string; }`.</step>
+    <step order="3">Create `GateApprovalCard.styles.ts` — `makeStyles` with semantic tokens (`tokens.colorNeutralBackground1`, `tokens.colorNeutralForeground1`, `tokens.colorBrandBackground`, `tokens.colorPaletteRedBackground1` for urgency border &lt;60 sec, etc.). NO hardcoded hex/rgb. Define `card`, `header`, `body`, `footer`, `urgencyBorder`, `timer`, `actions`, `rejectionReasonInput` classes.</step>
+    <step order="4">Create `GateApprovalCard.tsx`:
+      - Functional component using `useState` for countdown + reject-reason input visibility + reject reason text.
+      - `useEffect` for countdown ticker (decrement every 1 sec; pure visual).
+      - Layout: `Card` from `@fluentui/react-components` with header (gate-type Badge + summary), body (payloadPreview in `pre` block, authorizedApproverRoles list), footer (timer + Approve `Button` primary + Reject `Button` secondary).
+      - Reject click opens inline `Textarea` + Cancel/Submit; Submit calls `onReject(reason)`.
+      - Approve click calls `onApprove()` and disables both buttons (prevent double-submit).
+      - Accessibility: ARIA labels on buttons, `role="region"` + `aria-label` on the Card, focus management when reject-reason opens.</step>
+    <step order="5">Create `index.ts` — `export * from './GateApprovalCard'; export type * from './GateApprovalCard.types';`. Update `src/client/shared/Spaarke.UI.Components/src/index.ts` to re-export `GateApprovalCard`.</step>
+    <step order="6">Create `GateApprovalCard.test.tsx` — Jest + React Testing Library tests:
+      (a) Renders with all required props.
+      (b) Countdown ticker decrements.
+      (c) Approve click invokes `onApprove` and disables buttons.
+      (d) Reject click reveals reason input.
+      (e) Submit reject invokes `onReject(reason)` with the entered text.
+      (f) Cancel reject hides reason input.
+      (g) `disabled` prop disables both buttons + hides reason input.
+      (h) Accessibility: `Card` has `aria-label`; buttons have descriptive labels.
+      (i) Snapshot test (light theme).
+      (j) Snapshot test (dark theme — render under `&lt;FluentProvider theme={webDarkTheme}&gt;`).</step>
+    <step order="7">Build the package: `npm run build` in `src/client/shared/Spaarke.UI.Components/`. Run tests: `npm test`. All pass.</step>
+    <step order="8">If Storybook exists in the package, add a story file `GateApprovalCard.stories.tsx` with 4 variants: Default, NearTimeout (10 sec remaining), DarkMode, Disabled. Verify visually under Storybook (optional but recommended).</step>
+    <step order="9">Bundle-size impact: `Spaarke.UI.Components` has a per-component budget tracked in the package's CI step (check `package.json` build scripts). Verify added bundle delta is small (target: &lt; 20 KB minified-gzipped).</step>
+    <step order="9.5">Run quality gates: `code-review` (Fluent v9 semantic-token correctness, accessibility, no hardcoded colors, props contract matches `GateRequest` server-side, type safety), `adr-check` (ADR-006/011/012/021).</step>
+    <step order="9.7">Run `ui-test` skill against deployed SpaarkeAi (after Phase 5 task 050 mounts the card). For Phase 3, the UI tests below describe the targets; full execution happens during integration testing in Phase 6 task 062.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: 036 ✅. Update `current-task.md`. Phase 3 complete after Group D + 035 + 036 all ✅.</step>
+    <step order="11">Commit + push. Note the props contract finalization in `notes/decisions/036-gateapprovalcard-props-contract.md` so Phase 5 task 050 (SpaarkeAi card-mount) consumes the stable shape.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Component Renders">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control&amp;controlName=sprk_spaarkeai</url>
+      <steps>
+        <step>Navigate to SpaarkeAi Code Page</step>
+        <step>Trigger a gate-required Action (e.g., "Send weekly task digest" with humanGate=true)</step>
+        <step>Verify `GateApprovalCard` renders with gate type, summary, payloadPreview, countdown timer, Approve + Reject buttons</step>
+        <step>Check browser console for JavaScript errors</step>
+      </steps>
+      <expected>Card renders without console errors; all props (gateType, summary, payloadPreview, authorizedApproverRoles, countdown) visible</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control&amp;controlName=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi with `GateApprovalCard` visible (gate-required Action triggered)</step>
+        <step>Toggle Dataverse app to dark theme (or use OS dark mode if app respects system theme)</step>
+        <step>Verify card background, text, borders, and button colors all shift to dark-theme palette</step>
+        <step>Inspect computed styles — assert NO hardcoded hex/rgb values; all colors resolve to Fluent v9 semantic tokens</step>
+        <step>Toggle back to light theme — verify symmetric correctness</step>
+        <step>Check console for any theme-related warnings</step>
+      </steps>
+      <expected>Card visually correct under both light and dark themes; no hardcoded colors; semantic tokens used throughout; no console warnings</expected>
+    </test>
+    <test name="User Interaction">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control&amp;controlName=sprk_spaarkeai</url>
+      <steps>
+        <step>Trigger a gate-required Action; `GateApprovalCard` renders</step>
+        <step>Click Approve button — verify loading indicator appears + buttons disable</step>
+        <step>Verify the Action proceeds (chat shows next step or final result)</step>
+        <step>Trigger a second gate; click Reject button</step>
+        <step>Verify inline Textarea appears for rejection reason</step>
+        <step>Enter reason "test rejection" and click Submit</step>
+        <step>Verify the Action terminates with the rejection reason in chat history</step>
+        <step>Verify audit log entry contains the rejection reason (admin check)</step>
+      </steps>
+      <expected>Approve submits and progresses Action; Reject reveals reason input, accepts text, terminates Action with reason; both within 3 seconds; no double-submit</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Install dependencies, run tests, build package</tool>
+    <tool name="git">Commit and push</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.types.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.styles.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/GateApprovalCard/GateApprovalCard.test.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (export added)</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/decisions/036-gateapprovalcard-props-contract.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GateApprovalCard.tsx`, `.types.ts`, `.styles.ts`, `index.ts`, `.test.tsx` all exist; package builds (`npm run build` in `Spaarke.UI.Components`).</criterion>
+    <criterion testable="true">10 Jest tests pass: render, countdown, approve-click, reject-click, reject-submit, reject-cancel, disabled, accessibility, light-snapshot, dark-snapshot.</criterion>
+    <criterion testable="true">`GateApprovalCard` exported from `@spaarke/ui-components` top-level; consumers can `import { GateApprovalCard, GateCardProps }` from the package.</criterion>
+    <criterion testable="true">Zero hardcoded color values in `GateApprovalCard.styles.ts` and `GateApprovalCard.tsx` — verified by grep for `#[0-9a-f]{3,8}|rgb\(`.</criterion>
+    <criterion testable="true">Dark-mode test passes: rendering under `webDarkTheme` produces a distinct, correct visual output (snapshot diff).</criterion>
+    <criterion testable="true">Bundle-size delta &lt; 20 KB minified-gzipped (target).</criterion>
+    <criterion testable="true">UI tests defined in `&lt;ui-tests&gt;` section: Component Renders, Dark Mode Compliance (ADR-021), User Interaction. Each ready for `ui-test` skill execution in Phase 6 task 062.</criterion>
+    <criterion testable="true">Props contract documented in `notes/decisions/036-gateapprovalcard-props-contract.md` for Phase 5 task 050 to consume.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass at Step 9.5; ADR-006/011/012/021 cited in PR description.</criterion>
+    <criterion testable="true">Component is purely props-driven (stateless from data fetching) — verified by code-review: no `fetch` / SSE / data-store imports in the component.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Pure props-driven design is the load-bearing decision. If `GateApprovalCard` reaches into an SSE channel or service, it stops being reusable across surfaces (Teams, M365 Copilot). Hosting surfaces own the data flow; the card owns the visual + interaction contract.
+
+    The TypeScript `GateCardProps` mirrors the server-side `GateRequest` fields in shape but uses camelCase (TS convention) vs PascalCase (C# convention). Document this in `notes/decisions/036-gateapprovalcard-props-contract.md` to avoid future inconsistency.
+
+    Phase 5 task 050 (SpaarkeAi card mount) wires SSE event → props mapping. Phase 6 task 062 (UI integration tests) executes the `&lt;ui-tests&gt;` defined here against deployed SpaarkeAi.
+
+    Bundle-size budget for `Spaarke.UI.Components` is tracked in the package's CI; check `package.json` `size-limit` config if present. If unclear, document the actual measured bundle delta in PR description.
+
+    Storybook is OPTIONAL for this task — if Storybook is not already wired in `Spaarke.UI.Components`, skip and document in the notes. Do not introduce Storybook scaffolding here (out of scope).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. UI tests in `&lt;ui-tests&gt;` are executed by Step 9.7 via the `ui-test` skill against deployed SpaarkeAi (full execution in Phase 6 task 062).
+    </protocol>
+  </execution>
+</task>
