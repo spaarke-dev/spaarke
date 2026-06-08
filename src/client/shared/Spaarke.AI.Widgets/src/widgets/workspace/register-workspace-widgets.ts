@@ -666,6 +666,55 @@ registerWorkspaceWidget(
 );
 
 // ---------------------------------------------------------------------------
+// ai-spaarke-ai-workspace-UI-r1 #7 (2026-06-08) — Metrics dashboards
+//
+// Each dashboard ("Matters Report", "Invoice Report", "Project Report", …) is
+// a STANDALONE direct widget — not a composable Dashboard section. Operators
+// confirmed (2026-06-08) that these reports are not added to consolidated
+// workspaces; each owns its full tab.
+//
+// Configs live in `metricsDashboardConfigs.ts` (in-code per the same
+// 2026-06-08 decision; promote to a `sprk_dashboardconfiguration` Dataverse
+// entity later if maker-authored dashboards become a requirement).
+//
+// To add a new dashboard:
+//   1. Add a MetricsDashboardConfig entry in `metricsDashboardConfigs.ts`.
+//   2. Add a registerWorkspaceWidget call below using
+//      `createMetricsDashboardFactory(dashboardId)`.
+// ---------------------------------------------------------------------------
+
+function createMetricsDashboardFactory(dashboardId: string) {
+  return () =>
+    import('./MetricsDashboardWidget').then(m => {
+      const Base = m.MetricsDashboardWidget;
+      const Wrapped = (
+        props: import('../../types/widget-types').WorkspaceWidgetProps<
+          import('./MetricsDashboardWidget').MetricsDashboardWidgetData
+        >,
+      ): ReturnType<typeof Base> => {
+        const mergedData = { dashboardId, ...(props.data ?? {}) };
+        return Base({ ...props, data: mergedData });
+      };
+      Wrapped.displayName = `MetricsDashboardWidget(${dashboardId})`;
+      return {
+        default: Wrapped as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+      };
+    });
+}
+
+registerWorkspaceWidget(
+  'matters-dashboard',
+  {
+    displayName: 'Matters Report',
+    category: 'ai',
+    icon: 'DataBarVerticalRegular',
+    allowMultiple: false,
+    defaultOrder: 300,
+  },
+  createMetricsDashboardFactory('matters-dashboard'),
+);
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from index.ts side-effect import)
 // ---------------------------------------------------------------------------
 
