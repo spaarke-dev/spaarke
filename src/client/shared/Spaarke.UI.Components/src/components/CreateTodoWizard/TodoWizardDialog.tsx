@@ -63,13 +63,20 @@ export interface ICreateTodoWizardProps {
    */
   navigationService?: INavigationService;
   /**
-   * Optional initial regarding selection. When supplied, task 032 will
-   * use this to pre-fill the AssociateToStep so launch contexts that
+   * Optional initial regarding selection (R3 FR-16). When supplied, the
+   * AssociateToStep is pre-filled with this record so launch contexts that
    * already know the parent record (e.g., a Matter detail-page ribbon
-   * button) can skip the user-selection step.
+   * button, the Outlook "Create To Do" ribbon) skip the user-selection step.
+   * The user may still change the selection or clear it before advancing.
    *
-   * Task 031 adds the prop surface only — the AssociateToStep does not
-   * yet auto-advance when this is supplied. Task 032 wires the auto-advance.
+   * Canonical launch contexts (see
+   * `projects/smart-todo-decoupling-r3/notes/createtodo-launch-contract.md`):
+   *   1. Kanban "Add To Do"                  → `undefined` (no pre-fill)
+   *   2. Parent-form ribbon (Matter / etc.)  → launch record triple
+   *   3. Outlook add-in "Create To Do"       → `sprk_communication` triple
+   *
+   * Task 031 added the prop surface; task 032 wired the pre-fill end-to-end
+   * via `IAssociateToStepConfig.initialAssociation`.
    */
   initialRegarding?: IInitialRegarding;
   /**
@@ -103,7 +110,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
   onClose,
   dataService,
   navigationService,
-  initialRegarding: _initialRegarding,
+  initialRegarding,
   authenticatedFetch,
   bffBaseUrl,
   embedded,
@@ -144,10 +151,19 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
       // FR-16: AssociateToStep is prepended (skippable). The CreateRecordWizard
       // shell renders the eleven-target dropdown + lookup; selection is captured
       // into context.association and passed through to onFinish.
+      //
+      // R3 task 032 — launch-context pre-fill (FR-16):
+      // When the caller supplies `initialRegarding`, the AssociateToStep starts with
+      // that record pre-selected. Three canonical launch contexts:
+      //   1. Kanban "Add To Do"                  → initialRegarding = undefined (no pre-fill)
+      //   2. Parent-form ribbon (Matter / etc.)  → initialRegarding = launch record
+      //   3. Outlook add-in "Create To Do"       → initialRegarding = sprk_communication
+      // See projects/smart-todo-decoupling-r3/notes/createtodo-launch-contract.md.
       associateToStep: navigationService
         ? {
             entityTypes: TODO_REGARDING_TARGETS.slice(),
             navigationService,
+            initialAssociation: initialRegarding,
           }
         : undefined,
 
@@ -255,6 +271,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
       formValues,
       dataService,
       navigationService,
+      initialRegarding,
       authenticatedFetch,
       bffBaseUrl,
       handleSearchContacts,

@@ -43,6 +43,20 @@ export interface IAssociateToStepConfig {
    * Typically injected by the consuming wizard from a PCF or Code Page adapter.
    */
   navigationService: INavigationService;
+  /**
+   * Optional pre-filled association applied when the wizard opens (smart-todo-decoupling-r3
+   * task 032 / FR-16 — launch-context pre-fill). When supplied, the AssociateToStep starts
+   * with this record pre-selected; the user may still change it or clear it before advancing.
+   *
+   * Three canonical launch contexts (per spec FR-16):
+   *   1. Kanban "Add To Do"                                  → undefined (no pre-fill)
+   *   2. Parent-form ribbon (Matter / Project / Event / …)   → pre-filled to the launch record
+   *   3. Outlook add-in "Create To Do"                       → pre-filled to sprk_regardingcommunication
+   *
+   * See `projects/smart-todo-decoupling-r3/notes/createtodo-launch-contract.md` for the full
+   * contract.
+   */
+  initialAssociation?: AssociationResult;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Refactor LegalWorkspace legacy to-do references (CreateTodo + CreateWorkAssignment + useTodoItems) to sprk_todo</title>
+    <phase>Phase 2: Shared-Lib Hoist (audit-surfaced follow-up)</phase>
+    <status>not-started</status>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <dependencies>010, 011, 023, 030, 031</dependencies>
+    <blocks>004, 005</blocks>
+    <tags>react, typescript, frontend, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Refactors a major consumer surface. Tags include `fluent-ui` + `frontend` + `refactoring`. Touches multiple `.tsx`/`.ts` files in LegalWorkspace. Blocks the final schema cut. FULL rigor.</rigor-reason>
+    <parallel-group>P2-W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches LegalWorkspace package extensively; other concurrent tasks (e.g., task 023 already done) modified the same package. Run alone to avoid conflicts.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Cleanup the remaining `sprk_event` / `sprk_todoflag` / `sprk_eventtodo` references in `src/solutions/LegalWorkspace/` so the final schema cut (tasks 004 + 005) can run without breaking LegalWorkspace.
+
+    Surfaced by waves 6 + 7 sub-agents (after tasks 020/023/031). Three sub-surfaces to address:
+
+    1. **`src/solutions/LegalWorkspace/src/components/CreateTodo/`** — LegalWorkspace's LOCAL CreateTodo component still writes `sprk_todoflag`. Replace with consumption of the shared lib's CreateTodoWizard (now sprk_todo per task 031). If the local component has LegalWorkspace-specific concerns (modal vs dialog, parent context, ActivityFeed integration), preserve those but route through the shared wizard.
+
+    2. **`src/solutions/LegalWorkspace/src/components/CreateWorkAssignment/`** — local CreateWorkAssignment with the same `addTodo` flag pattern that task 031 removed from the shared lib. Apply the same decision: remove the auto-create-todo feature; users who want a companion sprk_todo can launch the shared CreateTodoWizard with the work assignment event as regarding.
+
+    3. **`src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts`** — still queries `sprk_event?$filter=...sprk_todoflag eq true` for the LegalWorkspace SmartToDo widget. Repoint to `sprk_todos?$filter=...` filtered appropriately (likely by workspace context — workspace ↔ regarding matter or project).
+
+    Also clean up:
+    - The R3-deferred TODO in `src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts` per task 023's note ("can only respond with a generic refetch — it cannot resolve a sprk_todoid to a specific row in its IEvent list").
+    - Any straggler `sprk_eventtodo` reads in LegalWorkspace (audit Section 2C if applicable).
+  </prompt>
+
+  <role>Spaarke LegalWorkspace developer with shared-lib consumer expertise + Fluent v9.</role>
+
+  <goal>Zero `sprk_todoflag`, `sprk_eventtodo`, `_sprk_regardingevent_value` (in todo path) references in `src/solutions/LegalWorkspace/`. LegalWorkspace's SmartToDo widget queries `sprk_todo`. CreateTodo + CreateWorkAssignment consume the shared lib's new sprk_todo wizards. Build clean; cross-block sync via FeedTodoSyncContext (task 023 contract) works.</goal>
+
+  <context>
+    <background>The task 001 audit catalogued multiple LegalWorkspace consumers of the legacy event-todo model. Tasks 020 (SmartTodo) and 023 (FeedTodoSyncContext) addressed the SmartTodo + shared bus parts but explicitly deferred LegalWorkspace refactor. Task 031 fixed the shared lib's CreateTodo + CreateWorkAssignmentWizard but flagged that LegalWorkspace has LOCAL copies of these wizards that still write `sprk_todoflag`. Final schema cut (tasks 004 + 005) requires zero `src/` references to the legacy names — this task closes the gap.</background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateTodo/</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateWorkAssignment/</file>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/</file>
+      <file>src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/DataverseService.ts</file>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-29">Zero `sprk_todoflag`, `sprk_eventtodo`, `_sprk_regardingevent_value` (in todo path) references in `src/solutions/LegalWorkspace/` after this task. JSDoc migration notes referencing the LEGACY shape are OK.</constraint>
+    <constraint source="OS-1">No compat shim. Local CreateTodo + CreateWorkAssignment routes through the new shared lib wizards (or removes the auto-create feature for WorkAssignment per task 031's decision).</constraint>
+    <constraint source="ADR-024">Multi-entity resolution: when creating sprk_todo with a regarding parent, use `PolymorphicResolverService.applyResolverFields` (via the shared CreateTodoWizard which already wires this).</constraint>
+    <constraint source="NFR-01">Fluent v9 + semantic tokens + Griffel only.</constraint>
+    <constraint source="NFR-10">A11y preserved (no regression in keyboard nav, SR labels).</constraint>
+    <constraint source="Product portability">No hardcoded org URLs / tenant IDs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+      <file>projects/smart-todo-decoupling-r3/notes/createtodo-launch-contract.md (from task 032)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/ (the shared sprk_todo wizard from task 031)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/types.ts (TODO_REGARDING_TARGETS preset from task 030)</file>
+      <file>src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="shared-wizard-consumption" location="src/solutions/SmartTodo/src/components/AddTodoBar.tsx">After task 032, this is the canonical pattern for invoking the shared CreateTodoWizard from a domain surface.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inventory all legacy references in `src/solutions/LegalWorkspace/src/`: grep for `sprk_todoflag`, `sprk_eventtodo`, `_sprk_regardingevent_value` (excluding non-todo paths), and any references to LegalWorkspace's local `CreateTodo` + `CreateWorkAssignment` components.</step>
+    <step order="2">Refactor LegalWorkspace's local CreateTodo: replace with consumption of `CreateTodoWizard` from `@spaarke/ui-components`. Use the launch-context pre-fill prop (`initialRegarding`) per the contract doc from task 032 — wire the workspace context to pre-fill regarding (typically the workspace's matter or project).</step>
+    <step order="3">Refactor LegalWorkspace's local CreateWorkAssignment: remove the `addTodo` flag + auto-create-todo feature per task 031's decision. Update the wizard to NOT write `sprk_todoflag` on the event.</step>
+    <step order="4">Repoint `useTodoItems.ts`: change from `sprk_event?$filter=sprk_todoflag eq true` to `sprk_todos` filtered by the workspace context (the workspace's matter/project regarding lookup). Update the IEvent → ITodo type usage. Inline mapping from `sprk_todoid` to display fields uses the same shape as SmartTodo's ITodo (from task 020). Consider extracting an `ITodo` type from SmartTodo to a shared types location for reuse — OR redeclare locally in LegalWorkspace if duplication is acceptable for now.</step>
+    <step order="5">Update `useTodoItems.ts` to consume the new FeedTodoSyncContext bus (task 023's `notifyTodoChange` + `subscribe(todoId, isActive)`) — refresh the todo list when a todo changes.</step>
+    <step order="6">Update LegalWorkspace's SmartToDo widget component to render ITodo records (not IEvent with todoflag). Display fields per sprk_todo schema (sprk_name, sprk_priorityscore, sprk_duedate, statuscode).</step>
+    <step order="7">Update LegalWorkspace's ActivityFeed if it directly renders todo entries from sprk_event todoflag (per audit). Repoint to sprk_todo or split feed rendering between events and todos.</step>
+    <step order="8">Update any service-layer code (DataverseService.ts) that exposes legacy `toggleTodoFlag` or similar — either remove (preferred per OS-1) or repoint to a sprk_todo statuscode update.</step>
+    <step order="9">Run `npm run build` in `src/solutions/LegalWorkspace/` — must succeed clean.</step>
+    <step order="10">Run any existing tests in LegalWorkspace — pass.</step>
+    <step order="11">Fluent v9 lint pass on changed files.</step>
+    <step order="12">Repo grep `src/solutions/LegalWorkspace/src/` for `sprk_todoflag` and `sprk_eventtodo`. Confirm zero functional hits (JSDoc migration notes OK).</step>
+    <step order="13">Verify the LegalWorkspace SmartToDo widget end-to-end (read-through trace): user clicks "Add To Do" → shared CreateTodoWizard opens with workspace context pre-filled as regarding → submits → sprk_todo created → FeedTodoSyncContext notifies → useTodoItems refreshes → widget re-renders.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="grep">Reference verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">`src/solutions/LegalWorkspace/src/components/CreateTodo/` (refactored to consume shared wizard)</output>
+    <output type="code">`src/solutions/LegalWorkspace/src/components/CreateWorkAssignment/` (addTodo feature removed)</output>
+    <output type="code">`src/solutions/LegalWorkspace/src/components/SmartToDo/` (uses ITodo + sprk_todo)</output>
+    <output type="code">`src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts` (repointed to sprk_todo)</output>
+    <output type="code">`src/solutions/LegalWorkspace/src/services/DataverseService.ts` (legacy toggleTodoFlag removed or repointed)</output>
+    <output type="code">`src/solutions/LegalWorkspace/src/components/ActivityFeed/` (if affected, todo rendering updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Repo grep `src/solutions/LegalWorkspace/src/` for `sprk_todoflag` returns 0 functional hits (JSDoc migration notes OK).</criterion>
+    <criterion testable="true">Repo grep for `sprk_eventtodo` in `src/solutions/LegalWorkspace/src/` returns 0 hits.</criterion>
+    <criterion testable="true">`npm run build` in `src/solutions/LegalWorkspace/` clean.</criterion>
+    <criterion testable="true">LegalWorkspace SmartToDo widget queries `sprk_todos` (not `sprk_event?$filter=sprk_todoflag eq true`).</criterion>
+    <criterion testable="true">LegalWorkspace CreateTodo flow consumes shared CreateTodoWizard.</criterion>
+    <criterion testable="true">LegalWorkspace CreateWorkAssignment no longer writes `sprk_todoflag`.</criterion>
+    <criterion testable="true">Fluent v9 lint passes on changed files.</criterion>
+    <criterion testable="true">Final schema cut readiness verified: ZERO `src/` references to `sprk_todoflag` outside `.claude/archive/` (or this project's own audit/spec/plan docs).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the final consumer-side cleanup before the schema cut. After this completes, repo-wide grep for `sprk_todoflag` should be clean enough for task 004 to remove the field from `sprk_event` without breaking any consumer.
+
+    The LegalWorkspace ActivityFeed integration is the trickiest part — historically, events with `todoflag=true` were rendered as todo entries in the feed. Now todos are first-class sprk_todo records. The feed should likely show events AND todos as separate streams (or unified via the new bus, but with todo-id keying). Use task 023's FeedTodoSyncContext pattern.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

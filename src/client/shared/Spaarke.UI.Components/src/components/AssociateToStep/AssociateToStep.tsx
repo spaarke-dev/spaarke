@@ -83,9 +83,16 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
   const styles = useAssociateToStepStyles();
 
   // ── State ────────────────────────────────────────────────────────────────
-  const [selectedEntityType, setSelectedEntityType] = React.useState<string>(() =>
-    entityTypes.length > 0 ? entityTypes[0].entityType : ''
-  );
+  // Initial entity type: if a `value` is pre-supplied (R3 task 032 / FR-16
+  // launch-context pre-fill), seed `selectedEntityType` from value.entityType so
+  // the dropdown reflects the pre-filled record's parent type. Otherwise default
+  // to the first available target.
+  const [selectedEntityType, setSelectedEntityType] = React.useState<string>(() => {
+    if (value?.entityType && entityTypes.some(et => et.entityType === value.entityType)) {
+      return value.entityType;
+    }
+    return entityTypes.length > 0 ? entityTypes[0].entityType : '';
+  });
   const [isLookupPending, setIsLookupPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
