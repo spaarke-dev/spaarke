@@ -27,6 +27,7 @@ import { calendarRegistration } from "./sections/calendar.registration";
 import { projectsRegistration } from "./sections/projects.registration";
 import { invoicesRegistration } from "./sections/invoices.registration";
 import { workAssignmentsRegistration } from "./sections/workAssignments.registration";
+import { mattersRegistration } from "./sections/matters.registration";
 
 /** All available workspace sections in default display order. */
 export const SECTION_REGISTRY: readonly SectionRegistration[] = [
@@ -35,6 +36,7 @@ export const SECTION_REGISTRY: readonly SectionRegistration[] = [
   latestUpdatesRegistration,
   todoRegistration,
   documentsRegistration,
+  mattersRegistration,
   projectsRegistration,
   invoicesRegistration,
   workAssignmentsRegistration,

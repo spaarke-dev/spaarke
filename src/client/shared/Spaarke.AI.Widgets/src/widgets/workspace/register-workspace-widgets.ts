@@ -591,6 +591,7 @@ registerWorkspaceWidget(
 //  - workAssignments:  'Active Work Assignments (Workspace)' (created 2026-06-08)
 const ENTITY_VIEW_CONFIG_IDS = {
   documents: 'd99a4352-4913-f111-8343-7ced8d1dc988',
+  matters: '113ad380-9e63-f111-ab0c-70a8a53ec687',
   projects: '97ee98e7-7a63-f111-ab0c-70a8a53ec687',
   invoices: 'd021827b-9b5e-f111-ab0c-7c1e521545d7',
   workAssignments: '9c5b0ee7-7a63-f111-ab0c-000d3a4d8152',
@@ -636,6 +637,18 @@ registerWorkspaceWidget(
     defaultOrder: 200,
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents)
+);
+
+registerWorkspaceWidget(
+  'matters-list',
+  {
+    displayName: 'Matters',
+    category: 'data',
+    icon: 'BriefcaseSearchRegular',
+    allowMultiple: true,
+    defaultOrder: 205,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.matters)
 );
 
 registerWorkspaceWidget(

@@ -90,12 +90,28 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, shorthands, Dropdown, Option, Label, Button, Tooltip } from '@fluentui/react-components';
+import {
+  makeStyles,
+  mergeClasses,
+  tokens,
+  shorthands,
+  Label,
+  Button,
+  Tooltip,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  RadioGroup,
+  Radio,
+  Input,
+  Text,
+} from '@fluentui/react-components';
 import {
   ChevronLeft20Regular,
   ChevronRight20Regular,
-  CaretUp24Regular,
-  CaretDown24Regular,
+  ChevronDown16Regular,
+  CalendarLtr24Filled,
+  CalendarLtr24Regular,
 } from '@fluentui/react-icons';
 
 import { EventsPageProvider, useEventsPageContext } from '../../context/EventsPageContext';
@@ -297,37 +313,55 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     boxSizing: 'border-box',
   },
+  // ai-spaarke-ai-workspace-UI-r1 iteration 2 (2026-06-08): filter row is
+  // now a Semantic-Search-style toolbar of chip buttons (Event Type ⌄,
+  // Event Status ⌄, Date Range ⌄, Filter by Date Field ⌄). Gray toolbar
+  // background per operator feedback (match the DataGrid header).
   dateRangeRow: {
     display: 'flex',
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     flexWrap: 'wrap',
-    rowGap: '12px',
-    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): restore Griffel atomic-
-    // CSS spacing between filter fields. Task 033b regressed this to inline
-    // `marginRight: 28` per-field; this columnGap replaces those overrides
-    // and is the canonical spacing source for all fields in the row.
-    columnGap: tokens.spacingHorizontalXXL,
+    rowGap: tokens.spacingVerticalS,
+    columnGap: tokens.spacingHorizontalS,
     flexShrink: 0,
-    ...shorthands.padding('4px', '4px', '8px', '4px'),
-    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): subtle brand-accent
-    // border instead of neutral; provides the "color title line" the user
-    // requested without disrupting the dark-mode palette.
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorBrandStroke2),
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
   },
-  dateRangeField: {
-    display: 'flex',
-    flexDirection: 'column',
-    flex: '1 0 140px',
-    minWidth: '140px',
+  filterChipButton: {
+    minWidth: 'auto',
+    fontWeight: tokens.fontWeightRegular,
   },
-  dateRangeLabel: {
-    fontSize: tokens.fontSizeBase200,
-    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): brand-tinted label color
-    // (subtle), keeping ADR-021 compliance (semantic token, dark-mode safe).
+  filterChipButtonActive: {
+    backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground2,
     fontWeight: tokens.fontWeightSemibold,
-    marginBottom: '4px',
+  },
+  filterPopoverSurface: {
+    minWidth: '240px',
+    padding: tokens.spacingHorizontalM,
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalS,
+  },
+  filterPopoverLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  filterPopoverFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    columnGap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  quickSelectGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: tokens.spacingHorizontalS,
   },
   filterActions: {
     display: 'flex',
@@ -708,77 +742,227 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     [openEvent]
   );
 
+  // ── Date-range chip helpers ─────────────────────────────────────────────
+  // ai-spaarke-ai-workspace-UI-r1 iteration 2 (2026-06-08): Date Range
+  // re-introduced as a chip popover (operator request — bring it back from
+  // the field-dropdown pattern in Semantic Search). The popover surfaces
+  // From / To date inputs AND Quick Select presets. State still flows via
+  // pending.fromDate / pending.toDate so calendar day-clicks (clickMode=range)
+  // and the chip's edits share one source of truth.
+  const dateRangeDisplay = React.useMemo(() => {
+    if (pending.fromDate && pending.toDate) {
+      if (pending.fromDate === pending.toDate) return pending.fromDate;
+      return `${pending.fromDate} → ${pending.toDate}`;
+    }
+    if (pending.fromDate) return `from ${pending.fromDate}`;
+    if (pending.toDate) return `to ${pending.toDate}`;
+    return null;
+  }, [pending.fromDate, pending.toDate]);
+
+  const applyPreset = React.useCallback(
+    (preset: 'last30' | 'last90' | 'thisYear' | 'lastYear') => {
+      const today = new Date();
+      const toIso = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      let from: Date;
+      let to: Date = today;
+      switch (preset) {
+        case 'last30':
+          from = new Date(today);
+          from.setDate(from.getDate() - 30);
+          break;
+        case 'last90':
+          from = new Date(today);
+          from.setDate(from.getDate() - 90);
+          break;
+        case 'thisYear':
+          from = new Date(today.getFullYear(), 0, 1);
+          break;
+        case 'lastYear':
+          from = new Date(today.getFullYear() - 1, 0, 1);
+          to = new Date(today.getFullYear() - 1, 11, 31);
+          break;
+      }
+      setPending(prev => ({ ...prev, fromDate: toIso(from), toDate: toIso(to) }));
+    },
+    [],
+  );
+
   return (
     <div className={styles.root}>
-      {/* (1) Filter row — preserved AS-IS from task 130/136 per Q2 sign-off. */}
+      {/* (1) Filter row — Semantic-Search-style chip toolbar.
+          ai-spaarke-ai-workspace-UI-r1 iteration 2 (2026-06-08). */}
       <div className={styles.dateRangeRow}>
-        <div className={styles.dateRangeField}>
-          <Label className={styles.dateRangeLabel}>Event Type</Label>
-          <Dropdown
-            value={eventTypeDisplay}
-            selectedOptions={pending.eventTypeId ? [pending.eventTypeId] : ['']}
-            onOptionSelect={(_e, data) => {
-              const v = data.optionValue ?? '';
-              setPending(prev => ({
-                ...prev,
-                eventTypeId: v === '' ? null : v,
-              }));
-            }}
-          >
-            <Option value="" text="All">
-              All
-            </Option>
-            {eventTypeOptions.map(t => (
-              <Option key={t.id} value={t.id} text={t.name}>
-                {t.name}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
-        <div className={styles.dateRangeField}>
-          <Label className={styles.dateRangeLabel}>Event Status</Label>
-          <Dropdown
-            value={eventStatusDisplay}
-            selectedOptions={pending.eventStatusValue !== null ? [String(pending.eventStatusValue)] : ['']}
-            onOptionSelect={(_e, data) => {
-              const v = data.optionValue ?? '';
-              setPending(prev => ({
-                ...prev,
-                eventStatusValue: v === '' ? null : Number(v),
-              }));
-            }}
-          >
-            <Option value="" text="All">
-              All
-            </Option>
-            {STATUS_OPTIONS.map(s => (
-              <Option key={s.value} value={String(s.value)} text={s.label}>
-                {s.label}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
-        <div className={styles.dateRangeField}>
-          <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
-          <Dropdown
-            value={dateFieldDisplay}
-            selectedOptions={[pending.dateField]}
-            onOptionSelect={(_e, data) => {
-              const next = data.optionValue ?? DATE_FIELD_NONE;
-              setPending(prev => ({ ...prev, dateField: next }));
-            }}
-          >
-            {DATE_FIELDS.map(f => (
-              <Option key={f.value || 'none'} value={f.value} text={f.label}>
-                {f.label}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
-        {/* ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): explicit From / To
-            date inputs removed. The range is now picked entirely by clicking
-            days on the calendar strip (first click = From, second click = To,
-            third click resets). See `onCalendarFilter` for the wiring. */}
+        {/* Event Type chip */}
+        <Popover trapFocus>
+          <PopoverTrigger disableButtonEnhancement>
+            <Button
+              className={mergeClasses(
+                styles.filterChipButton,
+                pending.eventTypeId ? styles.filterChipButtonActive : undefined,
+              )}
+              appearance="subtle"
+              size="small"
+              iconPosition="after"
+              icon={<ChevronDown16Regular />}
+              aria-label="Event Type filter"
+            >
+              {`Event Type${pending.eventTypeId ? `: ${eventTypeDisplay}` : ''}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverSurface className={styles.filterPopoverSurface}>
+            <Text className={styles.filterPopoverLabel}>Event Type</Text>
+            <RadioGroup
+              value={pending.eventTypeId ?? ''}
+              onChange={(_e, data) =>
+                setPending(prev => ({
+                  ...prev,
+                  eventTypeId: data.value === '' ? null : data.value,
+                }))
+              }
+            >
+              <Radio value="" label="All" />
+              {eventTypeOptions.map(t => (
+                <Radio key={t.id} value={t.id} label={t.name} />
+              ))}
+            </RadioGroup>
+          </PopoverSurface>
+        </Popover>
+
+        {/* Event Status chip */}
+        <Popover trapFocus>
+          <PopoverTrigger disableButtonEnhancement>
+            <Button
+              className={mergeClasses(
+                styles.filterChipButton,
+                pending.eventStatusValue !== null ? styles.filterChipButtonActive : undefined,
+              )}
+              appearance="subtle"
+              size="small"
+              iconPosition="after"
+              icon={<ChevronDown16Regular />}
+              aria-label="Event Status filter"
+            >
+              {`Event Status${pending.eventStatusValue !== null ? `: ${eventStatusDisplay}` : ''}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverSurface className={styles.filterPopoverSurface}>
+            <Text className={styles.filterPopoverLabel}>Event Status</Text>
+            <RadioGroup
+              value={pending.eventStatusValue !== null ? String(pending.eventStatusValue) : ''}
+              onChange={(_e, data) =>
+                setPending(prev => ({
+                  ...prev,
+                  eventStatusValue: data.value === '' ? null : Number(data.value),
+                }))
+              }
+            >
+              <Radio value="" label="All" />
+              {STATUS_OPTIONS.map(s => (
+                <Radio key={s.value} value={String(s.value)} label={s.label} />
+              ))}
+            </RadioGroup>
+          </PopoverSurface>
+        </Popover>
+
+        {/* Date Range chip — popover with From / To + Quick Select presets */}
+        <Popover trapFocus>
+          <PopoverTrigger disableButtonEnhancement>
+            <Button
+              className={mergeClasses(
+                styles.filterChipButton,
+                dateRangeDisplay ? styles.filterChipButtonActive : undefined,
+              )}
+              appearance="subtle"
+              size="small"
+              iconPosition="after"
+              icon={<ChevronDown16Regular />}
+              aria-label="Date Range filter"
+            >
+              {`Date Range${dateRangeDisplay ? `: ${dateRangeDisplay}` : ''}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverSurface className={styles.filterPopoverSurface}>
+            <Text className={styles.filterPopoverLabel}>From</Text>
+            <Input
+              type="date"
+              value={pending.fromDate}
+              onChange={(_e, data) =>
+                setPending(prev => ({ ...prev, fromDate: data.value }))
+              }
+            />
+            <Text className={styles.filterPopoverLabel}>To</Text>
+            <Input
+              type="date"
+              value={pending.toDate}
+              onChange={(_e, data) =>
+                setPending(prev => ({ ...prev, toDate: data.value }))
+              }
+            />
+            <Text className={styles.filterPopoverLabel}>Quick select</Text>
+            <div className={styles.quickSelectGrid}>
+              <Button size="small" appearance="subtle" onClick={() => applyPreset('last30')}>
+                Last 30 days
+              </Button>
+              <Button size="small" appearance="subtle" onClick={() => applyPreset('last90')}>
+                Last 90 days
+              </Button>
+              <Button size="small" appearance="subtle" onClick={() => applyPreset('thisYear')}>
+                This year
+              </Button>
+              <Button size="small" appearance="subtle" onClick={() => applyPreset('lastYear')}>
+                Last year
+              </Button>
+            </div>
+            {(pending.fromDate || pending.toDate) && (
+              <div className={styles.filterPopoverFooter}>
+                <Button
+                  size="small"
+                  appearance="subtle"
+                  onClick={() =>
+                    setPending(prev => ({ ...prev, fromDate: '', toDate: '' }))
+                  }
+                >
+                  Clear range
+                </Button>
+              </div>
+            )}
+          </PopoverSurface>
+        </Popover>
+
+        {/* Filter by Date Field chip */}
+        <Popover trapFocus>
+          <PopoverTrigger disableButtonEnhancement>
+            <Button
+              className={mergeClasses(
+                styles.filterChipButton,
+                pending.dateField && pending.dateField !== DATE_FIELD_NONE
+                  ? styles.filterChipButtonActive
+                  : undefined,
+              )}
+              appearance="subtle"
+              size="small"
+              iconPosition="after"
+              icon={<ChevronDown16Regular />}
+              aria-label="Date field filter"
+            >
+              {`Date Field${pending.dateField && pending.dateField !== DATE_FIELD_NONE ? `: ${dateFieldDisplay}` : ''}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverSurface className={styles.filterPopoverSurface}>
+            <Text className={styles.filterPopoverLabel}>Filter by Date Field</Text>
+            <RadioGroup
+              value={pending.dateField}
+              onChange={(_e, data) =>
+                setPending(prev => ({ ...prev, dateField: data.value }))
+              }
+            >
+              {DATE_FIELDS.map(f => (
+                <Radio key={f.value || 'none'} value={f.value} label={f.label} />
+              ))}
+            </RadioGroup>
+          </PopoverSurface>
+        </Popover>
         <div className={styles.filterActions}>
           {hasUnapplied && (
             <Button appearance="primary" size="small" onClick={onApply} aria-label="Apply filters">
@@ -790,13 +974,19 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
               Clear
             </Button>
           )}
-          <Tooltip content={calendarCollapsed ? 'Expand calendar' : 'Collapse calendar'} relationship="label">
+          <Tooltip content={calendarCollapsed ? 'Show calendar' : 'Hide calendar'} relationship="label">
             <Button
-              appearance="subtle"
-              icon={calendarCollapsed ? <CaretDown24Regular /> : <CaretUp24Regular />}
+              appearance={calendarCollapsed ? 'subtle' : 'primary'}
+              icon={
+                calendarCollapsed ? (
+                  <CalendarLtr24Regular />
+                ) : (
+                  <CalendarLtr24Filled />
+                )
+              }
               onClick={toggleCollapsed}
               aria-expanded={!calendarCollapsed}
-              aria-label={calendarCollapsed ? 'Expand calendar' : 'Collapse calendar'}
+              aria-label={calendarCollapsed ? 'Show calendar' : 'Hide calendar'}
             />
           </Tooltip>
         </div>
