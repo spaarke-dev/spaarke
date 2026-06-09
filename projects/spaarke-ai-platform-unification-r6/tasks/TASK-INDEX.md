@@ -84,9 +84,9 @@
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 050 | C-G1 | `WorkspaceTab` canonical TypeScript interface (D-C-01) | 🔲 | FULL | true | 049 |
-| 051 | C-G2 | `WorkspaceStateService.cs` (Redis hot + Cosmos durable per Q4) (D-C-02) | 🔲 | FULL | false | 050 |
-| 052 | C-G3 | `GET /api/workspace/state` endpoint (D-C-03) | 🔲 | FULL | false | 051 |
+| 050 | C-G1 | `WorkspaceTab` canonical TypeScript interface (D-C-01) | ✅ | FULL | true | 049 |
+| 051 | C-G2 | `WorkspaceStateService.cs` (Redis hot + Cosmos durable per Q4) (D-C-02) | ✅ | FULL | false | 050 |
+| 052 | C-G3 | `GET /api/workspace/state` endpoint (D-C-03) | ✅ | FULL | false | 051 |
 | 053 | C-G4 | Wire `WorkspaceStateService` into `SprkChatAgentFactory` (D-C-04) | 🔲 | FULL | false | 052 |
 
 #### Sub-phase 6b — Chat tools + affordances + conflict (parallel with 6c/7/9 after 6a)

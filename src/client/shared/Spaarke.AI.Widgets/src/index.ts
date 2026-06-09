@@ -61,6 +61,26 @@ export type {
 // Required by WorkspaceWidgetRegistry.registerWorkspaceWidget().
 export type { WidgetMetadata } from './types/shared';
 
+// ---------------------------------------------------------------------------
+// Types — Canonical WorkspaceTab (R6 Pillar 6a gate; FR-31)
+//
+// Shared contract for Pillars 6a (state model), 6b (chat tools that mutate
+// tabs), 6c (workspace events), 7 (memory composition), and 9 (visibility
+// contract). See `./types/WorkspaceTab.ts` for the full design rationale.
+// ---------------------------------------------------------------------------
+
+export type {
+  WorkspaceTab,
+  WorkspaceTabWidgetType,
+  WorkspaceTabWidgetData,
+  SummaryTabWidgetData,
+  DocumentViewerTabWidgetData,
+  DashboardTabWidgetData,
+  TableTabWidgetData,
+  WorkspaceTabSourceProvenance,
+  WorkspaceTabMatterContext,
+} from './types/WorkspaceTab';
+
 export * from './types/event-types';
 
 // ---------------------------------------------------------------------------

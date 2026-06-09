@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
+using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -118,6 +119,28 @@ public static class AnalysisServicesModule
         // hosted-service registration itself is still gated above (under the
         // compound AI gate via AddPlaybookServices).
         AddSessionFilesCleanupOptions(services, configuration);
+
+        // R6 Pillar 6a (task 051, D-C-02) — WorkspaceStateService. Q4 hybrid persistence
+        // (Redis hot 24h TTL + Cosmos durable on pin/matter-attach) for canonical
+        // workspace-tab state. Per-tenant Redis key `workspace:{tenantId}:{sessionId}`
+        // is BINDING per ADR-014 + NFR-16.
+        //
+        // §F.1 asymmetric-registration audit: UNCONDITIONAL registration. The consumers
+        // are (a) GET /api/workspace/state endpoint (task 052, unconditional mapping in
+        // R6 Pillar 6a) and (b) SprkChatAgentFactory per-turn snapshot (task 053). The
+        // service has ZERO AI-internal constructor deps (cache + Cosmos + config + logger
+        // only), so the asymmetric-registration anti-pattern does NOT apply — registration
+        // is symmetric with endpoint mapping (both unconditional). No Null peer needed.
+        //
+        // §A.4 ADR-013 placement: workspace-state plumbing, NOT AI capability. Per refined
+        // ADR-013, this service does NOT inject IOpenAiClient / IPlaybookService / any
+        // AI-internal type. Placement-justification record:
+        // `projects/spaarke-ai-platform-unification-r6/notes/task-051-placement-justification.md`.
+        //
+        // Lifetime: Scoped — matches IDistributedCache (Singleton) + CosmosClient
+        // (Singleton) wrap pattern used by SessionPersistenceService + MatterMemoryService.
+        // ZERO new Program.cs lines per ADR-010.
+        services.AddScoped<IWorkspaceStateService, WorkspaceStateService>();
 
         // Unconditional chat-CRUD + notification services (task 011 Phase 1b Tier 1, D-09 §2 B1/B4/B5/L5).
         // These services have ZERO AI dependencies; their previous conditional registration was

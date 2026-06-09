@@ -1,7 +1,9 @@
 <task id="050" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-01 — Canonical `WorkspaceTab` TypeScript interface (Pillar 6a gate)</title>
-    <status>pending</status>
+    <status>completed</status>
+    <completion-date>2026-06-08</completion-date>
+    <outcome-note>Canonical WorkspaceTab interface added to @spaarke/ai-widgets/src/types/WorkspaceTab.ts (407 lines incl. JSDoc) + barrel-exported. 4-variant discriminated union (Summary | DocumentViewer | Dashboard | Table) narrowed by widgetType; all 12 required fields per FR-31 typed (incl. visibleToAssistant required, lastUserEditAt optional for Q8). tsc --noEmit passes with 0 errors. Quality Gates (code-review + adr-check) PASS at Step 9.5. Consumers NOT migrated — downstream Pillar 6a work. See notes/task-050-workspacetab-interface-evidence.md.</outcome-note>
     <estimated-effort>3 hours</estimated-effort>
     <phase>Phase C — Tri-directional Workspace (Pillar 6a)</phase>
     <wave>C-G1 (sequential within Pillar 6a; gates 6b/6c/7/9)</wave>

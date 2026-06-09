@@ -1,7 +1,8 @@
 <task id="052" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-03 — `GET /api/workspace/state` BFF endpoint (tenant + session scoped)</title>
-    <status>pending</status>
+    <status>completed</status>
+    <outcome-note>2026-06-09: ✅ COMPLETE. Endpoint `GET /api/workspace/state?sessionId={sessionId}` ships at `Api/Workspace/WorkspaceStateEndpoints.cs` with `RequireAuthorization()` + `ai-context` rate limit + `tid`-claim tenant scope (canonical InsightEndpoints precedent). `WorkspaceStateResponse(Tabs, ActiveTabId, UserSelection)` record; activeTabId/userSelection null in C-G1 (reserved for C-G2/C-G6 extension points). Empty session returns 200 + empty list. Wired in ONE line in `EndpointMappingExtensions.MapDomainEndpoints` (ZERO Program.cs delta per ADR-010). 5/5 endpoint tests PASS. "403 tenant mismatch" reinterpreted as 401-missing-tid (structurally impossible by design — no query-param tenant override). Publish 44.62 MB compressed (-1.34 MB vs post-051 baseline; within R6 budget). Evidence: `notes/task-052-workspace-state-endpoint-evidence.md`. ADR compliance walkthrough: 008/010/013/014/015/016/019/029.</outcome-note>
     <estimated-effort>4 hours</estimated-effort>
     <phase>Phase C — Tri-directional Workspace (Pillar 6a)</phase>
     <wave>C-G1 (sequential)</wave>

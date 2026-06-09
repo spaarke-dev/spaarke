@@ -1,7 +1,20 @@
 <task id="051" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-02 — `WorkspaceStateService.cs` BFF service (Redis hot + Cosmos durable, Q4 hybrid)</title>
-    <status>pending</status>
+    <status>completed</status>
+    <outcome-note>
+      9/9 POML acceptance criteria PASS. Service implemented in `Services/Workspace/`
+      with full Q4 hybrid persistence (Redis 24h TTL + Cosmos durable on pin); reuses
+      existing `memory` container with `documentType: "workspace-tab"` discriminator +
+      id prefix (no new container provisioned). C# DTOs mirror task 050's TS canonical
+      shape; 4-variant discriminated union via System.Text.Json polymorphism (round-trip
+      verified by unit test). Unconditional DI registration in `AnalysisServicesModule`
+      — §F.1 anti-pattern not applicable (zero AI-internal ctor deps). 14 unit tests
+      PASS; full unit suite (6,900 tests) PASSES with no regressions. Publish-size
+      delta +0.31 MB (45.96 MB compressed; well within ≤+5 MB R6 budget + 50 MB
+      ADR-029 ceiling). No new HIGH CVE. Evidence + placement justification in
+      `notes/task-051-*.md`. Ready for main-session commit aggregation in Wave C-G1.
+    </outcome-note>
     <estimated-effort>1 day</estimated-effort>
     <phase>Phase C — Tri-directional Workspace (Pillar 6a)</phase>
     <wave>C-G1 (sequential within Pillar 6a)</wave>

@@ -11,15 +11,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | **B (Pillar 5 — schema-aware output)** — Wave B-G2 complete; preparing Wave B-G3 dispatch |
-| **Mode** | **Autonomous execution** per user pre-stated preference (`feedback_pipeline-execution-style.md`) |
+| **Phase** | **C (Pillar 6 — tri-directional workspace)** sub-phase 6a in progress, parallel with Phase B UI walkthrough |
+| **Mode** | **Autonomous execution** per user pre-stated preference (`feedback_pipeline-execution-style.md`); user UI walkthrough in parallel |
 | **Wave B-G1** | ✅ COMMITTED `f8ee93bf`. Tasks 030 + 031. |
 | **Wave B-G2** | ✅ COMMITTED `4f585448`. 032 SUM-CHAT@v1 (existing schema verified + node destination=chat); 033 Option A — new workspace playbook referencing shared SUM-CHAT@v1; 034 matter-prefill (data work via timed-out sub-agent; main-session closeout); 035 project-prefill (~12 min runtime; NFR-07 inspection-based). |
 | **Wave B-G3** | ✅ COMMITTED `4de9b67d`. 040 array dispatch + 041 object dispatch. Widget 1117 → 1775 LOC; 23 tests; both R5 SC-18 Gap C bugs structurally fixed. |
 | **Wave B-G4** | ✅ COMMITTED `200f8becb`. Task 042 CapabilityRouter dedup via SelectedPlaybookId + system-prompt directive (NFR-01-preserving). |
 | **Wave B-G5** | ✅ COMMITTED `2934c6bcf`. Task 048 integration test — 6 scenarios programmatically PASS; 8 live-UI items deferred to exit-gate manual walkthrough; 0 regressions vs Wave B-G4 baseline. |
-| **Wave B-G6** | ✅ Task 049 exit-gate doc authored (uncommitted). `notes/phase-b-exit-gate.md` — 5 GREEN criteria, 4 YELLOW flags (none blockers), 0 RED. Phase B programmatically exit-ready. **PENDING USER SIGN-OFF** per CLAUDE.md Confirmation Triggers (phase exit gate). 8 manual UI verifications required (~30 min user time on Spaarke Dev). |
-| **Next** | **PAUSE for user sign-off**. After approval → commit Wave B-G6 + transition `current-task.md` to Phase C kickoff (task 050 — `WorkspaceTab` canonical TypeScript interface; sub-phase 6a gates 6b/6c/7/9). |
+| **Wave B-G6** | ✅ COMMITTED `dbbeffe56`. Task 049 exit-gate doc. |
+| **Wave B-G7** | ✅ COMMITTED `949ee71ec`. Flag #3 stale GUID + flag #2 ProjectPreFill tests. |
+| **Wave B-G8** | ✅ COMMITTED `a62cccb48`. BingGrounding startup hardening + Spaarke Dev config drift unblock. BFF + SpaarkeAi + LegalWorkspace deployed to Spaarke Dev; BFF stable (200, ~0.3s, 5/5 over 30s). |
+| **Wave C-G1 partial** | ✅ Tasks 050 + 051 + 052 complete (committing now). 050 = WorkspaceTab canonical TS interface (407 LOC, 4-variant discriminated union, 0 TS errors). 051 = IWorkspaceStateService + WorkspaceStateService.cs (Redis hot 24h + Cosmos `memory` container reuse with documentType="workspace-tab" discriminator; +0.31 MB; 14 tests). 052 = GET /api/workspace/state endpoint (5 tests; ZERO Program.cs delta via EndpointMappingExtensions.MapDomainEndpoints). Full sweep 6905/0/109 (+19 vs Wave B-G8 baseline; 0 regressions). |
+| **Task 053 (HELD)** | SprkChatAgentFactory wire-up; held pending UI walkthrough (file overlap risk with B-G4 task 042 dedup directive). After walkthrough sign-off, dispatch 053 to close Wave C-G1. |
+| **Next** | **PAUSE for user walkthrough + sign-off**. After walkthrough: (a) stamp Phase B exit-gate; (b) dispatch task 053; (c) commit Wave C-G1 closeout; (d) begin sub-phases 6b/6c/7/9 (parallel after 6a complete). |
 | **Phase A exit-gate doc** | `projects/spaarke-ai-platform-unification-r6/notes/phase-a-exit-gate.md` |
 | **Wave B-G2 evidence** | `notes/task-032-migration-evidence.md`, `notes/task-033-migration-evidence.md`, `notes/task-034-migration-evidence.md`, `notes/task-035-migration-evidence.md` |
 | **R7 follow-up candidate** | Matter-prefill technical-debt sweep: retire 3-fallback parsing layers in `MatterPreFillService.cs` (lines 460-608: `UnwrapRawResponse`, `HasAnyField`, `ParseAiResponse` entity-extraction-format, `MatchField`). Defensive parsing from pre-Structured-Outputs era; now superfluous. Touches NFR-07 surface → R6-deferred. Also fix stale `DefaultPreFillPlaybookId` GUID in `ProjectPreFillService.cs:37-38` (flagged by 035). |
