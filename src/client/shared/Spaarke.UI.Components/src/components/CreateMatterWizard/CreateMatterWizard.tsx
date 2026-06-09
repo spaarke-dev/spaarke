@@ -195,6 +195,13 @@ export interface ICreateMatterWizardProps {
    * `sprk_searchindexname` to be populated on new matters (FR-WIZ-01).
    */
   resolveUserBuDefaults?: () => Promise<IUserBuCascadeDefaults>;
+  /**
+   * AAD tenant ID. Forwarded to `MatterService` so post-upload RAG indexing
+   * via `@spaarke/sdap-client` can route to the correct multi-tenant index.
+   * When omitted, indexing is skipped (files still upload to SPE successfully).
+   * Typically sourced from solution `config.tenantId` in `main.tsx`.
+   */
+  tenantId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +237,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   embedded,
   resolveSpeContainerId,
   resolveUserBuDefaults,
+  tenantId,
 }) => {
   // -- Entity-specific form state --
   const [step2Valid, setStep2Valid] = React.useState(false);
@@ -383,7 +391,8 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
           dataService,
           authenticatedFetch,
           bffBaseUrl,
-          context.speContainerId || undefined
+          context.speContainerId || undefined,
+          tenantId
         );
         const result = await service.createMatter(
           mergedFormValues,

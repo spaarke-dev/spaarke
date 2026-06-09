@@ -154,13 +154,22 @@ function _resolveNavProp(navPropMap: Record<string, string>, columnLogical: stri
 export class MatterService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
+  private readonly _tenantId: string;
 
   constructor(
     dataService: IDataService,
     authenticatedFetch: AuthenticatedFetchFn,
     bffBaseUrl: string,
-    private readonly _containerId?: string
+    private readonly _containerId?: string,
+    /**
+     * AAD tenant ID. Required to trigger post-upload RAG indexing via
+     * `EntityCreationService.indexUploadedFiles()`. When omitted or empty,
+     * the file upload still succeeds but indexing is skipped with a warning.
+     * Provided by the host solution (e.g. `config.tenantId` in main.tsx).
+     */
+    tenantId?: string
   ) {
+    this._tenantId = tenantId ?? '';
     this._dataService = dataService;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
@@ -316,20 +325,10 @@ export class MatterService {
 
     // -- Step 2: Upload files to SPE via BFF + create document records --
     if (uploadedFiles.length > 0 && this._containerId) {
-      // Phase 3b (upload-indexing-centralization): forward parent entity context +
-      // pre-resolved searchIndexName as query params so the BFF helper enqueues the
-      // RAG indexing job with the correct routing immediately — no race condition
-      // with downstream sprk_document creation.
       const uploadResult = await this._entityService.uploadFilesToSpe(
         this._containerId,
         uploadedFiles,
-        onUploadProgress,
-        {
-          searchIndexName: cascadeDefaults?.searchIndexName,
-          parentEntityType: 'sprk_matter',
-          parentEntityId: matterId,
-          parentEntityName: form.matterName.trim(),
-        }
+        onUploadProgress
       );
 
       if (!uploadResult.success) {
@@ -355,6 +354,24 @@ export class MatterService {
         );
         if (linkResult.warnings.length > 0) {
           warnings.push(...linkResult.warnings);
+        }
+
+        // -- Step 2b: Trigger RAG indexing for uploaded files --
+        // Uses the canonical sync-OBO path via `@spaarke/sdap-client.SdapApiClient.indexFile()`.
+        // Non-fatal — failures are surfaced as warnings; the matter + documents are already saved.
+        const indexingWarnings = await this._entityService.indexUploadedFiles(
+          uploadResult.uploadedFiles,
+          this._tenantId,
+          {
+            entityType: 'sprk_matter',
+            entityId: matterId,
+            entityName: form.matterName.trim(),
+          },
+          linkResult.createdDocumentIds,
+          cascadeDefaults?.searchIndexName
+        );
+        if (indexingWarnings.length > 0) {
+          warnings.push(...indexingWarnings);
         }
       }
 

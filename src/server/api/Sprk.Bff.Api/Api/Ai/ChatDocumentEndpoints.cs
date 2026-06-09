@@ -579,7 +579,6 @@ public static class ChatDocumentEndpoints
         IDistributedCache cache,
         ChatSessionManager sessionManager,
         SpeFileStore speFileStore,
-        Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         IConfiguration configuration,
         ILoggerFactory loggerFactory)
     {
@@ -733,48 +732,10 @@ public static class ChatDocumentEndpoints
                     detail: "Failed to upload document to SharePoint Embedded storage.");
             }
 
-            // multi-container-multi-index-r1 upload-indexing-centralization (Phase 3):
-            // enqueue tenant RAG indexing for the just-persisted document. This is the SprkChat
-            // "Save to Spaarke" gap — chat-promoted documents previously landed in SPE but were
-            // invisible to spaarke-file-index. The session's HostContext carries the parent
-            // entity (Matter/Project) so the resolver chain can route to the correct index.
-            // Helper is non-fatal; failures are logged but don't fail the persist response.
-            try
-            {
-                Sprk.Bff.Api.Models.Ai.ParentEntityContext? parentEntity = null;
-                if (session.HostContext != null &&
-                    !string.IsNullOrWhiteSpace(session.HostContext.EntityType) &&
-                    !string.IsNullOrWhiteSpace(session.HostContext.EntityId))
-                {
-                    parentEntity = new Sprk.Bff.Api.Models.Ai.ParentEntityContext(
-                        session.HostContext.EntityType,
-                        session.HostContext.EntityId,
-                        session.HostContext.EntityName ?? string.Empty);
-                }
-
-                var indexingRequest = new Sprk.Bff.Api.Services.Ai.PostUploadIndexingRequest(
-                    TenantId: tenantId,
-                    DriveId: driveId,
-                    ItemId: uploadResult.Id,
-                    FileName: filename,
-                    FileSizeBytes: binaryContent.Length,
-                    ContentType: contentType,
-                    DocumentId: documentId,
-                    ParentEntity: parentEntity,
-                    SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
-                    Source: "ChatPersist",
-                    CorrelationId: httpContext.TraceIdentifier);
-
-                await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, httpContext, httpContext.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                // Defensive — helper already swallows its own exceptions, but belt-and-braces
-                // ensures the chat persist contract is never broken by indexing.
-                logger.LogWarning(ex,
-                    "Failed to enqueue post-upload indexing for chat-persisted document {DocumentId} (non-fatal)",
-                    documentId);
-            }
+            // Post-upload RAG indexing for chat-persisted documents is triggered client-side
+            // via `@spaarke/sdap-client.SdapApiClient.indexFile()` — see project
+            // `sdap-client-shared-library-fix-r1`. Re-wiring inline indexing here is tracked
+            // as future work once the SprkChat surface adopts `@spaarke/sdap-client`.
 
             // 8. Build response and store idempotency marker
             var speResponse = new SpeFilePersistResponse(

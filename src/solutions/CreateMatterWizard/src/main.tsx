@@ -15,6 +15,7 @@ function App() {
   const params = React.useMemo(() => parseDataParams(), []);
   const [isAuthReady, setIsAuthReady] = React.useState(false);
   const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>(params.bffBaseUrl || "");
+  const [resolvedTenantId, setResolvedTenantId] = React.useState<string>("");
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
@@ -34,6 +35,7 @@ function App() {
         });
         if (!cancelled) {
           setResolvedBffBaseUrl(config.bffBaseUrl);
+          setResolvedTenantId(config.tenantId ?? "");
           setIsAuthReady(true);
         }
       } catch (err) {
@@ -102,6 +104,7 @@ function App() {
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
         resolveUserBuDefaults={resolveUserBuDefaults}
+        tenantId={resolvedTenantId}
       />
     </FluentProvider>
   );

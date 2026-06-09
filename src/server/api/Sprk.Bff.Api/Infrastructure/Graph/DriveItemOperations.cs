@@ -90,7 +90,8 @@ public class DriveItemOperations
                 item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
                 item.ETag,
                 item.Folder != null,
-                item.WebUrl)).ToList();
+                item.WebUrl,
+                item.ParentReference?.DriveId)).ToList();
 
             // Cache the result (2min TTL)
             if (_metadataCache != null)
@@ -274,7 +275,8 @@ public class DriveItemOperations
                 item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
                 item.ETag,
                 item.Folder != null,
-                item.WebUrl);
+                item.WebUrl,
+                item.ParentReference?.DriveId);
 
             // Cache the result with ETag-versioned key (5min TTL)
             if (_metadataCache != null)
@@ -751,7 +753,8 @@ public class DriveItemOperations
                 item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
                 item.ETag,
                 item.Folder != null,
-                item.WebUrl);
+                item.WebUrl,
+                item.ParentReference?.DriveId);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {

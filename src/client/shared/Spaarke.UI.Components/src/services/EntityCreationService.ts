@@ -31,6 +31,7 @@
 
 import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
+import { SdapApiClient, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
 // PolymorphicResolverService not needed — document records use canonical field set only
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,12 @@ export interface ISpeFileMetadata {
   name: string;
   size: number;
   webUrl?: string;
+  /**
+   * SPE drive ID this item belongs to. Populated from `DriveItem.parentReference.driveId`
+   * on the BFF upload response. Required to call `SdapApiClient.indexFile()` after upload.
+   * Optional for backwards compatibility with response payloads that pre-date the field.
+   */
+  driveId?: string;
 }
 
 /** Result of creating sprk_document records. */
@@ -128,11 +135,103 @@ export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<
 // ---------------------------------------------------------------------------
 
 export class EntityCreationService {
+  /** Lazily-constructed SDAP API client for BFF operations (currently: post-upload indexing). */
+  private _sdapClient: SdapApiClient | null = null;
+
   constructor(
     private readonly _webApi: IWebApiWithCreate,
     private readonly _authenticatedFetch: AuthenticatedFetchFn,
     private readonly _bffBaseUrl: string
   ) {}
+
+  /**
+   * Lazy accessor for `SdapApiClient`. Constructed on first use with the same
+   * `authenticatedFetch` + `bffBaseUrl` already injected into this service.
+   */
+  private _getSdapClient(): SdapApiClient {
+    if (!this._sdapClient) {
+      this._sdapClient = new SdapApiClient({
+        baseUrl: this._bffBaseUrl,
+        authenticatedFetch: this._authenticatedFetch,
+      });
+    }
+    return this._sdapClient;
+  }
+
+  /**
+   * Trigger RAG indexing for files uploaded via {@link uploadFilesToSpe}.
+   *
+   * Iterates `uploadedFiles` and posts one `POST /api/ai/rag/index-file` per file
+   * via `@spaarke/sdap-client.SdapApiClient.indexFile()`. Indexing runs under
+   * the caller's OBO identity inside the BFF request — same canonical path as
+   * DocumentUploadWizard's `triggerRagIndexing` and the "Send to Index" ribbon
+   * command. Pattern 4 compliant (writer-identity matching).
+   *
+   * Each call is **non-fatal**: an individual failure is logged + collected in
+   * the returned warnings array; remaining files continue. The wizard contract
+   * with the user is "files uploaded successfully" — searchability is best-effort.
+   *
+   * @param uploadedFiles Result of `uploadFilesToSpe` (must include `id` and `driveId`)
+   * @param tenantId AAD tenant GUID — required for multi-tenant index routing
+   * @param parentEntity Optional parent entity context for entity-scoped search
+   *   (e.g. `{ entityType: 'sprk_matter', entityId: matterId, entityName: matterName }`)
+   * @param createdDocumentIds Optional Dataverse document GUIDs in the same order as
+   *   `uploadedFiles` (returned by `createDocumentRecords`). When provided, the BFF
+   *   updates `sprk_searchindexed` + tracking fields on each document.
+   * @param searchIndexName Optional explicit index name (e.g. from BU cascade). When
+   *   omitted, the BFF resolver chain (parent → BU → tenant default) decides.
+   * @returns Warnings array describing per-file failures (empty when all succeed).
+   */
+  async indexUploadedFiles(
+    uploadedFiles: ISpeFileMetadata[],
+    tenantId: string,
+    parentEntity?: { entityType: string; entityId: string; entityName: string },
+    createdDocumentIds?: string[],
+    searchIndexName?: string
+  ): Promise<string[]> {
+    const warnings: string[] = [];
+    if (uploadedFiles.length === 0) return warnings;
+
+    if (!tenantId || tenantId.trim() === '') {
+      warnings.push('RAG indexing skipped: tenantId is required.');
+      return warnings;
+    }
+
+    const client = this._getSdapClient();
+
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      const file = uploadedFiles[i];
+
+      if (!file.driveId) {
+        warnings.push(`RAG indexing skipped for ${file.name}: missing driveId on upload response.`);
+        continue;
+      }
+
+      const request: IndexFileRequest = {
+        driveId: file.driveId,
+        itemId: file.id,
+        fileName: file.name,
+        tenantId,
+        documentId: createdDocumentIds?.[i],
+        parentEntity,
+        searchIndexName,
+      };
+
+      try {
+        const result: IndexFileResult = await client.indexFile(request);
+        if (!result.success) {
+          warnings.push(`RAG indexing failed for ${file.name}: ${result.errorMessage ?? 'unknown error'}`);
+        } else {
+          console.info(`[EntityCreationService] Indexed ${file.name} — ${result.chunksIndexed ?? '?'} chunks`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        warnings.push(`RAG indexing threw for ${file.name}: ${message}`);
+      }
+    }
+
+    return warnings;
+  }
 
   // -------------------------------------------------------------------------
   // INV-5-safe cascade helpers (spaarke-multi-container-multi-index-r1 / FR-WIZ-01..08)
@@ -295,33 +394,19 @@ export class EntityCreationService {
    * Uses: PUT /api/obo/containers/{containerId}/files/{path}
    * Each file is uploaded individually with Bearer token auth.
    *
-   * Optionally forwards the parent entity context + pre-resolved searchIndexName
-   * as query params so the BFF's centralized post-upload indexing helper
-   * (IPostUploadIndexingEnqueuer) can route the indexing job to the correct
-   * tenant index — closes the race condition where the sprk_document record
-   * isn't yet created at upload time (Phase 3b of upload-indexing-centralization).
+   * Post-upload RAG indexing is the caller's responsibility — invoke
+   * `SdapApiClient.indexFile()` from `@spaarke/sdap-client` for each
+   * returned `ISpeFileMetadata`. See project `sdap-client-shared-library-fix-r1`
+   * for the planned migration of this method to `sdap-client.UploadOperation`.
    *
    * @param containerId SPE container/drive ID for the target storage
    * @param files Files to upload
    * @param onProgress Optional progress callback
-   * @param indexingContext Optional context forwarded to the BFF helper:
-   *   - searchIndexName: BU-resolved index name (from resolveUserBuDefaults)
-   *   - parentEntityType/Id/Name: the parent record this upload links to
-   *     (e.g., "sprk_matter" + matterId + matterName). When provided, the
-   *     server-side ISearchIndexNameResolver chain uses these directly,
-   *     bypassing the document lookup that would race with sprk_document
-   *     creation downstream.
    */
   async uploadFilesToSpe(
     containerId: string,
     files: IUploadedFile[],
-    onProgress?: (progress: IUploadProgress) => void,
-    indexingContext?: {
-      searchIndexName?: string;
-      parentEntityType?: string;
-      parentEntityId?: string;
-      parentEntityName?: string;
-    }
+    onProgress?: (progress: IUploadProgress) => void
   ): Promise<IFileUploadResult> {
     if (files.length === 0) {
       return {
@@ -336,25 +421,6 @@ export class EntityCreationService {
     const uploadedFiles: ISpeFileMetadata[] = [];
     const errors: Array<{ fileName: string; error: string }> = [];
 
-    // Build indexing query string once (Phase 3b — forwarded to BFF helper).
-    const indexingQuery = (() => {
-      if (!indexingContext) return '';
-      const params: string[] = [];
-      if (indexingContext.searchIndexName) {
-        params.push(`searchIndexName=${encodeURIComponent(indexingContext.searchIndexName)}`);
-      }
-      if (indexingContext.parentEntityType) {
-        params.push(`parentEntityType=${encodeURIComponent(indexingContext.parentEntityType)}`);
-      }
-      if (indexingContext.parentEntityId) {
-        params.push(`parentEntityId=${encodeURIComponent(indexingContext.parentEntityId)}`);
-      }
-      if (indexingContext.parentEntityName) {
-        params.push(`parentEntityName=${encodeURIComponent(indexingContext.parentEntityName)}`);
-      }
-      return params.length > 0 ? `?${params.join('&')}` : '';
-    })();
-
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const fileName = encodeURIComponent(file.name);
@@ -368,7 +434,7 @@ export class EntityCreationService {
 
       try {
         const response = await this._authenticatedFetch(
-          `${this._bffBaseUrl}/api/obo/containers/${containerId}/files/${fileName}${indexingQuery}`,
+          `${this._bffBaseUrl}/api/obo/containers/${containerId}/files/${fileName}`,
           {
             method: 'PUT',
             body: file.file,

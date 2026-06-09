@@ -19,19 +19,15 @@ public static class UploadEndpoints
 {
     public static IEndpointRouteBuilder MapUploadEndpoints(this IEndpointRouteBuilder app)
     {
-        // PUT /api/containers/{id}/files/{*path} - Upload small file (MI)
+        // PUT /api/containers/{id}/files/{*path} - Upload small file (MI). Post-upload
+        // RAG indexing is triggered by the client via `@spaarke/sdap-client.SdapApiClient.indexFile()`
+        // after a successful PUT — see `sdap-client-shared-library-fix-r1` project.
         app.MapPut("/api/containers/{containerId}/files/{*path}", async (
             string containerId,
             string path,
             HttpRequest req,
-            [FromQuery] string? searchIndexName,
-            [FromQuery] string? parentEntityType,
-            [FromQuery] string? parentEntityId,
-            [FromQuery] string? parentEntityName,
             SpeFileStore speFileStore,
             NotificationService notificationService,
-            IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
-            IConfiguration configuration,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct) =>
@@ -61,40 +57,6 @@ public static class UploadEndpoints
 
                 // Stream directly to Graph SDK (no memory buffering)
                 var item = await speFileStore.UploadSmallAsync(containerId, path, req.Body, ct);
-
-                // multi-container-multi-index-r1 upload-indexing-centralization (Phase 3):
-                // enqueue RAG indexing for the just-uploaded file. Non-fatal — helper swallows
-                // failures so the upload contract with the caller is preserved.
-                if (item is not null && !string.IsNullOrWhiteSpace(item.Id))
-                {
-                    var tenantId = configuration["TENANT_ID"] ?? configuration["AzureAd:TenantId"] ?? string.Empty;
-                    var uploadedFileName = Path.GetFileName(path);
-
-                    ParentEntityContext? parentEntity = null;
-                    if (!string.IsNullOrWhiteSpace(parentEntityType) &&
-                        !string.IsNullOrWhiteSpace(parentEntityId))
-                    {
-                        parentEntity = new ParentEntityContext(
-                            parentEntityType,
-                            parentEntityId,
-                            parentEntityName ?? string.Empty);
-                    }
-
-                    var indexingRequest = new PostUploadIndexingRequest(
-                        TenantId: tenantId,
-                        DriveId: containerId,
-                        ItemId: item.Id,
-                        FileName: uploadedFileName,
-                        FileSizeBytes: item.Size,
-                        ContentType: null, // FileHandleDto doesn't carry MIME — helper infers from extension
-                        DocumentId: null,
-                        ParentEntity: parentEntity,
-                        SearchIndexName: searchIndexName,
-                        Source: "DirectContainerUpload",
-                        CorrelationId: traceId);
-
-                    await postUploadIndexingEnqueuer.EnqueueIfApplicableAsync(indexingRequest, context, ct);
-                }
 
                 // Fire-and-forget: create notification for the uploading user (must not block response)
                 var userOid = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
