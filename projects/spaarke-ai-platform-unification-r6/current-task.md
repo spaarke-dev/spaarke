@@ -1,8 +1,8 @@
 # Current Task State — spaarke-ai-platform-unification-r6
 
-> **Last Updated**: 2026-06-08 (Task 023 in progress — Pillar 3 cleanup; delete InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges)
+> **Last Updated**: 2026-06-08 (Phase A CLOSED; transitioning to Phase B kickoff — task 030)
 > **Recovery**: Read "Quick Recovery" section first
-> **Last Commit**: `cc6d8e3b` (Tasks 022 + 025 — dynamic invoke_playbook description + PlaybookExecutionEngine.ExecuteChatSummarizeAsync)
+> **Last Commit**: `9567cc1f` (task 029 — Phase A exit-gate document)
 > **Branch**: `work/spaarke-ai-platform-unification-r6` (pushed to origin; clean working tree)
 
 ---
@@ -11,11 +11,35 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | A (data-driven foundation) — Wave 10 (cleanup) + Phase A exit gate remaining |
-| **Wave** | 9 COMPLETE — Q9 chat-tool migration closes at **10/10** ✅ |
-| **Last Committed Wave** | 9 (`3ccb5304`) |
-| **Status** | ✅ Wave 9 complete. ADR-033 written (concise + full + INDEX). WorkingDocumentHandler migrated. ChatInvocationContext gains 2 fields (DocumentStreamWriter + AnalysisId). Build 0 errors, 16 baseline warnings. 3594/3616 AI services sweep passes (0 failed, +40 from Wave 9, +5 from Stage 2, baseline 3549). 3 new Dataverse rows deployed. First invocation of the "ADRs Are Defaults" principle in R6 — surfaced the over-engineered first framing AND a Stage-3 sub-agent stop-and-surface gap, both resolved cleanly. |
-| **Next Action** | Wave 10 (cleanup wave) — delete AnalysisExecutionTools (replaced by Pillar 3 invoke_playbook) + delete InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges (replaced by Pillar 3) + optionally delete the 10 now-unused legacy migrated tool classes (per-class audit needed for non-LLM consumers). Low risk; no ADR needed. |
+| **Phase** | **B (Pillar 5 — schema-aware output)** kickoff |
+| **Phase A** | ✅ CLOSED 2026-06-08 (user sign-off received; all 4 exit criteria GREEN; 2 documented yellow flags — ADR-033 + pre-existing Kiota CVE) |
+| **Next Task** | **030 — Add `outputSchema` JSON field to `sprk_analysisaction` Dataverse entity** (D-B-01; FULL rigor; production schema change → **Confirmation Trigger** per CLAUDE.md before deployment to Spaarke Dev) |
+| **Phase B parallel pair** | Task 030 (`outputSchema` on action) + Task 031 (`destination` + `widgetType` on node config) are parallel-safe; both gate the 4 downstream action migrations (032-035) |
+| **Phase B critical-path constraint** | Tasks 034 + 035 are NFR-07 regression tests (pre-fill migrations); MUST preserve `useAiPrefill` hook signature + 45s timeout + existing pre-fill flow |
+| **Phase A exit-gate doc** | `projects/spaarke-ai-platform-unification-r6/notes/phase-a-exit-gate.md` |
+
+## Phase B overview
+
+Pillar 5 — **Schema-aware output** (Q5 re-shaped design):
+- `outputSchema` on **action** (intrinsic data shape; action-fixed)
+- `destination` + `widgetType` on **node config** (per-playbook routing)
+- `StructuredOutputStreamWidget` schema-aware (array → bullets; object → labeled key-value blocks)
+- Duplicate-fire fix at **CapabilityRouter** (one user intent → one route → one playbook → one DeliverOutput)
+- Migrate 4 existing actions: summarize-document-for-chat, summarize-document-for-workspace, matter-prefill, project-prefill
+
+**Phase B task chain**:
+1. **030** (D-B-01) — outputSchema field on action [FULL; parallel with 031]
+2. **031** (D-B-02) — destination + widgetType on node config [FULL; parallel with 030]
+3. **032** (D-B-03) — migrate summarize-document-for-chat [STANDARD; depends on 030, 031]
+4. **033** (D-B-04) — migrate summarize-document-for-workspace [STANDARD; depends on 030, 031]
+5. **034** (D-B-05) — migrate matter-prefill **NFR-07 regression** [FULL; depends on 030, 031]
+6. **035** (D-B-06) — migrate project-prefill **NFR-07 regression** [FULL; depends on 030, 031]
+7. **040** (D-B-07) — StructuredOutputStreamWidget array rendering [FULL; depends on 032, 033]
+8. **041** (D-B-08) — StructuredOutputStreamWidget object rendering [FULL; depends on 040; sequential — same file]
+9. **042** (D-B-09) — CapabilityRouter dedup [FULL; depends on 041, 025]
+10. **048** — Phase B integration test [STANDARD; depends on 042, 034, 035]
+
+Estimated Phase B duration: 1-2 weeks (per spec calendar).
 
 ### ✅ Wave 7c verification (2026-06-08, post-compaction)
 

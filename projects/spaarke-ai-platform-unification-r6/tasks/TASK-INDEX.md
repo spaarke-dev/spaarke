@@ -59,8 +59,8 @@
 | 023 | A-G11 | Remove `InvokeSummarizePlaybookTool`/`InvokeInsightsQueryTool` bridges (D-A-15) | 🔲 | FULL | true | 022 |
 | 024 | A-G8 | Playbook FK fix: summarize-document-for-chat → SUM-CHAT (D-A-16) | 🔲 | STANDARD | true | 011 |
 | 025 | A-G12 | Refactor `SessionSummarizeOrchestrator` to use `PlaybookExecutionEngine` (D-A-17) | 🔲 | FULL | false | 024 |
-| 028 | A-G13 | Phase A integration test | 🔲 | STANDARD | false | 005, 013, 023, 025 |
-| 029 | A-G14 | Phase A exit-gate validation | 🔲 | MINIMAL | false | 028 |
+| 028 | A-G13 | Phase A integration test | ✅ | STANDARD | false | 005, 013, 023, 025 |
+| 029 | A-G14 | Phase A exit-gate validation | ✅ | MINIMAL | false | 028 |
 
 ### Phase B — Schema-Aware Output (Week 2–3, 11 tasks)
 
