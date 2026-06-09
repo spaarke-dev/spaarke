@@ -66,8 +66,8 @@
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 030 | B-G1 | Add `outputSchema` field to `sprk_analysisaction` (D-B-01) | 🔲 | FULL | true | 029 |
-| 031 | B-G1 | Extend node config with `destination` + `widgetType` (D-B-02) | 🔲 | FULL | true | 029 |
+| 030 | B-G1 | Add `outputSchema` field to `sprk_analysisaction` (D-B-01) — Option A: verify existing `sprk_outputschemajson` column (no deploy) | ✅ | FULL | true | 029 |
+| 031 | B-G1 | Extend node config with `destination` + `widgetType` (D-B-02) | ✅ | FULL | true | 029 |
 | 032 | B-G2 | Migrate `summarize-document-for-chat@v1` action outputSchema (D-B-03) | 🔲 | STANDARD | true | 030, 031 |
 | 033 | B-G2 | Migrate `summarize-document-for-workspace@v1` action outputSchema (D-B-04) | 🔲 | STANDARD | true | 030, 031 |
 | 034 | B-G2 | **Migrate matter-prefill action outputSchema (NFR-07 regression test)** (D-B-05) | 🔲 | FULL | true | 030, 031 |

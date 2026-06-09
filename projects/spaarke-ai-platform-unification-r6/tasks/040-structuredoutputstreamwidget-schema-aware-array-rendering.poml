@@ -270,7 +270,7 @@
     <test name="Backward Compatibility (Actions Without outputSchema)">
       <steps>
         <step>Open SpaarkeAi workspace shell</step>
-        <step>Trigger an action whose row has NULL `sprk_outputschema` (e.g., a not-yet-migrated action)</step>
+        <step>Trigger an action whose row has NULL `sprk_outputschemajson` (e.g., a not-yet-migrated action)</step>
         <step>Wait for streaming_complete</step>
         <step>Verify widget renders accumulated text as a string (current behavior)</step>
         <step>Check console — no errors expected (legacy path still works)</step>

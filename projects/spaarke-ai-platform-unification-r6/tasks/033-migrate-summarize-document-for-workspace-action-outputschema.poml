@@ -26,7 +26,7 @@
     (array → bullets) + 041 (object → labeled key-value blocks).
 
     The migration script MUST be idempotent — guard with a GET before PATCH; if existing
-    `sprk_outputschema` is non-null AND matches, skip; if mismatches, FAIL loudly with a
+    `sprk_outputschemajson` is non-null AND matches, skip; if mismatches, FAIL loudly with a
     conflict message. Same pattern for the node-level `destination = workspace` change.
 
     No BFF code changes here. This task seeds data only. The downstream
@@ -42,7 +42,7 @@
 
   <goal>
     `sprk_analysisaction` row for action code `summarize-document-for-workspace@v1` has
-    `sprk_outputschema` populated with a valid JSON Schema document covering all output
+    `sprk_outputschemajson` populated with a valid JSON Schema document covering all output
     fields (at minimum: `summary: string`, `tldr: string[]`, `entities: { organizations:
     string[], persons: string[] }` per R5 SC-18 evidence). The playbook node referencing
     this action has its `destination = workspace` and `widgetType =
@@ -153,7 +153,7 @@
     <step order="4" name="Author Migration Script">
       Create `scripts/Migrate-SumWorkspaceActionOutputSchema.ps1`:
       (a) GET action by alternate key `summarize-document-for-workspace@v1`;
-      (b) Guard + PATCH `sprk_outputschema`;
+      (b) Guard + PATCH `sprk_outputschemajson`;
       (c) GET playbook node referencing the action; PATCH `destination = workspace` and
           `widgetType = StructuredOutputStreamWidget` per task 031 storage surface;
       (d) Log all actions.
@@ -191,7 +191,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">`sprk_analysisaction` row for `summarize-document-for-workspace@v1` has `sprk_outputschema` populated with a valid draft-07 JSON Schema covering at minimum `summary: string`, `tldr: array(string)`, and `entities: object` with `organizations + persons` array(string) members.</criterion>
+    <criterion testable="true">`sprk_analysisaction` row for `summarize-document-for-workspace@v1` has `sprk_outputschemajson` populated with a valid draft-07 JSON Schema covering at minimum `summary: string`, `tldr: array(string)`, and `entities: object` with `organizations + persons` array(string) members.</criterion>
     <criterion testable="true">Playbook node referencing this action has `destination = workspace` AND `widgetType = StructuredOutputStreamWidget` per task 031's storage surface.</criterion>
     <criterion testable="true">Migration script is idempotent (guard with GET before PATCH); second run succeeds with no-op; conflict mismatch FAILS loudly.</criterion>
     <criterion testable="true">JSON Schema document validates against draft-07 meta-schema.</criterion>

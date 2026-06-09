@@ -29,7 +29,7 @@
         wizard fields populate identically to BEFORE-task-034 baseline (NFR-07 binding).
     (5) Project-prefill regression — run end-to-end pre-fill on a test project; verify
         wizard fields populate identically to BEFORE-task-035 baseline (NFR-07 binding).
-    (6) Backward compatibility — invoke an action whose row has NULL `sprk_outputschema`;
+    (6) Backward compatibility — invoke an action whose row has NULL `sprk_outputschemajson`;
         verify widget falls back to string rendering (no regression on non-migrated
         actions).
 
@@ -162,7 +162,7 @@
       Verify ZERO drift. Record evidence.
     </step>
     <step order="7" name="Scenario 6: Backward Compatibility">
-      Invoke an action whose row has NULL `sprk_outputschema` (e.g., a not-yet-migrated
+      Invoke an action whose row has NULL `sprk_outputschemajson` (e.g., a not-yet-migrated
       action — verify via query). Confirm widget renders as today (string formatting).
       No crash; no error. Record evidence.
     </step>
@@ -195,7 +195,7 @@
     <criterion testable="true">Scenario 3 (Dedup): typing `/summarize` produces ONE rendered output; server logs show ONE LLM call + ONE playbook execution + ONE DeliverOutput + ONE render. Both slash and natural-language entry paths verified.</criterion>
     <criterion testable="true">Scenario 4 (Matter pre-fill): ZERO drift vs task 034 AFTER baseline; per-field wizard outputs identical; latency within ±10%; NFR-07 binding honored.</criterion>
     <criterion testable="true">Scenario 5 (Project pre-fill): ZERO drift vs task 035 AFTER baseline; per-field wizard outputs identical; latency within ±10%; NFR-07 binding honored.</criterion>
-    <criterion testable="true">Scenario 6 (Backward compat): action with NULL `sprk_outputschema` renders as string (legacy); no crash; no error.</criterion>
+    <criterion testable="true">Scenario 6 (Backward compat): action with NULL `sprk_outputschemajson` renders as string (legacy); no crash; no error.</criterion>
     <criterion testable="true">Evidence file `notes/task-048-phase-b-integration-evidence.md` exists with screenshot/log/diff references per scenario.</criterion>
     <criterion testable="true">Server log excerpts captured per ADR-015 — tool names + decisions + timestamps ONLY; no user message text.</criterion>
     <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in evidence notes; no BFF code changed by this task).</criterion>

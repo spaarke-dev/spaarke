@@ -50,7 +50,7 @@
   </role>
 
   <goal>
-    `sprk_analysisaction` row for the matter-prefill action has `sprk_outputschema`
+    `sprk_analysisaction` row for the matter-prefill action has `sprk_outputschemajson`
     populated with a valid JSON Schema that exactly mirrors the existing
     `$choices`-constrained output the wizard consumes today. The playbook node has
     `destination = form-prefill`. Migration script committed + idempotent + applied to
@@ -193,7 +193,7 @@
     <step order="5" name="Author Migration Script">
       Create `scripts/Migrate-MatterPrefillActionOutputSchema.ps1`:
       (a) GET action by alternate key;
-      (b) Guard + PATCH `sprk_outputschema`;
+      (b) Guard + PATCH `sprk_outputschemajson`;
       (c) GET playbook node; PATCH `destination = form-prefill` per task 031 storage
           surface;
       (d) Log all actions.
@@ -252,7 +252,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">User confirmed (per CLAUDE.md Confirmation Triggers) approval to migrate matter-prefill action's `outputSchema` data field BEFORE deployment; explicit confirmation that `IWorkspacePrefillAi` / `MatterPreFillService` / `useAiPrefill` / 45s timeout are NOT being modified.</criterion>
-    <criterion testable="true">`sprk_analysisaction` row for the matter-prefill action has `sprk_outputschema` populated with a valid draft-07 JSON Schema that exactly mirrors the existing `$choices`-constrained wizard consumer contract.</criterion>
+    <criterion testable="true">`sprk_analysisaction` row for the matter-prefill action has `sprk_outputschemajson` populated with a valid draft-07 JSON Schema that exactly mirrors the existing `$choices`-constrained wizard consumer contract.</criterion>
     <criterion testable="true">Playbook node referencing the matter-prefill action has `destination = form-prefill` per task 031 storage surface.</criterion>
     <criterion testable="true">`IWorkspacePrefillAi.cs` is UNMODIFIED (verified by git diff showing zero changes).</criterion>
     <criterion testable="true">`MatterPreFillService.cs` is UNMODIFIED (verified by git diff).</criterion>

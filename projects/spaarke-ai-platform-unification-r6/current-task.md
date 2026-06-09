@@ -1,9 +1,9 @@
 # Current Task State — spaarke-ai-platform-unification-r6
 
-> **Last Updated**: 2026-06-08 (Phase A CLOSED; transitioning to Phase B kickoff — task 030)
+> **Last Updated**: 2026-06-08 (Wave B-G1 ✅; user asleep; running autonomously through downstream waves)
 > **Recovery**: Read "Quick Recovery" section first
-> **Last Commit**: `9567cc1f` (task 029 — Phase A exit-gate document)
-> **Branch**: `work/spaarke-ai-platform-unification-r6` (pushed to origin; clean working tree)
+> **Last Commit**: (pending Wave B-G1 commit — being aggregated)
+> **Branch**: `work/spaarke-ai-platform-unification-r6` (pushed to origin through `aef41d99`; Wave B-G1 changes uncommitted)
 
 ---
 
@@ -11,12 +11,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | **B (Pillar 5 — schema-aware output)** kickoff |
-| **Phase A** | ✅ CLOSED 2026-06-08 (user sign-off received; all 4 exit criteria GREEN; 2 documented yellow flags — ADR-033 + pre-existing Kiota CVE) |
-| **Next Task** | **030 — Add `outputSchema` JSON field to `sprk_analysisaction` Dataverse entity** (D-B-01; FULL rigor; production schema change → **Confirmation Trigger** per CLAUDE.md before deployment to Spaarke Dev) |
-| **Phase B parallel pair** | Task 030 (`outputSchema` on action) + Task 031 (`destination` + `widgetType` on node config) are parallel-safe; both gate the 4 downstream action migrations (032-035) |
-| **Phase B critical-path constraint** | Tasks 034 + 035 are NFR-07 regression tests (pre-fill migrations); MUST preserve `useAiPrefill` hook signature + 45s timeout + existing pre-fill flow |
+| **Phase** | **B (Pillar 5 — schema-aware output)** — Wave B-G1 complete; preparing Wave B-G2 dispatch |
+| **Mode** | **Autonomous execution** per user pre-stated preference (`feedback_pipeline-execution-style.md`); user asleep |
+| **Wave B-G1** | ✅ Tasks 030 + 031 complete. Build clean (0 err, 16 baseline warn). Test suite 6858/6940 pass per task 031 sweep. |
+| **Wave B-G1 key discovery** | Task 030 reshaped to Option A: column `sprk_outputschemajson` already exists (Memo, 1 MB max, in production use by `PlaybookExecutionEngine.cs:474-500` for SUM-CHAT@v1). Downstream POMLs 032/033/034/035/040/048 batch-renamed `sprk_outputschema` → `sprk_outputschemajson` (042 didn't reference the column). |
+| **Wave B-G1 task 031** | JSON-blob surface path chosen; NodeRoutingConfig + JSON Schema + 27 tests + NodeDestinationJsonConverter; DeliverOutputNodeExecutor.cs UNMODIFIED (NFR-08 verified via System.Text.Json default Skip behavior); +0.05 MB BFF delta. |
+| **Next Wave** | **B-G2 — Action migrations (032 + 033 + 034 + 035) in parallel** (4 parallel-safe; 030 + 031 dependencies satisfied). 034 + 035 NFR-07 binding: pre-fill flow signatures + 45s timeout + `useAiPrefill` MUST stay unchanged. |
 | **Phase A exit-gate doc** | `projects/spaarke-ai-platform-unification-r6/notes/phase-a-exit-gate.md` |
+| **Wave B-G1 evidence** | `notes/task-030-schema-deployment-evidence.md` + `notes/task-031-node-config-extension-evidence.md` |
 
 ## Phase B overview
 

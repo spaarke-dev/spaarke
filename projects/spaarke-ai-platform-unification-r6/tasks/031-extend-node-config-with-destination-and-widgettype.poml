@@ -3,7 +3,7 @@
   <metadata>
     <title>D-B-02 Extend playbook node config schema with `destination` enum + `widgetType`</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-3 hours</estimated-effort>
     <dependencies>029</dependencies>
     <blocks>032, 033, 034, 035, 042</blocks>
@@ -246,4 +246,27 @@
     <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
     <criterion testable="true">TASK-INDEX.md updated (031 🔲 → ✅) and `current-task.md` reset.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-06-08</completion-date>
+    <storage-surface>JSON-blob path — destination + widgetType added INSIDE sprk_playbooknode.sprk_configjson; no new Dataverse column. Surface decision rationale + line-cited evidence in notes/task-031-node-config-extension-evidence.md §1.</storage-surface>
+    <nfr-08-verification>DeliverOutputNodeExecutor.cs UNMODIFIED (binary-identical). Additive-safety verified at lines 32, 271-286, 427-438 (System.Text.Json default UnmappedMemberHandling.Skip — unknown properties silently ignored). 21 existing DeliverOutputNodeExecutor tests still pass.</nfr-08-verification>
+    <backward-compatibility>27 NodeRoutingConfig tests cover null / empty / malformed / unknown-value / mixed-with-existing-fields / empty-object inputs. All default to destination=chat per FR-27. No data migration of existing playbooks required.</backward-compatibility>
+    <bff-publish-size>45.90 MB → 45.95 MB compressed (+0.05 MB; 100× below the +5 MB NFR-02 single-task threshold).</bff-publish-size>
+    <files-added>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/NodeRoutingConfig.cs (250 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/node-routing-config.schema.json (55 LOC)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Models/Ai/NodeRoutingConfigTests.cs (315 LOC, 27 tests)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-031-node-config-extension-evidence.md</file>
+    </files-added>
+    <files-unmodified-nfr-08>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverOutputNodeExecutor.cs</file>
+      <file>(All 10 other production node executors under Services/Ai/Nodes/)</file>
+    </files-unmodified-nfr-08>
+    <unblocks>032-035 (action migrations populate destination per node); 040/041 (StructuredOutputStreamWidget schema-aware); 042 (CapabilityRouter dedup — single canonical route surface).</unblocks>
+    <quality-gates>
+      <code-review>PASS (self-audit; no critical issues; 27 tests cover 100% surface)</code-review>
+      <adr-check>PASS (ADR-029 publish-size +0.05 MB; ADR-010 zero new DI; ADR-013 facade boundary respected; NFR-08 verified)</adr-check>
+    </quality-gates>
+  </notes>
 </task>

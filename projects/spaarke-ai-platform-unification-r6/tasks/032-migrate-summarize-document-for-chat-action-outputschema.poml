@@ -26,7 +26,7 @@
 
     The migration script MUST be idempotent — re-running it on a row that already has
     `outputSchema` populated MUST succeed without destructive effect. Use a guard query
-    (GET the row; check if `sprk_outputschema` is null) before applying the update. Same
+    (GET the row; check if `sprk_outputschemajson` is null) before applying the update. Same
     pattern applies for the node-level `destination` change.
 
     No BFF code changes here. This task seeds data only. The downstream
@@ -44,7 +44,7 @@
 
   <goal>
     `sprk_analysisaction` row for action code `summarize-document-for-chat@v1` has
-    `sprk_outputschema` populated with a valid JSON Schema describing the action's
+    `sprk_outputschemajson` populated with a valid JSON Schema describing the action's
     current output shape (at minimum the `tldr: string[]` and `summary: string` fields
     that R5 SC-18 surfaced). The playbook node referencing this action has its
     `destination` set to `chat`. Migration script is committed + idempotent + applied to
@@ -89,7 +89,7 @@
     <patterns>
       <pattern name="Action row PATCH via Web API" location=".claude/patterns/dataverse/web-api-client.md">
         Pattern: query action row by alternate key (`sprk_actioncode = 'summarize-document-for-chat@v1'`);
-        GET current `sprk_outputschema` value; if null, PATCH with the new schema; if
+        GET current `sprk_outputschemajson` value; if null, PATCH with the new schema; if
         non-null AND matches expected schema, skip; if non-null AND mismatches, fail
         with conflict message (manual intervention required).
       </pattern>
@@ -143,7 +143,7 @@
     </step>
     <step order="1" name="Review Progress">
       Read TASK-INDEX.md; confirm 032 status 🔲; deps (030, 031) complete. Verify
-      `sprk_outputschema` column exists on `sprk_analysisaction` (deployed by task 030).
+      `sprk_outputschemajson` column exists on `sprk_analysisaction` (deployed by task 030).
       Verify node config supports `destination` (task 031).
     </step>
     <step order="2" name="Gather Resources">
@@ -164,7 +164,7 @@
       (a) connects to Spaarke Dev;
       (b) GETs action row by alternate key `sprk_actioncode = 'summarize-document-for-chat@v1'`
           (or equivalent — verify actual code in JPS source);
-      (c) checks `sprk_outputschema` — if null, PATCHes with schema content; if matches,
+      (c) checks `sprk_outputschemajson` — if null, PATCHes with schema content; if matches,
           skip; if mismatches, FAIL with conflict;
       (d) GETs the playbook node referencing the action; PATCHes node config to set
           `destination = chat` (per task 031 storage surface);
@@ -172,7 +172,7 @@
     </step>
     <step order="5" name="Apply to Spaarke Dev">
       Run the migration script. Capture output + the post-migration GET response showing
-      `sprk_outputschema` populated + node `destination = chat`. Record in
+      `sprk_outputschemajson` populated + node `destination = chat`. Record in
       `notes/task-032-migration-evidence.md`.
     </step>
     <step order="6" name="Verify Idempotency">
@@ -206,7 +206,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">`sprk_analysisaction` row for `summarize-document-for-chat@v1` has `sprk_outputschema` populated with a valid draft-07 JSON Schema describing at minimum `summary: string` and `tldr: string[]` (and any other emitted fields).</criterion>
+    <criterion testable="true">`sprk_analysisaction` row for `summarize-document-for-chat@v1` has `sprk_outputschemajson` populated with a valid draft-07 JSON Schema describing at minimum `summary: string` and `tldr: string[]` (and any other emitted fields).</criterion>
     <criterion testable="true">Playbook node referencing this action has `destination = chat` per task 031's storage surface.</criterion>
     <criterion testable="true">Migration script is idempotent — second run succeeds without destructive effect; conflict mismatch (existing non-null mismatching schema) FAILS loudly.</criterion>
     <criterion testable="true">JSON Schema document validates against draft-07 meta-schema.</criterion>

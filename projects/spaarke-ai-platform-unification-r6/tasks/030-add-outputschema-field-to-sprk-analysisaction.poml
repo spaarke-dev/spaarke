@@ -3,7 +3,24 @@
   <metadata>
     <title>D-B-01 Add `outputSchema` JSON field to `sprk_analysisaction` Dataverse entity</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>not-started</status>
+    <status>complete</status>
+    <completed-on>2026-06-08</completed-on>
+    <outcome-note>
+      Option A reshape applied: the column already existed on `sprk_analysisaction` as
+      `sprk_outputschemajson` (Memo, MaxLength 1,048,576, RequiredLevel None, IsCustomAttribute true)
+      and is in production use by `PlaybookExecutionEngine.cs` for Structured Outputs binding. Per
+      project CLAUDE.md "ADRs Are Defaults" + dispatch-prompt Confirmation Trigger ("column already
+      exists with different metadata"), sub-agent stopped and surfaced 3 options (A=reuse,
+      B=add-duplicate, C=rename). Main session approved Option A. Deliverables shifted from "deploy
+      new column" to "verify existing column + document discovery":
+        - scripts/Verify-OutputSchemaField.ps1 (NEW; idempotent read-only verification script)
+        - infra/dataverse/sprk_analysisaction-outputschemajson.json (NEW; metadata-of-record)
+        - projects/spaarke-ai-platform-unification-r6/notes/task-030-schema-deployment-evidence.md
+      Verification PASSED. BFF publish-size delta = 0 MB. Quality Gates: code-review PASS (0
+      findings), adr-check PASS (0 violations, 0 warnings, 11 compliant). Downstream POMLs 032-035,
+      040, 042, 048 reference `sprk_outputschema` as a placeholder; main session will batch-rename
+      to `sprk_outputschemajson` before dispatching Wave B-G2.
+    </outcome-note>
     <estimated-effort>2-3 hours</estimated-effort>
     <dependencies>029</dependencies>
     <blocks>032, 033, 034, 035</blocks>
