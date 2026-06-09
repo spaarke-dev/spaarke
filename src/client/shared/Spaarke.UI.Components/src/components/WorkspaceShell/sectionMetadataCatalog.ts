@@ -39,6 +39,7 @@ import {
   FolderRegular,
   ReceiptRegular,
   BriefcaseRegular,
+  BriefcaseSearchRegular,
 } from '@fluentui/react-icons';
 import type { SectionCategory } from './types';
 
@@ -124,6 +125,14 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
   // sections sharing <DataverseEntityViewWidget>. Each needs an operator-
   // created sprk_gridconfiguration row (see each registration file's
   // DEPLOYMENT REQUIREMENT note).
+  {
+    id: 'matters',
+    label: 'Matters',
+    description: 'Your matters',
+    category: 'data',
+    icon: BriefcaseSearchRegular,
+    defaultHeight: '480px',
+  },
   {
     id: 'projects',
     label: 'Projects',
