@@ -597,13 +597,17 @@ registerWorkspaceWidget(
 // guard); no production crash.
 // ---------------------------------------------------------------------------
 
-// Real sprk_gridconfiguration GUIDs in spaarkedev1 (2026-06-08):
-//  - documents:        'Semantic Search Documents View'  (pre-existing)
+// Real sprk_gridconfiguration GUIDs in spaarkedev1:
+//  - documents:        'Active Documents (Workspace)'    (created 2026-06-09; replaces
+//                       the legacy 'Semantic Search Documents View' row d99a4352-…,
+//                       which was authored for SemanticSearchControl PCF and lacks
+//                       the DataGrid framework's source.savedQueryId field).
+//  - matters:          'Active Matters (Workspace)'      (created 2026-06-08)
 //  - projects:         'Active Projects (Workspace)'     (created 2026-06-08)
 //  - invoices:         'Invoice Matter Budget Performance' (pre-existing)
 //  - workAssignments:  'Active Work Assignments (Workspace)' (created 2026-06-08)
 const ENTITY_VIEW_CONFIG_IDS = {
-  documents: 'd99a4352-4913-f111-8343-7ced8d1dc988',
+  documents: '1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6',
   matters: '113ad380-9e63-f111-ab0c-70a8a53ec687',
   projects: '97ee98e7-7a63-f111-ab0c-70a8a53ec687',
   invoices: 'd021827b-9b5e-f111-ab0c-7c1e521545d7',
