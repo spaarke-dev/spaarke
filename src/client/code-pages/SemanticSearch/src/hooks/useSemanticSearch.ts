@@ -229,10 +229,36 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
       // PCF on a Matter form returned tenant-wide results regardless of which
       // matter the user came from. Both fields now come from URL envelope
       // (FR-CP-03) so the modal mirrors the PCF's entity-scoped view.
-      // When scope is null/'all' or entityId is null, the BFF runs a tenant-
-      // wide search (preserves the prior fallback behavior).
-      const effectiveScope = currentScopeRef.current ?? 'all';
-      const effectiveEntityId = currentEntityIdRef.current ?? undefined;
+      //
+      // PCF→BFF contract mapping (mirrors SemanticSearchApiService.transformRequest
+      // in the PCF): URL envelope sends PCF-style `scope` ('matter', 'project',
+      // 'invoice', 'account', 'contact', 'document') + `entityId`. BFF
+      // SemanticSearchRequest expects `scope='entity' + entityType + entityId`
+      // for entity scopes, or `scope='all'` for tenant-wide. Without this
+      // mapping the BFF rejects the request with 400.
+      const ENTITY_SCOPES = ['matter', 'project', 'invoice', 'account', 'contact', 'document'];
+      const incomingScope = currentScopeRef.current;
+      const incomingEntityId = currentEntityIdRef.current;
+
+      let bffScope: string;
+      let bffEntityType: string | undefined;
+      let bffEntityId: string | undefined;
+
+      if (incomingScope && ENTITY_SCOPES.includes(incomingScope) && incomingEntityId) {
+        bffScope = 'entity';
+        bffEntityType = incomingScope;
+        bffEntityId = incomingEntityId;
+      } else if (incomingScope === 'entity' && incomingEntityId) {
+        // Already-translated form (paranoia branch — shouldn't happen from PCF
+        // but defensive in case callers send the BFF shape directly).
+        bffScope = 'entity';
+        bffEntityType = undefined; // caller must include in filters if needed
+        bffEntityId = incomingEntityId;
+      } else {
+        bffScope = 'all';
+        bffEntityType = undefined;
+        bffEntityId = undefined;
+      }
 
       // FR-CP-04 — Conditionally include `searchIndexName` in the body. The
       // spread + cast pattern keeps `DocumentSearchRequest` untouched while
@@ -241,8 +267,9 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
       // omitted entirely (NOT sent as empty string).
       const requestBody = {
         query,
-        scope: effectiveScope,
-        ...(effectiveEntityId ? { scopeId: effectiveEntityId } : {}),
+        scope: bffScope,
+        ...(bffEntityType ? { entityType: bffEntityType } : {}),
+        ...(bffEntityId ? { entityId: bffEntityId } : {}),
         filters: buildDocumentFilters(filters),
         options: {
           limit: PAGE_SIZE,
@@ -303,13 +330,29 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
     // multi-container-multi-index-r1 UAT 2026-06-09: also reuse the same
     // scope/entityId captured at search() time so subsequent pages stay
     // entity-scoped (otherwise pagination silently falls back to tenant-wide
-    // and merges unrelated docs into the result set).
-    const effectiveScope = currentScopeRef.current ?? 'all';
-    const effectiveEntityId = currentEntityIdRef.current ?? undefined;
+    // and merges unrelated docs into the result set). PCF→BFF mapping
+    // (matter/project/etc. → entity + entityType + entityId) mirrors the
+    // search() function above; see comment there for full context.
+    const ENTITY_SCOPES = ['matter', 'project', 'invoice', 'account', 'contact', 'document'];
+    const lmIncomingScope = currentScopeRef.current;
+    const lmIncomingEntityId = currentEntityIdRef.current;
+    let lmBffScope: string;
+    let lmBffEntityType: string | undefined;
+    let lmBffEntityId: string | undefined;
+    if (lmIncomingScope && ENTITY_SCOPES.includes(lmIncomingScope) && lmIncomingEntityId) {
+      lmBffScope = 'entity';
+      lmBffEntityType = lmIncomingScope;
+      lmBffEntityId = lmIncomingEntityId;
+    } else {
+      lmBffScope = 'all';
+      lmBffEntityType = undefined;
+      lmBffEntityId = undefined;
+    }
     const requestBody = {
       query: currentQueryRef.current,
-      scope: effectiveScope,
-      ...(effectiveEntityId ? { scopeId: effectiveEntityId } : {}),
+      scope: lmBffScope,
+      ...(lmBffEntityType ? { entityType: lmBffEntityType } : {}),
+      ...(lmBffEntityId ? { entityId: lmBffEntityId } : {}),
       filters: buildDocumentFilters(filters),
       options: {
         limit: PAGE_SIZE,
