@@ -41,6 +41,89 @@ Pillar 5 — **Schema-aware output** (Q5 re-shaped design):
 
 Estimated Phase B duration: 1-2 weeks (per spec calendar).
 
+---
+
+## Post-Compaction Recovery Protocol (READ THIS BEFORE RESUMING)
+
+When this conversation is compacted and a new context starts, do these steps IN ORDER:
+
+### Step 1 — Verify branch + clean working tree
+
+```bash
+git branch --show-current    # expect: work/spaarke-ai-platform-unification-r6
+git status                    # expect: clean working tree
+git log --oneline -5          # expect: latest commit is the TASK-INDEX cleanup commit
+```
+
+### Step 2 — Verify the build + test baseline still holds
+
+```bash
+dotnet build src/server/api/Sprk.Bff.Api/        # expect: 0 errors, 16 baseline warnings
+dotnet test tests/unit/Sprk.Bff.Api.Tests/       # expect: 6820+/6929 pass, 0 fail, 109 skip
+```
+
+If either command fails: investigate before dispatching Phase B work. Phase A closure
+depends on these baselines holding.
+
+### Step 3 — Read Phase A closure context (skim these in order)
+
+1. `notes/phase-a-exit-gate.md` — the binding artifact for Phase A closure (4 GREEN exit criteria, 2 documented YELLOW flags, commit cross-reference table)
+2. `CLAUDE.md` (project-scoped) — operating principles including "ADRs Are Defaults" (§ first invocation = ADR-033 / Wave 9)
+3. `tasks/TASK-INDEX.md` — task statuses (all Phase A tasks now ✅)
+4. This file's "Quick Recovery" section (above)
+
+### Step 4 — Phase B kickoff
+
+Tasks **030 + 031** are the parallel-safe entry into Phase B. Per the Phase B critical-path notes above:
+
+- Both modify Dataverse entity schemas in different files (030 = `sprk_analysisaction`; 031 = playbook node config). Independent file targets → safe to dispatch in parallel.
+- Both are **FULL rigor** tasks (production schema changes).
+- Both are **Confirmation Triggers** per CLAUDE.md before deploying to Spaarke Dev.
+- The 4 downstream action-migration tasks (032-035) depend on BOTH 030 and 031 landing.
+
+**Dispatch approach** (proven across Phase A):
+- Read each task's POML before dispatching (the POML is the binding spec).
+- Sub-agent prompts include:
+  - Full POML path reference
+  - The "Stop and surface" trigger per "ADRs Are Defaults" principle
+  - Explicit "files you OWN" and "files you MUST NOT touch" lists
+  - Verification commands the sub-agent runs before reporting
+
+### Step 5 — Memory check (verify cross-session memories still relevant)
+
+Memory files at `C:\Users\RalphSchroeder\.claude\projects\c--code-files-spaarke-wt-spaarke-ai-platform-unification-r6\memory\`:
+
+- `MEMORY.md` — index of all memories
+- `feedback_adrs-are-defaults-not-laws.md` — binding operating principle; codified in project CLAUDE.md; ADR-033 is the first worked example
+- `feedback_pipeline-execution-style.md` — autonomous parallel dispatch + confirmation triggers
+- `feedback_no-backcompat-hacks-for-small-counts.md` — small-count migration philosophy
+- `project_r6-decisions.md` — Q1-Q11 binding decisions
+
+These memories are still load-bearing for Phase B. No revisions needed at compaction.
+
+### Key commits to know after resume
+
+| Commit | What it represents |
+|---|---|
+| `9567cc1f` | Phase A exit-gate document |
+| `99dd7a03` | Phase A closure bookkeeping (TASK-INDEX + current-task.md) |
+| `26061612` | Task 028 (Phase A vertical-slice integration test) |
+| `a7a0e051` | DI cycle fix (lazy IToolHandlerRegistry resolution) — unblocked WorkspaceEndpointsTests |
+| `cc6d8e3b` | Tasks 022 + 025 (Pillar 4 closes; Option A engine extension per "ADRs Are Defaults") |
+| `3ccb5304` | Wave 9 (ADR-033 streaming side-channel) — Q9 closes at 10/10 |
+
+### What Phase B should produce (preview)
+
+- Dataverse schema additions (030 + 031)
+- 4 action migrations (032-035) — including 2 NFR-07 pre-fill regression tests (034 + 035)
+- 1 widget refactor (040 + 041 sequential)
+- 1 router dedup (042)
+- 1 integration test (048)
+
+Estimated 10 tasks, 1-2 weeks per spec calendar. Mostly STANDARD or FULL rigor; no new ADR expected (the Phase B work is implementation of the Q5-reshaped design).
+
+---
+
 ### ✅ Wave 7c verification (2026-06-08, post-compaction)
 
 The Wave 7c content was committed pre-compaction as a "checkpoint" (commit `52201189`) because the test suite had not yet been run at that time. Post-compaction verification:

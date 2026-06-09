@@ -51,14 +51,14 @@
 | 009 | A-G3 | Split execution context (Tool/ChatInvocation) (D-A-09) | ✅ | FULL | true | 006 |
 | 010 | A-G4 | Build `ToolHandlerToAIFunctionAdapter` (D-A-10) | ✅ | FULL | false | 007, 008, 009 |
 | 011 | A-G5 | Wire `ResolveTools()` to read `sprk_analysistool` rows (D-A-11) | ✅ | FULL | false | 010 |
-| 012 | A-G6 | **Q9 BIG-BANG: Migrate 10 pre-R5 chat tools** (D-A-11) | 🔲 | FULL | false | 011 |
-| 013 | A-G7 | Q9 migration regression test gate (D-A-11) | 🔲 | STANDARD | false | 012 |
-| 020 | A-G8 | Add `IInvokePlaybookAi` facade (D-A-12) | 🔲 | FULL | true | 011 |
-| 021 | A-G9 | Build generic `invoke_playbook` chat tool (D-A-13) | 🔲 | FULL | true | 020 |
-| 022 | A-G10 | Dynamic playbook list in tool description (D-A-14) | 🔲 | FULL | true | 021 |
-| 023 | A-G11 | Remove `InvokeSummarizePlaybookTool`/`InvokeInsightsQueryTool` bridges (D-A-15) | 🔲 | FULL | true | 022 |
-| 024 | A-G8 | Playbook FK fix: summarize-document-for-chat → SUM-CHAT (D-A-16) | 🔲 | STANDARD | true | 011 |
-| 025 | A-G12 | Refactor `SessionSummarizeOrchestrator` to use `PlaybookExecutionEngine` (D-A-17) | 🔲 | FULL | false | 024 |
+| 012 | A-G6 | **Q9 BIG-BANG: Migrate 10 pre-R5 chat tools** (D-A-11) | ✅ | FULL | false | 011 |
+| 013 | A-G7 | Q9 migration regression test gate (D-A-11) | ✅ | STANDARD | false | 012 |
+| 020 | A-G8 | Add `IInvokePlaybookAi` facade (D-A-12) | ✅ | FULL | true | 011 |
+| 021 | A-G9 | Build generic `invoke_playbook` chat tool (D-A-13) | ✅ | FULL | true | 020 |
+| 022 | A-G10 | Dynamic playbook list in tool description (D-A-14) | ✅ | FULL | true | 021 |
+| 023 | A-G11 | Remove `InvokeSummarizePlaybookTool`/`InvokeInsightsQueryTool` bridges (D-A-15) | ✅ | FULL | true | 022 |
+| 024 | A-G8 | Playbook FK fix: summarize-document-for-chat → SUM-CHAT (D-A-16) | ✅ | STANDARD | true | 011 |
+| 025 | A-G12 | Refactor `SessionSummarizeOrchestrator` to use `PlaybookExecutionEngine` (D-A-17) | ✅ | FULL | false | 024 |
 | 028 | A-G13 | Phase A integration test | ✅ | STANDARD | false | 005, 013, 023, 025 |
 | 029 | A-G14 | Phase A exit-gate validation | ✅ | MINIMAL | false | 028 |
 
@@ -162,7 +162,7 @@
 | 103 | H-G1 | `ClauseComparisonHandler` (pure deterministic) (D-H-03) | ✅ | FULL | true | 100 |
 | 104 | H-G1 | `FinancialCalculationToolHandler` (pure deterministic) (D-H-04) | ✅ | FULL | true | 100 |
 | 105 | H-G2 | `EntityExtractorHandler` (LLM-assisted NER) (D-H-05) | ✅ | FULL | true | 104 |
-| 106 | H-G2 | `ClauseAnalyzerHandler` (LLM-assisted clause structuring) (D-H-06) | 🔲 | FULL | true | 104 |
+| 106 | H-G2 | `ClauseAnalyzerHandler` (LLM-assisted clause structuring) (D-H-06) | ✅ | FULL | true | 104 |
 | 107 | H-G2 | `RiskDetectorHandler` (LLM-assisted + severity scoring) (D-H-07) | ✅ | FULL | true | 104 |
 | 108 | H-G2 | `InvoiceExtractionToolHandler` (LLM-assisted + line-item arithmetic) (D-H-08) | ✅ | FULL | true | 104 |
 | 109 | H-G3 | Handler dispatch tests (playbook + chat) (D-H-09/10) | ✅ | STANDARD | false | 105, 106, 107, 108 |
