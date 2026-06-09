@@ -406,9 +406,12 @@ function applyActiveLayout(layoutId: string): void {
  * of the WorkspacePane. See file header for full FR / NFR mapping.
  */
 export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
-  // tabs / activeTabId / onTabSelect / onTabClose retained for API back-compat
-  // (see WorkspacePaneMenuProps JSDoc). Task 089 removed the Open + Home menu
-  // sections that used these props.
+  // tabs is destructured for the iteration-2 pin → tab feature (the handler
+  // checks whether a layoutId is already open before dispatching widget_load).
+  // activeTabId / onTabSelect / onTabClose retained for API back-compat (see
+  // WorkspacePaneMenuProps JSDoc). Task 089 removed the Open + Home menu
+  // sections that used those latter props.
+  tabs,
 }) => {
   const styles = useStyles();
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -492,9 +495,25 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
           next.add(layoutId);
           return next;
         });
+        // ai-spaarke-ai-workspace-UI-r1 iteration 2 (2026-06-08): pin → tab.
+        // Skip the dispatch if the workspace is already open in a tab.
+        const alreadyOpen = tabs.some(
+          (t) =>
+            t.widgetType === "workspace" &&
+            (t.widgetData as { layoutId?: string } | null)?.layoutId ===
+              layoutId,
+        );
+        if (!alreadyOpen) {
+          dispatch("workspace", {
+            type: "widget_load",
+            widgetType: "workspace",
+            widgetData: { layoutId, layoutName },
+            displayName: layoutName,
+          });
+        }
       }
     },
-    [pinnedIds],
+    [pinnedIds, tabs, dispatch],
   );
 
   // -------------------------------------------------------------------------

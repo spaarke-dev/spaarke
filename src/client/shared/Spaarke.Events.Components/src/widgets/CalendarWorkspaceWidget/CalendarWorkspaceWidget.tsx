@@ -96,6 +96,8 @@ import {
   ChevronRight20Regular,
   CaretUp24Regular,
   CaretDown24Regular,
+  CalendarLtr24Regular,
+  CalendarLtr24Filled,
 } from '@fluentui/react-icons';
 
 import { EventsPageProvider, useEventsPageContext } from '../../context/EventsPageContext';
@@ -790,13 +792,22 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
               Clear
             </Button>
           )}
-          <Tooltip content={calendarCollapsed ? 'Expand calendar' : 'Collapse calendar'} relationship="label">
+          <Tooltip
+            content={calendarCollapsed ? 'Show calendar' : 'Hide calendar'}
+            relationship="label"
+          >
             <Button
-              appearance="subtle"
-              icon={calendarCollapsed ? <CaretDown24Regular /> : <CaretUp24Regular />}
+              appearance={calendarCollapsed ? 'subtle' : 'primary'}
+              icon={
+                calendarCollapsed ? (
+                  <CalendarLtr24Regular />
+                ) : (
+                  <CalendarLtr24Filled />
+                )
+              }
               onClick={toggleCollapsed}
               aria-expanded={!calendarCollapsed}
-              aria-label={calendarCollapsed ? 'Expand calendar' : 'Collapse calendar'}
+              aria-label={calendarCollapsed ? 'Show calendar' : 'Hide calendar'}
             />
           </Tooltip>
         </div>
