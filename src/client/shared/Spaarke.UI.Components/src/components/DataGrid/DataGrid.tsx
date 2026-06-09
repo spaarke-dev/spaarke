@@ -975,18 +975,17 @@ export const DataGrid: React.FC<DataGridProps> = props => {
 
   // ─────────────────────────────────────────────────────────────────────────
   // Responsive column sizing (ai-spaarke-ai-workspace-UI-r1 iteration 2,
-  // 2026-06-09). Operator feedback: the horizontal scrollbar was ALWAYS
-  // visible even when the host expanded the grid container very wide. Root
-  // cause: each `ResolvedColumn.width` is a fixed pixel value (defaults to
-  // 150). When sum-of-widths > container width the grid scrolls (correct).
-  // When sum-of-widths < container width, the FluentDataGrid still rendered
-  // at the fixed sum — leaving dead space on the right and (apparently due
-  // to a small overflow from selection-cell + borders) keeping the scrollbar
-  // visible. The fix: track the gridScroll container's width via
-  // ResizeObserver and proportionally scale up each column's defaultWidth /
-  // idealWidth when the container is wider than the baseline sum. Below
-  // the baseline sum the original widths apply and horizontal scroll
-  // appears as expected.
+  // 2026-06-09; refined 2026-06-09 round 2). Operator feedback round 1:
+  // horizontal scrollbar always visible because columns rendered at the
+  // fixed sum-of-widths regardless of container width. Round 1 fix scaled
+  // UP only. Round 2 feedback (this round): the grid still overflows
+  // because sum-of-widths > container width, so the grid renders wider
+  // than its container with a permanent scrollbar. Fix: scale columns to
+  // FIT the container in BOTH directions — up when container > baseSum
+  // (fill dead space) and down when container < baseSum (avoid scroll),
+  // bounded by a per-column minimum so columns don't collapse to nothing.
+  // If even the minimums sum to more than the container, horizontal
+  // scroll appears as a last resort (correct).
   // ─────────────────────────────────────────────────────────────────────────
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
   React.useEffect(() => {
@@ -1005,19 +1004,24 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     const options: TableColumnSizingOptions = {};
     if (visibleColumns.length === 0) return options;
     const baseSum = visibleColumns.reduce((s, c) => s + c.width, 0);
-    // Reserve space for: selection cell (~44px when multiselect),
-    // gridScroll horizontal padding (24px = 12+12), and a tiny scrollbar
-    // safety buffer (10px). Below this, columns stay at their baseline.
+    // Reserve space for selection cell (~44px when multiselect), gridScroll
+    // horizontal padding (24px = 12+12), and a small scrollbar safety
+    // buffer (10px). Anything left over is shared across the columns.
     const selectionWidth =
       resolved && resolved.behavior.selectionMode === 'multi' ? 44 : 0;
     const available = Math.max(0, containerWidth - selectionWidth - 24 - 10);
-    const scale = available > baseSum && baseSum > 0 ? available / baseSum : 1;
+    // Bidirectional scale: when `available` < `baseSum`, scale < 1 shrinks
+    // the columns to fit (down to each column's minimum); when `available`
+    // > `baseSum`, scale > 1 expands them to fill. Skip the no-op when the
+    // ResizeObserver hasn't fired yet (containerWidth === 0).
+    const scale = available > 0 && baseSum > 0 ? available / baseSum : 1;
     for (const col of visibleColumns) {
-      const scaled = Math.max(col.width, Math.floor(col.width * scale));
+      const minW = Math.max(80, Math.round(col.width * 0.5));
+      const target = Math.max(minW, Math.round(col.width * scale));
       options[col.name] = {
-        defaultWidth: scaled,
-        minWidth: Math.max(80, Math.round(col.width * 0.5)),
-        idealWidth: scaled,
+        defaultWidth: target,
+        minWidth: minW,
+        idealWidth: target,
       };
     }
     return options;

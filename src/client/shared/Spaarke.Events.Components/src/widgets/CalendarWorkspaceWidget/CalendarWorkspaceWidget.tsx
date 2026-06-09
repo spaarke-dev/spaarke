@@ -367,6 +367,9 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'flex-end',
     flexShrink: 0,
+    // Push the Apply/Clear/Calendar-toggle cluster all the way to the right
+    // edge of the chip toolbar (operator testing feedback, 2026-06-09 round 2).
+    marginLeft: 'auto',
     ...shorthands.gap('8px'),
   },
   calendarRow: {
@@ -663,9 +666,17 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     setApplied(pending);
   }, [pending]);
 
+  // 2026-06-09 round 2: CalendarSection holds its own internal "selected
+  // range" state (which drives the highlighted-day visual). Clearing the
+  // host's pending/applied filters doesn't reset that internal state, so
+  // the calendar still shows the previously-selected day(s) highlighted.
+  // Fix: bump a key on Clear so React fully unmounts + remounts the
+  // CalendarSection — its internal state resets back to nothing.
+  const [calendarResetKey, setCalendarResetKey] = React.useState(0);
   const onClear = React.useCallback(() => {
     setPending(EMPTY_FILTER_SET);
     setApplied(EMPTY_FILTER_SET);
+    setCalendarResetKey(k => k + 1);
   }, []);
 
   // ── Calendar range click handler ─────────────────────────────────────────
@@ -1007,6 +1018,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
           </Tooltip>
           <div ref={stripRef} className={styles.calendarStrip}>
             <CalendarSection
+              key={calendarResetKey}
               eventDates={eventDates as IEventDateInfo[]}
               onFilterChange={onCalendarFilter}
               viewDate={viewDate}
