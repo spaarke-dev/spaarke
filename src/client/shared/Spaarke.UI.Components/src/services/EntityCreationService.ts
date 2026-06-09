@@ -207,13 +207,33 @@ export class EntityCreationService {
         continue;
       }
 
+      // multi-container-multi-index-r1 UAT 2026-06-09: the BFF entity-scope
+      // filter (`SearchFilterBuilder.BuildFilter`) compares chunks'
+      // `parentEntityType` against the LOWERCASED, UN-PREFIXED form
+      // ("matter" / "project" / "invoice" / etc.). DocumentUploadWizard's
+      // `triggerRagIndexing` strips `sprk_` before sending; our wizards
+      // were passing the Dataverse logical name ("sprk_matter") directly,
+      // which got indexed verbatim → entity-scoped search returned 0 results
+      // because filter expected "matter" but the chunks said "sprk_matter".
+      // Normalize at the single seam so all 4 Create wizards + future
+      // callers automatically conform.
+      const normalizedParentEntity = parentEntity
+        ? {
+            entityType: parentEntity.entityType.startsWith('sprk_')
+              ? parentEntity.entityType.substring('sprk_'.length)
+              : parentEntity.entityType,
+            entityId: parentEntity.entityId,
+            entityName: parentEntity.entityName,
+          }
+        : undefined;
+
       const request: IndexFileRequest = {
         driveId: file.driveId,
         itemId: file.id,
         fileName: file.name,
         tenantId,
         documentId: createdDocumentIds?.[i],
-        parentEntity,
+        parentEntity: normalizedParentEntity,
         searchIndexName,
       };
 
