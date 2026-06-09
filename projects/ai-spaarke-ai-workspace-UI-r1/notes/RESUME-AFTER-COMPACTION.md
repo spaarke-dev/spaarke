@@ -1,10 +1,34 @@
 # RESUME AFTER COMPACTION — ai-spaarke-ai-workspace-UI-r1
 
-> **Date saved**: 2026-06-09 (low context, ~11% remaining)
+> **Date saved**: 2026-06-09 — UPDATED after Phase A + B completion
 > **Active branch**: `feature/ai-spaarke-ai-workspace-UI-r1`
 > **Active PR**: #372
-> **Last commit on branch**: `60b98770` (iteration 2 partial — calendar icon + pin-to-tab + tabs destructure fix)
-> **What's deployed in spaarkedev1**: `sprk_spaarkeai` web resource at the working baseline (commit `60b98770` content)
+> **Last commit on branch**: `1240fd65` (Phase B — AppErrorBoundary + safeRegister, pushed)
+> **Working baseline still deployed in spaarkedev1**: `sprk_spaarkeai` web resource at commit `60b98770` (Phase A + B NOT yet deployed; rebuild + redeploy in Final step)
+
+---
+
+## Progress since the previous save
+
+### Phase A — STATIC HARDENING (✅ COMPLETE)
+- A.1: `tsconfig.base.json` at repo root (committed `fe4d37389`)
+- A.2: 3 Code Pages extend base (committed `fe4d37389`)
+- A.3: Softened `noUnusedLocals`/`noUnusedParameters` in base; fixed 3 SpaarkeAi-owned tsc errors in `ContextPaneController.test.tsx` (committed `2aeb2d98`)
+- A.4: `scripts/tsc-surface-gate.mjs` — surface-scoped tsc gate (filters to `src/**` errors so shared-lib hygiene doesn't block builds). Wired into SpaarkeAi + DailyBriefing `npm run build` and `npm run typecheck`. **WLW deferred — 24 pre-existing owned errors (real type bugs in App.tsx + missing @testing-library/react types).** (committed `2aeb2d98`)
+- A.5: Added `pdfjs-dist@^5.7.284` + `mammoth@^1.12.0` to SpaarkeAi's `package.json` (dynamic imports via SprkChat hook). (committed `2aeb2d98`)
+
+### Phase B — RUNTIME RESILIENCE (✅ COMPLETE)
+- B.1: `AppErrorBoundary` in `@spaarke/ui-components/src/components/AppErrorBoundary/`. Self-contained FluentProvider in fallback render path (works even if parent FluentProvider crashed). Surface, onError, fallback props. (committed `1240fd65`)
+- B.2-B.3: Wrapped all 3 Code Page entry points (SpaarkeAi/main.tsx, DailyBriefing/main.tsx, WorkspaceLayoutWizard/main.tsx). WLW tsconfig also got the @spaarke/auth + @spaarke/ui-components source path mappings. (committed `1240fd65`)
+- B.4: `safeRegister` helper in `@spaarke/ui-components/src/utils/`. Thin try/catch wrapper that logs + returns undefined on registration error. (committed `1240fd65`)
+- B.5: Wrapped 26/28 registration calls — `register-workspace-widgets.ts` (21 calls via local `safeRegisterWidget`) + `register-context-widgets.ts` (5 calls via local `safeRegisterContext`). 3 single-call register-*.ts files NOT wrapped (no cascade risk for single-call modules). (committed `1240fd65`)
+
+### Pending (per original plan)
+- **Phase C** — Playwright smoke tests + CI integration
+- **Phase D** — `createRegistry` wired into WorkspaceLayoutWidget render path + per-widget Error Boundary at WorkspaceTabManager
+- **Final** — Rebuild + redeploy SpaarkeAi/WLW/DailyBriefing; verify in spaarkedev1; resume iteration 2 bisect (DataGrid `ResizeObserver`, Matters widget chain, Calendar filter-chip rewrite)
+
+---
 
 ---
 
