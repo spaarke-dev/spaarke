@@ -23,10 +23,25 @@
 - B.4: `safeRegister` helper in `@spaarke/ui-components/src/utils/`. Thin try/catch wrapper that logs + returns undefined on registration error. (committed `1240fd65`)
 - B.5: Wrapped 26/28 registration calls — `register-workspace-widgets.ts` (21 calls via local `safeRegisterWidget`) + `register-context-widgets.ts` (5 calls via local `safeRegisterContext`). 3 single-call register-*.ts files NOT wrapped (no cascade risk for single-call modules). (committed `1240fd65`)
 
-### Pending (per original plan)
-- **Phase C** — Playwright smoke tests + CI integration
-- **Phase D** — `createRegistry` wired into WorkspaceLayoutWidget render path + per-widget Error Boundary at WorkspaceTabManager
-- **Final** — Rebuild + redeploy SpaarkeAi/WLW/DailyBriefing; verify in spaarkedev1; resume iteration 2 bisect (DataGrid `ResizeObserver`, Matters widget chain, Calendar filter-chip rewrite)
+### Completed since prior save
+- **Phase D** — `WidgetErrorBoundary` + reportClientError + App Insights bootstrap; all in `ff66d005`.
+- **Phase C** — deferred per user decision; A+B+D defenses considered sufficient absent a fast PR cadence.
+- **Iteration 2 bisect** — landed in 3 slices, each independently committed + deployed:
+   - `17e1ca67` slice 1 — DataGrid ResizeObserver responsive column sizing
+   - `a00a8b03` slice 2 — Matters widget chain (registration shim, sectionRegistry, sections/index, sectionMetadataCatalog, register-workspace-widgets safeRegisterWidget)
+   - `472bb36d` slice 3 — Calendar filter-chip rewrite (Popover-based chips, Date Range chip with Quick Select, gray toolbar)
+- **Round 2 testing fixes** (`70b1d6c7`):
+   - Fix #1: DataGrid bidirectional scale (down-to-fit when container < baseline)
+   - Fix #2: WorkspaceLayoutWizard rebuilt + redeployed to surface Matters entry from `SECTION_METADATA_CATALOG`
+   - Fix #3a: Calendar filter actions right-justified (`marginLeft: auto`)
+   - Fix #3b: Calendar Clear button bumps a `key` on CalendarSection so its internal range highlight resets
+- **Round 3 testing fix** (`389e63f8`):
+   - Fix #4: New `sprk_gridconfiguration` row `1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6` ("Active Documents (Workspace)", `sprk_document`, pointed at OOB "Active Documents" savedquery). `ENTITY_VIEW_CONFIG_IDS.documents` now points there. The legacy `d99a4352-…` "Semantic Search Documents View" row was authored for SemanticSearchControl PCF (`_type='semantic-search-view'`) and left untouched.
+
+### Pending — DEFERRED to other projects
+- **Fix #5 (Smart To Do widget) — deferred to smart-todo-r4 task A** (2026-06-09 user decision). The R3 schema cut (PR #373 squash `e328beaf`) removed `sprk_event.sprk_todoflag` but never propagated the migration through client code — 36 files in this repo still reference the old shape. The R4 design.md task A is exactly scoped to this work: rewrite `useTodoItems.ts` + `DataverseService.ts` todo methods to query `sprk_todo`, update the `TodoEntity` interface + all field references across LegalWorkspace + SmartTodo Code Page + ai-widgets. AppErrorBoundary / WidgetErrorBoundary catch the current failure as a fallback card (not a blank page), so operators see a graceful error until R4 runs.
+- **Phase B follow-up (shared-lib hygiene)** — ~42 shared-lib tsc errors deferred during brittleness work. Includes 12 missing-module errors in `register-workspace-widgets.ts` import paths, 20 `ComponentFramework` namespace errors in PCF-bridging files. When fixed, re-enable `noUnusedLocals` / `noUnusedParameters` in `tsconfig.base.json`.
+- **WorkspaceLayoutWizard tsc gate** — 24 pre-existing owned errors must be fixed before adding the gate. Deferred per Phase A.4 strategy.
 
 ---
 
