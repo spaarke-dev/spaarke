@@ -91,9 +91,12 @@ public static class ConfigurationModule
             .ValidateDataAnnotations();
 
         // Bing Grounding options (AIPU-071) — gated on BingGrounding:Enabled kill switch (ADR-018).
-        // Validation deferred (no ValidateOnStart): BingConnectionName is [Required] but only
-        // needed when Enabled=true. App starts cleanly with Enabled=false and no Bing config.
-        // LegalResearchTools.ResearchLegalAsync/LookupCaseAsync check Enabled at call time.
+        // BingConnectionName is NOT [Required] at the option-class level (removed Wave B-G8
+        // 2026-06-09 after a startup crash on Spaarke Dev: LegalResearchHandler ctor calls
+        // .Value which triggered DataAnnotation eagerly even though comment said "validation
+        // deferred"). Required-when-Enabled semantics enforced at use-site in
+        // LegalResearchHandler.RunBingGroundingAsync; kill switch at the call sites already
+        // prevents the use-site code from running when Enabled=false.
         services
             .AddOptions<Sprk.Bff.Api.Services.Ai.Foundry.BingGroundingOptions>()
             .Bind(configuration.GetSection(Sprk.Bff.Api.Services.Ai.Foundry.BingGroundingOptions.SectionName))

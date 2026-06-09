@@ -552,6 +552,21 @@ public partial class LegalResearchHandler : IToolHandler
         string sanitizedQuery,
         CancellationToken cancellationToken)
     {
+        // Use-site validation (R6 Wave B-G8 hardening 2026-06-09): BingConnectionName is
+        // "required when Enabled=true" per BingGroundingOptions XML doc. Enforced here
+        // (not via DataAnnotation) so the app starts cleanly with Enabled=false and no
+        // Bing config. The kill switch at LegalResearchHandler ResearchLegal/LookupCase
+        // call sites prevents this method from running when Enabled=false, so reaching
+        // here implies Enabled=true and BingConnectionName MUST be set.
+        if (string.IsNullOrWhiteSpace(_options.BingConnectionName))
+        {
+            throw new InvalidOperationException(
+                "BingGrounding:BingConnectionName must be set in configuration when " +
+                "BingGrounding:Enabled=true. Retrieve the connection name from Azure AI " +
+                "Foundry Studio > Connections and set it via App Service config or " +
+                "Key Vault (BingGrounding__BingConnectionName).");
+        }
+
         var threadId = await _agentServiceClient
             .CreateOrResumeThreadAsync(LegalResearchThreadKey, cancellationToken)
             .ConfigureAwait(false);
