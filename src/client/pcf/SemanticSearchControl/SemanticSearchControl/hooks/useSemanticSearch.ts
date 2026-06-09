@@ -151,12 +151,15 @@ export function useSemanticSearch(
       setTotalCount(0);
 
       try {
-        // v1.1.49 — route through `searchUnion` so "All Documents" mode
-        // (associatedOnly=false on an entity-scoped surface) returns the
-        // union of semantic + associated docs (Item 8 Part B). The wrapper
-        // delegates to plain `search()` for all other paths so existing
-        // behavior is preserved verbatim.
-        const response = await apiService.searchUnion(
+        // multi-container-multi-index-r1 (post-Phase D UAT): single source-of-truth
+        // is now the AI Search index. The wizard pipeline + "Send to Index" ribbon
+        // reliably populate `spaarke-file-index` with parentEntityType/parentEntityId
+        // on every chunk, so the semantic search (filtered by parent) returns the
+        // complete set. The previous `searchUnion` (semantic + Dataverse-associated
+        // merged client-side) was an indexing-reliability workaround and is retired
+        // — it caused the PCF and Code Page surfaces to drift since the Code Page
+        // never had the union. Both surfaces now query the same path identically.
+        const response = await apiService.search(
           {
             query: searchQuery,
             scope,
