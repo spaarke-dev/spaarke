@@ -973,55 +973,17 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     theme,
   ]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Responsive column sizing (ai-spaarke-ai-workspace-UI-r1 iteration 2,
-  // 2026-06-08). Operator feedback: the horizontal scrollbar was ALWAYS
-  // visible even when the host expanded the grid container very wide. Root
-  // cause: each `ResolvedColumn.width` is a fixed pixel value (defaults to
-  // 150). When sum-of-widths > container width the grid scrolls (correct).
-  // When sum-of-widths < container width, the FluentDataGrid still rendered
-  // at the fixed sum — leaving dead space on the right and (apparently due
-  // to a small overflow from selection-cell + borders) keeping the scrollbar
-  // visible. The fix: track the gridScroll container's width via
-  // ResizeObserver and proportionally scale up each column's defaultWidth /
-  // idealWidth when the container is wider than the baseline sum. Below
-  // the baseline sum the original widths apply and horizontal scroll
-  // appears as expected.
-  // ─────────────────────────────────────────────────────────────────────────
-  const [containerWidth, setContainerWidth] = React.useState<number>(0);
-  React.useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const options: TableColumnSizingOptions = {};
-    if (visibleColumns.length === 0) return options;
-    const baseSum = visibleColumns.reduce((s, c) => s + c.width, 0);
-    // Reserve space for: selection cell (~44px when multiselect),
-    // gridScroll horizontal padding (24px = 12+12), and a tiny scrollbar
-    // safety buffer (10px). Below this, columns stay at their baseline.
-    const selectionWidth =
-      resolved && resolved.behavior.selectionMode === 'multiselect' ? 44 : 0;
-    const available = Math.max(0, containerWidth - selectionWidth - 24 - 10);
-    const scale = available > baseSum && baseSum > 0 ? available / baseSum : 1;
     for (const col of visibleColumns) {
-      const scaled = Math.max(col.width, Math.floor(col.width * scale));
       options[col.name] = {
-        defaultWidth: scaled,
+        defaultWidth: col.width,
         minWidth: Math.max(80, Math.round(col.width * 0.5)),
-        idealWidth: scaled,
+        idealWidth: col.width,
       };
     }
     return options;
-  }, [visibleColumns, containerWidth, resolved]);
+  }, [visibleColumns]);
 
   // Items with stable row ids (primaryId-derived, so selection survives reorder).
   const items: GridItem[] = React.useMemo(() => {

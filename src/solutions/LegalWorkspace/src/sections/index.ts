@@ -15,6 +15,5 @@ export { documentsRegistration } from "./documents.registration";
 export { projectsRegistration } from "./projects.registration";
 export { invoicesRegistration } from "./invoices.registration";
 export { workAssignmentsRegistration } from "./workAssignments.registration";
-export { mattersRegistration } from "./matters.registration";
 export { dailyBriefingRegistration } from "./dailyBriefing/dailyBriefing.registration";
 export { calendarRegistration } from "./calendar.registration";

@@ -492,27 +492,9 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
           next.add(layoutId);
           return next;
         });
-        // ai-spaarke-ai-workspace-UI-r1 iteration 2 (2026-06-08): operator
-        // feedback — pinning a workspace should immediately open it as a tab
-        // (the previous behaviour only auto-opened pins on cold load).
-        // Skip the dispatch if the workspace is already open in a tab.
-        const alreadyOpen = tabs.some(
-          (t) =>
-            t.widgetType === "workspace" &&
-            (t.widgetData as { layoutId?: string } | null)?.layoutId ===
-              layoutId,
-        );
-        if (!alreadyOpen) {
-          dispatch("workspace", {
-            type: "widget_load",
-            widgetType: "workspace",
-            widgetData: { layoutId, layoutName },
-            displayName: layoutName,
-          });
-        }
       }
     },
-    [pinnedIds, tabs, dispatch],
+    [pinnedIds],
   );
 
   // -------------------------------------------------------------------------
