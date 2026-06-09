@@ -3,7 +3,30 @@
   <metadata>
     <title>D-B-08 `StructuredOutputStreamWidget` schema-aware — object-typed fields render as labeled key-value blocks (fixes R5 Entities bug)</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <outcome-note>
+      Closed 2026-06-09 by sub-agent. Task 040's extension-point handoff worked
+      cleanly — flipped `classifySchemaField()` object branch (one-line change),
+      added `else if (classification === 'object')` branch at dispatch site,
+      authored `parseObject()` helper + `prettyName()` humanizer + new
+      `<SchemaAwareObjectRenderer />` component + `renderObjectValue()`
+      recursive helper. Nested array properties REUSE task 040's
+      `<SchemaAwareArrayRenderer />` directly (verified by test asserting
+      `data-display-hint="schema-array"` on nested lists) — no duplicate
+      implementation per Q5 architectural decision. Depth guard bails to
+      compact JSON.stringify with TODO marker for depth-≥-2 (Phase B
+      constraint). 23 tests pass (12 task 040 baseline + 11 new for task 041).
+      Widget grew 1385 → 1775 LOC; test file grew 494 → 846 LOC. BFF publish-
+      size delta = 0 MB (frontend-only). ADR-012 / ADR-021 / ADR-029 / ADR-030
+      compliance verified via self-audit + new DOM-scan dark-mode test on
+      object renderer subtree. Did NOT refactor task 040's top-level array
+      dispatch into a generic helper (acceptance criterion #1 said "if needed";
+      kept stable to minimize regression surface — the reuse happens at the
+      component level via direct `<SchemaAwareArrayRenderer />` mounting from
+      `renderObjectValue`). Live D365 UI walkthrough deferred to main session
+      at Phase B exit gate. Evidence note:
+      `projects/spaarke-ai-platform-unification-r6/notes/task-041-widget-object-rendering-evidence.md`.
+    </outcome-note>
     <estimated-effort>3-4 hours</estimated-effort>
     <dependencies>040</dependencies>
     <blocks>042, 048</blocks>

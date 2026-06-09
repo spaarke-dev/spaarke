@@ -3,7 +3,8 @@
   <metadata>
     <title>D-B-07 `StructuredOutputStreamWidget` schema-aware — array-typed fields render as bulleted list (fixes R5 TL;DR bug)</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <outcome-note>Task 040 closed 2026-06-09 — schema-aware ARRAY dispatch added to StructuredOutputStreamWidget; R5 SC-18 TL;DR bug structurally fixed. Widget LOC delta: 1117→1385 (+268). New test file: 494 LOC; 13 tests all pass. BFF publish-size delta: 0 MB (frontend-only). Task 041 extension point documented at classifySchemaField() + dispatch site. NFR-11 back-compat preserved (test b verifies). ADR-021 dark-mode tested via DOM hex/rgb scan. Evidence: notes/task-040-widget-array-rendering-evidence.md.</outcome-note>
     <estimated-effort>4-5 hours</estimated-effort>
     <dependencies>032, 033</dependencies>
     <blocks>041, 042, 048</blocks>

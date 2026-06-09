@@ -72,8 +72,8 @@
 | 033 | B-G2 | Migrate `summarize-document-for-workspace@v1` action outputSchema (D-B-04) — REVISED: CREATE new playbook referencing shared SUM-CHAT@v1 (Option A) | ✅ | STANDARD | true | 030, 031 |
 | 034 | B-G2 | **Migrate matter-prefill action outputSchema (NFR-07 regression test)** (D-B-05) — data work via timed-out sub-agent; closeout by main session 2026-06-09 | ✅ | FULL | true | 030, 031 |
 | 035 | B-G2 | **Migrate project-prefill action outputSchema (NFR-07 regression test)** (D-B-06) | ✅ | FULL | true | 030, 031 |
-| 040 | B-G3 | `StructuredOutputStreamWidget` schema-aware array rendering (D-B-07) | 🔲 | FULL | true | 032, 033 |
-| 041 | B-G3 | `StructuredOutputStreamWidget` schema-aware object rendering (D-B-08) | 🔲 | FULL | false (same file as 040) | 040 |
+| 040 | B-G3 | `StructuredOutputStreamWidget` schema-aware array rendering (D-B-07) | ✅ | FULL | true | 032, 033 |
+| 041 | B-G3 | `StructuredOutputStreamWidget` schema-aware object rendering (D-B-08) | ✅ | FULL | false (same file as 040) | 040 |
 | 042 | B-G4 | CapabilityRouter dedup (one intent → one route) (D-B-09) | 🔲 | FULL | false | 041, 025 |
 | 048 | B-G5 | Phase B integration test (TL;DR + Entities + dedup + pre-fill regression) | 🔲 | STANDARD | false | 042, 034, 035 |
 | 049 | B-G6 | Phase B exit-gate validation | 🔲 | MINIMAL | false | 048 |
