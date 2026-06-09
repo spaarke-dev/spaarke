@@ -1,9 +1,9 @@
 # Current Task State — spaarke-ai-platform-unification-r6
 
-> **Last Updated**: 2026-06-08 (Wave B-G1 ✅; user asleep; running autonomously through downstream waves)
+> **Last Updated**: 2026-06-09 (Wave B-G1 ✅ committed `f8ee93bf`; Wave B-G2 ✅ all 4 complete, uncommitted; preparing aggregate commit + Wave B-G3 dispatch)
 > **Recovery**: Read "Quick Recovery" section first
-> **Last Commit**: (pending Wave B-G1 commit — being aggregated)
-> **Branch**: `work/spaarke-ai-platform-unification-r6` (pushed to origin through `aef41d99`; Wave B-G1 changes uncommitted)
+> **Last Commit**: `f8ee93bf` (Wave B-G1: 030 + 031)
+> **Branch**: `work/spaarke-ai-platform-unification-r6` (Wave B-G2 changes uncommitted; aggregate commit pending)
 
 ---
 
@@ -11,14 +11,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | **B (Pillar 5 — schema-aware output)** — Wave B-G1 complete; preparing Wave B-G2 dispatch |
-| **Mode** | **Autonomous execution** per user pre-stated preference (`feedback_pipeline-execution-style.md`); user asleep |
-| **Wave B-G1** | ✅ Tasks 030 + 031 complete. Build clean (0 err, 16 baseline warn). Test suite 6858/6940 pass per task 031 sweep. |
-| **Wave B-G1 key discovery** | Task 030 reshaped to Option A: column `sprk_outputschemajson` already exists (Memo, 1 MB max, in production use by `PlaybookExecutionEngine.cs:474-500` for SUM-CHAT@v1). Downstream POMLs 032/033/034/035/040/048 batch-renamed `sprk_outputschema` → `sprk_outputschemajson` (042 didn't reference the column). |
-| **Wave B-G1 task 031** | JSON-blob surface path chosen; NodeRoutingConfig + JSON Schema + 27 tests + NodeDestinationJsonConverter; DeliverOutputNodeExecutor.cs UNMODIFIED (NFR-08 verified via System.Text.Json default Skip behavior); +0.05 MB BFF delta. |
-| **Next Wave** | **B-G2 — Action migrations (032 + 033 + 034 + 035) in parallel** (4 parallel-safe; 030 + 031 dependencies satisfied). 034 + 035 NFR-07 binding: pre-fill flow signatures + 45s timeout + `useAiPrefill` MUST stay unchanged. |
+| **Phase** | **B (Pillar 5 — schema-aware output)** — Wave B-G2 complete; preparing Wave B-G3 dispatch |
+| **Mode** | **Autonomous execution** per user pre-stated preference (`feedback_pipeline-execution-style.md`) |
+| **Wave B-G1** | ✅ COMMITTED `f8ee93bf`. Tasks 030 + 031. |
+| **Wave B-G2** | ✅ All 4 complete (uncommitted): 032 SUM-CHAT@v1 (existing schema verified + node destination=chat); 033 Option A — new workspace playbook referencing shared SUM-CHAT@v1 action; 034 matter-prefill (data work via timed-out sub-agent; main-session closeout); 035 project-prefill (~12 min runtime; NFR-07 inspection-based). Build 0/0; all NFR-07 binding files zero-diff. |
+| **Wave B-G2 key discoveries** | 033 surfaced "summarize-document-for-workspace@v1 doesn't exist" → user approved Option A (shared SUM-CHAT@v1 action + new playbook). 034 sub-agent timed out 2x with API stream idle (~7h + ~52min) likely due to matter-prefill consumer complexity (704 LOC vs project's 443; 3-fallback ParseAiResponse + MatchField + HasAnyField); data work landed via the timed-out runs; main session completed bookkeeping. |
+| **Next Wave** | **B-G3 — Widget refactor (040 → 041 sequential, same file)**. 040 = `StructuredOutputStreamWidget` schema-aware ARRAY rendering (`tldr` bullets); 041 = OBJECT rendering (`entities` labeled k-v blocks). Depends on 032 + 033 (both ✅). |
 | **Phase A exit-gate doc** | `projects/spaarke-ai-platform-unification-r6/notes/phase-a-exit-gate.md` |
-| **Wave B-G1 evidence** | `notes/task-030-schema-deployment-evidence.md` + `notes/task-031-node-config-extension-evidence.md` |
+| **Wave B-G2 evidence** | `notes/task-032-migration-evidence.md`, `notes/task-033-migration-evidence.md`, `notes/task-034-migration-evidence.md`, `notes/task-035-migration-evidence.md` |
+| **R7 follow-up candidate** | Matter-prefill technical-debt sweep: retire 3-fallback parsing layers in `MatterPreFillService.cs` (lines 460-608: `UnwrapRawResponse`, `HasAnyField`, `ParseAiResponse` entity-extraction-format, `MatchField`). Defensive parsing from pre-Structured-Outputs era; now superfluous. Touches NFR-07 surface → R6-deferred. Also fix stale `DefaultPreFillPlaybookId` GUID in `ProjectPreFillService.cs:37-38` (flagged by 035). |
 
 ## Phase B overview
 

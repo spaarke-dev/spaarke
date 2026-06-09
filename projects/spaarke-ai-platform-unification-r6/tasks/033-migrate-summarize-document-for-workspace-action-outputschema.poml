@@ -3,7 +3,8 @@
   <metadata>
     <title>D-B-04 Migrate `summarize-document-for-workspace@v1` action: populate outputSchema + node destination = workspace</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <outcome-note>Redispatched 2026-06-09 with user-approved Option (a) CREATE path. Refined to Option A (shared SUM-CHAT@v1 action + NEW playbook) per Q5 re-shape principle. New playbook `summarize-document-for-workspace@v1` deployed to Spaarke Dev (GUID 302e6da6-f363-f111-ab0c-7ced8ddc4cc6) with single AiAnalysis node (GUID 3d6564a1-f363-f111-ab0c-7ced8ddc4a05) referencing existing SUM-CHAT@v1 (GUID eeb05bfd-1260-f111-ab0b-70a8a59455f4). Node sprk_configjson carries `destination: "workspace"` + `widgetType: "structured-output-stream"` per task 031 NodeRoutingConfig contract (kebab-case wire format). Deploy idempotent (verified via re-run). 0 MB BFF publish-size delta (data-only). New file: `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/summarize-document-for-workspace.playbook.json`. Resolution evidence: `projects/spaarke-ai-platform-unification-r6/notes/task-033-migration-evidence.md` "RESOLUTION" section. Acceptance criteria 1-7 all pass (revised for CREATE path; original POML criteria assumed pre-existing row to migrate which never existed).</outcome-note>
     <estimated-effort>2-3 hours</estimated-effort>
     <dependencies>030, 031</dependencies>
     <blocks>040, 041, 048</blocks>

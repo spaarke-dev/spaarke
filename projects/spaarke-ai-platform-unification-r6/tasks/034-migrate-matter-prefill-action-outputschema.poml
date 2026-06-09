@@ -3,7 +3,8 @@
   <metadata>
     <title>D-B-05 Migrate matter-prefill action: populate outputSchema + node destination = form-prefill (NFR-07 binding regression)</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <outcome-note>Closeout completed 2026-06-09 by main session after two sub-agent stream-idle timeouts (7h and 52min). Sub-agents authored + executed the migration successfully: ACT-023 sprk_outputschemajson populated with 8-field draft-07 schema; playbook PB-008 node 444b06d3-... sprk_configjson merged with destination=form-prefill (NodeRoutingConfig kebab-case per task 031). Main session ran NFR-07 inspection (zero diff on IWorkspacePrefillAi/MatterPreFillService/useAiPrefill + 3/3 targeted tests pass), wrote evidence note, updated status. Idempotency verified via dry-run (both Step A + Step B SKIP). BFF publish-size delta 0 MB. Timeout root-cause hypothesis: matter-prefill consumer is significantly more sophisticated than project-prefill (3-fallback ParseAiResponse + findBestLookupMatch lookup resolution); agent inspection loops exceeded streaming idle threshold. Full closeout: notes/task-034-migration-evidence.md.</outcome-note>
     <estimated-effort>3-4 hours</estimated-effort>
     <dependencies>030, 031</dependencies>
     <blocks>048</blocks>

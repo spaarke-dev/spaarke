@@ -68,10 +68,10 @@
 |----|------|-------|--------|-------|---------------|--------------|
 | 030 | B-G1 | Add `outputSchema` field to `sprk_analysisaction` (D-B-01) — Option A: verify existing `sprk_outputschemajson` column (no deploy) | ✅ | FULL | true | 029 |
 | 031 | B-G1 | Extend node config with `destination` + `widgetType` (D-B-02) | ✅ | FULL | true | 029 |
-| 032 | B-G2 | Migrate `summarize-document-for-chat@v1` action outputSchema (D-B-03) | 🔲 | STANDARD | true | 030, 031 |
-| 033 | B-G2 | Migrate `summarize-document-for-workspace@v1` action outputSchema (D-B-04) | 🔲 | STANDARD | true | 030, 031 |
-| 034 | B-G2 | **Migrate matter-prefill action outputSchema (NFR-07 regression test)** (D-B-05) | 🔲 | FULL | true | 030, 031 |
-| 035 | B-G2 | **Migrate project-prefill action outputSchema (NFR-07 regression test)** (D-B-06) | 🔲 | FULL | true | 030, 031 |
+| 032 | B-G2 | Migrate `summarize-document-for-chat@v1` action outputSchema (D-B-03) | ✅ | STANDARD | true | 030, 031 |
+| 033 | B-G2 | Migrate `summarize-document-for-workspace@v1` action outputSchema (D-B-04) — REVISED: CREATE new playbook referencing shared SUM-CHAT@v1 (Option A) | ✅ | STANDARD | true | 030, 031 |
+| 034 | B-G2 | **Migrate matter-prefill action outputSchema (NFR-07 regression test)** (D-B-05) — data work via timed-out sub-agent; closeout by main session 2026-06-09 | ✅ | FULL | true | 030, 031 |
+| 035 | B-G2 | **Migrate project-prefill action outputSchema (NFR-07 regression test)** (D-B-06) | ✅ | FULL | true | 030, 031 |
 | 040 | B-G3 | `StructuredOutputStreamWidget` schema-aware array rendering (D-B-07) | 🔲 | FULL | true | 032, 033 |
 | 041 | B-G3 | `StructuredOutputStreamWidget` schema-aware object rendering (D-B-08) | 🔲 | FULL | false (same file as 040) | 040 |
 | 042 | B-G4 | CapabilityRouter dedup (one intent → one route) (D-B-09) | 🔲 | FULL | false | 041, 025 |

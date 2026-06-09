@@ -3,7 +3,7 @@
   <metadata>
     <title>D-B-06 Migrate project-prefill action: populate outputSchema + node destination = form-prefill (NFR-07 binding regression)</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3-4 hours</estimated-effort>
     <dependencies>030, 031</dependencies>
     <blocks>048</blocks>

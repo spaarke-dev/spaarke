@@ -3,7 +3,7 @@
   <metadata>
     <title>D-B-03 Migrate `summarize-document-for-chat@v1` action: populate outputSchema + node destination = chat</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2-3 hours</estimated-effort>
     <dependencies>030, 031</dependencies>
     <blocks>040, 048</blocks>
