@@ -366,29 +366,30 @@ export const App: React.FC<AppProps> = ({
   // Search dispatch — routes to correct hook by domain
   // =============================================
 
+  // multi-container-multi-index-r1 UAT 2026-06-09 fix: scope/entityId from
+  // the URL envelope are used ONLY for the initial auto-fire — they mirror
+  // the PCF's entity-scoped view. Once the user types a query (or otherwise
+  // initiates a search themselves), the scope drops to tenant-wide so the
+  // code page behaves like its direct-opened counterpart. Without this the
+  // matter scope persisted into every subsequent search → user could only
+  // search within the matter they came from, which felt like the search
+  // was "broken / cached" (vs working fine when the code page is opened
+  // standalone).
+  const [hasUserInitiatedSearch, setHasUserInitiatedSearch] = useState(false);
+
   const executeSearch = useCallback(
     (searchQuery: string, searchFilters: SearchFilters, domain: SearchDomain) => {
       setSelectedIds([]);
-      // multi-container-multi-index-r1 UAT 2026-06-09 fix: completes task 042
-      // (the TODO that was previously left as a console.debug-only log). The
-      // URL envelope (`scope`, `entityId`, `searchIndexName`) now flows into
-      // the hook's search() so the code page mirrors the PCF's entity-scoped
-      // view instead of falling back to tenant-wide. selectedTags + associatedOnly
-      // remain in `searchFilters` per the existing buildDocumentFilters path.
       const envelopeSearchIndexName = urlParams?.searchIndexName ?? null;
+      const scopeArg = hasUserInitiatedSearch ? null : initialScope || null;
+      const entityIdArg = hasUserInitiatedSearch ? null : initialEntityId || null;
       if (domain === 'documents') {
-        searchDocuments(
-          searchQuery,
-          searchFilters,
-          envelopeSearchIndexName,
-          initialScope || null,
-          initialEntityId || null
-        );
+        searchDocuments(searchQuery, searchFilters, envelopeSearchIndexName, scopeArg, entityIdArg);
       } else {
         searchRecords(searchQuery, DOMAIN_RECORD_TYPES[domain], searchFilters);
       }
     },
-    [searchDocuments, searchRecords, initialScope, initialEntityId, urlParams]
+    [searchDocuments, searchRecords, hasUserInitiatedSearch, initialScope, initialEntityId, urlParams]
   );
 
   // =============================================
@@ -399,6 +400,7 @@ export const App: React.FC<AppProps> = ({
   const handleSearch = useCallback(
     (searchQuery: string, domain: SearchDomain) => {
       setQuery(searchQuery);
+      setHasUserInitiatedSearch(true);
       executeSearch(searchQuery, filters, domain);
     },
     [filters, executeSearch]
@@ -417,6 +419,7 @@ export const App: React.FC<AppProps> = ({
   const handleFilterSearch = useCallback(
     (_filterQuery: string, searchFilters: SearchFilters) => {
       setFilters(searchFilters);
+      setHasUserInitiatedSearch(true);
       executeSearch(query, searchFilters, activeDomain);
     },
     [activeDomain, query, executeSearch]
