@@ -537,13 +537,24 @@ export const App: React.FC<AppProps> = ({
       autoSearchFired.current = true;
     }
 
-    // Auto-execute search if query param is present
-    if (initialQuery && !autoSearchFired.current) {
+    // Auto-execute search when launched from the PCF "Open Viewer":
+    //   - With a query string OR
+    //   - With an entity scope (entityId present) so the modal mirrors the
+    //     PCF's "all docs for this matter/project/etc." view even when the
+    //     user hadn't typed a query before clicking the launcher.
+    //
+    // Without the `initialEntityId` branch, opening the viewer on an entity
+    // form without first typing a query left the modal in the empty default
+    // state — diverged from PCF behavior (which always shows the entity's
+    // docs regardless of query). See multi-container-multi-index-r1 UAT
+    // 2026-06-09: "Open Viewer shows blank" repro.
+    if ((initialQuery || initialEntityId) && !autoSearchFired.current) {
       autoSearchFired.current = true;
       executeSearch(initialQuery, filters, activeDomain);
     }
   }, [
     initialQuery,
+    initialEntityId,
     initialSavedSearchId,
     savedSearches,
     isSavedSearchesLoading,
