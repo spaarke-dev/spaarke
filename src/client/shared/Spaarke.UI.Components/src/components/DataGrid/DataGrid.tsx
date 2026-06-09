@@ -988,6 +988,19 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // scroll appears as a last resort (correct).
   // ─────────────────────────────────────────────────────────────────────────
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
+  // Synchronous initial measurement BEFORE FluentDataGrid's first commit, so
+  // its initial `columnSizingOptions` already reflect the container width
+  // (round 2 feedback found that ResizeObserver firing AFTER mount didn't
+  // re-apply column sizing — Fluent treats `columnSizingOptions` as initial
+  // values, not live-tracked). useLayoutEffect runs synchronously after the
+  // DOM is laid out but before paint, so the column sizes are correct on
+  // the very first visible frame.
+  React.useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (el) {
+      setContainerWidth(el.clientWidth);
+    }
+  }, []);
   React.useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -1196,7 +1209,16 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               focusMode="composite"
               size={density}
               getRowId={(item: GridItem) => item._rowId}
-              style={{ width: '100%' }}
+              // CSS belt-and-suspenders: maxWidth caps the FluentDataGrid at
+              // the container width even if `columnSizingOptions` failed to
+              // apply (Fluent treats it as initial-only). Without this, when
+              // sum-of-column-widths > container width, the grid renders past
+              // the container's right edge with a permanent horizontal scroll
+              // (round 2 testing feedback).
+              style={{
+                width: '100%',
+                maxWidth: containerWidth > 0 ? `${containerWidth}px` : undefined,
+              }}
               aria-label={contextValue.currentView}
             >
               <DataGridHeader>
