@@ -60,7 +60,13 @@ export interface UseSemanticSearchReturn {
    *   tenant default index chain (FR-BFF-04). Empty string MUST NOT be
    *   sent — absence is the protocol signal for "use server default".
    */
-  search: (query: string, filters: SearchFilters, searchIndexName?: string | null) => void;
+  search: (
+    query: string,
+    filters: SearchFilters,
+    searchIndexName?: string | null,
+    scope?: string | null,
+    entityId?: string | null
+  ) => void;
   /** Load the next page of results (appends to existing) */
   loadMore: () => void;
   /** Reset all state to initial idle values */
@@ -173,6 +179,12 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
   // FR-CP-04 — captured at search() time so loadMore() reuses the same
   // index routing across pages. null means "not provided / use BFF default".
   const currentSearchIndexNameRef = useRef<string | null>(null);
+  // multi-container-multi-index-r1 UAT 2026-06-09 fix: scope + entityId from
+  // the URL envelope MUST be sent to the BFF on each search/loadMore so the
+  // code page mirrors the PCF's entity-scoped view (instead of the previously
+  // hardcoded `scope: 'all'`). null means "tenant-wide / no entity scope".
+  const currentScopeRef = useRef<string | null>(null);
+  const currentEntityIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // --- Derived ---
@@ -184,61 +196,83 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
    * Cancels any in-flight request before starting. Stores query and filters
    * in refs so loadMore() can reuse them for subsequent pages.
    */
-  const search = useCallback((query: string, filters: SearchFilters, searchIndexName?: string | null): void => {
-    // Cancel any in-flight request
-    abortControllerRef.current?.abort();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+  const search = useCallback(
+    (
+      query: string,
+      filters: SearchFilters,
+      searchIndexName?: string | null,
+      scope?: string | null,
+      entityId?: string | null
+    ): void => {
+      // Cancel any in-flight request
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-    // Store for loadMore (FR-CP-04: same index routing across pages)
-    currentQueryRef.current = query;
-    currentFiltersRef.current = filters;
-    currentSearchIndexNameRef.current =
-      typeof searchIndexName === 'string' && searchIndexName.trim().length > 0 ? searchIndexName.trim() : null;
+      // Store for loadMore (FR-CP-04: same index routing across pages)
+      currentQueryRef.current = query;
+      currentFiltersRef.current = filters;
+      currentSearchIndexNameRef.current =
+        typeof searchIndexName === 'string' && searchIndexName.trim().length > 0 ? searchIndexName.trim() : null;
+      currentScopeRef.current = typeof scope === 'string' && scope.trim().length > 0 ? scope.trim() : null;
+      currentEntityIdRef.current = typeof entityId === 'string' && entityId.trim().length > 0 ? entityId.trim() : null;
 
-    // Reset state for new search
-    setResults([]);
-    setTotalCount(0);
-    setErrorMessage(null);
-    setSearchTime(null);
-    setSearchState('loading');
+      // Reset state for new search
+      setResults([]);
+      setTotalCount(0);
+      setErrorMessage(null);
+      setSearchTime(null);
+      setSearchState('loading');
 
-    // FR-CP-04 — Conditionally include `searchIndexName` in the body. The
-    // spread + cast pattern keeps `DocumentSearchRequest` untouched while
-    // still forwarding the field to the BFF. JSON.stringify in the API
-    // service serializes the field when present; when absent the key is
-    // omitted entirely (NOT sent as empty string).
-    const requestBody = {
-      query,
-      scope: 'all',
-      filters: buildDocumentFilters(filters),
-      options: {
-        limit: PAGE_SIZE,
-        offset: 0,
-        includeHighlights: true,
-        hybridMode: filters.searchMode,
-      },
-      ...buildSearchIndexNameFragment(searchIndexName),
-    } as DocumentSearchRequest;
+      // multi-container-multi-index-r1 UAT 2026-06-09 fix: scope + entityId
+      // were previously hardcoded to 'all', so opening the code page from a
+      // PCF on a Matter form returned tenant-wide results regardless of which
+      // matter the user came from. Both fields now come from URL envelope
+      // (FR-CP-03) so the modal mirrors the PCF's entity-scoped view.
+      // When scope is null/'all' or entityId is null, the BFF runs a tenant-
+      // wide search (preserves the prior fallback behavior).
+      const effectiveScope = currentScopeRef.current ?? 'all';
+      const effectiveEntityId = currentEntityIdRef.current ?? undefined;
 
-    searchDocuments(requestBody)
-      .then((response: DocumentSearchResponse) => {
-        // If this request was cancelled, discard the result
-        if (controller.signal.aborted) return;
+      // FR-CP-04 — Conditionally include `searchIndexName` in the body. The
+      // spread + cast pattern keeps `DocumentSearchRequest` untouched while
+      // still forwarding the field to the BFF. JSON.stringify in the API
+      // service serializes the field when present; when absent the key is
+      // omitted entirely (NOT sent as empty string).
+      const requestBody = {
+        query,
+        scope: effectiveScope,
+        ...(effectiveEntityId ? { scopeId: effectiveEntityId } : {}),
+        filters: buildDocumentFilters(filters),
+        options: {
+          limit: PAGE_SIZE,
+          offset: 0,
+          includeHighlights: true,
+          hybridMode: filters.searchMode,
+        },
+        ...buildSearchIndexNameFragment(searchIndexName),
+      } as DocumentSearchRequest;
 
-        setResults(response.results);
-        setTotalCount(response.metadata.totalResults);
-        setSearchTime(response.metadata.searchDurationMs);
-        setSearchState('success');
-      })
-      .catch((err: unknown) => {
-        // If this request was cancelled, do not surface the error
-        if (controller.signal.aborted) return;
+      searchDocuments(requestBody)
+        .then((response: DocumentSearchResponse) => {
+          // If this request was cancelled, discard the result
+          if (controller.signal.aborted) return;
 
-        setErrorMessage(extractErrorMessage(err));
-        setSearchState('error');
-      });
-  }, []);
+          setResults(response.results);
+          setTotalCount(response.metadata.totalResults);
+          setSearchTime(response.metadata.searchDurationMs);
+          setSearchState('success');
+        })
+        .catch((err: unknown) => {
+          // If this request was cancelled, do not surface the error
+          if (controller.signal.aborted) return;
+
+          setErrorMessage(extractErrorMessage(err));
+          setSearchState('error');
+        });
+    },
+    []
+  );
 
   /**
    * Load the next page of results, appending to the existing set.
@@ -265,9 +299,17 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
     // FR-CP-04 — Reuse the same `searchIndexName` captured at search() time
     // so pagination stays bound to the same index. Cast + spread mirrors
     // the pattern in search() above.
+    //
+    // multi-container-multi-index-r1 UAT 2026-06-09: also reuse the same
+    // scope/entityId captured at search() time so subsequent pages stay
+    // entity-scoped (otherwise pagination silently falls back to tenant-wide
+    // and merges unrelated docs into the result set).
+    const effectiveScope = currentScopeRef.current ?? 'all';
+    const effectiveEntityId = currentEntityIdRef.current ?? undefined;
     const requestBody = {
       query: currentQueryRef.current,
-      scope: 'all',
+      scope: effectiveScope,
+      ...(effectiveEntityId ? { scopeId: effectiveEntityId } : {}),
       filters: buildDocumentFilters(filters),
       options: {
         limit: PAGE_SIZE,

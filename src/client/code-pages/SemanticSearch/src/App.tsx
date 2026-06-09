@@ -369,32 +369,26 @@ export const App: React.FC<AppProps> = ({
   const executeSearch = useCallback(
     (searchQuery: string, searchFilters: SearchFilters, domain: SearchDomain) => {
       setSelectedIds([]);
-      // initialScope + initialEntityId + selectedTags + associatedOnly are
-      // captured in the closure (no longer discarded per FR-CP-02). The
-      // current hook surface (`search(query, filters)` / `search(query,
-      // recordTypes, filters)`) does not yet thread these through to the
-      // request body — task 042 extends the hook signatures to accept
-      // `{ scope, entityId, searchIndexName, tags, associatedOnly }` at
-      // construction time, after which the values seeded here will flow into
-      // the first POST automatically. Until then, log them for traceability
-      // so UAT can verify they reached App.tsx even before task 042 lands.
-      // TODO(task-042): pass initialScope / initialEntityId / selectedTags /
-      // associatedOnly / urlParams.searchIndexName as hook constructor args.
-      if (initialScope || initialEntityId || selectedTags.length > 0 || associatedOnly) {
-        console.debug('[SemanticSearch] URL-seeded scope/entity/tags/associatedOnly carried into executeSearch:', {
-          initialScope,
-          initialEntityId,
-          selectedTags,
-          associatedOnly,
-        });
-      }
+      // multi-container-multi-index-r1 UAT 2026-06-09 fix: completes task 042
+      // (the TODO that was previously left as a console.debug-only log). The
+      // URL envelope (`scope`, `entityId`, `searchIndexName`) now flows into
+      // the hook's search() so the code page mirrors the PCF's entity-scoped
+      // view instead of falling back to tenant-wide. selectedTags + associatedOnly
+      // remain in `searchFilters` per the existing buildDocumentFilters path.
+      const envelopeSearchIndexName = urlParams?.searchIndexName ?? null;
       if (domain === 'documents') {
-        searchDocuments(searchQuery, searchFilters);
+        searchDocuments(
+          searchQuery,
+          searchFilters,
+          envelopeSearchIndexName,
+          initialScope || null,
+          initialEntityId || null
+        );
       } else {
         searchRecords(searchQuery, DOMAIN_RECORD_TYPES[domain], searchFilters);
       }
     },
-    [searchDocuments, searchRecords, initialScope, initialEntityId, selectedTags, associatedOnly]
+    [searchDocuments, searchRecords, initialScope, initialEntityId, urlParams]
   );
 
   // =============================================
