@@ -89,6 +89,39 @@ Tasks **030 + 031** are the parallel-safe entry into Phase B. Per the Phase B cr
   - Explicit "files you OWN" and "files you MUST NOT touch" lists
   - Verification commands the sub-agent runs before reporting
 
+#### Phase B sub-agent prompt alignment (MANDATORY for tasks 042, 048; recommended for 034, 035)
+
+After merging master `6a717e43` (PR #360 — bff-ai-architecture-audit-r1), the repo gained 3 patterns + a `bff-extensions.md` §F that **govern any new DI registration in `Sprk.Bff.Api`**. Phase B sub-agent prompts MUST reference these when relevant:
+
+| Task | Reference patterns | Why |
+|---|---|---|
+| 030, 031 | none (Dataverse schema only) | No BFF DI impact |
+| 032, 033 | `public-contracts-facade.md` if action migration touches `IWorkspacePrefillAi` surface | preserves Pre-fill facade contract |
+| **034, 035** | `public-contracts-facade.md`; `bff-extensions.md` NFR-07 binding | NFR-07 regression tests; pre-fill facade signature MUST stay unchanged |
+| 040, 041 | none (TS/React widget only) | Frontend |
+| **042** | **`endpoint-di-symmetry.md`** + **`bff-extensions.md` §F.1/F.2/F.3** if CapabilityRouter dedup touches DI in `Services/Ai/Chat/` | New DI = symmetric registration check required |
+| **048** | **`bff-extensions.md` §F.2** (Fixture-Config-FIRST Inspection Protocol) | When integration tests fail/skip with DI symptom, inspect fixture config BEFORE code fix |
+
+**Inline prompt snippet to paste into 042 + 048 dispatches**:
+
+> ### DI-aware binding (post 2026-06-08 merge of PR #360)
+>
+> If your changes touch DI registration in any `*Module.cs` file: read `.claude/patterns/ai/endpoint-di-symmetry.md` and `.claude/constraints/bff-extensions.md` §F.1 BEFORE designing. Any conditional service registration MUST have a Null peer (per ADR-032 P3) registered in `AddNullObjectsForCompoundOff` for both compound-OFF branches. The §F.1 static-scan recipe is binding.
+>
+> If a test is Skip'd or fails with a DI / fixture symptom: §F.2 Fixture-Config-FIRST Inspection Protocol applies. Inspect `WorkspaceTestFixture` config + claims + mocks for missing/non-contract values BEFORE proposing a code fix.
+
+### Step 4.5 — FR-21 acceptance criteria (added 2026-06-08)
+
+Cross-project request from `spaarke-insights-engine-r2` audit (rationale: closes the LATENT BUG #1 class). All 5 criteria are satisfied by current Phase A code + tests; the spec.md FR-21 update codifies them as binding:
+
+1. ✅ `NullInvokePlaybookAi.cs` exists at `Services/Ai/PublicContracts/NullInvokePlaybookAi.cs`; throws `FeatureDisabledException("ai.invoke-playbook.disabled", …)` per ADR-032 P3
+2. ✅ Real impl registered in `AddPublicContractsFacade`; Null peer in `AddNullObjectsForCompoundOff` (both branches)
+3. ✅ Transitive ctor-dep symmetry verified via `bff-extensions.md` §F.1 static-scan
+4. ✅ Unit test `Null_InvokePlaybookAsync_ThrowsFeatureDisabledException` + `Null_InvokePlaybookAsync_ExceptionConvertsToProblemDetails503`
+5. ✅ Integration test `ExecuteChatAsync_WhenFacadeIsNullKillSwitchActive_ReturnsFailureToolResult_NotInvalidOperationException` — added 2026-06-08
+
+**errorCode**: aligned from `ai.playbook-invocation.disabled` → `ai.invoke-playbook.disabled` per R2 team's spec. The change is safe — task 020 was the introducing commit; no external clients had switched on the old string yet.
+
 ### Step 5 — Memory check (verify cross-session memories still relevant)
 
 Memory files at `C:\Users\RalphSchroeder\.claude\projects\c--code-files-spaarke-wt-spaarke-ai-platform-unification-r6\memory\`:

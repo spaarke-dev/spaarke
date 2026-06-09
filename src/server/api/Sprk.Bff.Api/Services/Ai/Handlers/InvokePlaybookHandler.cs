@@ -350,11 +350,16 @@ public sealed class InvokePlaybookHandler : IToolHandler
         {
             stopwatch.Stop();
             _logger.LogWarning(ex,
-                "InvokePlaybookHandler ({Correlation}) facade reports feature disabled: {Reason}",
-                correlationLogId, ex.Message);
+                "InvokePlaybookHandler ({Correlation}) facade reports feature disabled: {ErrorCode} {Reason}",
+                correlationLogId, ex.ErrorCode, ex.Message);
+            // Include the stable errorCode in the user-facing message so the chat-tool
+            // adapter + observability stack can distinguish kill-switch state from generic
+            // failures. Per FR-21 §Criterion 5 (cross-project R2 audit binding 2026-06-08):
+            // the chat-tool path's equivalent of "503 ProblemDetails" is a Failure ToolResult
+            // whose body carries the stable errorCode for downstream switching.
             return ToolResult.Error(
                 HandlerId, tool.Id, tool.Name,
-                "Playbook invocation is currently unavailable (feature disabled).",
+                $"Playbook invocation is currently unavailable (feature disabled). errorCode={ex.ErrorCode}",
                 ToolErrorCodes.DependencyUnavailable,
                 new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = DateTimeOffset.UtcNow });
         }

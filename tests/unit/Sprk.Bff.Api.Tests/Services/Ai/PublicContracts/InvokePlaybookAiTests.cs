@@ -418,8 +418,9 @@ public sealed class InvokePlaybookAiTests
                 CancellationToken.None));
 
         ex.ErrorCode.Should().Be(NullInvokePlaybookAi.ErrorCode);
-        ex.ErrorCode.Should().Be("ai.playbook-invocation.disabled",
-            "errorCode must be stable across releases — clients switch on this string");
+        ex.ErrorCode.Should().Be("ai.invoke-playbook.disabled",
+            "errorCode must be stable across releases — clients switch on this string; " +
+            "aligned to `ai.<tool-name>.disabled` convention per spaarke-insights-engine-r2 audit");
         ex.Message.Should().Contain("Playbook invocation");
     }
 

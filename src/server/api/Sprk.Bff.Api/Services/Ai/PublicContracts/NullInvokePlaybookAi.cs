@@ -40,7 +40,10 @@ public sealed class NullInvokePlaybookAi : IInvokePlaybookAi
     /// <summary>
     /// Stable feature-key identifier — clients SHOULD switch on this string.
     /// </summary>
-    public const string ErrorCode = "ai.playbook-invocation.disabled";
+    // Stable errorCode per spaarke-insights-engine-r2 audit cross-project request
+    // (2026-06-08): aligned to `ai.<tool-name>.disabled` convention to match the LLM
+    // tool name `invoke_playbook`. Clients switch on this string.
+    public const string ErrorCode = "ai.invoke-playbook.disabled";
 
     private const string DetailMessage =
         "Playbook invocation requires Analysis:Enabled=true AND DocumentIntelligence:Enabled=true.";

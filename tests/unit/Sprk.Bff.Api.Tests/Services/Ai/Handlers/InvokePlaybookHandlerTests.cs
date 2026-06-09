@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
@@ -739,6 +740,75 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
 
         AssertTelemetryRespectsAdr015(SentinelParameterValue);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // FR-21 Criterion 5 — Kill-switch integration: NullInvokePlaybookAi (compound-OFF)
+    // through InvokePlaybookHandler returns a translatable Failure ToolResult.
+    //
+    // Cross-project R2 audit binding (2026-06-08): closes the LATENT BUG #1 class.
+    // For HTTP-endpoint consumers, AsFeatureDisabled503() converts to 503 ProblemDetails
+    // (covered by `Null_InvokePlaybookAsync_ExceptionConvertsToProblemDetails503` in
+    // InvokePlaybookAiTests). For the chat-tool dispatch path (R6 Pillar 3 / Q11),
+    // the equivalent assertion is that the InvokePlaybookHandler converts the
+    // FeatureDisabledException into a ToolResult.Failure with the same stable errorCode —
+    // the chat-tool adapter then surfaces this to the LLM as a tool-call failure rather
+    // than crashing the chat session.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task ExecuteChatAsync_WhenFacadeIsNullKillSwitchActive_ReturnsFailureToolResult_NotInvalidOperationException()
+    {
+        // Arrange — wire the REAL NullInvokePlaybookAi (compound-OFF Null-peer) into the
+        // handler's IServiceProvider lazy-resolve. This is the exact DI shape the BFF host
+        // will have when DocumentIntelligence:Enabled=false OR Analysis:Enabled=false.
+        var playbookId = Guid.NewGuid();
+        _playbookServiceMock
+            .Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildVisiblePlaybook(playbookId));
+
+        var realNullFacade = new Sprk.Bff.Api.Services.Ai.PublicContracts.NullInvokePlaybookAi(
+            NullLogger<Sprk.Bff.Api.Services.Ai.PublicContracts.NullInvokePlaybookAi>.Instance);
+        var serviceProvider = new ServiceCollection()
+            .AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IInvokePlaybookAi>(realNullFacade)
+            .BuildServiceProvider();
+
+        var handler = new InvokePlaybookHandler(
+            serviceProvider,
+            _playbookServiceMock.Object,
+            _httpContextAccessor,
+            _memoryCache,
+            CreateLogger<InvokePlaybookHandler>());
+
+        var argsJson = JsonSerializer.Serialize(new
+        {
+            playbookId = playbookId.ToString(),
+            parameters = new { }
+        });
+        var ctx = BuildChatInvocationContext(
+            requestedToolName: "invoke_playbook",
+            toolArgumentsJson: argsJson);
+        var tool = BuildInvokeTool();
+
+        // Act
+        var result = await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
+
+        // Assert — FR-21 §Criterion 5: the handler MUST convert FeatureDisabledException
+        // into a Failure ToolResult; MUST NOT propagate the exception (which would 500 the
+        // chat session). The errorCode in the failure message MUST be traceable back to
+        // the stable NullInvokePlaybookAi.ErrorCode so chat-side observability tools can
+        // distinguish "kill-switch OFF" from generic tool-call errors.
+        result.Success.Should().BeFalse(
+            "FR-21 §Criterion 5: handler returns Failure ToolResult when the facade kill-switch fires");
+        result.Should().NotBeNull(
+            "handler MUST NOT propagate the FeatureDisabledException; the chat session must continue");
+
+        // The error code surfaces in the failure message (per InvokePlaybookHandler's
+        // existing exception-mapping logic for facade exceptions).
+        (result.ErrorMessage ?? result.Summary ?? string.Empty)
+            .Should().Contain(Sprk.Bff.Api.Services.Ai.PublicContracts.NullInvokePlaybookAi.ErrorCode,
+                "stable errorCode 'ai.invoke-playbook.disabled' MUST appear in the failure trace " +
+                "so observability can distinguish kill-switch state from generic errors");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
