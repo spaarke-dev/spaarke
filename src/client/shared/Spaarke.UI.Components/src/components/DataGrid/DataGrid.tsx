@@ -1190,8 +1190,22 @@ export const DataGrid: React.FC<DataGridProps> = props => {
              * would leave the user with no way back to clear the filter.
              * Power Apps OOB pattern: header always visible, body empty,
              * empty-state message sits below the (empty) body.
+             *
+             * ai-spaarke-ai-workspace-UI-r1 iter 2 round 3 (2026-06-09):
+             * FluentDataGrid treats `columnSizingOptions` as INITIAL-only —
+             * once mounted, prop changes to those options do not re-flow the
+             * columns. To get responsive sizing in containers whose width
+             * changes (workspace section embeds; window resize), we gate
+             * mount on the first valid container-width measurement (skips
+             * the useless containerWidth=0 first frame) and use a key bucket
+             * (every 50px) so big resize deltas force a remount with fresh
+             * column widths. Selection state lives in DataGrid's React state
+             * (above this FluentDataGrid), so remount only loses Fluent's
+             * internal sort/filter-popover UI state — acceptable trade-off.
              */}
+            {containerWidth > 0 && (
             <FluentDataGrid
+              key={`fg-${Math.floor(containerWidth / 50)}`}
               items={items}
               columns={tableColumns}
               selectionMode={
@@ -1239,6 +1253,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
                 )}
               </DataGridBody>
             </FluentDataGrid>
+            )}
 
             {isEmpty && (
               <div className={styles.emptyState}>
