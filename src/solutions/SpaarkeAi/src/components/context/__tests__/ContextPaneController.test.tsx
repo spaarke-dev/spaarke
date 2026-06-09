@@ -51,6 +51,7 @@ function makeStageContext(
     toLoading: jest.fn(),
     toActiveChat: jest.fn(),
     toReview: jest.fn(),
+    toActiveWork: jest.fn(),
     reset: jest.fn(),
     ...overrides,
   };
