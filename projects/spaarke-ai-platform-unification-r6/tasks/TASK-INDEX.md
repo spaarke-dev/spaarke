@@ -74,7 +74,7 @@
 | 035 | B-G2 | **Migrate project-prefill action outputSchema (NFR-07 regression test)** (D-B-06) | ✅ | FULL | true | 030, 031 |
 | 040 | B-G3 | `StructuredOutputStreamWidget` schema-aware array rendering (D-B-07) | ✅ | FULL | true | 032, 033 |
 | 041 | B-G3 | `StructuredOutputStreamWidget` schema-aware object rendering (D-B-08) | ✅ | FULL | false (same file as 040) | 040 |
-| 042 | B-G4 | CapabilityRouter dedup (one intent → one route) (D-B-09) | 🔲 | FULL | false | 041, 025 |
+| 042 | B-G4 | CapabilityRouter dedup (one intent → one route) (D-B-09) | ✅ | FULL | false | 041, 025 |
 | 048 | B-G5 | Phase B integration test (TL;DR + Entities + dedup + pre-fill regression) | 🔲 | STANDARD | false | 042, 034, 035 |
 | 049 | B-G6 | Phase B exit-gate validation | 🔲 | MINIMAL | false | 048 |
 

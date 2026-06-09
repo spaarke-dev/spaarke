@@ -403,6 +403,75 @@ public class SprkChatAgentFactory
         }
         // === End AIPU2-061 routing ===
 
+        // === R6 task 042 (FR-30) — CapabilityRouter dedup: one intent → one render =========
+        // When the router resolved an UNAMBIGUOUS playbook (single confident capability with
+        // a non-null PlaybookId), look up the playbook's terminal node `destination` per
+        // NodeRoutingConfig (task 031 / FR-27). When the destination is NOT chat, append a
+        // dedup directive to the system prompt so the LLM emits ONLY a single-sentence
+        // acknowledgment for the `invoke_playbook` tool call — the playbook output renders
+        // at the destination (workspace tab / form-prefill / side-effect) and the chat-agent's
+        // parallel inline text would be a redundant render (R5 Gap A — path A vs path B
+        // parallelism is a smell; structurally eliminated here).
+        //
+        // NFR-01 binding: conversational primacy preserved. The directive applies ONLY to the
+        // `invoke_playbook` tool call response in THIS turn. Refinement, follow-up,
+        // comparison, and context-injection turns are unaffected — the next turn's routing
+        // resolves separately and only adds the directive when it again resolves to a
+        // non-chat destination playbook.
+        //
+        // NFR-13 / NFR-07 / NFR-08 binding: safety pipeline, pre-fill flows, and node
+        // executors are all UNCHANGED — the dedup is a system-prompt enrichment only.
+        //
+        // ADR-015 telemetry: log decision + playbookId + destination only; NEVER user content.
+        //
+        // Soft failure: if INodeService lookup fails (Dataverse outage, etc.), the directive
+        // is NOT applied and the chat-agent emits inline text normally — degrades to current
+        // (pre-task-042) behavior. NFR-01 conversational primacy is preserved unconditionally.
+        if (routingResult is not null
+            && routingResult.IsConfident
+            && routingResult.SelectedPlaybookId.HasValue)
+        {
+            try
+            {
+                var resolvedPlaybookId = routingResult.SelectedPlaybookId.Value;
+                var destination = await ResolvePlaybookTerminalDestinationAsync(
+                    scope.ServiceProvider, resolvedPlaybookId, cancellationToken)
+                    .ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "R6 task 042: CapabilityRouter dedup — session={SessionId} " +
+                    "playbookId={PlaybookId} destination={Destination} " +
+                    "directiveApplied={DirectiveApplied}",
+                    sessionId,
+                    resolvedPlaybookId,
+                    destination?.ToString() ?? "(unresolved)",
+                    destination is not null && destination != Models.Ai.NodeDestination.Chat);
+
+                if (destination.HasValue && destination.Value != Models.Ai.NodeDestination.Chat)
+                {
+                    var directive = BuildDedupDirective(destination.Value);
+                    if (!string.IsNullOrEmpty(directive))
+                    {
+                        context = context with { SystemPrompt = context.SystemPrompt + directive };
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // ADR-015: log exception type + tenant only; never user content.
+                _logger.LogWarning(ex,
+                    "R6 task 042: CapabilityRouter dedup directive lookup failed " +
+                    "(session={SessionId}, playbookId={PlaybookId}, exceptionType={ExceptionType}); " +
+                    "continuing without dedup directive — NFR-01 conversational primacy preserved.",
+                    sessionId, routingResult.SelectedPlaybookId, ex.GetType().Name);
+            }
+        }
+        // === End R6 task 042 dedup ============================================================
+
         // Create a shared CitationContext for search tools to populate with source metadata.
         // This context is passed to DocumentSearchTools and KnowledgeRetrievalTools so they
         // can register citations during tool execution. The SprkChatAgent resets it before
@@ -1567,6 +1636,139 @@ public class SprkChatAgentFactory
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// R6 task 042 (FR-30): Resolves the terminal node's render destination for the given
+    /// playbook by reading <c>sprk_playbooknode.sprk_configjson</c> on the node with the
+    /// highest <see cref="PlaybookNodeDto.ExecutionOrder"/> and parsing it as a
+    /// <see cref="Models.Ai.NodeRoutingConfig"/>. Returns <c>null</c> when the lookup
+    /// fails, the playbook has no nodes, or the terminal node's config does not parse —
+    /// the caller (CreateAgentAsync) treats null as "no dedup directive" (preserves
+    /// current behavior + NFR-01 conversational primacy).
+    /// </summary>
+    /// <param name="scopedProvider">
+    /// The scoped DI provider for this chat-turn (used to resolve <see cref="INodeService"/>).
+    /// </param>
+    /// <param name="playbookId">
+    /// Dataverse <c>sprk_analysisplaybook</c> ID of the playbook resolved by the router.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The terminal node's render destination, or <c>null</c> when unresolved (no nodes,
+    /// no config blob, malformed JSON, transient lookup failure). Defaults of
+    /// <see cref="Models.Ai.NodeDestination.Chat"/> from
+    /// <see cref="Models.Ai.NodeRoutingConfig.Parse"/> are returned AS Chat so the caller
+    /// can short-circuit the directive without invoking the soft-failure branch.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>NFR-13 / NFR-08 binding</b>: this helper consults <see cref="INodeService"/> only
+    /// for read access; the 11 production node executors and the safety pipeline are NOT
+    /// touched. The lookup runs once per chat-turn (per <c>CreateAgentAsync</c> invocation);
+    /// typical latency is &lt;50 ms against Spaarke Dev. No per-turn cache is added —
+    /// per-call materialization is sufficient at chat-turn cadence.
+    /// </para>
+    /// <para>
+    /// <b>ADR-015 binding</b>: logs (in the caller) emit playbookId + destination only;
+    /// NEVER user content. This helper itself emits no log output — the caller centralizes
+    /// telemetry.
+    /// </para>
+    /// </remarks>
+    private static async Task<Models.Ai.NodeDestination?> ResolvePlaybookTerminalDestinationAsync(
+        IServiceProvider scopedProvider,
+        Guid playbookId,
+        CancellationToken cancellationToken)
+    {
+        var nodeService = scopedProvider.GetService<INodeService>();
+        if (nodeService is null)
+        {
+            return null;
+        }
+
+        var nodes = await nodeService.GetNodesAsync(playbookId, cancellationToken).ConfigureAwait(false);
+        if (nodes is null || nodes.Length == 0)
+        {
+            return null;
+        }
+
+        // Terminal node = highest ExecutionOrder. Per PlaybookExecutionEngine and the
+        // DeliverOutputNodeExecutor contract, the last node in execution order is the
+        // one whose ConfigJson carries the destination property (set by tasks 032/033/034/035).
+        var terminal = nodes
+            .OrderByDescending(n => n.ExecutionOrder)
+            .First();
+
+        if (string.IsNullOrWhiteSpace(terminal.ConfigJson))
+        {
+            // No config blob → NodeRoutingConfig.Parse would return default (Chat). Return
+            // Chat explicitly so the caller's branch short-circuits without a directive.
+            return Models.Ai.NodeDestination.Chat;
+        }
+
+        var routing = Models.Ai.NodeRoutingConfig.Parse(terminal.ConfigJson);
+        return routing.Destination;
+    }
+
+    /// <summary>
+    /// R6 task 042 (FR-30): Builds the system-prompt suffix that instructs the chat-agent
+    /// LLM to emit ONLY a single-sentence acknowledgment when invoking
+    /// <c>invoke_playbook</c> for an intent that routes to a non-chat destination. The
+    /// playbook output renders elsewhere (workspace tab / form-prefill / side-effect); the
+    /// chat-agent's parallel inline text would be a redundant render (R5 Gap A — path A vs
+    /// path B parallelism eliminated structurally).
+    /// </summary>
+    /// <param name="destination">The terminal node's resolved render destination.</param>
+    /// <returns>
+    /// A non-empty directive string when the destination is workspace / form-prefill /
+    /// side-effect; empty string when the destination is chat (caller should not invoke
+    /// this for chat destinations — current behavior preserved).
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>NFR-01 binding</b>: the directive instructs the LLM to emit a SINGLE-SENTENCE
+    /// acknowledgment — not silence. Conversational primacy is preserved (the LLM still
+    /// talks, just briefly). Refinement / follow-up / comparison / context-injection turns
+    /// are not affected because each turn's directive is re-evaluated against the current
+    /// turn's router resolution; the directive does not "stick" across turns.
+    /// </para>
+    /// <para>
+    /// <b>Format</b>: two-newline-prefixed paragraph so the directive is isolated from
+    /// preceding system-prompt sections (Active Capabilities, Session Files manifest,
+    /// entity enrichment). Names the literal <c>invoke_playbook</c> tool so the LLM has
+    /// the exact tool identifier the directive applies to.
+    /// </para>
+    /// </remarks>
+    internal static string BuildDedupDirective(Models.Ai.NodeDestination destination)
+    {
+        // The destination's user-facing surface determines the acknowledgment wording.
+        var (surface, target) = destination switch
+        {
+            Models.Ai.NodeDestination.Workspace => ("workspace tab", "the workspace"),
+            Models.Ai.NodeDestination.FormPrefill => ("form pre-fill", "the form"),
+            Models.Ai.NodeDestination.SideEffect => ("background action", "the system"),
+            _ => (string.Empty, string.Empty),
+        };
+
+        if (string.IsNullOrEmpty(surface))
+        {
+            // Chat destination (or unknown) — no directive; caller short-circuits.
+            return string.Empty;
+        }
+
+        // Two leading newlines isolate the directive as its own paragraph. The exact
+        // wording is calibrated to keep the LLM brief WITHOUT silencing it (NFR-01:
+        // conversational primacy preserved — the LLM still acknowledges the intent).
+        return $"\n\n## Render Routing Directive (R6 task 042 / FR-30)\n" +
+               $"This user intent resolves to a playbook that renders its output to {target} " +
+               $"({surface}). When you invoke the `invoke_playbook` tool for this intent, " +
+               $"respond with a SINGLE-SENTENCE acknowledgment ONLY (e.g., " +
+               $"\"Generating your result in {target}…\"). " +
+               $"Do NOT emit the analysis content inline in this chat turn — the playbook " +
+               $"output will render in {target}. This prevents a duplicate render " +
+               $"(\"path A vs path B\" parallelism — R5 Gap A). The user's subsequent " +
+               $"follow-up turns (refinement, comparison, context injection) are " +
+               $"unaffected — respond conversationally as normal on those turns.";
     }
 
     /// <summary>
