@@ -230,6 +230,14 @@ export interface ICreateProjectWizardProps {
    * {@link EntityCreationService.resolveUserBuDefaults}.
    */
   resolveUserBuDefaults?: () => Promise<IUserBuCascadeDefaults>;
+  /**
+   * AAD tenant ID. Forwarded to `EntityCreationService.indexUploadedFiles()` so
+   * post-upload RAG indexing via `@spaarke/sdap-client` can route to the
+   * correct multi-tenant index. When omitted, indexing is skipped (files still
+   * upload to SPE successfully). Typically sourced from solution
+   * `config.tenantId` in `main.tsx`.
+   */
+  tenantId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +274,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   bffBaseUrl,
   resolveSpeContainerId,
   resolveUserBuDefaults,
+  tenantId,
 }) => {
   // ── Entity-specific form state ──────────────────────────────────────────
   const [formValid, setFormValid] = React.useState(false);
@@ -576,6 +585,24 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
 
               if (docResult.warnings.length > 0) {
                 warnings.push(...docResult.warnings);
+              }
+
+              // Trigger RAG indexing per file (canonical sync OBO path via
+              // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal —
+              // file uploads already succeeded; indexing is best-effort.
+              const indexingWarnings = await entityService.indexUploadedFiles(
+                uploadResult.uploadedFiles,
+                tenantId ?? '',
+                {
+                  entityType: 'sprk_project',
+                  entityId: projectId,
+                  entityName: projectName,
+                },
+                docResult.createdDocumentIds,
+                cascadeDefaults?.searchIndexName
+              );
+              if (indexingWarnings.length > 0) {
+                warnings.push(...indexingWarnings);
               }
             }
           } catch (err) {
