@@ -319,14 +319,31 @@ export const App: React.FC<AppProps> = ({
   const isDocDomain = activeDomain === 'documents';
   const rawResults = isDocDomain ? docResults : recordResults;
 
-  // Client-side relevance threshold filter — hides results below the slider value
+  // Pass-through: trust the BFF results.
+  //
+  // multi-container-multi-index-r1 UAT 2026-06-09: the previous client-side
+  // threshold filter rejected all results when the BFF returned the
+  // associated-only path (entity-scope + empty-query case) because those
+  // docs come from Dataverse direct (score=0, not AI-ranked). That made the
+  // viewer modal show "No results found" even though the BFF returned 25 docs.
+  //
+  // The BFF already applies the threshold to its semantic-search path
+  // (SemanticSearchService.BuildFilter), and associated-only docs are
+  // already entity-scoped (guaranteed relevant). Double-filtering client-side
+  // was redundant for the semantic path and incorrect for the associated path.
+  //
+  // Future enhancement: if a user expects threshold to also filter the
+  // associated path's results, that's a server-side concern — the BFF should
+  // be the single arbiter of relevance, not the client.
   const activeResults = useMemo(() => {
-    const t = filters.threshold;
-    if (t <= 0) return rawResults;
-    return rawResults.filter(r => {
-      const score = 'combinedScore' in r ? r.combinedScore : r.confidenceScore;
-      return score * 100 >= t;
-    });
+    return rawResults;
+    // Original (buggy for associatedOnly) — preserved as a comment for context:
+    // const t = filters.threshold;
+    // if (t <= 0) return rawResults;
+    // return rawResults.filter(r => {
+    //   const score = 'combinedScore' in r ? r.combinedScore : r.confidenceScore;
+    //   return score * 100 >= t;
+    // });
   }, [rawResults, filters.threshold]);
   const activeTotalCount = isDocDomain ? docTotalCount : recordTotalCount;
   const activeSearchState = isDocDomain ? docSearchState : recordSearchState;
