@@ -1,3 +1,6 @@
+// App-level Error Boundary — wrap Code Page roots to prevent blank-page crashes
+export * from './AppErrorBoundary';
+
 // Fluent UI v9 Wrappers (Spaarke standards)
 export * from './SprkButton';
 

@@ -9,7 +9,7 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
+import { resolveCodePageTheme, setupCodePageThemeListener, AppErrorBoundary } from "@spaarke/ui-components";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
 import { setRuntimeConfig } from "./config/runtimeConfig";
@@ -50,7 +50,9 @@ function Root() {
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
-      <App params={params} />
+      <AppErrorBoundary surfaceName="Daily Briefing">
+        <App params={params} />
+      </AppErrorBoundary>
     </FluentProvider>
   );
 }

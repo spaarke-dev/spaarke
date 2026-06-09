@@ -34,7 +34,20 @@
 
 import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
 import { createWorkspaceWrapper } from './WorkspaceWidgetWrapper';
+import { safeRegister } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
+
+// ai-spaarke-ai-workspace-UI-r1 brittleness Phase B.5 (2026-06-09):
+// Isolate each registration in its own try/catch. Without this, a synchronous
+// throw from ANY call below (malformed metadata, factory-expression evaluation
+// failure, missing import) would skip all subsequent registrations, leaving
+// the registry partially populated and the workspace pane rendering empty
+// widget tabs. See safeRegister docblock + brittleness-remediation-plan.md.
+function safeRegisterWidget(
+  ...args: Parameters<typeof registerWorkspaceWidget>
+): void {
+  safeRegister('WorkspaceWidget', args[0], () => registerWorkspaceWidget(...args));
+}
 
 // ---------------------------------------------------------------------------
 // Widget type string constants
@@ -81,7 +94,7 @@ function wrapFactory<T>(
 //    allowMultiple=false — a session has one budget view at a time.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.BudgetDashboard,
   {
     displayName: 'Budget Dashboard',
@@ -106,7 +119,7 @@ registerWorkspaceWidget(
 //    allowMultiple=true — different queries can produce parallel result tabs.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.SearchResults,
   {
     displayName: 'Search Results',
@@ -132,7 +145,7 @@ registerWorkspaceWidget(
 //    allowMultiple=true — different documents/turns can each have an analysis tab.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.AnalysisEditor,
   {
     displayName: 'Analysis Editor',
@@ -157,7 +170,7 @@ registerWorkspaceWidget(
 //    allowMultiple=true — users may compare multiple document pairs.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.ContractComparison,
   {
     displayName: 'Contract Comparison',
@@ -182,7 +195,7 @@ registerWorkspaceWidget(
 //    allowMultiple=false — a session has one status overview at a time.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.StatusSummary,
   {
     displayName: 'Status Summary',
@@ -207,7 +220,7 @@ registerWorkspaceWidget(
 //    allowMultiple=false — single recommendation set per session.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.Recommendation,
   {
     displayName: 'Recommendations',
@@ -232,7 +245,7 @@ registerWorkspaceWidget(
 //    allowMultiple=false — a session has one active action plan at a time.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.ActionPlan,
   {
     displayName: 'Action Plan',

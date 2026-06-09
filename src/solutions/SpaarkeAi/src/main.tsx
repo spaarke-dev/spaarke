@@ -65,7 +65,7 @@ import {
 // renderer. `WorkspaceLayoutWidget` in `@spaarke/ai-widgets` consults this
 // slot at render time instead of importing `@spaarke/legal-workspace` directly.
 // Zero behavioural change today — `LegalWorkspaceRenderer` IS `LegalWorkspaceApp`.
-import { setDefaultWorkspaceRenderer } from "@spaarke/ui-components";
+import { setDefaultWorkspaceRenderer, AppErrorBoundary } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // BFF base URL baked in at build time via Vite env var (AIPU-091).
@@ -343,12 +343,14 @@ async function bootstrap(): Promise<void> {
   const root = createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <App
-        entityLogicalName={entityLogicalName}
-        entityId={entityId}
-        matterId={matterId}
-        sessionId={sessionId}
-      />
+      <AppErrorBoundary surfaceName="SpaarkeAi">
+        <App
+          entityLogicalName={entityLogicalName}
+          entityId={entityId}
+          matterId={matterId}
+          sessionId={sessionId}
+        />
+      </AppErrorBoundary>
     </React.StrictMode>
   );
 

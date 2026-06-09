@@ -16,6 +16,7 @@ import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
+import { AppErrorBoundary } from "@spaarke/ui-components";
 import type { LayoutTemplateId } from "@spaarke/ui-components";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -199,7 +200,9 @@ if (rootElement) {
   const root = createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <Root />
+      <AppErrorBoundary surfaceName="Workspace Layout Wizard">
+        <Root />
+      </AppErrorBoundary>
     </React.StrictMode>
   );
 } else {
