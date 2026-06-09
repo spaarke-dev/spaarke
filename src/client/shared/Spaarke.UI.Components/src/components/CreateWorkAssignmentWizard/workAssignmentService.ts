@@ -157,13 +157,20 @@ function _resolveDocNavProp(entries: INavPropEntry[], referencedEntity: string):
 export class WorkAssignmentService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
+  private readonly _tenantId: string;
 
   constructor(
     dataService: IDataService,
     authenticatedFetch: AuthenticatedFetchFn,
     bffBaseUrl: string,
-    private readonly _containerId?: string
+    private readonly _containerId?: string,
+    /**
+     * AAD tenant ID for post-upload RAG indexing routing. When omitted,
+     * indexing is skipped (files still upload to SPE successfully).
+     */
+    tenantId?: string
   ) {
+    this._tenantId = tenantId ?? '';
     this._dataService = dataService;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
@@ -577,6 +584,22 @@ export class WorkAssignmentService {
           );
           if (createResult.warnings.length > 0) {
             warnings.push(...createResult.warnings);
+          }
+
+          // Trigger RAG indexing per file (canonical sync OBO path via
+          // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal.
+          const indexingWarnings = await this._entityService.indexUploadedFiles(
+            uploadResult.uploadedFiles,
+            this._tenantId,
+            {
+              entityType: 'sprk_workassignment',
+              entityId: workAssignmentId,
+              entityName: form.name.trim(),
+            },
+            createResult.createdDocumentIds
+          );
+          if (indexingWarnings.length > 0) {
+            warnings.push(...indexingWarnings);
           }
         } catch (err) {
           console.warn('[WorkAssignmentService] Document record creation failed:', err);
