@@ -1,0 +1,19 @@
+{
+  "//": "Shared TypeScript base configuration for Spaarke client surfaces (Code Pages, PCF, Office Add-ins, shared libs). Established by ai-spaarke-ai-workspace-UI-r1 brittleness remediation (2026-06-09) to centralize strict compiler settings across 20+ surfaces. Each surface extends this base and adds its own `jsx`, `baseUrl`, `paths`, `include`, `references`, and `typeRoots` as appropriate.",
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}
