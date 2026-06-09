@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Create `sprk_todo` custom entity with full attribute set</title>
+    <phase>Phase 1: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <dependencies>001</dependencies>
+    <blocks>003, 010, 011, 020, 030, 040, 061</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Schema creation is the foundational change for the entire project. Tags include `dataverse`; modifies solution XML; blocks 6+ downstream tasks; FULL-rigor with Step 9.5 quality gates.</rigor-reason>
+    <parallel-group>P1-W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential within Phase 1 — must complete before 003 (recordtype_ref) and 004 (`sprk_event` cleanup), and before 005 (`sprk_eventtodo` delete) can be safely sequenced.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create the `sprk_todo` custom entity with the full attribute set defined in spec FR-01 + design §4.1: primary name (`sprk_name`), description, ownership (`ownerid`, `owningbusinessunit`), `sprk_assignedto` (User-only lookup → systemuser), state/status, kanban behavior fields (`sprk_todocolumn`, `sprk_todopinned`, `sprk_priorityscore`, `sprk_effortscore`, `sprk_duedate`, `sprk_completedon`), detail (`sprk_notes` rich text), the eleven `sprk_regarding*` specific lookups, the four `sprk_regardingrecord*` resolver fields, and the five Graph sync state fields. Mirror the regarding-shape of `sprk_communication` exactly.
+  </prompt>
+
+  <role>Spaarke Dataverse schema developer. Use the `dataverse-create-schema` skill (Web API + PowerShell SDK, NOT PAC CLI — PAC CLI has no `pac table create` / `pac column create`).</role>
+
+  <goal>`sprk_todo` entity exists in the target Dataverse environment with every attribute from FR-01 / design §4.1. Solution import succeeds; entity is visible in Power Apps maker portal; all attributes have correct types and lengths matching the design §4.1 table.</goal>
+
+  <context>
+    <background>This is the foundational entity for R3. Every downstream task depends on `sprk_todo` existing with the correct shape. Mirror `sprk_communication`'s 11-lookup + 4-resolver pattern exactly so existing `PolymorphicResolverService` works without modification.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+      <file>projects/smart-todo-decoupling-r3/spec.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+      <file>solutions/{spaarke-core}/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">Multi-entity resolution pattern: 11 specific `sprk_regarding*` lookups + 4 `sprk_regardingrecord*` resolver fields. Do NOT use Dataverse native polymorphic `regardingobjectid`.</constraint>
+    <constraint source="project">Custom entity (NOT Activity entity).</constraint>
+    <constraint source="project">No data migration (OS-2).</constraint>
+    <constraint source="FR-01">Attribute set must match design §4.1 table exactly (types, lengths, ownership model).</constraint>
+    <constraint source="project">`sprk_assignedto` is a User-ONLY lookup (target = systemuser). Teams own via standard `ownerid`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="multi-entity-resolution" location="docs/data-model/sprk_communication.md">11 specific lookups + 4 resolver fields populated by PolymorphicResolverService.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load spec FR-01 + design §4.1 attribute table. Cross-reference `sprk_communication` schema for the 11-lookup + 4-resolver pattern to mirror.</step>
+    <step order="2">Use `dataverse-create-schema` skill: invoke Web API + PowerShell SDK to create `sprk_todo` entity (ownership: User or Team; activities: false; notes: yes for `sprk_notes` rich text via metadata).</step>
+    <step order="3">Create primary name (`sprk_name`, string 200), description (string 2000), `sprk_assignedto` (lookup → systemuser).</step>
+    <step order="4">Create state/status (statecode + statuscode with values: Active/Inactive at state level; specific status options per design).</step>
+    <step order="5">Create kanban behavior fields: `sprk_todocolumn` (optionset), `sprk_todopinned` (boolean), `sprk_priorityscore` (integer 0-100), `sprk_effortscore` (integer 0-100), `sprk_duedate` (datetime), `sprk_completedon` (datetime).</step>
+    <step order="6">Create detail field: `sprk_notes` (memo, rich text enabled).</step>
+    <step order="7">Create the 11 specific regarding lookups, one per parent target: `sprk_regardingmatter` → `sprk_matter`, `sprk_regardingproject` → `sprk_project`, `sprk_regardingevent` → `sprk_event`, `sprk_regardingcommunication` → `sprk_communication`, `sprk_regardingworkassignment` → `sprk_workassignment`, `sprk_regardinginvoice` → `sprk_invoice`, `sprk_regardingbudget` → `sprk_budget`, `sprk_regardinganalysis` → `sprk_analysis`, `sprk_regardingorganization` → `sprk_organization`, `sprk_regardingcontact` → `sprk_contact` (OOB), `sprk_regardingdocument` → `sprk_document`.</step>
+    <step order="8">Create the 4 resolver fields: `sprk_regardingrecordtype` (string), `sprk_regardingrecordid` (string 100, GUID format), `sprk_regardingrecordname` (string 500), `sprk_regardingrecordurl` (string 4000).</step>
+    <step order="9">Create the 5 Graph sync state fields: `sprk_graphtodolistid` (string 100), `sprk_graphtodotaskid` (string 100), `sprk_lastsyncedutc` (datetime), `sprk_synchash` (string 16), `sprk_syncerror` (string 2000).</step>
+    <step order="10">Pack and import the solution to the target environment. Verify entity + every attribute in Power Apps maker portal.</step>
+    <step order="11">Record BFF publish-size impact: none expected (schema-only change). Note in task completion report.</step>
+    <step order="12">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-mcp">Read-only schema queries (`mcp__dataverse__describe`) for verification</tool>
+    <tool name="powershell">Web API + Microsoft.Xrm.Tooling.Connector for create-table / create-column</tool>
+    <tool name="pac">Solution pack / unpack only — NOT for table/column create</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">`sprk_todo` entity in target Dataverse environment</output>
+    <output type="solution">Updated solution XML in `solutions/` reflecting the new entity</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution import succeeds; no errors or warnings related to `sprk_todo`.</criterion>
+    <criterion testable="true">`sprk_todo` visible in Power Apps maker portal with all listed attributes; types and lengths match design §4.1 table.</criterion>
+    <criterion testable="true">11 specific regarding lookups present, each pointing at the correct target entity.</criterion>
+    <criterion testable="true">4 resolver fields present with correct types/lengths.</criterion>
+    <criterion testable="true">5 Graph sync state fields present.</criterion>
+    <criterion testable="true">`sprk_assignedto` target restricted to `systemuser` only (verified via metadata describe).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The 11-lookup pattern is the canonical Spaarke multi-entity resolution shape. Mirror `sprk_communication` exactly so `PolymorphicResolverService.applyResolverFields` works without modification (D-2 dependency). If a target entity is missing in the target environment, escalate before adding the lookup.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 0.5 declares FULL rigor; Step 9.5 runs adr-check + code-review on solution XML changes. Load `dataverse-create-schema` and `dataverse-deploy` skills before execution.</protocol>
+  </execution>
+</task>

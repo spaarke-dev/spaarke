@@ -67,6 +67,13 @@ builder.Services.AddFinanceModule(builder.Configuration);
 // Communication module (email sending via Graph API)
 builder.Services.AddCommunicationModule(builder.Configuration);
 
+// Todo Graph sync scaffolding (smart-todo-decoupling-r3 Phase 6, task 018) — registers
+// ITodoGraphSyncHandler / ISpaarkeListProvisioner / ITodoSubscriptionManager / ITodoSyncBackfiller
+// UNCONDITIONALLY with Null-Object fallbacks per ADR-032 P2. Feature-gated by
+// Spaarke:Graph:TodoSync:Enabled (default false). Real impls arrive in Phase 7
+// (tasks 061/062/063/065); placeholders throw until then.
+builder.Services.AddTodoSync(builder.Configuration);
+
 // Demo Registration module (self-service demo access provisioning)
 builder.Services.AddRegistrationModule(builder.Configuration);
 

@@ -103,19 +103,27 @@ export const QUICK_SUMMARY_CARDS: IQuickSummaryCardConfig[] = [
     },
   },
   {
+    // Repointed to `sprk_todo` in R3 task 013 (FR-29 / OS-1). The legacy
+    // `sprk_event?$filter=sprk_todoflag eq true` path was removed alongside
+    // the column. Active = statecode 0 AND statuscode in (Open=1, In Progress=659490001).
+    // statuscode 659490002 = Dismissed and 2 = Completed are excluded.
     id: "open-tasks",
     title: "Open Tasks",
     icon: CheckboxCheckedRegular,
     ariaLabel: "View open tasks",
-    entityName: "sprk_event",
-    primaryKey: "sprk_eventid",
+    entityName: "sprk_todo",
+    primaryKey: "sprk_todoid",
+    // TODO (R3 follow-up): the legacy `sprk_event` view GUID is retained here so
+    // navigation works in the interim. Once tasks 002/003 deploy and a default
+    // "Active To-Dos" view exists on `sprk_todo`, swap this GUID. The card count
+    // + badge are already correct against `sprk_todo`.
     viewId: "12a510e4-2517-f111-8343-7ced8d1dc988",
     countFilter: (ctx) =>
-      `${buildOwnerFilter(ctx)} and sprk_todoflag eq true and sprk_todostatus ne 100000002`,
+      `${buildOwnerFilter(ctx)} and statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001)`,
     badgeType: "overdue",
     badgeFilter: (ctx) => {
       const now = new Date().toISOString();
-      return `${buildOwnerFilter(ctx)} and sprk_todoflag eq true and sprk_todostatus ne 100000002 and sprk_duedate lt ${now}`;
+      return `${buildOwnerFilter(ctx)} and statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001) and sprk_duedate lt ${now}`;
     },
   },
   {

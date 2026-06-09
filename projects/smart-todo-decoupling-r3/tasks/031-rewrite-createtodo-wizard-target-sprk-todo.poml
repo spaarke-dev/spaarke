@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Rewrite `CreateTodo` wizard to target `sprk_todo` (NOT `sprk_event` with `todoflag=true`)</title>
+    <phase>Phase 4: CreateTodo Wizard + AssociateToStep Extension</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>002, 030</dependencies>
+    <blocks>032, 070</blocks>
+    <tags>react, typescript, frontend, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Rewrites a shared wizard. FULL rigor.</rigor-reason>
+    <parallel-group>P4-W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocks 032 (launch-context pre-fill) and 070 (Outlook ribbon launches this wizard).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Rewrite the `CreateTodo` shared wizard component to target `sprk_todo` (not `sprk_event` with `todoflag=true`). Use the `CreateRecordWizard` + `WizardShell` patterns. The create call writes to `/api/data/v9.x/sprk_todos`; resulting record has `sprk_todo` as the entity logical name. Include a skippable `AssociateToStep` step.
+  </prompt>
+
+  <role>Spaarke shared-UI developer with wizard pattern experience.</role>
+
+  <goal>`CreateTodo` wizard creates `sprk_todo` records. Wizard includes a skippable `AssociateToStep`. Builds clean across consumers (SmartTodo + future parent-form ribbons + future Outlook add-in).</goal>
+
+  <constraints>
+    <constraint source="FR-15">Wizard creates `sprk_todo`; no `sprk_event` rows created.</constraint>
+    <constraint source="FR-16">`AssociateToStep` step is skippable.</constraint>
+    <constraint source="NFR-01">Fluent v9 only.</constraint>
+    <constraint source="OS-1">No compat path that writes `sprk_event` with `todoflag=true`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="wizard-shell" location="src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/">Reuse WizardShell for step navigation, validation, and submit.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect existing `CreateTodo` implementation. Map every reference to `sprk_event` / `todoflag`.</step>
+    <step order="2">Rewrite create call: `createRecord("sprk_todo", { sprk_name, sprk_notes, sprk_duedate, sprk_assignedto, ...regardingFields })`.</step>
+    <step order="3">Embed `AssociateToStep` as a skippable wizard step. On selection, capture the triple for downstream `applyResolverFields` invocation.</step>
+    <step order="4">On submit (after AssociateToStep): if regarding chosen, call `applyResolverFields` to populate the four resolver fields atomically before `createRecord`.</step>
+    <step order="5">Unit tests: create-with-regarding writes 11+4 fields correctly; create-without-regarding (skip) writes all 11 lookups null + all 4 resolver fields null; no `sprk_event` rows created.</step>
+    <step order="6">Run `npm run build` + `npm test`. Fluent v9 lint pass.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/client/shared/Spaarke.UI.Components/src/components/CreateTodo/` (rewritten)</output>
+    <output type="test">Unit tests for create-with + create-without regarding</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Wizard's create call hits `/api/data/v9.x/sprk_todos`.</criterion>
+    <criterion testable="true">Resulting record has entity logical name `sprk_todo`.</criterion>
+    <criterion testable="true">Zero `sprk_event` rows created during wizard flow.</criterion>
+    <criterion testable="true">AssociateToStep is skippable and creates standalone todo when skipped.</criterion>
+    <criterion testable="true">Fluent v9 lint passes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

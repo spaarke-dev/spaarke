@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Retire or refactor `TodoDetailSidePane` per audit result</title>
+    <phase>Phase 9: Cleanup & Documentation</phase>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours (depends on audit decision)</estimated-effort>
+    <dependencies>080</dependencies>
+    <blocks>085</blocks>
+    <tags>refactoring, dataverse, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Execute audit decision; either delete or thin-shell refactor. STANDARD rigor.</rigor-reason>
+    <parallel-group>P9-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Execute the recommendation from task 080. If RETIRE: delete the `TodoDetailSidePane` solution + remove ribbon/sitemap references; pack + import to verify clean removal. If REFACTOR: reduce the side-pane page to a thin React shell around the simplified `TodoDetail` component (no two-entity logic).
+  </prompt>
+
+  <role>Spaarke Dataverse + React developer.</role>
+
+  <goal>Decision from task 080 fully executed. Solution clean. No orphan ribbon or sitemap references.</goal>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/notes/tododetailsidepane-decision.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read decision doc from task 080.</step>
+    <step order="2">If RETIRE: remove ribbon entries + sitemap entries referencing the page; delete the solution; pack + import; verify clean.</step>
+    <step order="3">If REFACTOR: refactor the page's React root to be a thin shell that imports `TodoDetail` from `@spaarke/ui-components` and renders it with the current record id from URL. No two-entity logic.</step>
+    <step order="4">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="solution">Updated solution (retired or refactored)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Decision executed per task 080's recommendation.</criterion>
+    <criterion testable="true">No orphan ribbon or sitemap references remain.</criterion>
+    <criterion testable="true">Solution import clean.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

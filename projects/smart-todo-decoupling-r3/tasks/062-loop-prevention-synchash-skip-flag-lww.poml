@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Loop prevention: `sprk_synchash` + thread-local skip-flag + per-field last-write-wins</title>
+    <phase>Phase 7: Graph Sync Engine</phase>
+    <status>not-started</status>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <dependencies>061</dependencies>
+    <blocks>066</blocks>
+    <tags>bff-api, api, backend, integration-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-cutting sync correctness concern; affects handler + webhook + plugin. FULL rigor with integration tests.</rigor-reason>
+    <parallel-group>P7-W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Builds on 061; modifies same handler + adds threading concerns.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement three-layer loop prevention per FR-23: (a) `sprk_synchash` — 16-hex truncated SHA-256 of canonical JSON of synced fields; computed before every outbound write; compared on inbound notification to drop echoes. (b) Thread-local "skip outbound" flag — set during inbound writes so the resulting Dataverse update doesn't re-enqueue an outbound message. (c) Per-field last-write-wins by timestamp — when hashes differ AND modification windows overlap (~10s), newer side wins per field; losers logged to `sprk_syncerror`. Integration tests cover round-trip echo + concurrent edit scenarios.
+  </prompt>
+
+  <role>Spaarke BFF API developer with distributed-sync expertise.</role>
+
+  <goal>Three-layer loop prevention fully implemented and tested. Round-trip echo dropped. Concurrent edit (both sides within 10s) results in newer-side-wins per field. Conflict losers logged.</goal>
+
+  <constraints>
+    <constraint source="FR-23">Three layers: synchash + thread-local skip-flag + per-field LWW. All three must work together.</constraint>
+    <constraint source="NFR-06">Audit-log conflict losers to `sprk_syncerror`.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation: unit + integration tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define synced-fields canonicalization: serialize the in-scope `sprk_todo` fields (sprk_name, sprk_notes, sprk_duedate, statecode/statuscode, sprk_priorityscore) to canonical JSON (sorted keys); SHA-256; truncate to 16 hex chars.</step>
+    <step order="2">Hook synchash compute into `TodoGraphSyncHandler.SyncAsync`: before PATCH, compute hash from outgoing fields; write hash to `sprk_synchash` post-PATCH.</step>
+    <step order="3">Implement thread-local skip-flag (`AsyncLocal&lt;bool&gt; SkipOutbound`) — webhook handler sets to `true` during the Dataverse update; the plugin checks and skips enqueue when set.</step>
+    <step order="4">Implement per-field LWW resolution: on inbound notification, compare incoming hash with stored hash; if different AND timestamps within 10s window, resolve field-by-field by `modifiedOn`; log losers to `sprk_syncerror`.</step>
+    <step order="5">Integration tests: (a) outbound write → inbound notification of own change → dropped by synchash; (b) concurrent edit both sides within 10s → newer-per-field wins, loser logged; (c) thread-local skip-flag isolates inbound writes from triggering outbound.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`. BFF publish-size + CVE checks.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">Updates to `TodoGraphSyncHandler.cs` for synchash + skip-flag + LWW</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Services/Todo/LoopPreventionTests.cs`</output>
+    <output type="test">`tests/integration/Spe.Integration.Tests/` (sync round-trip + concurrent-edit scenarios)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Round-trip echo (own write → own notification) is dropped.</criterion>
+    <criterion testable="true">Concurrent edit (both sides within 10s) resolves per-field LWW.</criterion>
+    <criterion testable="true">Conflict losers logged to `sprk_syncerror`.</criterion>
+    <criterion testable="true">Thread-local skip-flag prevents inbound writes from triggering outbound.</criterion>
+    <criterion testable="true">Integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review. Integration tests required.</protocol>
+  </execution>
+</task>

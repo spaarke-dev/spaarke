@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Update `FeedTodoSyncContext` payload from event-id to todo-id</title>
+    <phase>Phase 3: SmartTodo Code Page Repoint</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>020</dependencies>
+    <blocks>024</blocks>
+    <tags>react, typescript, frontend, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-block contract change; both LegalWorkspace + SmartTodo consume this context. FULL rigor.</rigor-reason>
+    <parallel-group>P3-W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `FeedTodoSyncContext.ts` which is in `@spaarke/ui-components` shared by LegalWorkspace ActivityFeed + SmartTodo widget.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update `FeedTodoSyncContext` cross-block sync events to carry `todoId` instead of `eventId`. Update both producers (TodoDetail, KanbanBoard) and consumers (LegalWorkspace ActivityFeed, SmartToDo widget) accordingly. Verify mutating a `sprk_todo` in one block updates the other within one render cycle.
+  </prompt>
+
+  <role>Spaarke shared-context developer.</role>
+
+  <goal>`FeedTodoSyncContext` payload shape is todo-id-keyed; producers + consumers updated; LegalWorkspace ActivityFeed and SmartToDo widget stay in sync.</goal>
+
+  <constraints>
+    <constraint source="FR-14">Cross-block sync uses todo-id; one render cycle propagation; no stale state across blocks.</constraint>
+    <constraint source="OS-1">No event-id compat path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/contexts/FeedTodoSyncContext.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/ActivityFeed/</file>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update `FeedTodoSyncContext` payload type from `eventId` to `todoId`.</step>
+    <step order="2">Update every producer call site (TodoDetail save, KanbanBoard drag-end).</step>
+    <step order="3">Update every consumer subscriber (LegalWorkspace ActivityFeed, SmartToDo widget).</step>
+    <step order="4">Manual cross-block test: mutate a `sprk_todo` in SmartTodo; verify LegalWorkspace ActivityFeed updates within one render cycle.</step>
+    <step order="5">Unit tests for the context payload shape.</step>
+    <step order="6">Run `npm run build` + `npm test`. Fluent v9 lint pass.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/client/shared/Spaarke.UI.Components/src/contexts/FeedTodoSyncContext.ts` (updated)</output>
+    <output type="code">Producer + consumer call sites updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Payload type uses `todoId`; no `eventId` in the new path.</criterion>
+    <criterion testable="true">Cross-block update propagates within one render cycle.</criterion>
+    <criterion testable="true">No stale state regression across blocks.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="082" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Mark `event-to-do-architecture.md` superseded; author new `spaarke-todo-architecture.md`</title>
+    <phase>Phase 9: Cleanup & Documentation</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>005</dependencies>
+    <blocks>083</blocks>
+    <tags>docs</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task. MINIMAL rigor.</rigor-reason>
+    <parallel-group>P9-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    (a) Add a "Superseded by" header to `docs/architecture/event-to-do-architecture.md` pointing at the new architecture doc. (b) Author `docs/architecture/spaarke-todo-architecture.md` covering: `sprk_todo` entity + multi-entity resolution; shared-lib Kanban + TodoDetail + AssociateToStep; Code Page + parent-form subgrids; Microsoft Graph `/me/todo` bidirectional sync (outbound + inbound + loop prevention + backfill); Outlook add-in surfaces.
+  </prompt>
+
+  <role>Spaarke architecture documenter.</role>
+
+  <goal>Old doc has "Superseded by" header. New doc is the canonical reference. Cross-links bidirectional.</goal>
+
+  <constraints>
+    <constraint source="FR-30">Old doc marked superseded; new doc replaces it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/event-to-do-architecture.md</file>
+      <file>projects/smart-todo-decoupling-r3/spec.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+      <file>projects/smart-todo-decoupling-r3/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add "Superseded by `docs/architecture/spaarke-todo-architecture.md`" header to the old doc.</step>
+    <step order="2">Write `docs/architecture/spaarke-todo-architecture.md` with sections: Entity model, Multi-entity resolution, Shared-lib components, Surfaces (Code Page, parent forms, Outlook), Microsoft Graph sync architecture (outbound, inbound, loop prevention, backfill, feature-gate), Operational concerns (auth, security, performance).</step>
+    <step order="3">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">`docs/architecture/event-to-do-architecture.md` (superseded header)</output>
+    <output type="docs">`docs/architecture/spaarke-todo-architecture.md` (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Old doc has "Superseded by …" header pointing at new doc.</criterion>
+    <criterion testable="true">New doc covers all six required sections.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor.</protocol>
+  </execution>
+</task>

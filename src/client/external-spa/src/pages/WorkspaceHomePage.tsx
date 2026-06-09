@@ -732,8 +732,10 @@ export const WorkspaceHomePage: React.FC = () => {
       try {
         const nested = await Promise.all(
           context.projects.map(p =>
+            // Events only — the legacy event-as-todo toggle was removed in R3 task 007.
+            // To-dos are queried separately via `getProjectTodos` per task 008.
             getEvents(p.projectId, {
-              $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_todoflag,_sprk_projectid_value,createdon',
+              $select: 'sprk_eventid,sprk_name,sprk_duedate,_sprk_projectid_value,createdon',
               $orderby: 'createdon desc',
               $top: 20,
             }).then(evts => evts.map(e => ({ ...e, _resolvedProjectId: p.projectId })))

@@ -31,8 +31,8 @@ export function getXrm(): any | null {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parentXrm = (window.parent as any)?.Xrm;
     if (parentXrm?.WebApi) {
-      // Expose on current window so child iframes (e.g. TodoDetailSidePane)
-      // can find it via window.parent.Xrm
+      // Expose on current window so child iframes can find it via
+      // window.parent.Xrm (general frame-walk pattern per ADR-026).
       (window as any).Xrm = parentXrm;
       return parentXrm;
     }

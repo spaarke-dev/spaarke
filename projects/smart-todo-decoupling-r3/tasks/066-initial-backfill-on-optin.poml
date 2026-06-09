@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Initial backfill on opt-in: `$batch` of 20, exponential backoff on 429, resumable progress checkpoint</title>
+    <phase>Phase 7: Graph Sync Engine</phase>
+    <status>not-started</status>
+    <estimated-effort>4-5 hours</estimated-effort>
+    <dependencies>061, 063, 064</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, backend, worker</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New backfill service with batching + retry + resumability. FULL rigor.</rigor-reason>
+    <parallel-group>P7-W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement `TodoSyncBackfiller.BackfillAsync(userId)` replacing the Null-Object impl from task 018. On opt-in (after `SpaarkeListProvisioner` ensures the list), enumerate all Active `sprk_todo` records where the user is `ownerid` OR `sprk_assignedto`. Create corresponding `todoTask` entries in the user's Spaarke list via Graph `$batch` (20 per request). Exponential backoff on 429. Persist `initialBackfillCompletedUtc` on the user-pref row on completion. Resumable: on interruption, re-run reads the checkpoint and continues from where it stopped. UI toast surfaces progress (via SignalR or polling — design choice in the task).
+  </prompt>
+
+  <role>Spaarke BFF API developer with Graph batching + resumable workflow expertise.</role>
+
+  <goal>Backfill correctly populates user's Spaarke list with N existing todos. Survives BFF restart. 429 triggers backoff. UI toast progresses.</goal>
+
+  <constraints>
+    <constraint source="FR-20">Enumerate Active todos owned/assigned to user; `$batch` of 20; exponential backoff; track progress; `initialBackfillCompletedUtc` checkpoint; resumable on interruption.</constraint>
+    <constraint source="NFR-05">Graph throttle handling: 1→2→4→8→cap 30s backoff.</constraint>
+    <constraint source="A-5">Backfill batch size 20 per `$batch`; up to 5 concurrent batches (tunable).</constraint>
+    <constraint source="ADR-028">OBO token flow.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>projects/smart-todo-decoupling-r3/notes/todosync-userpref-schema.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Implement `TodoSyncBackfiller` (replaces Null-Object). Use `GraphClientFactory` for OBO.</step>
+    <step order="2">Enumerate Active `sprk_todo` rows where `ownerid eq @user OR sprk_assignedto eq @user`. Page through results.</step>
+    <step order="3">Build Graph `$batch` requests, 20 todos per batch, up to 5 concurrent batches.</step>
+    <step order="4">Apply exponential-backoff policy per NFR-05; on 429, retry with backoff; persist last-successful-batch checkpoint.</step>
+    <step order="5">On each batched item success, write `sprk_graphtodotaskid` + `sprk_lastsyncedutc` + `sprk_synchash` back to the Dataverse row.</step>
+    <step order="6">On full completion, set `initialBackfillCompletedUtc` on the user-pref row.</step>
+    <step order="7">Surface progress to UI via existing pattern (SignalR notification or polling endpoint — choose per existing infrastructure).</step>
+    <step order="8">Tests: N todos backfilled successfully; restart-mid-backfill resumes; 429 triggers backoff (mocked Graph response).</step>
+    <step order="9">Run `dotnet build` + `dotnet test`. BFF publish-size + CVE checks.</step>
+    <step order="10">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Todo/TodoSyncBackfiller.cs`</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Services/Todo/TodoSyncBackfillerTests.cs`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">User with N existing todos sees all N appear in Microsoft To Do after opt-in.</criterion>
+    <criterion testable="true">Backfill survives BFF restart and resumes from checkpoint.</criterion>
+    <criterion testable="true">429 triggers exponential backoff (verified via Graph throttle test).</criterion>
+    <criterion testable="true">`initialBackfillCompletedUtc` set on user-pref row on completion.</criterion>
+    <criterion testable="true">UI toast shows progress.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

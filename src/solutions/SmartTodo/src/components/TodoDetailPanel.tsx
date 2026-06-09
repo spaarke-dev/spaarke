@@ -1,19 +1,38 @@
 /**
- * TodoDetailPanel — Wrapper that loads entity data and wires save callbacks
- * to the shared TodoDetail component via TodoContext.
+ * TodoDetailPanel — Wrapper that loads a single `sprk_todo` record and wires
+ * save / dismiss / regarding-edit callbacks to the shared TodoDetail component
+ * via TodoContext.
+ *
+ * Single-entity model (R3 FR-09 / task 011): the legacy two-entity load
+ * (sprk_event + sprk_eventtodo) is removed (OS-1). The new `TodoDetail` API
+ * exposes `onSaveTodo(todoId, ITodoFieldUpdates)` + `onDismissTodo(todoId)`
+ * — see `projects/smart-todo-decoupling-r3/notes/tododetail-consumer-breakage-task011.md`.
+ *
+ * Regarding edit (FR-13, task 022): when the user clicks "Change" / "Set
+ * Regarding…" / "Clear" on the regarding row, the host opens an inline dialog
+ * containing the shared `AssociateToStep` (with the canonical 11-target
+ * preset). On selection, the host calls `buildTodoRegardingUpdate` to produce
+ * a payload that atomically sets the four resolver fields + the chosen
+ * entity-specific lookup AND clears the other ten lookups (per ADR-024 +
+ * the spec's mutual-exclusion rule). The payload is then persisted via the
+ * existing save path.
  *
  * Responsibilities:
- *   - Consumes selectedEventId from TodoContext
- *   - Loads ITodoRecord and ITodoExtension from Dataverse in parallel
- *   - Wraps the shared TodoDetail component with save callbacks that write to
- *     Dataverse AND call TodoContext.updateItem for optimistic Kanban updates
- *   - Header bar with event name and close (X) button
+ *   - Consume the selected todo ID from TodoContext (`selectedEventId` —
+ *     property name retained; value is a sprk_todoid).
+ *   - Load one ITodoRecord from Dataverse.
+ *   - Wrap shared TodoDetail with save / dismiss / regarding-edit callbacks
+ *     that write to Dataverse AND call TodoContext.updateItem for optimistic
+ *     Kanban refresh.
+ *   - Render header bar with todo name + close (X) button.
+ *   - Host the AssociateToStep dialog for regarding edit (FR-13).
  *
- * No BroadcastChannel — all communication goes through TodoContext (ADR-006).
- * TodoDetail imported from @spaarke/ui-components (ADR-012).
- *
- * @see ADR-012 - Shared component library
- * @see ADR-021 - Fluent UI v9 design system (makeStyles + tokens only)
+ * Per ADR-006: no BroadcastChannel — all communication goes through TodoContext.
+ * Per ADR-012: TodoDetail comes from @spaarke/ui-components (context-agnostic).
+ * Per ADR-021: Fluent UI v9 design system (makeStyles + tokens only).
+ * Per ADR-024: regarding edits go through PolymorphicResolverService —
+ *              wrapped here in buildTodoRegardingUpdate which adds the
+ *              clear-and-set semantic across all 11 lookups (FR-13).
  */
 
 import * as React from "react";
@@ -23,26 +42,50 @@ import {
   Text,
   Button,
   Spinner,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  DialogTrigger,
 } from "@fluentui/react-components";
 import { DismissRegular } from "@fluentui/react-icons";
 import { TodoDetail } from "@spaarke/ui-components/TodoDetail";
 import type {
   ITodoRecord,
-  ITodoExtension,
-  IEventFieldUpdates,
-  ITodoExtensionUpdates,
+  ITodoFieldUpdates,
 } from "@spaarke/ui-components/TodoDetail";
+import { AssociateToStep, TODO_REGARDING_TARGETS } from "@spaarke/ui-components/AssociateToStep";
+import type {
+  AssociationResult,
+  EntityTypeOption,
+  INavigationService,
+} from "@spaarke/ui-components/AssociateToStep";
+import type {
+  LookupOptions,
+  LookupResult,
+} from "@spaarke/ui-components";
+import {
+  buildTodoRegardingUpdate,
+  buildTodoRegardingClear,
+  discoverTodoNavProps,
+} from "@spaarke/ui-components/services";
 import { useTodoContext } from "../context/TodoContext";
 import {
   loadTodoRecord,
-  loadTodoExtension,
   saveTodoFields,
-  saveTodoExtensionFields,
-  deactivateTodoExtension,
+  dismissTodo,
   searchContacts,
-  removeTodoFlag,
 } from "../services/todoDetailService";
-import { getXrm } from "../services/xrmProvider";
+import { getXrm, getWebApi } from "../services/xrmProvider";
+
+// ---------------------------------------------------------------------------
+// statuscode constants (sprk_todo per task 009)
+// ---------------------------------------------------------------------------
+
+const STATUSCODE_DISMISSED = 659490002;
+const STATECODE_INACTIVE = 1;
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -108,6 +151,64 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
+// Inline INavigationService adapter (Xrm.Utility.lookupObjects-backed)
+//
+// AssociateToStep requires an INavigationService for the lookup dialog. We
+// build one inline (rather than importing a global adapter) so SmartTodo
+// doesn't take on a transitive dependency on a navigation-service module —
+// the only method we use is `openLookup`.
+// ---------------------------------------------------------------------------
+
+function createXrmNavigationService(): INavigationService {
+  return {
+    openRecord: async (entityName: string, entityId: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = getXrm() as any;
+      await xrm?.Navigation?.navigateTo?.(
+        { pageType: "entityrecord", entityName, entityId },
+        { target: 1 },
+      );
+    },
+    openDialog: async () => ({ confirmed: false }),
+    closeDialog: () => {
+      /* no-op */
+    },
+    openLookup: async (options: LookupOptions): Promise<LookupResult[]> => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = getXrm() as any;
+      if (!xrm?.Utility?.lookupObjects) {
+        console.warn("[TodoDetailPanel] Xrm.Utility.lookupObjects unavailable");
+        return [];
+      }
+      const lookupOptions = {
+        defaultEntityType: options.defaultEntityType ?? options.entityType,
+        entityTypes: options.entityTypes ?? [options.entityType],
+        allowMultiSelect: options.allowMultiSelect ?? false,
+        defaultViewId: (options as { defaultViewId?: string }).defaultViewId,
+      };
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const results = await xrm.Utility.lookupObjects(lookupOptions);
+        if (!results || !Array.isArray(results)) return [];
+        return results.map(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (r: any): LookupResult => ({
+            id: String(r.id ?? "")
+              .replace(/[{}]/g, "")
+              .toLowerCase(),
+            name: String(r.name ?? "Unknown"),
+            entityType: String(r.entityType ?? options.entityType),
+          }),
+        );
+      } catch (err) {
+        console.error("[TodoDetailPanel] Lookup dialog error:", err);
+        return [];
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -120,17 +221,30 @@ export function TodoDetailPanel(): React.ReactElement {
   // Data state
   // ---------------------------------------------------------------------------
   const [record, setRecord] = React.useState<ITodoRecord | null>(null);
-  const [todoExt, setTodoExt] = React.useState<ITodoExtension | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   // ---------------------------------------------------------------------------
-  // Load record + extension in parallel when selectedEventId changes
+  // Regarding-edit dialog state (FR-13)
+  // ---------------------------------------------------------------------------
+  const [isRegardingDialogOpen, setIsRegardingDialogOpen] = React.useState(false);
+  const [regardingSelection, setRegardingSelection] =
+    React.useState<AssociationResult | null>(null);
+  const [regardingDialogError, setRegardingDialogError] = React.useState<string | null>(null);
+  const [isApplyingRegarding, setIsApplyingRegarding] = React.useState(false);
+
+  // Inline navigation-service singleton (stable identity across renders)
+  const navigationService = React.useMemo<INavigationService>(
+    () => createXrmNavigationService(),
+    [],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Load record when selectedEventId (sprk_todoid) changes
   // ---------------------------------------------------------------------------
   React.useEffect(() => {
     if (!selectedEventId) {
       setRecord(null);
-      setTodoExt(null);
       setIsLoading(false);
       setError(null);
       return;
@@ -140,25 +254,13 @@ export function TodoDetailPanel(): React.ReactElement {
     setIsLoading(true);
     setError(null);
 
-    Promise.all([
-      loadTodoRecord(selectedEventId),
-      loadTodoExtension(selectedEventId),
-    ]).then(([eventResult, extResult]) => {
+    loadTodoRecord(selectedEventId).then((result) => {
       if (cancelled) return;
-
-      if (eventResult.success && eventResult.data) {
-        setRecord(eventResult.data);
+      if (result.success && result.data) {
+        setRecord(result.data);
       } else {
-        setError(eventResult.error ?? "Failed to load record");
+        setError(result.error ?? "Failed to load record");
       }
-
-      // Extension is optional — may not exist for every event
-      if (extResult.success && extResult.data) {
-        setTodoExt(extResult.data);
-      } else {
-        setTodoExt(null);
-      }
-
       setIsLoading(false);
     });
 
@@ -175,27 +277,31 @@ export function TodoDetailPanel(): React.ReactElement {
   }, [selectItem]);
 
   // ---------------------------------------------------------------------------
-  // Save event fields (sprk_event) + optimistic Kanban update
+  // Save sprk_todo fields + optimistic Kanban update
   // ---------------------------------------------------------------------------
-  const handleSaveEventFields = React.useCallback(
-    async (evtId: string, fields: IEventFieldUpdates) => {
+  const handleSaveTodo = React.useCallback(
+    async (todoId: string, fields: ITodoFieldUpdates) => {
       // Capture previous item state for rollback
-      const previousItem = items.find((i) => i.sprk_eventid === evtId);
+      const previousItem = items.find((i) => i.sprk_todoid === todoId);
 
       // Optimistic update — Kanban card re-renders immediately (NFR-02)
-      updateItem(evtId, fields as Partial<Record<string, unknown>>);
-      setRecord((prev) => (prev ? { ...prev, ...fields } : prev));
+      updateItem(todoId, fields as Partial<Record<string, unknown>>);
+      setRecord((prev: ITodoRecord | null) =>
+        prev ? { ...prev, ...fields } : prev,
+      );
 
       // Persist to Dataverse in background
-      const result = await saveTodoFields(evtId, fields);
+      const result = await saveTodoFields(todoId, fields);
       if (!result.success) {
         // Rollback optimistic update on failure
         if (previousItem) {
-          updateItem(evtId, previousItem);
-          setRecord((prev) => (prev ? { ...prev, ...previousItem } : prev));
+          updateItem(todoId, previousItem);
+          setRecord((prev: ITodoRecord | null) =>
+            prev ? { ...prev, ...previousItem } : prev,
+          );
         }
         console.error(
-          "[TodoDetailPanel] Event save failed, reverted:",
+          "[TodoDetailPanel] Todo save failed, reverted:",
           result.error,
         );
       }
@@ -205,84 +311,34 @@ export function TodoDetailPanel(): React.ReactElement {
   );
 
   // ---------------------------------------------------------------------------
-  // Save todo extension fields (sprk_eventtodo)
+  // Dismiss handler — set statecode=1 / statuscode=Dismissed + remove from
+  // Kanban + close panel. Preserves the record so it can be recovered from
+  // the DismissedSection (per task 011 follow-up note default behaviour).
   // ---------------------------------------------------------------------------
-  const handleSaveTodoExtFields = React.useCallback(
-    async (todoId: string, fields: ITodoExtensionUpdates) => {
-      // Capture previous extension state for rollback
-      const previousExt = todoExt ? { ...todoExt } : null;
+  const handleDismissTodo = React.useCallback(
+    async (todoId: string) => {
+      // Optimistic: drop from Kanban + close panel immediately
+      const previousItem = items.find((i) => i.sprk_todoid === todoId);
 
-      // Optimistic update
-      setTodoExt((prev) => (prev ? { ...prev, ...fields } : prev));
-
-      // Persist to Dataverse
-      const result = await saveTodoExtensionFields(todoId, fields);
-      if (!result.success) {
-        // Rollback on failure
-        setTodoExt(previousExt);
+      const result = await dismissTodo(todoId);
+      if (result.success) {
+        handleRemove(todoId);
+        selectItem(null);
+      } else if (previousItem) {
+        // No rollback needed for the item itself (we hadn't removed it yet),
+        // but log the failure for the host so it can surface an error.
         console.error(
-          "[TodoDetailPanel] Todo extension save failed, reverted:",
+          "[TodoDetailPanel] Dismiss failed:",
           result.error,
         );
       }
       return result;
     },
-    [todoExt],
+    [handleRemove, selectItem, items],
   );
 
   // ---------------------------------------------------------------------------
-  // Deactivate sprk_eventtodo + optimistic Kanban update (mark completed)
-  // ---------------------------------------------------------------------------
-  const handleDeactivateTodoExt = React.useCallback(
-    async (todoId: string) => {
-      // Capture previous states for rollback
-      const previousExt = todoExt ? { ...todoExt } : null;
-      const previousItem = selectedEventId
-        ? items.find((i) => i.sprk_eventid === selectedEventId)
-        : undefined;
-
-      // Optimistic update — immediately reflect completed status
-      setTodoExt((prev) =>
-        prev ? { ...prev, statecode: 1, statuscode: 2 } : prev,
-      );
-      if (selectedEventId) {
-        updateItem(selectedEventId, {
-          sprk_todostatus: 100000001, // Completed
-        });
-      }
-
-      // Persist to Dataverse: update sprk_event.sprk_todostatus AND deactivate sprk_eventtodo
-      const [eventResult, extResult] = await Promise.all([
-        selectedEventId
-          ? saveTodoFields(selectedEventId, {
-              sprk_todostatus: 100000001, // Completed
-            } as any)
-          : Promise.resolve({ success: true }),
-        deactivateTodoExtension(todoId),
-      ]);
-
-      if (!extResult.success || !eventResult.success) {
-        // Rollback on failure
-        setTodoExt(previousExt);
-        if (selectedEventId && previousItem) {
-          updateItem(selectedEventId, previousItem);
-        }
-        console.error(
-          "[TodoDetailPanel] Complete failed, reverted:",
-          extResult.error || eventResult.error,
-        );
-      } else if (selectedEventId) {
-        // Success — remove item from Kanban (it's no longer Open)
-        handleRemove(selectedEventId);
-        selectItem(null);
-      }
-      return extResult;
-    },
-    [selectedEventId, updateItem, handleRemove, selectItem, todoExt, items],
-  );
-
-  // ---------------------------------------------------------------------------
-  // Search contacts for the Assigned To picker
+  // Search systemusers for the Assigned To picker
   // ---------------------------------------------------------------------------
   const handleSearchContacts = React.useCallback(
     async (query: string) => searchContacts(query),
@@ -290,8 +346,30 @@ export function TodoDetailPanel(): React.ReactElement {
   );
 
   // ---------------------------------------------------------------------------
-  // Open regarding record via Xrm.Navigation
+  // Open regarding record — uses sprk_regardingrecordurl per FR-13.
+  // Falls back to Xrm.Navigation.navigateTo only if URL is absent.
   // ---------------------------------------------------------------------------
+  const handleOpenRegardingUrl = React.useCallback((url: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = getXrm() as any;
+    // Prefer Xrm.Navigation.openUrl when available (uses host browser hooks)
+    if (xrm?.Navigation?.openUrl) {
+      try {
+        xrm.Navigation.openUrl(url);
+        return;
+      } catch (err) {
+        console.warn("[TodoDetailPanel] Xrm.Navigation.openUrl failed:", err);
+      }
+    }
+    // Fallback: window.open in a new tab
+    try {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      console.warn("[TodoDetailPanel] window.open failed:", err);
+    }
+  }, []);
+
+  // Legacy fallback (kept for hosts that haven't migrated to sprk_regardingrecordurl)
   const handleOpenRegardingRecord = React.useCallback(
     (entityName: string, recordId: string) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -313,19 +391,85 @@ export function TodoDetailPanel(): React.ReactElement {
   );
 
   // ---------------------------------------------------------------------------
-  // Remove from To Do — clear flag, remove from Kanban, close panel
+  // Regarding edit handlers (FR-13)
   // ---------------------------------------------------------------------------
-  const handleRemoveTodo = React.useCallback(
-    async (evtId: string) => {
-      const result = await removeTodoFlag(evtId);
-      if (result.success) {
-        handleRemove(evtId);
-        selectItem(null);
-      } else {
-        throw new Error(result.error ?? "Failed to remove from To Do");
+
+  /** Open the AssociateToStep dialog for change / set. */
+  const handleChangeRegarding = React.useCallback(() => {
+    setRegardingSelection(null);
+    setRegardingDialogError(null);
+    setIsRegardingDialogOpen(true);
+  }, []);
+
+  /** Clear regarding entirely (all 15 fields → null). */
+  const handleClearRegarding = React.useCallback(async () => {
+    if (!record) return;
+    setRegardingDialogError(null);
+    setIsApplyingRegarding(true);
+    try {
+      const webApi = getWebApi();
+      if (!webApi) {
+        console.error("[TodoDetailPanel] Xrm.WebApi unavailable for clear-regarding");
+        setIsApplyingRegarding(false);
+        return;
       }
+      const navProps = await discoverTodoNavProps();
+      const payload = buildTodoRegardingClear(navProps);
+      await handleSaveTodo(record.sprk_todoid, payload as ITodoFieldUpdates);
+    } finally {
+      setIsApplyingRegarding(false);
+    }
+  }, [record, handleSaveTodo]);
+
+  /** Apply the dialog selection: applyResolverFields + save (FR-13). */
+  const handleApplyRegardingSelection = React.useCallback(async () => {
+    if (!record || !regardingSelection) return;
+    setRegardingDialogError(null);
+    setIsApplyingRegarding(true);
+    try {
+      const webApi = getWebApi();
+      if (!webApi) {
+        setRegardingDialogError("Dataverse Web API unavailable");
+        return;
+      }
+      const navProps = await discoverTodoNavProps();
+      const payload = await buildTodoRegardingUpdate(
+        webApi,
+        navProps,
+        { entityType: regardingSelection.entityType },
+        regardingSelection.recordId,
+        regardingSelection.recordName,
+      );
+      const result = await handleSaveTodo(
+        record.sprk_todoid,
+        payload as ITodoFieldUpdates,
+      );
+      if (!result.success) {
+        setRegardingDialogError(result.error ?? "Failed to save regarding");
+        return;
+      }
+      setIsRegardingDialogOpen(false);
+      setRegardingSelection(null);
+    } catch (err) {
+      console.error("[TodoDetailPanel] applyResolverFields failed:", err);
+      setRegardingDialogError(
+        err instanceof Error ? err.message : "Failed to apply regarding",
+      );
+    } finally {
+      setIsApplyingRegarding(false);
+    }
+  }, [record, regardingSelection, handleSaveTodo]);
+
+  const handleRegardingDialogOpenChange = React.useCallback(
+    (_event: unknown, data: { open: boolean }) => {
+      if (!data.open) {
+        // Reset transient state when dialog closes
+        setRegardingSelection(null);
+        setRegardingDialogError(null);
+      }
+      setIsRegardingDialogOpen(data.open);
     },
-    [handleRemove, selectItem],
+    [],
   );
 
   // ---------------------------------------------------------------------------
@@ -394,16 +538,26 @@ export function TodoDetailPanel(): React.ReactElement {
   // ---------------------------------------------------------------------------
   // Render: full detail panel
   // ---------------------------------------------------------------------------
+  // Suppress unused-warning for STATUSCODE_DISMISSED / STATECODE_INACTIVE —
+  // they're declared at module scope for documentation of the semantic chosen
+  // by `dismissTodo` (statecode=1 / statuscode=659490002).
+  void STATUSCODE_DISMISSED;
+  void STATECODE_INACTIVE;
+
+  const hasExistingRegarding = Boolean(
+    record?.sprk_regardingrecordid && record?.sprk_regardingrecordname,
+  );
+
   return (
     <div
       className={styles.root}
       role="complementary"
       aria-label="To-do detail panel"
     >
-      {/* Header with event name and close button */}
+      {/* Header with todo name and close button */}
       <div className={styles.header}>
         <Text weight="semibold" size={400} className={styles.headerTitle}>
-          {record?.sprk_eventname ?? "To Do Details"}
+          {record?.sprk_name ?? "To Do Details"}
         </Text>
         <Button
           appearance="subtle"
@@ -417,18 +571,59 @@ export function TodoDetailPanel(): React.ReactElement {
       <div className={styles.body}>
         <TodoDetail
           record={record}
-          todoExtension={todoExt}
           isLoading={false}
           error={null}
-          onSaveEventFields={handleSaveEventFields}
-          onSaveTodoExtFields={handleSaveTodoExtFields}
-          onDeactivateTodoExt={handleDeactivateTodoExt}
-          onRemoveTodo={handleRemoveTodo}
+          onSaveTodo={handleSaveTodo}
+          onDismissTodo={handleDismissTodo}
           onClose={handleClose}
           onSearchContacts={handleSearchContacts}
           onOpenRegardingRecord={handleOpenRegardingRecord}
+          onOpenRegardingUrl={handleOpenRegardingUrl}
+          onChangeRegarding={handleChangeRegarding}
+          onClearRegarding={hasExistingRegarding ? handleClearRegarding : undefined}
         />
       </div>
+
+      {/* Regarding-edit dialog (FR-13) — hosts AssociateToStep */}
+      <Dialog
+        open={isRegardingDialogOpen}
+        onOpenChange={handleRegardingDialogOpenChange}
+        modalType="modal"
+      >
+        <DialogSurface aria-label="Change regarding record">
+          <DialogBody>
+            <DialogTitle>Change Regarding Record</DialogTitle>
+            <DialogContent>
+              <AssociateToStep
+                entityTypes={[...TODO_REGARDING_TARGETS] as EntityTypeOption[]}
+                navigationService={navigationService}
+                value={regardingSelection}
+                onChange={setRegardingSelection}
+                disabled={isApplyingRegarding}
+              />
+              {regardingDialogError && (
+                <Text style={{ color: tokens.colorPaletteRedForeground1 }}>
+                  {regardingDialogError}
+                </Text>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <DialogTrigger disableButtonEnhancement action="close">
+                <Button appearance="secondary" disabled={isApplyingRegarding}>
+                  Cancel
+                </Button>
+              </DialogTrigger>
+              <Button
+                appearance="primary"
+                onClick={handleApplyRegardingSelection}
+                disabled={!regardingSelection || isApplyingRegarding}
+              >
+                {isApplyingRegarding ? "Applying…" : "Apply"}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 }

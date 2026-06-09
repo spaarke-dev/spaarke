@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Refactor `TodoGenerationService` to create `sprk_todo` records (not `sprk_event` with `todoflag=true`)</title>
+    <phase>Phase 1: Dataverse Schema (audit-surfaced prerequisite)</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>002</dependencies>
+    <blocks>004</blocks>
+    <tags>bff-api, api, backend, refactoring, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` in `Sprk.Bff.Api/Services/Workspace/`; tags include `bff-api`. FULL rigor with publish-size + CVE checks. Blocks Phase 1 task 004.</rigor-reason>
+    <parallel-group>P1-W2.5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor `Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs` (24-hour BackgroundService that auto-generates to-dos for budget/deadline/assigned-task conditions). Today it creates `sprk_event` records with `sprk_todoflag=true`. Refactor to create `sprk_todo` records directly. When the source condition has a regarding parent (e.g., a Matter for budget alerts, an Event for deadlines), populate the matching `sprk_regarding{entity}` specific lookup AND populate the four resolver fields atomically (`sprk_regardingrecordtype`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`). Update `TodoGenerationServiceTests.cs` accordingly. This task surfaced from the task 001 audit; it is now a hard prerequisite for task 004 (removing `sprk_todoflag` from `sprk_event`).
+  </prompt>
+
+  <role>Spaarke BFF API developer with Dataverse SDK + background-service expertise.</role>
+
+  <goal>`TodoGenerationService` writes `sprk_todo` records; all four resolver fields populated when a regarding parent exists; tests updated and passing; repo grep returns zero `sprk_todoflag` writes from this service.</goal>
+
+  <context>
+    <background>The audit (task 001) found this service was the only remaining `sprk_todoflag = true` writer in `Sprk.Bff.Api` and would break at runtime once task 004 removes the field from `sprk_event`. Decision (user, 2026-06-07): refactor in place to use `sprk_todo` directly.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/TodoGenerationServiceTests.cs</file>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">When setting any `sprk_regarding{entity}` lookup, the four resolver fields MUST be populated atomically (`sprk_regardingrecordtype`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`). For C# server code, implement a small helper that mirrors `PolymorphicResolverService.applyResolverFields` semantics — do NOT duplicate the resolver-field literals across multiple call sites.</constraint>
+    <constraint source="FR-29">After this task: zero `sprk_todoflag` writes from `Services/Workspace/TodoGenerationService.cs`.</constraint>
+    <constraint source="OS-1">No compat shim. The service writes `sprk_todo`, period.</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish-size verification mandatory.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation: tests for the new code paths.</constraint>
+    <constraint source="project">Product portability: no hardcoded environment URLs / tenant IDs in this service or its tests. All Dataverse access goes through the existing `ServiceClient` / `IOrganizationService` injection.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `TodoGenerationService.cs` end-to-end. Map every `sprk_event` + `sprk_todoflag` write site. Identify the 5 rules currently emitting to-dos.</step>
+    <step order="2">Design a small C#-side resolver helper (e.g., `TodoRegardingBuilder.ApplyResolverFields(Entity todo, string entityType, Guid id, string displayName)`) that sets the matching specific lookup + the four resolver fields atomically. Location: `Services/Workspace/TodoRegardingBuilder.cs` (next to the service) or `Services/Todo/` if it's reusable cross-service.</step>
+    <step order="3">For each rule, replace the `sprk_event` + `todoflag=true` write with a `sprk_todo` create call. Map fields: `sprk_name` (title), `sprk_notes` (description), `sprk_duedate`, `sprk_priorityscore`, `sprk_effortscore`. For rules where a regarding parent is known (Matter for budget rules, Project for deadline rules, etc.), use the resolver helper.</step>
+    <step order="4">Update `TodoGenerationServiceTests.cs`: replace assertions on `sprk_event` create + `todoflag=true` with assertions on `sprk_todo` create + resolver-field shape. Add at least one test per rule covering: (a) the create is `sprk_todo`, (b) when regarding present, all four resolver fields populated correctly, (c) when no regarding (standalone), all eleven lookups + four resolver fields null.</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` — clean.</step>
+    <step order="6">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — all tests pass.</step>
+    <step order="7">Repo grep for `sprk_todoflag` inside `src/server/api/Sprk.Bff.Api/Services/Workspace/`. Confirm zero hits.</step>
+    <step order="8">BFF publish-size check + CVE scan per CLAUDE.md §10.</step>
+    <step order="9">Update `projects/smart-todo-decoupling-r3/tasks/TASK-INDEX.md` to ✅. Update `current-task.md` if active.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs` (refactored)</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs` (new helper, or equivalent location)</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/TodoGenerationServiceTests.cs` (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Service creates `sprk_todo` records; zero `sprk_event` + `sprk_todoflag=true` writes remain.</criterion>
+    <criterion testable="true">When source condition has a regarding parent, all four resolver fields populated correctly.</criterion>
+    <criterion testable="true">Tests cover all 5 rules; all pass; no regressions in the full unit-test sweep.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+5 MB; zero new HIGH CVEs.</criterion>
+    <criterion testable="true">Zero `sprk_todoflag` references in `Services/Workspace/`.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check (ADR-024 mandatory) + code-review.</protocol>
+  </execution>
+</task>

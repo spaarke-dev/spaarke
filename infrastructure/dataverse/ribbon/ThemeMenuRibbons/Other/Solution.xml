@@ -61,7 +61,6 @@
       <RootComponent type="1" schemaName="sprk_analysisplaybook" behavior="2" />
       <RootComponent type="1" schemaName="sprk_analysisoutput" behavior="2" />
       <RootComponent type="1" schemaName="sprk_communication" behavior="2" />
-      <RootComponent type="1" schemaName="sprk_eventtodo" behavior="2" />
       <RootComponent type="1" schemaName="sprk_eventtype" behavior="2" />
     </RootComponents>
     <MissingDependencies />

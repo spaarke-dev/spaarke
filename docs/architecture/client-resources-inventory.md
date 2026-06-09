@@ -154,7 +154,6 @@
 |---|---|---|
 | **CalendarSidePane** | 2026-03-30 | Calendar side pane |
 | **EventDetailSidePane** | 2026-03-30 | Event detail side pane |
-| **TodoDetailSidePane** | 2026-03-30 | Todo detail side pane |
 | **EventsPage** | 2026-03-30 | Events page |
 | **SmartTodo** | 2026-03-30 | Smart todo (Kanban-style) |
 | **FindSimilarCodePage** | 2026-04-04 | Find similar documents wizard/page |

@@ -119,7 +119,7 @@ Some existing Code Pages still reference React 18.x in their `package.json`. Rea
 | Status | Solutions |
 |--------|-----------|
 | Already on React 19 | `DocumentRelationshipViewer`, `SprkChatPane`, `AnalysisWorkspace`, `SemanticSearch` |
-| Still on React 18 (upgrade when touched) | `LegalWorkspace`, `EventsPage`, `SpeAdminApp`, `AnalysisBuilder`, `DocumentUploadWizard`, `CalendarSidePane`, `TodoDetailSidePane` |
+| Still on React 18 (upgrade when touched) | `LegalWorkspace`, `EventsPage`, `SpeAdminApp`, `AnalysisBuilder`, `DocumentUploadWizard`, `CalendarSidePane` |
 
 ---
 

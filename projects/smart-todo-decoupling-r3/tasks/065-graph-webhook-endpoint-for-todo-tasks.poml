@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>`/api/graph/webhooks/todo` endpoint: validate + delta-fetch + inbound PATCH `sprk_todo`</title>
+    <phase>Phase 7: Graph Sync Engine</phase>
+    <status>not-started</status>
+    <estimated-effort>5-6 hours</estimated-effort>
+    <dependencies>062, 064</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, backend, endpoints, minimal-api, auth, integration-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New Minimal API endpoint with auth + Graph delta queries + Dataverse write path. Highest-risk endpoint in the project. FULL rigor.</rigor-reason>
+    <parallel-group>P7-W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on loop prevention (062) + subscription manager (064); sequential within Phase 7.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add Minimal API endpoint `POST /api/graph/webhooks/todo`. Endpoint MUST: (1) respond to validation-token requests within 10s; (2) validate `clientState` against the subscription's stored seed (read from Key Vault per UQ-3); (3) verify `subscriptionId` matches an active subscription; (4) fetch changes via delta query on `/me/todo/lists/{listId}/tasks`; (5) for each changed task, locate the matching `sprk_todo` by `sprk_graphtodotaskid` and PATCH with changed fields (honoring loop prevention from task 062). Audit-log every call.
+  </prompt>
+
+  <role>Spaarke BFF API developer with Minimal API + Graph delta queries + Key Vault expertise.</role>
+
+  <goal>Webhook endpoint validates correctly, fetches deltas, and PATCHes `sprk_todo` per inbound changes. Loop prevention applied. Audit logging present. Tests cover validation, valid notification, invalid `clientState`, missing subscription, delta-query failure.</goal>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern.</constraint>
+    <constraint source="ADR-008">Endpoint filters for `clientState` + subscription-id validation. Not middleware.</constraint>
+    <constraint source="FR-22">Validation, delta-fetch, inbound PATCH.</constraint>
+    <constraint source="UQ-3">`clientState` seed stored in Key Vault with rotation pipeline.</constraint>
+    <constraint source="NFR-06">Audit-log every call with correlation id.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation: endpoint tests + integration tests.</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish-size verification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define endpoint in a new file `Endpoints/GraphWebhookEndpoints.cs` (or extend existing). Map `POST /api/graph/webhooks/todo`.</step>
+    <step order="2">Implement validation-token handler — respond with the token within 10s as required by Graph contract.</step>
+    <step order="3">Implement endpoint filter for `clientState` + `subscriptionId` validation. Read `clientState` seed from Key Vault via existing secrets infrastructure.</step>
+    <step order="4">On valid notification: fetch delta via `/me/todo/lists/{listId}/tasks/delta`; iterate changes; for each, locate `sprk_todo` by `sprk_graphtodotaskid`.</step>
+    <step order="5">PATCH `sprk_todo` with mapped fields, honoring loop prevention (task 062): set thread-local skip-flag during the Dataverse update.</step>
+    <step order="6">Audit-log every call with correlation id (validation token, valid notification, validation failure, delta-fetch failure).</step>
+    <step order="7">Tests: validation-token round-trip, valid notification → PATCH happens, invalid `clientState` → 401, missing subscription → 404, delta-fetch failure → 500 with retry hint.</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. BFF publish-size + CVE checks.</step>
+    <step order="9">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Endpoints/GraphWebhookEndpoints.cs` (NEW or extended)</output>
+    <output type="code">Endpoint filter for `clientState` validation</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Endpoints/GraphWebhookTodoTests.cs`</output>
+    <output type="test">`tests/integration/Spe.Integration.Tests/` (inbound sync scenarios)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Validation token round-trip succeeds within 10s.</criterion>
+    <criterion testable="true">Valid notification → `sprk_todo` PATCHed with delta changes.</criterion>
+    <criterion testable="true">Invalid `clientState` → 401.</criterion>
+    <criterion testable="true">Loop prevention skip-flag honored: inbound PATCH does NOT trigger outbound enqueue.</criterion>
+    <criterion testable="true">Every call logged with correlation id.</criterion>
+    <criterion testable="true">Tests pass; BFF publish-size delta justified.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check (ADR-001 + ADR-008 mandatory) + code-review.</protocol>
+  </execution>
+</task>

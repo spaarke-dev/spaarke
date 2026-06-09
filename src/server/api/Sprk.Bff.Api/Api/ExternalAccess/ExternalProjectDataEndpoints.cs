@@ -11,17 +11,23 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   GET  /projects                       — list user's accessible projects
 ///   GET  /projects/{id}                  — single project by ID
 ///   GET  /projects/{id}/documents        — documents for a project
-///   GET  /projects/{id}/events           — events for a project
-///   POST /projects/{id}/events           — create a new event in a project
+///   GET  /projects/{id}/todos            — to-dos for a project (sprk_todo, regarding=project)
+///   POST /projects/{id}/todos            — create a new to-do regarding the project
 ///   GET  /projects/{id}/contacts         — contacts with access to the project
 ///   GET  /projects/{id}/organizations    — organizations linked to project contacts
-///   PATCH /events/{id}                   — update an event (any project)
+///   PATCH /todos/{id}                    — update a to-do (any project)
 ///
 /// All project-specific endpoints verify the caller has a participation record for the requested
 /// project via ExternalCallerContext.HasProjectAccess(). Returns 403 if no access.
 ///
+/// smart-todo-decoupling-r3 (FR-29): Routes formerly exposed an event-based to-do model
+/// (GET/POST /events, PATCH /events/{id}). Replaced with sprk_todo routes here. See
+/// projects/smart-todo-decoupling-r3/notes/external-access-contract-change.md for the
+/// breaking-contract migration guide consumed by the external-spa (task 008).
+///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Authorization applied via route group + ExternalCallerAuthorizationFilter.
+/// ADR-024: To-do regarding context applied via the four resolver fields + sprk_regardingproject lookup.
 /// </summary>
 public static class ExternalProjectDataEndpoints
 {
@@ -55,20 +61,20 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .AddExternalCallerAuthorizationFilter();
 
-        // GET /api/v1/external/projects/{id}/events
-        group.MapGet("/projects/{id:guid}/events", GetEvents)
-            .WithName("GetExternalProjectEvents")
-            .WithSummary("Get events for a Secure Project")
-            .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
+        // GET /api/v1/external/projects/{id}/todos
+        group.MapGet("/projects/{id:guid}/todos", GetTodos)
+            .WithName("GetExternalProjectTodos")
+            .WithSummary("Get to-dos for a Secure Project (sprk_todo records regarding the project)")
+            .Produces<ExternalCollectionResponse<ExternalTodoDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .AddExternalCallerAuthorizationFilter();
 
-        // POST /api/v1/external/projects/{id}/events — create a new event
-        group.MapPost("/projects/{id:guid}/events", CreateEvent)
-            .WithName("CreateExternalProjectEvent")
-            .WithSummary("Create a new event in a Secure Project")
-            .Produces<ExternalEventDto>(StatusCodes.Status201Created)
+        // POST /api/v1/external/projects/{id}/todos — create a new to-do regarding the project
+        group.MapPost("/projects/{id:guid}/todos", CreateTodo)
+            .WithName("CreateExternalProjectTodo")
+            .WithSummary("Create a new sprk_todo regarding a Secure Project (ADR-024 resolver fields applied)")
+            .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -92,10 +98,10 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .AddExternalCallerAuthorizationFilter();
 
-        // PATCH /api/v1/external/events/{id} — update an event
-        group.MapPatch("/events/{id:guid}", UpdateEvent)
-            .WithName("UpdateExternalEvent")
-            .WithSummary("Update an event (PATCH semantics — only provided fields are changed)")
+        // PATCH /api/v1/external/todos/{id} — update a to-do
+        group.MapPatch("/todos/{id:guid}", UpdateTodo)
+            .WithName("UpdateExternalTodo")
+            .WithSummary("Update a to-do (PATCH semantics — only provided fields are changed)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -157,7 +163,7 @@ public static class ExternalProjectDataEndpoints
         return Results.Ok(new ExternalCollectionResponse<ExternalDocumentDto> { Value = documents });
     }
 
-    private static async Task<IResult> GetEvents(
+    private static async Task<IResult> GetTodos(
         Guid id,
         HttpContext httpContext,
         ExternalDataService dataService,
@@ -170,13 +176,13 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
-        var events = await dataService.GetEventsAsync(id, ct);
-        return Results.Ok(new ExternalCollectionResponse<ExternalEventDto> { Value = events });
+        var todos = await dataService.GetTodosAsync(id, ct);
+        return Results.Ok(new ExternalCollectionResponse<ExternalTodoDto> { Value = todos });
     }
 
-    private static async Task<IResult> CreateEvent(
+    private static async Task<IResult> CreateTodo(
         Guid id,
-        CreateExternalEventRequest request,
+        CreateExternalTodoRequest request,
         HttpContext httpContext,
         ExternalDataService dataService,
         CancellationToken ct)
@@ -188,18 +194,18 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
-        // Require at least Collaborate access to create events
+        // Require at least Collaborate access to create to-dos
         var rights = callerContext.GetEffectiveRights(id);
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
             return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "Your access level does not permit creating events on this project");
+                detail: "Your access level does not permit creating to-dos on this project");
 
         if (string.IsNullOrWhiteSpace(request.SprkName))
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_name is required");
 
-        var created = await dataService.CreateEventAsync(id, request, ct);
-        return Results.Created($"/api/v1/external/events/{created.SprkEventid}", created);
+        var created = await dataService.CreateTodoAsync(id, request, ct);
+        return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
     }
 
     private static async Task<IResult> GetContacts(
@@ -236,9 +242,9 @@ public static class ExternalProjectDataEndpoints
         return Results.Ok(new ExternalCollectionResponse<ExternalOrganizationDto> { Value = organizations });
     }
 
-    private static async Task<IResult> UpdateEvent(
+    private static async Task<IResult> UpdateTodo(
         Guid id,
-        UpdateExternalEventRequest request,
+        UpdateExternalTodoRequest request,
         HttpContext httpContext,
         ExternalDataService dataService,
         CancellationToken ct)
@@ -246,11 +252,12 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerContext(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        // Note: for update, we can't easily check project membership without looking up the event.
+        // Note: for update, we can't easily check project membership without looking up the to-do.
         // The ExternalCallerAuthorizationFilter already validates the caller is authenticated.
-        // A stricter implementation would look up the event's project and verify access — acceptable
-        // for now given the app's low blast radius (only the authenticated user's linked data).
-        await dataService.UpdateEventAsync(id, request, ct);
+        // A stricter implementation would look up the to-do's project (via sprk_regardingproject)
+        // and verify access — acceptable for now given the app's low blast radius (only the
+        // authenticated user's linked data).
+        await dataService.UpdateTodoAsync(id, request, ct);
         return Results.NoContent();
     }
 

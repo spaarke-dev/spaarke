@@ -130,3 +130,7 @@ export * from './DocumentRowMenu';
 
 // DataGrid - Spaarke DataGrid Framework R1 (task 001: tokens; tasks 003-008: component + chips + command bar)
 export * from './DataGrid';
+
+// Kanban - Generic Kanban primitives (board + slot-based card + column types)
+// Hoisted from SmartTodo-local per smart-todo-decoupling-r3 task 010 (NFR-02 + FR-08).
+export * from './Kanban';

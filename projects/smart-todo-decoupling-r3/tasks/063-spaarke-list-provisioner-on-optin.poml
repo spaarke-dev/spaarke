@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>`SpaarkeListProvisioner`: auto-provision "Spaarke" list under `/me/todo/lists/` on first opt-in</title>
+    <phase>Phase 7: Graph Sync Engine</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>015, 016, 017, 018</dependencies>
+    <blocks>064, 068</blocks>
+    <tags>bff-api, api, backend, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New Graph-calling service; tags include `bff-api` + `auth`. FULL rigor.</rigor-reason>
+    <parallel-group>P7-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement `SpaarkeListProvisioner.EnsureListAsync(userId)`: on first opt-in, create a "Spaarke" list under the user's `/me/todo/lists/` via Graph; persist the resulting `listId` to the user's `sprk_userpreference` row (type `MicrosoftToDoSync`). On subsequent opt-in, reuse the existing list (no duplicate). Replaces the Null-Object impl from task 018.
+  </prompt>
+
+  <role>Spaarke BFF API developer with Microsoft Graph + Dataverse Web API + OBO expertise.</role>
+
+  <goal>First opt-in creates a "Spaarke" Graph todoList for the user and persists the listId. Second opt-in (same user) reuses the existing list — no duplicate. Tests cover both paths.</goal>
+
+  <constraints>
+    <constraint source="FR-19">Auto-provision on first opt-in; reuse on subsequent; persist listId on `sprk_userpreference` row of type `MicrosoftToDoSync`.</constraint>
+    <constraint source="ADR-028">OBO token flow.</constraint>
+    <constraint source="ADR-032">Replace Null-Object impl when feature flag on.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>projects/smart-todo-decoupling-r3/notes/todosync-userpref-schema.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Implement `SpaarkeListProvisioner` replacing the Null-Object binding from task 018. Use `GraphClientFactory` for OBO.</step>
+    <step order="2">Read existing user-pref row for the user; if present + has `listId`, return it.</step>
+    <step order="3">If not present, list `/me/todo/lists`, search for display name "Spaarke"; if found, persist + return.</step>
+    <step order="4">If not found anywhere, create new list via `POST /me/todo/lists` with `displayName: "Spaarke"`; persist + return.</step>
+    <step order="5">Unit tests: first opt-in → creates list; second opt-in → reuses; pre-existing list with display name "Spaarke" → reuses without creating.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`. BFF publish-size + CVE checks.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Todo/SpaarkeListProvisioner.cs`</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Services/Todo/SpaarkeListProvisionerTests.cs`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">First opt-in creates a Graph todoList and persists the listId.</criterion>
+    <criterion testable="true">Second opt-in reuses the existing listId; no duplicate list created.</criterion>
+    <criterion testable="true">Pre-existing list found by name is reused.</criterion>
+    <criterion testable="true">Unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>
