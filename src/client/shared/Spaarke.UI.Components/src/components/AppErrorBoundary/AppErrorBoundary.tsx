@@ -11,6 +11,7 @@ import {
   webLightTheme,
 } from "@fluentui/react-components";
 import { ArrowClockwise20Regular, ErrorCircle24Regular } from "@fluentui/react-icons";
+import { reportClientError } from "../../services/reportClientError";
 
 export interface AppErrorBoundaryProps {
   /** Logical name shown to the user when a crash is caught — e.g. "SpaarkeAi", "Daily Briefing". */
@@ -147,11 +148,11 @@ export class AppErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    console.error(
-      `[AppErrorBoundary:${this.props.surfaceName}] React render error caught:`,
-      error,
-      errorInfo,
-    );
+    reportClientError(error, {
+      scope: "AppErrorBoundary",
+      surface: this.props.surfaceName,
+      componentStack: errorInfo.componentStack ?? undefined,
+    });
     try {
       this.props.onError?.(error, errorInfo);
     } catch (telemetryErr) {

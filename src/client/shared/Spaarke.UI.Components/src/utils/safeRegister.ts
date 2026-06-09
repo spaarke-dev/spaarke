@@ -1,3 +1,5 @@
+import { reportClientError } from "../services/reportClientError";
+
 /**
  * safeRegister — defensive wrapper for side-effect registration calls.
  *
@@ -40,10 +42,11 @@ export function safeRegister<T>(
   try {
     return action();
   } catch (err) {
-    console.error(
-      `[safeRegister:${registryName}] Failed to register "${registrationLabel}":`,
-      err,
-    );
+    reportClientError(err instanceof Error ? err : new Error(String(err)), {
+      scope: "safeRegister",
+      registryName,
+      registrationLabel,
+    });
     return undefined;
   }
 }

@@ -136,6 +136,7 @@ src/client/shared/*/src/**/*.d.ts.map
 
 # Negation rules for legitimately hand-written files
 !src/solutions/SpaarkeAi/src/ribbon/xrm-globals.d.ts
+!src/solutions/*/src/vite-env.d.ts
 !src/client/shared/Spaarke.UI.Components/src/__mocks__/diff.js
 
 # Bicep build outputs — main.bicep compiles to main.json next to it.

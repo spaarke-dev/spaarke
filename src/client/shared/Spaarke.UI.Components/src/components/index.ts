@@ -1,6 +1,9 @@
 // App-level Error Boundary — wrap Code Page roots to prevent blank-page crashes
 export * from './AppErrorBoundary';
 
+// Per-widget Error Boundary — isolate widget crashes inside workspace shells
+export * from './WidgetErrorBoundary';
+
 // Fluent UI v9 Wrappers (Spaarke standards)
 export * from './SprkButton';
 
