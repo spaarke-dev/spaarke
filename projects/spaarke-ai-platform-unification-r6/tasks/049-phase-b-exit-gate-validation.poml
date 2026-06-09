@@ -3,7 +3,8 @@
   <metadata>
     <title>D-B-10 Phase B exit-gate validation (4 exit criteria from spec)</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <outcome-note>Exit-gate document authored by main session 2026-06-09 at `notes/phase-b-exit-gate.md`. 5/5 GREEN exit criteria met; 4 YELLOW flags documented (none blockers); 0 RED. Programmatically exit-ready. Pending user sign-off (8 live-UI verifications deferred for manual walkthrough; ~30 min user time). Per CLAUDE.md Confirmation Triggers: phase exit gates require user sign-off before transitioning. Phase C kickoff (task 050) blocked on user sign-off.</outcome-note>
     <estimated-effort>1-2 hours</estimated-effort>
     <dependencies>048</dependencies>
     <blocks>none</blocks>
