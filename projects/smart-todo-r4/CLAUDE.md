@@ -167,17 +167,26 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 <!-- Add notes about gotchas, workarounds, or important learnings during implementation -->
 
-### Discovery Gaps Surfaced 2026-06-10
+### Discovery Gaps — Resolved by Phase 0 Audits (2026-06-10)
 
-1. **`useLaunchContext` hook** — spec cites `src/solutions/SmartTodo/src/hooks/useLaunchContext.ts` but file does not exist. Existing hooks: `useFeedTodoSync`, `useKanbanColumns`, `useTodoItems`, `useTodoScoring`, `useUserPreferences`. Phase 0 task must decide: implement new or repurpose existing.
-2. **`@spaarke/events-components` source location** — present only in `node_modules`; consumed as published package, not local lib. If A chooses Pattern D, A creates new `@spaarke/smart-todo-components` peer package.
-3. **D PCF placement** — `src/client/pcf/RegardingResolver/` doesn't exist (expected, since audit pending). Phase 0 D audit gates implementation directory + tech choice.
+1. **`useLaunchContext` hook — EXISTS** (initial discovery was wrong). R3 task 070b shipped it: `src/solutions/SmartTodo/src/hooks/useLaunchContext.ts` (235 LOC + 217 LOC tests). Consumed at `src/solutions/SmartTodo/src/components/SmartTodoApp.tsx:169` for Outlook ribbon `createTodo` action. Existing hooks total: **6** (`useFeedTodoSync`, `useKanbanColumns`, `useLaunchContext`, `useTodoItems`, `useTodoScoring`, `useUserPreferences`). R4-004 decision: **REPURPOSE + EXTEND** — add `openTodos` action discriminator. R4-003 surfaced additional refactor: switch to `parseDataParams()` shared utility + recognize VisualHost auto-inject keys (`entityName/filterField/filterValue/mode=dialog` wrapped in `?data=<envelope>`). New task **034** added to cover both extensions.
+2. **`@spaarke/events-components` source location** — published-only; A audit (R4-001) confirmed **Pattern D** chosen, so a new peer package `@spaarke/smart-todo-components` will be created in task 020 (modeled on R3 task 115 Calendar canonical).
+3. **D PCF placement — RESOLVED** (R4-002). Architecture chosen: **virtual PCF** at `src/client/pcf/RegardingResolver/`. Scored 40/40 vs Web Resource 22/40 vs Code Page 26/40. Strong precedent: existing `src/client/pcf/AssociationResolver/` v1.1.0 (already deployed in spaarkedev1) uses the exact same shape (virtual ReactControl bound to `sprk_regardingrecordtype`). Tasks 050/051/052 scopes formally gated to PCF path.
 
-### Parallel Branch Coordination
+### Phase 0 Audit Outcomes — Binding Decisions (2026-06-10)
+
+| Audit | Decision | Binds tasks | Key risk |
+|---|---|---|---|
+| **R4-001** A widget surface | Pattern D dual-use; rebuild `LegalWorkspace/SmartToDo` via new `@spaarke/smart-todo-components` peer package. Source is CLEAN — runtime error is stale-bundle issue, not code defect. Both system + user-added widget paths use SAME bundle → one rebuild fixes both. | 020 | `FeedTodoSyncContext` coupling — lift subscription into LW section shim (Calendar pattern); standalone `sprk_smarttodo` Code Page bundle freshness — redeploy both for safety |
+| **R4-002** D resolver architecture | Virtual PCF `Spaarke.Controls.RegardingResolver`; bound to hidden `sprk_regardingrecordtype`; 4 side-effect field writes via `Xrm.WebApi`; mirrors `AssociationResolver` precedent | 050, 051, 052 | New-record transaction boundary needs pre-save handler (proven in AssociationResolver); verify hidden `sprk_regardingrecordtype` field on To Do form before binding |
+| **R4-003** G drill-through | `Xrm.Navigation.navigateTo({pageType:"webresource", webresourceName:"sprk_smarttodo.html", data:"entityName=sprk_todo&filterField=sprk_regarding<X>&filterValue=<guid>&mode=dialog"}, {target:2, width:90%, height:85%})` — confirmed by MS Learn + 20+ in-repo callers | 080, 081-084 | **Contract gap**: existing `useLaunchContext` reads RAW query keys but VisualHost wraps params in `?data=<envelope>`. New task 034 closes this gap. |
+| **R4-004** useLaunchContext | REPURPOSE + EXTEND. Add `openTodos` action discriminator. Tasks 020 and 060 (originally listed as consumers in the spec) DON'T actually consume the hook — only 030 + 081-084 do. | 030, 081-084 | None — extension is additive |
+
+### Parallel Branch Coordination — Updated 2026-06-10 (post-Phase-0 audits)
 
 | Branch / PR | Overlap Area | Status |
 |---|---|---|
-| **PR #372** `feature/ai-spaarke-ai-workspace-UI-r1` | `Spaarke.AI.Widgets` (overlaps A) | Active — coordinate at A task time |
+| **PR #372** `feature/ai-spaarke-ai-workspace-UI-r1` | `Spaarke.AI.Widgets` (originally flagged as overlap with A) | ✅ **MERGED to master at `a338f4b24` on 2026-06-10**. R4-001 audit confirmed PR #372 does NOT touch SmartToDo source — only `LegalWorkspace/src/sectionRegistry.ts` and `register-workspace-widgets.ts` are append-only overlap. Clean merge expected. Action: `git merge origin/master` before task 020. |
 | **work/spaarke-datagrid-framework-r1** | `Spaarke.UI.Components` heavy (overlaps C shell + B toolbar primitives) | Active (55 unmerged, no PR) — sequence C shell hoist if datagrid merges first |
 | **work/matter-ui-r1-v1.1.72-vh-polish** | Visual Host (adjacent to G, not same files) | Monitor |
 

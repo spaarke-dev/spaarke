@@ -1,10 +1,24 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-10 (project initialization)
+> **Last Updated**: 2026-06-10 (Wave G0 complete + new task 034 registered)
 > **Branch**: `work/smart-todo-r4`
-> **Total Tasks**: 30
-> **Status**: 🔲 30 not-started · 🔄 0 in-progress · ✅ 0 complete · ❌ 0 blocked
+> **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
+> **Status**: 🔲 27 not-started · 🔄 0 in-progress · ✅ 4 complete · ❌ 0 blocked
+> **Active wave**: ready to dispatch G1+2a (Phase 1 hoists + audit-unblocked Wave 2a)
+
+---
+
+## Phase 0 Outcomes — Binding Decisions (2026-06-10)
+
+| Audit | Decision | Binds tasks | Notes file |
+|---|---|---|---|
+| **R4-001** A widget surface | **Pattern D dual-use**; new `@spaarke/smart-todo-components` peer package; source is clean (runtime error = stale bundle, not code defect); BOTH widget paths share bundle | 020 | [widget-surface-audit.md](../notes/widget-surface-audit.md) |
+| **R4-002** D resolver architecture | **Virtual PCF** `Spaarke.Controls.RegardingResolver` at `src/client/pcf/RegardingResolver/`; bound to hidden `sprk_regardingrecordtype`; mirrors `AssociationResolver` precedent (40/40 vs 22/40 vs 26/40 scoring) | 050, 051, 052 | [regarding-resolver-audit.md](../notes/regarding-resolver-audit.md) |
+| **R4-003** G drill-through | Payload + modal-style render confirmed by MS Learn + 20+ in-repo precedents; **surfaced contract gap** → new task 034 | 080, 081-084 | [drill-through-spike.md](../notes/drill-through-spike.md) |
+| **R4-004** useLaunchContext | Hook **EXISTS** (initial discovery wrong); **REPURPOSE + EXTEND** with `openTodos` discriminator; only 030 + 081-084 consume it (020/060 don't) | 030, 081-084 | [launch-context-decision.md](../notes/launch-context-decision.md) |
+
+**New task added**: [034](034-B-extend-useLaunchContext.poml) — combines R4-003 + R4-004 follow-up (extend `useLaunchContext` with `openTodos` discriminator + `parseDataParams()` envelope consumption). Parallel-safe, blocks 081-084.
 
 ---
 
@@ -22,9 +36,9 @@
 
 | Phase / Wave | Tasks | Parallel-Safe | Estimated Effort | Gates |
 |---|---|---|---|---|
-| **Phase 0** Foundation (audits + spike) | 001, 002, 003, 004 | ✅ All parallel | 1.5 days wall-clock | Gates Phase 2 task scopes |
+| **Phase 0** Foundation (audits + spike) | 001, 002, 003, 004 | ✅ COMPLETE 2026-06-10 | ~3 hours wall-clock | Phase 2 task scopes gated |
 | **Phase 1** Shared-lib hoist | 010 + 011 (serial) · 012 (parallel) | ⚠️ Mixed | 2-3 days | Gates Phase 2 Waves 2a/2b |
-| **Phase 2 Wave 2a** Independent surfaces | 020, 030, 050, 080 | ✅ All parallel | 3-4 days | Gates Wave 2b + 2c |
+| **Phase 2 Wave 2a** Independent surfaces | 020, 030, 050, 080, 034 | ✅ All parallel | 3-4 days | Gates Wave 2b + 2c |
 | **Phase 2 Wave 2a (B sub-tasks)** | 031, 032, 033 | ✅ Parallel after 030 | 2 days | — |
 | **Phase 2 Wave 2a (D sub-tasks)** | 051, 052 | ⚠️ Serial after 050 | 1.5 days | Gates Wave 2c |
 | **Phase 2 Wave 2b** SmartTodo Code Page work | 040, 060, 070, 071 | ⚠️ File-ownership care | 4-5 days | Gates 041, 042 |
@@ -33,7 +47,7 @@
 | **Phase 3** Deployment + Test | 092, 093, 094 | ⚠️ Serial | 2 days | After everything |
 | **Phase 4** Wrap-up | 098 | — | 0.5 day | After 092/093/094 |
 
-**Critical path**: 001 → 002 → 050 → 051 → 081 → 092 → 093 → 098 (~3 weeks if not heavily parallelized; ~2 weeks with full parallel execution)
+**Critical path** (post-Phase 0): 050 → 051 → 081 → 092 → 098 (~2 weeks if heavily parallelized). Phase 0 is now ✅ — the new gating chain is 050 (D resolver) → 051 (form add) → 081 (Visual Host on form) → 092 (deploy) → 098 (wrap-up).
 
 ---
 
@@ -43,10 +57,10 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [001](001-A-audit-widget-surface.poml) | A — Audit failing workspace widget surface(s) | audit, widget, smart-todo | ✅ | — | 020 |
-| 🔲 | [002](002-D-audit-regarding-resolver-architecture.poml) | D — Audit regarding resolver architecture (PCF / Web Resource / Code Page) | audit, pcf, webresource, code-page | ✅ | — | 050 |
-| 🔲 | [003](003-G-spike-drill-through-url.poml) | G — Spike: confirm sprk_smarttodo Code Page accepts query-string + modal-style render | spike, code-page, navigation | ✅ | — | 080 |
-| 🔲 | [004](004-useLaunchContext-decision.poml) | Decide useLaunchContext hook (implement new or repurpose) | audit, hook | ✅ | — | 020, 030, 060, 081-084 |
+| ✅ | [001](001-A-audit-widget-surface.poml) | A — Audit failing workspace widget surface(s) → Pattern D dual-use | audit, widget, smart-todo | ✅ | — | 020 |
+| ✅ | [002](002-D-audit-regarding-resolver-architecture.poml) | D — Audit regarding resolver architecture → **virtual PCF** | audit, pcf, webresource, code-page | ✅ | — | 050 |
+| ✅ | [003](003-G-spike-drill-through-url.poml) | G — Spike: drill-through URL contract → payload + 034 follow-up | spike, code-page, navigation | ✅ | — | 080, 034 |
+| ✅ | [004](004-useLaunchContext-decision.poml) | useLaunchContext hook decision → **REPURPOSE + EXTEND** (hook exists; 034 implements) | audit, hook | ✅ | — | 034 (not 020/060 — corrected) |
 
 ---
 
@@ -76,6 +90,7 @@
 | 🔲 | [031](031-B-assigned-to-me-filter.poml) | B — "Assigned to Me" filter mode (drop "My Tasks") | smart-todo, filter | ✅ (with 032, 033) | 030 | — |
 | 🔲 | [032](032-B-selection-aware-toolbar-actions.poml) | B — Selection-aware toolbar actions (Open / Delete / Email / Pin) | smart-todo, toolbar | ✅ (with 031, 033) | 012, 030 | 040 (Open action) |
 | 🔲 | [033](033-B-list-card-view-toggle.poml) | B — List / Card view toggle with persistence | smart-todo, user-preference | ✅ (with 031, 032) | 012, 030 | — |
+| 🔲 | [034](034-B-extend-useLaunchContext.poml) | B — Extend useLaunchContext with `openTodos` + parseDataParams envelope **(NEW from Phase 0 aggregation)** | smart-todo, hook, url-params | ✅ | — | 081, 082, 083, 084 |
 
 #### D sub-tasks (serial after 050)
 
@@ -110,10 +125,10 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [081](081-G-visualhost-on-matter-form.poml) | G — Visual Host on Matter main form | dataverse, form-designer | ✅ | 051, 080 | 092 |
-| 🔲 | [082](082-G-visualhost-on-project-form.poml) | G — Visual Host on Project main form | dataverse, form-designer | ✅ | 051, 080 | 092 |
-| 🔲 | [083](083-G-visualhost-on-invoice-form.poml) | G — Visual Host on Invoice main form | dataverse, form-designer | ✅ | 051, 080 | 092 |
-| 🔲 | [084](084-G-visualhost-on-workassignment-form.poml) | G — Visual Host on WorkAssignment main form | dataverse, form-designer | ✅ | 051, 080 | 092 |
+| 🔲 | [081](081-G-visualhost-on-matter-form.poml) | G — Visual Host on Matter main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| 🔲 | [082](082-G-visualhost-on-project-form.poml) | G — Visual Host on Project main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| 🔲 | [083](083-G-visualhost-on-invoice-form.poml) | G — Visual Host on Invoice main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| 🔲 | [084](084-G-visualhost-on-workassignment-form.poml) | G — Visual Host on WorkAssignment main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
 
 ---
 
@@ -142,7 +157,7 @@
 | **G0 — Foundation audits** | 001, 002, 003, 004 | (none) | 4 | All independent; each writes its own `notes/*.md` |
 | **G1a — Hoist parallel** | 010, 012 | (none) | 2 | Independent shared-lib components |
 | **G1b — Hoist regression** | 011 | 010 | 1 | Serial after 010 |
-| **G2a — Independent surfaces** | 020, 030, 050, 080 | G0 (per-task ancestor) | 4 | Disjoint file scopes; A/B/D/G surfaces |
+| **G2a — Independent surfaces** | 020, 030, 050, 080, **034** | G0 ✅ | 5 | Disjoint file scopes; A/B/D/G surfaces + new useLaunchContext extension |
 | **G2a-B** | 031, 032, 033 | 030 + 012 (for 032/033) | 3 | Same Code Page but disjoint refactor scopes |
 | **G2a-D-serial** | 051 → 052 | 050 | 1 each | Form-designer change then read-only mode |
 | **G2b — Code Page wave** | 040, 060, 070 | 010/012/030/040 (per task) | up to 3 (with file-ownership care) | All touch `src/solutions/SmartTodo/`. If conflict, serialize 040 → 060 → 070 |
@@ -160,21 +175,19 @@
 ## Dependency Graph (text rendering)
 
 ```
-G0 Foundation (parallel)
-  001 ──┐
-  002 ──┤
-  003 ──┤
-  004 ──┘
+G0 Foundation ✅ COMPLETE (2026-06-10)
+  001 ✅  002 ✅  003 ✅  004 ✅
 
 G1 Shared-lib hoist
   010 → 011
   012 (parallel with 010, 011)
 
-G2a Independent surfaces (parallel after G0/G1)
-  020 ← 001
+G2a Independent surfaces (parallel after G0 ✅ / G1)
+  020 ← 001 ✅
   030 ← 012 → 031, 032 (← 012, 030), 033 (← 012, 030)
-  050 ← 002 → 051 → 052
-  080 ← 003 → 081, 082, 083, 084 (← 051, 080)
+  050 ← 002 ✅ → 051 → 052
+  080 ← 003 ✅ → 081, 082, 083, 084 (← 051, 080, 034)
+  034 ← (no deps; from Phase 0 aggregation) — blocks 081-084
 
 G2b SmartTodo Code Page (after G1, G2a-B)
   040 ← 010, 030 → 041 (← 010), 042

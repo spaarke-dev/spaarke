@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-10 (project initialized)
+> **Last Updated**: 2026-06-10 (Wave G0 audits complete; ready for Wave G1+2a dispatch)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,23 +13,26 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (project just initialized) |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Begin Phase 0 audits — invoke `task-execute` on the first Phase 0 audit task (or run all 4 audits in parallel via parallel `task-execute` invocations) |
+| **Wave G0** | ✅ COMPLETE — 4 audits done, all binding decisions captured |
+| **Active Task** | none — between waves |
+| **Status** | Phase 0 ✅ complete; ready for Wave G1+2a dispatch |
+| **Next Action** | Dispatch Wave G1+2a in parallel: 010 (shell extract), 012 (toolbar primitives), 050 (D PCF resolver), 080 (G chart defs), 034 (useLaunchContext extension). Tasks 020 (A widget) requires `FeedTodoSyncContext` coupling design decision — discuss with user before kickoff. |
+| **Phase 0 outcomes** | See [`plan.md` §Phase 0 Outcomes](plan.md#phase-0-foundation--audit--spike--complete-2026-06-10) + [`tasks/TASK-INDEX.md` Phase 0 Outcomes table](tasks/TASK-INDEX.md#phase-0-outcomes--binding-decisions-2026-06-10) |
 
-### Files Modified This Session
+### Files Modified This Session (Wave G0 + aggregation)
 
-- `projects/smart-todo-r4/README.md` — Created — project overview + graduation criteria
-- `projects/smart-todo-r4/plan.md` — Created — phase breakdown, discovered resources, parallel coordination
-- `projects/smart-todo-r4/CLAUDE.md` — Created — AI context file, ADR list, decisions
-- `projects/smart-todo-r4/current-task.md` — Created — initial task state tracker (this file)
-- `projects/smart-todo-r4/tasks/` — Created — empty, ready for task-create to populate
-- `projects/smart-todo-r4/notes/` — Created with debug/spikes/drafts/handoffs subdirs
+- `projects/smart-todo-r4/notes/widget-surface-audit.md` — Created (R4-001 outcome, 256 lines)
+- `projects/smart-todo-r4/notes/regarding-resolver-audit.md` — Created (R4-002 outcome, 162 lines)
+- `projects/smart-todo-r4/notes/drill-through-spike.md` — Created (R4-003 outcome, 311 lines)
+- `projects/smart-todo-r4/notes/launch-context-decision.md` — Created (R4-004 outcome, 205 lines)
+- `projects/smart-todo-r4/tasks/034-B-extend-useLaunchContext.poml` — Created (combines R4-003 + R4-004 follow-up)
+- `projects/smart-todo-r4/CLAUDE.md` — Modified (corrected useLaunchContext claim; added Phase 0 outcomes table)
+- `projects/smart-todo-r4/plan.md` — Modified (Phase 0 → COMPLETE; binding decisions captured)
+- `projects/smart-todo-r4/tasks/TASK-INDEX.md` — Modified (001-004 ✅; added 034; trimmed over-stated deps on 020/060)
 
 ### Critical Context
 
-R4 is the UX-closure follow-up to R3 (`sprk_todo` decoupling). 7 workstreams (A–G), 36-45 tasks, ~3-4 weeks. Phase 0 = 4 parallel audits/spikes that gate Phase 2 implementation scopes. Worktree at `c:\code_files\spaarke-wt-smart-todo-r4` on branch `work/smart-todo-r4` (already pushed to origin). Predecessor R3 PRs #373 + #374 both merged.
+R4 is the UX-closure follow-up to R3 (`sprk_todo` decoupling). 7 workstreams (A-G), now **31 tasks** (was 30; +034 from Phase 0 aggregation). Phase 0 ✅ complete — all 4 binding decisions captured: **Pattern D dual-use** for A; **virtual PCF** for D (mirrors `AssociationResolver` precedent); drill-through payload **confirmed**; `useLaunchContext` **EXISTS** (needs extension via 034, not new build). Worktree at `c:\code_files\spaarke-wt-smart-todo-r4` on branch `work/smart-todo-r4`. Master moved to `a338f4b24` during Wave G0 (PR #372 merged) — needs merge before task 020 starts.
 
 ---
 

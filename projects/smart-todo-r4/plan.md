@@ -182,25 +182,37 @@ Phase 4: Wrap-up (Week 4, day 1)
 
 ## 4. Phase Breakdown
 
-### Phase 0: Foundation — Audit + Spike (Week 1, days 1-2)
+### Phase 0: Foundation — Audit + Spike ✅ COMPLETE (2026-06-10)
 
-**Objectives**:
-1. Identify which deployed surface(s) emit `sprk_todoflag` legacy query (A).
-2. Pick the regarding resolver architecture: PCF vs Web Resource vs embedded Code Page (D).
-3. Confirm drill-through URL signature for SmartTodo Code Page modal render (G).
-4. Confirm `useLaunchContext` resolution: implement new or repurpose existing.
+**Objectives** (all met):
+1. ✅ Identify which deployed surface(s) emit `sprk_todoflag` legacy query (A).
+2. ✅ Pick the regarding resolver architecture: PCF vs Web Resource vs embedded Code Page (D).
+3. ✅ Confirm drill-through URL signature for SmartTodo Code Page modal render (G).
+4. ✅ Confirm `useLaunchContext` resolution: implement new or repurpose existing.
 
-**Deliverables**:
-- [ ] `notes/widget-surface-audit.md` — names file(s); confirms whether both "system widget" AND user-added widget load are affected.
-- [ ] `notes/regarding-resolver-audit.md` — recommends one of PCF / Web Resource / Code Page embed with rationale per FR-19 criteria.
-- [ ] `notes/drill-through-spike.md` — confirms `Xrm.Navigation.navigateTo` signature + modal-style render OR documents fallback.
-- [ ] `notes/launch-context-decision.md` — implement new vs repurpose existing.
+**Deliverables** (all written 2026-06-10):
+- [x] [`notes/widget-surface-audit.md`](notes/widget-surface-audit.md) (256 lines) — source is CLEAN; runtime error is stale-bundle issue. Both system-widget + user-added paths use SAME bundle. Archetype: **Pattern D dual-use** with new `@spaarke/smart-todo-components` peer package modeled on Calendar (R3 task 115).
+- [x] [`notes/regarding-resolver-audit.md`](notes/regarding-resolver-audit.md) (162 lines) — **virtual PCF** chosen (40/40 vs 22/40 Web Resource vs 26/40 Code Page); `src/client/pcf/RegardingResolver/` mirroring deployed `AssociationResolver` v1.1.0.
+- [x] [`notes/drill-through-spike.md`](notes/drill-through-spike.md) (311 lines) — payload confirmed by MS Learn + 20+ in-repo callers. Modal-style render risk: very-low. Surfaced **contract gap**: VisualHost wraps params in `?data=<envelope>` but existing `useLaunchContext` reads raw keys only.
+- [x] [`notes/launch-context-decision.md`](notes/launch-context-decision.md) (205 lines) — **CORRECTION**: hook EXISTS (R3 task 070b shipped it; 235 LOC + 217 LOC tests). Initial project discovery missed it. Decision: **REPURPOSE + EXTEND** with `openTodos` action discriminator.
 
-**Critical Tasks**: All four blocking decisions made before any Phase 2 implementation starts.
+**Binding decisions for downstream tasks**:
 
-**Inputs**: spec.md, current deployed bundle, BUILD-A-NEW-WORKSPACE-WIDGET.md, ADR-006 decision tree.
+| For task | Decision | Source |
+|---|---|---|
+| 020 (A widget) | Pattern D dual-use; new `@spaarke/smart-todo-components` peer package; rebuild `LegalWorkspace/SmartToDo` shim AND standalone Code Page (both share bundle, but standalone freshness uncertain — redeploy both for safety per NFR-09) | R4-001 |
+| 020 — design risk | `FeedTodoSyncContext` coupling needs design decision — recommended: lift subscription into LW section shim (Calendar pattern) so shared-lib widget stays host-agnostic | R4-001 |
+| 050 (D resolver) | Virtual PCF at `src/client/pcf/RegardingResolver/`; bound to hidden `sprk_regardingrecordtype` lookup; 4-side-effect-field writes via `Xrm.WebApi`; manifest `entity` input prop enables reuse for `sprk_communication` | R4-002 |
+| 051 (D form add) | Verify hidden `sprk_regardingrecordtype` field present on To Do main form BEFORE binding | R4-002 |
+| 080 (G chart defs) | `sprk_drillthroughtarget = "sprk_smarttodo.html"`; `sprk_contextfieldname = "sprk_regarding<X>"` per entity; `sprk_visualtype = 100000009` Due Date Card List | R4-003 |
+| 081-084 (G forms) | Drill-through payload: `Xrm.Navigation.navigateTo({pageType:"webresource", webresourceName:"sprk_smarttodo.html", data:"entityName=sprk_todo&filterField=sprk_regarding<X>&filterValue=<guid>&mode=dialog"}, {target:2, position:1, width:90%, height:85%})`. Auto-emitted by VisualHost when chart def's drill target is set | R4-003 |
+| 030 (B layout) + 081-084 (G drill) | Consume the EXISTING `useLaunchContext` hook — extend it via new task 034 before tasks 081-084 attempt drill-through | R4-004 |
 
-**Outputs**: 4 audit/spike notes that gate Phase 2 task scopes.
+**New task added**: [034](tasks/034-B-extend-useLaunchContext.poml) — extends `useLaunchContext` with `openTodos` discriminator AND switches parser to `parseDataParams()` shared utility for envelope handling. Closes the contract gap surfaced by R4-003 + R4-004. Blocks tasks 081-084.
+
+**Stale-claim corrections applied**:
+- R4 spec.md cited `useLaunchContext.ts` as missing — was wrong; hook exists.
+- Tasks 020 + 060 had `004` in deps; corrected — they don't consume the hook directly. Only tasks 030 + 081-084 do (and 030 already does in R3 — no R4 change required for the consumer side; 034 extends the producer).
 
 ---
 
