@@ -21,10 +21,11 @@ import { ACTION_CARD_CONFIGS } from "../components/GetStarted/getStartedConfig";
 /**
  * Section registration for Get Started (action-cards).
  *
- * The factory wires all 7 card click handlers using `ctx.onOpenWizard`:
+ * The factory wires all 8 card click handlers using `ctx.onOpenWizard`:
  *   - create-new-matter       → sprk_creatematterwizard
  *   - create-new-project      → sprk_createprojectwizard
  *   - assign-to-counsel       → sprk_createworkassignmentwizard
+ *   - create-new-todo         → sprk_createtodowizard
  *   - summarize-new-files     → sprk_summarizefileswizard
  *   - find-similar            → sprk_findsimilar
  *   - send-email-message      → sprk_playbooklibrary (intent=email-compose)
@@ -57,6 +58,8 @@ export const getStartedRegistration: SectionRegistration = {
         ctx.onOpenWizard("sprk_createprojectwizard"),
       "assign-to-counsel": () =>
         ctx.onOpenWizard("sprk_createworkassignmentwizard"),
+      "create-new-todo": () =>
+        ctx.onOpenWizard("sprk_createtodowizard"),
       "summarize-new-files": () =>
         ctx.onOpenWizard("sprk_summarizefileswizard"),
       "find-similar": () =>
@@ -86,7 +89,7 @@ export const getStartedRegistration: SectionRegistration = {
       cards,
       onCardClick,
       toolbar,
-      maxVisible: 4,
+      maxVisible: 5,
       style: {},
     };
   },

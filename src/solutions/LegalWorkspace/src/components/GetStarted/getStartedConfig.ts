@@ -6,6 +6,7 @@ import {
   SearchRegular,
   MailRegular,
   CalendarAddRegular,
+  ClipboardTaskAddRegular,
 } from "@fluentui/react-icons";
 import type { FluentIcon } from "@fluentui/react-icons";
 
@@ -54,6 +55,12 @@ export const ACTION_CARD_CONFIGS: IActionCardConfig[] = [
     label: "Assign Work",
     icon: PersonAddRegular,
     ariaLabel: "Create a new work assignment",
+  },
+  {
+    id: "create-new-todo",
+    label: "Create New To Do",
+    icon: ClipboardTaskAddRegular,
+    ariaLabel: "Create a new To Do",
   },
   {
     id: "summarize-new-files",
