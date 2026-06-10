@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Playbook Library</title>
     <style>
+      /* Box-sizing reset — REQUIRED per docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md §2.
+       * Wave 3 backfill 2026-06-10 — see projects/ai-spaarke-ai-workspace-UI-r1/
+       * notes/box-sizing-reset-audit.md for the audit results and reasoning. */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
+
       /* Reset styles for Dataverse modal dialog context */
       html, body, #root {
         margin: 0;
