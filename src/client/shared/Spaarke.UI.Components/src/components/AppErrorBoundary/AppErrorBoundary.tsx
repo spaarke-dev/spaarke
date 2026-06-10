@@ -1,4 +1,4 @@
-import * as React from "react";
+import * as React from 'react';
 import {
   Body1,
   Button,
@@ -9,9 +9,9 @@ import {
   shorthands,
   tokens,
   webLightTheme,
-} from "@fluentui/react-components";
-import { ArrowClockwise20Regular, ErrorCircle24Regular } from "@fluentui/react-icons";
-import { reportClientError } from "../../services/reportClientError";
+} from '@fluentui/react-components';
+import { ArrowClockwise20Regular, ErrorCircle24Regular } from '@fluentui/react-icons';
+import { reportClientError } from '../../services/reportClientError';
 
 export interface AppErrorBoundaryProps {
   /** Logical name shown to the user when a crash is caught — e.g. "SpaarkeAi", "Daily Briefing". */
@@ -29,28 +29,28 @@ interface AppErrorBoundaryState {
 
 const useStyles = makeStyles({
   root: {
-    minHeight: "100vh",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalXXL, tokens.spacingHorizontalXXL),
     backgroundColor: tokens.colorNeutralBackground1,
   },
   panel: {
-    maxWidth: "640px",
-    width: "100%",
-    display: "flex",
-    flexDirection: "column",
+    maxWidth: '640px',
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
     rowGap: tokens.spacingVerticalM,
     ...shorthands.padding(tokens.spacingVerticalXL, tokens.spacingHorizontalXL),
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     backgroundColor: tokens.colorNeutralBackground2,
     boxShadow: tokens.shadow8,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     columnGap: tokens.spacingHorizontalS,
     color: tokens.colorPaletteRedForeground1,
   },
@@ -64,12 +64,12 @@ const useStyles = makeStyles({
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    overflow: "auto",
-    maxHeight: "240px",
-    whiteSpace: "pre-wrap",
+    overflow: 'auto',
+    maxHeight: '240px',
+    whiteSpace: 'pre-wrap',
   },
   actions: {
-    display: "flex",
+    display: 'flex',
     columnGap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalS,
   },
@@ -95,11 +95,11 @@ const ErrorFallback: React.FC<{
           <Subtitle1>{surfaceName} encountered an error</Subtitle1>
         </div>
         <Body1 className={styles.message}>
-          The page could not be displayed. Reload to try again. If the problem persists, contact
-          support with the message below.
+          The page could not be displayed. Reload to try again. If the problem persists, contact support with the
+          message below.
         </Body1>
         <Text className={styles.message} weight="semibold">
-          {error.message || "Unknown error"}
+          {error.message || 'Unknown error'}
         </Text>
         <div className={styles.actions}>
           <Button appearance="primary" icon={<ArrowClockwise20Regular />} onClick={handleReload}>
@@ -108,8 +108,8 @@ const ErrorFallback: React.FC<{
           <Button appearance="secondary" onClick={resetError}>
             Try again
           </Button>
-          <Button appearance="subtle" onClick={() => setShowDetails((v) => !v)}>
-            {showDetails ? "Hide details" : "Show details"}
+          <Button appearance="subtle" onClick={() => setShowDetails(v => !v)}>
+            {showDetails ? 'Hide details' : 'Show details'}
           </Button>
         </div>
         {showDetails && error.stack && <pre className={styles.details}>{error.stack}</pre>}
@@ -137,10 +137,7 @@ const ErrorFallback: React.FC<{
  *     </AppErrorBoundary>
  *   );
  */
-export class AppErrorBoundary extends React.Component<
-  AppErrorBoundaryProps,
-  AppErrorBoundaryState
-> {
+export class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, AppErrorBoundaryState> {
   state: AppErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
@@ -149,17 +146,14 @@ export class AppErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     reportClientError(error, {
-      scope: "AppErrorBoundary",
+      scope: 'AppErrorBoundary',
       surface: this.props.surfaceName,
       componentStack: errorInfo.componentStack ?? undefined,
     });
     try {
       this.props.onError?.(error, errorInfo);
     } catch (telemetryErr) {
-      console.warn(
-        `[AppErrorBoundary:${this.props.surfaceName}] onError callback threw:`,
-        telemetryErr,
-      );
+      console.warn(`[AppErrorBoundary:${this.props.surfaceName}] onError callback threw:`, telemetryErr);
     }
   }
 
@@ -177,11 +171,7 @@ export class AppErrorBoundary extends React.Component<
       // because the boundary may fire before theme resolution completes.
       return (
         <FluentProvider theme={webLightTheme}>
-          <ErrorFallback
-            surfaceName={this.props.surfaceName}
-            error={this.state.error}
-            resetError={this.resetError}
-          />
+          <ErrorFallback surfaceName={this.props.surfaceName} error={this.state.error} resetError={this.resetError} />
         </FluentProvider>
       );
     }

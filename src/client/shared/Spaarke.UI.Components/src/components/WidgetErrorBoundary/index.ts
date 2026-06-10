@@ -1,2 +1,2 @@
-export { WidgetErrorBoundary } from "./WidgetErrorBoundary";
-export type { WidgetErrorBoundaryProps } from "./WidgetErrorBoundary";
+export { WidgetErrorBoundary } from './WidgetErrorBoundary';
+export type { WidgetErrorBoundaryProps } from './WidgetErrorBoundary';

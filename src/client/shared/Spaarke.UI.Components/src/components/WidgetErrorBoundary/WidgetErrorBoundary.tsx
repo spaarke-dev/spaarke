@@ -1,14 +1,7 @@
-import * as React from "react";
-import {
-  Button,
-  Caption1,
-  Text,
-  makeStyles,
-  shorthands,
-  tokens,
-} from "@fluentui/react-components";
-import { ArrowClockwise16Regular, ErrorCircle20Regular } from "@fluentui/react-icons";
-import { reportClientError } from "../../services/reportClientError";
+import * as React from 'react';
+import { Button, Caption1, Text, makeStyles, shorthands, tokens } from '@fluentui/react-components';
+import { ArrowClockwise16Regular, ErrorCircle20Regular } from '@fluentui/react-icons';
+import { reportClientError } from '../../services/reportClientError';
 
 export interface WidgetErrorBoundaryProps {
   /** Widget type string — e.g. "matters-list", "calendar", "BudgetDashboard". Surfaced in fallback + telemetry. */
@@ -30,25 +23,25 @@ interface WidgetErrorBoundaryState {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-start",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     rowGap: tokens.spacingVerticalS,
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
-    ...shorthands.border("1px", "solid", tokens.colorPaletteRedBorder1),
+    ...shorthands.border('1px', 'solid', tokens.colorPaletteRedBorder1),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     backgroundColor: tokens.colorPaletteRedBackground1,
     color: tokens.colorPaletteRedForeground2,
     margin: tokens.spacingVerticalM,
-    maxWidth: "560px",
+    maxWidth: '560px',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     columnGap: tokens.spacingHorizontalS,
   },
   actions: {
-    display: "flex",
+    display: 'flex',
     columnGap: tokens.spacingHorizontalS,
   },
   message: {
@@ -68,14 +61,9 @@ const InlineFallback: React.FC<{
         <ErrorCircle20Regular />
         <Text weight="semibold">{displayName} failed to load</Text>
       </div>
-      <Caption1 className={styles.message}>{error.message || "Unknown error"}</Caption1>
+      <Caption1 className={styles.message}>{error.message || 'Unknown error'}</Caption1>
       <div className={styles.actions}>
-        <Button
-          appearance="primary"
-          size="small"
-          icon={<ArrowClockwise16Regular />}
-          onClick={resetError}
-        >
+        <Button appearance="primary" size="small" icon={<ArrowClockwise16Regular />} onClick={resetError}>
           Retry
         </Button>
       </div>
@@ -105,10 +93,7 @@ const InlineFallback: React.FC<{
  *     <Widget data={tab.widgetData} widgetType={tab.widgetType} />
  *   </WidgetErrorBoundary>
  */
-export class WidgetErrorBoundary extends React.Component<
-  WidgetErrorBoundaryProps,
-  WidgetErrorBoundaryState
-> {
+export class WidgetErrorBoundary extends React.Component<WidgetErrorBoundaryProps, WidgetErrorBoundaryState> {
   state: WidgetErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): WidgetErrorBoundaryState {
@@ -117,7 +102,7 @@ export class WidgetErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     reportClientError(error, {
-      scope: "WidgetErrorBoundary",
+      scope: 'WidgetErrorBoundary',
       surface: this.props.surface,
       widgetType: this.props.widgetType,
       componentStack: errorInfo.componentStack ?? undefined,
@@ -125,10 +110,7 @@ export class WidgetErrorBoundary extends React.Component<
     try {
       this.props.onError?.(error, errorInfo);
     } catch (telemetryErr) {
-      console.warn(
-        `[WidgetErrorBoundary:${this.props.widgetType}] onError callback threw:`,
-        telemetryErr,
-      );
+      console.warn(`[WidgetErrorBoundary:${this.props.widgetType}] onError callback threw:`, telemetryErr);
     }
   }
 

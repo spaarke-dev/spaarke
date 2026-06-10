@@ -36,9 +36,7 @@ import type { ContextWidgetComponent } from '../types/widget-types';
 // expression evaluation failure, malformed registration object) does not skip
 // the registrations that follow. See safeRegister docblock + the same pattern
 // in `register-workspace-widgets.ts`.
-function safeRegisterContext(
-  ...args: Parameters<typeof registerContextWidget>
-): void {
+function safeRegisterContext(...args: Parameters<typeof registerContextWidget>): void {
   safeRegister('ContextWidget', args[0], () => registerContextWidget(...args));
 }
 
