@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/sprk_workspacelayoutwizard.html');\"",
+    "check:html-reset": "node ../../../scripts/check-html-css-reset.mjs",
+    "build": "node ../../../scripts/check-html-css-reset.mjs && vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/sprk_workspacelayoutwizard.html');\"",
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix"

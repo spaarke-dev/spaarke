@@ -83,9 +83,6 @@ function renderController(
 // Test widget stubs
 // ---------------------------------------------------------------------------
 
-/** Tracks onHighlight calls in tests. */
-let capturedHighlightCalls: Array<{ citationId: string; selectionRef?: string }> = [];
-
 /**
  * Stub EntityInfoWidget that records onHighlight calls via module-level array.
  * Real widgets would use useImperativeHandle, but stubs record through closure.
@@ -117,7 +114,6 @@ ProgressWidgetStub.displayName = 'ProgressWidgetStub';
 
 beforeEach(() => {
   clearContextRegistry();
-  capturedHighlightCalls = [];
   jest.clearAllMocks();
 });
 
@@ -341,9 +337,6 @@ describe('ContextPaneController — unknown widget type (null from registry)', (
 describe('ContextPaneController — context_highlight event routing', () => {
   it('calls onHighlight on the active widget ref when context_highlight fires', async () => {
     const bus = new PaneEventBus();
-
-    // Track highlight calls via a module-level ref exposed by a custom widget
-    const highlightCalls: Array<{ citationId: string; selectionRef?: string }> = [];
 
     /**
      * Widget that exposes its onHighlight by writing to the component's

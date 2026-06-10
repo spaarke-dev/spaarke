@@ -191,44 +191,6 @@ export const App: React.FC<AppProps> = ({ params: _params }) => {
   }, [channels, channelNarratives]);
 
   // ---------------------------------------------------------------------------
-  // Navigation helper (kept for potential future use)
-  // ---------------------------------------------------------------------------
-
-  const _handleNavigate = React.useCallback(
-    (actionUrl: string, regardingEntityType?: string, regardingId?: string) => {
-      try {
-        if (xrm?.Navigation?.navigateTo && regardingEntityType && regardingId) {
-          xrm.Navigation.navigateTo(
-            { pageType: "entityrecord", entityName: regardingEntityType, entityId: regardingId },
-            { target: 2, width: { value: 80, unit: "%" }, height: { value: 80, unit: "%" } }
-          );
-          return;
-        }
-        if (xrm?.Navigation?.navigateTo && actionUrl.includes("pagetype=entityrecord")) {
-          const params = new URLSearchParams(actionUrl.split("?")[1] ?? "");
-          const etn = params.get("etn");
-          const id = params.get("id");
-          if (etn && id) {
-            xrm.Navigation.navigateTo(
-              { pageType: "entityrecord", entityName: etn, entityId: id },
-              { target: 2, width: { value: 80, unit: "%" }, height: { value: 80, unit: "%" } }
-            );
-            return;
-          }
-        }
-        if (xrm?.Navigation?.openUrl) {
-          xrm.Navigation.openUrl(actionUrl);
-        } else {
-          window.open(actionUrl, "_blank");
-        }
-      } catch {
-        window.open(actionUrl, "_blank");
-      }
-    },
-    [xrm]
-  );
-
-  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 

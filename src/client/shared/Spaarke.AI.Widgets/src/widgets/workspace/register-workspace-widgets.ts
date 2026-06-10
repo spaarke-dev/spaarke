@@ -107,7 +107,7 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-budget-dashboard" */
-        '@spaarke/ai-outputs/src/output-widgets/BudgetDashboardWidget'
+        '@spaarke/ai-outputs/output-widgets/BudgetDashboardWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.BudgetDashboard
   )
@@ -132,7 +132,7 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-search-results" */
-        '@spaarke/ai-outputs/src/output-widgets/SearchResultsWidget'
+        '@spaarke/ai-outputs/output-widgets/SearchResultsWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.SearchResults
   )
@@ -158,7 +158,7 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-analysis-editor" */
-        '@spaarke/ai-outputs/src/output-widgets/AnalysisEditorWidget'
+        '@spaarke/ai-outputs/output-widgets/AnalysisEditorWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.AnalysisEditor
   )
@@ -183,7 +183,7 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-contract-comparison" */
-        '@spaarke/ai-outputs/src/output-widgets/ContractComparisonWidget'
+        '@spaarke/ai-outputs/output-widgets/ContractComparisonWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.ContractComparison
   )
@@ -208,7 +208,7 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-status-summary" */
-        '@spaarke/ai-outputs/src/output-widgets/StatusSummaryWidget'
+        '@spaarke/ai-outputs/output-widgets/StatusSummaryWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.StatusSummary
   )
@@ -233,7 +233,7 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-recommendation" */
-        '@spaarke/ai-outputs/src/output-widgets/RecommendationWidget'
+        '@spaarke/ai-outputs/output-widgets/RecommendationWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.Recommendation
   )
@@ -258,7 +258,7 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-action-plan" */
-        '@spaarke/ai-outputs/src/output-widgets/ActionPlanWidget'
+        '@spaarke/ai-outputs/output-widgets/ActionPlanWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.ActionPlan
   )
