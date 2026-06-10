@@ -526,6 +526,130 @@ Same shape as §3.2. `category: 'wizard'` is appropriate for modal launchers.
 
 ---
 
+## 7.1 Sizing & layout — the constraint chain (NEW 2026-06-09, post iter-2 round 11)
+
+If your widget renders ANY component whose intrinsic width can exceed its
+container — DataGrid, wide tables, side-by-side cards, image galleries,
+horizontal scrollers — the workspace pane will be **forced to grow to fit
+that content** unless every flex/grid ancestor in the chain explicitly opts
+out of the default `min-width: auto` behavior.
+
+This was the root cause of an 11-round debug cycle on the embedded
+DataverseEntityViewWidget (Documents/Matters/Projects/Invoices/WorkAssignments
+direct widgets). The single-row §9 of [`DATAGRID-CODE-PAGE-HOST-CONTRACT.md`](DATAGRID-CODE-PAGE-HOST-CONTRACT.md)
+that flagged "⚠️ Partial — workspace shell owns FluentProvider" understated
+the host obligation enormously. The full requirement is now §9.1 of that
+doc; below is the short version every workspace-widget author MUST follow.
+
+### 7.1.1 The four-step contract
+
+1. **Host Code Page's `index.html` MUST have the box-sizing reset.** If
+   missing, every grid cell renders `+24px` wider than declared. Audit:
+   ```bash
+   grep -l "box-sizing" src/solutions/<YourHost>/index.html
+   ```
+   Add the §2 block from [`DATAGRID-CODE-PAGE-HOST-CONTRACT.md`](DATAGRID-CODE-PAGE-HOST-CONTRACT.md#2-the-indexhtml-css-contract-non-negotiable)
+   if it's missing. As of 2026-06-09, 17 of 23 host Code Pages were missing
+   this — assume nothing.
+
+2. **Your widget's root container MUST set `min-width: 0` and `width: 100%`.**
+   ```ts
+   const useStyles = makeStyles({
+     root: {
+       flex: 1,
+       minHeight: 0,
+       minWidth: 0,   // ← required; default 'auto' = max-content
+       width: '100%',
+       display: 'flex',
+       flexDirection: 'column',
+       overflow: 'hidden',
+     },
+   });
+   ```
+   Reference: [`DataverseEntityViewWidget.tsx`](../../src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx)
+   styles.root.
+
+3. **Widget MUST measure its own outer width with ResizeObserver and apply
+   it as an explicit pixel cap** on an inner wrapper, so the descendant
+   content has an explicit containing block (mimics the
+   `body { overflow: hidden }` boundary that a standalone Code Page gets
+   for free).
+   ```ts
+   const rootRef = React.useRef<HTMLDivElement | null>(null);
+   const [width, setWidth] = React.useState(0);
+   React.useLayoutEffect(() => {
+     if (rootRef.current) setWidth(rootRef.current.clientWidth);
+   }, []);
+   React.useEffect(() => {
+     const el = rootRef.current;
+     if (!el || typeof ResizeObserver === 'undefined') return;
+     const ro = new ResizeObserver(es => es.forEach(e => setWidth(e.contentRect.width)));
+     ro.observe(el);
+     return () => ro.disconnect();
+   }, []);
+   return (
+     <div ref={rootRef} className={styles.root}>
+       <div style={{
+         width: width > 0 ? `${width}px` : '100%',
+         maxWidth: width > 0 ? `${width}px` : '100%',
+         flex: 1,
+         minHeight: 0,
+         minWidth: 0,
+         display: 'flex',
+         flexDirection: 'column',
+         overflow: 'hidden',
+       }}>
+         {/* your wide content here */}
+       </div>
+     </div>
+   );
+   ```
+   Reference: [`DataverseEntityViewWidget.tsx`](../../src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx)
+   (round 9 pattern).
+
+4. **If your widget mounts `<DataGrid>`, you get the rest for free.** The
+   shared `<DataGrid>` already includes:
+   - Griffel `!important` override for Fluent v9's hardcoded
+     `min-width: fit-content` (round 8).
+   - 2-pass `columnSizingOptions` math with minWidth-floor-aware redistribution
+     (round 10).
+   - `visibleColumns.length * 24` padding reserve in the `available`
+     calculation as defense against missed §7.1.1.1 resets (round 11).
+   - `min-width: 0` on root, innerCard, gridScroll (rounds 6-7).
+
+   If you build a non-DataGrid wide component, you'll need to replicate
+   patterns 8/10/11 yourself or use the `<DataGrid>`-equivalent shared
+   primitive (TBD as new wide components emerge).
+
+### 7.1.2 Diagnostic when something looks wrong
+
+Switch DevTools Console to the Code Page's iframe and run the script at
+[`DATAGRID-CODE-PAGE-HOST-CONTRACT.md` §9.1.6](DATAGRID-CODE-PAGE-HOST-CONTRACT.md#916-diagnostic-script).
+The output tells you:
+- `col[N] rendered = declared + 24` → §7.1.1.1 box-sizing reset missing.
+- Section card `cw` differs from row track width → §7.1.1.2 min-width:0
+  chain broken — walk up the parent list until you find the inflated layer.
+- Table `sw > container cw` but rendered ≈ declared → DataGrid column math
+  regression; file a bug, don't try to fix at the widget level.
+
+### 7.1.3 Anti-patterns specific to sizing
+
+- ❌ **Setting `width: 100%` without `min-width: 0`.** The flex item still
+  refuses to shrink below its content's intrinsic width. The combination
+  matters.
+- ❌ **Using CSS class with `min-width: 0` (no `!important`) to override
+  Fluent v9 inline styles.** Inline beats class in CSS specificity. Use
+  the `!important` Griffel pattern from DataGrid's `gridTableOverride`
+  style if you must override a Fluent inline style.
+- ❌ **Measuring `gridScroll` clientWidth and assuming it equals available
+  cell width.** The cell-padding reserve is real; either include the reset
+  or subtract `cellCount * 24` from your math.
+- ❌ **Relying on the workspace pane being narrow enough that overshoot is
+  invisible.** The operator can resize panes; the widget must constrain
+  itself regardless of current pane width.
+
+---
+
 ## 8. Anti-patterns
 
 - **❌ Do not invent a third wrapper.** The two wrappers (Dashboard + Direct) are intentionally retained per OC-R4-06 (model doc §2.3). If you find yourself wanting a third — "but my widget is sort-of-composable" or "but my widget needs Dataverse persistence too" — re-read the model doc. Dual-use (§4 here) is almost always the right answer.

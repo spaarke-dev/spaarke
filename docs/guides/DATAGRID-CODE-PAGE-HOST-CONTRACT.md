@@ -376,8 +376,137 @@ Do NOT cherry-pick individual `Deploy-EventsPage.ps1` / `Deploy-CorporateWorkspa
 | Drill-through dialog Custom Page hosting `<DataGrid>` | ✅ Yes | — |
 | Form-embedded iframe Custom Page hosting `<DataGrid>` | ✅ Yes | — |
 | MDA sub-grid (system grid on a form) | ❌ No | OOB Power Platform grid; the framework targets Code Pages, not sub-grids |
-| Workspace widget (inside SpaarkeAi/LegalWorkspace section) mounting `<DataGrid>` | ⚠️ Partial | Inherits FluentProvider from the workspace shell — do NOT add a second one. Use `<DataGrid>` directly without `DataGridPageShell`. The Calendar widget at [`src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/`](../../src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/) is the canonical example. |
+| Workspace widget (inside SpaarkeAi/LegalWorkspace section) mounting `<DataGrid>` | ⚠️ See §9.1 | Different contract — workspace shell owns the FluentProvider + theme. See §9.1. |
 | PCF control | ❌ No | PCFs have their own scaffolding (manifest, control class, lifecycle hooks). The framework's `<DataGrid>` does NOT target PCF hosting; the legacy `UniversalDatasetGrid` PCF retires in Phase F. |
+
+---
+
+## 9.1 Embedded workspace-widget hosts (NEW — iter-2 round 11, 2026-06-09)
+
+When `<DataGrid>` is mounted **inside a workspace widget** (not as a standalone
+Code Page), the host is the parent Code Page (SpaarkeAi, LegalWorkspace,
+etc.), not the widget itself. The widget INHERITS the host's FluentProvider,
+theme, and box-sizing reset. **Five additional contract rules** apply that
+the standalone §1-§8 path does not need.
+
+### 9.1.1 The host Code Page's `index.html` MUST have the box-sizing reset
+
+The §2 rule (`*, *::before, *::after { box-sizing: border-box }`) is binding
+for the host Code Page even when the host itself is not a DataGrid surface.
+Without it every embedded `DataGridCell` renders **+24px** wider than its
+declared width (`12px padding-left + 12px padding-right` adds to content-box),
+which sums to ~100-150px of column overshoot over a typical 4-6 column grid
+and produces a permanent horizontal scrollbar inside the widget.
+
+Audit your host Code Page's `index.html`:
+
+```bash
+grep -l box-sizing src/solutions/<YourPage>/index.html || echo "MISSING — add the §2 reset"
+```
+
+Canonical reference: [`src/solutions/SpaarkeAi/index.html`](../../src/solutions/SpaarkeAi/index.html)
+(added round 11). Verified failure mode: 17 of 23 Code Pages in this repo
+were missing this as of 2026-06-09; see the audit note below the table.
+
+### 9.1.2 The flex/grid `min-width: 0` chain MUST be unbroken
+
+Every container between the workspace section card and the `<DataGrid>` root
+MUST set `min-width: 0` (in addition to `min-height: 0` if it's a flex/grid
+column). The default `min-width: auto` resolves to `max-content`, which lets
+the FluentDataGrid's intrinsic column-sum width inflate every ancestor.
+
+The known-required chain inside SpaarkeAi:
+
+```
+Workspace row (display: grid; grid-template-columns: 1fr)
+  └── SectionPanel.card                       ← needs min-width: 0  (round 7)
+       └── DataverseEntityViewWidget root     ← needs min-width: 0  (round 6)
+            └── inner pixel-cap wrapper       ← width: ${measured}px (round 9 — see §9.1.3)
+                 └── DataGrid root            ← needs min-width: 0  (round 6)
+                      └── innerCard           ← needs min-width: 0  (round 6)
+                           └── gridScroll     ← needs min-width: 0  (round 6)
+                                └── FluentDataGrid (Fluent v9 internal)
+```
+
+If you build a new widget that wraps `<DataGrid>`, copy
+[`DataverseEntityViewWidget`'s style chain](../../src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx) verbatim
+or risk introducing the same bug.
+
+### 9.1.3 Widget root needs a ResizeObserver-driven pixel cap
+
+The body-level `overflow: hidden` from §2 acts as the page-wide boundary for
+a standalone Code Page. Embedded widgets have no such single boundary — the
+section card can be any width depending on the workspace row's grid template
+and the user's pane sizing.
+
+The widget MUST measure its own outer width via a `ResizeObserver` and apply
+that value as an explicit inline `width: ${px}px; maxWidth: ${px}px;` on a
+wrapper that the `<DataGrid>` mounts into. This creates an explicit pixel
+containing block that the inner FluentDataGrid's column layout cannot escape.
+
+Reference: [`DataverseEntityViewWidget.tsx`](../../src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx)
+(`useLayoutEffect` for synchronous initial measurement + `useEffect` +
+`ResizeObserver` for live tracking).
+
+### 9.1.4 Fluent v9's hardcoded `min-width: fit-content` must be overridden
+
+`@fluentui/react-components` v9's `DataGrid` hardcodes
+`min-width: fit-content` as an INLINE style on its root `<div role="grid">`.
+CSS class selectors WITHOUT `!important` cannot beat an inline style. The
+DataGrid component (`src/client/shared/Spaarke.UI.Components/src/components/
+DataGrid/DataGrid.tsx`) already includes a Griffel `gridTableOverride` class
+with `!important` that targets `& > [role="grid"]` to neutralize this — you
+get it for free as long as you mount via `<DataGrid>`. Do not mount a raw
+`<FluentDataGrid>` from Fluent v9 inside a workspace widget.
+
+### 9.1.5 Column math: 2nd-pass redistribution + per-cell padding reserve
+
+DataGrid's `columnSizingOptions` math already accounts for both:
+- A 2nd pass that redistributes overshoot when some columns hit their
+  `minWidth` floor and others have slack (round 10).
+- A `visibleColumns.length × 24px` reserve in the `available` calculation
+  so columns still fit if a host forgets the §9.1.1 box-sizing reset (round 11).
+
+You do not need to do anything for this — it's framework-internal — but
+DO NOT remove these passes when refactoring the DataGrid component; both
+were added in response to operator-validated overshoot bugs.
+
+### 9.1.6 Diagnostic script
+
+If a future embedded DataGrid renders past its container, paste this into
+DevTools Console (after switching the frame selector to the Code Page's
+iframe) to walk the layout chain:
+
+```js
+(function(){
+  const labels=['Active Documents','Active Projects','Active Matters','Active Events','All Active Events'];
+  let g=null;
+  for(const l of labels){g=document.querySelector(`div[role="grid"][aria-label="${l}"]`);if(g)break;}
+  if(!g){g=document.querySelector('div[role="grid"]');}
+  if(!g){console.log('no role="grid" on page');return;}
+  console.log('FluentDataGrid cw=%d sw=%d inline-style=%s',g.clientWidth,g.scrollWidth,g.getAttribute('style'));
+  g.querySelectorAll('[role="columnheader"]').forEach((c,i)=>console.log(`col[${i}] rendered=${c.offsetWidth}px style="${c.getAttribute('style')||''}"`));
+  let n=g,d=0;
+  while(n&&d<14){console.log(`[${d}] cw=${n.clientWidth} sw=${n.scrollWidth} inline="${(n.getAttribute('style')||'').slice(0,90)}"`);n=n.parentElement;d++;}
+})()
+```
+
+Interpretation:
+- If **column rendered width = declared width + 24px** consistently → §9.1.1
+  reset missing in host index.html.
+- If **table scrollWidth > container clientWidth but rendered widths match
+  declared** → §9.1.5 column-math bug; file a regression issue.
+- If **section card cw differs from workspace row track width** → §9.1.2
+  min-width:0 chain broken somewhere; walk up the output until you find the
+  first parent whose `cw` matches the table's `sw`.
+
+### 9.1.7 The known reference implementations
+
+| Widget | File | What it shows |
+|---|---|---|
+| Direct embed | [`DataverseEntityViewWidget.tsx`](../../src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx) | The canonical 9.1.2 + 9.1.3 + 9.1.4 reference. Copy this style chain for any new widget wrapping `<DataGrid>`. |
+| Calendar (composite) | [`CalendarWorkspaceWidget.tsx`](../../src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx) | Same layout chain, plus a filter chip toolbar above the grid. |
+| LegalWorkspace section shim | [`documents.registration.ts`](../../src/solutions/LegalWorkspace/src/sections/documents.registration.ts) | The SectionRegistration that mounts a widget. Just sets the configId — all the layout work lives in the widget. |
 
 ---
 
