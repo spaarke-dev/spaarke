@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>SpaarkeAi Code Page — Extend `launch-resolver.ts` with `ChatLaunchContext` URL-param parsing</title>
+    <phase>Phase 5: Surfaces + Templates</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>051</blocks>
+    <tags>typescript, frontend, fluent-ui, react</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>TypeScript code modification of an existing critical-path module (`launch-resolver.ts`) that all entity-form ribbon launchers depend on; creates a new contract type (`ChatLaunchContext`) consumed by Action Engine invocation paths; tags include typescript + frontend</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocks task 051 (ribbon launchers wire to the parsed context); single critical-path task within the Phase 5 Surfaces sub-group.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `src/solutions/SpaarkeAi/src/utils/launch-resolver.ts` to parse a full `ChatLaunchContext` from URL parameters when SpaarkeAi loads, and create the new contract type at `src/solutions/SpaarkeAi/src/types/ChatLaunchContext.ts`. `ChatLaunchContext` is the canonical handoff payload that ribbon launchers (task 051) populate and the Spaarke AI Assistant (default playbook per task 052) consumes to scope its session — entity ids, entity type, optional pre-selected Action template id, surface hint (sidePane / modal / fullPage), and optional invocation hint (e.g., "Summarize this matter"). This task ADDS a parsing function + the new type without breaking the existing `SpaarkeAiLaunchParams` contract.
+  </prompt>
+
+  <role>
+    Senior TypeScript / React engineer with deep familiarity with the Spaarke `SpaarkeAi` Code Page shell (Vite + React 19, ADR-026), Fluent UI v9 conventions (ADR-021 dark-mode parity), and Spaarke Auth v2 (`useAuth()` / `authenticatedFetch` per ADR-028). You preserve backward compatibility of the existing `SpaarkeAiLaunchParams` contract while extending it for Action Engine.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **`ChatLaunchContext` type** — a new TypeScript interface at `src/solutions/SpaarkeAi/src/types/ChatLaunchContext.ts` carrying the canonical Action Engine invocation handoff fields: `entityLogicalName?`, `entityId?`, `matterId?` (alias), `actionTemplateId?` (optional pre-selected Template), `surfaceHint?` (`'sidePane' | 'modal' | 'fullPage'`), `invocationHint?` (free-text prompt to seed the chat input).
+    2. **Parsing function** — extend `launch-resolver.ts` with `parseChatLaunchContext(search: string): ChatLaunchContext`, which reads `window.location.search` (or an injected string for testability) and returns a populated `ChatLaunchContext`. MUST strip GUID braces (same convention as `buildLaunchUrl`). MUST tolerate missing params (every field optional). MUST NOT throw on unknown params.
+    3. **Backward compatibility** — `SpaarkeAiLaunchParams` continues to work for existing ribbon callers (`EntityFormLaunch.openFromEntityForm`, `WorkspaceLaunch`). `ChatLaunchContext` extends, does not replace.
+
+    Deliverable: `src/solutions/SpaarkeAi/src/types/ChatLaunchContext.ts` (new), `src/solutions/SpaarkeAi/src/utils/launch-resolver.ts` (edited — adds `parseChatLaunchContext` + extends `buildLaunchUrl` to accept the new fields), unit tests at `src/solutions/SpaarkeAi/src/utils/__tests__/launch-resolver.test.ts`.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-13 mandates SpaarkeAi as the no-context default surface; FR-14 mandates ribbon launchers on Matter / Project / Account / Contact that pre-populate `ChatLaunchContext`. The existing `launch-resolver.ts` already handles `entityLogicalName` + `entityId` + `matterId`; this task expands the contract for Action Engine's three invocation paths (design.md §4.5.1) — the LLM's session resolution depends on the full context payload.
+
+      The new type `ChatLaunchContext` is the boundary contract between (a) ribbon launchers populating it, (b) SpaarkeAi parsing it, and (c) the default Assistant playbook (task 052) consuming it to pick the right system prompt + always-on tools. Design.md §4.5.4 lists how the agent's runtime behavior changes based on launch context — this type is the wire format for that handoff.
+
+      The parsing function MUST be safe under SSR-style invocation (where `window` might not exist) — accept an optional string argument so unit tests can pass URL query strings directly without DOM dependency.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file>src/solutions/SpaarkeAi/src/types/ChatLaunchContext.ts</file>
+      <file>src/solutions/SpaarkeAi/src/utils/__tests__/launch-resolver.test.ts</file>
+      <file>src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts</file>
+      <file>src/solutions/SpaarkeAi/src/ribbon/WorkspaceLaunch.ts</file>
+      <file>src/solutions/SpaarkeAi/src/App.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 only. No new components in this task, but any types added MUST be compatible with downstream Fluent v9 consumers; do NOT import from `@fluentui/react` (v8).</constraint>
+    <constraint source="ADR-026">Vite + singlefile + React 19 build target. New types live in `src/types/`; new utils live in `src/utils/`. Bundle stays singlefile.</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2. This task does NOT call BFF (no auth needed here), but the `ChatLaunchContext` payload MUST NOT carry tokens, access tokens, or other secret material — only routing/contextual data. Verified by code review.</constraint>
+    <constraint source="project">Backward compatibility: `SpaarkeAiLaunchParams` continues to exist; `buildLaunchUrl` accepts both shapes via union or extension. Existing ribbon callers (`EntityFormLaunch`, `WorkspaceLaunch`) MUST keep working without modification.</constraint>
+    <constraint source="project">Parsing MUST tolerate unknown URL params (forward-compatibility with future Action Engine fields) without throwing.</constraint>
+    <constraint source="project">No new npm dependencies. Use built-in `URLSearchParams`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/code-pages-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-and-dark-mode.md</file>
+      <file>.claude/adr/ADR-026-vite-singlefile-react19.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Launch-resolver URL contract" location="src/solutions/SpaarkeAi/src/utils/launch-resolver.ts">Existing `buildLaunchUrl` strips GUID braces and uses `URLSearchParams`. Extend, do not replace.</pattern>
+      <pattern name="Ribbon launcher delegation" location="src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts">Ribbon scripts are invocation-only; all URL/business logic lives in `launch-resolver.ts` (ADR-006).</pattern>
+      <pattern name="SpaarkeAi context resolution" location="docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md">SpaarkeAi parses entity context at boot; downstream context providers consume it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, dependencies (task 013) marked ✅ in `TASK-INDEX.md`. (task-execute Step 0)</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;` — especially design.md §4.5.1 (three invocation paths), §4.5.4 (surface-context awareness), and the existing `launch-resolver.ts`.</step>
+    <step order="2">Create `src/solutions/SpaarkeAi/src/types/ChatLaunchContext.ts` exporting the `ChatLaunchContext` interface. Document each field with TSDoc citing the source design section. Include `surfaceHint` enum-type and `invocationHint` free-text contract.</step>
+    <step order="3">Edit `src/solutions/SpaarkeAi/src/utils/launch-resolver.ts`: add `parseChatLaunchContext(search?: string): ChatLaunchContext`. Use `URLSearchParams`. Strip GUID braces on `entityId`, `matterId`, and (if a GUID) `actionTemplateId`. Tolerate missing `search` arg by reading `window.location.search` with a safe fallback for non-browser contexts.</step>
+    <step order="4">Extend `buildLaunchUrl` to accept the new fields (`actionTemplateId`, `surfaceHint`, `invocationHint`) as optional inputs WITHOUT breaking the existing `SpaarkeAiLaunchParams` callers. Either widen the param type or accept a `ChatLaunchContext` union — preserve the function's existing signature for backward compatibility.</step>
+    <step order="5">Create unit tests at `src/solutions/SpaarkeAi/src/utils/__tests__/launch-resolver.test.ts`: (a) `parseChatLaunchContext` with empty string returns empty object; (b) with full context returns all 6 fields; (c) GUID braces stripped on `entityId` and `actionTemplateId`; (d) unknown params tolerated (no throw); (e) `buildLaunchUrl` round-trips through `parseChatLaunchContext` (build then parse yields the same payload); (f) existing `SpaarkeAiLaunchParams` callers still work (regression).</step>
+    <step order="6">Run `npm test --workspace=src/solutions/SpaarkeAi` (or the local equivalent) — all tests pass. Run `npm run build:prod --workspace=src/solutions/SpaarkeAi` — build succeeds with no new errors. (Use `npm install --legacy-peer-deps --no-audit --no-fund` if a fresh install is needed per CLAUDE.md §11.)</step>
+    <step order="7">Sanity-check: open `App.tsx` and confirm the existing entry path still compiles. Do NOT integrate `ChatLaunchContext` consumption into `App.tsx` in this task — that integration ships with task 052 (default playbook) and is out of scope here. This task ONLY adds the type + the parser.</step>
+    <step order="8">**Manual smoke test** (deferred — covered by `&lt;ui-tests&gt;` section): the deep-link flow (URL with `?entityLogicalName=sprk_matter&amp;entityId=abc-123&amp;invocationHint=Summarize+this+matter`) parses correctly. This is verified by the unit test in step 5 plus the `ui-test` skill invocation at Step 9.7.</step>
+    <step order="9">Update `current-task.md` with progress; checkpoint via `context-handoff` skill if &gt; 3 steps complete.</step>
+    <step order="9.5">**Quality gates** (FULL rigor): run `code-review` on `launch-resolver.ts` + `ChatLaunchContext.ts`; run `adr-check` (verify ADR-021, ADR-026, ADR-028 compliance — no Fluent v8 imports, singlefile bundle preserved, no token fields in `ChatLaunchContext`).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 050 status ✅. Update `current-task.md`: task 050 complete; unblocks task 051.</step>
+    <step order="11">If any deviations from this plan, document in `projects/ai-spaarke-action-engine-r1/notes/handoffs/050-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run tests and production build for the SpaarkeAi solution</tool>
+    <tool name="git">Confirm working tree state</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/types/ChatLaunchContext.ts</output>
+    <output type="code">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</output>
+    <output type="test">src/solutions/SpaarkeAi/src/utils/__tests__/launch-resolver.test.ts</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/solutions/SpaarkeAi/src/types/ChatLaunchContext.ts` exists and exports the `ChatLaunchContext` interface with all 6 documented optional fields (`entityLogicalName`, `entityId`, `matterId`, `actionTemplateId`, `surfaceHint`, `invocationHint`).</criterion>
+    <criterion testable="true">`parseChatLaunchContext('')` returns an empty `ChatLaunchContext` (all fields undefined) — unit test passes.</criterion>
+    <criterion testable="true">`parseChatLaunchContext('entityLogicalName=sprk_matter&amp;entityId={abc-123}&amp;invocationHint=Summarize+this+matter')` returns `{entityLogicalName: 'sprk_matter', entityId: 'abc-123', invocationHint: 'Summarize this matter'}` (GUID braces stripped) — unit test passes.</criterion>
+    <criterion testable="true">`buildLaunchUrl({entityLogicalName: 'sprk_matter', entityId: 'abc-123'})` continues to return the existing format — regression test passes.</criterion>
+    <criterion testable="true">`buildLaunchUrl` round-trip through `parseChatLaunchContext` yields the same payload — unit test passes.</criterion>
+    <criterion testable="true">Unknown URL params (e.g., `?foo=bar`) do not cause `parseChatLaunchContext` to throw — unit test passes.</criterion>
+    <criterion testable="true">`npm run build:prod --workspace=src/solutions/SpaarkeAi` exits 0 with no new TypeScript errors.</criterion>
+    <criterion testable="true">No new npm dependencies added to `package.json`.</criterion>
+    <criterion testable="true">`ChatLaunchContext` MUST NOT contain `accessToken`, `token`, or any secret-shaped field — verified by `code-review`.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Render — SpaarkeAi loads with no params">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Navigate to SpaarkeAi Code Page with no query params</step>
+        <step>Verify the page renders the no-context default landing (welcome panel)</step>
+        <step>Open browser dev tools; check console for JavaScript errors</step>
+      </steps>
+      <expected>Page renders without console errors; no entity context applied; `parseChatLaunchContext` returns empty object.</expected>
+    </test>
+
+    <test name="Deep-link flow — full ChatLaunchContext from URL">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_spaarkeai&amp;data=entityLogicalName%3Dsprk_matter%26entityId%3Dabc-123%26invocationHint%3DSummarize%2Bthis%2Bmatter</url>
+      <steps>
+        <step>Navigate to SpaarkeAi Code Page with full deep-link query string</step>
+        <step>Verify `parseChatLaunchContext` extracts entityLogicalName=sprk_matter, entityId=abc-123, invocationHint='Summarize this matter'</step>
+        <step>Verify the context is observable in dev tools (window.__SPAARKE_LAUNCH_CONTEXT__ or React DevTools state, depending on integration plan)</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>All 3 fields parsed correctly; GUID braces stripped if present; no console errors.</expected>
+    </test>
+
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 user settings</step>
+        <step>Reload SpaarkeAi Code Page (any URL)</step>
+        <step>Verify background and text colors adapt via Fluent v9 semantic tokens (no hard-coded white or black)</step>
+        <step>Verify any icons use `currentColor` for stroke/fill</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021; no contrast failures.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The `ChatLaunchContext` type is intentionally a superset of `SpaarkeAiLaunchParams` — do not delete or rename the existing type. The existing ribbon callers in `EntityFormLaunch.ts` and `WorkspaceLaunch.ts` MUST continue to compile and behave identically.
+
+    Task 052 (default playbook seed) will integrate `ChatLaunchContext` consumption into `App.tsx` (deciding which playbook to load based on `entityLogicalName`). That integration is out of scope here.
+
+    Do not import `@fluentui/react` (v8) anywhere — Spaarke is Fluent UI v9 only (ADR-021).
+
+    Per spec.md FR-13: SpaarkeAi already exists; this task only EXTENDS its URL contract. Do not rewrite `App.tsx` or shell components.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. Run `ui-test` skill against the `&lt;ui-tests&gt;` section at Step 9.7 if Chrome integration is available.
+    </protocol>
+  </execution>
+</task>

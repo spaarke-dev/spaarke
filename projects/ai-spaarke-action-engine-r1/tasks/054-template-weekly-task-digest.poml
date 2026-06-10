@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Action Template — "Send weekly task digest" (Scheduled cron + SendEmail with human gate)</title>
+    <phase>Phase 5: Surfaces + Templates</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>040, 041, 042, 052</dependencies>
+    <blocks>060</blocks>
+    <tags>dataverse, ai, deploy, worker</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>JPS Action JSON authoring + Dataverse seed for the "Conservative 3" Template #2 per spec.md FR-20. Wires the scheduled-cron path (depends on task 042 scheduled dispatch handler) and the `SendEmail` Tool with `humanGate.required = true`. No new C# code; deliverable is JPS-validated JSON + scheduled-trigger config + deploy. Has explicit ADR constraints (013, 015, 018) + scheduler dependency.</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent JPS JSON authoring; writes to `infra/insights/schemas/template-weekly-task-digest.json` — no file overlap with tasks 053, 055. Same prerequisite set (040 + 041 + 042 + 052). Safe for parallel sub-agent execution.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author the "Send weekly task digest" Action Template as a JPS-compliant JSON definition at `infra/insights/schemas/template-weekly-task-digest.json` and seed it into Dataverse (`sprk_actiontemplate` entity). Per spec.md FR-20 + design.md "Conservative 3", this is a **scheduled** (cron-triggered) Action: takes Matter id + day-of-week + time + lookahead window as parameters; on schedule fire (handled by `ScheduledActionDispatchJobHandler` from task 042) it runs (Step 1) Deterministic Dataverse query for tasks due in the lookahead window scoped to the matter; (Step 2) template-render the email body from the task list; (Step 3) `SendEmail` Tool with `humanGate.required = true` (default; configurable). The cron trigger spec is part of the Template; an Instance binds a specific Matter + schedule. Validates via `jps-validate` skill before deployment.
+  </prompt>
+
+  <role>
+    Spaarke AI Template author with deep familiarity with the JPS Action format, scheduled-trigger semantics (cron expressions, scheduler dispatch via `ScheduledActionDispatchJobHandler` per task 042 + ADR-004 Job Contract), the `SendEmail` Tool's gate requirements (design.md §5 IGateResolver, `humanGate.required = true` for external side effects), and the default `Spaarke Assistant — General` playbook from task 052.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **JPS Action JSON** — `infra/insights/schemas/template-weekly-task-digest.json` with `instruction`, `scopes` (matterId, recipients), `templateParams` (`dayOfWeek`, `timeOfDay`, `lookaheadDays`, `humanGate` override), `trigger` (`{type: "scheduled", cronExpression: "0 {timeOfDayHour} * * {dayOfWeek}"}` — rendered per Instance), `steps` (deterministic Dataverse query → deterministic template render → `SendEmail` with gate), `output` schema, `governance.featureFlag` reference.
+    2. **Dataverse seed** — upsert `sprk_actiontemplate` row keyed by `sprk_name = 'weekly-task-digest'`. Idempotent.
+    3. **Scheduled-dispatch verification** — create a test Instance pointing at a dev Matter with a cron triggering 2 minutes from "now" + `humanGate.required = false` (test bypass). Confirm:
+       - `ScheduledActionDispatchJobHandler` (task 042) picks up the schedule via the Azure-native scheduler (task 001's choice)
+       - Run record created in `sprk_actionrun` with the canonical status sequence
+       - Email NOT sent (because the test Instance uses a fake recipient or the SendEmail Tool's dev mode logs instead of sends — coordinate with task 044's SendEmail Tool impl)
+       - With `humanGate.required = true`: confirm the run pauses at the gate and a `sprk_gate_approval` record is created (per task 031 `DataverseQueueGateResolver` or task 032 `InteractiveInChatGateResolver` depending on the Action's `defaultGateResolver` field)
+
+    Deliverable: the JSON file, a deploy log at `notes/deploys/054-template-weekly-task-digest.md`, and a verification of both the cron-trigger fire AND the gate-pause behavior.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-20 mandates the "Send weekly task digest" Template. Design.md "Conservative 3" decision confirms it as MVP Template #2. This Template is the **scheduled-trigger** demonstrator: it validates the Hybrid D runtime topology (Azure-native scheduler from task 001 → Service Bus message → `ScheduledActionDispatchJobHandler` from task 042 → BFF orchestration → Tool dispatches with gate).
+
+      The `SendEmail` Tool has `humanGate.required = true` by default per spec.md FR-20 + design.md §5 (Five gate types — `FinalDelivery` applies here). The user (or designated approver per Action's `humanGate.approvalRoles` field) sees a `GateApprovalCard` (task 033, Phase 3) in their workspace OR an in-chat card (task 032) depending on the resolver choice. 5-min default timeout → auto-reject.
+
+      Per ADR-004 Job Contract: the dispatch job MUST be idempotent. If the scheduler delivers the cron-fire message twice (at-least-once semantics), the second dispatch MUST NOT create a duplicate run. `ScheduledActionDispatchJobHandler` (task 042) handles this via `IIdempotencyService`; this Template's responsibility is to declare a stable `IdempotencyKey` derived from `{templateId}-{instanceId}-{cronFireTimeUtc}`.
+
+      The Template's `trigger.cronExpression` is a TEMPLATE field — the actual cron string is rendered per Instance from `dayOfWeek` + `timeOfDay` parameters. Example: Instance with `dayOfWeek=MON`, `timeOfDay=09:00` renders to `"0 9 * * MON"`.
+
+      Per ADR-018, the Template's governance block references `feature.actionEngine.template.weeklyTaskDigest` so it can be kill-switched per environment.
+
+      Per ADR-015, every Tool dispatch this Template makes writes audit (Tier 2 hash + Tier 3 work history) including the gate decision (approve / reject / timeout). The `SendEmail` Tool's audit row includes the recipient hash (NOT plaintext recipient — per ADR-015 data governance).
+    </background>
+    <relevant-files>
+      <file>infra/insights/schemas/template-weekly-task-digest.json</file>
+      <file>infra/insights/schemas/playbook-spaarke-assistant-general.json</file>
+      <file>scripts/Seed-JpsActions.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJobHandler.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/deploys/054-template-weekly-task-digest.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI placement: Template lives in Dataverse + `infra/insights/schemas/`. No CRUD-side caller injects orchestration internals.</constraint>
+    <constraint source="ADR-015">Audit on every Tool dispatch this Template makes (Tier 2 hash + Tier 3 work history). Gate decisions (approve/reject/timeout) audited. Recipient is hashed in audit, not plaintext.</constraint>
+    <constraint source="ADR-018">Feature flag `feature.actionEngine.template.weeklyTaskDigest` referenced in governance block.</constraint>
+    <constraint source="ADR-029">Publish size impact: zero — JSON + Dataverse seed only.</constraint>
+    <constraint source="ADR-004">Job Contract idempotency: `IdempotencyKey` = `"weekly-task-digest:{instanceId}:{cronFireTimeUtc}"`. Re-delivery of the cron-fire message MUST NOT create a duplicate run.</constraint>
+    <constraint source="project">`SendEmail` Tool has `humanGate.required = true` by default. Instance-level override permitted but logged (spec.md FR-20 acceptance).</constraint>
+    <constraint source="project">Validate via `jps-validate` before deployment.</constraint>
+    <constraint source="project">Cron expression rendered from `dayOfWeek` + `timeOfDay` parameters; Template carries the cron template, Instance carries the parameter values.</constraint>
+    <constraint source="project">Default `IGateResolver` for this Template: `InteractiveInChatGateResolver` if the Instance was authored from a chat surface; `DataverseQueueGateResolver` if from a scheduled background path. The Template declares both as acceptable; the runtime selects based on invocation surface.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="JPS Action authoring with scheduled trigger" location=".claude/skills/jps-action-create/SKILL.md">Same Template format as task 053; add the `trigger` block with `type: "scheduled"` and a cron template string.</pattern>
+      <pattern name="Job Contract idempotency" location=".claude/patterns/api/background-workers.md">`IIdempotencyService` deduplicates at-least-once message deliveries. Provide a stable `IdempotencyKey`.</pattern>
+      <pattern name="IGateResolver default routing" location="projects/ai-spaarke-action-engine-r1/design.md §5">Templates can declare multiple acceptable resolvers; runtime selects based on invocation surface.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, dependencies (tasks 040 + 041 + 042 + 052) marked ✅ in `TASK-INDEX.md`. (task-execute Step 0)</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;` — especially spec.md FR-20, design.md §5 (IGateResolver), and the `ScheduledActionDispatchJobHandler` from task 042.</step>
+    <step order="2">Use the `jps-action-create` skill to scaffold the Template JSON. Populate:
+      - `instruction`: brief LLM-facing description (used if the Template is also discoverable via FindResources for ad-hoc invocation)
+      - `scopes`: `[{name: "matterId", type: "guid", required: true}, {name: "recipients", type: "stringArray", required: true, sourceHints: ["matter.outsideCounsel", "ask"]}]`
+      - `templateParams`: `[{name: "dayOfWeek", type: "enum", values: ["MON","TUE","WED","THU","FRI","SAT","SUN"], default: "MON"}, {name: "timeOfDay", type: "string", default: "09:00"}, {name: "lookaheadDays", type: "int", default: 7}, {name: "humanGateOverride", type: "bool", default: true}]`
+      - `trigger`: `{type: "scheduled", cronExpression: "0 {timeOfDayHour} * * {dayOfWeek}"}` (Hybrid D runtime: scheduler from task 001 → SB message → `ScheduledActionDispatchJobHandler`)
+      - `steps`:
+        - Step 1: `{tool: "QueryDataverse", params: {entity: "sprk_task", matter: "{matterId}", dueWithinDays: "{lookaheadDays}", status: "open"}}` — Deterministic
+        - Step 2: `{tool: "RenderTemplate", params: {templateName: "weekly-task-digest-email", data: "{step1.output}"}}` — Deterministic
+        - Step 3: `{tool: "SendEmail", params: {recipients: "{recipients}", subject: "Weekly Task Digest — {matterName}", body: "{step2.output}"}, humanGate: {required: "{humanGateOverride}", gateType: "FinalDelivery", approvalRoles: ["matterPartner", "matterPM"], defaultResolver: "InteractiveInChatGateResolver", fallbackResolver: "DataverseQueueGateResolver", timeoutMinutes: 5}}`
+      - `output`: `{emailSent: bool, emailMessageId: string, gateOutcome: enum, taskCount: int}`
+      - `idempotencyKey`: `"weekly-task-digest:{instanceId}:{cronFireTimeUtc}"`
+      - `governance.featureFlag`: `"feature.actionEngine.template.weeklyTaskDigest"`
+    </step>
+    <step order="3">Run `jps-validate` skill. Halt and fix on schema violations.</step>
+    <step order="4">Deploy via `scripts/Seed-JpsActions.ps1` (or equivalent): upsert `sprk_actiontemplate` row keyed by `sprk_name = 'weekly-task-digest'`. Capture stdout/stderr.</step>
+    <step order="5">**Test Instance** — create a test `sprk_actioninstance` pointing at a dev Matter with `dayOfWeek=$(today)`, `timeOfDay=$(now + 2 minutes)`, `humanGateOverride=false` (test bypass). The Instance triggers the cron schedule.</step>
+    <step order="6">**Scheduled-dispatch verification** — wait for the cron fire (≤2 min). Confirm:
+      - The Azure-native scheduler (per task 001's choice — Logic Apps timer / SB scheduled / Functions timer) publishes the dispatch message
+      - `ScheduledActionDispatchJobHandler` (task 042) consumes it
+      - A `sprk_actionrun` row exists with status `Completed` (or `Failed` with diagnostic info)
+      - Step 1 audit (QueryDataverse), Step 2 audit (RenderTemplate), Step 3 audit (SendEmail) all present
+      - Email NOT sent for real (dev-mode SendEmail Tool logs to App Insights instead — coordinate with task 044's Tool impl)
+      - `IdempotencyKey` recorded on the run; second cron-fire message (if any) MUST be deduplicated
+    </step>
+    <step order="7">**Gate verification** — create a SECOND test Instance with `humanGateOverride=true`. Trigger the cron. Confirm:
+      - Run pauses at Step 3 (SendEmail with gate)
+      - Either: `sprk_gate_approval` record created (DataverseQueueGateResolver path) OR an in-chat card appears in SpaarkeAi for the test user (InteractiveInChatGateResolver path) — depending on the resolver selected
+      - Approval flow: approve the gate via the resolver's surface → run resumes → email logged
+      - Rejection / timeout: separate test, verify run terminates with reason
+    </step>
+    <step order="8">**Idempotency verification**: synthesize a duplicate dispatch message (or re-fire the cron). Confirm exactly one `sprk_actionrun` row exists for the same `IdempotencyKey` (no duplicate).</step>
+    <step order="9">Capture all verification evidence in `notes/deploys/054-template-weekly-task-digest.md`.</step>
+    <step order="10">Update `current-task.md`; checkpoint via `context-handoff`. Update `tasks/TASK-INDEX.md`: mark task 054 ✅. If deviations, document in `notes/handoffs/054-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="jps-action-create">Scaffold the JPS Action JSON</tool>
+    <tool name="jps-validate">Validate JSON against JPS schema</tool>
+    <tool name="dataverse-deploy">Upsert `sprk_actiontemplate` row</tool>
+    <tool name="powershell">Run Seed-JpsActions.ps1</tool>
+    <tool name="curl">Invoke BFF endpoints for instance creation / verification</tool>
+    <tool name="azure-cli">Inspect scheduler state for verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">infra/insights/schemas/template-weekly-task-digest.json</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/deploys/054-template-weekly-task-digest.md</output>
+    <output type="dataverse-record">`sprk_actiontemplate` row `weekly-task-digest` in dev environment</output>
+    <output type="evidence">Scheduled-dispatch verification (cron fire + run record + audit rows)</output>
+    <output type="evidence">Gate-pause verification (humanGate.required=true path)</output>
+    <output type="evidence">Idempotency verification (duplicate message dedup)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`infra/insights/schemas/template-weekly-task-digest.json` exists and passes `jps-validate`.</criterion>
+    <criterion testable="true">The Template's `trigger` block declares `type: "scheduled"` with a cron-expression template referencing `{dayOfWeek}` + `{timeOfDay}` parameters.</criterion>
+    <criterion testable="true">The `SendEmail` step has `humanGate.required = "{humanGateOverride}"` (parametric, defaulting to true) and `humanGate.gateType = "FinalDelivery"`.</criterion>
+    <criterion testable="true">The Template declares `idempotencyKey = "weekly-task-digest:{instanceId}:{cronFireTimeUtc}"`.</criterion>
+    <criterion testable="true">After deployment, exactly one `sprk_actiontemplate` row with `sprk_name='weekly-task-digest'` exists. Re-running the seed yields no duplicate.</criterion>
+    <criterion testable="true">**Scheduled-dispatch path verified**: cron fire → scheduler → `ScheduledActionDispatchJobHandler` → BFF orchestration → run completed. All audit rows present. Evidence in `notes/deploys/054-*.md`.</criterion>
+    <criterion testable="true">**Gate-pause path verified**: with `humanGateOverride=true`, run pauses at SendEmail; gate approval / rejection / 5-min timeout all behave per ADR-004 + design.md §5.</criterion>
+    <criterion testable="true">**Idempotency verified**: duplicate dispatch message yields exactly one run record (no duplicate).</criterion>
+    <criterion testable="true">Recipient is hashed in Tier 2 audit (not plaintext) — ADR-015 compliance.</criterion>
+    <criterion testable="true">Publish-size delta zero.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The verification depends on task 042's `ScheduledActionDispatchJobHandler` being functional and the task 001 scheduler being deployed in the dev environment. If those aren't ready, mark this task `blocked` and surface the dependency. Do NOT author the Template against a non-functional scheduler — verification is part of the Template's acceptance.
+
+    The `SendEmail` Tool's dev-mode behavior (log instead of send) is a Tool implementation concern, not a Template concern. Verify via task 044's `SendEmail` Tool that the dev environment is configured to log+suppress rather than send-real-emails. If real emails would send in dev, halt and escalate.
+
+    The two acceptable resolvers (`InteractiveInChatGateResolver` for chat-originated, `DataverseQueueGateResolver` for cron-originated) are both built in Phase 3 (tasks 031 + 032). The Template DECLARES both as acceptable; the BFF orchestrator selects at runtime based on `invocationSurface` field on the Run record.
+
+    Per design.md §7.4.5 guardrail #4 (`IGateResolver` before side effects): the `SendEmail` step's `humanGate.required = true` is the canonical example. Even if the user overrides via Instance parameter, the override is logged per spec.md FR-20 acceptance.
+
+    The cron expression rendering (`0 {timeOfDayHour} * * {dayOfWeek}`) MUST handle the `timeOfDay` parameter format. If `timeOfDay = "09:00"`, the hour is `09`. A small render helper (in the orchestrator from task 041) handles this — confirm the helper exists; if not, file a dependency note.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: STANDARD with the reason from `&lt;rigor-reason&gt;`. Use the `jps-action-create` skill for scaffolding, `jps-validate` for schema checks, and `dataverse-deploy` for the upsert. Follow the task-execute skill for proactive checkpointing. Skip Step 9.5 quality gate (STANDARD rigor — no .cs/.ts changes), but record the scheduled-dispatch + gate + idempotency verification evidence carefully.
+    </protocol>
+  </execution>
+</task>

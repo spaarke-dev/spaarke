@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Simplify `TodoDetail` shared component to single-entity load/save</title>
+    <phase>Phase 2: Shared-Lib Hoist</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>002, 010</dependencies>
+    <blocks>020, 022</blocks>
+    <tags>react, typescript, frontend, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx` in the shared lib; deletes helper functions referenced elsewhere; FULL rigor with quality gates.</rigor-reason>
+    <parallel-group>P2-W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 010 (Kanban hoist) for shared-lib build settle.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Reduce `TodoDetail` shared component to single-entity load/save against `sprk_todo`. Delete `loadTodoExtension`, `saveTodoExtensionFields`, `deactivateTodoExtension` and the parallel two-entity (`sprk_event` + `sprk_eventtodo`) load logic. `loadTodoRecord` becomes a single `retrieveRecord("sprk_todo", id, fields)`; save is a single `updateRecord("sprk_todo", id, fields)`.
+  </prompt>
+
+  <role>Spaarke shared-UI developer with Fluent UI v9 + Dataverse Web API expertise.</role>
+
+  <goal>`TodoDetail` operates against `sprk_todo` only. Deleted: `loadTodoExtension`, `saveTodoExtensionFields`, `deactivateTodoExtension`. Single-entity load/save path verified by unit tests. Build clean across consumers.</goal>
+
+  <context>
+    <background>R1/R2 `TodoDetail` had to load both `sprk_event` and `sprk_eventtodo` in parallel (the "extension" pattern). With `sprk_todo` as a first-class entity, this is unnecessary and adds complexity. Per FR-09, all two-entity logic is deleted.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-09">`loadTodoExtension`, `saveTodoExtensionFields`, `deactivateTodoExtension` deleted; `loadTodoRecord` operates against `sprk_todo`; save is single `updateRecord`.</constraint>
+    <constraint source="NFR-01">Fluent v9 + semantic tokens + Griffel `makeStyles` only.</constraint>
+    <constraint source="OS-1">No compat shims — DO NOT keep the old helpers as deprecated wrappers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current `TodoDetail` implementation. Map every reference to the three deleted helpers + the two-entity load logic.</step>
+    <step order="2">Refactor `loadTodoRecord` to a single `retrieveRecord("sprk_todo", id, fields)` call.</step>
+    <step order="3">Refactor save to a single `updateRecord("sprk_todo", id, fields)` call.</step>
+    <step order="4">Delete `loadTodoExtension`, `saveTodoExtensionFields`, `deactivateTodoExtension` (definitions + every import).</step>
+    <step order="5">Update unit tests to cover the single-entity path. Delete tests scoped to the deleted helpers.</step>
+    <step order="6">Run `npm run build` + `npm test` in Spaarke.UI.Components. Verify clean build + test pass.</step>
+    <step order="7">Repo grep for the three deleted helper names. Confirm zero hits in `src/`.</step>
+    <step order="8">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="grep">Reference verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">`src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/` simplified</output>
+    <output type="test">Updated unit tests for single-entity path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Three named helpers deleted; zero `src/` references remain.</criterion>
+    <criterion testable="true">`loadTodoRecord` is a single `retrieveRecord("sprk_todo", ...)`.</criterion>
+    <criterion testable="true">Save is a single `updateRecord("sprk_todo", ...)`.</criterion>
+    <criterion testable="true">Unit tests cover the single-entity load + save path; all pass.</criterion>
+    <criterion testable="true">`npm run build` clean.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

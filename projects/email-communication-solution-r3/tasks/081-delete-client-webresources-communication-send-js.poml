@@ -1,0 +1,101 @@
+<task id="081" project="email-communication-solution-r3">
+  <metadata>
+    <title>Delete `src/client/webresources/js/sprk_communication_send.js` (~1,150 LOC)</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>083</blocks>
+    <tags>cleanup, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Source file deletion — requires verification of zero remaining references; not architectural but mistakes here break ribbon entry points</rigor-reason>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-24</fr-refs>
+  </metadata>
+
+  <prompt>
+    Delete the primary copy of the retired webresource at `src/client/webresources/js/sprk_communication_send.js` (~1,150 LOC — larger than the spec's stated ~600 LOC per empirical CLAUDE.md finding #7). Before deletion: verify the task 080 audit verdict is "safe to proceed" AND verify no `import` / `<script>` / config reference to this file remains anywhere in the repo.
+
+    This is one of two webresource source files (the other lives in `infrastructure/dataverse/ribbon/EmailRibbons/WebResources/` and is deleted by task 082). Parallel-safe with 082 because they touch different files.
+  </prompt>
+
+  <role>
+    Dataverse webresource lifecycle specialist. Familiar with the relationship between source file in repo, the deployed Dataverse web resource record, and ribbon entry points that load the resource at runtime.
+  </role>
+
+  <goal>
+    `src/client/webresources/js/sprk_communication_send.js` deleted from the repo. Zero remaining references to this file anywhere in `src/`, `infrastructure/`, or build pipelines. Repository builds successfully after deletion.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-24, the canonical client-side email send is the EmailComposer Code Page (`sprk_emailcomposer`, deployed Wave 2). The legacy webresource `sprk_communication_send.js` is now redundant. Task 080 audited entry points; this task removes the primary source file.
+
+      The second copy at `infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js` is a duplicate (older copy from R1 ribbon authoring); it's deleted by task 082 in parallel.
+
+      The Dataverse web resource record (the deployed copy) is deleted by task 083 sequentially after both source files are gone.
+    </background>
+    <relevant-files>
+      <file>src/client/webresources/js/sprk_communication_send.js</file>
+      <file>notes/research/080-webresource-entry-point-audit.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-24">Source file deletion MUST be preceded by audit verdict (task 080 must be complete with "safe to proceed")</constraint>
+    <constraint source="FR-24">After deletion, no `import` / `<script src>` / config reference to the file may remain</constraint>
+    <constraint source="project">Coordinated with parallel task 082 (deletes the duplicate copy); both can run in same wave</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>notes/research/080-webresource-entry-point-audit.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify task 080 is ✅ completed with verdict "safe to proceed". If not, STOP and notify.</step>
+    <step order="2">Confirm file existence: `ls src/client/webresources/js/sprk_communication_send.js`. Record approximate LOC for the PR description.</step>
+    <step order="3">Grep the repo for any remaining references to `sprk_communication_send`: `grep -r "sprk_communication_send" --include="*.js" --include="*.ts" --include="*.tsx" --include="*.json" --include="*.xml" --include="*.html"`. EXPECT only the file itself and the task-082 duplicate to be hits. Any OTHER hit must be resolved before deletion.</step>
+    <step order="4">Delete `src/client/webresources/js/sprk_communication_send.js`.</step>
+    <step order="5">Re-run the grep from step 3 — confirm zero hits remain other than the task-082 duplicate (which will be deleted by that task).</step>
+    <step order="6">Build any solution that previously bundled this webresource (likely none — confirm via build script inspection): `npm run build` on the webresources package if one exists.</step>
+    <step order="7">Stage the deletion in git with a clear commit message: `chore(r3/task-081): delete sprk_communication_send.js (primary copy, ~1,150 LOC) per FR-24`.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 081 ✅ completed.</step>
+    <step order="9">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify zero remaining references</tool>
+    <tool name="bash">Delete the file + run build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_communication_send.js (DELETED, ~1,150 LOC removed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/client/webresources/js/sprk_communication_send.js` no longer exists.</criterion>
+    <criterion testable="true">Grep for `sprk_communication_send` returns ONLY the task-082 duplicate path (which is deleted in parallel) — no other references.</criterion>
+    <criterion testable="true">Any build pipeline that previously consumed this file builds clean.</criterion>
+    <criterion testable="true">Commit message references FR-24 and task 081.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical findings from project pipeline (relevant here):
+    - Spec stated ~600 LOC per copy; reality is ~1,150 LOC per copy (CLAUDE.md finding #7). The PR description for Wave 6 retirement should cite the actual LOC count.
+    - Parallel-safe with task 082 — they target different files. Both deletions complete before task 083 deletes the Dataverse record.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Step 1 audit-verdict check is the binding gate.
+    </protocol>
+  </execution>
+</task>

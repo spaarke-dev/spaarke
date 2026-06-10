@@ -15,12 +15,12 @@
  *   Effort inverted (0.20) — lower effort = quick wins bubble up.
  *   Due date urgency (0.30) — time pressure adds urgency bonus.
  *
- * All inputs come from existing IEvent fields — this is a client-side
- * convenience sort key and does NOT replace the BFF-computed
- * sprk_priorityscore / sprk_effortscore.
+ * All inputs come from existing `sprk_todo` (ITodo) fields — this is a
+ * client-side convenience sort key and does NOT replace the BFF-computed
+ * sprk_priorityscore / sprk_effortscore on the record itself.
  */
 
-import type { IEvent } from '../types/entities';
+import type { ITodo } from '../types/entities';
 import { parseDueDate } from './dueLabelUtils';
 
 // ---------------------------------------------------------------------------
@@ -80,23 +80,23 @@ export function computeDueDateUrgencyRaw(dueDate: Date | null): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the To Do Score for an event.
+ * Compute the To Do Score for a `sprk_todo` record.
  *
- * @param event - The event record with priority/effort/due-date fields.
+ * @param todo - The to-do record with priority/effort/due-date fields.
  * @returns Breakdown with the final todoScore and per-component values.
  */
-export function computeTodoScore(event: IEvent): ITodoScoreBreakdown {
+export function computeTodoScore(todo: ITodo): ITodoScoreBreakdown {
   // Priority: use sprk_priorityscore (0-100), default 50 (Normal)
-  const rawPriority = event.sprk_priorityscore ?? 50;
+  const rawPriority = todo.sprk_priorityscore ?? 50;
   const priorityComponent = rawPriority * W_PRIORITY;
 
   // Effort inverted: lower effort → higher score (quick wins)
-  const rawEffort = event.sprk_effortscore ?? 50;
+  const rawEffort = todo.sprk_effortscore ?? 50;
   const invertedEffort = 100 - rawEffort;
   const effortComponent = invertedEffort * W_EFFORT;
 
   // Due-date urgency
-  const dueDate = parseDueDate(event.sprk_duedate);
+  const dueDate = parseDueDate(todo.sprk_duedate);
   const rawUrgency = computeDueDateUrgencyRaw(dueDate);
   const urgencyComponent = rawUrgency * W_URGENCY;
 

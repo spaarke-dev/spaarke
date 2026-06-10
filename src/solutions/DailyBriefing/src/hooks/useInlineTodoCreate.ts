@@ -1,10 +1,26 @@
 /**
- * useInlineTodoCreate — hook for creating To Do items (sprk_event records)
- * directly from notification items in the Daily Briefing.
+ * useInlineTodoCreate — hook for creating `sprk_todo` records directly from
+ * notification items in the Daily Briefing.
  *
- * Unlike FeedTodoSyncContext (which toggles existing sprk_event.sprk_todoflag),
- * this hook CREATES new sprk_event records from notification data. It tracks
- * per-notification creation state so the UI can show pending/created/error states.
+ * Per smart-todo-decoupling-r3 FR-29 / OS-1 (task 014, 2026-06-08):
+ *   - Creates first-class `sprk_todo` Dataverse records.
+ *   - Legacy `sprk_event { sprk_todoflag=true, sprk_todostatus, sprk_todosource }`
+ *     model is retired across the repo. This hook was the final functional
+ *     consumer outside the BFF.
+ *   - No backward-compat shim — `sprk_eventtodo` is not written under any
+ *     circumstances.
+ *
+ * Regarding (multi-entity resolution per ADR-024):
+ *   - When the notification item carries `regardingEntityType` + `regardingId`,
+ *     the hook resolves the catalog entry from `TODO_REGARDING_CATALOG` and
+ *     calls `applyResolverFields` to atomically populate the entity-specific
+ *     lookup + four resolver fields (sprk_regardingrecordtype,
+ *     sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl).
+ *   - If the regarding entity type is not in the catalog, the regarding step is
+ *     skipped and the todo is created without an association (the resolver
+ *     fields stay null).
+ *
+ * Tracks per-notification creation state so the UI can show pending/created/error.
  *
  * Usage:
  *   const { createTodo, isCreated, isPending, getError } = useInlineTodoCreate(webApi);
@@ -15,6 +31,12 @@
  */
 
 import { useState, useRef, useCallback } from "react";
+import {
+  applyResolverFields,
+  TODO_REGARDING_CATALOG,
+  type INavPropEntry,
+  type IPolymorphicWebApi,
+} from "@spaarke/ui-components/services";
 import type { IWebApi, NotificationItem, NotificationPriority } from "../types/notifications";
 
 // ---------------------------------------------------------------------------
@@ -24,7 +46,7 @@ import type { IWebApi, NotificationItem, NotificationPriority } from "../types/n
 type TodoCreateStatus = "pending" | "created" | "error";
 
 export interface UseInlineTodoCreateResult {
-  /** Create a new To Do (sprk_event) from a notification item. */
+  /** Create a new `sprk_todo` from a notification item. */
   createTodo: (item: NotificationItem) => Promise<void>;
   /** Returns true if a To Do was successfully created for this notification. */
   isCreated: (itemId: string) => boolean;
@@ -35,38 +57,88 @@ export interface UseInlineTodoCreateResult {
 }
 
 // ---------------------------------------------------------------------------
+// sprk_todo lifecycle constants (mirrors SmartTodo/DataverseService.ts task 020)
+// ---------------------------------------------------------------------------
+
+/** sprk_todo statecode: 0 = Active. */
+const STATECODE_ACTIVE = 0;
+/** sprk_todo statuscode: 1 = Open (statecode 0). */
+const STATUSCODE_OPEN = 1;
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Map notification priority string to Dataverse sprk_priority option set value.
- * Values: 100000000=Low, 100000001=Normal, 100000002=High, 100000003=Urgent
- * (per CreateTodo/formTypes.ts) */
-function mapPriorityToOptionSet(priority: NotificationPriority): number {
+/**
+ * Map notification priority string to a 0-100 priority score for
+ * `sprk_todo.sprk_priorityscore`. Bands match the implicit kanban
+ * banding used elsewhere (low ~20, normal ~50, high ~70, urgent ~90).
+ */
+function mapPriorityToScore(priority: NotificationPriority): number {
   switch (priority) {
     case "urgent":
-      return 100000003;
+      return 90;
     case "high":
-      return 100000002;
+      return 70;
     case "normal":
-      return 100000001;
+      return 50;
     case "low":
-      return 100000000;
+      return 20;
     default:
-      return 100000001; // default to normal
+      return 50;
   }
 }
 
-/** Map entity logical name to Dataverse entity set name (plural form for OData). */
-function getEntitySetName(logicalName: string): string {
-  const map: Record<string, string> = {
-    sprk_matter: "sprk_matters",
-    sprk_project: "sprk_projects",
-    sprk_document: "sprk_documents",
-    sprk_event: "sprk_events",
-    sprk_invoice: "sprk_invoices",
-    sprk_contact: "sprk_contacts",
-  };
-  return map[logicalName] ?? `${logicalName}s`;
+// ---------------------------------------------------------------------------
+// Nav-prop discovery for sprk_todo (mirrors the shared `todoService.ts` pattern)
+// ---------------------------------------------------------------------------
+
+/** Page-session cache of discovered ManyToOne nav-props, keyed by entity name. */
+const _navPropCache: Record<string, INavPropEntry[]> = {};
+
+async function _discoverNavProps(
+  entityLogicalName: string
+): Promise<INavPropEntry[]> {
+  if (_navPropCache[entityLogicalName]) {
+    return _navPropCache[entityLogicalName];
+  }
+
+  try {
+    const url =
+      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
+      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
+
+    const resp = await fetch(url, { credentials: "include" });
+    if (!resp.ok) {
+      console.warn(
+        `[useInlineTodoCreate] Nav-prop discovery failed for ${entityLogicalName}: HTTP ${resp.status}`
+      );
+      return [];
+    }
+
+    const json = (await resp.json()) as {
+      value?: Array<{
+        ReferencingAttribute: string;
+        ReferencingEntityNavigationPropertyName: string;
+        ReferencedEntity: string;
+      }>;
+    };
+
+    const entries: INavPropEntry[] = (json.value ?? []).map((r) => ({
+      columnName: r.ReferencingAttribute,
+      navPropName: r.ReferencingEntityNavigationPropertyName,
+      referencedEntity: r.ReferencedEntity,
+    }));
+
+    _navPropCache[entityLogicalName] = entries;
+    return entries;
+  } catch (err) {
+    console.warn(
+      `[useInlineTodoCreate] Nav-prop discovery error for ${entityLogicalName}:`,
+      err
+    );
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -100,27 +172,62 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
       });
 
       try {
-        // Build the sprk_event record
+        // 1. Build the core sprk_todo record (per entity-schema.md + SmartTodo
+        //    DataverseService.createTodo pattern).
         const record: Record<string, unknown> = {
-          sprk_eventname: item.title,
-          sprk_todoflag: true,
-          sprk_todostatus: 100000000, // Open
-          sprk_todosource: 100000001, // User
-          sprk_priority: mapPriorityToOptionSet(item.priority),
+          sprk_name: item.title,
+          statecode: STATECODE_ACTIVE,
+          statuscode: STATUSCODE_OPEN,
+          sprk_priorityscore: mapPriorityToScore(item.priority),
         };
 
         if (item.body) {
-          record["sprk_description"] = item.body;
+          // sprk_notes is the rich-text/long-text body field on sprk_todo
+          // (replaces the legacy sprk_event.sprk_description path).
+          record["sprk_notes"] = item.body;
         }
 
-        // Add regarding lookup if available
+        // 2. Apply regarding (multi-entity resolution per ADR-024) — only when
+        //    a regarding entity is supplied AND it's in the supported catalog.
         if (item.regardingEntityType && item.regardingId) {
-          const entitySetName = getEntitySetName(item.regardingEntityType);
-          record["sprk_Regarding@odata.bind"] =
-            `/${entitySetName}(${item.regardingId})`;
+          const catalogEntry = TODO_REGARDING_CATALOG.find(
+            (c: { entityType: string }) => c.entityType === item.regardingEntityType
+          );
+
+          if (catalogEntry) {
+            // Wrap IWebApi.retrieveMultipleRecords into the shape
+            // applyResolverFields expects (IPolymorphicWebApi).
+            const polyWebApi: IPolymorphicWebApi = {
+              retrieveMultipleRecords: (entityLogicalName: string, query: string) =>
+                webApi.retrieveMultipleRecords(entityLogicalName, query),
+            };
+
+            const navProps = await _discoverNavProps("sprk_todo");
+
+            // Notification carries the parent's display name in `regardingName`.
+            await applyResolverFields(
+              polyWebApi,
+              record,
+              navProps,
+              catalogEntry.entityType,
+              catalogEntry.entitySet,
+              item.regardingId,
+              item.regardingName ?? "",
+              catalogEntry.navPropHint
+            );
+          } else {
+            // Regarding entity not in supported catalog — create the todo
+            // without a regarding association rather than failing the whole
+            // operation. This handles notifications for entities not in the
+            // 11-entity multi-entity resolution scope.
+            console.info(
+              `[useInlineTodoCreate] Regarding entity "${item.regardingEntityType}" not in TODO_REGARDING_CATALOG — creating todo without association.`
+            );
+          }
         }
 
-        await webApi.createRecord("sprk_event", record);
+        // 3. Create the sprk_todo record (NEVER sprk_event).
+        await webApi.createRecord("sprk_todo", record);
 
         // Success
         setStatusMap((prev) => {

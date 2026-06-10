@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>IToolHandlerRegistry — Phase deny-tools mechanical enforcement (LAVERN Pattern #8)</title>
+    <phase>Phase 2: Tool Registry + Discovery</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>040, 052, 063</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF code implementation enforcing mechanical security boundary (Phase deny-tools per LAVERN Pattern #8); blocks Phase 4 + integration test G4; tags include bff-api + ai</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct scope (dispatch layer) from Group C meta-tools (services) and from tasks 021 (endpoints) and 025 (registration). Touches `Services/Ai/ActionEngine/Dispatch/` — no file overlap with siblings. Parallelizable per task-create §3.8.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `IToolHandlerRegistry` dispatch with mechanical Phase deny-tools enforcement per LAVERN Pattern #8 + design.md §5. When a Tool is dispatched, the registry checks the current execution phase against the Tool's `PhaseRestrictions` (from the ToolRegistry metadata model, task 020); if the Tool is in the deny-list for the current phase, throw `PhaseToolDeniedException` with a clear message naming the phase and forbidden Tool. This is mechanical enforcement — NOT prompt-coached — and is the canonical security boundary preventing probabilistic agents (e.g., Builder Agent) from dispatching execute-phase Tools from the authoring phase or vice versa.
+  </prompt>
+
+  <role>
+    Senior .NET 8 / security-aware engineer with deep familiarity with dispatch-layer enforcement patterns. Designs the enforcement so it cannot be circumvented by prompt engineering — the registry is the only path to dispatch and the check happens before any Tool handler runs.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **`IToolHandlerRegistry` interface + implementation** — `Task&lt;ToolDispatchResult&gt; DispatchAsync(string resourceId, Dictionary&lt;string, object&gt; parameters, IPhaseContext phaseContext)`. Looks up the handler by `resourceId`; checks `PhaseRestrictions` against `phaseContext.CurrentPhase`; throws `PhaseToolDeniedException` if denied; otherwise invokes the handler.
+    2. **`PhaseToolDeniedException`** — typed exception with `Phase` + `ResourceId` + `DenyReason` properties. Message format: `"Tool '{resourceId}' is denied in phase '{phase}'. Deny rule: {denyReason}."` Distinguishable from generic errors so callers (task 024 `InvokeResourceTool`) can return `Failed { ErrorKind = PhaseDenied }`.
+    3. **Integration test** — verifies G4 spec gate: throws `PhaseToolDeniedException` when execute Tool dispatched during authoring phase, and vice versa. Plus a positive test (allowed Tool dispatches successfully).
+
+    Deliverable: `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/IToolHandlerRegistry.cs` (interface) + `ToolHandlerRegistry.cs` (impl) + `PhaseToolDeniedException.cs` + tests.
+  </goal>
+
+  <context>
+    <background>
+      LAVERN Pattern #8 (referenced in design.md §5 and design.md §11) is the mechanical phase-enforcement pattern. From design.md: "Phase deny-tools (LAVERN Pattern #8) is enforced at `IToolHandlerRegistry` dispatch time. Violation throws `PhaseToolDeniedException` with a clear message naming the phase and the forbidden tool. This is **mechanical** enforcement, not prompt-coached — the Builder Agent's prompt cannot circumvent it."
+
+      `PhaseRestrictions` shape (from task 020 model):
+      ```
+      "phaseRestrictions": [
+        { "phase": "authoring", "denyTools": ["SendEmail", "DeleteRecord"] },
+        { "phase": "execution", "denyTools": ["CreateActionTemplate"] }
+      ]
+      ```
+
+      Execution phases in MVP scope (per design.md):
+      - **authoring** — Builder Agent constructs an Action Template; should NOT dispatch execute-phase Tools (e.g., SendEmail).
+      - **execution** — Runtime invokes a deployed Action; should NOT dispatch authoring-phase Tools (e.g., CreateActionTemplate).
+
+      The `IPhaseContext` parameter signals which phase the caller is in. For Phase 2 the only consumers are:
+      - Task 024 `InvokeResourceTool` — passes phase from chat-session context (`sprk_aichatcontextmap.currentPhase`)
+      - Phase 4 task 040 `ActionEndpoints.Run` — passes `Phase = execution`
+
+      The enforcement is mechanical: registry is the only dispatch path; check happens before handler invocation; exception is typed for caller-handling.
+
+      Integration test for G4 lives at `tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/ActionEngine/Dispatch/PhaseDeniedToolsTests.cs` — covered by task 063 (Phase 6 integration tests) but this task wires the foundational unit test that asserts the exception shape and per-phase behavior.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/IToolHandlerRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/ToolHandlerRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/PhaseToolDeniedException.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/IPhaseContext.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModel.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Dispatch/ToolHandlerRegistryTests.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/lavern-pattern-assessment.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. Dispatch runs in-proc.</constraint>
+    <constraint source="ADR-008">Authorization happens at the calling endpoint (endpoint-filter). This dispatch layer enforces phase boundaries — a different axis from auth. Both apply.</constraint>
+    <constraint source="ADR-010">DI minimalism. `IToolHandlerRegistry` registered once via `AddActionEngineModule()`. Tool handlers registered via the registry's `Register&lt;THandler&gt;(resourceId)` method, not by individual DI registrations.</constraint>
+    <constraint source="ADR-013">PublicContracts boundary. `IToolHandlerRegistry` is internal — NOT exposed via the facade. Phase 4 `IActionEngineFacade.RunAction()` is the CRUD-side surface; it internally calls the registry.</constraint>
+    <constraint source="ADR-015">Audit Tier 2 + Tier 3: every dispatch (successful AND denied) MUST write audit. Tier 2 hashes the dispatch envelope; Tier 3 Cosmos work history records the dispatch outcome (including phase-denied outcomes for security forensics).</constraint>
+    <constraint source="ADR-019">`PhaseToolDeniedException` propagates to caller; caller (task 024 / task 040) translates to ProblemDetails or `ResourceExecutionResult.Failed` per surface.</constraint>
+    <constraint source="ADR-029">No new NuGet packages.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge: placement (in BFF — dispatch is core AE machinery, never CRUD-side). Zero publish-size delta.</constraint>
+    <constraint source="project">LAVERN Pattern #8 (referenced in design.md §5, §11): mechanical phase enforcement at `IToolHandlerRegistry` dispatch. NOT prompt-coached. The Builder Agent's prompt CANNOT circumvent it because the registry is the only dispatch path.</constraint>
+    <constraint source="project">Spec gate G4: `IToolHandlerRegistry` Phase deny-tools throws `PhaseToolDeniedException` — verified by `PhaseDeniedTools` integration test (task 063).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/lavern-pattern-assessment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Registry-driven dispatch" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">Existing pattern of resolving handlers by resource id; this task adds the phase-gate check before invocation.</pattern>
+      <pattern name="Typed exception for cross-layer signal" location="src/server/api/Sprk.Bff.Api/">Existing BFF pattern of typed exceptions for distinguishable error semantics; `PhaseToolDeniedException` follows this shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm baseline build passes; task 020 merged or branch-loadable; LAVERN Pattern #8 reading complete (`lavern-pattern-assessment.md` + design.md §5).</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;`. Pay close attention to design.md §5 (Phase deny-tools subsection), design.md §11 (LAVERN cross-references), and `lavern-pattern-assessment.md` (external reference for pattern intent).</step>
+    <step order="2">Sketch the interface:
+      - `IToolHandlerRegistry.DispatchAsync(string resourceId, Dictionary&lt;string, object&gt; parameters, IPhaseContext phaseContext)` returns `Task&lt;ToolDispatchResult&gt;`.
+      - `IToolHandlerRegistry.Register&lt;THandler&gt;(string resourceId) where THandler : IToolHandler` — handler registration entry point used by `AddActionEngineModule()`.
+      - `IPhaseContext.CurrentPhase` (enum: `Authoring`, `Execution`, plus `Unknown` for sessions without an explicit phase).
+      - `PhaseToolDeniedException(string resourceId, string phase, string denyReason)`.</step>
+    <step order="3">Implement `PhaseToolDeniedException.cs`: extends `Exception`, properties `ResourceId`, `Phase`, `DenyReason`. Message format: `"Tool '{ResourceId}' is denied in phase '{Phase}'. Deny rule: {DenyReason}."` Add `[Serializable]` if needed for cross-AppDomain (likely not in MVP).</step>
+    <step order="4">Implement `IPhaseContext.cs` + a default `PhaseContext.cs` implementation. Phase enum: `Authoring`, `Execution`, `Unknown`. Where the context comes from depends on the caller — chat-session callers pass `sprk_aichatcontextmap.currentPhase`; Action runtime endpoint passes `Execution` directly.</step>
+    <step order="5">Implement `ToolHandlerRegistry.cs`:
+      - In-memory dictionary `Dictionary&lt;string, Type&gt; _handlers` (resourceId → handler type).
+      - `Register&lt;THandler&gt;(resourceId)` adds to dictionary.
+      - `DispatchAsync`:
+        1. Look up handler type by `resourceId`; throw `KeyNotFoundException` if not found (caller translates to NotFound).
+        2. Read Tool Registry entry for `resourceId` (via injected Dataverse client or cached lookup).
+        3. Check `entry.PhaseRestrictions` for `phaseContext.CurrentPhase`; if `resourceId` is in the deny list, throw `PhaseToolDeniedException` with the deny reason from the registry.
+        4. Resolve the handler instance from DI (`IServiceProvider.GetRequiredService(handlerType)`).
+        5. Invoke `handler.InvokeAsync(parameters)`.
+        6. Return `ToolDispatchResult { Status = Succeeded, Payload, LatencyMs }`.</step>
+    <step order="6">Wire ADR-015 audit: every dispatch path (success, phase-denied, exception) writes a Tier 2 hash event + Tier 3 Cosmos work history record. The phase-denied path is critical for security forensics — confirm middleware picks it up via exception filter OR add explicit audit write in the catch block.</step>
+    <step order="7">Register `IToolHandlerRegistry` (singleton) in `AddActionEngineModule()`. Tool handlers are registered via `registry.Register&lt;Handler&gt;(resourceId)` calls inside the module — these count toward ADR-010 ≤15 budget only as the registry itself (singletons under the registry don't count individually).</step>
+    <step order="8">Write unit tests at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Dispatch/ToolHandlerRegistryTests.cs`:
+      - (a) Handler dispatches successfully when no phase restriction applies.
+      - (b) Handler dispatches successfully when phase is allowed.
+      - (c) `PhaseToolDeniedException` thrown when dispatching `SendEmail` in `Authoring` phase (given Tool Registry mock with `PhaseRestrictions.Authoring.DenyTools = [SendEmail]`).
+      - (d) `PhaseToolDeniedException` thrown when dispatching `CreateActionTemplate` in `Execution` phase.
+      - (e) Exception message includes resource id + phase + deny reason.
+      - (f) Audit middleware receives a Tier 2 event for the denied dispatch (verified via `IAuditWriter` mock).
+      - (g) Unknown phase + Tool with PhaseRestrictions → dispatches (fail-open for `Unknown` is the safer Phase 2 default; document in code comments + escalate if owner wants fail-closed).</step>
+    <step order="9">Verify build + tests + format: `dotnet build`, `dotnet test --filter "ToolHandlerRegistry"`, `dotnet format`. Verify NFR-10.</step>
+    <step order="9.5">Run quality gates: `code-review` on the new files (security-sensitive — request thorough review); `adr-check` verifies ADR-008 (auth orthogonal layer respected), ADR-010 (DI budget), ADR-013 (NOT exposed via PublicContracts), ADR-015 (audit on all dispatch paths including denied), ADR-019 (typed exception propagates cleanly), ADR-029 (no new packages).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 026 ✅. Update `current-task.md`. Note the `Unknown` phase fail-open decision for owner awareness (escalate if owner wants fail-closed default).</step>
+    <step order="11">Document the LAVERN Pattern #8 enforcement contract in `projects/ai-spaarke-action-engine-r1/notes/handoffs/` — including the `Unknown` phase semantics, the exception envelope, and how task 024 (`InvokeResourceTool`) consumes the typed exception. Commit with brief recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, format</tool>
+    <tool name="git">State + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/IToolHandlerRegistry.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/ToolHandlerRegistry.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/PhaseToolDeniedException.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/IPhaseContext.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/PhaseContext.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (registry registration)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Dispatch/ToolHandlerRegistryTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/handoffs/lavern-pattern-8-enforcement-contract.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IToolHandlerRegistry.DispatchAsync` interface exists with `(string resourceId, Dictionary&lt;string, object&gt; parameters, IPhaseContext phaseContext)` signature.</criterion>
+    <criterion testable="true">`PhaseToolDeniedException` is typed with `ResourceId`, `Phase`, `DenyReason` properties; message includes all three.</criterion>
+    <criterion testable="true">throws `PhaseToolDeniedException` when execute Tool dispatched during authoring phase (G4) — verified by unit test (c) above.</criterion>
+    <criterion testable="true">throws `PhaseToolDeniedException` when authoring Tool dispatched during execution phase — verified by unit test (d) above.</criterion>
+    <criterion testable="true">Handler dispatches successfully when no phase restriction applies OR when phase is explicitly allowed — verified by unit tests (a) + (b).</criterion>
+    <criterion testable="true">ADR-015 audit applies to all dispatch paths including phase-denied — verified by unit test (f).</criterion>
+    <criterion testable="true">NOT exposed via `PublicContracts/IActionEngineFacade.cs` (ADR-013 boundary) — verified by grep.</criterion>
+    <criterion testable="true">No new NuGet packages added (NFR-10 preserved); DI count under ADR-010 budget.</criterion>
+    <criterion testable="true">Supports spec gate G4 (Phase deny-tools enforcement); integration test in task 063 will validate the full E2E flow.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    LAVERN Pattern #8 is the canonical security boundary for this project. Code review should treat this task with the rigor of a security-sensitive change. The mechanical-not-prompt-coached property is what gives the Builder Agent (Phase 5+) safety guarantees — if a Builder Agent prompt instructs the LLM to "ignore phase restrictions," the registry's enforcement still wins because the dispatch path is unconditional.
+
+    `Unknown` phase fail-open is a deliberate Phase 2 default — sessions without an explicit phase context (e.g., legacy chat sessions before `sprk_aichatcontextmap.currentPhase` is populated) dispatch normally. If the owner wants fail-closed (deny unless phase explicitly allowed), escalate before committing. Phase 5 work seeds `currentPhase` for all new sessions.
+
+    The audit on phase-denied dispatch is non-trivial security forensics. ADR-015 middleware should pick up the thrown exception via existing exception-filter wiring, but VERIFY this in test (f) — add an explicit `_auditWriter.WriteDeniedDispatch(...)` call in the catch block if the middleware doesn't auto-fire on typed exceptions.
+
+    The interface `IToolHandlerRegistry` may already exist as a stub from task 014 (BFF module skeleton). This task fills in the dispatch logic + phase enforcement; do NOT re-create the interface if 014 already shipped it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with reason from `&lt;rigor-reason&gt;`. Follow task-execute skill for checkpoint protocol every 3 steps and quality gates at Step 9.5. Treat code review as security-sensitive — request thorough review of the dispatch + exception path.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Customize `sprk_todo.statuscode` option values (Open / In Progress / Completed / Dismissed) — follow-up from task 002</title>
+    <phase>Phase 1: Dataverse Schema (audit-surfaced follow-up)</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>002</dependencies>
+    <blocks>061</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema metadata update — modifies statuscode option values on `sprk_todo`. STANDARD rigor; small surface.</rigor-reason>
+    <parallel-group>P1-W2.5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Task 002 created `sprk_todo` but Dataverse auto-defaulted the `statuscode` option pair to Active(1)/Inactive(2). Per design §4.1 + spec FR-24, the statuscode option set should support the four states that map bidirectionally to Microsoft Graph todoTask status: **Open** / **In Progress** / **Completed** / **Dismissed**. This task customizes the statuscode option values to match: extend statuscode under the Active statecode with `Open` + `In Progress`; extend under Inactive with `Completed` + `Dismissed`. Use `UpdateOptionValueRequest` or equivalent metadata API (Web API + PowerShell SDK; PAC CLI does NOT support this).
+  </prompt>
+
+  <role>Spaarke Dataverse schema developer.</role>
+
+  <goal>`sprk_todo.statuscode` exposes four option values (Open + In Progress under Active; Completed + Dismissed under Inactive) matching design §4.1 + spec FR-24 Graph-status mapping. Field mapping for Graph sync (task 061) can be implemented without further schema work.</goal>
+
+  <context>
+    <background>Surfaced by the task 002 sub-agent on 2026-06-07: "statuscode auto-defaults to Active(1)/Inactive(2) pair. Design row 76 specifies Open/Completed/Dismissed. Customizing statuscode option values requires a separate UpdateOptionValueRequest pass (not in scope for entity-creation task). Recommend filing a small follow-up task." This is that task. Also reconciles a design vs. spec drift: design uses Open/Completed/Dismissed (3); FR-24 uses notStarted/inProgress/completed/deferred (4). Resolution: use design's English labels + Graph's 4-state semantics → Open / In Progress / Completed / Dismissed.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+      <file>projects/smart-todo-decoupling-r3/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-24">Status mapping to Graph: Open → `notStarted`, In Progress → `inProgress`, Completed → `completed`, Dismissed → `deferred`. The Spaarke-side labels are English; mapping happens in the sync handler (task 061).</constraint>
+    <constraint source="design §4.1">Status options: Open / Completed / Dismissed. Extended to 4 here to match Graph's 4-state model (per FR-24).</constraint>
+    <constraint source="project">Product portability: schema change exports via solution; not env-specific.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect current `sprk_todo.statuscode` schema via `mcp__dataverse__describe` or Web API metadata. Confirm only Active(1)/Inactive(2) defaults present.</step>
+    <step order="2">Decide numeric values per Spaarke convention (consistent with other Spaarke entities — e.g., active=1, in-progress=2, completed=3, dismissed=4; OR use the 100000000+ range if that's Spaarke convention). Document the choice.</step>
+    <step order="3">Use Web API `UpdateOptionValueRequest` (or `UpdateStatus` for statecode-related option metadata) scoped to `SolutionUniqueName = SpaarkeCore` for portability. Rename `1 → Open`; add `2 → In Progress` (both under statecode Active). Add `3 → Completed`, `4 → Dismissed` (both under statecode Inactive).</step>
+    <step order="4">Publish customizations.</step>
+    <step order="5">Verify via `mcp__dataverse__describe` that all four option values are present + correctly mapped to statecode parents.</step>
+    <step order="6">Update `src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md` with the final statuscode option list.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅.</step>
+  </steps>
+
+  <outputs>
+    <output type="schema">`sprk_todo.statuscode` with four option values (Open + In Progress under Active; Completed + Dismissed under Inactive)</output>
+    <output type="docs">`src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md` (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`mcp__dataverse__describe sprk_todo` shows statuscode with exactly four option values: Open / In Progress / Completed / Dismissed.</criterion>
+    <criterion testable="true">Statuscode → statecode mapping correct (first two under Active; last two under Inactive).</criterion>
+    <criterion testable="true">Schema is portable (exports cleanly via SpaarkeCore solution).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

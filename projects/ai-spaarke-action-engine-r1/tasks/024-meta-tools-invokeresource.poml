@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Meta-tool — InvokeResource (direct execution or gate-pending)</title>
+    <phase>Phase 2: Tool Registry + Discovery</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>040, 052</blocks>
+    <tags>bff-api, ai, meta-tools</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF code implementation; integrates with IGateResolver (Phase 3) + dispatch (task 026); ADR-013 facade boundary; ADR-015 audit; tags include bff-api + ai</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group C with 022, 023. Depends only on task 020 (data model). Touches a distinct file (`InvokeResourceTool.cs`) with no shared service state. Integration with IGateResolver is deferred — this task creates the seam (IGateResolver-shaped dependency injected as nullable / stub) and Phase 3 task 030 fills it in.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the `InvokeResource(string resourceId, Dictionary&lt;string, object&gt; parameters)` meta-tool — a Semantic Kernel function that EITHER executes the named Tool directly when no gate is configured, OR returns a `gate-pending` status when `humanGate.required = true`. Provides the agent-facing invocation primitive. Integrates with `IToolHandlerRegistry` (task 026) for dispatch and with `IGateResolver` (Phase 3 task 030) via a forward-compatible dependency seam — Phase 3 will wire the actual resolver implementations.
+  </prompt>
+
+  <role>
+    Senior .NET 8 / Semantic Kernel engineer with strong understanding of the dispatch boundary between conversational invocation (this meta-tool) and the deterministic `IToolHandlerRegistry`. Designs the gate-pending path so that the agent's conversation can suspend cleanly and resume on gate approval (Phase 3 wiring).
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **`InvokeResourceTool.cs` implementation** — `[KernelFunction]` decorated async method. Reads ToolRegistry entry; validates parameters against schema; if `humanGate.required = false` dispatches directly via `IToolHandlerRegistry`; if `humanGate.required = true` returns `ResourceExecutionResult` with `Status = GatePending` (and a `gateId` for the caller to track).
+    2. **Forward-compatible IGateResolver seam** — inject `IGateResolver?` (nullable) for Phase 3 wiring. Phase 2 returns gate-pending result without resolving; Phase 3 task 030 + 031–034 supply the resolver implementations.
+    3. **Audit and ProblemDetails parity** — dispatch path triggers `IToolHandlerRegistry` (which handles ADR-015 audit + ADR-026 phase deny-tools); errors return `ResourceExecutionResult.Failed` with ProblemDetails-equivalent error envelope.
+
+    Deliverable: `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/InvokeResourceTool.cs` + tests; SK registration wired in task 025.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-12: `InvokeResource(resourceId, parameters)` returns `ResourceExecutionResult` OR a confirmation request if `humanGate.required = true`. Direct invocation with all parameters resolved executes end-to-end; Tool with gate required returns gate-pending status.
+
+      The two return modes:
+      - **Direct execution**: `humanGate.required = false` → dispatch immediately via `IToolHandlerRegistry`; return result with payload, latency, citations.
+      - **Gate-pending**: `humanGate.required = true` → record gate-intent (write to `sprk_gate_approval` placeholder in Phase 3; for now log + return placeholder gateId); return `ResourceExecutionResult { Status = GatePending, GateId, GateType }`. The Builder Agent's prompt instructs the LLM to surface this to the user via the chat surface; user approves → resumes via Phase 3 resolver callback.
+
+      Integration boundary with Phase 3:
+      - This task defines `IGateResolver?` as a nullable dependency — present after Phase 3 task 030 lands, absent during Phase 2 standalone testing
+      - When `IGateResolver` is null AND `humanGate.required = true`, return gate-pending with a placeholder gateId + log "Gate resolver not yet wired; Phase 3 task 030 required". This prevents the meta-tool from blocking Phase 2 completion.
+
+      Integration with task 026 (dispatch):
+      - Direct execution path calls `IToolHandlerRegistry.DispatchAsync` which enforces phase deny-tools (task 026)
+      - If dispatch throws `PhaseToolDeniedException`, this meta-tool catches and returns `ResourceExecutionResult.Failed` with `ErrorKind = PhaseDenied`
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/InvokeResourceTool.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/ToolRegistryModel.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Dispatch/IToolHandlerRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/MetaTools/InvokeResourceToolTests.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. Meta-tool runs in-proc within BFF Chat agent.</constraint>
+    <constraint source="ADR-008">Endpoint-filter auth at calling endpoint. Invoke permission verified inside this meta-tool BEFORE dispatch (more restrictive than read permission used by GetResourceDetail).</constraint>
+    <constraint source="ADR-010">DI minimalism. `IToolHandlerRegistry`, `IGateResolver?` (nullable), Dataverse client injected via `[FromServices]`.</constraint>
+    <constraint source="ADR-013">PublicContracts boundary. `InvokeResource` is NOT exposed via the facade — internal SK function only. The `IActionEngineFacade.RunAction()` operation (Phase 4 task 040) is the CRUD-side equivalent surface.</constraint>
+    <constraint source="ADR-015">Audit Tier 2 + Tier 3 applies via dispatch path (`IToolHandlerRegistry`). Gate-pending path ALSO writes audit (caller initiated invocation; awaiting gate).</constraint>
+    <constraint source="ADR-019">Errors returned via `ResourceExecutionResult.Failed` with ProblemDetails-shaped error envelope (errorKind, title, detail, traceId).</constraint>
+    <constraint source="ADR-029">No new NuGet packages.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge: placement (in BFF, latency-coupled). Zero publish-size delta.</constraint>
+    <constraint source="project">spec.md FR-12: returns `ResourceExecutionResult` or gate-pending. Acceptance: direct invocation with all parameters executes end-to-end; gate-required Tool returns gate-pending status.</constraint>
+    <constraint source="project">Phase 3 forward compatibility: `IGateResolver?` nullable seam. Phase 2 returns gate-pending without resolving — Phase 3 wires actual resolution.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Semantic Kernel function registration" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">`[KernelFunction]` + `[Description]` for LLM tool selection; XML-doc parameters with descriptions.</pattern>
+      <pattern name="Dispatch indirection" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">Existing AI orchestration uses a registry-driven dispatch pattern; `IToolHandlerRegistry` mirrors this shape for Action Tools.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm baseline build passes; task 020 merged or branch-loadable; `IToolHandlerRegistry` interface available (created in task 014 module skeleton; task 026 fills in dispatch logic).</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;`. Pay attention to spec.md FR-12 and design.md §7.4.1 worked example (full dispatch flow with parameter resolution + gate behavior).</step>
+    <step order="2">Sketch `ResourceExecutionResult` response shape: `Status` enum (`Succeeded | GatePending | Failed`), `Payload` (the Tool's result on success; `JsonElement` or typed), `GateId` (when GatePending), `GateType`, `Error` (when Failed), `LatencyMs`, `AuditId`. Document defaults.</step>
+    <step order="3">Implement `InvokeResourceTool.cs`: `[KernelFunction, Description("Invoke a Tool Registry resource. If the resource requires human approval (humanGate.required=true), returns GatePending status with a gateId. Otherwise executes immediately and returns the result.")]` `Task&lt;ResourceExecutionResult&gt; InvokeResourceAsync(string resourceId, Dictionary&lt;string, object&gt; parameters)`. Inject `IToolHandlerRegistry`, `IGateResolver?` (nullable), Dataverse client, `ICallerContext`.</step>
+    <step order="4">Lookup the ToolRegistry entry by `resourceId`. Not-found → return `ResourceExecutionResult.Failed { ErrorKind=NotFound }`. Caller without invoke permission → return `Failed { ErrorKind=Forbidden }`.</step>
+    <step order="5">Validate `parameters` against the Tool's parameter schema. Missing required → return `Failed { ErrorKind=ValidationError, Detail="Missing required parameter: X" }`. Use JSON Schema validation.</step>
+    <step order="6">Branch on `humanGate.required`:
+      - **false**: call `IToolHandlerRegistry.DispatchAsync(resourceId, parameters)`. Catch `PhaseToolDeniedException` (task 026) → return `Failed { ErrorKind=PhaseDenied }`. Catch generic exceptions → `Failed { ErrorKind=ExecutionError }`. On success return `Succeeded { Payload, LatencyMs }`.
+      - **true**: if `IGateResolver` is null (Phase 2 standalone), record gate-intent placeholder + return `GatePending { GateId=Guid.NewGuid().ToString(), GateType=humanGate.Type }`. If `IGateResolver` present (Phase 3+), call resolver to initiate gate flow and return `GatePending` with real gateId.</step>
+    <step order="7">Emit App Insights metric `action_engine.metatool.latency` with dimension `metatool=invokeResource` and `outcome={succeeded|gatePending|failed}`. Tier 2 + Tier 3 audit via existing middleware.</step>
+    <step order="8">Write unit tests: (a) direct execution happy path (no gate), (b) gate-pending path (humanGate.required = true, no resolver wired — returns placeholder), (c) gate-pending path (humanGate.required = true, mocked resolver — returns real gateId), (d) parameter validation rejects missing-required, (e) PhaseToolDeniedException → Failed { ErrorKind=PhaseDenied }, (f) caller without invoke permission → Forbidden, (g) not-found → NotFound.</step>
+    <step order="9">Verify build + tests + format: `dotnet build`, `dotnet test --filter "InvokeResource"`, `dotnet format`. Verify NFR-10 (no new packages).</step>
+    <step order="9.5">Run quality gates: `code-review` on `InvokeResourceTool.cs`; `adr-check` verifies ADR-008 (invoke permission checked), ADR-010 (DI), ADR-013 (NOT exposed via PublicContracts), ADR-015 (audit auto-applies), ADR-019 (ProblemDetails-shaped errors), ADR-029 (no new packages).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 024 ✅. Update `current-task.md`. Note the `IGateResolver?` nullable seam for Phase 3 awareness.</step>
+    <step order="11">Document deviations in `projects/ai-spaarke-action-engine-r1/notes/handoffs/`. Commit with brief recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, format</tool>
+    <tool name="git">State + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/MetaTools/InvokeResourceTool.cs</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/MetaTools/InvokeResourceToolTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InvokeResourceAsync(string resourceId, Dictionary&lt;string, object&gt; parameters)` exists, decorated with `[KernelFunction]` + `[Description]`.</criterion>
+    <criterion testable="true">Direct execution path (humanGate.required = false): dispatches via `IToolHandlerRegistry.DispatchAsync` and returns `ResourceExecutionResult { Status = Succeeded, Payload, LatencyMs }` — verified by unit test.</criterion>
+    <criterion testable="true">Gate-pending path (humanGate.required = true): returns `ResourceExecutionResult { Status = GatePending, GateId, GateType }`; works with `IGateResolver` null (Phase 2) and non-null (Phase 3+) — verified by two unit tests.</criterion>
+    <criterion testable="true">Parameter validation against Tool's schema: missing required parameter returns `Failed { ErrorKind = ValidationError }` — verified by unit test.</criterion>
+    <criterion testable="true">PhaseToolDeniedException from dispatch → `Failed { ErrorKind = PhaseDenied }` — verified by unit test (mocked dispatch throw).</criterion>
+    <criterion testable="true">Caller without invoke permission → `Failed { ErrorKind = Forbidden }` (ADR-008) — verified by unit test.</criterion>
+    <criterion testable="true">App Insights metric `action_engine.metatool.latency` emitted with `metatool=invokeResource` + `outcome` dimension on every invocation — verified by unit test on `TelemetryClient` mock.</criterion>
+    <criterion testable="true">No new NuGet packages added (NFR-10 preserved). NOT exposed via PublicContracts (ADR-013) — verified by grep.</criterion>
+    <criterion testable="true">Supports spec gates G2 (conversational invocation resolves intent → Tool) and G3 (gate-required Tools route to gate flow).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `IGateResolver?` nullable seam is the critical Phase 2 / Phase 3 boundary. Tests in this task validate both states (null = Phase 2 standalone; non-null = Phase 3 wired). Phase 3 task 030 will wire the actual resolver implementations.
+
+    JSON Schema validation library choice matters for NFR-10. Use a library already transitively present (`Json.More.Net` or similar already in BFF). If none is present, escalate — DO NOT silently add a new package.
+
+    Audit middleware (ADR-015) handles Tier 2 + Tier 3 writes automatically on dispatch. The gate-pending path does NOT go through dispatch, so this task must explicitly log the gate-intent invocation to ensure full audit coverage (an `IAuditEvent` write or equivalent). Consult `AuditEnrichmentMiddleware` for the canonical write pattern.
+
+    Direct invocation latency budget: not formally NFR-bound but should align with general AI-tool dispatch &lt;500ms p95. Measure in unit tests with stubbed handlers; load test in task 064 covers the registry-discovery path which is the SLO-bound one (NFR-01).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with reason from `&lt;rigor-reason&gt;`. Follow task-execute skill for checkpoint protocol every 3 steps and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,183 @@
+<task id="045" project="email-communication-solution-r3">
+  <metadata>
+    <title>UI test — EmailComposer Code Page dark mode compliance (ADR-021, NFR-09)</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>099</blocks>
+    <tags>ui-test, e2e-test, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Browser-based UI test using `ui-test` skill; comprehensive dark mode verification per ADR-021 + NFR-09; deterministic acceptance per scripted compliance checks</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel-safe with 041, 042, 043, 044 — independent compliance check; no shared mutation</parallel-reason>
+    <fr-refs>ADR-021, NFR-09, FR-18</fr-refs>
+  </metadata>
+
+  <prompt>
+    Execute a comprehensive UI compliance test for dark mode rendering of the EmailComposer Code Page per ADR-021 (Fluent v9 design system) and NFR-09 (accessibility). Unlike the smoke checks in tasks 041–044, this task performs a thorough audit.
+
+    Toggle dark mode in D365 user settings (or via DOM theme override fallback). For each composer mode (compose / view / reply / forward / draft), verify:
+    1. No white backgrounds in dark mode anywhere on the page
+    2. All text uses Fluent v9 semantic tokens (`tokens.colorNeutralForeground1`, etc.) — no hardcoded text colors
+    3. Borders, dividers, separators adapt to dark palette
+    4. Icons use `currentColor` (verifiable via DOM inspection — SVGs should NOT have fixed `fill`/`stroke` attributes set to hex colors)
+    5. All form controls (To/Cc/Subject/Body/Attach/Send) use Fluent v9 primitives that respect theme
+    6. Validation error messages (if triggered) render in dark palette
+    7. Attachment list (if populated) adapts (background, file icons, remove buttons)
+    8. Action bar (ComposerActionBar) buttons adapt
+    9. Focus indicators visible in dark mode (NFR-09 accessibility)
+
+    Use the `ui-test` skill (Chrome integration). Document findings comprehensively.
+  </prompt>
+
+  <role>
+    Spaarke UI accessibility + design system test engineer. Authoritative on ADR-021 (Fluent v9 semantic tokens), NFR-09 (accessibility patterns), and dark mode compliance checks.
+  </role>
+
+  <goal>
+    Comprehensive dark mode compliance audit pass for all 5 EmailComposer modes. Test results in `projects/email-communication-solution-r3/notes/research/045-ui-test-dark-mode.md` with per-mode pass/fail, specific violations enumerated (with selectors), and remediation recommendations if any failures found.
+  </goal>
+
+  <context>
+    <background>
+      ADR-021 binds Spaarke UI to Fluent v9 design tokens; dark mode is one of the supported themes (`webDarkTheme`). NFR-09 requires accessibility patterns including focus management.
+
+      Common dark mode violations to watch for:
+      - Hardcoded white backgrounds (`background: #fff`, `background: white`)
+      - Hardcoded text colors (`color: #000`, `color: black`)
+      - SVG icons with fixed `fill="#000"` or similar
+      - Custom CSS overriding Fluent v9 token defaults
+      - Third-party rich-text editor components that don't theme
+
+      The composer's `<BodyEditor />` rich-text mode is a high-risk area — if implemented via a third-party editor (e.g., Quill, Slate, Lexical), it may need theme overrides.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/research/045-ui-test-dark-mode.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; no hardcoded colors</constraint>
+    <constraint source="NFR-09">Focus indicators visible; keyboard navigation preserved in dark mode</constraint>
+    <constraint source="spec FR-18">All 5 modes must comply</constraint>
+    <constraint source="project">Use `{org}` placeholder in test URLs</constraint>
+    <constraint source="project">Dev environment only</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dark mode compliance audit" location=".claude/skills/ui-test/SKILL.md">
+        Inspect computed styles for known violation patterns (`background-color: rgb(255, 255, 255)` outside Fluent contexts, etc.).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance — all 5 modes">
+      <navigation>
+        <url-set>
+          <url mode="compose">https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22compose%22%7D</url>
+          <url mode="view">https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22view%22%2C%22id%22%3A%22{existing-record-guid}%22%7D</url>
+          <url mode="reply">https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22reply%22%2C%22id%22%3A%22{existing-record-guid}%22%7D</url>
+          <url mode="forward">https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22forward%22%2C%22id%22%3A%22{existing-record-guid}%22%7D</url>
+          <url mode="draft">https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22draft%22%2C%22id%22%3A%22{existing-draft-guid}%22%7D</url>
+        </url-set>
+        <description>Visit each mode and execute the same compliance check set</description>
+      </navigation>
+      <preconditions>
+        <precondition>Toggle dark mode in D365 personal settings → Theme → Dark (or apply DOM-level theme override if direct settings access unavailable)</precondition>
+        <precondition>Reload each URL to ensure dark theme applied from initial render</precondition>
+      </preconditions>
+      <steps>
+        <step order="1">For EACH of the 5 mode URLs, perform steps 2–10 below</step>
+        <step order="2">Navigate to mode URL; wait for app mount</step>
+        <step order="3">Verify zero console errors on cold load</step>
+        <step order="4">Inspect `&lt;body&gt;` and `&lt;html&gt;` computed `background-color` — must NOT be pure white in dark mode. Acceptable dark backgrounds: `#1f1f1f`, `#2b2b2b`, `#292929`, or theme-derived rgb tuples.</step>
+        <step order="5">Walk DOM tree; for each visible element with non-empty text, capture computed `color` + parent's computed `background-color`. Verify contrast ratio meets WCAG AA (4.5:1 for normal text, 3:1 for large text). Flag any failures.</step>
+        <step order="6">Inspect SVG icons: select all `&lt;svg&gt;` elements; check `fill` and `stroke` attributes. Acceptable: `currentColor`, `none`, or a CSS variable. UNACCEPTABLE: fixed hex colors like `#000000`, `#ffffff`.</step>
+        <step order="7">Inspect form controls (To, Cc, Subject, Body): verify each is a Fluent v9 primitive (`Input`, `Textarea`, `Field`, `Tag`, etc.) by checking root class names contain `fui-` prefix. Non-Fluent primitives are a violation.</step>
+        <step order="8">Tab through all interactive elements (To input → Cc → Subject → Body → Attach → Send/Save). Verify focus indicator is visible on each (Fluent v9 uses `outline` + `box-shadow` semantic tokens).</step>
+        <step order="9">If mode has attachments (forward, view with attachments), inspect attachment list — file icons + name + remove button — verify dark adaptation.</step>
+        <step order="10">If mode has action bar (view, draft), inspect each action button — verify Fluent v9 `Button` primitive in use.</step>
+      </steps>
+      <expected-outcomes>
+        <outcome>All 5 modes pass: no white backgrounds in dark mode</outcome>
+        <outcome>All text meets WCAG AA contrast ratios</outcome>
+        <outcome>All SVG icons use `currentColor` or theme-derived values</outcome>
+        <outcome>All form controls + buttons use Fluent v9 primitives (`fui-*` classes)</outcome>
+        <outcome>Focus indicators visible across keyboard navigation</outcome>
+        <outcome>Zero console errors throughout</outcome>
+      </expected-outcomes>
+      <dark-mode-check>
+        <description>This task IS the comprehensive dark mode check (tasks 041–044 do smoke checks only)</description>
+        <step>Audit per the steps above; remediation recommendations for any violations</step>
+      </dark-mode-check>
+      <console-error-check>
+        <target>0 errors per mode</target>
+        <description>Zero errors on cold load in dark mode for each of the 5 modes.</description>
+      </console-error-check>
+    </test>
+  </ui-tests>
+
+  <steps>
+    <step order="1">Verify task 036 (Code Page deploy) successful.</step>
+    <step order="2">Identify test record GUIDs (one with attachments for view/reply/forward; one draft for draft mode). Reuse test data from tasks 041–044 if those tasks ran first.</step>
+    <step order="3">Toggle dark mode in D365 personal settings; verify dev environment applies theme.</step>
+    <step order="4">Invoke `ui-test` skill — Chrome session, logged in, dark theme active.</step>
+    <step order="5">Execute the compliance test per the `<ui-tests>` block above — iterate through all 5 modes.</step>
+    <step order="6">For each violation found, capture: (a) the mode, (b) the selector, (c) the computed style, (d) the recommended fix.</step>
+    <step order="7">Document results in `projects/email-communication-solution-r3/notes/research/045-ui-test-dark-mode.md` with per-mode pass/fail + violations + recommendations.</step>
+    <step order="8">If violations found: file defect notes; depending on severity, escalate to Wave 1 (engine/sub-component issues) or address in a Wave 2 follow-up. Block task 099 wrap-up if uncorrected.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 045 ✅ completed (with violations noted if any).</step>
+    <step order="10">Update `current-task.md` per task-execute protocol: status → completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="ui-test">Skill — Chrome browser automation with computed-style inspection</tool>
+    <tool name="write">Compliance audit note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/045-ui-test-dark-mode.md (NEW — per-mode compliance audit)</output>
+    <output type="test-result">Dark mode compliance per mode + violation inventory + remediation recommendations</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 modes audited in dark mode.</criterion>
+    <criterion testable="true">No white backgrounds in dark mode (computed style check passes).</criterion>
+    <criterion testable="true">All text passes WCAG AA contrast ratio (4.5:1 normal, 3:1 large).</criterion>
+    <criterion testable="true">All SVG icons use `currentColor` or theme-derived values (no fixed-color SVGs).</criterion>
+    <criterion testable="true">All form controls + buttons use Fluent v9 primitives (`fui-*` classes detected).</criterion>
+    <criterion testable="true">Focus indicators visible in dark mode for keyboard nav.</criterion>
+    <criterion testable="true">Zero console errors per mode in dark mode.</criterion>
+    <criterion testable="true">Compliance audit documented with violations + remediation recommendations.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-group I: safe to run alongside 041, 042, 043, 044.
+
+    If the `<BodyEditor />` HTML mode uses a third-party rich-text editor that doesn't theme, this task will surface it. The recommended fix is either (a) restyle via CSS overrides hitting Fluent v9 tokens, or (b) swap to a Fluent-native editor (deferred to a Wave 1 follow-up if discovered late).
+
+    Toggling dark mode in D365: typical path is Personal Settings → Display Theme. If the dev environment lacks this UI, fall back to a DOM-level theme override: open DevTools, apply `data-theme="dark"` to `<html>` or modify the Fluent theme provider's prop. Document the path used.
+
+    This audit's findings may trigger a Wave 1 retroactive fix if the engine or a sub-component is fundamentally non-compliant — file as a defect, do not gloss over.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Invoke `ui-test` skill with computed-style inspection capability. This is a thorough audit — do not gloss over edge cases.
+    </protocol>
+  </execution>
+</task>

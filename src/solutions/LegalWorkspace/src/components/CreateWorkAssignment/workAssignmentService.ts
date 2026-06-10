@@ -527,9 +527,9 @@ export class WorkAssignmentService {
       if (eventState.eventFinalDueDate) {
         entity['sprk_finalduedate'] = eventState.eventFinalDueDate;
       }
-      if (eventState.addTodo) {
-        entity['sprk_todoflag'] = true;
-      }
+      // R3 FR-29 / OS-1 (task 013): the legacy `addTodo` checkbox + `sprk_todoflag`
+      // write was removed. Users who want a companion `sprk_todo` should launch
+      // the shared CreateTodoWizard with this work-assignment event as regarding.
 
       // Link to work assignment
       const waNavProp = findNavProp(navProps, 'sprk_workassignment', 'workassignment');

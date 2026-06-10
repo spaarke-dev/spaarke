@@ -166,6 +166,29 @@ export interface CalendarSectionProps {
    * toggle-off semantics).
    */
   onSelectDate?: (date: Date | null) => void;
+
+  /**
+   * Click semantics for plain (non-Shift) day clicks.
+   *
+   * - `'single'` (DEFAULT) — backwards-compatible behavior. Plain clicks toggle
+   *   a single selected day. Shift+click selects a range from `selectedDate`
+   *   to the clicked day.
+   * - `'range'` — first plain click sets the range start; second plain click
+   *   sets the range end (auto-swapped if the second click is earlier);
+   *   third plain click resets and becomes a fresh first click. Emits via
+   *   `onFilterChange`: `{ type: 'single', date }` after the first click,
+   *   `{ type: 'range', start, end }` after the second click, and
+   *   `{ type: 'clear' }` if the third click lands on a non-range day to
+   *   restart. This mode is intended for hosts (Calendar workspace widget,
+   *   r1 #1) that have replaced explicit From/To date inputs with click-on-
+   *   calendar interaction.
+   *
+   * `onSelectDate` is NOT called in `'range'` mode (the host uses
+   * `onFilterChange` only).
+   *
+   * ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08).
+   */
+  clickMode?: 'single' | 'range';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -550,6 +573,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   layout = 'vertical',
   selectedDate: selectedDateProp,
   onSelectDate,
+  clickMode = 'single',
 }) => {
   const styles = useStyles();
   const today = new Date();
@@ -618,6 +642,40 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
     (date: Date, isShiftKey: boolean) => {
       const dateStr = toIsoDateString(date);
 
+      // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): clickMode='range'
+      // path. Plain clicks drive range selection (no Shift required). Three-
+      // state cycle: empty → start → range → empty (restart on next click).
+      // `selectedDate` semantics are NOT used here — the host consumes range
+      // updates exclusively via `onFilterChange`.
+      if (clickMode === 'range') {
+        // Reset case: range already complete OR initial empty state — start fresh.
+        if (rangeStart && rangeEnd) {
+          setRangeStart(dateStr);
+          setRangeEnd(null);
+          onFilterChange({ type: 'single', date: dateStr });
+          return;
+        }
+        if (!rangeStart) {
+          // First click: set start; emit single-day filter so the host can
+          // begin filtering to the one chosen day until the user completes
+          // the range with a second click.
+          setRangeStart(dateStr);
+          setRangeEnd(null);
+          onFilterChange({ type: 'single', date: dateStr });
+          return;
+        }
+        // Second click: rangeStart is set, rangeEnd is null. Finalize the
+        // range. Auto-swap if the second click is earlier than the first so
+        // the emitted start <= end invariant always holds.
+        const second = dateStr;
+        const start = rangeStart < second ? rangeStart : second;
+        const end = rangeStart < second ? second : rangeStart;
+        setRangeStart(start);
+        setRangeEnd(end);
+        onFilterChange({ type: 'range', start, end });
+        return;
+      }
+
       if (isShiftKey && selectedDate) {
         // Range selection (legacy path — same for controlled + uncontrolled).
         const start = selectedDate;
@@ -663,7 +721,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
         }
       }
     },
-    [selectedDate, rangeStart, onFilterChange, isSelectedControlled, onSelectDate]
+    [selectedDate, rangeStart, rangeEnd, onFilterChange, isSelectedControlled, onSelectDate, clickMode]
   );
 
   /**

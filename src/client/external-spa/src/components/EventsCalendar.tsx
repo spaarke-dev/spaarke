@@ -295,13 +295,11 @@ const EventRow: React.FC<EventRowProps> = ({ event, isLast }) => {
             <Badge appearance="tint" color={getEventStatusColor(event.sprk_status)} size="small">
               {getEventStatusLabel(event.sprk_status)}
             </Badge>
-
-            {/* To-Do flag badge */}
-            {event.sprk_todoflag && (
-              <Badge appearance="tint" color="warning" size="small">
-                To-Do
-              </Badge>
-            )}
+            {/*
+             * To-Do badge removed (R3 task 008): events no longer carry a
+             * to-do boolean toggle. To-dos are first-class `sprk_todo` records
+             * surfaced by the SmartTodo component / `getProjectTodos` route.
+             */}
           </div>
 
           {/* Created on meta */}
@@ -377,7 +375,7 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
         sprk_name: title.trim(),
         ...(dueDate ? { sprk_duedate: new Date(dueDate).toISOString() } : {}),
         sprk_status: 1, // Open
-        sprk_todoflag: false,
+        // Note: the event-as-todo toggle was removed in R3 task 007 — events are not to-dos.
         'sprk_projectid@odata.bind': `sprk_projects(${projectId})`,
       };
 

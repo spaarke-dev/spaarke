@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Integration test `ActionEngine.IntegrationTests.GateResolution` — every IGateResolver path × every timeout outcome (G3)</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>031, 032, 033, 034, 035</dependencies>
+    <blocks>070, 071, 090</blocks>
+    <tags>testing, integration-test, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration test with explicit ADR / approval-flow constraints; creates new test file; Phase 6 quality gate</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent test class; no file overlap with peer integration tests in Group F (060, 061, 063)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the `ActionEngine.IntegrationTests.GateResolution` integration test suite that proves graduation criterion G3: every `IGateResolver` implementation routes correctly; approval resumes execution; rejection terminates with reason; 5-minute timeout auto-rejects. Cover the matrix of resolvers × outcomes.
+  </prompt>
+
+  <role>
+    Senior Spaarke platform engineer with deep BFF integration-testing experience and familiarity with the approval surface design (in-chat card, Dataverse precedent board, webhook callback, auto-approve). Comfortable with controllable-clock test patterns for timeout verification.
+  </role>
+
+  <goal>
+    `tests/integration/Sprk.Bff.Api.Tests/ActionEngine/GateResolutionIntegrationTests.cs` exists covering the matrix:
+    - 4 resolvers (`DataversePrecedentBoardGateResolver`, `InteractiveGateResolver`, `WebhookGateResolver`, `AutoApproveGateResolver`)
+    - 3 outcomes per resolver (approve → resume; reject → terminate with reason; timeout → auto-reject after 5 min)
+    Minimum 8 tests (auto-approve has fewer paths). Graduation criterion G3 is verifiable from `dotnet test --filter FullyQualifiedName~GateResolution`.
+  </goal>
+
+  <context>
+    <background>
+      G3 codifies the side-effect-safety contract: every Action with `humanGate.required = true` MUST pause at the configured gate, route to the declared resolver, and respect the 5-minute auto-reject timeout. If these tests don't pass, the Action Engine cannot safely dispatch side-effect Tools — a critical safety control fails.
+
+      Use `FakeTimeProvider` / `TimeProvider` test substitute to advance virtual time for timeout tests — do NOT use real wall-clock waits in CI.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.Tests/ActionEngine/GateResolutionIntegrationTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/DataversePrecedentBoardGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/InteractiveGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/WebhookGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/AutoApproveGateResolver.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Tests live in `tests/integration/Sprk.Bff.Api.Tests/`; use `WebApplicationFactory&lt;Program&gt;`.</constraint>
+    <constraint source="ADR-013">Webhook resolver test MUST use a test HTTP listener — no real outbound network calls in CI.</constraint>
+    <constraint source="project">Timeout test MUST use `FakeTimeProvider` or equivalent; NEVER wait 5 minutes of wall-clock time in CI.</constraint>
+    <constraint source="project">Approval-rejection tests MUST assert the rejection reason is propagated to the ActionRun record.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-022-test-organization.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Controllable-clock testing" location=".claude/patterns/testing/mocking-patterns.md">FakeTimeProvider for 5-min timeout assertions without wall-clock waits.</pattern>
+      <pattern name="WebApplicationFactory integration test" location=".claude/patterns/testing/integration-tests.md">Reuse for gate flow tests.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: tasks 031–035 (resolvers + timeout) complete in TASK-INDEX.md.</step>
+    <step order="1">Read knowledge files; identify the resolver registration path in DI; confirm `FakeTimeProvider` substitution surface.</step>
+    <step order="2">Create `tests/integration/Sprk.Bff.Api.Tests/ActionEngine/GateResolutionIntegrationTests.cs` with `WebApplicationFactory` fixture; inject `FakeTimeProvider`; register fake HTTP listener for webhook tests.</step>
+    <step order="3">Add tests for `DataversePrecedentBoardGateResolver`: approve path (write approval row → assert Run resumes); reject path (write rejection row → assert Run terminates with reason); timeout path (advance clock past 5 min → assert auto-reject).</step>
+    <step order="4">Add tests for `InteractiveGateResolver`: in-chat approve path (post approval message → resume); in-chat reject (post rejection → terminate with reason); timeout (5-min advance → auto-reject).</step>
+    <step order="5">Add tests for `WebhookGateResolver`: callback approve (test listener POSTs approve → resume); callback reject (POST reject → terminate); timeout (no callback → auto-reject).</step>
+    <step order="6">Add test for `AutoApproveGateResolver`: assert immediate resume (no pause, no clock advance).</step>
+    <step order="7">Run `dotnet test --filter FullyQualifiedName~GateResolution` and verify all pass.</step>
+    <step order="8">Run full `dotnet test` to confirm no regression.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 062 status ✅. Update `current-task.md`: G3 verified.</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test runner</tool>
+    <tool name="terminal">Shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/ActionEngine/GateResolutionIntegrationTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">**G3**: IGateResolver routes all 5 gate types; approval resumes; rejection terminates; 5-min timeout auto-rejects. Test matrix passes via `dotnet test --filter FullyQualifiedName~GateResolution`.</criterion>
+    <criterion testable="true">Timeout test uses controllable clock (FakeTimeProvider) — no real wall-clock waits.</criterion>
+    <criterion testable="true">Rejection tests assert the reason is propagated to the ActionRun record.</criterion>
+    <criterion testable="true">Full `dotnet test` suite passes after additions.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task directly verifies graduation gate **G3** (spec.md Success Criteria #3). The 5-min timeout is the safety net for misbehaving resolvers — its test must use FakeTimeProvider, never wall-clock waits.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Declare RIGOR LEVEL: STANDARD. Follow task-execute skill.
+    </protocol>
+  </execution>
+</task>

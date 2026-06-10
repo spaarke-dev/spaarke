@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>ActionEndpoints.cs — Action CRUD + /run endpoint (endpoint-filter auth, ProblemDetails, rate-limit hooks)</title>
+    <phase>Phase 4: Action Execution Runtime</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>010, 014, 015, 030</dependencies>
+    <blocks>041, 042, 043, 044, 045, 052, 053, 054, 055, 060</blocks>
+    <tags>bff-api, api, endpoints, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates BFF endpoints (.cs file) consumed by every downstream surface; tags include bff-api/api/endpoints/ai; depends on 4 prereqs; modifies EndpointMappingExtensions.cs; G11 acceptance gate (endpoint-filter authorization) verified here</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocking task in Phase 4 — creates ActionEndpoints.cs which tasks 044 + 045 subsequently extend; must land first to avoid file-overlap conflicts</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create `src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs` — Minimal API endpoint group for Action CRUD (create / read / update / delete by id) plus the `/run` invocation endpoint. Apply endpoint-filter authorization per ADR-008 on every endpoint. Return ProblemDetails (RFC 7807) on every error per ADR-019. Wire rate-limit attribute hooks per ADR-016 (concrete enforcement comes in task 044). Register the endpoint group via `MapActionEndpoints()` in `Infrastructure/DI/EndpointMappingExtensions.cs`. This is the G11 acceptance gate (endpoint-filter authorization on every Action Engine endpoint) verified by grep audit + adr-check at Step 9.5.
+  </prompt>
+
+  <role>
+    SPAARKE BFF endpoint engineer fluent in .NET 8 Minimal API patterns, endpoint filters (ADR-008), feature-module DI (ADR-010), ProblemDetails responses (ADR-019), and the existing `AnalysisEndpoints.cs` / `PlaybookEndpoints.cs` shapes that establish the canonical endpoint surface in `Sprk.Bff.Api/Api/Ai/`.
+  </role>
+
+  <goal>
+    Concrete artifacts:
+    1. **`src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs`** — static class exposing `MapActionEndpoints(this IEndpointRouteBuilder app)` plus handler methods for: `GET /api/ai/actions/{actionId}` (read), `POST /api/ai/actions` (create), `PUT /api/ai/actions/{actionId}` (update), `DELETE /api/ai/actions/{actionId}` (delete), `POST /api/ai/actions/{actionId}/run` (invoke). Each endpoint applies `.AddEndpointFilter&lt;...&gt;()` with an action-resource authorization filter (ADR-008) and `.RequireAuthorization()`. Every error path returns `Results.Problem(...)` (RFC 7807).
+    2. **Action-resource authorization filter** — new `Filters/ActionResourceAuthorizationFilter.cs` modeled on `Filters/DocumentAuthorizationFilter.cs` — resolves the Action by id from Dataverse, checks caller has `actionExecute` (or `actionRead` / `actionWrite`) right on the tenant-scoped record, short-circuits with 403 ProblemDetails otherwise.
+    3. **Endpoint registration** — add `app.MapActionEndpoints()` to `Infrastructure/DI/EndpointMappingExtensions.cs` in the AI endpoint group section.
+    4. **Rate-limit hooks** — endpoints carry the `EnableRateLimiting("ai-action-invocation")` attribute pointing at a named policy that task 044 wires up; the named-policy slot MUST exist so 044 can fill it without changing this file.
+    5. **G11 verification artifact** — `notes/spikes/g11-endpoint-filter-grep.md` recording the grep audit `grep -rn "MapPost\|MapGet\|MapPut\|MapDelete" src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs` cross-referenced with `AddEndpointFilter` coverage — every route MUST have a filter.
+
+    Acceptance: integration test asserts (a) 401 without auth on `/run`, (b) 403 for user lacking `actionExecute`, (c) 200 with a valid Action Run record created for an authorized caller, (d) ProblemDetails shape for every error response.
+  </goal>
+
+  <context>
+    <background>
+      The Action Engine's external surface to every Spaarke client. Conversational invocations via the Assistant arrive here through `InvokeResource` → `IActionEngineFacade` → eventually `/run`. Explicit-path invocations (ribbon, command bar) arrive here directly. Scheduled invocations arrive via `ScheduledActionDispatchJobHandler` (task 042) which calls into the same orchestration service the `/run` handler uses.
+
+      The endpoint shape mirrors the existing `Api/Ai/PlaybookEndpoints.cs` and `Api/Ai/AnalysisEndpoints.cs` patterns: a static class with a `MapXEndpoints` extension method, handler methods that delegate to a service (in this case `IActionOrchestrationService` — task 041 supplies the concrete implementation; for now we depend on the interface and inject through `Services/Ai/PublicContracts/IActionEngineFacade.cs` per ADR-013 refined to honour the facade boundary).
+
+      G11 acceptance gate: Every Action Engine endpoint applies endpoint-filter authorization (verified by grep audit + adr-check Step 9.5). This task is where G11 is established for the Action Engine; tasks 044 + 045 inherit the pattern when extending the file.
+
+      Rate-limit policy name `ai-action-invocation` is reserved for task 044; this task creates the attribute slot but does NOT implement the policy itself.
+
+      Feature-flag check on the `/run` endpoint is reserved for task 045; this task does NOT add the flag check directly — task 045 adds it.
+
+      Binding governance: `.claude/constraints/bff-extensions.md` MUST be loaded. Placement decision is "BFF" (per spec.md §6 — fails all 4 ADR-013 exception criteria). No new HIGH-severity CVE introduced (verify in Step 9.5).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Filters/ActionResourceAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionEngineFacade.cs</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/spikes/g11-endpoint-filter-grep.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API patterns. No Azure Functions. Endpoints registered via Minimal API `Map*` calls.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization (`.AddEndpointFilter&lt;...&gt;()`) MUST apply on every Action endpoint. NO global middleware for resource checks. G11 verified by grep audit.</constraint>
+    <constraint source="ADR-010">Endpoint registration goes through `MapActionEndpoints()` extension method registered in `EndpointMappingExtensions.cs` — NOT inline in Program.cs.</constraint>
+    <constraint source="ADR-013">Endpoints depend on `IActionEngineFacade` (PublicContracts) where possible; internal types (`IActionOrchestrationService` from task 041) are accessed via the facade boundary, not direct injection from any CRUD-side caller.</constraint>
+    <constraint source="ADR-016">Endpoints carry `EnableRateLimiting("ai-action-invocation")` attribute slot for task 044 to wire concrete policy. Soft enforcement MVP.</constraint>
+    <constraint source="ADR-019">Every error path returns `Results.Problem(...)` (ProblemDetails RFC 7807) with `statusCode`, `title`, `detail`. NO raw exception messages.</constraint>
+    <constraint source="ADR-029">No new NuGet packages unless absolutely required. If added: verify ≤5MB compressed publish-size delta + no new HIGH-severity CVE.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist binding: placement decision = BFF (cited from spec.md §6), publish-size delta verified, no new CRUD→AI direct dependencies (facade used).</constraint>
+    <constraint source="project">G11 acceptance gate established here. Every endpoint in ActionEndpoints.cs MUST have an endpoint filter. Verified by grep + adr-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Minimal API endpoint definition" location=".claude/patterns/api/endpoint-definition.md">Static `Map*Endpoints` extension method + handler methods; ProblemDetails on errors.</pattern>
+      <pattern name="Endpoint filter authorization" location=".claude/patterns/api/endpoint-filters.md">`.AddEndpointFilter&lt;...&gt;()` per ADR-008; resource-resolution + 403 short-circuit pattern; mirrors DocumentAuthorizationFilter.cs.</pattern>
+      <pattern name="AI endpoint shape reference" location="src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs">Canonical AI endpoint group in Sprk.Bff.Api/Api/Ai/ — clone the structural shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes. Confirm tasks 010 (entities), 014 (BFF module), 015 (PublicContracts facade), 030 (IGateResolver interface) all show ✅ in TASK-INDEX.md. (task-execute Step 0)</step>
+    <step order="1">Load `.claude/constraints/bff-extensions.md` and answer every pre-merge checklist item in `notes/decisions/task-040-bff-extensions-checklist.md`. Cite placement decision (= BFF per spec.md §6).</step>
+    <step order="2">Read existing `PlaybookEndpoints.cs` + `AnalysisEndpoints.cs` to capture the canonical endpoint group shape. Read `Filters/DocumentAuthorizationFilter.cs` as the model for the new `ActionResourceAuthorizationFilter.cs`.</step>
+    <step order="3">Create `Filters/ActionResourceAuthorizationFilter.cs`: implements `IEndpointFilter`, resolves Action by id from Dataverse (via the `IActionEngineFacade` from task 015), validates tenant scope, checks the caller's right per operation kind (read / write / execute), short-circuits with `Results.Problem(statusCode: 403, title: "Forbidden", detail: ...)` on denial. Inject scoped services per ADR-010 conventions.</step>
+    <step order="4">Create `src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs` as a static class with `MapActionEndpoints(this IEndpointRouteBuilder app)`. Register the 5 routes (GET/POST/PUT/DELETE/POST-run). Each route: `.AddEndpointFilter&lt;ActionResourceAuthorizationFilter&gt;()` + `.RequireAuthorization()` + `.WithName(...)` + `.WithTags("ActionEngine")` + `.RequireRateLimiting("ai-action-invocation")` (named policy slot for task 044).</step>
+    <step order="5">Wire each handler: thin delegation to `IActionEngineFacade` (which task 015 provides). DO NOT inject `IActionOrchestrationService` (internal type from task 041) directly — go through the facade so G12 (facade integrity) is preserved. For `/run`, the facade method is `ExecuteActionAsync(actionId, parameters, cancellationToken)` returning a Run id + status; the handler returns 202 Accepted on async paths and 200 OK on synchronous Tool returns.</step>
+    <step order="6">Every error path returns `Results.Problem(...)` per ADR-019. Status mapping: not-found → 404; tenant mismatch → 404 (do NOT leak existence across tenants); validation error → 400; auth denial → 403; rate-limit → 429; feature-disabled → 503 (slot for task 045). Title field always set; detail field set; `type` field URI per ADR-019 if available.</step>
+    <step order="7">Register `MapActionEndpoints()` in `Infrastructure/DI/EndpointMappingExtensions.cs` in the AI endpoint group section (find the `// AI endpoints` comment around line 157 per plan.md §2 Resources).</step>
+    <step order="8">Run the grep audit: `grep -nE "Map(Get|Post|Put|Delete)" src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs` AND `grep -nE "AddEndpointFilter" src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs` — confirm every `Map*` call has a matching `AddEndpointFilter` line. Record the audit output verbatim in `notes/spikes/g11-endpoint-filter-grep.md`.</step>
+    <step order="9">Build + run focused unit tests: a smoke test that the endpoint group registers (`MapActionEndpoints` extension method exists, route table contains the 5 routes). Integration test: 401 without auth on `/run`; 403 for user lacking `actionExecute`; 200 + Run id for authorized caller (use the `IActionEngineFacade` stub if task 041 isn't merged yet — task 041 swaps in the real implementation).</step>
+    <step order="9.5">Run quality gates per task-execute Step 9.5: `code-review` on `ActionEndpoints.cs` + `ActionResourceAuthorizationFilter.cs` + the `EndpointMappingExtensions.cs` edit; `adr-check` verifies ADR-008 (endpoint filters on every route), ADR-010 (registration via extension method), ADR-019 (every error path uses `Results.Problem`), ADR-029 (no new NuGet packages without budget check). Re-run `dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet list package --vulnerable --include-transitive | grep -i HIGH` (expect no NEW HIGH; pre-existing Kiota CVE is documented project-level).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 040 ✅. Verify it unblocks tasks 041, 042, 043, 044, 045, 052, 053, 054, 055, 060. Reset `current-task.md` for the next active task.</step>
+    <step order="11">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-040-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF API</tool>
+    <tool name="terminal">Run grep audits for G11</tool>
+    <tool name="git">Confirm state + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Filters/ActionResourceAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (edit — register MapActionEndpoints)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/task-040-bff-extensions-checklist.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/spikes/g11-endpoint-filter-grep.md (G11 verification artifact)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs` exists with the 5 endpoints (GET/POST/PUT/DELETE/POST-run). `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+    <criterion testable="true">**G11 acceptance gate** — Every Action Engine endpoint applies endpoint-filter authorization (G11 — verified by grep audit + adr-check Step 9.5). The grep audit artifact at `notes/spikes/g11-endpoint-filter-grep.md` shows 5 `Map*` calls and 5 matching `AddEndpointFilter&lt;ActionResourceAuthorizationFilter&gt;()` calls.</criterion>
+    <criterion testable="true">Integration test asserts: 401 without auth on `/api/ai/actions/{id}/run`; 403 for caller lacking `actionExecute`; 200 + Run id for authorized caller; ProblemDetails (`type`, `title`, `status`, `detail`) shape on every error response.</criterion>
+    <criterion testable="true">`Filters/ActionResourceAuthorizationFilter.cs` exists and implements `IEndpointFilter`; resolves the Action via `IActionEngineFacade` (NOT direct injection of `IActionOrchestrationService` from task 041 — facade integrity preserved per G12).</criterion>
+    <criterion testable="true">`MapActionEndpoints()` registered in `Infrastructure/DI/EndpointMappingExtensions.cs` in the AI endpoint group.</criterion>
+    <criterion testable="true">Rate-limit policy slot `EnableRateLimiting("ai-action-invocation")` present on every endpoint, ready for task 044 to fill the named policy.</criterion>
+    <criterion testable="true">Every error path uses `Results.Problem(...)` (ADR-019). No raw exception messages leak.</criterion>
+    <criterion testable="true">`notes/decisions/task-040-bff-extensions-checklist.md` exists with every `bff-extensions.md` pre-merge item answered. Placement decision = BFF cited from spec.md §6.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` returns no NEW HIGH-severity CVE (pre-existing Kiota CVE documented project-level).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The actual `AuditEnrichmentMiddleware` lives at `src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs` — task 043 extends it. This task does NOT touch the middleware; the middleware already enriches every authenticated request and Action endpoints inherit that enrichment automatically.
+
+    `IActionOrchestrationService` is task 041's deliverable. This task depends on the *interface* shape via `IActionEngineFacade` (task 015). If you find yourself wanting to inject `IActionOrchestrationService` directly into an endpoint, STOP — that's the G12 violation. Go through the facade.
+
+    Rate-limit policy `ai-action-invocation` is the named-policy slot ONLY. Task 044 adds the per-user + per-tenant budgets. Do not implement the policy here.
+
+    Feature-flag check on `/run` is task 045's responsibility. Do not add the flag check here.
+
+    The 5 routes mirror the spec.md "ActionEndpoints.cs (CRUD + `/run` endpoint, endpoint-filter auth per ADR-008)" deliverable from plan.md Phase 4.
+
+    Reference `PlaybookEndpoints.cs` for the AI-endpoint-group shape; reference `DocumentAuthorizationFilter.cs` for the endpoint-filter resource-resolution pattern.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5 (code-review + adr-check).
+    </protocol>
+  </execution>
+</task>

@@ -13,7 +13,15 @@ export type EffortLevel = 'High' | 'Med' | 'Low';
 /** To-Do item status */
 export type TodoStatus = 'Open' | 'Completed' | 'Dismissed';
 
-/** To-Do item source (matches Dataverse sprk_todosource choice: 100000000=System, 100000001=User, 100000002=AI) */
+/**
+ * To-Do item source — historical discriminator.
+ *
+ * Per R3 FR-29 / OS-1, the `sprk_todosource` column was removed from
+ * `sprk_event` and is not modelled on the new first-class `sprk_todo` entity.
+ * Provenance lives in audit logs. This type is retained as `unused` for any
+ * external consumer that may still reference it; it should be removed in a
+ * future cleanup pass once no consumers remain.
+ */
 export type TodoSource = 'System' | 'User' | 'AI';
 
 /** Kanban column assignment for To Do items */

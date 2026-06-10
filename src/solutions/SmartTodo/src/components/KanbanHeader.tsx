@@ -35,6 +35,8 @@ import {
 } from "@fluentui/react-icons";
 import { MicrosoftToDoIcon } from "../icons/MicrosoftToDoIcon";
 import { AddTodoBar } from "./AddTodoBar";
+import { MyTasksFilter } from "./MyTasksFilter";
+import type { MyTasksFilterMode } from "../hooks/useUserPreferences";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -100,6 +102,15 @@ export interface IKanbanHeaderProps {
   onSettingsOpen: () => void;
   /** When true, hides the header (matching existing SmartToDo embedded pattern). */
   embedded?: boolean;
+  /** Currently-selected My Tasks filter mode (R3 FR-12). */
+  myTasksFilterMode: MyTasksFilterMode;
+  /** Called when the user selects a different My Tasks filter mode. */
+  onMyTasksFilterModeChange: (mode: MyTasksFilterMode) => void;
+  /**
+   * Disable the My Tasks filter (e.g. while user preferences are still
+   * loading on first render).
+   */
+  myTasksFilterDisabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +126,9 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
     isAdding,
     onSettingsOpen,
     embedded = false,
+    myTasksFilterMode,
+    onMyTasksFilterModeChange,
+    myTasksFilterDisabled = false,
   }) => {
     const styles = useStyles();
 
@@ -163,6 +177,14 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
             {totalCount}
           </Badge>
         </div>
+
+        {/* My Tasks filter — sits between title and add bar so the scope of
+            items being shown is visible adjacent to the count badge (FR-12). */}
+        <MyTasksFilter
+          value={myTasksFilterMode}
+          onChange={onMyTasksFilterModeChange}
+          disabled={myTasksFilterDisabled}
+        />
 
         {/* Center group: add bar (flex-grow) */}
         <div className={styles.centerGroup}>

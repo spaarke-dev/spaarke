@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Fix `CLAUDE.md` §10 line 183 stale `ADR-030-bff-nullobject-kill-switch.md` link → `ADR-032`</title>
+    <phase>Phase 9: Cleanup & Documentation</phase>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, refactoring</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Single-line fix to a docs link. MINIMAL rigor.</rigor-reason>
+    <parallel-group>P9-W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches root `CLAUDE.md` — main-session-only per the `.claude/` permission boundary.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Fix the stale ADR link in `CLAUDE.md` §10 (line 183 as of 2026-06-07): `.claude/adr/ADR-030-bff-nullobject-kill-switch.md` → `.claude/adr/ADR-032-bff-nullobject-kill-switch.md`. The Null-Object Kill-Switch Pattern lives in ADR-032; ADR-030 is `pane-event-bus`, an unrelated topic.
+  </prompt>
+
+  <role>Spaarke documentation maintainer.</role>
+
+  <goal>CLAUDE.md §10 cites ADR-032 for the Null-Object Kill-Switch Pattern. Repo-wide grep returns zero remaining references to `ADR-030-bff-nullobject-kill-switch.md`.</goal>
+
+  <constraints>
+    <constraint source="project">This is the doc-drift fix surfaced by the `/project-pipeline` run on 2026-06-07. Tracked because spec.md cited the wrong path and the issue traces back to a `CLAUDE.md` typo.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open `CLAUDE.md`; locate the line in §10 referencing `ADR-030-bff-nullobject-kill-switch.md`.</step>
+    <step order="2">Replace with `ADR-032-bff-nullobject-kill-switch.md`.</step>
+    <step order="3">Repo grep for any other occurrences of `ADR-030-bff-nullobject-kill-switch`. Fix if found.</step>
+    <step order="4">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">`CLAUDE.md` §10 corrected</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Repo grep for `ADR-030-bff-nullobject-kill-switch.md` returns zero hits (excluding `.claude/archive/`).</criterion>
+    <criterion testable="true">`CLAUDE.md` §10 cites ADR-032.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor. Main-session-only (touches `CLAUDE.md`).</protocol>
+  </execution>
+</task>

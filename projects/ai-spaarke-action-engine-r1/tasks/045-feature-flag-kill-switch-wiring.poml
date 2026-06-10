@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Feature flag + kill-switch wiring on Action governance block (ADR-018) + admin disable endpoint</title>
+    <phase>Phase 4: Action Execution Runtime</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>060, 061, 062, 063</blocks>
+    <tags>bff-api, api, config, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies the ActionEndpoints.cs file (created by task 040) with feature-flag enforcement; tags include bff-api/api/config/ai; creates an admin disable endpoint with broader-than-normal authorization; touches user-visible enforcement behavior</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with ActionEndpoints.cs from task 040 — both tasks edit the same file. Task 045 adds (a) feature-flag check on /run and (b) a new admin disable endpoint. Sequential after 040 lands. If task 044 and task 045 both need to edit ActionEndpoints.cs, run them sequentially (conservative).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Wire feature-flag + kill-switch enforcement on the Action `/run` endpoint per ADR-018, AND add an admin endpoint to disable a specific Action immediately (kill-switch reference on the Action Definition's `governance` JSON block from FR-01). Feature flags live in typed options classes with startup validation; disabled features return 503 ProblemDetails (ADR-018); flags NEVER bypass authorization (ADR-018 binding). The Action Definition's `governance.killSwitchFlagName` field (Dataverse, from task 010 entity schema) is the per-Action reference; the admin endpoint atomically flips the flag without redeploying the BFF.
+  </prompt>
+
+  <role>
+    SPAARKE BFF governance + operations engineer fluent in ADR-018 feature flag + kill-switch semantics (options-based, typed, startup-validated, 503 ProblemDetails on disabled), the `IFeatureFlagService` surface (or equivalent — create if not present), and admin-endpoint authorization patterns. You ship kill switches that are reliable, fast, and that NEVER bypass authorization.
+  </role>
+
+  <goal>
+    Concrete artifacts:
+    1. **`Configuration/ActionEngineFeatureFlags.cs`** — typed options class with global flags: `ActionInvocationEnabled` (bool, default true — global kill switch for /run), `ScheduledDispatchEnabled` (bool, default true — global kill switch for the scheduler job handler), `AdminDisableEndpointEnabled` (bool, default true — meta-flag for whether admins can disable Actions at runtime). Startup-validated per ADR-018.
+    2. **`Infrastructure/FeatureFlags/IFeatureFlagService.cs`** + **`FeatureFlagService.cs`** — abstraction over BOTH the typed options (compile-time / deploy-time flags) AND the per-Action `governance.killSwitchFlagName` Dataverse field (runtime flags via Action Definition). Method: `Task&lt;bool&gt; IsActionEnabledAsync(Guid actionId, CancellationToken ct)` — returns false if EITHER the global flag is off OR the per-Action governance block has `killSwitchActive = true`. Cache the per-Action flag in `IDistributedCache` (Redis per ADR-009) with a SHORT TTL (30 seconds default) so flips propagate fast across BFF instances.
+    3. **`ActionEndpoints.cs` (edit from task 040)** — add a feature-flag endpoint filter `FeatureFlagFilter("ai-action-invocation")` that runs BEFORE the rate limiter and BEFORE the resource authorization filter (so disabled features don't consume rate-limit quota and don't reveal Action existence). Returns 503 ProblemDetails when disabled. On the `/run` endpoint, ALSO check the per-Action kill switch via `IFeatureFlagService.IsActionEnabledAsync(actionId, ct)` after authorization passes (since the per-Action check requires the actionId).
+    4. **`Infrastructure/FeatureFlags/FeatureFlagFilter.cs`** — `IEndpointFilter` implementation that checks the global flag and short-circuits with 503 ProblemDetails when disabled. Pluggable by named flag.
+    5. **Admin disable endpoint** — `POST /api/ai/actions/{actionId}/admin/disable` and `POST /api/ai/actions/{actionId}/admin/enable`. Authorization: requires `ActionEngine.Admin` role (a new application role — added to the BFF's app registration and to the role check filter). Body: optional reason. Behavior: updates the Action Definition's `governance.killSwitchActive` field in Dataverse, evicts the cache key, emits App Insights event `action_engine.killswitch.toggled` with `actionId`, `state`, `adminOid`, `reason`.
+    6. **Tests**:
+      - Unit: feature-flag service returns false when global flag is off; false when per-Action kill switch is on; true otherwise.
+      - Integration: global flag off → /run returns 503; per-Action kill switch on → /run returns 503 with detail referencing the Action id; admin disable endpoint requires `ActionEngine.Admin` role (regular caller gets 403); after disable, /run returns 503; after enable, /run returns 200.
+
+    Acceptance: ADR-018 binding rules verified — disabled features return 503, flag NEVER bypasses authorization (verified by test that asserts: feature flag is OFF + caller is unauthorized → still 401 from auth, NOT 503 — auth wins over flag).
+  </goal>
+
+  <context>
+    <background>
+      ADR-018 binding rules (MUST):
+      - Represent flags in typed options classes with startup validation
+      - Return 503 ProblemDetails when feature is disabled
+      - Check same flag in both endpoints and async handlers
+      - Document default value and environment behavior for each flag
+
+      ADR-018 binding rules (MUST NOT):
+      - Use flags to bypass authorization checks (auth runs FIRST; flag check runs AFTER for the unauthorized case to keep behavior consistent)
+      - Produce partial behavior when disabled (fail cleanly — 503, not 500)
+      - Allow hidden/undocumented kill switches (every flag MUST be documented in `notes/decisions/feature-flags-inventory.md`)
+
+      The Action Engine has TWO layers of flag:
+      1. **Global flags** (ActionEngineFeatureFlags typed options class, deploy-time): turn off the entire Action invocation surface or the scheduled dispatch surface. Set via `appsettings.json` or environment variable. Restart required for changes to take effect.
+      2. **Per-Action kill switches** (Action Definition's `governance` JSON block from FR-01 / task 010): turn off a specific Action without redeploying. Flipped via the admin endpoint; propagates across BFF instances via Redis cache eviction within ~30 seconds.
+
+      The per-Action kill switch is the operational lever for incident response — "Action X is misbehaving, kill it now without affecting other Actions or redeploying." MVP scope.
+
+      `IFeatureFlagService` does NOT yet exist in the BFF (verified by grep). This task creates it. The service is the abstraction over both layers — callers ask "is this Action enabled" and get a single boolean answer.
+
+      Cache strategy: per-Action flag state cached in `IDistributedCache` (Redis per ADR-009) with 30-second TTL. Cache key: `action-engine:killswitch:{actionId}`. Eviction on admin endpoint mutation. The 30-second TTL is the worst-case propagation delay across instances if a single instance fails to evict (defense in depth). Cache versioning per ADR-009: include the Action's rowversion in the cached value so stale entries are detected.
+
+      Admin role: `ActionEngine.Admin` is a new application role. Added to the BFF app registration's manifest (manifested in `notes/decisions/admin-roles.md` and operator runbook update). For MVP, a global tenant admin or an explicit role assignment is required. The endpoint filter checks `User.IsInRole("ActionEngine.Admin")`.
+
+      Interaction with task 044 (rate limiter): the feature flag check runs BEFORE the rate limiter so disabled features don't consume bucket quota. Pipeline order: auth → feature flag filter → rate limiter → resource authorization filter → handler. The per-Action kill switch is checked INSIDE the handler (or as a late filter) after the actionId is resolved.
+
+      Interaction with task 042 (scheduled job handler): the scheduled dispatch job handler MUST also check `ScheduledDispatchEnabled` (global) AND `IsActionEnabledAsync(actionId)` (per-Action) before invoking the orchestrator. If disabled, return `JobOutcome.Skipped` (NOT `Failed` or `Poisoned` — the message remains processable when the flag is re-enabled, but with idempotency it won't re-run if it succeeded once). NOTE: This requires editing the task 042 handler to add the check. Coordinate or do as part of this task with a clear callout.
+
+      Binding governance: `.claude/constraints/bff-extensions.md` MUST be loaded. Placement = BFF. No new NuGet packages (the typed options pattern is in the framework).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/ActionEngineFeatureFlags.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/FeatureFlags/IFeatureFlagService.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/FeatureFlags/FeatureFlagService.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/FeatureFlags/FeatureFlagFilter.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs (edit — add flag filter + admin endpoints)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJobHandler.cs (edit from task 042 — add flag check)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (edit — register flag service + options)</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json (edit — ActionEngineFeatureFlags section)</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/decisions/feature-flags-inventory.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/decisions/admin-roles.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API. Flag filter is an endpoint filter; runs in the standard pipeline.</constraint>
+    <constraint source="ADR-008">Endpoint authorization runs FIRST. Feature flag does NOT bypass authorization. An unauthorized caller hitting a disabled feature still gets 401 (auth check wins). Verified by test.</constraint>
+    <constraint source="ADR-009">Per-Action kill-switch cache uses `IDistributedCache` (Redis). Cache keys versioned with Action rowversion. 30-second TTL for fast propagation.</constraint>
+    <constraint source="ADR-010">Flag service + options registered via `AddActionEngineModule()` extension. Module total ≤15 non-framework registrations.</constraint>
+    <constraint source="ADR-013">Feature flag service is a cross-cutting infrastructure concern — placed under `Infrastructure/FeatureFlags/`, NOT inside `Services/Ai/ActionEngine/`. The service surfaces booleans only; no AE internal types leak.</constraint>
+    <constraint source="ADR-018">**PRIMARY**. Typed options class for flags. Startup validation. 503 ProblemDetails on disabled. Same flag checked in endpoints AND async handlers. Flags NEVER bypass authorization. Documented defaults + environment behavior for every flag.</constraint>
+    <constraint source="ADR-019">503 response uses ProblemDetails (RFC 7807) with `status: 503`, `title: "Service Unavailable"`, `detail: "Action Engine /run is currently disabled by feature flag"` (or per-Action equivalent).</constraint>
+    <constraint source="ADR-029">No new NuGet packages — typed options + IDistributedCache are in framework.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF, publish-size unchanged, no new HIGH-severity CVE.</constraint>
+    <constraint source="project">Per-Action kill switch is the operational lever for incident response. 30-second worst-case propagation. Documented in `notes/decisions/feature-flags-inventory.md`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR-018 typed options" location=".claude/adr/ADR-018-feature-flags.md">Options class + startup validation + 503 ProblemDetails on disabled.</pattern>
+      <pattern name="Endpoint filter (ADR-008)" location=".claude/patterns/api/endpoint-filters.md">`IEndpointFilter` + early short-circuit pattern; mirrors DocumentAuthorizationFilter.cs.</pattern>
+      <pattern name="Redis-cached flag with rowversion" location=".claude/adr/ADR-009-redis-caching.md">IDistributedCache with key versioning + short TTL.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes. Confirm task 040 (ActionEndpoints.cs) shows ✅ in TASK-INDEX.md AND task 042 (ScheduledActionDispatchJobHandler.cs) status (if ✅, this task edits it; if not yet, document the dependency). (task-execute Step 0)</step>
+    <step order="1">Load `.claude/constraints/bff-extensions.md` and answer the pre-merge checklist in `notes/decisions/task-045-bff-extensions-checklist.md`. Cite placement = BFF (spec.md §6).</step>
+    <step order="2">Create `Configuration/ActionEngineFeatureFlags.cs` per ADR-018 typed-options conventions. Fields per `&lt;goal&gt;` section. Add `[Required]` validation attributes. Register via `services.Configure&lt;ActionEngineFeatureFlags&gt;(config.GetSection("ActionEngineFeatureFlags"))` + `services.AddOptions&lt;ActionEngineFeatureFlags&gt;().ValidateDataAnnotations().ValidateOnStart()`.</step>
+    <step order="3">Create `Infrastructure/FeatureFlags/IFeatureFlagService.cs` + `FeatureFlagService.cs`. Methods: `bool IsActionInvocationEnabled()` (reads typed options); `bool IsScheduledDispatchEnabled()` (reads typed options); `Task&lt;bool&gt; IsActionEnabledAsync(Guid actionId, CancellationToken ct)` (combines BOTH layers: global + per-Action). Implement per-Action check with `IDistributedCache` (Redis) caching the Action's `governance.killSwitchActive` field with key `action-engine:killswitch:{actionId}` + Action rowversion suffix per ADR-009. 30-second TTL.</step>
+    <step order="4">Create `Infrastructure/FeatureFlags/FeatureFlagFilter.cs` implementing `IEndpointFilter`. Constructor takes a flag-name string. Checks `IFeatureFlagService.IsActionInvocationEnabled()` (or the named flag); on false → `Results.Problem(statusCode: 503, title: "Service Unavailable", detail: "...", type: "https://datatracker.ietf.org/doc/html/rfc7231#section-6.6.4")`. Order in the pipeline: AFTER auth (so 401 wins over 503 for the unauthorized-and-disabled case), BEFORE rate limiter, BEFORE resource authorization filter.</step>
+    <step order="5">Edit `ActionEndpoints.cs`: add `.AddEndpointFilter&lt;FeatureFlagFilter&gt;()` (configured with the `ai-action-invocation` flag) to every Action endpoint. For the `/run` endpoint specifically, ALSO add an additional check INSIDE the handler (or as a late endpoint filter that runs after resource resolution) calling `IFeatureFlagService.IsActionEnabledAsync(actionId, ct)` — if false, return 503 with detail referencing the Action id.</step>
+    <step order="6">Add admin endpoints to `ActionEndpoints.cs`:
+      - `POST /api/ai/actions/{actionId}/admin/disable` — requires `ActionEngine.Admin` role. Body: `{ reason?: string }`. Updates Action Definition's `governance.killSwitchActive = true` in Dataverse via the facade. Evicts the cache key. Emits `action_engine.killswitch.toggled` App Insights event.
+      - `POST /api/ai/actions/{actionId}/admin/enable` — symmetrical inverse.
+      Both endpoints use a dedicated `AdminAuthorizationFilter` that asserts `User.IsInRole("ActionEngine.Admin")`. On role miss → 403 ProblemDetails.</step>
+    <step order="7">Edit `Services/Jobs/ScheduledActionDispatchJobHandler.cs` (from task 042): in the `HandleAsync` pipeline, check `IFeatureFlagService.IsScheduledDispatchEnabled()` + `IsActionEnabledAsync(actionId, ct)` early. If either false → return `JobOutcome.Skipped`. This satisfies ADR-018's "same flag checked in both endpoints and async handlers" binding rule.</step>
+    <step order="8">DI registration: register `IFeatureFlagService` + `FeatureFlagService` as scoped in `AddActionEngineModule()`. Register the options. Confirm total non-framework registrations ≤15 (ADR-010).</step>
+    <step order="9">Edit `appsettings.json` to add `ActionEngineFeatureFlags` section with defaults (all true). Edit `appsettings.Development.json` to inherit defaults. Write `notes/decisions/feature-flags-inventory.md` documenting EVERY flag: name, default, environment behavior, who can change it, how propagation works. Write `notes/decisions/admin-roles.md` documenting the new `ActionEngine.Admin` role and how to assign it.</step>
+    <step order="9.3">Write integration tests at `tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/FeatureFlagIntegrationTests.cs`:
+      (a) Global `ActionInvocationEnabled = false` → /run returns 503 with ProblemDetails;
+      (b) Per-Action kill switch on → /run returns 503 with detail referencing the Action id;
+      (c) ADR-018 binding test: global flag OFF + unauthorized caller → 401 (auth wins over flag — flag does NOT bypass authorization);
+      (d) Admin disable endpoint requires `ActionEngine.Admin` role — regular caller gets 403; admin gets 200 + cache eviction + App Insights event;
+      (e) After admin disable, /run returns 503; after admin enable, /run returns 200 (or 401/403 if caller's auth fails on /run — orthogonal to the flag check);
+      (f) Cache propagation: an admin disable in one BFF instance is visible in another instance within 30 seconds (test with two `IDistributedCache`-sharing instances or simulate via cache eviction).</step>
+    <step order="9.5">Run quality gates per task-execute Step 9.5: `code-review` on the new options + service + filter + admin endpoints + appsettings; `adr-check` verifies ADR-008 (auth not bypassed), ADR-009 (Redis-cached flag with versioning), ADR-018 (typed options + 503 ProblemDetails + same flag in handler + documented), ADR-019 (503 returns ProblemDetails). Re-run `dotnet build` and integration tests.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 045 ✅. Verify it unblocks tasks 060, 061, 062, 063 (the integration test phase). Reset `current-task.md` for the next active task.</step>
+    <step order="11">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-045-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF API including feature flag integration tests</tool>
+    <tool name="terminal">Run multi-instance integration tests for cache propagation</tool>
+    <tool name="git">Confirm state + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/ActionEngineFeatureFlags.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/FeatureFlags/IFeatureFlagService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/FeatureFlags/FeatureFlagService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/FeatureFlags/FeatureFlagFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/AdminAuthorizationFilter.cs (new — for ActionEngine.Admin role check)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs (edit — add flag filter + admin endpoints)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledActionDispatchJobHandler.cs (edit — add flag check)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (edit — register flag service + options)</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.json (edit — ActionEngineFeatureFlags section)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/FeatureFlagIntegrationTests.cs (6+ tests)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/feature-flags-inventory.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/admin-roles.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/task-045-bff-extensions-checklist.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Global `ActionInvocationEnabled = false` → /run returns 503 ProblemDetails with `type`, `title`, `status: 503`, `detail` — verified by integration test.</criterion>
+    <criterion testable="true">Per-Action kill switch on → /run returns 503 with detail referencing the Action id — verified by integration test.</criterion>
+    <criterion testable="true">**ADR-018 binding: flag does NOT bypass authorization** — global flag OFF + unauthorized caller returns 401 (auth wins), NOT 503. Verified by integration test.</criterion>
+    <criterion testable="true">Admin disable endpoint requires `ActionEngine.Admin` role — regular caller gets 403; admin gets 200 + cache eviction + `action_engine.killswitch.toggled` App Insights event. Verified by integration test.</criterion>
+    <criterion testable="true">Scheduled job handler (task 042) checks the same flag — if disabled, returns `JobOutcome.Skipped` (verified by unit test on the handler).</criterion>
+    <criterion testable="true">Cache propagation: admin disable in instance A is visible in instance B within 30 seconds (cache TTL) — verified by integration test or documented manual verification.</criterion>
+    <criterion testable="true">Typed options startup validation rejects invalid configurations — verified by startup test asserting `OptionsValidationException`.</criterion>
+    <criterion testable="true">`notes/decisions/feature-flags-inventory.md` exists with every flag documented (name, default, environment behavior, who can change, propagation).</criterion>
+    <criterion testable="true">`notes/decisions/admin-roles.md` exists documenting the `ActionEngine.Admin` role + assignment instructions.</criterion>
+    <criterion testable="true">`notes/decisions/task-045-bff-extensions-checklist.md` exists with every `bff-extensions.md` pre-merge item answered.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` returns no NEW HIGH-severity CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The ADR-018 binding rule "flags never bypass authorization" is the load-bearing constraint. If the flag check runs BEFORE the auth check, an unauthenticated caller can probe whether a feature is enabled (information disclosure). Order MUST be: auth → flag → resource auth → handler. The integration test (c) verifies this.
+
+    Per-Action kill switch is the operational lever. In production, an on-call engineer hits the admin endpoint to disable a runaway Action without redeploying. The 30-second cache TTL is the worst case; typical propagation is sub-second when the cache evicts cleanly.
+
+    The `IFeatureFlagService` abstraction unifies the two flag layers. Callers don't need to know whether a flag is global or per-Action — they ask "is this Action enabled" and get a single answer. This is the right abstraction for operations: incident response writes the kill switch; engineers don't navigate two systems.
+
+    Task 042 (job handler) is edited as part of this task. If task 042 hasn't merged yet, document the dependency and execute task 045 after task 042 lands. If task 042 has merged, this task's edit to the handler is straightforward (insert two lines for the flag check at the start of `HandleAsync`).
+
+    Task 044 (rate limiter) interaction: pipeline order is auth → feature flag filter (this task) → rate limiter (task 044) → resource authorization filter → handler. If both tasks merge in the same PR, double-check the order in `EndpointMappingExtensions.cs` or wherever the pipeline is composed.
+
+    Documentation is binding per ADR-018 ("documented default value and environment behavior for each flag"). `notes/decisions/feature-flags-inventory.md` is NOT optional. Skip it and `adr-check` will catch the gap at Step 9.5.
+
+    Admin role assignment is an operator concern, not a code concern. Document the procedure in `notes/decisions/admin-roles.md` and link from the operator runbook (`docs/guides/auth-deployment-setup.md` update may be appropriate — coordinate if so).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5 (code-review + adr-check). The ADR-018 binding "flag never bypasses authorization" is non-negotiable.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>BFF — PublicContracts Facade IActionEngineFacade (ADR-013 refined; blocks Phase 2+)</title>
+    <phase>Phase 1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>020, 021, 022, 023, 024, 025, 026, 040, 041, 042, 050, 051, 052</blocks>
+    <tags>bff-api, api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Defines the binding boundary between Action Engine internals and CRUD-side consumers per ADR-013 refined 2026-05-20; the facade interface IS the contract — once Phase 2+ consumers begin depending on it, changing it requires coordinated multi-task refactor; bff-extensions.md governance applies; tags include bff-api + ai</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Creates only `Services/Ai/PublicContracts/IActionEngineFacade.cs` + a placeholder skeleton impl in `Services/Ai/PublicContracts/ActionEngineFacade.cs` (no DI registration — that's deferred). Task 014 owns `Program.cs` edit + `AddActionEngineModule.cs` (different files). Task 016 deploys Azure infra (no BFF code). Verified: NO shared file edits with 014 or 016 in Phase 1.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create the public-contract facade `IActionEngineFacade` in `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/` per ADR-013 refined 2026-05-20. This interface IS the binding boundary: every CRUD-side consumer of Action Engine capability MUST reach it through this facade. Do NOT inject `IToolHandlerRegistry`, `IActionOrchestrationService`, `IGateResolver`, or any Action Engine internal anywhere outside `Services/Ai/ActionEngine/`. Create the interface + a placeholder skeleton impl that throws `NotImplementedException` until Phase 4 wires it up.
+  </prompt>
+
+  <role>
+    SPAARKE BFF API designer experienced with the `PublicContracts/` facade pattern from ADR-013 refined. You design contract surfaces that are stable, narrow, and self-documenting — knowing every method signature here becomes a downstream dependency that's expensive to change once consumers begin using it.
+  </role>
+
+  <goal>
+    Two files created:
+
+    1. **`Services/Ai/PublicContracts/IActionEngineFacade.cs`** — the contract interface, with these methods (per spec FR-10..FR-12 + FR-16 + FR-17 surface):
+       - `Task&lt;ActionRunDescriptor&gt; InvokeActionAsync(InvokeActionRequest request, CancellationToken ct)` — dispatch a known Action by id with parameters; returns descriptor (run id + initial state)
+       - `Task&lt;ActionRunDescriptor&gt; GetActionRunStatusAsync(Guid runId, CancellationToken ct)` — poll run state
+       - `Task&lt;IReadOnlyList&lt;ResourceCandidate&gt;&gt; FindResourcesAsync(string userIntent, int topK = 5, CancellationToken ct = default)` — semantic discovery (backed by Phase 2 meta-tool impl)
+       - `Task&lt;ResourceDetail&gt; GetResourceDetailAsync(string resourceId, CancellationToken ct)` — full resource schema for a discovered Tool
+       - `Task&lt;GateDescriptor&gt; ResolveGateAsync(ResolveGateRequest request, CancellationToken ct)` — submit gate approval/rejection on behalf of an external caller (used by Insights Engine consumption per coordination assessment)
+
+       Plus the public DTOs referenced by these methods (`ActionRunDescriptor`, `InvokeActionRequest`, `ResourceCandidate`, `ResourceDetail`, `ResolveGateRequest`, `GateDescriptor`) — defined IN the same folder as record types, no Action Engine internal types leaked.
+
+    2. **`Services/Ai/PublicContracts/ActionEngineFacade.cs`** — placeholder concrete impl. All methods throw `NotImplementedException("Action Engine facade impl wired up in Phase 4 (task 040+).")`. Class is `internal sealed` (CRUD callers must depend on the INTERFACE, never the impl). NO DI registration in this task (task 014 owns Program.cs / DI module; the registration of this facade impl is deferred to Phase 4).
+
+    Deliverable: BFF builds cleanly; the interface + DTOs surface compiles standalone; the placeholder impl compiles but is NOT yet registered with DI (intentional — no consumer should depend on this in Phase 1).
+  </goal>
+
+  <context>
+    <background>
+      **ADR-013 refined (2026-05-20)** binding rule from spec.md §6 placement justification: "CRUD-side consumers reach Action Engine via `Services/Ai/PublicContracts/IActionEngineFacade.cs` — NOT direct injection of `IToolHandlerRegistry`, `IGateResolver`, or other internal types."
+
+      **Why facade-first**: the 2026-05-20 BFF AI extraction assessment (`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`) found 20 inbound CRUD→AI direct dependencies. ADR-013 refined was the remediation: every new CRUD→AI surface uses a public-contract facade. Action Engine is the first new AI-side capability shipping under this discipline.
+
+      **What goes in PublicContracts**: only the public method surface + the public DTOs. NO Action Engine internal types (`Action`, `ToolDispatchContext`, `IGateResolver`, `PhaseRestrictions`, etc.) — these stay under `Services/Ai/ActionEngine/`. The facade method DTOs are flattened, stable, versionable shapes.
+
+      **What this task does NOT do**:
+      - Does NOT register the facade impl with DI (task 014 owns the DI module; the facade impl registration is deferred until Phase 4 has real wiring to expose)
+      - Does NOT add `accessToken`/`token` fields to any DTO (ADR-028)
+      - Does NOT leak Action Engine internals into the interface or DTOs
+
+      **Coordination with task 014**: task 014 creates `Services/Ai/ActionEngine/` folder + `AddActionEngineModule.cs` + edits `Program.cs`. This task (015) creates only `Services/Ai/PublicContracts/IActionEngineFacade.cs` + `ActionEngineFacade.cs`. NO shared file edits — both tasks can land in parallel cleanly.
+
+      **Why blocks Phase 2+**: every Phase 2+ task that exposes Action Engine capability to a CRUD-side caller (e.g., task 050 SpaarkeAi launcher consuming the facade) requires this interface to exist. Phase 1 ships the contract; Phase 4 wires up the impl.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API conventions; record types preferred for DTOs.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization. Endpoints that USE this facade (Phase 2+) apply `.AddEndpointFilter&lt;&gt;()`. This task creates no endpoints.</constraint>
+    <constraint source="ADR-010">Feature-module DI. The facade impl is registered by `AddActionEngineModule()` in a LATER phase. This task does NOT touch DI.</constraint>
+    <constraint source="ADR-013 (refined)">CRUD-side consumers reach Action Engine ONLY via this facade. Internal types (`IToolHandlerRegistry`, `IGateResolver`, `ActionOrchestrationService`, etc.) MUST NOT be referenced anywhere outside `Services/Ai/ActionEngine/`. The facade is the only public surface.</constraint>
+    <constraint source="ADR-019">Errors returned via the facade follow ProblemDetails RFC 7807 (when endpoints surface them). The interface methods themselves throw typed exceptions (e.g., `ResourceNotFoundException`, `PhaseToolDeniedException` reified at facade boundary).</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2. NO `accessToken`/`token` fields on any DTO. Auth context flows via ambient request principal, not facade parameters.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta MUST be ≤ 5 MB compressed. For an interface + DTOs + placeholder impl, expect a few KB. Verify.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist binding: placement decision (BFF, per ADR-013 refined), ADRs cited, publish-size verified, no new HIGH-sev CVE, feature-module DI (facade registration deferred to Phase 4).</constraint>
+    <constraint source="project">Facade impl class is `internal sealed`. CRUD callers depend on the INTERFACE; this prevents accidental misuse of impl-specific behavior.</constraint>
+    <constraint source="project">DTOs are records (immutable). NO Action Engine internal types leaked into the public surface.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
+    </files>
+    <patterns>
+      <pattern name="PublicContracts facade (ADR-013 refined)" location=".claude/constraints/bff-extensions.md">Canonical pattern. Public interface + public DTOs only; no internal types leaked.</pattern>
+      <pattern name="Endpoint definition (Minimal API)" location=".claude/patterns/api/endpoint-definition.md">Pattern for Phase 2+ endpoints that consume this facade.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes, task 001 status is ✅. Load `.claude/constraints/bff-extensions.md` and `docs/assessments/bff-ai-extraction-assessment-2026-05-20.md` in full. (task-execute Step 0)</step>
+    <step order="1">Read `Services/Ai/AnalysisOrchestrationService.cs` to see the orchestration shape this facade will eventually wrap. Read coordination-assessment-with-insights-engine.md for the joint-ownership context on gate resolution (Insights Engine will call `ResolveGateAsync` through this facade).</step>
+    <step order="2">Verify task 014 has not yet created `Services/Ai/PublicContracts/` — if it has, coordinate file additions to avoid conflicts. (Tasks 014 and 015 are parallel-safe by design; task 014 creates `Services/Ai/ActionEngine/`, task 015 creates `Services/Ai/PublicContracts/` — disjoint folders.)</step>
+    <step order="3">Capture publish-size baseline if not already captured by task 014: `dotnet publish src/server/api/Sprk.Bff.Api/ --configuration Release --runtime linux-x64 --self-contained false`. Save baseline to `notes/spikes/task-015-publish-baseline.md`.</step>
+    <step order="4">Create folder `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/`.</step>
+    <step order="5">Create `Services/Ai/PublicContracts/IActionEngineFacade.cs` — the interface. Define the 5 methods per `&lt;goal&gt;` with full XML doc comments citing the spec FR they satisfy. Public interface; namespace `Sprk.Bff.Api.Services.Ai.PublicContracts`. Methods are all async, all return Tasks, all accept `CancellationToken ct`.</step>
+    <step order="6">In the SAME file (or sibling files in `PublicContracts/`), define the public DTOs as records: `ActionRunDescriptor`, `InvokeActionRequest`, `ResourceCandidate`, `ResourceDetail`, `ResolveGateRequest`, `GateDescriptor`. Use camelCase JSON via `[JsonPropertyName]` if BFF endpoints expose these via JSON. NO `accessToken`/`token` fields (ADR-028). NO Action Engine internal types referenced.</step>
+    <step order="7">Create `Services/Ai/PublicContracts/ActionEngineFacade.cs` — placeholder impl. `internal sealed class`. All 5 methods throw `NotImplementedException("Action Engine facade impl wired up in Phase 4 (task 040+).")`. Constructor accepts `ILogger&lt;ActionEngineFacade&gt;` for future use.</step>
+    <step order="8">Add XML doc comments to ALL public types/methods/properties citing the spec FR + ADR-013 refined binding. The doc comments are part of the contract — future task authors read them to understand the surface.</step>
+    <step order="9">Do NOT register the impl with DI. Verify `Program.cs` and `Infrastructure/DI/AddActionEngineModule.cs` (created by task 014) do NOT mention `ActionEngineFacade`. (When task 014 also lands, both files should be free of facade DI registration — by intentional design.)</step>
+    <step order="10">Build: `dotnet build src/server/api/Sprk.Bff.Api/` MUST exit 0. The interface, DTOs, and placeholder impl all compile, but the impl is not in the DI container — confirmed by absence in `AddActionEngineModule.cs`.</step>
+    <step order="11">Smoke-test BFF startup: `dotnet run --project src/server/api/Sprk.Bff.Api/` then `curl /healthz` returns 200. Stop the server. (The facade not being registered does NOT break startup — nothing currently injects it.)</step>
+    <step order="12">Measure publish-size delta: re-run publish, zip output, compare. Record in `notes/spikes/task-015-publish-delta.md`. For an interface + DTOs + placeholder impl, expect &lt; 100 KB delta. MUST be ≤ 5 MB compressed (NFR-10).</step>
+    <step order="13">Verify no new HIGH-sev CVE: `dotnet list package --vulnerable --include-transitive --project src/server/api/Sprk.Bff.Api/`. No new packages added in this task, so the diff should be clean.</step>
+    <step order="14">Run quality gates per task-execute Step 9.5: `code-review` on `IActionEngineFacade.cs` + DTOs + placeholder impl (rigorous review — this is contract code); `adr-check` confirms ADR-013 refined (no internals leaked), ADR-028 (no accessToken fields), ADR-019 (error-handling pattern documented).</step>
+    <step order="15">Update `tasks/TASK-INDEX.md`: mark task 015 ✅; verify it unblocks tasks 020, 021, 022, 023, 024, 025, 026, 040, 041, 042, 050, 051, 052. Reset `current-task.md` to point to next pending task in Group B.</step>
+    <step order="16">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-015-handoff.md` and add a brief commit message recap. Commit message MUST cite ADR-013 refined explicitly.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, run, publish, list vulnerable packages</tool>
+    <tool name="git">Confirm state + commit</tool>
+    <tool name="terminal">Run shell commands for measurements + smoke tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionEngineFacade.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ActionEngineFacade.cs (placeholder impl)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ — DTOs as record types (in IActionEngineFacade.cs or sibling files)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/spikes/task-015-publish-baseline.md (if not captured by task 014)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/spikes/task-015-publish-delta.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/handoffs/task-015-handoff.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`Services/Ai/PublicContracts/IActionEngineFacade.cs` exists with exactly 5 method signatures (InvokeActionAsync, GetActionRunStatusAsync, FindResourcesAsync, GetResourceDetailAsync, ResolveGateAsync) — verified by interface inspection.</criterion>
+    <criterion testable="true">All public DTOs (ActionRunDescriptor, InvokeActionRequest, ResourceCandidate, ResourceDetail, ResolveGateRequest, GateDescriptor) defined as record types; no Action Engine internal types leaked.</criterion>
+    <criterion testable="true">No DTO has an `accessToken` or `token` field (ADR-028 verified).</criterion>
+    <criterion testable="true">`ActionEngineFacade.cs` is `internal sealed`; all 5 methods throw `NotImplementedException` with the "Phase 4" message.</criterion>
+    <criterion testable="true">Build passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+    <criterion testable="true">BFF starts without crash; `curl /healthz` returns 200 (facade absence from DI does NOT affect startup).</criterion>
+    <criterion testable="true">Publish-size delta &lt; 100 KB compressed (within NFR-10 ≤ 5 MB cap); recorded in `notes/spikes/task-015-publish-delta.md`.</criterion>
+    <criterion testable="true">No new HIGH-sev CVE; verified by `dotnet list package --vulnerable --include-transitive`.</criterion>
+    <criterion testable="true">All public methods + DTOs have XML doc comments citing the spec FR they satisfy.</criterion>
+    <criterion testable="true">Grep audit: `IToolHandlerRegistry`, `IGateResolver`, `ActionOrchestrationService` referenced ONLY inside `Services/Ai/ActionEngine/` — NOT in `PublicContracts/` or anywhere outside the AE folder.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **This interface is the contract**. Once Phase 2+ tasks start depending on it, changing it requires coordinated refactor across all consumers. Get the surface right before merging.
+
+    The placeholder impl exists so the BFF compiles cleanly with a complete facade type, but it is NOT registered with DI — by design. Phase 4 (task 040+) will register the real impl. CRUD-side consumers in Phase 5 (task 050+) will depend on the INTERFACE; the DI container will resolve the impl after task 040.
+
+    Do NOT auto-register the facade in this task's PR. The DI registration of `IActionEngineFacade -> ActionEngineFacade` belongs in `AddActionEngineModule.cs` in Phase 4, after the impl has real logic. Registering a NotImplementedException-throwing impl now would make smoke tests pass falsely if any consumer accidentally injects the facade prematurely.
+
+    Coordination with Insights Engine (per `coordination-assessment-with-insights-engine.md`): Insights Engine will call `ResolveGateAsync` to submit gate resolutions on behalf of monitor-triggered actions. The signature here MUST accommodate that — `ResolveGateRequest` includes `gateApprovalId` (Guid), `decision` (Approved | Rejected), `reason` (optional text), `resolvedByUserId` (Guid, optional — null for system/agent decisions).
+
+    The 5 method surface intentionally does NOT include CRUD for Action Definitions or Templates. Those are Phase 4 endpoint concerns (task 040 `ActionEndpoints.cs`), not facade concerns. The facade is the LLM-facing + cross-AI-feature-facing surface.
+
+    If task 014 lands first and modifies `AddActionEngineModule.cs`, this task can land without any conflict — different folders. If this task lands first, task 014 lands without conflict — different folders. Verify clean parallel-land by checking `git status` shows additions only in `Services/Ai/PublicContracts/` for this task and `Services/Ai/ActionEngine/` + `Infrastructure/DI/AddActionEngineModule.cs` + `Program.cs` for task 014.
+
+    The `internal sealed` modifier on the impl class is deliberate. External callers in this assembly can still construct the interface via DI; internal sealed prevents subclassing and forces consumers through the contract.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;` — ESPECIALLY `.claude/constraints/bff-extensions.md` and `docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. ADR-013 refined is the binding constraint; cite it in the PR description.
+    </protocol>
+  </execution>
+</task>

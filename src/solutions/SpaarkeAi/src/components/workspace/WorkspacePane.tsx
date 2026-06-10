@@ -62,7 +62,10 @@ import {
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
   TELEMETRY_TAB_RESTORE_SAVE_FAILURE,
 } from "../../telemetry/errorTelemetry";
-import { getPinnedWorkspaces } from "../../services/pinnedWorkspaces";
+import {
+  getPinnedWorkspaces,
+  prunePinnedToKnown,
+} from "../../services/pinnedWorkspaces";
 // Wave 2b (task 109): the cold-load default tab is now driven by
 // useWorkspaceLayouts().activeLayout (the BFF's discovered default — Daily
 // Briefing in dev) instead of a hard-coded Home tab. See the auto-install
@@ -382,7 +385,7 @@ export function WorkspacePane(): React.JSX.Element {
   // default tab is the correct UX when the system has no default to offer.
   // ---------------------------------------------------------------------------
 
-  const { activeLayout } = useWorkspaceLayouts({
+  const { activeLayout, layouts } = useWorkspaceLayouts({
     bffBaseUrl,
     authenticatedFetch,
     isAuthenticated,
@@ -488,10 +491,17 @@ export function WorkspacePane(): React.JSX.Element {
   const autoOpenedPinsRef = React.useRef<boolean>(false);
   React.useEffect(() => {
     if (!isAuthenticated) return;
+    if (layouts.length === 0) return; // wait for layouts to load before pruning
     if (autoOpenedPinsRef.current) return; // run once per mount
     autoOpenedPinsRef.current = true;
 
-    const pinned = getPinnedWorkspaces();
+    // Stale-pin cleanup: drop pinned entries whose layoutId is no longer in
+    // the server-side layouts list (e.g. another device or the Manage
+    // Workspaces drawer deleted the layout). Persists the cleaned list back
+    // to localStorage in the same call. Returns the live (cleaned) list so we
+    // do not dispatch widget_load for non-existent layouts.
+    const knownLayoutIds = new Set(layouts.map((l) => l.id));
+    const pinned = prunePinnedToKnown(knownLayoutIds);
     if (pinned.length === 0) return;
 
     const manager = managerRef.current;
@@ -537,11 +547,13 @@ export function WorkspacePane(): React.JSX.Element {
       window.clearTimeout(timerId);
     };
     // Auto-open is a one-shot per mount. `isAuthenticated` flipping false→true
-    // is the trigger; subsequent state changes (re-auth on token refresh)
-    // MUST NOT re-trigger or we'd re-stack tabs. The ref guard above enforces
-    // this.
+    // is the trigger; subsequent state changes (re-auth on token refresh, or
+    // layouts refetch) MUST NOT re-trigger or we'd re-stack tabs. The ref
+    // guard above enforces this. `layouts` is in deps so the effect re-runs
+    // once after the initial empty array is replaced with the loaded list
+    // (the early-return guard at top blocks the first empty-array invocation).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  }, [isAuthenticated, layouts]);
 
   // ---------------------------------------------------------------------------
   // Auto-install Summary tab — R5 task 038 (2026-06-05)

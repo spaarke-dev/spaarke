@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Ribbon + Command-Bar Launchers — Matter / Project / Account / Contact entity forms</title>
+    <phase>Phase 5: Surfaces + Templates</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>060, 061, 062, 063</blocks>
+    <tags>dataverse, ribbon, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies ribbon XML and TypeScript code that wires user-visible launch points across four entity forms; touches solution ribbon DOM (high-blast-radius if wrong); tags include dataverse + ribbon</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 050 (URL contract must exist); modifies shared ribbon XML resource; single critical-path task within the Phase 5 Surfaces sub-group.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add ribbon + command-bar buttons on `sprk_matter`, `sprk_project`, `account`, and `contact` entity forms (and their respective home-grid command bars) that open SpaarkeAi as a side pane (`Xrm.App.sidePanes`) pre-populated with the record's `ChatLaunchContext` (entity logical name + record id + `surfaceHint: 'sidePane'`). The ribbon XML lives in a `Communication`-style ribbon solution (use the `ribbon-edit` skill); the form-script glue lives in `src/solutions/SpaarkeAi/src/ribbon/` extending the existing `EntityFormLaunch.ts` pattern with a new `openAsSidePane` export. The buttons are labeled "Open Spaarke AI" with the Spaarke logo icon and appear in the form command bar's "Collaborate" or "Tools" group (placement decided per entity convention).
+  </prompt>
+
+  <role>
+    Senior Dataverse customization engineer with deep familiarity with ribbon XML (`RibbonDiffXml`, `CommandDefinitions`, `Actions`, `JavaScriptFunction`), web resource invocation, the `Xrm.App.sidePanes` API (vs `Xrm.Navigation.navigateTo`), and Spaarke's ribbon convention of invocation-only scripts (ADR-006). You preserve the existing `openFromEntityForm` ribbon binding while adding the new side-pane binding.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **Ribbon XML changes** — `RibbonDiffXml` additions for `sprk_matter` (form + home grid), `sprk_project`, `account`, `contact` entities adding the "Open Spaarke AI" button with `Sprk.SpaarkeAi.EntityFormLaunch.openAsSidePane` as the function name. Buttons placed in the "Collaborate" or "Tools" group (consistent with existing Spaarke ribbon placements).
+    2. **Form-script extension** — extend `src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts` with `openAsSidePane(primaryControl: Xrm.FormContext)`. It extracts entity context, builds a `ChatLaunchContext` (with `surfaceHint: 'sidePane'`), and calls a new `openSpaarkeAiAsSidePane(ctx)` helper in `launch-resolver.ts` that uses `Xrm.App.sidePanes.createPane(...)` to mount SpaarkeAi as a 480px-wide side pane pre-populated with the context.
+    3. **Backward compatibility** — the existing `openFromEntityForm` (which opens as a modal dialog) is preserved unchanged so that existing ribbon bindings (if any) continue to work. The new function is additive.
+
+    Deliverable: ribbon XML diff in the solution's `customizations.xml` (deployed via the `ribbon-edit` skill workflow), edited `src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts`, edited `src/solutions/SpaarkeAi/src/utils/launch-resolver.ts` (adds `openSpaarkeAiAsSidePane`), and unit tests at `src/solutions/SpaarkeAi/src/ribbon/__tests__/EntityFormLaunch.test.ts`.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-14 mandates ribbon launchers on Matter, Project, Account, Contact entity forms that pre-populate `ChatLaunchContext` and open SpaarkeAi as a side pane. Design.md §4.5.2 lists "Command bar / ribbon Assistant button" as one of the seven Assistant host contexts; design.md §4.5.4 documents that **entity context** changes the agent's runtime behavior (playbook selected from `sprk_aichatcontextmap`, narrower tool set, system prompt knows "you are helping with this specific record").
+
+      The existing `EntityFormLaunch.openFromEntityForm` opens SpaarkeAi as a **modal dialog** (target: 2). This task adds `openAsSidePane` which uses `Xrm.App.sidePanes.createPane(...)` instead — a different host context that keeps the form visible (split-screen UX) and is the recommended pattern for Action Engine entity-form invocation (design.md §4.5.4 "Entity context" row).
+
+      Ribbon XML placement convention: Matter and Project use a "Tools" group on the form command bar; Account and Contact use the "Collaborate" group. Verify in the existing solution layout before adding. Use the `ribbon-edit` skill to extract → edit → repack → import, which is the canonical Spaarke workflow for ribbon changes.
+
+      ADR-006: ribbon scripts are invocation-only — they extract context from `PrimaryControl` and delegate to a resolver module. No business logic, no URL construction, no direct Xrm.Navigation calls in `EntityFormLaunch.ts`. That contract MUST be preserved.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts</file>
+      <file>src/solutions/SpaarkeAi/src/ribbon/WorkspaceLaunch.ts</file>
+      <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file>src/solutions/SpaarkeAi/src/types/ChatLaunchContext.ts</file>
+      <file>src/solutions/SpaarkeAi/src/ribbon/__tests__/EntityFormLaunch.test.ts</file>
+      <file>infra/solutions/spaarke-action-engine-ribbon/customizations.xml</file>
+      <file>infra/solutions/spaarke-action-engine-ribbon/solution.xml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Ribbon scripts are invocation-only. `EntityFormLaunch.ts` MUST NOT construct URLs, call `Xrm.Navigation` directly, or contain business logic. All such logic lives in `launch-resolver.ts`.</constraint>
+    <constraint source="ADR-026">Vite + singlefile + React 19 build target. New TypeScript files compile to the existing single-file bundle. No new external dependencies.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 only. The side-pane host loads the existing SpaarkeAi shell which is already Fluent v9 compliant; this task adds no new UI surface.</constraint>
+    <constraint source="project">Use the `ribbon-edit` skill for solution export → ribbon XML edit → repack → import. Do NOT hand-edit the solution ZIP.</constraint>
+    <constraint source="project">Preserve existing `openFromEntityForm` modal binding for backward compatibility. The new `openAsSidePane` is additive.</constraint>
+    <constraint source="project">Button placement: Matter + Project → "Tools" group; Account + Contact → "Collaborate" group (verify against existing solution layout; deviate only with documented rationale).</constraint>
+    <constraint source="project">Side pane width: 480px (matches Spaarke's existing side-pane conventions per `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`). Side pane title: the record's primary name + " — Spaarke AI".</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/code-pages-architecture.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-006-ui-surface-architecture.md</file>
+      <file>.claude/adr/ADR-026-vite-singlefile-react19.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ribbon invocation-only scripts" location="src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts">Existing `openFromEntityForm` extracts context from `PrimaryControl` and delegates to `launch-resolver.ts`. Follow the same shape for `openAsSidePane`.</pattern>
+      <pattern name="ribbon-edit workflow" location=".claude/skills/ribbon-edit/SKILL.md">Solution export → unzip → edit `customizations.xml` `RibbonDiffXml` → repack → import. Always verify with the skill rather than hand-editing.</pattern>
+      <pattern name="Xrm.App.sidePanes" location="docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md">Use `createPane({paneId, title, width, hideHeader, imageSrc})` then `pane.navigate(...)` to load the SpaarkeAi web resource into the pane.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, dependencies (task 050) marked ✅ in `TASK-INDEX.md`, and `ChatLaunchContext` type exists at `src/solutions/SpaarkeAi/src/types/ChatLaunchContext.ts`. (task-execute Step 0)</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;` — especially the `ribbon-edit` skill's workflow, the existing `EntityFormLaunch.ts` shape, and design.md §4.5.4 (surface-context awareness).</step>
+    <step order="2">Add `openSpaarkeAiAsSidePane(ctx: ChatLaunchContext)` to `launch-resolver.ts`: builds the URL via `buildLaunchUrl(ctx)`, calls `Xrm.App.sidePanes.createPane({title, width: 480, hideHeader: false, imageSrc: 'sprk_spaarke_logo_16'})` then `pane.navigate({pageType: 'webresource', webresourceName: 'sprk_spaarkeai', data: builtUrl})`. Fall back gracefully if `Xrm.App` is unavailable (warn + no-op, mirroring existing `openSpaarkeAi`).</step>
+    <step order="3">Add `openAsSidePane(primaryControl: Xrm.FormContext)` to `EntityFormLaunch.ts`. Extract `entityLogicalName` + `entityId` from `primaryControl.data.entity`; build a `ChatLaunchContext` with `surfaceHint: 'sidePane'`; delegate to `openSpaarkeAiAsSidePane`. No URL construction in this file.</step>
+    <step order="4">Author ribbon XML using the `ribbon-edit` skill. Export the target solution (or a small dedicated ribbon-extensions solution per Spaarke convention); edit `RibbonDiffXml` for `sprk_matter` (form + home grid), `sprk_project`, `account`, `contact` to add a `CommandDefinition` invoking `Sprk.SpaarkeAi.EntityFormLaunch.openAsSidePane` (library: `$webresource:sprk_spaarkeai_entityformlaunch`, with `&lt;CrmParameter Value="PrimaryControl"/&gt;`); add a matching `Button` in the correct group ("Tools" for Matter/Project, "Collaborate" for Account/Contact) with `LabelText="Open Spaarke AI"` and the Spaarke logo `Image16by16` + `Image32by32` references.</step>
+    <step order="5">Repack the solution via the `ribbon-edit` workflow; import into the dev environment via `dataverse-deploy` (or the skill's own deploy step); verify the button appears on each of the four entity forms.</step>
+    <step order="6">Create unit tests at `src/solutions/SpaarkeAi/src/ribbon/__tests__/EntityFormLaunch.test.ts`: mock `Xrm.App.sidePanes.createPane` + the returned `pane.navigate` and verify (a) `openAsSidePane` extracts entity context correctly, (b) the resulting URL includes `surfaceHint=sidePane`, (c) the existing `openFromEntityForm` regression test still passes (no behavior change).</step>
+    <step order="7">Run `npm test --workspace=src/solutions/SpaarkeAi` — all tests pass. Run `npm run build:prod --workspace=src/solutions/SpaarkeAi` — build succeeds. Deploy the updated web resource via the `code-page-deploy` skill if not already covered by step 5.</step>
+    <step order="8">**Manual smoke test** (deferred — covered by `&lt;ui-tests&gt;` section): open a Matter record, click "Open Spaarke AI" in the ribbon, verify the side pane mounts at 480px with SpaarkeAi loaded and the matter's entity context populated.</step>
+    <step order="9">Update `current-task.md` with progress; checkpoint via `context-handoff` skill.</step>
+    <step order="9.5">**Quality gates** (FULL rigor): run `code-review` on `EntityFormLaunch.ts` + `launch-resolver.ts` + the ribbon XML diff (citing ADR-006 invocation-only contract); run `adr-check` (verify ADR-006, ADR-021, ADR-026 compliance — no business logic in ribbon scripts, Fluent v9 only, singlefile bundle preserved).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 051 status ✅. Update `current-task.md`: task 051 complete; unblocks Phase 6 integration tests.</step>
+    <step order="11">If any deviations from this plan, document in `projects/ai-spaarke-action-engine-r1/notes/handoffs/051-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="ribbon-edit">Canonical Spaarke workflow for ribbon XML changes (export → edit → repack → import)</tool>
+    <tool name="dataverse-deploy">Deploy the updated solution containing the ribbon changes</tool>
+    <tool name="code-page-deploy">Deploy the updated SpaarkeAi web resource (for the new TypeScript)</tool>
+    <tool name="npm">Run tests and production build</tool>
+    <tool name="git">Confirm state</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts (edited — adds `openAsSidePane`)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts (edited — adds `openSpaarkeAiAsSidePane`)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/ribbon/__tests__/EntityFormLaunch.test.ts</output>
+    <output type="code">Ribbon XML diff in the target solution's `customizations.xml` (deployed via `ribbon-edit`)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The "Open Spaarke AI" button appears on the `sprk_matter` form command bar (Tools group) when the dev solution is imported. Verified by manual smoke + `ui-test`.</criterion>
+    <criterion testable="true">The same button appears on `sprk_project`, `account`, and `contact` forms (in their respective groups). Verified by manual smoke + `ui-test`.</criterion>
+    <criterion testable="true">Clicking the button mounts SpaarkeAi as an `Xrm.App.sidePanes` pane at 480px width with the record's entity context populated in the URL. Verified by `ui-test`.</criterion>
+    <criterion testable="true">The URL passed to the side pane contains `entityLogicalName`, `entityId`, and `surfaceHint=sidePane`. Verified by unit test mocking `Xrm.App.sidePanes`.</criterion>
+    <criterion testable="true">The existing `openFromEntityForm` modal-dialog behavior is unchanged — regression test passes.</criterion>
+    <criterion testable="true">`EntityFormLaunch.ts` contains NO URL construction, NO direct `Xrm.Navigation` calls, NO business logic — ADR-006 compliance verified by `code-review`.</criterion>
+    <criterion testable="true">`npm run build:prod --workspace=src/solutions/SpaarkeAi` exits 0; no new TypeScript errors.</criterion>
+    <criterion testable="true">No new npm dependencies added.</criterion>
+    <criterion testable="true">Ribbon XML diff was authored via the `ribbon-edit` skill (not hand-edited ZIP) — verified by skill invocation record.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Button visible on Matter form (Tools group)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_matter</url>
+      <steps>
+        <step>Navigate to any Matter record</step>
+        <step>Locate the form command bar; expand the "Tools" group if collapsed</step>
+        <step>Verify "Open Spaarke AI" button is visible with the Spaarke logo icon</step>
+        <step>Check browser console for JavaScript errors during form load</step>
+      </steps>
+      <expected>Button renders with correct label + icon; no console errors.</expected>
+    </test>
+
+    <test name="Side pane opens with entity context (deep-link flow)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_matter</url>
+      <steps>
+        <step>Open a Matter record</step>
+        <step>Click "Open Spaarke AI" in the ribbon</step>
+        <step>Verify a side pane opens at 480px width on the right side of the screen</step>
+        <step>Verify the side pane title includes the matter's primary name</step>
+        <step>Open browser dev tools; verify the side pane's iframe URL contains `entityLogicalName=sprk_matter`, `entityId={matter-guid}`, and `surfaceHint=sidePane`</step>
+        <step>Verify the SpaarkeAi shell renders inside the pane with no console errors</step>
+      </steps>
+      <expected>Side pane opens with the correct width, title, URL params, and rendered shell. No console errors.</expected>
+    </test>
+
+    <test name="Button visible on Account, Contact, Project forms (Collaborate / Tools group)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=account</url>
+      <steps>
+        <step>Navigate to an Account record; verify "Open Spaarke AI" appears in the "Collaborate" group</step>
+        <step>Navigate to a Contact record; verify "Open Spaarke AI" appears in the "Collaborate" group</step>
+        <step>Navigate to a Project record; verify "Open Spaarke AI" appears in the "Tools" group</step>
+        <step>Click the button on each and verify side pane opens with the entity's logical name + id</step>
+      </steps>
+      <expected>All three forms have the button in the correct group; clicking each opens the side pane with correct context.</expected>
+    </test>
+
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 user settings</step>
+        <step>Open a Matter record; click "Open Spaarke AI"</step>
+        <step>Verify the side pane content (SpaarkeAi shell) renders correctly in dark mode — no white backgrounds, no black-on-black text, icons use `currentColor`</step>
+        <step>Verify the ribbon button icon adapts to dark mode (or remains legibly visible)</step>
+      </steps>
+      <expected>Side pane content respects Fluent UI v9 semantic tokens per ADR-021; no contrast failures.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The exact ribbon group placement ("Tools" vs "Collaborate") MUST be verified against the target environment's existing ribbon layout before authoring the diff. If a group does not exist for a given entity, place the button at the top level of the command bar (not the form's `Mscrm.Form` overflow menu).
+
+    For the home-grid command bar (Matter list view), the button should appear when no records or single records are selected. Selection-based behavior (multi-record selection) is deferred — only single-record / no-selection invocation is in MVP scope.
+
+    The Spaarke logo icon web resource (`sprk_spaarke_logo_16`, `sprk_spaarke_logo_32`) MUST exist in the environment. If absent, deploy via the standard Spaarke shared-assets solution before importing this ribbon diff.
+
+    Do NOT remove or modify `openFromEntityForm` — it is the modal-dialog binding used by other Spaarke surfaces.
+
+    The `Xrm.App.sidePanes` API requires Unified Interface; classic UI is not supported. Spaarke is UCI-only so this is acceptable; document the constraint in the function's TSDoc.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Use the `ribbon-edit` skill for the ribbon XML changes (export → edit → repack → import). Use `dataverse-deploy` for solution import and `code-page-deploy` for web resource updates. Follow the task-execute skill for proactive checkpointing and quality gates at Step 9.5. Run `ui-test` skill at Step 9.7 if Chrome integration is available.
+    </protocol>
+  </execution>
+</task>

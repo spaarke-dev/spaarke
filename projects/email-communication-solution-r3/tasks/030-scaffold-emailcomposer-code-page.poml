@@ -1,0 +1,137 @@
+<task id="030" project="email-communication-solution-r3">
+  <metadata>
+    <title>Scaffold EmailComposer Code Page directory structure</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>029</dependencies>
+    <blocks>031, 032, 035</blocks>
+    <tags>code-page, react, frontend, scaffold</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New file creation task mirroring an existing exemplar; no engine logic; follows DocumentRelationshipViewer pattern 1:1</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>First step of the Code Page chain; subsequent tasks (031, 032) modify the scaffolded App.tsx so must serialize</parallel-reason>
+    <fr-refs>FR-18</fr-refs>
+  </metadata>
+
+  <prompt>
+    Scaffold the EmailComposer Code Page directory at `src/client/code-pages/EmailComposer/`, mirroring the file layout of `src/client/code-pages/DocumentRelationshipViewer/`. Create the skeleton ONLY — do not mount `<EmailComposer />` yet (task 033 does the mount). The goal is a deployable, empty-shell Code Page that builds and serves a "Hello" page so tasks 031–034 can iterate on auth, URL parsing, and the wrapper mount independently.
+
+    Files to create: `src/main.tsx` (or `src/index.tsx` per exemplar), `src/App.tsx` (minimal shell), `src/auth/` placeholder directory, `index.html`, `vite.config.ts` (or `webpack.config.js` matching exemplar's bundler), `package.json`, `tsconfig.json`, `build-webresource.ps1`. Choose the bundler that matches the canonical exemplar.
+
+    Verify the scaffold builds locally before completing.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer. Familiar with the Code Page architecture per ADR-026 and the `code-page-deploy` skill. Has read the DocumentRelationshipViewer exemplar end-to-end.
+  </role>
+
+  <goal>
+    A new directory `src/client/code-pages/EmailComposer/` containing the same file scaffold as `DocumentRelationshipViewer/` (sans the visualization-specific components). `npm install` succeeds. `npm run build` (or equivalent) produces a deployable artifact even though the App.tsx body is a placeholder.
+  </goal>
+
+  <context>
+    <background>
+      The EmailComposer Code Page is the canonical Surface 2 entry point (Form Component Control replacement for `sprk_communication`) and Surface 1 entry point (ribbon "+ New Email"). Per FR-18 it deploys as the Dataverse web resource `sprk_emailcomposer`. Wave 1 ships the `<SendEmailPage />` wrapper this Code Page will eventually mount (task 033); Wave 2 builds the host.
+
+      Per the empirical findings in `CLAUDE.md`, the exemplar is at `src/client/code-pages/DocumentRelationshipViewer/` (22 files including auth, types, components, services, build script). This task replicates the structure WITHOUT yet wiring the email-specific logic.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/package.json</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/tsconfig.json</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/webpack.config.js</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/index.html</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/index.tsx</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/App.tsx</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/build-webresource.ps1</file>
+      <file>src/client/code-pages/EmailComposer/ (NEW DIR)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-026">Code Page architecture follows Full-Page Custom Page standard</constraint>
+    <constraint source="ADR-028">`@spaarke/auth` v2 is the only auth bootstrap (wired in task 031, scaffold should reserve a placeholder)</constraint>
+    <constraint source="project">Mirror the DocumentRelationshipViewer file/bundler choice; do NOT introduce a new bundler if exemplar uses webpack</constraint>
+    <constraint source="project">Web resource name MUST be `sprk_emailcomposer` (referenced by `build-webresource.ps1`)</constraint>
+    <constraint source="project">Do NOT mount `<EmailComposer />` or any wrapper in this task — task 033 owns that</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/package.json</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/webpack.config.js</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/App.tsx</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/build-webresource.ps1</file>
+    </files>
+    <patterns>
+      <pattern name="Code Page directory layout" location="src/client/code-pages/DocumentRelationshipViewer/">
+        Canonical 22-file Code Page scaffold: src/index.tsx entry, src/App.tsx root, src/services/auth/ for `@spaarke/auth` v2 bootstrap, index.html, build-webresource.ps1 producing single self-contained HTML artifact.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DocumentRelationshipViewer exemplar files: `package.json`, `tsconfig.json`, `webpack.config.js`, `index.html`, `src/index.tsx`, `src/App.tsx`, `build-webresource.ps1`. Note bundler choice (webpack vs vite) and follow it.</step>
+    <step order="2">Create `src/client/code-pages/EmailComposer/` directory.</step>
+    <step order="3">Copy + adapt `package.json` — change `name` to `emailcomposer-code-page`, version `0.1.0`, scripts match exemplar.</step>
+    <step order="4">Copy + adapt `tsconfig.json` — keep as-is (paths relative to new dir).</step>
+    <step order="5">Copy + adapt bundler config (`webpack.config.js` or `vite.config.ts`) — adjust entry/output paths for the new directory.</step>
+    <step order="6">Copy + adapt `index.html` — title "Email Composer", placeholder root div `<div id="root"></div>`.</step>
+    <step order="7">Create `src/index.tsx` — React 18 `createRoot` calling `<App />` (mirror exemplar's entry shape).</step>
+    <step order="8">Create `src/App.tsx` — minimal placeholder rendering "Email Composer (scaffold)" inside Fluent v9 `<FluentProvider theme={webLightTheme}>`. NO `<EmailComposer />` or `<SendEmailPage />` mount yet.</step>
+    <step order="9">Create empty placeholder directory `src/auth/` (or `src/services/auth/` matching exemplar) with a README marker file noting "Wired in task 031".</step>
+    <step order="10">Copy + adapt `build-webresource.ps1` — target web resource name `sprk_emailcomposer`; output path correct for the new dir.</step>
+    <step order="11">Run `npm install` in the new directory; confirm zero errors.</step>
+    <step order="12">Run `npm run build` (or exemplar's prod build script); confirm artifact emitted to expected output path.</step>
+    <step order="13">Verify with `Get-ChildItem` / `dir` that the directory layout matches the exemplar's file set (sans email-specific extras).</step>
+    <step order="14">Update `tasks/TASK-INDEX.md`: mark task 030 ✅ completed.</step>
+    <step order="15">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task (031).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read exemplar files</tool>
+    <tool name="write">Create new scaffold files</tool>
+    <tool name="bash">Run npm install + build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/EmailComposer/package.json (NEW)</output>
+    <output type="code">src/client/code-pages/EmailComposer/tsconfig.json (NEW)</output>
+    <output type="code">src/client/code-pages/EmailComposer/webpack.config.js (or vite.config.ts) (NEW)</output>
+    <output type="code">src/client/code-pages/EmailComposer/index.html (NEW)</output>
+    <output type="code">src/client/code-pages/EmailComposer/src/index.tsx (NEW)</output>
+    <output type="code">src/client/code-pages/EmailComposer/src/App.tsx (NEW — minimal placeholder)</output>
+    <output type="code">src/client/code-pages/EmailComposer/src/auth/ (NEW empty dir + README marker)</output>
+    <output type="code">src/client/code-pages/EmailComposer/build-webresource.ps1 (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Directory `src/client/code-pages/EmailComposer/` exists and contains the mirrored scaffold file set.</criterion>
+    <criterion testable="true">`npm install` in the new dir succeeds with zero errors.</criterion>
+    <criterion testable="true">`npm run build` (or exemplar's production build) emits a deployable artifact.</criterion>
+    <criterion testable="true">`src/App.tsx` renders a placeholder "Email Composer (scaffold)" inside a Fluent v9 theme provider.</criterion>
+    <criterion testable="true">No `<EmailComposer />` / `<SendEmailPage />` import yet — task 033 owns mount.</criterion>
+    <criterion testable="true">`build-webresource.ps1` references web resource name `sprk_emailcomposer`.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Bundler choice (webpack vs vite): per the empirical finding, the exemplar uses `webpack.config.js`. Follow that. If the exemplar has been migrated to vite by the time this task runs, mirror whichever bundler is canonical at execution time — do not introduce divergence.
+
+    Auth wiring is deliberately deferred to task 031 to keep this scaffold task in STANDARD rigor (no auth-sensitive code). The `src/auth/` placeholder dir + README anchor the slot for 031.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 are SKIPPED for STANDARD rigor.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,148 @@
+<task id="031" project="email-communication-solution-r3">
+  <metadata>
+    <title>Wire `@spaarke/auth` v2 bootstrap into EmailComposer Code Page</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033</blocks>
+    <tags>code-page, auth, frontend, react</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Auth-sensitive code (ADR-028 binding); Code Page is the only surface that imports `@spaarke/auth` directly; misconfiguration would cause popup-loops or token-acquisition failures. FULL rigor + code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the scaffolded App.tsx from task 030; task 032 also modifies App.tsx, so 031 → 032 must serialize</parallel-reason>
+    <fr-refs>FR-18</fr-refs>
+  </metadata>
+
+  <prompt>
+    Wire `@spaarke/auth` v2 bootstrap into the EmailComposer Code Page per ADR-028 and the `spaarke-sso-binding` pattern. The Code Page is the ONLY Spaarke surface that imports `@spaarke/auth` directly — every shared library component (including the `<SendEmailPage />` wrapper this Code Page will host) receives `authenticatedFetch` via props, NOT by importing `@spaarke/auth` itself.
+
+    Goal: After this task, the Code Page bootstraps SSO silently (no popup in steady state), produces a configured `authenticatedFetch` from auth context, and exposes it to the App tree via React context so task 033 can pass it into the `<SendEmailPage />` wrapper props.
+
+    Mirror the auth bootstrap of `src/client/code-pages/DocumentRelationshipViewer/src/services/auth/MsalAuthProvider.ts` + `msalConfig.ts` + `authInit.ts` — same pattern, same library, same configuration shape.
+  </prompt>
+
+  <role>
+    Spaarke frontend + auth engineer. Authoritative on Spaarke Auth v2 architecture (ADR-028) and the canonical Code Page bootstrap (DocumentRelationshipViewer + LegalWorkspace patterns).
+  </role>
+
+  <goal>
+    EmailComposer Code Page bootstraps `@spaarke/auth` v2 successfully:
+    1. Silent token acquisition on cold load (no popup unless interactive consent required)
+    2. `authenticatedFetch` available via React context inside App tree
+    3. Configuration shape mirrors DocumentRelationshipViewer (same scopes, same authority, same redirect URI handling)
+    4. NO direct `@spaarke/auth` import from any `@spaarke/ui-components` code reachable from the Code Page (binding rule per NFR-02)
+  </goal>
+
+  <context>
+    <background>
+      Per spec NFR-02 + ADR-028, shared library components MUST NOT import `@spaarke/auth` directly. The Code Page bootstraps it, derives `authenticatedFetch`, and injects via props. This is the same pattern DocumentRelationshipViewer follows.
+
+      The Code Page must work in two contexts: (a) direct URL navigation (e.g., user types `https://{org}/api/data/v9.2/WebResourceSet(...)?data=...`), and (b) launched via `Xrm.Navigation.navigateTo`. In both contexts the `@spaarke/auth` v2 silent-bootstrap should succeed without a popup; popup only appears on first-ever consent grant.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/EmailComposer/src/App.tsx (UPDATED — wrap with auth provider)</file>
+      <file>src/client/code-pages/EmailComposer/src/auth/ or src/services/auth/ (UPDATED — copy + adapt from exemplar)</file>
+      <file>src/client/code-pages/EmailComposer/src/index.tsx (potentially UPDATED — bootstrap call sequence)</file>
+      <file>src/client/code-pages/EmailComposer/package.json (UPDATED — add @spaarke/auth dep if not present)</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/auth/MsalAuthProvider.ts (EXEMPLAR)</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/auth/msalConfig.ts (EXEMPLAR)</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/authInit.ts (EXEMPLAR)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Code Page uses `@spaarke/auth` v2 bootstrap; no self-bootstrapped MSAL</constraint>
+    <constraint source="ADR-028">Silent acquisition is the steady-state path; popup is exception (first-ever consent)</constraint>
+    <constraint source="NFR-02">Shared library components MUST inject `authenticatedFetch` via props — NEVER import `@spaarke/auth`</constraint>
+    <constraint source="project">Mirror DocumentRelationshipViewer auth bootstrap exactly (scope set, authority, cache, redirect URI) — do NOT introduce variants</constraint>
+    <constraint source="project">Expose `authenticatedFetch` via React context so task 033 can wire it into the wrapper props</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/auth/MsalAuthProvider.ts</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/auth/msalConfig.ts</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/authInit.ts</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/App.tsx</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/index.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="Code Page auth bootstrap (canonical)" location=".claude/patterns/auth/spaarke-sso-binding.md">
+        Code Page bootstraps `@spaarke/auth` at app entry; exposes `authenticatedFetch` to React tree; shared lib components receive it via props.
+      </pattern>
+      <pattern name="Auth bootstrap exemplar (working impl)" location="src/client/code-pages/DocumentRelationshipViewer/src/services/auth/">
+        Three-file pattern: `MsalAuthProvider.ts` (provider wrapper), `msalConfig.ts` (config constants), `authInit.ts` (boot sequence).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the auth pattern + ADR-028 + DocumentRelationshipViewer's three auth files end-to-end.</step>
+    <step order="2">Verify `@spaarke/auth` is in `package.json` deps; add if missing (same version as DocumentRelationshipViewer).</step>
+    <step order="3">Create `src/services/auth/MsalAuthProvider.ts` (or `src/auth/MsalAuthProvider.ts` matching scaffold location from task 030) — copy from exemplar, adapt only as needed for EmailComposer scope.</step>
+    <step order="4">Create `src/services/auth/msalConfig.ts` — copy from exemplar (scopes, authority, cache config should match unless email scope diverges, which it should NOT for this composer surface).</step>
+    <step order="5">Create `src/services/authInit.ts` — copy from exemplar; the auth-init entry point called by `index.tsx`.</step>
+    <step order="6">Update `src/index.tsx` — call `authInit()` before rendering `<App />`; await silent acquisition; only then mount React root (mirror exemplar's pattern).</step>
+    <step order="7">Update `src/App.tsx` — wrap App body with the auth provider component; expose `authenticatedFetch` via a React Context so child components (later, task 033's `<SendEmailPage />`) can consume it via prop pass-through.</step>
+    <step order="8">Create or update a small `AuthContext.tsx` (or place context in MsalAuthProvider.ts) exposing `{ authenticatedFetch, account, isAuthenticated }`.</step>
+    <step order="9">Run `npm run build`; confirm clean build.</step>
+    <step order="9.5">QUALITY GATE — Run `code-review` skill on the auth-related files; run `adr-check` against ADR-028 + NFR-02. Confirm: (a) no `@spaarke/auth` import outside Code Page; (b) silent bootstrap path correct; (c) error handling for token-acquisition failure present.</step>
+    <step order="10">Local smoke: temporarily add a debug `console.log` near `authenticatedFetch` to confirm it's defined when App mounts. Remove debug log before completion.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: mark task 031 ✅ completed.</step>
+    <step order="12">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task (032).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read exemplar auth files + ADR-028 + pattern</tool>
+    <tool name="edit">Update App.tsx + index.tsx</tool>
+    <tool name="write">Create new auth files mirroring exemplar</tool>
+    <tool name="bash">npm install + npm run build</tool>
+    <tool name="code-review">Step 9.5 quality gate</tool>
+    <tool name="adr-check">Step 9.5 ADR validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/EmailComposer/src/services/auth/MsalAuthProvider.ts (NEW)</output>
+    <output type="code">src/client/code-pages/EmailComposer/src/services/auth/msalConfig.ts (NEW)</output>
+    <output type="code">src/client/code-pages/EmailComposer/src/services/authInit.ts (NEW)</output>
+    <output type="code">src/client/code-pages/EmailComposer/src/App.tsx (UPDATED — wrap with auth provider + AuthContext)</output>
+    <output type="code">src/client/code-pages/EmailComposer/src/index.tsx (UPDATED — bootstrap call)</output>
+    <output type="code">src/client/code-pages/EmailComposer/package.json (UPDATED — add @spaarke/auth dep if missing)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`@spaarke/auth` is the only auth library imported; no `@azure/msal-browser` direct usage.</criterion>
+    <criterion testable="true">Silent token acquisition succeeds on cold load (no popup in steady state).</criterion>
+    <criterion testable="true">`authenticatedFetch` is exposed via React Context and reachable from `<App />` children.</criterion>
+    <criterion testable="true">`code-review` skill returns no Critical findings on the auth files.</criterion>
+    <criterion testable="true">`adr-check` against ADR-028 + NFR-02 passes.</criterion>
+    <criterion testable="true">`npm run build` clean; no TypeScript errors.</criterion>
+    <criterion testable="true">No `@spaarke/auth` import from any `@spaarke/ui-components` file (verify via grep; pre-existing rule).</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The DocumentRelationshipViewer exemplar may name files differently (e.g., `MsalAuthProvider.ts` vs `AuthProvider.tsx`). Mirror whatever the exemplar uses to minimize variance — the goal is bit-for-bit similarity in auth bootstrap shape.
+
+    The `<SendEmailPage />` wrapper from Wave 1 (task 023) consumes `authenticatedFetch` as a prop. Task 033 will wire `useContext(AuthContext).authenticatedFetch` into the wrapper's prop API.
+
+    UQ from spec: NFR-02 binding rule is empirically verified — `@spaarke/ui-components/src/services/communicationApi.ts:21-23` documents the decoupling. This task reinforces by NOT importing `@spaarke/auth` anywhere in the shared lib.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>`. Run Step 9.5 quality gates: `code-review` on auth files + `adr-check` against ADR-028 + NFR-02. Auth code is sensitive — investigate any token-acquisition failure paths thoroughly.
+    </protocol>
+  </execution>
+</task>

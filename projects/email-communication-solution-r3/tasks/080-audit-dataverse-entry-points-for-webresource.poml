@@ -1,0 +1,119 @@
+<task id="080" project="email-communication-solution-r3">
+  <metadata>
+    <title>Audit Dataverse entry points referencing `sprk_communication_send.js` webresource</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>077</dependencies>
+    <blocks>081, 082, 083</blocks>
+    <tags>dataverse, ribbon, audit, cleanup</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit + customization inspection task; no code implementation but gates Wave 6 deletions — incorrect audit could break production ribbon entry points</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential — gates deletion tasks 081, 082, 083; must complete before any deletion begins</parallel-reason>
+    <fr-refs>FR-24</fr-refs>
+  </metadata>
+
+  <prompt>
+    Audit the Dataverse dev environment for every ribbon button, command bar definition, workflow, business rule, or form-script reference that loads `sprk_communication_send.js`. Produce a comprehensive list of entry points so we can verify (a) each entry point has been replaced by the Wave 2 EmailComposer Code Page (`sprk_emailcomposer` web resource) and (b) no entry point will be orphaned when tasks 081/082/083 delete the source files and Dataverse web resource record.
+
+    This audit is the gate that protects Wave 6 retirement from breaking production ribbon flows. If any entry point is found that has NOT been replaced by the Code Page, STOP and file a remediation task before proceeding to 081/082/083.
+  </prompt>
+
+  <role>
+    Dataverse customization specialist familiar with ribbon definitions, command bar XML, web resource lifecycle, and the relationship between source-file deletes and Dataverse record-level deletes. Authoritative on Wave 2 deliverables (EmailComposer Code Page entry surfaces per FR-19).
+  </role>
+
+  <goal>
+    A complete audit document at `notes/research/080-webresource-entry-point-audit.md` listing every Dataverse entity that references `sprk_communication_send.js` (ribbon button, command bar, workflow, form script). Each entry point has a clear status: (a) replaced by EmailComposer Code Page in Wave 2 ✅, or (b) NOT replaced — requires remediation before Wave 6 deletes proceed ⚠. The audit document is referenced from the Wave 6 retirement PR description.
+  </goal>
+
+  <context>
+    <background>
+      `sprk_communication_send.js` (~1,150 LOC per copy × 2 copies) was the original client-side email send implementation. R3 Wave 2 deployed the EmailComposer Code Page (`sprk_emailcomposer`) which replaced all production entry points. This task verifies that replacement empirically (not just on paper) before we delete the source files.
+
+      Per FR-24 acceptance criteria: "all ribbon entry points functional via Code Page; no remaining self-bootstrapped MSAL in any client surface."
+    </background>
+    <relevant-files>
+      <file>infrastructure/dataverse/ribbon/EmailRibbons/</file>
+      <file>src/client/webresources/js/sprk_communication_send.js</file>
+      <file>src/client/code-pages/EmailComposer/</file>
+      <file>notes/research/080-webresource-entry-point-audit.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-24">Audit MUST list every Dataverse entry point referencing `sprk_communication_send.js`</constraint>
+    <constraint source="FR-24">Audit MUST verify each entry point is replaced by EmailComposer Code Page (Wave 2)</constraint>
+    <constraint source="FR-19">Wave 2 delivered 3 entry surfaces (ribbon "+ New Email", Form Component Control, embeddable launch) — confirm webresource entry points map to these</constraint>
+    <constraint source="ADR-033">No new self-bootstrapped MSAL paths after Wave 6 — verify audit results align</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="ribbon-edit skill" location=".claude/skills/ribbon-edit/SKILL.md">
+        Inspecting and editing ribbon customizations via solution export/import — use to enumerate ribbon definitions in dev.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read FR-24 + FR-19 in spec.md to ground audit scope.</step>
+    <step order="2">Grep the repo for any source file referencing `sprk_communication_send` (JS, XML, ribbon definitions, form scripts): `grep -r "sprk_communication_send" --include="*.js" --include="*.xml" --include="*.json"` — list every match with file + context.</step>
+    <step order="3">Inspect `infrastructure/dataverse/ribbon/EmailRibbons/` — read the ribbon definition files (CustomizationsExport.xml, RibbonDefinitions, etc.) to enumerate every ribbon button declared.</step>
+    <step order="4">Use `ribbon-edit` skill or solution export to enumerate the live Dataverse ribbon state for `sprk_communication` (Active Communications view, My Communications view, related-record subgrids, form ribbon).</step>
+    <step order="5">For each ribbon entry point found, check whether it has been replaced by a Wave 2 EmailComposer Code Page launch (`sprk_emailcomposer` web resource). Look for `Xrm.Navigation.navigateTo` calls to `sprk_emailcomposer` in current ribbon definitions.</step>
+    <step order="6">Cross-check the Wave 2 task 037 (ribbon button "+ New Email") + task 038 (Form Component Control) PRs to confirm what was deployed.</step>
+    <step order="7">Author `notes/research/080-webresource-entry-point-audit.md` documenting: (a) every entry point found, (b) replacement status for each (✅ replaced / ⚠ NOT replaced), (c) overall verdict (safe to proceed with 081/082/083 OR remediation required).</step>
+    <step order="8">If ANY entry point is NOT replaced: file a remediation task in `notes/research/080-remediation-required.md` and STOP. Do not allow 081/082/083 to proceed.</step>
+    <step order="9">If all entry points are replaced: confirm with a clean audit verdict; record verdict in `current-task.md`.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 080 ✅ completed (with verdict in notes column).</step>
+    <step order="11">Update `current-task.md`: status → completed, advance to next pending Wave 6 task.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Enumerate source-level references to `sprk_communication_send`</tool>
+    <tool name="ribbon-edit">Inspect Dataverse ribbon state if source files are insufficient</tool>
+    <tool name="dataverse-deploy">Solution export/diff for verifying live state</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">notes/research/080-webresource-entry-point-audit.md (NEW — comprehensive entry point inventory + replacement status)</output>
+    <output type="notes">notes/research/080-remediation-required.md (CONDITIONAL — only if entry points not replaced)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit document at `notes/research/080-webresource-entry-point-audit.md` exists.</criterion>
+    <criterion testable="true">Audit lists every Dataverse entry point referencing `sprk_communication_send.js` (ribbon, command bar, workflow, form script).</criterion>
+    <criterion testable="true">Each entry point has explicit replacement status (✅ / ⚠).</criterion>
+    <criterion testable="true">Verdict is unambiguous: either "safe to proceed with 081/082/083" OR "remediation required".</criterion>
+    <criterion testable="true">If remediation required, a follow-up task is filed in `notes/research/080-remediation-required.md` and 081/082/083 are NOT started.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is the safety gate for Wave 6 deletions. Erring on the side of completeness is correct — over-auditing is acceptable; under-auditing causes production breakage.
+
+    Empirical findings from project pipeline (relevant here):
+    - Both webresource source files confirmed present at the exact paths: `src/client/webresources/js/sprk_communication_send.js` (~1,150 LOC) AND `infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js` (~1,150 LOC duplicate). Total ~2,300 LOC to delete.
+    - Wave 2 task 037 (ribbon button) + task 038 (Form Component Control) should have deployed the Code Page entry surfaces — confirm via PR refs.
+
+    Coordinate with Wave 2 deliverables: the audit assumes Wave 2's Code Page (`sprk_emailcomposer`) and ribbon button "+ New Email" are deployed to dev. If they aren't, this audit cannot proceed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 SKIPPED for STANDARD rigor. The audit verdict in step 9 is the binding gate for downstream tasks.
+    </protocol>
+  </execution>
+</task>

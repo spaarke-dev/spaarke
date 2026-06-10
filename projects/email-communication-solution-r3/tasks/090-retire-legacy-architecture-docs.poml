@@ -1,0 +1,128 @@
+<task id="090" project="email-communication-solution-r3">
+  <metadata>
+    <title>Mark RETIRED banners on legacy R1 email architecture docs (email-to-document)</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>077</dependencies>
+    <blocks>093</blocks>
+    <tags>docs, retirement, cleanup</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Trivial doc updates — adds banners to two retired legacy docs; no architectural decision, just markup</rigor-reason>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Add prominent **RETIRED** banners to two R1-legacy architecture documents per FR-27 items #10 and #11:
+
+    (a) `docs/architecture/email-to-document-architecture.md`
+    (b) `docs/architecture/email-to-document-automation.md`
+
+    Both docs describe R1's `/api/v1/emails/*` Power Apps Email-activity subsystem — confirmed dead in production usage per the driver assessment (out of scope for R3 per spec). Banner format: bold notice at top with link to ADR-033 + the driver assessment + a "do not implement against this doc" warning.
+
+    The docs are NOT deleted (preserves history); they are clearly marked as no-longer-canonical.
+  </prompt>
+
+  <role>
+    Spaarke documentation maintainer applying retirement banners. Familiar with the precedent for retirement banners (see `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` for prior retirement language).
+  </role>
+
+  <goal>
+    Both legacy docs have visible RETIRED banners at the top, with links to ADR-033 (canonical replacement) + the driver assessment + a clear warning that no new code should be written against these docs.
+  </goal>
+
+  <context>
+    <background>
+      Per spec Out of Scope: "`/api/v1/emails/*` Power Apps Email-activity subsystem (dead in production usage per assessment §3.3)". The two architecture docs describing this subsystem are R1 legacy and should not guide new work.
+
+      Backlog item #12 (filed in Wave 0 task 006) is "Investigate retirement of `/api/v1/emails/*`" — actual code retirement is OUT OF SCOPE for R3 (separate project). This task only handles the documentation-side marking.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/email-to-document-architecture.md</file>
+      <file>docs/architecture/email-to-document-automation.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-27 #10">email-to-document-architecture.md MUST be marked RETIRED</constraint>
+    <constraint source="FR-27 #11">email-to-document-automation.md MUST be marked RETIRED</constraint>
+    <constraint source="project">Docs MUST NOT be deleted — preserved as historical reference</constraint>
+    <constraint source="project">Banner MUST link to ADR-033 + driver assessment + include warning text</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>docs/architecture/email-to-document-architecture.md</file>
+      <file>docs/architecture/email-to-document-automation.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-RETIREMENT.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+    </files>
+    <patterns>
+      <pattern name="retirement doc exemplar" location="docs/architecture/LEGALWORKSPACE-RETIREMENT.md">
+        Existing retirement doc — use as model for banner language + linking conventions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `docs/architecture/LEGALWORKSPACE-RETIREMENT.md` (and any other retirement-marked doc found via grep) to extract the standard banner template.</step>
+    <step order="2">Read both target docs to find their top-of-file structure and decide on banner placement (typically immediately after the H1 title).</step>
+    <step order="3">Author the banner template (one banner used for both docs):
+      ```
+      > **⚠ RETIRED — 2026-06-05**
+      >
+      > This document describes the R1 Power Apps Email-activity subsystem (`/api/v1/emails/*`), which is **dead in production usage** per the [Communication Architecture Assessment 2026-06-05](../assessments/communication-architecture-assessment-2026-06-05.md).
+      >
+      > The canonical email architecture is **[ADR-033 Communication Architecture](../../.claude/adr/ADR-033-communication-architecture.md)** — `<EmailComposer />` engine + 3 wrappers + Code Page + typed wrapper.
+      >
+      > **DO NOT implement new code against this document.** Backlog item #12 covers eventual code retirement of `/api/v1/emails/*`.
+      ```
+    </step>
+    <step order="4">Apply banner to `docs/architecture/email-to-document-architecture.md` (top of file, immediately after H1).</step>
+    <step order="5">Apply banner to `docs/architecture/email-to-document-automation.md` (top of file, immediately after H1).</step>
+    <step order="6">Verify banner renders correctly (Markdown blockquote syntax).</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: mark task 090 ✅ completed.</step>
+    <step order="8">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read existing retirement doc model + target docs</tool>
+    <tool name="edit">Apply banners</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/email-to-document-architecture.md (UPDATED — RETIRED banner)</output>
+    <output type="docs">docs/architecture/email-to-document-automation.md (UPDATED — RETIRED banner)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both target docs have a visible RETIRED banner immediately after the H1 title.</criterion>
+    <criterion testable="true">Banner links to ADR-033 (relative path resolves).</criterion>
+    <criterion testable="true">Banner links to driver assessment (relative path resolves).</criterion>
+    <criterion testable="true">Banner contains "DO NOT implement new code against this document" warning.</criterion>
+    <criterion testable="true">Original doc content preserved (not deleted).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical findings from project pipeline (relevant here):
+    - Both docs confirmed present in `docs/architecture/`.
+    - Backlog item #12 already filed in Wave 0 task 006 — banner explicitly references it.
+
+    Parallel-safe with tasks 085, 088, 089, 091 (different files in `docs/`).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply MINIMAL rigor per `<rigor-hint>`. Quality gates SKIPPED for MINIMAL rigor.
+    </protocol>
+  </execution>
+</task>

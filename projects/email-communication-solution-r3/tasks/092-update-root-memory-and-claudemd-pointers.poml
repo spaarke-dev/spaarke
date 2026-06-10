@@ -1,0 +1,125 @@
+<task id="092" project="email-communication-solution-r3">
+  <metadata>
+    <title>Update root `MEMORY.md` + confirm `CLAUDE.md` §16 references ADR-033</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>077</dependencies>
+    <blocks>093</blocks>
+    <tags>docs, meta</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Targeted meta-doc updates; trivial in size but important for cross-session enforcement of ADR-033's MUST NOT rules</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>May touch root `CLAUDE.md` or `MEMORY.md` — main-session-only for safety (low blast radius but high-value files)</parallel-reason>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Land two final meta-documentation deliverables per FR-27 item #13.
+
+    (a) Update root `MEMORY.md` — add a feedback memory entry codifying the "no 6th send-email implementation" rule per FR-26 / ADR-033. Cite the driver assessment as the originating incident. This memory entry persists across Claude Code sessions and reinforces the binding rule.
+
+    (b) Confirm root `CLAUDE.md` §16 (pointer table) references ADR-033. This was added in Wave 0 task 001, so step (b) is a verification — only edit if missing.
+  </prompt>
+
+  <role>
+    Spaarke meta-documentation maintainer with familiarity for the `MEMORY.md` feedback-memory convention + the root `CLAUDE.md` §16 pointer table structure.
+  </role>
+
+  <goal>
+    Two updates landed:
+    (a) Root `MEMORY.md` has a new feedback memory entry codifying the ADR-033 binding rule (no 6th send-email implementation; use canonical engine + wrappers + typed wrapper).
+    (b) Root `CLAUDE.md` §16 pointer table verifiably includes ADR-033 (either via direct row or via the "ADRs (concise)" row that covers the INDEX).
+  </goal>
+
+  <context>
+    <background>
+      The driver assessment (Communication Architecture Assessment 2026-06-05) identified 6 ad-hoc send-email implementations as the root cause of the bug class R3 closes. ADR-033 binds the canonical pattern. `MEMORY.md` is the agent's feedback memory — adding the "no 6th implementation" rule there ensures the rule survives session boundaries.
+
+      Root `CLAUDE.md` §16 was updated in Wave 0 task 001 to reference ADR-033 (via the §16 pointer table). Verify that change is still in place.
+    </background>
+    <relevant-files>
+      <file>MEMORY.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-27 #13">MEMORY.md MUST gain a feedback memory entry codifying the "no 6th implementation" rule</constraint>
+    <constraint source="ADR-033">Memory entry MUST cite ADR-033 + driver assessment</constraint>
+    <constraint source="project">Root CLAUDE.md §16 already updated in Wave 0 task 001 — this task verifies, does not duplicate</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>MEMORY.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read root `MEMORY.md` to understand the existing feedback memory format (entries typically date-stamped, brief, action-oriented).</step>
+    <step order="2">**Update (a)** root `MEMORY.md`: append a new feedback memory entry. Suggested form:
+      ```
+      ## 2026-06-05 — Communication architecture: do NOT add a 6th send-email implementation
+
+      Per [ADR-033 Communication Architecture](.claude/adr/ADR-033-communication-architecture.md) and the [Communication Architecture Assessment 2026-06-05](docs/assessments/communication-architecture-assessment-2026-06-05.md), Spaarke has exactly ONE canonical client-side send-email path:
+
+      - UI: `<EmailComposer />` engine via 3 wrappers (`<SendEmailStep />`, `<SendEmailDialog />`, `<SendEmailPage />`)
+      - Programmatic: `sendCommunication()` typed wrapper in `@spaarke/ui-components/services/communicationApi.ts`
+
+      **MUST NOT** add a 6th send-email implementation. If a new mount context emerges, add a 4th wrapper next to the existing three — do not bypass the engine. The R3 project (`email-communication-solution-r3`) closed the bug class created by 6 ad-hoc implementations. Re-fragmentation undoes that work.
+
+      Triggers: any task with tags `communication`, `email`, `send-email`, or modifying `communicationApi.ts` / `EmailComposer*`.
+      ```
+      Adapt format to match existing MEMORY.md style.
+    </step>
+    <step order="3">**Verify (b)** root `CLAUDE.md` §16: confirm ADR-033 is reachable via the pointer table. Either:
+      - A direct row referencing ADR-033 exists, OR
+      - The "ADRs (concise)" row pointing to `.claude/adr/INDEX.md` covers ADR-033 (verify ADR-033 is in INDEX.md from Wave 0 task 001).
+      If neither: add a direct row.
+    </step>
+    <step order="4">Update `tasks/TASK-INDEX.md`: mark task 092 ✅ completed.</step>
+    <step order="5">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read MEMORY.md + CLAUDE.md + ADR-033</tool>
+    <tool name="edit">Append memory entry + verify CLAUDE.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">MEMORY.md (UPDATED — new feedback memory entry for ADR-033 enforcement)</output>
+    <output type="docs">CLAUDE.md (VERIFIED — §16 references ADR-033; edit only if missing)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`MEMORY.md` has a new entry dated 2026-06-05 (or current date) codifying the "no 6th implementation" rule.</criterion>
+    <criterion testable="true">Memory entry cites ADR-033 + driver assessment.</criterion>
+    <criterion testable="true">Memory entry lists the trigger conditions (task tags / file paths).</criterion>
+    <criterion testable="true">Root CLAUDE.md §16 reachable to ADR-033 (direct or via INDEX).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical findings from project pipeline (relevant here):
+    - CLAUDE.md §16 was updated in Wave 0 task 001 — this task verifies that change held; no duplication.
+    - MEMORY.md is the persistent feedback memory across sessions; this entry's value is in surviving Claude Code session boundaries to enforce the rule on future tasks.
+
+    Treated as parallel-safe FALSE conservatively even though root MEMORY.md is not under `.claude/` — the file is high-leverage and main-session-only treatment reduces risk.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply MINIMAL rigor per `<rigor-hint>`. Quality gates SKIPPED for MINIMAL rigor.
+    </protocol>
+  </execution>
+</task>

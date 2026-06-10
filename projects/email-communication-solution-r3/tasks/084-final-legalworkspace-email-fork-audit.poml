@@ -1,0 +1,115 @@
+<task id="084" project="email-communication-solution-r3">
+  <metadata>
+    <title>Final LegalWorkspace email-touching fork audit (confirm zero forks remain)</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>083</dependencies>
+    <blocks>093</blocks>
+    <tags>audit, cleanup, react, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Empirical audit gating Wave 6 completion; identifies any forks missed during Waves 3–5 migrations; not architectural change but binding for FR-25 acceptance</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final audit task — runs after all retirement deletions complete to capture true post-retirement state</parallel-reason>
+    <fr-refs>FR-25</fr-refs>
+  </metadata>
+
+  <prompt>
+    Run the final audit of `src/solutions/LegalWorkspace/src/components/` to confirm zero email-touching duplicate forks of `@spaarke/ui-components` remain. Per FR-25, after Waves 3–5 migrations, every email-touching component in LegalWorkspace should either (a) be a thin re-export from `@spaarke/ui-components`, or (b) be a LegalWorkspace-specific component with no shared-lib counterpart.
+
+    Per CLAUDE.md empirical finding #9, the project's only confirmed true fork was `CreateMatter/SendEmailStep.tsx` (deleted in Wave 5 task 074). This audit verifies that finding holds AND nothing was introduced between then and now.
+  </prompt>
+
+  <role>
+    React component architecture specialist familiar with the LegalWorkspace solution structure and the canonical `@spaarke/ui-components` shared lib. Authoritative on the empirical fork inventory from project pre-flight.
+  </role>
+
+  <goal>
+    A final audit document at `notes/research/084-final-fork-audit.md` confirming zero email-touching forks remain in LegalWorkspace. The audit document is the binding evidence for the FR-25 acceptance criterion. Any fork found is filed as a remediation task and resolved before Wave 6 completes.
+  </goal>
+
+  <context>
+    <background>
+      LegalWorkspace historically forked shared-lib components for various reasons. R3 spec FR-25 mandates that all email-touching forks (CreateMatter/CreateProject/CreateEvent/CreateTodo/CreateWorkAssignment/SummarizeFiles/FilePreview) be removed in favor of re-exports from `@spaarke/ui-components`.
+
+      Per empirical CLAUDE.md finding #9: only `CreateMatter/SendEmailStep.tsx` was a true fork. Project/Event/Todo/WorkAssignment dirs exist in LegalWorkspace but contain NO email-touching SendEmailStep — they were never forked. SummarizeFiles fork was deleted in Wave 4. FilePreview was migrated to use the canonical SendEmailDialog wrapper in Wave 3 (no fork to delete).
+
+      This task verifies the final state.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateProject/</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateEvent/</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateTodo/</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateWorkAssignment/</file>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/</file>
+      <file>src/solutions/LegalWorkspace/src/components/FilePreview/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-25">Zero email-touching forks may remain in `src/solutions/LegalWorkspace/src/components/`</constraint>
+    <constraint source="FR-25">`WorkAssignmentWizardDialog.tsx:31` cross-package source-path import must be resolved (was Wave 5 task 073)</constraint>
+    <constraint source="ADR-033">LegalWorkspace re-exports from `@spaarke/ui-components` only — no parallel implementations</constraint>
+    <constraint source="project">Audit must be empirically grounded — not a "I think so" verdict</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Enumerate every file under `src/solutions/LegalWorkspace/src/components/{CreateMatter,CreateProject,CreateEvent,CreateTodo,CreateWorkAssignment,SummarizeFiles,FilePreview}/`. List file paths.</step>
+    <step order="2">For each file, classify it: (a) thin re-export from `@spaarke/ui-components` (one-liner `export *` or named re-export), (b) LegalWorkspace-specific component with no shared-lib counterpart (legitimate), (c) email-touching fork (FAIL — must be remediated).</step>
+    <step order="3">Grep for inline `fetch` calls to `/api/communications/send` in LegalWorkspace: `grep -r "fetch.*communications/send" src/solutions/LegalWorkspace/`. Expect ZERO hits.</step>
+    <step order="4">Grep for direct imports of `sendCommunication` from anywhere other than `@spaarke/ui-components`: `grep -r "import.*sendCommunication" src/solutions/LegalWorkspace/`. Expect all hits to be from `@spaarke/ui-components`.</step>
+    <step order="5">Grep for cross-package source-path imports (the WorkAssignment dialog antipattern): `grep -rn "from '\.\./\.\./\.\./\.\./shared/" src/solutions/LegalWorkspace/`. Expect zero such patterns referencing email-related paths.</step>
+    <step order="6">Verify `WorkAssignmentWizardDialog.tsx:31` now imports from `@spaarke/ui-components` (was resolved in Wave 5 task 073).</step>
+    <step order="7">Document the audit in `notes/research/084-final-fork-audit.md` with: classification table per file, grep results, verdict (✅ zero forks confirmed / ⚠ forks found requiring remediation).</step>
+    <step order="8">If forks found: file remediation tasks and STOP. If clean: proceed.</step>
+    <step order="9">Cross-link the audit document from Wave 6 PR description.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 084 ✅ completed.</step>
+    <step order="11">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Empirical scan of LegalWorkspace for forks, inline fetch, cross-package imports</tool>
+    <tool name="read">Inspect re-export files for shape</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">notes/research/084-final-fork-audit.md (NEW — comprehensive classification of every component in 7 LegalWorkspace dirs)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit document at `notes/research/084-final-fork-audit.md` exists.</criterion>
+    <criterion testable="true">Every file in the 7 LegalWorkspace email-touching dirs classified.</criterion>
+    <criterion testable="true">Grep for `fetch.*communications/send` in LegalWorkspace returns 0 hits.</criterion>
+    <criterion testable="true">Grep for cross-package source-path imports referencing email components returns 0 hits.</criterion>
+    <criterion testable="true">Verdict is unambiguous: ✅ zero forks OR ⚠ remediation filed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical findings from project pipeline (relevant here):
+    - CLAUDE.md finding #9: only `CreateMatter/SendEmailStep.tsx` was a true fork. The other 4 wizard dirs in LegalWorkspace existed but had no email step. Verify this still holds at audit time.
+    - Wave 3 task 051 migrated FilePreviewDialog to canonical wrapper (no fork to delete).
+    - Wave 4 task 061 deleted SummarizeFiles fork.
+    - Wave 5 task 074 deleted CreateMatter SendEmailStep fork.
+    - Wave 5 task 073 resolved `WorkAssignmentWizardDialog.tsx:31` cross-package import.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Step 7 audit document is the binding evidence for FR-25 acceptance.
+    </protocol>
+  </execution>
+</task>

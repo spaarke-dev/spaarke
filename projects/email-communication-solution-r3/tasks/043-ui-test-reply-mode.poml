@@ -1,0 +1,166 @@
+<task id="043" project="email-communication-solution-r3">
+  <metadata>
+    <title>UI test — EmailComposer Code Page `mode=reply` (Re: prefix + body wrap + `sprk_inreplyto` stamp)</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003, 036</dependencies>
+    <blocks>099</blocks>
+    <tags>ui-test, e2e-test, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Browser-based UI test using `ui-test` skill; deterministic; gated by tasks 003 (Internet-Message-Id capture) + 036 (Code Page deployed)</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel-safe with 041, 042, 044, 045 — each test creates its own reply record; no shared mutation contention</parallel-reason>
+    <fr-refs>FR-11, FR-18</fr-refs>
+  </metadata>
+
+  <prompt>
+    Execute an end-to-end UI test for the EmailComposer Code Page in `mode=reply`. Open a Code Page URL with `mode=reply&id={existing-record-guid}`, verify the form is pre-filled per FR-11:
+    - `to` = original record's `from` address
+    - `subject` starts with `Re: ` (not duplicated if already prefixed)
+    - `body` wraps the original body with a divider
+    - `sprk_inreplyto` lookup is stamped on the new record when Send is clicked
+
+    Use the `ui-test` skill. Verify zero console errors. Verify dark mode smoke per ADR-021.
+
+    Depends on task 003 (Internet-Message-Id capture) — the parent record must have `sprk_internetmessageid` populated for reply-thread closure verification (FR-22).
+  </prompt>
+
+  <role>
+    Spaarke UI test engineer. Familiar with reply-mode semantics (FR-11), `sprk_inreplyto` schema, and `IncomingAssociationResolver` reply-thread matching (R2 implementation).
+  </role>
+
+  <goal>
+    UI test pass for reply mode. Test results in `projects/email-communication-solution-r3/notes/research/043-ui-test-reply.md`. Verifies prefill correctness + `sprk_inreplyto` stamp post-Send.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-11: reply mode pre-fills new compose from an existing `sprk_communication`. `to` = original `from`; `cc` blank; `subject` = `Re: ${original.subject}` (no double-prefix); `body` wraps original with a divider; `attachments` not carried; `associations` carried; `sprk_inreplyto` stamped on new record pointing to original.
+
+      Post-send verification: query Dataverse for the new `sprk_communication` record (the reply) and confirm its `sprk_inreplyto` field references the original record's GUID.
+
+      Depends on task 003 (Internet-Message-Id capture) ensuring the original record has `sprk_internetmessageid` populated — required for reply-thread closure verification per FR-22 + ADR-024.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/research/043-ui-test-reply.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-11">Reply prefills: to=from, subject=Re:..., body wraps original, sprk_inreplyto stamped</constraint>
+    <constraint source="spec FR-22">Original record's `sprk_internetmessageid` populated (gated by task 003)</constraint>
+    <constraint source="ADR-021">Dark mode compliance smoke</constraint>
+    <constraint source="ADR-024">`IncomingAssociationResolver` (server-side, R2) consumes `Internet-Message-Id` for inbound matching — verify reply chain integrity</constraint>
+    <constraint source="project">Use `{org}` and `{existing-record-guid}` placeholders</constraint>
+    <constraint source="project">Dev environment only</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="UI test for prefilled mode" location=".claude/skills/ui-test/SKILL.md">
+        Reply test: assert prefill correctness BEFORE user input; then submit; verify Dataverse-side stamp.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <ui-tests>
+    <test name="Reply mode prefill and send">
+      <navigation>
+        <url>https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22reply%22%2C%22id%22%3A%22{existing-record-guid}%22%7D</url>
+        <description>Open EmailComposer Code Page in reply mode for an existing `sprk_communication` record. Existing record must have populated `from`, `subject`, `body`, AND `sprk_internetmessageid` (task 003 prerequisite).</description>
+      </navigation>
+      <steps>
+        <step order="1">Navigate to URL; wait for app mount + record load (max 5s)</step>
+        <step order="2">Verify zero console errors on cold load</step>
+        <step order="3">Verify To field is prefilled with the original record's `from` address (Fluent Tag visible)</step>
+        <step order="4">Verify Cc field is empty</step>
+        <step order="5">Verify Subject field is prefilled with `Re: ${original.subject}`. If original subject already starts with `Re:`, verify NO double-prefix (still just `Re: <subject>`)</step>
+        <step order="6">Verify Body field is prefilled with: user reply area (empty) + divider + quoted original body</step>
+        <step order="7">Verify Attachments section is empty (attachments NOT carried per FR-11)</step>
+        <step order="8">Verify Associations section carries the original record's associations</step>
+        <step order="9">Type user reply text in Body: `Thanks — confirming receipt.`</step>
+        <step order="10">Click Send button; wait for response (max 10s)</step>
+        <step order="11">Verify success state displayed</step>
+        <step order="12">Verify Dataverse-side: query the new `sprk_communication` record (most recent) and confirm `sprk_inreplyto` references the original record's GUID. Use `Xrm.WebApi` from DevTools or the ui-test skill's Dataverse query helper.</step>
+        <step order="13">Verify zero console errors throughout</step>
+      </steps>
+      <expected-outcomes>
+        <outcome>Code Page loads in reply mode with prefilled To, Subject (Re: prefix), Body (wrapped original)</outcome>
+        <outcome>Attachments NOT carried (FR-11)</outcome>
+        <outcome>Associations carried from original</outcome>
+        <outcome>Send creates new `sprk_communication` with `sprk_inreplyto` pointing to original</outcome>
+        <outcome>If original has `sprk_threadid`, the new record inherits it</outcome>
+        <outcome>Zero console errors throughout</outcome>
+      </expected-outcomes>
+      <dark-mode-check>
+        <step>Toggle dark mode; verify reply UI adapts</step>
+        <step>Smoke check; comprehensive in task 045</step>
+      </dark-mode-check>
+      <console-error-check>
+        <target>0 errors</target>
+        <description>Zero errors from cold load through Send completion.</description>
+      </console-error-check>
+    </test>
+  </ui-tests>
+
+  <steps>
+    <step order="1">Verify task 003 (Internet-Message-Id capture) deployed and at least one existing `sprk_communication` record has `sprk_internetmessageid` populated.</step>
+    <step order="2">Verify task 036 (Code Page deploy) successful.</step>
+    <step order="3">Identify the test record GUID (the one with `sprk_internetmessageid`) and capture it for the test URL.</step>
+    <step order="4">Invoke `ui-test` skill — Chrome session, logged in.</step>
+    <step order="5">Execute reply-mode test scenario per the `<ui-tests>` block above.</step>
+    <step order="6">Capture screenshots + console output.</step>
+    <step order="7">Post-Send: query Dataverse via the skill or DevTools to verify `sprk_inreplyto` stamp on the new record.</step>
+    <step order="8">Toggle dark mode; smoke-verify rendering.</step>
+    <step order="9">Document results in `projects/email-communication-solution-r3/notes/research/043-ui-test-reply.md`.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 043 ✅ completed.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="ui-test">Skill — Chrome browser automation</tool>
+    <tool name="dataverse-mcp-usage">Verify `sprk_inreplyto` stamp post-send</tool>
+    <tool name="write">Test results note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/043-ui-test-reply.md (NEW)</output>
+    <output type="test-result">Reply mode test pass/fail logged + `sprk_inreplyto` stamp verified</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Reply mode prefills To, Subject (Re: prefix, no duplicate), Body (wrapped original).</criterion>
+    <criterion testable="true">Attachments NOT carried per FR-11.</criterion>
+    <criterion testable="true">Send creates new record with `sprk_inreplyto` referencing original GUID.</criterion>
+    <criterion testable="true">Zero console errors throughout.</criterion>
+    <criterion testable="true">Dark mode smoke check passes.</criterion>
+    <criterion testable="true">Test results documented.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-group I: safe to run alongside 041, 042, 044, 045.
+
+    Test data: requires an existing `sprk_communication` record with populated `from`, `subject`, `body`, AND `sprk_internetmessageid`. The latter is populated by task 003. If 003 has not yet stamped any records, create a new outbound communication via task 041 (compose) which goes through `CommunicationService.SendAsync` with task 003's logic — that record will have `sprk_internetmessageid` stamped post-send.
+
+    Reply-thread closure end-to-end verification (an inbound reply auto-associating to the outbound) is out of scope for this task; that requires actual external SendMail + reply receipt, deferred to a final integration test or owner UAT.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Invoke `ui-test` skill for browser automation.
+    </protocol>
+  </execution>
+</task>

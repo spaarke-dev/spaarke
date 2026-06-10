@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Outlook taskpane banner indicator showing count of linked Spaarke to-dos</title>
+    <phase>Phase 8: Outlook Add-in</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>002</dependencies>
+    <blocks>072</blocks>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New Outlook UI surface. FULL rigor.</rigor-reason>
+    <parallel-group>P8-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a taskpane banner indicator (per assumption A-1: pinned banner inside the add-in taskpane) showing count of Spaarke to-dos already linked to the current email. Query: `GET sprk_todos?$filter=_sprk_regardingcommunication_value eq {commId}&amp;$select=sprk_todoid,sprk_name,statecode&amp;$top=10`. Cache results per `communicationid` for the add-in session. Banner absent when zero linked. Banner shows count + link to view list.
+  </prompt>
+
+  <role>Spaarke Office Add-in developer.</role>
+
+  <goal>Banner renders correctly for 0 / 1 / N linked todos. Cache hit on re-open within session. Query p95 &lt; 500ms cached after first hit (NFR-09).</goal>
+
+  <constraints>
+    <constraint source="FR-28">Banner shows count + link; cached per `communicationid` per session.</constraint>
+    <constraint source="A-1">Option (A): pinned message banner inside taskpane.</constraint>
+    <constraint source="NFR-09">Indicator query p95 &lt; 500ms cached after first hit.</constraint>
+    <constraint source="NFR-01">Fluent v9.</constraint>
+    <constraint source="NFR-10">Keyboard + SR accessible.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/office-addins/outlook/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build banner component using Fluent v9 `MessageBar` or equivalent. Semantic tokens.</step>
+    <step order="2">On email-context change, look up `sprk_communication` for the current email; if found, query linked `sprk_todo` records.</step>
+    <step order="3">Implement per-session in-memory cache keyed by `communicationid`.</step>
+    <step order="4">Render: 0 → no banner; ≥1 → "This email has N Spaarke to-do(s)" + link to view list.</step>
+    <step order="5">Verify accessibility: keyboard + SR labels.</step>
+    <step order="6">Unit tests for the 0 / 1 / N rendering + cache behavior.</step>
+    <step order="7">Run `npm run build`. Fluent v9 lint pass.</step>
+    <step order="8">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/client/office-addins/outlook/` (banner component + cache)</output>
+    <output type="test">Unit tests for banner + cache</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero linked → no banner.</criterion>
+    <criterion testable="true">≥1 linked → banner with correct count + link.</criterion>
+    <criterion testable="true">Cache hit on re-open within session.</criterion>
+    <criterion testable="true">Keyboard + SR accessible.</criterion>
+    <criterion testable="true">Query p95 &lt; 500ms cached.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

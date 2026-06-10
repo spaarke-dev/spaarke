@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Dataverse Schema — Extend sprk_aichatcontextmap (surface → playbook + context mapping)</title>
+    <phase>Phase 1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>050, 051, 052</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Extends an existing production entity (`sprk_aichatcontextmap`); breaking the existing schema would regress every chat surface in production; the surface-to-playbook mapping is the routing data backing the SpaarkeAi launcher + ribbon flow (Phase 5)</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only `sprk_aichatcontextmap` entity (existing, additive-only extension); disjoint from tasks 010, 011, 012 which create new entities</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend the existing `sprk_aichatcontextmap` Dataverse entity with the additional fields needed to support the SpaarkeAi multi-surface Assistant model (design §4.5) — specifically, the surface-to-playbook-and-context mapping that the SpaarkeAi launcher consumes when a user clicks a ribbon button or opens SpaarkeAi without entity context. **Additive-only**: do NOT remove or rename existing fields. Maintain backward compatibility with current chat surfaces.
+  </prompt>
+
+  <role>
+    SPAARKE Dataverse schema engineer experienced with **additive-only** extension of production entities. You know the difference between adding columns (safe, reversible) and modifying existing columns (potentially breaking). You verify backward compatibility before merging.
+  </role>
+
+  <goal>
+    `sprk_aichatcontextmap` carries these additional fields (additive-only):
+
+    1. **`surfaceType`** — Choice: SpaarkeAiCodePage, EntityRibbon, CommandBar, AssistantPCF (R2 placeholder), Other
+    2. **`entityLogicalName`** — Text; e.g., `account`, `contact`, `sprk_matter` — null for SpaarkeAi default (no-context) landing
+    3. **`optionalViewId`** — Text; nullable; specific Dataverse view for filtered context loads
+    4. **`optionalCommandBarContextJson`** — Text(Memo); nullable JSON; e.g., bulk-selection context for command-bar invocations
+    5. **`defaultPlaybookId`** — Lookup → existing `sprk_aiplaybook`; the playbook to load for this surface+entity combination
+    6. **`contextResolverConfigJson`** — Text(Memo); JSON: how to resolve entity context (which fields to pre-populate, which related records to pull)
+    7. **`isDefaultLanding`** — Boolean; true exactly once (the SpaarkeAi no-context default row)
+    8. **`tenantId`** — Text (only add if not already present on existing entity); tenant scoping (NFR-05)
+
+    Seed-data update: ensure ONE row exists with `surfaceType = SpaarkeAiCodePage`, `entityLogicalName = null`, `isDefaultLanding = true`, `defaultPlaybookId = (id of "Spaarke Assistant — General")`. The default playbook itself will be seeded by task 052; this task only sets up the schema and an initial placeholder seed row.
+
+    Deliverable: extension applied to dev environment, schema doc updated, existing chat surfaces verified still working (smoke test: open existing SpaarkeAi page, confirm no regression).
+  </goal>
+
+  <context>
+    <background>
+      `sprk_aichatcontextmap` already exists in production (referenced in spec.md scope under Dataverse schema section: "extend existing `sprk_aichatcontextmap`"). It currently maps entity/context combinations to chat configurations. This task ADDS the surface-and-playbook mapping fields needed for the multi-surface Assistant model.
+
+      The multi-surface Assistant model (design §4.5) requires:
+      - **SpaarkeAi Code Page** opens with the default "Spaarke Assistant — General" playbook when no entity context (FR-13)
+      - **Entity ribbon buttons** open SpaarkeAi as a side pane pre-populated with that entity's context (FR-14)
+      - The same `SprkChat` component serves all surfaces; differentiation is via `ChatLaunchContext`
+
+      `ChatLaunchContext` URL params (parsed in task 050: `src/solutions/SpaarkeAi/src/utils/launch-resolver.ts`) carry entity id + type. The resolver looks up `sprk_aichatcontextmap` to find the matching row (by `entityLogicalName`), loads the configured `defaultPlaybookId`, and pre-populates context per `contextResolverConfigJson`.
+
+      **No-context default**: when SpaarkeAi opens without URL params (user navigates directly), the resolver falls back to the row where `isDefaultLanding = true`. There MUST be exactly one such row per tenant.
+
+      Additive-only safety: existing rows in production lack these new columns. New columns must be nullable (except `isDefaultLanding` boolean which defaults to false). DO NOT add NOT-NULL constraints on the new columns until backfill is complete (out of scope here — backfill happens in Phase 5).
+
+      Tenant scoping: if `tenantId` field is not already on the entity, add it. If it is already present, do NOT modify it.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Thin Dataverse plugins. MUST NOT register new plugins on `sprk_aichatcontextmap`.</constraint>
+    <constraint source="ADR-019">If any custom API is registered against this entity (deferred to later phase), error responses use ProblemDetails RFC 7807.</constraint>
+    <constraint source="project">**Additive-only extension**. MUST NOT remove or rename existing fields. MUST NOT add NOT-NULL constraints on new columns until backfill complete. Backward compatibility with existing chat surfaces is non-negotiable.</constraint>
+    <constraint source="project">Existing chat surfaces in production MUST continue working unchanged after this extension. Verified by smoke test before merge.</constraint>
+    <constraint source="project">Exactly ONE row per tenant with `isDefaultLanding = true`. Enforced operationally (seed data) — Dataverse does not natively support partial-unique constraints, so the BFF layer enforces this.</constraint>
+    <constraint source="project">Packed into the same solution as tasks 010 + 011 + 012 entities OR into the existing solution that hosts `sprk_aichatcontextmap`. Decision documented.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-create-schema (additive-only extension)" location=".claude/skills/dataverse-create-schema/SKILL.md">Pattern for safely extending production entities — nullable new columns, no rename/remove, smoke-test existing flows.</pattern>
+      <pattern name="ChatLaunchContext resolution flow" location="src/solutions/SpaarkeAi/src/utils/launch-resolver.ts">Existing URL-params resolver; task 050 will extend it to consume the new mapping fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes, task 001 status is ✅. Load the `dataverse-create-schema` skill. (task-execute Step 0)</step>
+    <step order="1">Inspect the existing `sprk_aichatcontextmap` entity via Web API GET on EntityDefinition. Document current field list in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-013-baseline-schema.md`. Identify whether `tenantId` is already present.</step>
+    <step order="2">Identify target solution: either the existing solution that hosts `sprk_aichatcontextmap` OR the new `SpaarkeActionEngine` solution. Document decision in `notes/decisions/aichatcontextmap-extension-targeting.md`. **Prefer**: keep the entity in its current solution; layer the extension via solution segmentation if Dataverse supports it for this entity.</step>
+    <step order="3">Identify whether any existing seed rows for `sprk_aichatcontextmap` exist. If yes, plan for backward compatibility — the new fields default to null on existing rows, and Phase 5 backfills them.</step>
+    <step order="4">Author the extension script as Python / Web API. Create new global Choice option-set `sprk_aichatcontextmap_surfacetype` (5 values). Add the 7 new columns (or 8 if `tenantId` not present). All nullable.</step>
+    <step order="5">Run the extension script against the dev environment. Confirm via Web API GET that the new columns landed and existing columns are unchanged.</step>
+    <step order="6">Pack the extension into the chosen solution. Verify the export contains the column additions + the new option-set.</step>
+    <step order="7">**Smoke-test backward compatibility**: open SpaarkeAi and any existing entity-form chat surface in the dev environment. Verify no regression — chat loads, existing playbook routing works as before. If anything breaks, ROLL BACK the extension and investigate.</step>
+    <step order="8">Insert ONE placeholder seed row for the SpaarkeAi no-context default landing: `surfaceType = SpaarkeAiCodePage`, `entityLogicalName = null`, `isDefaultLanding = true`, `defaultPlaybookId = null` (will be backfilled in task 052 when the default playbook is seeded). Document the placeholder in `notes/handoffs/task-013-seed-placeholder.md`.</step>
+    <step order="9">Append the entity extension to `docs/data-model/action-engine-entities.md`. Document the additive-only nature explicitly (call out which fields are new vs pre-existing).</step>
+    <step order="10">Run quality gates per task-execute Step 9.5: `code-review` on the extension script + the schema doc update; `adr-check` confirms ADR-002 (no plugins added) and ADR-019 (any later custom API uses ProblemDetails).</step>
+    <step order="10.5">Verify baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: mark task 013 ✅; verify it unblocks tasks 050, 051, 052. Reset `current-task.md` to point to next pending task.</step>
+    <step order="12">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-013-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema">Skill: Web API + Python SDK for additive column creation</tool>
+    <tool name="pac">CLI for solution pack/unpack/export</tool>
+    <tool name="dotnet">Verify baseline build still passes</tool>
+    <tool name="git">Confirm state + commit</tool>
+    <tool name="terminal">Run shell + Python scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/dataverse/action-engine/extend-aichatcontextmap.py</output>
+    <output type="solution">existing solution OR src/dataverse/solutions/SpaarkeActionEngine/ — additive extension only</output>
+    <output type="docs">docs/data-model/action-engine-entities.md (extended with `sprk_aichatcontextmap` extension section)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/aichatcontextmap-extension-targeting.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/handoffs/task-013-baseline-schema.md (baseline capture)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/handoffs/task-013-seed-placeholder.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 (or 8) new columns exist on `sprk_aichatcontextmap`; verified by Web API GET on EntityDefinition.</criterion>
+    <criterion testable="true">No existing column was removed or renamed; verified by diffing baseline schema (task-013-baseline-schema.md) against post-extension schema.</criterion>
+    <criterion testable="true">All new columns are nullable (no NOT-NULL constraints); verified via EntityDefinition metadata.</criterion>
+    <criterion testable="true">`surfaceType` Choice has exactly 5 values: `SpaarkeAiCodePage`, `EntityRibbon`, `CommandBar`, `AssistantPCF`, `Other`.</criterion>
+    <criterion testable="true">Smoke test: existing SpaarkeAi chat surface and any existing entity-form chat surfaces load without regression.</criterion>
+    <criterion testable="true">One placeholder seed row exists with `surfaceType = SpaarkeAiCodePage`, `isDefaultLanding = true`, `defaultPlaybookId = null` (to be backfilled by task 052).</criterion>
+    <criterion testable="true">`docs/data-model/action-engine-entities.md` includes the `sprk_aichatcontextmap` extension section calling out additive-only nature.</criterion>
+    <criterion testable="true">Baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **Additive-only is non-negotiable**. The existing entity is in production and existing chat surfaces depend on its current shape. If you find yourself wanting to rename a field or change a type — STOP. Investigate whether you can add a new field with the desired shape and let the old field remain unused (Phase 5 can migrate consumers).
+
+    The `isDefaultLanding = true` constraint (exactly one row per tenant) is operationally enforced (BFF layer + seed data discipline). Dataverse doesn't support partial-unique constraints natively. If a future change wants to enforce this at the database layer, see `docs/data-model/` for the approach.
+
+    The placeholder seed row in step 8 will have `defaultPlaybookId = null` until task 052 seeds the default "Spaarke Assistant — General" playbook. That's fine — the `launch-resolver.ts` (task 050) will handle null playbook IDs gracefully (fall back to a hardcoded default in the BFF or surface an error message).
+
+    If `tenantId` is already present on the entity, leave it alone. If not, add it as a required field — but verify there are no existing rows in production first (an existing row without tenantId would fail the required-field constraint).
+
+    Solution segmentation: if the entity is in solution X and we want the new fields in solution Y (SpaarkeActionEngine), Dataverse solution segmentation lets us layer additions. Verify support before assuming.
+
+    Do NOT register new plugins on this entity (ADR-002). The launch-resolver and routing logic lives in client + BFF, not in plugins.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. Use the `dataverse-create-schema` skill — specifically its additive-extension pattern — and SMOKE-TEST existing chat surfaces before claiming completion.
+    </protocol>
+  </execution>
+</task>

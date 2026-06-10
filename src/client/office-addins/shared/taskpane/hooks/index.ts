@@ -36,3 +36,21 @@ export type {
 // Accessibility hooks
 export { useAnnounce, useAnnounceOnChange } from './useAnnounce';
 export type { AnnounceMode, UseAnnounceOptions, UseAnnounceResult } from './useAnnounce';
+
+// Linked todos indicator hook (smart-todo-decoupling-r3 FR-28 / A-1)
+export {
+  useLinkedTodosForCommunication,
+  __clearLinkedTodosCache,
+  __linkedTodosCache,
+} from './useLinkedTodosForCommunication';
+export type { LinkedTodo, LinkedTodosResponse, UseLinkedTodosResult } from './useLinkedTodosForCommunication';
+
+// Create To Do from email click flow (smart-todo-decoupling-r3 FR-27 / task 070)
+export { useCreateTodoFromEmail } from './useCreateTodoFromEmail';
+export type {
+  CurrentEmailReader,
+  SaveEmailToSpaarkeFn,
+  CreateTodoFlowState,
+  UseCreateTodoFromEmailOptions,
+  UseCreateTodoFromEmailResult,
+} from './useCreateTodoFromEmail';

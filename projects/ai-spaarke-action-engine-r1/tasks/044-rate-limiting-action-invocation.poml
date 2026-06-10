@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Rate limiting on Action /run endpoints — ADR-016 soft enforcement MVP (per-user + per-tenant budgets)</title>
+    <phase>Phase 4: Action Execution Runtime</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>060, 061, 062, 063</blocks>
+    <tags>bff-api, api, endpoints, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies the ActionEndpoints.cs file (created by task 040) with rate-limit policy wiring; tags include bff-api/api/endpoints/ai; touches user-visible enforcement behavior; depends on task 040 having established the named-policy slot</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with ActionEndpoints.cs from task 040 — both tasks edit the same file. Task 044 adds rate-limit policy configuration + per-endpoint binding. Sequential after 040 lands; can run in parallel-after-040 with task 045 ONLY if both tasks coordinate the same-file edits via separate commits (conservative: mark as sequential).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the `ai-action-invocation` named rate-limit policy (slot reserved in task 040's `ActionEndpoints.cs`) per ADR-016 soft enforcement MVP. Apply per-user + per-tenant budgets via the .NET 8 `Microsoft.AspNetCore.RateLimiting` middleware. MVP is SOFT: emit telemetry + 429 ProblemDetails when budget exceeded, but do NOT hard-block subsequent requests beyond returning 429. Hard caps + admin override surfaces defer to R2. Configurable thresholds via `RateLimitingOptions` (typed options class). The /run endpoint is the primary target; CRUD endpoints (GET/POST/PUT/DELETE) get a more permissive policy (or none) since they're not Tool-invocation paths.
+  </prompt>
+
+  <role>
+    SPAARKE BFF performance + governance engineer fluent in .NET 8 `Microsoft.AspNetCore.RateLimiting`, the existing `RateLimiter` patterns used elsewhere in the BFF (if any), ADR-016 soft-MVP semantics (telemetry + 429, no hard block beyond the response), and typed-options configuration with startup validation. You configure policies that protect upstream AI cost without surprising users.
+  </role>
+
+  <goal>
+    Concrete artifacts:
+    1. **`Configuration/RateLimitingOptions.cs`** (or extend existing options surface) — typed options class with `PerUserHourlyCap` (int, default 60), `PerTenantDailyCap` (int, default 1000), `Enabled` (bool, default true). Startup-validated per ADR-018 options conventions.
+    2. **`Infrastructure/RateLimiting/AiActionInvocationPolicy.cs`** — partition rate-limiter implementation using `PartitionedRateLimiter.Create&lt;HttpContext, string&gt;` keyed by `(userOid, tenantId)`. Two stacked limiters: (a) per-user-per-hour fixed window cap; (b) per-tenant-per-day fixed window cap. Soft enforcement: when limit reached, the policy emits a 429 ProblemDetails AND an App Insights custom event (`action_engine.ratelimit.exceeded`) but does NOT permanently block — the next bucket window opens normally.
+    3. **`Program.cs` registration** (or DI module extension) — `builder.Services.AddRateLimiter(options =&gt; { options.AddPolicy("ai-action-invocation", ...); })`. Pipeline wiring `app.UseRateLimiter()` placed AFTER `UseAuthentication` + `UseAuthorization` so the policy can read `userOid` / `tenantId` from the authenticated principal.
+    4. **`ActionEndpoints.cs` (edit from task 040)** — the named-policy slot `EnableRateLimiting("ai-action-invocation")` already exists on every endpoint; this task only needs to confirm the named policy resolves correctly. The `/run` endpoint inherits the full policy; CRUD endpoints may opt into a more permissive policy if needed (decided in Step 5).
+    5. **Telemetry** — App Insights custom event `action_engine.ratelimit.exceeded` with properties `userOid`, `tenantId`, `endpointPath`, `bucketWindow`. Custom metric `action_engine.ratelimit.consumed.per_user_hour` and `action_engine.ratelimit.consumed.per_tenant_day` (gauges) for dashboards.
+    6. **Configuration documentation** — `notes/decisions/rate-limiting-thresholds.md` documenting the default thresholds + how to tune via `appsettings.json` + the soft-MVP semantics (no hard block, only 429 + telemetry).
+
+    Acceptance: integration test asserts (a) request 61 within an hour from the same user returns 429 ProblemDetails with `Retry-After` header; (b) the App Insights event fires; (c) request 1 in the next hour bucket succeeds (no permanent block); (d) per-tenant cap kicks in independent of per-user (e.g., a high-volume tenant with multiple users hits the tenant cap first).
+  </goal>
+
+  <context>
+    <background>
+      ADR-016 (AI Cost, Rate Limits, Backpressure) requires that Action invocation endpoints apply rate limiting; bound concurrency for upstream AI service calls; use async jobs for batch AI work; return clear 429/503 ProblemDetails under load.
+
+      MVP semantics are SOFT (per spec.md NFR-04 and ADR-016 MVP scope):
+      - Telemetry + warnings — every limit breach emits an App Insights event
+      - 429 ProblemDetails for the immediate request — user sees a clear failure with retry-after
+      - NO hard block beyond the response — the next bucket window opens normally
+      - NO admin override surface — that's R2
+      - NO cost-class differentiation (every Tool invocation counts the same) — that's R2
+
+      Why soft: the goal in MVP is to learn the actual usage patterns and detect runaway loops, not to ration access. Hard caps risk false-positive throttling of legitimate workflows; soft caps + telemetry let us tune thresholds based on real usage before turning on enforcement.
+
+      Existing patterns to study (read these before implementing):
+      - .NET 8 `Microsoft.AspNetCore.RateLimiting` namespace — `PartitionedRateLimiter`, `FixedWindowRateLimiter`, `SlidingWindowRateLimiter`. Use `FixedWindowRateLimiter` for MVP (simpler semantics, easier telemetry).
+      - `RateLimiterOptions.AddPolicy("name", ...)` — the named-policy registration pattern.
+      - `.RequireRateLimiting("ai-action-invocation")` — the endpoint-side binding (already in `ActionEndpoints.cs` from task 040).
+      - ADR-018 typed-options conventions for the configuration shape.
+
+      Soft-MVP-specific design choices:
+      - When a limit is exceeded, the FixedWindowRateLimiter naturally returns 429 from `.AcquireAsync()`. The ASP.NET middleware translates this to a 429 response. We add the ProblemDetails body + App Insights event in the rejection callback.
+      - The next bucket window opens normally — this is the default behavior of FixedWindowRateLimiter. No additional logic.
+      - The policy reads `userOid` and `tenantId` from `HttpContext.User`. If unauthenticated (shouldn't happen because endpoint requires auth), short-circuit with 401 (handled by the auth middleware, not the rate limiter).
+
+      The named-policy slot `EnableRateLimiting("ai-action-invocation")` was reserved by task 040 on every Action endpoint. This task fills the slot with the concrete policy.
+
+      Feature flag interaction: task 045 adds a feature flag for the entire Action `/run` endpoint. If the flag is off, the endpoint returns 503 BEFORE the rate limiter checks — so a disabled feature doesn't consume bucket quota. Coordinate ordering with task 045 (rate limiter runs AFTER feature flag check if both apply).
+
+      Binding governance: `.claude/constraints/bff-extensions.md` MUST be loaded. Placement = BFF. No new NuGet packages — `Microsoft.AspNetCore.RateLimiting` ships in the framework.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/RateLimitingOptions.cs (new — or extend existing)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/RateLimiting/AiActionInvocationPolicy.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (edit — register rate limit policy)</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (edit — add rate limiter middleware to pipeline)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs (edit by inspection — confirm named-policy slot resolves)</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json (edit — add RateLimiting config section with defaults)</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/decisions/rate-limiting-thresholds.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API. Rate limiter middleware is part of the standard pipeline.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization runs BEFORE the rate limiter (auth must succeed for the policy to read `userOid`/`tenantId`). Authentication failure short-circuits with 401; the rate limiter never sees the unauthenticated request.</constraint>
+    <constraint source="ADR-010">Policy registration via `AddActionEngineModule()` extension (or equivalent registration site). Module total ≤15 non-framework registrations.</constraint>
+    <constraint source="ADR-013">Rate limiter is on the endpoint surface — no new CRUD→AI dependencies. Policy reads context from `HttpContext.User`.</constraint>
+    <constraint source="ADR-016">**PRIMARY**. Rate limiting on Action `/run` endpoints. Per-user soft cap on Tool dispatches/hour. Per-tenant soft cap on AI Tool invocations/day. MVP soft enforcement only (warnings + telemetry); hard caps deferred to R2. Return clear 429 ProblemDetails.</constraint>
+    <constraint source="ADR-018">Typed options class for thresholds. Startup validation. Documented default values + environment behavior.</constraint>
+    <constraint source="ADR-019">429 response uses ProblemDetails (RFC 7807) with `status: 429`, `title: "Too Many Requests"`, `detail: "..."`, `Retry-After` header.</constraint>
+    <constraint source="ADR-029">No new NuGet packages — `Microsoft.AspNetCore.RateLimiting` is in framework.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF, publish-size unchanged (no new packages), no new HIGH-severity CVE.</constraint>
+    <constraint source="project">Soft MVP semantics: limit exceeded → 429 + telemetry; next bucket window opens normally. NO hard block beyond the response. NO admin override surface in MVP.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Typed options + startup validation" location=".claude/adr/ADR-018-feature-flags.md">Options class with attributes + validation in DI registration.</pattern>
+      <pattern name="Endpoint-side named policy binding" location="src/server/api/Sprk.Bff.Api/Api/Ai/ActionEndpoints.cs">`.RequireRateLimiting("ai-action-invocation")` — slot reserved by task 040.</pattern>
+      <pattern name=".NET 8 PartitionedRateLimiter" location="https://learn.microsoft.com/aspnet/core/performance/rate-limit">Partition by `(userOid, tenantId)`; FixedWindow per partition.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes. Confirm task 040 (ActionEndpoints.cs) shows ✅ in TASK-INDEX.md AND the `EnableRateLimiting("ai-action-invocation")` slot exists on every endpoint. (task-execute Step 0)</step>
+    <step order="1">Load `.claude/constraints/bff-extensions.md` and answer the pre-merge checklist in `notes/decisions/task-044-bff-extensions-checklist.md`. Confirm no new NuGet packages — `Microsoft.AspNetCore.RateLimiting` is in framework. Cite placement = BFF (spec.md §6).</step>
+    <step order="2">Create `Configuration/RateLimitingOptions.cs` per ADR-018 typed-options conventions. Fields: `PerUserHourlyCap` (int, default 60), `PerTenantDailyCap` (int, default 1000), `Enabled` (bool, default true), `BucketIsolationByTenant` (bool, default true — tenant id is part of partition key). Add validation attributes.</step>
+    <step order="3">Create `Infrastructure/RateLimiting/AiActionInvocationPolicy.cs`. Implement using `PartitionedRateLimiter.Create&lt;HttpContext, string&gt;`. Partition function: `ctx =&gt; $"user:{ctx.User.FindFirst("oid")?.Value}|tenant:{ctx.User.FindFirst("tid")?.Value}"`. Per-partition: stacked `FixedWindowRateLimiter` — one for user (1 hour window, cap = `PerUserHourlyCap`), one for tenant-wide aggregation (1 day window, cap = `PerTenantDailyCap`). The tenant-wide limiter partitions by `tenant:{tid}` only.</step>
+    <step order="4">Configure the rejection callback (`options.OnRejected = (ctx, ct) =&gt; { ... }`) to emit App Insights custom event `action_engine.ratelimit.exceeded` with properties `userOid`, `tenantId`, `endpointPath`, `bucketWindow`. Return a ProblemDetails JSON body with status 429, title "Too Many Requests", detail describing which bucket exceeded, and a `Retry-After` header with the seconds until the next bucket window opens.</step>
+    <step order="5">CRUD endpoints (GET/POST/PUT/DELETE) policy decision: either (a) same `ai-action-invocation` policy (simplest), or (b) separate `ai-action-crud` policy with a more permissive cap. Recommend (a) for MVP — CRUD volume is typically much lower than `/run` volume. Document the decision in `notes/decisions/rate-limiting-thresholds.md`.</step>
+    <step order="6">Register the rate limiter middleware in `Program.cs`: `builder.Services.AddRateLimiter(options =&gt; { options.AddPolicy("ai-action-invocation", new AiActionInvocationPolicy(opts)); options.RejectionStatusCode = 429; });`. Place `app.UseRateLimiter()` AFTER `UseAuthentication()` + `UseAuthorization()` in the pipeline. Register `RateLimitingOptions` via `services.Configure&lt;RateLimitingOptions&gt;(config.GetSection("RateLimiting"))`.</step>
+    <step order="7">Edit `appsettings.json` to add a `RateLimiting` section with the default values + a comment block explaining the soft-MVP semantics. Edit `appsettings.Development.json` to override with permissive values for local dev (e.g., 1000/hour, 10000/day).</step>
+    <step order="8">Write integration tests at `tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/RateLimitingIntegrationTests.cs`:
+      (a) 60 requests from same user succeed; request 61 within the hour returns 429 with ProblemDetails body + `Retry-After` header;
+      (b) After 1-hour window passes (test-clock advance), request 1 in the new bucket succeeds — no permanent block;
+      (c) Per-tenant cap kicks in: multiple users from same tenant collectively hitting 1000 requests/day all get 429 even if no individual user hit their cap;
+      (d) App Insights event fires on every 429 (use a test-double sink and assert the event was recorded).</step>
+    <step order="9">Write `notes/decisions/rate-limiting-thresholds.md` documenting: default thresholds + rationale, how to tune via `appsettings.json` per environment, soft-MVP semantics (no hard block), what changes in R2 (hard caps + admin override + per-Tool cost-class differentiation).</step>
+    <step order="9.5">Run quality gates per task-execute Step 9.5: `code-review` on the new options + policy + Program.cs edit + appsettings edits; `adr-check` verifies ADR-016 (rate limiting present, soft MVP), ADR-018 (typed options + startup validation), ADR-019 (429 returns ProblemDetails + Retry-After), ADR-029 (no new packages). Re-run `dotnet build` and integration tests.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 044 ✅. Verify it unblocks tasks 060, 061, 062, 063 (the integration test phase). Reset `current-task.md` for the next active task.</step>
+    <step order="11">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-044-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF API including rate-limiting integration tests</tool>
+    <tool name="terminal">Run integration tests with test-clock control for bucket windows</tool>
+    <tool name="git">Confirm state + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/RateLimitingOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/RateLimiting/AiActionInvocationPolicy.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (edit — register options + policy)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (edit — middleware pipeline)</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.json (edit — RateLimiting section + defaults)</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.Development.json (edit — permissive dev overrides)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/ActionEngine/RateLimitingIntegrationTests.cs (4+ tests)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/rate-limiting-thresholds.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/task-044-bff-extensions-checklist.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">61st request within an hour from the same user returns 429 ProblemDetails with `Retry-After` header — verified by integration test.</criterion>
+    <criterion testable="true">After the 1-hour bucket window passes, request 1 in the next bucket succeeds (no permanent block) — verified by integration test with test-clock advance.</criterion>
+    <criterion testable="true">Per-tenant daily cap (1000 by default) enforced independently of per-user caps — verified by integration test with multiple users from the same tenant.</criterion>
+    <criterion testable="true">App Insights custom event `action_engine.ratelimit.exceeded` fires on every 429 — verified by integration test with test-double sink.</criterion>
+    <criterion testable="true">429 response body conforms to ProblemDetails (RFC 7807) with `type`, `title: "Too Many Requests"`, `status: 429`, `detail`, and `Retry-After` header — ADR-019.</criterion>
+    <criterion testable="true">`RateLimitingOptions` startup validation rejects invalid configurations (e.g., negative caps) — verified by startup test asserting `OptionsValidationException`.</criterion>
+    <criterion testable="true">Soft-MVP semantics documented in `notes/decisions/rate-limiting-thresholds.md` — explicit statement that there is NO hard block beyond the 429 response.</criterion>
+    <criterion testable="true">`notes/decisions/task-044-bff-extensions-checklist.md` exists with every `bff-extensions.md` pre-merge item answered.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` returns no NEW HIGH-severity CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Soft enforcement is the key invariant. The phrase "rate limiting" suggests a hard block to some readers — the MVP semantics are NOT that. The 429 is for the immediate request only; subsequent requests in the next bucket window succeed. If you implement a per-user "lockout" or a persistent block, you've deviated from ADR-016 MVP scope — escalate before merging.
+
+    The per-user + per-tenant stacked-limiter pattern requires care: a request that's NOT capped at the user level may still be capped at the tenant level (or vice versa). The first limiter to reject wins; the rejection callback must indicate which bucket exceeded in the `detail` field (e.g., "User hourly cap (60) exceeded" vs "Tenant daily cap (1000) exceeded").
+
+    Cost-class differentiation (cheap vs expensive Tools) is R2 scope. MVP counts every dispatch the same. Do NOT add per-Tool cost weighting.
+
+    Feature flag interaction (task 045): if the Action endpoint feature flag is off, return 503 BEFORE the rate limiter so disabled features don't consume quota. Order in the pipeline: auth → feature flag check (task 045) → rate limiter (this task) → endpoint handler. Coordinate with task 045 if both extensions land in the same PR.
+
+    Test-clock control: use the `TimeProvider` abstraction (.NET 8) to advance the bucket window in tests. If the existing codebase uses `DateTime.UtcNow` directly, consider whether the rate limiter API surfaces a TimeProvider hook (it does — `RateLimitOptions.TimeProvider`).
+
+    The `Retry-After` header value should be the seconds until the next bucket window opens, computed at rejection time. For a 1-hour window, that's `3600 - (utcNow.Minute*60 + utcNow.Second)`. For consistency across windows, FixedWindowRateLimiter exposes a `metadata.GetRetryAfter()` method — use that.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5 (code-review + adr-check). The soft-MVP invariant (no hard block) is non-negotiable.
+    </protocol>
+  </execution>
+</task>

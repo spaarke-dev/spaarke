@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Azure AI Search — Provision spaarke-resource-registry-index on existing spaarke-search-dev</title>
+    <phase>Phase 1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001, 011</dependencies>
+    <blocks>022, 023, 024, 025, 026</blocks>
+    <tags>azure, azure-search, ai, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Provisions production-shaped infra on a shared Azure resource (`spaarke-search-dev`); schema is the semantic backing for `FindResources` meta-tool (NFR-01: p95 &lt; 200ms); a wrong schema forces a re-index across Tool Registry growth; tags include azure + deploy</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Provisions a NEW index `spaarke-resource-registry-index` on an existing Azure AI Search service. Does NOT modify BFF code, NOT modify `AddActionEngineModule.cs`, NOT modify `Program.cs`. Disjoint from tasks 014 (BFF DI + Program.cs) and 015 (PublicContracts facade). Resource creation only — no DI registration in this task. Depends on task 011 for the `sprk_toolregistry` shape, but does NOT modify it.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Provision a NEW Azure AI Search index `spaarke-resource-registry-index` on the existing `spaarke-search-dev` service. Define the schema (vector + keyword fields for Tool Registry Discoverability per spec FR-08), semantic configuration, and vectorizer wiring against the existing OpenAI embedding deployment. Do NOT touch the existing `spaarke-file-index` infrastructure. Output: index live, schema documented, and a smoke-test query (zero documents — just structural query) succeeds with HTTP 200.
+  </prompt>
+
+  <role>
+    SPAARKE Azure infra engineer experienced with Azure AI Search index provisioning via Bicep + REST API. You distinguish between the SERVICE (provisioned, existing — do not modify) and INDEXES on that service (new — what this task creates). You understand semantic search configuration, vectorizers, vector profiles, and the wire-up to an existing Azure OpenAI embedding deployment.
+  </role>
+
+  <goal>
+    Three outcomes:
+
+    1. **Index schema authored** at `infra/ai-search/spaarke-resource-registry-index/index-schema.json` — the Azure AI Search index definition. Fields per spec FR-08:
+       - `resourceId` (Edm.String, key, retrievable, filterable)
+       - `displayName` (Edm.String, retrievable, searchable)
+       - `description` (Edm.String, retrievable, searchable)
+       - `classification` (Edm.String, retrievable, filterable, facetable) — facet for filter-by-Deterministic/AI/Hybrid
+       - `tenantId` (Edm.String, retrievable, filterable) — mandatory filter for tenant scoping (NFR-05)
+       - `keywords` (Collection(Edm.String), retrievable, searchable, facetable)
+       - `semanticDescription` (Edm.String, retrievable, searchable) — the primary semantic-search field per spec FR-08
+       - `sampleInvocationsJson` (Edm.String, retrievable) — stringified JSON; not indexed for search
+       - `costClass`, `latencyClass`, `authMode`, `modelTier` (Edm.String, retrievable, filterable, facetable) — Tool axes for filtered queries
+       - `isAlwaysOnInAssistant` (Edm.Boolean, retrievable, filterable)
+       - `evidenceRequired` (Edm.Boolean, retrievable, filterable)
+       - `phaseRestrictions` (Collection(Edm.String), retrievable, filterable)
+       - `promoteInContexts` (Collection(Edm.String), retrievable, filterable)
+       - `descriptionVector` (Collection(Edm.Single), `dimensions = 1536` for `text-embedding-ada-002` or `dimensions = 3072` for `text-embedding-3-large` — pick to match the existing OpenAI deployment on `spaarke-openai-dev`)
+       - Vector profile + HNSW algorithm config
+       - Semantic config: title field = `displayName`; content fields = `description`, `semanticDescription`, `keywords`
+
+    2. **Bicep module** at `infra/ai-search/spaarke-resource-registry-index/main.bicep` — declarative IaC for the index. Parameter for the existing service name (`spaarke-search-dev`); module deploys ONLY the new index, NOT the service. Uses `Microsoft.Search/searchServices/indexes@2023-11-01` (or current GA API version).
+
+    3. **Index deployed to dev** — the Bicep module run against the resource group containing `spaarke-search-dev`. Verified by REST API GET on the new index URL returning HTTP 200 and the schema matching.
+
+    Deliverable: index exists; schema documented at `infra/ai-search/spaarke-resource-registry-index/README.md`; structural smoke-test query (e.g., `POST /indexes/spaarke-resource-registry-index/docs/search?api-version=2023-11-01` with `search=*`) returns HTTP 200 with 0 documents.
+  </goal>
+
+  <context>
+    <background>
+      **Existing service**: `spaarke-search-dev` is the existing Azure AI Search service in the dev resource group. It already hosts `spaarke-file-index` (document RAG). This task adds a NEW index ALONGSIDE — does NOT modify the existing index, does NOT modify the service tier or replication.
+
+      **Schema source**: spec.md FR-08 + design §5 + the `sprk_toolregistry` Dataverse shape from task 011. The semantic search field is `discoverabilityJson.semanticDescription`, which is flattened into a top-level `semanticDescription` field on the search index (Azure AI Search doesn't search nested JSON directly).
+
+      **Vectorizer**: the index uses `text-embedding-ada-002` or `text-embedding-3-large` (whichever is deployed on `spaarke-openai-dev`). Check the existing deployment before authoring the vector profile — the `dimensions` count MUST match (1536 for ada-002, 3072 for embedding-3-large).
+
+      **Indexer**: NOT in scope for this task. This task creates the INDEX (the storage shape). Phase 2 (task 022 or 025) will create the indexer or push-API loader that hydrates the index from `sprk_toolregistry` records.
+
+      **No BFF code change**: this task creates Azure infra only. The BFF client wiring (search client registration in `AddActionEngineModule.cs`) is a Phase 2 task. This task does NOT modify any BFF files — that's why it's parallel-safe with 014 and 015.
+
+      **NFR-01 latency target**: `FindResources` p95 &lt; 200ms. The index design must support that — HNSW vector profile + semantic ranker + tenant filter. Document the expected p95 in the README; validation is a Phase 6 load test.
+
+      **NFR-05 tenant isolation**: every query against this index MUST filter by `tenantId`. The index doesn't enforce this directly — the BFF query layer does (task 022). Document the requirement in the README.
+    </background>
+    <relevant-files>
+      <file>infra/ai-search/ (existing; check for parallel index modules to mirror)</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Placement: Action Engine in BFF, NOT in a separate Function App. The search index is infra (lives in Azure resource group), not code — placement constraint applies to consumers (BFF query layer), not to the index itself.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta ≤ 5 MB compressed. This task does NOT add packages to the BFF csproj, so the publish-size impact is zero. Verified.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement decision (index is infra; consumer is BFF per ADR-013), ADRs cited, publish-size verified (no impact), no new HIGH-sev CVE (no BFF package changes), feature-module DI (consumer registration is Phase 2, not this task).</constraint>
+    <constraint source="project">Provision the index on the EXISTING service `spaarke-search-dev`. Do NOT create a new service. Do NOT modify the service tier, replication, or partitioning.</constraint>
+    <constraint source="project">Do NOT touch the existing `spaarke-file-index`. Verify by Bicep scope and by REST GET on that index before + after.</constraint>
+    <constraint source="project">Tenant isolation: every query against this index MUST filter by `tenantId`. The index schema includes the field; query enforcement is a Phase 2 concern documented in the README.</constraint>
+    <constraint source="project">Vector dimensions match the existing OpenAI embedding deployment on `spaarke-openai-dev`. Mis-matched dimensions cause indexing failures.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="azure-deploy (Bicep + script)" location=".claude/skills/azure-deploy/SKILL.md">Bicep authoring + deployment pattern; use for the new index module.</pattern>
+      <pattern name="Existing AI Search index modules" location="infra/ai-search/">Mirror the existing module structure (likely `spaarke-file-index` is the closest sibling); copy patterns for vectorizer config, semantic config, and IaC parameters.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes, tasks 001 + 011 status are ✅. Load the `azure-deploy` skill. (task-execute Step 0)</step>
+    <step order="1">Inspect existing Azure AI Search infra:
+      - `az search service show --name spaarke-search-dev --resource-group &lt;rg-name&gt;` — confirm tier, replicas, partitions
+      - `az search service list-admin-keys` — capture admin key for REST GETs (do NOT commit)
+      - REST GET on existing `spaarke-file-index` to capture its schema shape — mirror conventions where appropriate (analyzers, language, etc.)
+    </step>
+    <step order="2">Inspect existing Azure OpenAI deployment on `spaarke-openai-dev` to determine the embedding model + dimensions:
+      - `az cognitiveservices account deployment list --name spaarke-openai-dev --resource-group &lt;rg-name&gt;` — find the embedding deployment
+      - Note: dimensions = 1536 for `text-embedding-ada-002`; dimensions = 3072 for `text-embedding-3-large`
+      - Record the choice in `notes/decisions/task-016-embedding-model.md`.
+    </step>
+    <step order="3">Read spec.md FR-08, design §5 (Tool Registry section), and task 011's schema doc (`docs/data-model/action-engine-entities.md` `sprk_toolregistry` section) to align field names between Dataverse + Azure AI Search.</step>
+    <step order="4">Author `infra/ai-search/spaarke-resource-registry-index/index-schema.json` — full Azure AI Search index definition per the `&lt;goal&gt;` field list. Include:
+      - Vector profile referencing `spaarke-openai-dev` via Azure AI Search vectorizer config (using managed identity if the service supports it; otherwise API key from Key Vault per project secrets policy)
+      - Semantic config with title = `displayName`, content fields = `description` + `semanticDescription` + `keywords`
+      - HNSW algorithm config with default parameters
+      - Suggester on `displayName` + `keywords` for typeahead (optional but useful)
+    </step>
+    <step order="5">Author `infra/ai-search/spaarke-resource-registry-index/main.bicep` — Bicep module that deploys the index. Uses `Microsoft.Search/searchServices/indexes@2023-11-01` resource. Parameter `searchServiceName` (default `spaarke-search-dev`). Reads the JSON schema from `index-schema.json` via `loadJsonContent()` Bicep function.</step>
+    <step order="6">Validate Bicep locally: `az bicep build --file infra/ai-search/spaarke-resource-registry-index/main.bicep` — MUST succeed.</step>
+    <step order="7">Deploy to dev: `az deployment group create --resource-group &lt;rg-name&gt; --template-file infra/ai-search/spaarke-resource-registry-index/main.bicep` (use `--what-if` first to confirm changes are additive only — should show ONE create: the new index).</step>
+    <step order="8">Smoke-test the deployed index:
+      - REST GET on the new index URL: `GET https://spaarke-search-dev.search.windows.net/indexes/spaarke-resource-registry-index?api-version=2023-11-01` MUST return HTTP 200 with the schema we authored
+      - Structural search query: `POST /indexes/spaarke-resource-registry-index/docs/search?api-version=2023-11-01` with body `{"search": "*"}` MUST return HTTP 200 with 0 documents (no docs indexed yet — by design)
+      - Verify no regression on `spaarke-file-index`: REST GET MUST return its existing schema unchanged
+    </step>
+    <step order="9">Author `infra/ai-search/spaarke-resource-registry-index/README.md` — index overview:
+      - Purpose: Tool Registry semantic discovery (spec FR-08 + NFR-01)
+      - Field-by-field schema with `Dataverse → Index` mapping (so task 022's indexer/loader knows the projection)
+      - Tenant isolation requirement (NFR-05): every query MUST filter by `tenantId`
+      - Latency target: `FindResources` p95 &lt; 200ms (NFR-01); load test in Phase 6 validates
+      - Embedding model + dimensions (from step 2)
+    </step>
+    <step order="10">Run quality gates per task-execute Step 9.5: `code-review` on the Bicep + JSON schema + README; `adr-check` confirms ADR-029 (no BFF impact), bff-extensions.md (placement: index is infra; BFF consumer is Phase 2). The `bff-extensions.md` pre-merge checklist applies but most items are N/A here (no BFF code change).</step>
+    <step order="11">Verify BFF baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0. (Should be unaffected — no BFF code change.)</step>
+    <step order="12">Update `tasks/TASK-INDEX.md`: mark task 016 ✅; verify it unblocks tasks 022, 023, 024, 025, 026. Reset `current-task.md` to point to next pending task in Group B (or signal Phase 1 complete if 010-016 all ✅).</step>
+    <step order="13">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-016-handoff.md` and add a brief commit message recap. Commit message MUST note the existing service used, the embedding model + dimensions, and confirm no regression on `spaarke-file-index`.</step>
+  </steps>
+
+  <tools>
+    <tool name="azure-deploy">Skill: Bicep + script pattern</tool>
+    <tool name="az">Azure CLI for inspection + deployment + REST GETs</tool>
+    <tool name="bicep">Validate + compile Bicep modules</tool>
+    <tool name="dotnet">Verify BFF baseline build unaffected</tool>
+    <tool name="git">Confirm state + commit</tool>
+    <tool name="terminal">Run shell commands for REST smoke tests + deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">infra/ai-search/spaarke-resource-registry-index/index-schema.json</output>
+    <output type="infra">infra/ai-search/spaarke-resource-registry-index/main.bicep</output>
+    <output type="docs">infra/ai-search/spaarke-resource-registry-index/README.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/decisions/task-016-embedding-model.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/handoffs/task-016-handoff.md</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Bicep module exists at `infra/ai-search/spaarke-resource-registry-index/main.bicep` and compiles cleanly: `az bicep build` exits 0.</criterion>
+    <criterion testable="true">Index schema at `infra/ai-search/spaarke-resource-registry-index/index-schema.json` includes all required fields per spec FR-08 + vector profile + semantic config; validated by JSON schema lint + structural inspection.</criterion>
+    <criterion testable="true">Index deployed to dev: REST GET on `https://spaarke-search-dev.search.windows.net/indexes/spaarke-resource-registry-index?api-version=2023-11-01` returns HTTP 200 with the deployed schema.</criterion>
+    <criterion testable="true">Structural smoke-test query (`search=*`) returns HTTP 200 with 0 documents.</criterion>
+    <criterion testable="true">Existing `spaarke-file-index` schema unchanged; verified by REST GET before + after.</criterion>
+    <criterion testable="true">Vector dimensions in the index schema match the existing OpenAI embedding deployment on `spaarke-openai-dev`; choice documented in `notes/decisions/task-016-embedding-model.md`.</criterion>
+    <criterion testable="true">README documents the full Dataverse → Index field mapping for the Phase 2 indexer/loader task.</criterion>
+    <criterion testable="true">BFF baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0 (no BFF code change in this task — verifies parallel-safe with tasks 014 + 015).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is INFRA-ONLY. No BFF code change. That's why it's parallel-safe with tasks 014 (BFF DI module) and 015 (PublicContracts facade) — none of these tasks touch the same files.
+
+    Do NOT add Azure AI Search client packages to `Sprk.Bff.Api.csproj` in this task. That's a Phase 2 concern (task 022 or 025 — whichever owns `FindResources` impl). Adding it here risks publish-size budget pressure without the corresponding consumer code.
+
+    Vector dimensions are LOCKED at index creation. If you pick 1536 (ada-002) and later want to switch to 3072 (embedding-3-large), you MUST recreate the index. Verify the existing deployment on `spaarke-openai-dev` BEFORE authoring the schema.
+
+    Tenant isolation: the index has the `tenantId` field, but enforcement is at QUERY time — every BFF query MUST filter by tenantId. Document this in the README so task 022 doesn't forget. Index-level isolation (separate index per tenant) is OUT of scope for MVP — design lean is single multi-tenant index with mandatory tenant filter.
+
+    The semantic config makes `FindResources` work. Without it, the index is only a vector + keyword surface (still useful but the semantic ranker noticeably improves p95 quality). Verify the existing service tier supports semantic search (Basic SKU does NOT; Standard or above does). If the existing service is Basic, escalate — semantic search is a hard NFR-01 dependency.
+
+    `spaarke-file-index` smoke test (REST GET before + after) is mandatory. The biggest risk of this task is accidentally modifying the wrong index. Bicep scoping should prevent it, but verify empirically.
+
+    `bff-extensions.md` checklist: most items are N/A here (no BFF code change). Cite the assessment in the PR description to show you considered it — placement decision (index is infra), ADRs cited (ADR-029 N/A, no publish-size impact), no new HIGH-sev CVE (no BFF package changes), feature-module DI (consumer in Phase 2). Recording the N/A items is itself the discipline.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;` — ESPECIALLY `.claude/skills/azure-deploy/SKILL.md` and `.claude/constraints/bff-extensions.md`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. Verify `spaarke-file-index` parity (REST GET before + after) — this is the single highest risk in this task.
+    </protocol>
+  </execution>
+</task>

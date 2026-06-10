@@ -1,0 +1,126 @@
+<task id="004" project="email-communication-solution-r3">
+  <metadata>
+    <title>Dataverse — Verify (or add) `sprk_inreplyto` + `sprk_internetmessageid` on `sprk_communication`</title>
+    <phase>Wave 0 — Foundations + Non-Breaking BFF</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>007</blocks>
+    <tags>dataverse, schema, fields, communication</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema verification + conditional add via `dataverse-create-schema` skill; documentation update; no `.cs`/`.ts` code change; STANDARD per CLAUDE.md rigor table</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-23</fr-refs>
+  </metadata>
+
+  <prompt>
+    Verify that the `sprk_communication` Dataverse table has the two columns the reply-thread closure flow depends on:
+    - `sprk_inreplyto` — Lookup, self-referencing to `sprk_communication` (parent message)
+    - `sprk_internetmessageid` — Single Line of Text, max length 255, indexed (so inbound `In-Reply-To` matching in `IncomingAssociationResolver` is fast)
+
+    If either column is missing in the dev environment, add it using the `dataverse-create-schema` skill (Web API + PowerShell — PAC CLI cannot create columns). Update `docs/data-model/sprk_communication.md` to document both columns and their purpose.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse engineer. Authoritative on `sprk_communication` schema. Familiar with the `dataverse-create-schema` skill (Web API column creation) and `docs/data-model/` documentation conventions.
+  </role>
+
+  <goal>
+    Both `sprk_inreplyto` (Lookup self-ref) and `sprk_internetmessageid` (Text 255 indexed) are present on `sprk_communication` in the dev environment. `docs/data-model/sprk_communication.md` documents both columns. The `IncomingAssociationResolver` (existing, ADR-024) can read `sprk_internetmessageid` from outbound records and use it for `In-Reply-To` matching of inbound replies.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-23 calls for verifying these two columns and adding either if missing. The R2 server-side work (parent project) introduced parts of the `sprk_communication` schema but did not consistently land these two reply-closure fields. This task closes that gap deterministically so Wave 0 task 003 (`Internet-Message-Id` capture) and the Wave 1+ reply/forward modes (FR-11, FR-12) have a place to land their data.
+
+      Per spec, `sprk_internetmessageid` MUST be indexed because `IncomingAssociationResolver` queries it on every inbound message. Without an index, the lookup degrades as the table grows.
+    </background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">`sprk_inreplyto` MUST be a self-referencing Lookup to `sprk_communication` (parent message link).</constraint>
+    <constraint source="project">`sprk_internetmessageid` MUST be Single Line of Text, max length 255, AND indexed (per FR-23).</constraint>
+    <constraint source="project">If columns already exist, do NOT recreate them — verify and document only. The `dataverse-create-schema` skill's idempotency check covers this.</constraint>
+    <constraint source="project">Documentation update in `docs/data-model/sprk_communication.md` is REQUIRED whether or not columns are added — the doc must reflect the current schema.</constraint>
+    <constraint source="ADR-024">`IncomingAssociationResolver` reads `sprk_internetmessageid`. Schema MUST match its expectations.</constraint>
+    <constraint source="ADR-033">The new ADR (task 001) codifies the canonical pattern. Confirm this task aligns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse column creation" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Web API + PowerShell pattern. PAC CLI does NOT create columns. Use `New-DataverseColumn` (or equivalent script in the skill) with `attributeType=Lookup` for self-ref + `attributeType=String` (max 255) + `isSearchable=true` for indexed text.
+      </pattern>
+      <pattern name="Data-model documentation" location="docs/data-model/">
+        Each entity has a markdown file documenting columns: logical name, display name, type, max length / target entity, purpose, consumers. Update on every schema change.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `.claude/skills/dataverse-create-schema/SKILL.md` for the column-creation pattern + invocation conventions.</step>
+    <step order="2">Read `docs/data-model/sprk_communication.md` (if it exists) to see the current documented schema. If it does NOT exist, this task creates it.</step>
+    <step order="3">Verify schema via Dataverse MCP `describe` tool on `sprk_communication` (or PAC CLI `pac data show`). Capture column list. Identify whether `sprk_inreplyto` and `sprk_internetmessageid` are present and have the correct type / target / index.</step>
+    <step order="4">Branch on findings:
+- BOTH present + correct → no schema change needed. Proceed to doc step.
+- `sprk_inreplyto` missing → invoke `dataverse-create-schema` skill to add it as Lookup self-ref to `sprk_communication` (parent message).
+- `sprk_internetmessageid` missing → invoke `dataverse-create-schema` skill to add it as Single Line of Text, max length 255, with `isSearchable=true` (indexed).
+- Either present but wrong type/length/index → STOP, escalate to human (the task description does not authorize destructive schema edits).</step>
+    <step order="5">After any schema changes, re-verify both columns via Dataverse MCP `describe` — confirm presence + correct shape.</step>
+    <step order="6">Update `docs/data-model/sprk_communication.md` to document both columns under a "Reply-thread closure fields" section: logical names, types, purposes, consumers (`IncomingAssociationResolver` for `sprk_internetmessageid`; reply/forward UX for `sprk_inreplyto`).</step>
+    <step order="7">Export the customizations to the solution `EmailRibbons` (or whichever solution owns `sprk_communication` schema additions — confirm with PAC CLI `pac solution list`) so subsequent environments pick up the change. (Skip if columns already existed in the deployed solution.)</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 004 ✅ completed; confirm task 007 dependency satisfied.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task; record any schema additions in Decisions Made (CLAUDE.md).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect current doc + skill</tool>
+    <tool name="dataverse-mcp">describe `sprk_communication` to verify columns</tool>
+    <tool name="dataverse-create-schema">Add missing column(s) via Web API</tool>
+    <tool name="edit">Update `docs/data-model/sprk_communication.md`</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/data-model/sprk_communication.md (UPDATED or CREATED — documents both reply-closure columns)</output>
+    <output type="dataverse">`sprk_communication.sprk_inreplyto` (Lookup self-ref) — verified or added</output>
+    <output type="dataverse">`sprk_communication.sprk_internetmessageid` (Text 255 indexed) — verified or added</output>
+    <output type="dataverse">Solution export (if schema added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_communication.sprk_inreplyto` exists in dev with type Lookup, target `sprk_communication`.</criterion>
+    <criterion testable="true">`sprk_communication.sprk_internetmessageid` exists in dev with type Single Line of Text, max length 255, indexed (`isSearchable=true`).</criterion>
+    <criterion testable="true">`docs/data-model/sprk_communication.md` documents both columns with logical names, types, purposes, consumers.</criterion>
+    <criterion testable="true">If columns were added, the owning solution exports cleanly with the new columns included.</criterion>
+    <criterion testable="true">Dataverse MCP `describe` confirms final state matches the FR-23 acceptance shape.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical state at pre-flight (2026-06-05): not yet verified. The first sub-step of step 3 is the discovery. This task is a no-op if both columns already exist correctly — but the documentation update is NOT a no-op (always update the doc to current state).
+
+    If either column exists with wrong type/length/missing index, do NOT silently "fix" it — that's a destructive schema change. Escalate to human with the evidence (current shape vs FR-23 required shape) and pause.
+
+    The Wave 0 task 003 (`Internet-Message-Id` capture) writes `sprk_internetmessageid`; the Wave 1 reply/forward modes (FR-11, FR-12) write `sprk_inreplyto`. Both depend on this task's columns existing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>` — Step 9.5 quality gates (code-review + adr-check) are SKIPPED for STANDARD. Schema-change escalation (step 4 final bullet) is REQUIRED behavior, not optional.
+    </protocol>
+  </execution>
+</task>

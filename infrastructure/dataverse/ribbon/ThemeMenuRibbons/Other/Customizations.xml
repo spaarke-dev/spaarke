@@ -359,57 +359,6 @@
       </RibbonDiffXml>
     </Entity>
     <Entity>
-      <Name LocalizedName="Event Todo" OriginalName="Event Todo">sprk_EventTodo</Name>
-      <EntityInfo>
-        <entity Name="sprk_EventTodo" unmodified="1">
-          <attributes />
-        </entity>
-      </EntityInfo>
-      <RibbonDiffXml>
-        <CustomActions>
-          <CustomAction Id="sprk.ThemeMenu.EventTodo.CustomAction" Location="Mscrm.HomepageGrid.sprk_eventtodo.MainTab.Actions.Controls._children" Sequence="900">
-            <CommandUIDefinition>
-              <FlyoutAnchor Id="sprk.ThemeMenu.EventTodo.Flyout" Command="sprk.ThemeMenu.EventTodo.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
-                <Menu Id="sprk.ThemeMenu.EventTodo.Menu">
-                  <MenuSection Id="sprk.ThemeMenu.EventTodo.Section" Title="Color Theme" Sequence="10">
-                    <Controls Id="sprk.ThemeMenu.EventTodo.Controls">
-                      <Button Id="sprk.ThemeMenu.EventTodo.Auto" Command="sprk.ThemeMenu.EventTodo.SetAuto" LabelText="Auto (follows app)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
-                      <Button Id="sprk.ThemeMenu.EventTodo.Light" Command="sprk.ThemeMenu.EventTodo.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
-                      <Button Id="sprk.ThemeMenu.EventTodo.Dark" Command="sprk.ThemeMenu.EventTodo.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
-                    </Controls>
-                  </MenuSection>
-                </Menu>
-              </FlyoutAnchor>
-            </CommandUIDefinition>
-          </CustomAction>
-          <CustomAction Id="sprk.ThemeMenu.EventTodo.Form.CustomAction" Location="Mscrm.Form.sprk_eventtodo.MainTab.Actions.Controls._children" Sequence="900">
-            <CommandUIDefinition>
-              <FlyoutAnchor Id="sprk.ThemeMenu.EventTodo.Form.Flyout" Command="sprk.ThemeMenu.EventTodo.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
-                <Menu Id="sprk.ThemeMenu.EventTodo.Form.Menu">
-                  <MenuSection Id="sprk.ThemeMenu.EventTodo.Form.Section" Title="Color Theme" Sequence="10">
-                    <Controls Id="sprk.ThemeMenu.EventTodo.Form.Controls">
-                      <Button Id="sprk.ThemeMenu.EventTodo.Form.Auto" Command="sprk.ThemeMenu.EventTodo.SetAuto" LabelText="Auto (follows app)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
-                      <Button Id="sprk.ThemeMenu.EventTodo.Form.Light" Command="sprk.ThemeMenu.EventTodo.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
-                      <Button Id="sprk.ThemeMenu.EventTodo.Form.Dark" Command="sprk.ThemeMenu.EventTodo.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
-                    </Controls>
-                  </MenuSection>
-                </Menu>
-              </FlyoutAnchor>
-            </CommandUIDefinition>
-          </CustomAction>
-        </CustomActions>
-        <Templates><RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates></Templates>
-        <CommandDefinitions>
-          <CommandDefinition Id="sprk.ThemeMenu.EventTodo.Command"><EnableRules><EnableRule Id="sprk.ThemeMenu.EventTodo.EnableRule" /></EnableRules><DisplayRules /><Actions /></CommandDefinition>
-          <CommandDefinition Id="sprk.ThemeMenu.EventTodo.SetAuto"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="auto" /></JavaScriptFunction></Actions></CommandDefinition>
-          <CommandDefinition Id="sprk.ThemeMenu.EventTodo.SetLight"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="light" /></JavaScriptFunction></Actions></CommandDefinition>
-          <CommandDefinition Id="sprk.ThemeMenu.EventTodo.SetDark"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="dark" /></JavaScriptFunction></Actions></CommandDefinition>
-        </CommandDefinitions>
-        <RuleDefinitions><TabDisplayRules /><DisplayRules /><EnableRules><EnableRule Id="sprk.ThemeMenu.EventTodo.EnableRule"><CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" /></EnableRule></EnableRules></RuleDefinitions>
-        <LocLabels />
-      </RibbonDiffXml>
-    </Entity>
-    <Entity>
       <Name LocalizedName="Event Type" OriginalName="Event Type">sprk_EventType</Name>
       <EntityInfo>
         <entity Name="sprk_EventType" unmodified="1">

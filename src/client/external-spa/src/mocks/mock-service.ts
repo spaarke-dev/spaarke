@@ -3,7 +3,15 @@
  * Intercepts bffApiCall requests and returns mock data from mock-data.ts.
  */
 
-import { MOCK_USER, MOCK_PROJECTS, MOCK_DOCUMENTS, MOCK_EVENTS, MOCK_CONTACTS, MOCK_ORGANIZATIONS } from './mock-data';
+import {
+  MOCK_USER,
+  MOCK_PROJECTS,
+  MOCK_DOCUMENTS,
+  MOCK_EVENTS,
+  MOCK_TODOS,
+  MOCK_CONTACTS,
+  MOCK_ORGANIZATIONS,
+} from './mock-data';
 import { ApiError } from '../types';
 
 /** Simulate realistic API latency */
@@ -49,6 +57,12 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
     return delay(collection(MOCK_EVENTS[eventsByProject[1]] ?? []) as unknown as T);
   }
 
+  // GET /api/v1/external/projects/:id/todos (NEW — R3 task 007)
+  const todosByProject = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/todos/);
+  if (method === 'GET' && todosByProject) {
+    return delay(collection(MOCK_TODOS[todosByProject[1]] ?? []) as unknown as T);
+  }
+
   // GET /api/v1/external/projects/:id/contacts
   const contactsByProject = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/contacts/);
   if (method === 'GET' && contactsByProject) {
@@ -70,16 +84,49 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
       sprk_name: body.sprk_name ?? 'New Event',
       sprk_duedate: body.sprk_duedate ?? null,
       sprk_status: body.sprk_status ?? 0,
-      sprk_todoflag: body.sprk_todoflag ?? false,
       _sprk_projectid_value: createEvent[1],
       createdon: new Date().toISOString(),
     };
     return delay(newEvent as unknown as T, 600);
   }
 
+  // POST /api/v1/external/projects/:id/todos (create to-do — NEW, R3 task 007)
+  const createTodo = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/todos$/);
+  if (method === 'POST' && createTodo) {
+    const body = options.body ? JSON.parse(options.body as string) : {};
+    const projectId = createTodo[1];
+    // BFF would populate resolver fields server-side; mock the same shape.
+    const mockProject = MOCK_PROJECTS.find(p => p.sprk_projectid === projectId);
+    const projectName = mockProject?.sprk_name ?? 'Unknown Project';
+    const newTodo = {
+      sprk_todoid: `todo-mock-${Date.now()}`,
+      sprk_name: body.sprk_name ?? 'New Task',
+      sprk_notes: body.sprk_notes ?? null,
+      sprk_duedate: body.sprk_duedate ?? null,
+      sprk_priorityscore: body.sprk_priorityscore ?? 50,
+      sprk_effortscore: body.sprk_effortscore ?? 50,
+      sprk_todocolumn: body.sprk_todocolumn ?? 100000000,
+      sprk_todopinned: body.sprk_todopinned ?? false,
+      statecode: 0, // Active
+      statuscode: 1, // Open
+      createdon: new Date().toISOString(),
+      _sprk_regardingproject_value: projectId,
+      sprk_regardingrecordid: projectId,
+      sprk_regardingrecordname: projectName,
+      sprk_regardingrecordurl: `/main.aspx?pagetype=entityrecord&etn=sprk_project&id=${projectId}`,
+    };
+    return delay(newTodo as unknown as T, 600);
+  }
+
   // PATCH /api/v1/external/events/:id (update event)
   const updateEvent = path.match(/^\/api\/v1\/external\/events\/([^/]+)$/);
   if (method === 'PATCH' && updateEvent) {
+    return delay(undefined as unknown as T, 300);
+  }
+
+  // PATCH /api/v1/external/todos/:id (update to-do — NEW, R3 task 007)
+  const updateTodoPath = path.match(/^\/api\/v1\/external\/todos\/([^/]+)$/);
+  if (method === 'PATCH' && updateTodoPath) {
     return delay(undefined as unknown as T, 300);
   }
 

@@ -135,7 +135,6 @@ $SolutionImportOrder = [ordered]@{
     "EventDetailSidePane"  = @{ DisplayName = "Event Detail Side Pane";   SolutionName = "EventDetailSidePane";  Tier = 3 }
     "EventsPage"           = @{ DisplayName = "Events Page";              SolutionName = "EventsPage";           Tier = 3 }
     "LegalWorkspace"       = @{ DisplayName = "Legal Workspace";          SolutionName = "LegalWorkspace";       Tier = 3 }
-    "TodoDetailSidePane"   = @{ DisplayName = "Todo Detail Side Pane";    SolutionName = "TodoDetailSidePane";   Tier = 3 }
 }
 
 # ============================================================================

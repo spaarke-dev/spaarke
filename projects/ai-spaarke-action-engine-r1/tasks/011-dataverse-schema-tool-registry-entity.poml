@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Dataverse Schema — Tool Registry Entity (sprk_toolregistry) with Extended LAVERN Metadata</title>
+    <phase>Phase 1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>016, 020, 021, 022, 023, 024, 025, 026</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tool Registry is the LLM's discovery surface; field shape directly determines meta-tool behavior and Azure AI Search index schema (task 016); LAVERN-derived extended metadata is the critical differentiator from a vanilla tool registry; mis-shaped fields force rework across Phase 2</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only `sprk_toolregistry` entity definition; disjoint from tasks 010 (action entities), 012 (sprk_gate_approval), 013 (sprk_aichatcontextmap)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create the `sprk_toolregistry` Dataverse entity carrying the full LAVERN-inspired extended metadata model (Classification, CostClass, LatencyClass, Idempotency, AuthMode, Discoverability, ModelTier, PhaseRestrictions, EvidenceRequired, IsAlwaysOnInAssistant, PromoteInContexts) per spec.md FR-07 and design §5. This entity feeds the Azure AI Search semantic index (task 016) and the meta-tools (`FindResources` / `GetResourceDetail` / `InvokeResource`).
+  </prompt>
+
+  <role>
+    SPAARKE Dataverse schema engineer experienced with the `dataverse-create-schema` skill and with LAVERN's extended Tool Registry metadata pattern. You translate the spec's metadata field list into Dataverse Choice columns, JSON Memo fields, and boolean flags such that the BFF can deserialize directly to a strongly-typed `ToolMetadata` model without ambiguity.
+  </role>
+
+  <goal>
+    `sprk_toolregistry` entity exists in dev with all 13 logical fields from spec.md FR-07 + design §5:
+
+    1. **`resourceId`** — Text (primary name); globally unique Tool identifier
+    2. **`displayName`** — Text
+    3. **`description`** — Text(Memo)
+    4. **`identityJson`** — Text(Memo); JSON: { ownerService, version, deprecated }
+    5. **`inputSchema`** — Text(Memo); JSON Schema
+    6. **`outputSchema`** — Text(Memo); JSON Schema
+    7. **`classification`** — Choice: Deterministic / AI / Hybrid
+    8. **`costClass`** — Choice: Free / Cheap / Expensive
+    9. **`latencyClass`** — Choice: Sub100ms / Sub1s / Sub10s / LongRunning
+    10. **`idempotency`** — Choice: Idempotent / NonIdempotent / IdempotentByKey
+    11. **`authMode`** — Choice: Obo / AppOnly / None
+    12. **`discoverabilityJson`** — Text(Memo); JSON: { keywords[], semanticDescription, sampleInvocations[] }
+    13. **`modelTier`** — Choice: Premium / Standard / Fast / Embedding / NotApplicable
+    14. **`phaseRestrictionsJson`** — Text(Memo); JSON array of phase deny-list entries
+    15. **`evidenceRequired`** — Boolean
+    16. **`isAlwaysOnInAssistant`** — Boolean
+    17. **`promoteInContextsJson`** — Text(Memo); JSON string array of context tokens
+    18. **`tenantId`** — Text; tenant scoping (NFR-05)
+
+    Entity packed into the same solution as task 010's action entities. Deliverable: schema doc updated, smoke-tested by creating 3 sample Tool records (one Deterministic, one AI, one Hybrid).
+  </goal>
+
+  <context>
+    <background>
+      LAVERN Pattern: extended Tool Registry metadata is the key architectural differentiator that lets the LLM discover and reason about Tools via semantic search rather than hard-coded routing. The `Discoverability` JSON object specifically feeds the Azure AI Search `spaarke-resource-registry-index` (task 016) — `semanticDescription` becomes the semantic-search field.
+
+      The 11-axis metadata schema (Classification through PromoteInContexts) maps to design §5 LAVERN-derived fields and spec.md FR-07. Do NOT add fields beyond this set without a spec change. Do NOT collapse choice columns into free text — the metadata is contract-binding for the LLM.
+
+      `PhaseRestrictions` is the data backing for the mechanical Phase deny-tools enforcement at `IToolHandlerRegistry` dispatch (spec FR-22, design §5). It is a JSON array because phase deny-lists are arbitrary length and variable.
+
+      `IsAlwaysOnInAssistant` is the boolean toggle that surfaces a Tool on every Assistant session alongside the meta-tools. The 3 always-on foundational Tools (`SearchDocuments`, `QueryDataverse`, `GetCurrentEntityContext`) will all carry `isAlwaysOnInAssistant = true`.
+
+      `EvidenceRequired` is a runtime guard (NFR-06 guardrail #3) — Tools with this flag refuse to execute without source citations in their inputs. The field is just storage here; the runtime guard lives at the dispatch layer.
+
+      Tenant scoping: `tenantId` text field, required. Tool Registry semantic index uses tenant-filtered queries (NFR-05).
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/lavern-pattern-assessment.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Thin Dataverse plugins. MUST NOT register plugins on `sprk_toolregistry`.</constraint>
+    <constraint source="ADR-019">If any custom API is registered against this entity (deferred to later phase), error responses use ProblemDetails RFC 7807.</constraint>
+    <constraint source="project">Field set is exactly the 13-field LAVERN extended metadata per spec FR-07 + design §5. No extra fields without spec amendment.</constraint>
+    <constraint source="project">All Choice columns use the exact label set from spec.md FR-07. Classification = { Deterministic, AI, Hybrid }; CostClass = { Free, Cheap, Expensive }; LatencyClass = { Sub100ms, Sub1s, Sub10s, LongRunning }; AuthMode = { Obo, AppOnly, None }; ModelTier = { Premium, Standard, Fast, Embedding, NotApplicable }; Idempotency = { Idempotent, NonIdempotent, IdempotentByKey }.</constraint>
+    <constraint source="project">JSON fields stored as Text(Memo) with `Format = TextArea`. BFF deserializes via System.Text.Json.</constraint>
+    <constraint source="project">Tenant-scoped via required `tenantId` text field (NFR-05).</constraint>
+    <constraint source="project">Packed into the same solution as task 010 entities for atomic deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/lavern-pattern-assessment.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-create-schema (Web API + Python SDK)" location=".claude/skills/dataverse-create-schema/SKILL.md">Canonical pattern for creating tables, columns, relationships, and option-sets when PAC CLI lacks the surface.</pattern>
+      <pattern name="LAVERN extended Tool Registry metadata" location="projects/ai-spaarke-action-engine-r1/lavern-pattern-assessment.md">Reference for the 11-axis metadata schema; inline-adopted in this project (no separate ADR).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes, task 001 status is ✅. Load the `dataverse-create-schema` skill. (task-execute Step 0)</step>
+    <step order="1">Read spec.md FR-07, design §5 (Tool Registry section), and lavern-pattern-assessment.md (Pattern: extended Tool Registry metadata). Confirm the 13-field set is fully understood before scripting.</step>
+    <step order="2">Identify target solution from task 010's decision (`notes/decisions/solution-targeting.md`). Use the same solution for atomic deploy.</step>
+    <step order="3">Author the entity schema as Python / Web API script. Order: create the 6 global Choice option-sets first (Classification, CostClass, LatencyClass, Idempotency, AuthMode, ModelTier), then create the entity, then add the 13 columns referencing those option-sets.</step>
+    <step order="4">Run the schema script against the dev environment. Confirm via Web API GET on the EntityDefinition that all 13 columns landed with correct types and Choice value labels.</step>
+    <step order="5">Pack the entity into the same solution as task 010 entities. Verify the export contains `sprk_toolregistry` + the 6 global option-sets.</step>
+    <step order="6">Smoke-test in maker portal: create 3 sample records — one Deterministic Tool (`SendEmail`, CostClass=Free, LatencyClass=Sub1s, Idempotency=NonIdempotent, AuthMode=Obo), one AI Tool (`SummarizeMatter`, Classification=AI, ModelTier=Standard, CostClass=Cheap), one Hybrid (`FindSimilarMatters`, Classification=Hybrid). Verify all Choice labels render correctly, JSON fields accept valid JSON, booleans toggle.</step>
+    <step order="7">Append the entity definition to `docs/data-model/action-engine-entities.md` (created by task 010). Include the field-by-field list with type + allowed values for each Choice.</step>
+    <step order="8">Run quality gates per task-execute Step 9.5: `code-review` on the schema script + the schema doc update; `adr-check` confirms ADR-002 (no plugins) and ADR-019 (custom-API note for later phases).</step>
+    <step order="8.5">Verify baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 011 ✅; verify it unblocks tasks 016, 020, 021, 022, 023, 024, 025, 026. Reset `current-task.md` to point to next pending task.</step>
+    <step order="10">Document any deviations from this plan in `projects/ai-spaarke-action-engine-r1/notes/handoffs/task-011-handoff.md` and add a brief commit message recap.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema">Skill: Web API + Python SDK for table/column/option-set creation</tool>
+    <tool name="pac">CLI for solution pack/unpack/export</tool>
+    <tool name="dotnet">Verify baseline build still passes</tool>
+    <tool name="git">Confirm state + commit</tool>
+    <tool name="terminal">Run shell + Python scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/dataverse/action-engine/create-toolregistry-entity.py</output>
+    <output type="solution">src/dataverse/solutions/SpaarkeActionEngine/ (extension) — `sprk_toolregistry` + 6 global option-sets</output>
+    <output type="docs">docs/data-model/action-engine-entities.md (extended with `sprk_toolregistry` section)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_toolregistry` exists in dev; verified by Web API GET on EntityDefinition.</criterion>
+    <criterion testable="true">All 13 logical fields present with correct types (Text, Text/Memo, Choice, Boolean) and the Choice columns reference the 6 global option-sets with exact label values from spec FR-07.</criterion>
+    <criterion testable="true">3 sample Tool records created in maker portal cover Classification = Deterministic, AI, and Hybrid; all Choice labels render correctly; JSON fields accept valid JSON.</criterion>
+    <criterion testable="true">`tenantId` text field is required (NFR-05).</criterion>
+    <criterion testable="true">Solution export round-trips cleanly: pack → unpack → diff shows no drift.</criterion>
+    <criterion testable="true">`docs/data-model/action-engine-entities.md` includes `sprk_toolregistry` section with field-by-field type + allowed-values table.</criterion>
+    <criterion testable="true">Baseline build still passes: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The extended metadata schema is LAVERN-inspired but **inline-adopted** (no separate Spaarke ADR — confirmed by spec.md Owner Clarifications table). Cite `lavern-pattern-assessment.md` as inspiration source, not as a Spaarke ADR.
+
+    The 6 global option-sets MUST be created BEFORE the entity columns reference them. Web API EntityDefinitions calls fail with cryptic errors if Choice columns reference unresolved option-set names.
+
+    Do NOT collapse Choice columns into free text. The LLM uses these as discrete signals during meta-tool routing. `Classification = "Deterministic"` is a hard constraint for the `FindResources` semantic search filter, not a hint.
+
+    `IsAlwaysOnInAssistant` and `EvidenceRequired` are stored here but enforced at the dispatch layer in Phase 2. This task only creates the storage shape; runtime enforcement is task 020+.
+
+    Run `dotnet list package --vulnerable --include-transitive` is N/A here (no NuGet additions in a Dataverse-schema task).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5. Use the `dataverse-create-schema` skill for the actual entity creation work.
+    </protocol>
+  </execution>
+</task>

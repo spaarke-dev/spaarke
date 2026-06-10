@@ -1,0 +1,128 @@
+<task id="010" project="email-communication-solution-r3">
+  <metadata>
+    <title>Scaffold EmailComposer directory + barrel exports</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>007</dependencies>
+    <blocks>011</blocks>
+    <tags>react, frontend, scaffold</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Scaffolding task — creates empty directories + an empty `index.ts` and commented-out barrel hookup. No business logic; no ADR-bearing decisions. STANDARD covers it; FULL would be over-application of rigor.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Strictly serial: blocks task 011 which must read the empty `index.ts` placeholder created here. Trivial enough that parallelism would not save time anyway.</parallel-reason>
+    <fr-refs>FR-01</fr-refs>
+  </metadata>
+
+  <prompt>
+    Create the empty directory structure for the new `EmailComposer` module inside `@spaarke/ui-components`. This task lays the file-system contract Wave 1 fills in. NO implementation logic — just empty dirs + an `index.ts` placeholder that exports nothing yet + a commented-out barrel-export hookup in the shared library's top-level `src/index.ts`.
+
+    The downstream tasks (011-029) will progressively uncomment the barrel lines as each piece lands. This keeps the build green at every intermediate step (no broken exports, no half-wired engine).
+  </prompt>
+
+  <role>
+    Frontend developer familiar with `@spaarke/ui-components` shared library layout. Knows the convention: each component directory has a colocated `index.ts` that re-exports the public surface, and the lib's top-level `src/index.ts` aggregates the public surface from each component dir.
+  </role>
+
+  <goal>
+    Empty `EmailComposer/` directory tree present under `src/client/shared/Spaarke.UI.Components/src/components/`. Subdirs (`wrappers/`, `subcomponents/`, `modes/`, `__tests__/`) exist. `EmailComposer/index.ts` exists as an empty file with no exports. The shared lib top-level `src/index.ts` has a commented-out section reserving the EmailComposer barrel area. `npm run build` + `npm run lint` still pass (nothing broken).
+  </goal>
+
+  <context>
+    <background>
+      Wave 1 builds the canonical EmailComposer engine + 3 wrappers + sub-components + modes + tests. The file-system layout follows the existing pattern of other components in `Spaarke.UI.Components` (e.g., `DocumentEmailWizard/`, `SummarizeFilesWizard/`, `CreateRecordWizard/`). Subdirs `wrappers/`, `subcomponents/`, `modes/`, `__tests__/` are project-specific and named in `spec.md` §Affected Areas + plan.md §Wave 1.
+
+      Empirical finding #1 (CLAUDE.md): `EmailComposer/` is confirmed absent at pre-flight 2026-06-05. This task creates it from scratch.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/ (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/ (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/ (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/modes/ (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/ (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (NEW, empty)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (UPDATE — add commented barrel)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">No styling code in this task — but the directory will hold Fluent v9-only components per ADR-021 (recorded here for downstream awareness)</constraint>
+    <constraint source="NFR-01">No React 16 compat in any future file under this directory — React 18 only</constraint>
+    <constraint source="project">Subdirs MUST be exactly `wrappers/`, `subcomponents/`, `modes/`, `__tests__/` (matches plan.md §Wave 1 + downstream task POMLs that hard-code these paths)</constraint>
+    <constraint source="project">Barrel hookup in `src/index.ts` MUST be commented-out at the end of this task — Wave 1 follow-on tasks uncomment progressively</constraint>
+    <constraint source="repo">`npm run build` + `npm run lint` in `@spaarke/ui-components` MUST stay green at end of task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared lib component layout" location="src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/">
+        Exemplar: a component dir with its tsx file + `index.ts` re-exporting the public surface. EmailComposer follows the same pattern plus the four subdirs.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/client/shared/Spaarke.UI.Components/src/index.ts` to understand the existing barrel-export style (named re-exports, alphabetical grouping, comments).</step>
+    <step order="2">Create directory `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/` and the four subdirs (`wrappers/`, `subcomponents/`, `modes/`, `__tests__/`).</step>
+    <step order="3">Create `EmailComposer/index.ts` as an empty file with a single TODO comment: `// EmailComposer barrel — populated by Wave 1 tasks 011-029`. No `export` lines yet.</step>
+    <step order="4">Update `src/client/shared/Spaarke.UI.Components/src/index.ts`: add a commented-out section near the existing component re-exports, e.g.:
+      <code>
+      // EmailComposer (Wave 1 — uncomment per sub-component as they land):
+      // export * from './components/EmailComposer';
+      </code>
+      Place it in alphabetical position relative to existing component exports.
+    </step>
+    <step order="5">Run `npm run build` in the shared lib root — verify build is clean (no missing import errors).</step>
+    <step order="6">Run `npm run lint` — verify no lint errors introduced.</step>
+    <step order="7">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 010 ✅ completed.</step>
+    <step order="8">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (011).</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">Create directories</tool>
+    <tool name="write">Create `EmailComposer/index.ts`</tool>
+    <tool name="edit">Update shared lib `src/index.ts` with commented barrel</tool>
+    <tool name="bash">Run `npm run build` + `npm run lint`</tool>
+  </tools>
+
+  <outputs>
+    <output type="directory">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/ (NEW)</output>
+    <output type="directory">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/ (NEW)</output>
+    <output type="directory">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/ (NEW)</output>
+    <output type="directory">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/modes/ (NEW)</output>
+    <output type="directory">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/ (NEW)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (NEW, empty placeholder)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/index.ts (UPDATED — commented barrel)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Directory `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/` exists with subdirs `wrappers/`, `subcomponents/`, `modes/`, `__tests__/`.</criterion>
+    <criterion testable="true">`EmailComposer/index.ts` exists and contains only a TODO comment (no exports yet).</criterion>
+    <criterion testable="true">Shared lib `src/index.ts` contains a commented-out EmailComposer barrel section.</criterion>
+    <criterion testable="true">`npm run build` exits 0 in `@spaarke/ui-components`.</criterion>
+    <criterion testable="true">`npm run lint` exits 0 (no new lint errors).</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 010 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Trivial scaffolding task — purpose is to make the file-system contract explicit before engine logic lands in task 011. Keeps follow-on tasks short by removing "is the directory there?" friction.
+
+    Subdir names are intentionally project-internal (not exported through the barrel) so the public API of `@spaarke/ui-components` only sees the top-level `EmailComposer` symbols, not the internal `wrappers/`, `subcomponents/`, etc.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 (adr-check + code-review) SKIPPED for STANDARD rigor.
+    </protocol>
+  </execution>
+</task>

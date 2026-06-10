@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Budget Entity - Create To Do Wizard Button
+  smart-todo-decoupling-r3 task 040 / Phase 5 / FR-17
+
+  Adds a "Create To Do" button (Sequence 220) to the sprk_budget form command bar
+  that launches Spaarke.Commands.Wizards.openCreateTodoWizard. The handler
+  reads entityType + entityId from primaryControl and passes them in the wizard
+  URL query string per createtodo-launch-contract (task 032) - the wizard
+  pre-fills initialRegarding to the host record.
+
+  Deployment:
+   1. Create dedicated unmanaged ribbon solution: BudgetRibbons
+      Publisher: Spaarke; include only the sprk_budget entity metadata.
+   2. Export the solution.
+   3. Merge the <RibbonDiffXml> below into the solution's customizations.xml
+      <RibbonDiffXml> for entity 'sprk_budget'.
+   4. Re-pack and import via 'pac solution import --publish-changes'.
+
+  Prerequisite (already met):
+    sprk_wizard_commands.js web resource is deployed and exposes
+    Spaarke.Commands.Wizards.openCreateTodoWizard (see UDSS-040 history).
+-->
+<ImportExportXml>
+  <Entities>
+    <Entity>
+      <Name>sprk_budget</Name>
+      <RibbonDiffXml>
+        <CustomActions>
+          <CustomAction Id="sprk.Wizard.Budget.CreateTodo.CustomAction"
+                        Location="Mscrm.Form.sprk_budget.MainTab.Actions.Controls._children"
+                        Sequence="220">
+            <CommandUIDefinition>
+              <Button Id="sprk.Wizard.Budget.CreateTodo.Button"
+                      Command="sprk.Wizard.Budget.CreateTodo.Command"
+                      LabelText="$LocLabels:sprk.Wizard.CreateTodo.Label"
+                      Alt="$LocLabels:sprk.Wizard.CreateTodo.Label"
+                      ToolTipTitle="$LocLabels:sprk.Wizard.CreateTodo.ToolTipTitle"
+                      ToolTipDescription="$LocLabels:sprk.Wizard.CreateTodo.ToolTipDescription"
+                      Image16by16="/_imgs/ribbon/newrecord16.png"
+                      Image32by32="/_imgs/ribbon/newrecord32.png"
+                      TemplateAlias="o1" />
+            </CommandUIDefinition>
+          </CustomAction>
+        </CustomActions>
+        <Templates>
+          <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+        </Templates>
+        <CommandDefinitions>
+          <CommandDefinition Id="sprk.Wizard.Budget.CreateTodo.Command">
+            <EnableRules>
+              <EnableRule Id="sprk.Wizard.Budget.Form.EnableRule" />
+            </EnableRules>
+            <DisplayRules>
+              <DisplayRule Id="sprk.Wizard.Budget.Form.DisplayRule" />
+            </DisplayRules>
+            <Actions>
+              <JavaScriptFunction Library="$webresource:sprk_wizard_commands.js"
+                                  FunctionName="Spaarke.Commands.Wizards.openCreateTodoWizard">
+                <CrmParameter Value="PrimaryControl" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+        </CommandDefinitions>
+        <RuleDefinitions>
+          <TabDisplayRules />
+          <DisplayRules>
+            <DisplayRule Id="sprk.Wizard.Budget.Form.DisplayRule">
+              <FormStateRule State="Existing" />
+            </DisplayRule>
+          </DisplayRules>
+          <EnableRules>
+            <EnableRule Id="sprk.Wizard.Budget.Form.EnableRule">
+              <FormStateRule State="Existing" Default="true" />
+            </EnableRule>
+          </EnableRules>
+        </RuleDefinitions>
+        <LocLabels>
+          <LocLabel Id="sprk.Wizard.CreateTodo.Label">
+            <Titles>
+              <Title languagecode="1033" description="Create To Do" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.Wizard.CreateTodo.ToolTipTitle">
+            <Titles>
+              <Title languagecode="1033" description="Create To Do" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.Wizard.CreateTodo.ToolTipDescription">
+            <Titles>
+              <Title languagecode="1033" description="Create a new to-do item linked to this record" />
+            </Titles>
+          </LocLabel>
+        </LocLabels>
+      </RibbonDiffXml>
+    </Entity>
+  </Entities>
+</ImportExportXml>

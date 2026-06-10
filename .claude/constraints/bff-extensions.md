@@ -119,6 +119,22 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 - r2 evidence — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) §2.1 + Appendix A
 - Phase 5 procedure-doc codification — [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.1
 - Per-service inventory — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md)
+- **2026-06-05 audit reinforcement** — [`bff-ai-architecture-audit-r1` LATENT BUG #1](../../projects/bff-ai-architecture-audit-r1/decisions/DR-003-public-contracts-facade.md) surfaced a **transitive** instance of this anti-pattern (`IInsightsAi` registered unconditionally, but ctor-resolved deps `IPlaybookOrchestrationService` + `IOpenAiClient` + `IInsightsPlaybookExecutionCache` conditional behind compound-AI gate → 500 instead of 503 under OFF). Fix: PR #351 moved facade registration into the compound-ON helper + added 4 Null peers in the compound-OFF helper. **Static scan extension**: the static scan must ALSO be applied transitively to the ctor dep chain of every conditional service.
+
+##### F.1-runtime — Runtime-verifiable detection fixture (W4-2 / NEW 2026-06-05)
+
+The static scan above catches the obvious case. The audit W4-2 finding recommends a complementary **runtime fixture** that boots the host with all 4 compound-gate combinations and resolves every public endpoint's ctor params:
+
+```csharp
+[Theory]
+[InlineData(analysisEnabled: true,  docIntelEnabled: true)]   // ON × ON
+[InlineData(analysisEnabled: true,  docIntelEnabled: false)]  // ON × OFF
+[InlineData(analysisEnabled: false, docIntelEnabled: true)]   // OFF × ON
+[InlineData(analysisEnabled: false, docIntelEnabled: false)]  // OFF × OFF
+public async Task EveryPublicEndpoint_ResolvesItsHandlerCtorParams(bool analysisEnabled, bool docIntelEnabled) { /* ... */ }
+```
+
+When all 4 combinations resolve without `InvalidOperationException`, the §F.1 anti-pattern is empirically blocked. **Implementation queued** as Migration PR #8 per [`migration-plan.md` §2.8](../../projects/bff-ai-architecture-audit-r1/notes/migration-plan.md); Insights team owns. Until that fixture ships, the static-scan rule + explicit reviewer discipline remain the only enforcement.
 
 #### F.2 Fixture-Config-FIRST Inspection Protocol (Binding per r2 task 081 / D-13)
 
