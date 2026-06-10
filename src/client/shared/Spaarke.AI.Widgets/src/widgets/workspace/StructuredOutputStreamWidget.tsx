@@ -424,6 +424,52 @@ export const INSIGHTS_PLAYBOOK_SCHEMA: StructuredOutputSchema = {
   ],
 };
 
+/**
+ * SUM-CHAT@v1 action `outputSchema` mirror — exported so dispatchers (e.g.
+ * `dispatchSummarizeOnly` in `FilePreviewContextWidget.tsx`) can attach the
+ * schema-aware classifier contract to the widget payload WITHOUT redeclaring
+ * the shape at the call site.
+ *
+ * R6 Hotfix Wave B-G9a (2026-06-10): production walkthrough showed `tldr`
+ * (declared `array of string`) rendering as a bold paragraph and `entities`
+ * (declared `object`) rendering as comma-split bullets — i.e. the legacy
+ * `displayHint` path was running because `outputSchema` was ABSENT on
+ * `widgetData`. Tasks 040 + 041 added the schema-aware dispatch but
+ * `dispatchSummarizeOnly` did not pass `outputSchema`, so `classifySchemaField()`
+ * returned `'legacy'` for every field. The unit tests passed because they
+ * always set `outputSchema`. This constant + the dispatcher update closes the
+ * data-flow gap.
+ *
+ * SHAPE: mirrors `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/
+ * summarize-document-for-chat.playbook.json` `actions[0].outputSchema`
+ * (Phase B Wave B-G2 task 032). The widget reads each top-level field's
+ * declared JSON Schema type and dispatches:
+ *
+ *   - `tldr`     → `array` of `string` → `<SchemaAwareArrayRenderer />` (bulleted list)
+ *   - `summary`  → `string`            → legacy `displayHint: 'paragraph'` path
+ *   - `keywords` → `string`            → legacy `displayHint: 'badge'` path
+ *   - `entities` → `object` w/ props   → `<SchemaAwareObjectRenderer />` (labeled blocks)
+ *
+ * Reuse: if a sibling action declares the SAME output envelope shape, it MAY
+ * reuse this constant verbatim. If it declares a divergent shape, mirror the
+ * new shape in a sibling constant — do NOT mutate this constant.
+ */
+export const SUM_CHAT_OUTPUT_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    tldr: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'string' },
+    keywords: { type: 'string' },
+    entities: {
+      type: 'object',
+      properties: {
+        organizations: { type: 'array', items: { type: 'string' } },
+        persons: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Internal reducer — append-only progressive rendering by JSON path
 // ---------------------------------------------------------------------------

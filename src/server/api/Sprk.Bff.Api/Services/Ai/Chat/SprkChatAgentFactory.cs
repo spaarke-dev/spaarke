@@ -445,7 +445,7 @@ public class SprkChatAgentFactory
                     sessionId,
                     resolvedPlaybookId,
                     destination?.ToString() ?? "(unresolved)",
-                    destination is not null && destination != Models.Ai.NodeDestination.Chat);
+                    destination.HasValue);
 
                 if (destination.HasValue && destination.Value != Models.Ai.NodeDestination.Chat)
                 {
@@ -454,6 +454,33 @@ public class SprkChatAgentFactory
                     {
                         context = context with { SystemPrompt = context.SystemPrompt + directive };
                     }
+                }
+                else if (destination.HasValue && destination.Value == Models.Ai.NodeDestination.Chat)
+                {
+                    // === Hotfix Wave B-G9b (R6, 2026-06-10) — PDF hallucination fix ====================
+                    // When the router resolves to a CHAT-destination playbook, the playbook itself
+                    // produces the primary structured result (rendered into chat). Without a directive,
+                    // the LLM may ALSO generate inline content in parallel. For PDFs (and any async-
+                    // text-extraction format), the LLM sees an empty document body at invocation time
+                    // and HALLUCINATES (e.g., "I can't extract this PDF") BEFORE the playbook's
+                    // structured summary arrives.
+                    //
+                    // The fix: apply a SHORT acknowledgment directive (NFR-01-preserving — still
+                    // conversational, single sentence — NOT silence) so the LLM emits a brief
+                    // "Working on it…" instead of hallucinating about content it does not yet have.
+                    //
+                    // For .doc / .txt where text is synchronously available, this directive is still
+                    // safe — the LLM gets a brief ack and the playbook produces the primary result.
+                    //
+                    // Wording is DISTINCT from the non-chat-destination directive (which forbids
+                    // inline analysis content). For chat destination, the LLM still acknowledges,
+                    // and the playbook output renders inline in the same chat surface.
+                    var chatAckDirective = BuildChatDestinationAckDirective();
+                    if (!string.IsNullOrEmpty(chatAckDirective))
+                    {
+                        context = context with { SystemPrompt = context.SystemPrompt + chatAckDirective };
+                    }
+                    // === End Hotfix Wave B-G9b =========================================================
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1769,6 +1796,73 @@ public class SprkChatAgentFactory
                $"(\"path A vs path B\" parallelism — R5 Gap A). The user's subsequent " +
                $"follow-up turns (refinement, comparison, context injection) are " +
                $"unaffected — respond conversationally as normal on those turns.";
+    }
+
+    /// <summary>
+    /// Hotfix Wave B-G9b (R6, 2026-06-10) — builds the system-prompt suffix that instructs
+    /// the chat-agent LLM to emit a SHORT acknowledgment when the router has resolved an
+    /// intent to a CHAT-destination playbook. Distinct from
+    /// <see cref="BuildDedupDirective(Models.Ai.NodeDestination)"/> (which targets non-chat
+    /// destinations and forbids inline content); for chat-destination playbooks the
+    /// playbook output renders inline in the same chat surface, so the directive only
+    /// suppresses the LLM's parallel free-form generation that — for async-extracted formats
+    /// like PDF — would otherwise hallucinate about content the LLM hasn't seen yet.
+    /// </summary>
+    /// <returns>
+    /// A non-empty directive string instructing the LLM to emit a single brief acknowledgment
+    /// for the <c>invoke_playbook</c> tool call and to NOT generate analysis content inline
+    /// (the playbook will render the primary result in chat).
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Root cause</b>: chat-destination playbooks (e.g., <c>summarize-document-for-chat@v1</c>)
+    /// produce the primary structured result via the playbook executor. For synchronous text
+    /// formats (.doc, .txt) the LLM has the text at invocation time and would have responded
+    /// fine on its own. For asynchronous formats (PDF needs Document Intelligence extraction),
+    /// the LLM sees an empty/partial document body at invocation time and HALLUCINATES
+    /// (e.g., "It appears the attached document does not contain extractable text") BEFORE
+    /// the playbook's structured summary arrives. This directive prevents both the
+    /// hallucinated message AND the duplicate inline render when the playbook does produce
+    /// content.
+    /// </para>
+    /// <para>
+    /// <b>NFR-01 binding</b>: the directive instructs a SHORT acknowledgment — NOT silence.
+    /// Conversational primacy is preserved (the LLM still emits one acknowledgment sentence).
+    /// This directive is ONLY applied when the router has resolved a confident playbook
+    /// binding (<c>SelectedPlaybookId</c> != null); free-form / refinement / ambiguous turns
+    /// see no directive and the LLM responds conversationally as normal.
+    /// </para>
+    /// <para>
+    /// <b>R5 Gap A binding</b>: this is the chat-destination side of the same dedup pattern
+    /// task 042 closed for non-chat destinations. Together, the two directives ensure that
+    /// EVERY confident playbook-routed intent has ONE primary render path — never two
+    /// parallel paths (LLM inline + playbook output).
+    /// </para>
+    /// <para>
+    /// <b>ADR-013 binding</b>: directive lives inside <c>Services/Ai/Chat/</c> — does not
+    /// widen the AI public-contracts surface.
+    /// </para>
+    /// </remarks>
+    internal static string BuildChatDestinationAckDirective()
+    {
+        // The wording instructs a SHORT acknowledgment WITHOUT forbidding chat as a render
+        // surface — distinct from BuildDedupDirective which routes to a NON-chat surface.
+        // Here the playbook DOES render in chat, but the LLM's parallel free-form is
+        // suppressed to prevent hallucination + duplicate-fire.
+        return $"\n\n## Render Routing Directive (Hotfix Wave B-G9b)\n" +
+               $"This user intent resolves to a playbook that will render its result inline " +
+               $"in this chat conversation. When you invoke the `invoke_playbook` tool for " +
+               $"this intent, respond with a SINGLE-SENTENCE acknowledgment ONLY (e.g., " +
+               $"\"Working on that now…\" or \"I'll summarize that for you now.\"). " +
+               $"Do NOT attempt to analyze, summarize, extract, or describe the document " +
+               $"content yourself — the playbook will produce the structured result. " +
+               $"In particular, do NOT speculate about whether the document is " +
+               $"extractable / readable / contains text — the extraction pipeline runs " +
+               $"asynchronously and the playbook handles it. This prevents hallucinated " +
+               $"\"I can't read this\" messages on async-extracted formats (PDF, scanned " +
+               $"images) and a duplicate inline render. The user's subsequent follow-up " +
+               $"turns (refinement, comparison, context injection) are unaffected — " +
+               $"respond conversationally as normal on those turns.";
     }
 
     /// <summary>

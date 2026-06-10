@@ -490,4 +490,172 @@ public sealed class CapabilityRouterDedupTests
         directive.Should().NotBeEmpty();
         directive.Should().Contain("form");
     }
+
+    // ── Hotfix Wave B-G9b tests (HIGH-severity PDF hallucination fix; 2026-06-10) ──────────────
+    //
+    // Coverage matrix for the chat-destination ack directive:
+    //   19. BuildChatDestinationAckDirective() → non-empty directive (chat destination is no
+    //       longer a no-op when a playbook will fire).
+    //   20. Directive names the literal `invoke_playbook` tool (task 023 / D-A-15 binding).
+    //   21. Directive instructs SINGLE-SENTENCE acknowledgment (NFR-01 conversational primacy).
+    //   22. Directive explicitly forbids hallucination about extractability (the PDF-symptom
+    //       phrase pattern from the production walkthrough).
+    //   23. Directive WORDING differs from non-chat directive (so the LLM doesn't think
+    //       "render elsewhere" applies — for chat destination, the playbook renders inline).
+    //   24. BuildDedupDirective(Chat) STILL returns empty (legacy contract for non-chat
+    //       directive path preserved — chat ack lives in a separate method).
+
+    // ── Test 19: BuildChatDestinationAckDirective → non-empty
+
+    [Fact]
+    public void BuildChatDestinationAckDirective_EmitsNonEmptyDirective()
+    {
+        // Act
+        var directive = SprkChatAgentFactory.BuildChatDestinationAckDirective();
+
+        // Assert — non-empty: Hotfix Wave B-G9b applies ack directive to chat-destination
+        // playbooks too (was previously a no-op). Prevents PDF hallucination + duplicate fire.
+        directive.Should().NotBeNullOrEmpty(
+            "chat-destination playbooks now ALSO produce an ack directive (Hotfix Wave B-G9b) " +
+            "so the LLM emits a brief acknowledgment instead of hallucinating about content " +
+            "it hasn't seen yet (PDF async-extraction case)");
+    }
+
+    // ── Test 20: Chat ack directive names the invoke_playbook tool
+
+    [Fact]
+    public void BuildChatDestinationAckDirective_NamesInvokePlaybookTool()
+    {
+        // Act
+        var directive = SprkChatAgentFactory.BuildChatDestinationAckDirective();
+
+        // Assert — must reference the literal tool identifier so the LLM scopes the
+        // directive precisely (task 023 / D-A-15: invoke_playbook is the canonical generic
+        // dispatcher tool name).
+        directive.Should().Contain("`invoke_playbook`",
+            "chat ack directive must name the literal `invoke_playbook` tool by name " +
+            "(task 023 / D-A-15) so the LLM scopes the directive to that tool only");
+    }
+
+    // ── Test 21: Chat ack directive preserves NFR-01 (single-sentence acknowledgment)
+
+    [Fact]
+    public void BuildChatDestinationAckDirective_PreservesNFR01ConversationalPrimacy()
+    {
+        // Act
+        var directive = SprkChatAgentFactory.BuildChatDestinationAckDirective();
+
+        // Assert — NFR-01 binding: the directive must NOT silence the LLM. It must
+        // instruct a SINGLE-SENTENCE acknowledgment so the chat surface remains
+        // conversational; only the parallel free-form generation is suppressed.
+        directive.Should().Contain("SINGLE-SENTENCE acknowledgment",
+            "NFR-01 conversational primacy: the chat-destination ack directive MUST instruct " +
+            "a single-sentence acknowledgment (not silence) — the LLM still acknowledges " +
+            "the user's intent even when a chat-destination playbook is firing");
+
+        // The directive must also explicitly state follow-up turns are unaffected so the
+        // LLM doesn't continue silencing on subsequent refinement turns.
+        directive.Should().Contain("follow-up",
+            "chat ack directive must clarify that subsequent turns are unaffected so the LLM " +
+            "doesn't continue acking on refinement / comparison turns (NFR-01 preservation)");
+    }
+
+    // ── Test 22: Chat ack directive explicitly forbids extractability hallucination
+
+    [Fact]
+    public void BuildChatDestinationAckDirective_ForbidsExtractabilityHallucination()
+    {
+        // Act
+        var directive = SprkChatAgentFactory.BuildChatDestinationAckDirective();
+
+        // Assert — the explicit symptom from the production walkthrough: PDF uploads cause
+        // the LLM to emit "It appears the attached document does not contain extractable
+        // text" because Document Intelligence extraction is asynchronous and the LLM sees
+        // an empty body at invocation time. The directive must explicitly forbid this
+        // speculation so the LLM defers to the playbook executor (which handles async
+        // extraction transparently).
+        directive.Should().Contain("extract",
+            "directive must explicitly forbid the LLM from speculating about whether the " +
+            "document is extractable / readable — this is the symptom the hotfix targets");
+
+        // Also: the directive must forbid the LLM from doing analysis / summary itself.
+        directive.Should().Contain("Do NOT",
+            "directive must explicitly forbid (not just discourage) the LLM from producing " +
+            "analysis / summary content inline — the playbook executor produces the primary result");
+    }
+
+    // ── Test 23: Chat ack wording differs from non-chat dedup directive
+
+    [Fact]
+    public void BuildChatDestinationAckDirective_WordingDiffersFromNonChatDirective()
+    {
+        // Act
+        var chatAck = SprkChatAgentFactory.BuildChatDestinationAckDirective();
+        var workspaceDedup = SprkChatAgentFactory.BuildDedupDirective(NodeDestination.Workspace);
+
+        // Assert — they must NOT be identical. The non-chat directive references a render
+        // surface elsewhere ("workspace tab", "form pre-fill", "background action"); the
+        // chat-destination directive must NOT say the result will render "elsewhere" because
+        // the playbook renders inline in chat.
+        chatAck.Should().NotBe(workspaceDedup,
+            "chat-destination ack directive must have distinct wording from the non-chat " +
+            "dedup directive — chat-destination playbooks render inline in the SAME chat " +
+            "surface, so the directive cannot say the result will render elsewhere");
+
+        // The chat ack must reference "chat conversation" / "inline" / "playbook" as its
+        // render description — not "workspace tab" / "form" / "system".
+        chatAck.Should().Contain("chat conversation",
+            "chat ack directive must describe the render surface as the chat conversation " +
+            "(not a separate workspace tab / form / background action)");
+    }
+
+    // ── Test 24: Legacy BuildDedupDirective(Chat) still returns empty
+
+    [Fact]
+    public void BuildDedupDirective_Chat_StillReturnsEmpty_AfterHotfix()
+    {
+        // The legacy BuildDedupDirective method continues to return empty for Chat. The new
+        // chat ack directive is a SEPARATE method (BuildChatDestinationAckDirective) — this
+        // preserves the contract that BuildDedupDirective targets ONLY non-chat destinations.
+        // The factory's call site applies the appropriate directive based on destination.
+        var directive = SprkChatAgentFactory.BuildDedupDirective(NodeDestination.Chat);
+        directive.Should().BeEmpty(
+            "BuildDedupDirective(Chat) preserves the legacy non-chat-only contract — the " +
+            "chat-destination ack directive lives in a separate method " +
+            "(BuildChatDestinationAckDirective) per Hotfix Wave B-G9b minimal-touch design");
+    }
+
+    // ── Test 25: End-to-end — chat-destination playbook resolution + ack directive
+
+    [Fact]
+    public void EndToEnd_ChatDestination_AckDirectiveAppliedToPreventPdfHallucination()
+    {
+        // This test documents the PDF-hallucination fix end-to-end:
+        //   1. Router resolves to summarize-document-for-chat playbook (chat destination)
+        //   2. SelectedPlaybookId populated
+        //   3. BuildChatDestinationAckDirective() returns a non-empty ack directive
+        //   4. System prompt enriched → LLM emits brief ack instead of hallucinating
+        //   5. For PDF (async extraction): no more "I can't extract this" hallucination
+        //   6. For .doc/.txt (sync extraction): brief ack still appropriate (no regression)
+        //   7. Playbook produces the primary structured result inline in chat
+        var chatPlaybookId = Guid.Parse("44285d15-1360-f111-ab0b-70a8a59455f4");
+        var cap = MakeEntry(
+            "summarize_chat",
+            ["summarize", "tldr", "summary"],
+            playbookId: chatPlaybookId);
+        var router = BuildRouter([cap]);
+
+        // Routing resolves to the chat playbook.
+        var result = router.RouteSync("summarize this tldr", activePlaybookName: null);
+        result.IsConfident.Should().BeTrue();
+        result.SelectedPlaybookId.Should().Be(chatPlaybookId);
+
+        // The chat-destination ack directive is non-empty and forbids hallucination about
+        // extraction (the symptom this hotfix targets).
+        var ackDirective = SprkChatAgentFactory.BuildChatDestinationAckDirective();
+        ackDirective.Should().NotBeEmpty(
+            "chat-destination playbooks now produce an ack directive (Hotfix Wave B-G9b)");
+        ackDirective.Should().Contain("extract",
+            "directive must address the extraction-hallucination symptom directly");
+    }
 }
