@@ -3,7 +3,7 @@
   <metadata>
     <title>Data migration: `Migrate-SearchIndexLookup.ps1` (text → lookup on 7 entities) + count verification</title>
     <phase>G: Lookup-driven multi-index</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2-3</estimated-hours>
     <dependencies>103</dependencies>
     <blocks>105, 110</blocks>
@@ -89,4 +89,34 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-06-10. Two deliverables:
+
+    1. **Script**: `scripts/phase-g-lookup-migration/Migrate-SearchIndexLookup.ps1` (336 lines).
+       - Default = dry-run; `-Apply` required to commit.
+       - Halt-loud on unmapped text values (yellow WARN + exit code 2).
+       - Idempotency by OData filter (`sprk_searchindexname ne null and _sprk_ai_search_index_value eq null`).
+       - Markdown log written to `notes/phase-g/migration-run-{timestamp}.log`.
+
+    2. **Live migration via MCP**: 196 records updated across 5 entities
+       (sprk_invoice + sprk_event had zero text-set records).
+
+       | Entity | text_set | lookup_set (post) | migrated |
+       |---|---:|---:|---:|
+       | businessunit | 2 | 2 | 2 |
+       | sprk_matter | 15 | 15 | 15 |
+       | sprk_project | 3 | 3 | 3 |
+       | sprk_workassignment | 2 | 2 | 2 |
+       | sprk_document | 174 | 174 | 174 |
+       | **Total** | **196** | **196** | **196** |
+
+       Verification (text_set == lookup_set): PASS on all 5 entities.
+       Mapping: `spaarke-file-index` → `dd04e55f-dd64-f111-ab0c-7ced8ddc4a05` (Document-targeted),
+       `spaarke-knowledge-index-v2` → `c104e55f-dd64-f111-ab0c-7ced8ddc4a05` (Document-targeted).
+       Zero SKIP-no-match cases (all text values mapped cleanly).
+
+    Code-review: PASS (no critical issues; 336 lines justified by inline help + per-record reporting).
+    INV-5 honored — script never writes to records where the lookup is already set.
+  </notes>
 </task>

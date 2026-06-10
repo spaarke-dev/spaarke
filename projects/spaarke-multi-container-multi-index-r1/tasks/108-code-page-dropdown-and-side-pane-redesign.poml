@@ -3,7 +3,7 @@
   <metadata>
     <title>Code page: dropdown component (DV Web API) + side-pane redesign (replace 4 tabs; relocate Relevance Threshold + Search Mode; popup info icons)</title>
     <phase>G: Lookup-driven multi-index</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5-7</estimated-hours>
     <dependencies>101</dependencies>
     <blocks>109</blocks>

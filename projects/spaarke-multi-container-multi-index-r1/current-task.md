@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-06-10 (task 102 complete; next: 103 BFF tests + deploy + App Insights verify)
+> **Last Updated**: 2026-06-10 (task 108 in progress — code page dropdown + side-pane redesign)
 
 ---
 
@@ -8,11 +8,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 103 — BFF tests + publish + deploy; App Insights verification of both lookup-first and text-fallback paths |
+| **Task** | 109 — Code page build + deploy + e2e UAT (next; not started) |
 | **Active Phase** | Phase G — Lookup-driven multi-index |
 | **Status** | not-started |
-| **Next Action** | Begin Step 1 of task 103 (POML: `tasks/103-bff-tests-deploy-app-insights.poml` if it exists; otherwise the next 🔲 in TASK-INDEX is the canonical pointer) |
-| **Previous Task** | 102 ✅ complete — placement justification at notes/phase-g/placement-justification-task102.md |
+| **Next Action** | Begin Step 1 of task 109 (POML: tasks/109-*.poml) |
+| **Previous Task** | 108 ✅ complete — dropdown + side-pane redesign + 53 new unit tests, all green |
+| **Rigor Level** | (set when task 109 starts) |
 
 ### Resume protocol (after compaction or new session)
 

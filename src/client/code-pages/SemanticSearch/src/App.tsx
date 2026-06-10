@@ -18,7 +18,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { makeStyles, tokens, Text, MessageBar, MessageBarBody, Divider } from '@fluentui/react-components';
+import { makeStyles, tokens, Text, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import type {
   SearchDomain,
   SearchFilters,
@@ -50,6 +50,8 @@ import { mapSearchResults } from './adapters/searchResultAdapter';
 import { openEntityRecord } from './components/EntityRecordDialog';
 import { DocumentPreviewDialog } from './components/DocumentPreviewDialog';
 import { SearchResultsGrid } from './components/SearchResultsGrid';
+import { listActiveSearchIndexes, type AiSearchIndexRow } from './services/aiSearchIndexService';
+import { buildSearchRequestFragment, type SearchRequestFragment } from './services/targetEntityNormalize';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -98,6 +100,39 @@ const DOMAIN_RECORD_TYPES: Record<SearchDomain, string[]> = {
   projects: [RecordEntityTypes.Project],
   invoices: [RecordEntityTypes.Invoice],
 };
+
+/**
+ * Phase G (2026-06-10) — derive the existing `SearchDomain` (used for grid
+ * column defaults + result adapter dispatch) from the request fragment's
+ * `scope`/`entityType`. The Search Index dropdown is the new source of
+ * truth; `activeDomain` is now a *projection* of the selected row.
+ *
+ * Mapping:
+ *   - scope='all' → 'documents' (uses useSemanticSearch — searches docs)
+ *   - entityType='matter' → 'matters' (uses useRecordSearch — searches records)
+ *   - entityType='project' → 'projects'
+ *   - entityType='invoice' → 'invoices'
+ *   - entityType='document' → 'documents' (docs in this index)
+ *   - entityType='event' / 'workassignment' / others → 'documents'
+ *     (no dedicated SearchDomain — the fragment still narrows the search
+ *     correctly via useSemanticSearch's entity-scope branch.)
+ */
+function deriveSearchDomain(fragment: SearchRequestFragment | null | undefined): SearchDomain {
+  if (!fragment) return 'documents';
+  if (fragment.scope === 'all') return 'documents';
+  switch (fragment.entityType) {
+    case 'matter':
+      return 'matters';
+    case 'project':
+      return 'projects';
+    case 'invoice':
+      return 'invoices';
+    default:
+      // 'document' / 'event' / 'workassignment' / future entity types
+      // all flow through useSemanticSearch.
+      return 'documents';
+  }
+}
 
 /**
  * Map the envelope `searchMode` literal (PCF/URL) to the API `HybridMode`
@@ -243,7 +278,6 @@ export const App: React.FC<AppProps> = ({
   // first POST issued by the auto-search effect (FR-13) carries the
   // URL-derived filter shape. Subsequent user edits go through setFilters /
   // setSelectedTags as normal.
-  const [activeDomain, setActiveDomain] = useState<SearchDomain>(initialDomain);
   const [filters, setFilters] = useState<SearchFilters>(() => buildInitialFilters(urlParams));
   const [selectedTags, setSelectedTags] = useState<string[]>(() => urlParams?.tags ?? []);
   const [associatedOnly, setAssociatedOnly] = useState<boolean>(() => urlParams?.associatedOnly ?? false);
@@ -251,10 +285,27 @@ export const App: React.FC<AppProps> = ({
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [currentSearchName, setCurrentSearchName] = useState<string | null>(null);
+
+  // Phase G — Search Index catalog state (sourced from sprk_aisearchindex via
+  // direct Dataverse Web API in `aiSearchIndexService.listActiveSearchIndexes`).
+  // The selected row becomes the single source of truth for: searchIndexName,
+  // entity scope (via `buildSearchRequestFragment`), and (transitively) the
+  // `activeDomain` derivation used for grid/view defaults.
+  const [searchIndexes, setSearchIndexes] = useState<AiSearchIndexRow[]>([]);
+  const [isLoadingSearchIndexes, setIsLoadingSearchIndexes] = useState<boolean>(true);
+  const [selectedSearchIndexId, setSelectedSearchIndexId] = useState<string>('');
+
+  // `activeDomain` is now DERIVED from the selected row's fragment. We still
+  // keep it as state so existing code that branches on the domain (grid
+  // columns, gridRecords adapter, visualization defaults) works unchanged.
+  // The legacy `initialDomain` URL envelope is honored only as a fallback
+  // when no rows are loaded yet (first render before the catalog fetch).
+  const [activeDomain, setActiveDomain] = useState<SearchDomain>(initialDomain);
+
   // Column-picker state lifted out of SearchResultsGrid so the unified
   // SearchCommandBar can host the picker UI alongside the other actions.
-  // Task 035 UI alignment (2026-06-04). Reset when domain changes via the
-  // useEffect below — different domains expose different column sets.
+  // Reset when domain changes via the useEffect below — different domains
+  // expose different column sets.
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   useEffect(() => {
     setHiddenColumns(new Set());
@@ -377,39 +428,77 @@ export const App: React.FC<AppProps> = ({
   // standalone).
   const [hasUserInitiatedSearch, setHasUserInitiatedSearch] = useState(false);
 
+  /**
+   * Build the SearchRequestFragment from the currently-selected index row.
+   * Returns null when no row is selected yet (catalog still loading or empty),
+   * in which case the hooks fall back to legacy URL-envelope behavior.
+   */
+  const currentFragment: SearchRequestFragment | null = useMemo(() => {
+    const row = searchIndexes.find(r => r.sprk_aisearchindexid === selectedSearchIndexId);
+    return row ? buildSearchRequestFragment(row) : null;
+  }, [searchIndexes, selectedSearchIndexId]);
+
   const executeSearch = useCallback(
     (searchQuery: string, searchFilters: SearchFilters, domain: SearchDomain) => {
       setSelectedIds([]);
+
+      // Phase G — dropdown-derived fragment is the single source of truth for
+      // scope/entityType/searchIndexName. When unavailable (catalog still
+      // loading or empty), the hooks fall back to legacy URL-envelope behavior.
+      const fragment = currentFragment;
       const envelopeSearchIndexName = urlParams?.searchIndexName ?? null;
       const scopeArg = hasUserInitiatedSearch ? null : initialScope || null;
       const entityIdArg = hasUserInitiatedSearch ? null : initialEntityId || null;
+
       if (domain === 'documents') {
-        searchDocuments(searchQuery, searchFilters, envelopeSearchIndexName, scopeArg, entityIdArg);
+        searchDocuments(searchQuery, searchFilters, envelopeSearchIndexName, scopeArg, entityIdArg, fragment);
       } else {
-        searchRecords(searchQuery, DOMAIN_RECORD_TYPES[domain], searchFilters);
+        // Record-level search (matters/projects/invoices). The fragment's
+        // searchIndexName flows through, but `recordTypes` is still derived
+        // from `domain` (which is itself derived from `fragment.entityType`
+        // via `deriveSearchDomain`).
+        searchRecords(searchQuery, DOMAIN_RECORD_TYPES[domain], searchFilters, envelopeSearchIndexName, fragment);
       }
     },
-    [searchDocuments, searchRecords, hasUserInitiatedSearch, initialScope, initialEntityId, urlParams]
+    [searchDocuments, searchRecords, hasUserInitiatedSearch, initialScope, initialEntityId, urlParams, currentFragment]
   );
 
   // =============================================
   // Handlers
   // =============================================
 
-  /** Called by SearchDomainTabs when user clicks a domain tab */
-  const handleSearch = useCallback(
-    (searchQuery: string, domain: SearchDomain) => {
-      setQuery(searchQuery);
+  /**
+   * Called by `SearchIndexSelector` when the user picks a different row.
+   *
+   * Phase G (2026-06-10):
+   *   1. Update `selectedSearchIndexId` (drives `currentFragment` memo).
+   *   2. Derive new `activeDomain` from the row's fragment (so grid columns
+   *      + result adapter pick up correctly).
+   *   3. Mark this as a user-initiated search (turns OFF the URL-envelope
+   *      auto-fire entity scope — the dropdown intent supersedes it).
+   *   4. Execute the search with the new fragment + current query/filters.
+   */
+  const handleSelectSearchIndex = useCallback(
+    (row: AiSearchIndexRow) => {
+      const fragment = buildSearchRequestFragment(row);
+      const newDomain = deriveSearchDomain(fragment);
+      setSelectedSearchIndexId(row.sprk_aisearchindexid);
+      setActiveDomain(newDomain);
+      setSelectedIds([]);
       setHasUserInitiatedSearch(true);
-      executeSearch(searchQuery, filters, domain);
-    },
-    [filters, executeSearch]
-  );
 
-  const handleDomainChange = useCallback((domain: SearchDomain) => {
-    setActiveDomain(domain);
-    setSelectedIds([]);
-  }, []);
+      // Execute the search directly using the new fragment (don't rely on
+      // the `currentFragment` memo — it won't update until React flushes
+      // the `selectedSearchIndexId` state above).
+      const envelopeSearchIndexName = urlParams?.searchIndexName ?? null;
+      if (newDomain === 'documents') {
+        searchDocuments(query, filters, envelopeSearchIndexName, null, null, fragment);
+      } else {
+        searchRecords(query, DOMAIN_RECORD_TYPES[newDomain], filters, envelopeSearchIndexName, fragment);
+      }
+    },
+    [query, filters, urlParams, searchDocuments, searchRecords]
+  );
 
   const handleFiltersChange = useCallback((newFilters: SearchFilters) => {
     setFilters(newFilters);
@@ -532,6 +621,75 @@ export const App: React.FC<AppProps> = ({
   }, [saveSearch, activeDomain, query, filters, viewMode, mapColorBy]);
 
   // =============================================
+  // Phase G — Load `sprk_aisearchindex` catalog on mount (spec §6)
+  // =============================================
+  //
+  // Default-selection precedence (spec §6):
+  //   1. URL envelope `searchIndexName` matches a row → select that row
+  //   2. Row with `sprk_isdefault === true` → select it
+  //   3. First row in `sprk_displayorder` order → select it
+  //   4. Empty list → leave `selectedSearchIndexId === ''` (UI disables)
+  //
+  // The catalog load is fire-and-forget (errors logged in the service); the
+  // effect runs ONCE on mount because all deps are stable initial values.
+
+  const catalogFetchedRef = useRef(false);
+  useEffect(() => {
+    if (catalogFetchedRef.current) return;
+    catalogFetchedRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      const rows = await listActiveSearchIndexes();
+      if (cancelled) return;
+
+      setSearchIndexes(rows);
+      setIsLoadingSearchIndexes(false);
+
+      if (rows.length === 0) {
+        // No indexes available — leave the selection empty; UI shows the
+        // "no indexes available" disabled state.
+        setSelectedSearchIndexId('');
+        return;
+      }
+
+      // 1. URL envelope match
+      const envelopeName = urlParams?.searchIndexName?.trim() ?? '';
+      if (envelopeName.length > 0) {
+        const envelopeRow = rows.find(r => r.sprk_searchindexname === envelopeName);
+        if (envelopeRow) {
+          setSelectedSearchIndexId(envelopeRow.sprk_aisearchindexid);
+          // Update activeDomain to match the row so the first auto-fire
+          // search (below) routes to the correct hook.
+          setActiveDomain(deriveSearchDomain(buildSearchRequestFragment(envelopeRow)));
+          return;
+        }
+      }
+
+      // 2. `sprk_isdefault === true`
+      const defaultRow = rows.find(r => r.sprk_isdefault === true);
+      if (defaultRow) {
+        setSelectedSearchIndexId(defaultRow.sprk_aisearchindexid);
+        setActiveDomain(deriveSearchDomain(buildSearchRequestFragment(defaultRow)));
+        return;
+      }
+
+      // 3. First row in displayorder/displayname order (already sorted by
+      // the OData query).
+      const firstRow = rows[0];
+      setSelectedSearchIndexId(firstRow.sprk_aisearchindexid);
+      setActiveDomain(deriveSearchDomain(buildSearchRequestFragment(firstRow)));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // urlParams identity is stable (memoized at App boundary by parent); the
+    // effect runs once on mount regardless. Including it in deps so React's
+    // exhaustive-deps lint is happy.
+  }, [urlParams]);
+
+  // =============================================
   // Auto-search on load (FR-13)
   // =============================================
 
@@ -630,11 +788,15 @@ export const App: React.FC<AppProps> = ({
 
       {/* Content row: filter pane + main results area */}
       <div className={styles.contentRow}>
-        {/* Left pane: SearchFilterPane (self-collapsing) */}
+        {/* Left pane: SearchFilterPane (self-collapsing) — Phase G: hosts
+            the new Search Index dropdown (replaces 4-domain tabs) + the
+            relocated Relevance Threshold + Search Mode controls. */}
         <SearchFilterPane
           activeDomain={activeDomain}
-          onDomainChange={handleDomainChange}
-          onDomainSearch={handleSearch}
+          searchIndexes={searchIndexes}
+          selectedSearchIndexId={selectedSearchIndexId}
+          isLoadingSearchIndexes={isLoadingSearchIndexes}
+          onSelectSearchIndex={handleSelectSearchIndex}
           filters={filters}
           onFiltersChange={handleFiltersChange}
           onSearch={handleFilterSearch}

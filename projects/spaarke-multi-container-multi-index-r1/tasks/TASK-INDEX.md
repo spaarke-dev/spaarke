@@ -58,11 +58,11 @@
 | 101 | Catalog: seed `sprk_aisearchindex` with 8 rows (2 file indexes + 5 records + 1 All); `sprk_isdefault` on file-index | G | ✅ | none | Group G2 | STANDARD |
 | 102 | BFF: lookup-first resolver (FetchXml link-entity, outer join); `DataverseAllowedIndexesProvider` (cached); text-fallback retained for soak | G | ✅ | 100, 101 | — | FULL |
 | 103 | BFF tests + publish + deploy; App Insights verification of both lookup-first and text-fallback paths | G | 🔲 | 102 | — | STANDARD |
-| 104 | Data migration: `Migrate-SearchIndexLookup.ps1` (text → lookup on 7 entities) + count verification (NFR backward-compat) | G | 🔲 | 103 | — | FULL |
+| 104 | Data migration: `Migrate-SearchIndexLookup.ps1` (text → lookup on 7 entities) + count verification (NFR backward-compat) | G | ✅ | 103 | — | FULL |
 | 105 | Field mappings: add lookup→lookup 1:N mappings on BU→Matter/Project/Invoice/Event/WorkAssignment, Matter→Document chains | G | 🔲 | 104 | — | STANDARD |
 | 106 | PCF v1.1.75: drop bound `searchIndexName`; add `resolveSearchIndexNameAsync` via `context.webAPI`; 5-location version bump | G | ✅ | 100 | — | FULL |
 | 107 | PCF build + deploy via `/pcf-deploy`; remove obsolete form-instance bindings on Matter/Project/Invoice/Event/WorkAssignment forms | G | 🔲 | 106 | — | STANDARD |
-| 108 | Code page: `aiSearchIndexService.ts` (DV Web API), `targetEntityNormalize.ts`, dropdown in side pane replacing 4 tabs, relocate Relevance Threshold + Search Mode, popup info icons | G | 🔲 | 101 | — | FULL |
+| 108 | Code page: `aiSearchIndexService.ts` (DV Web API), `targetEntityNormalize.ts`, dropdown in side pane replacing 4 tabs, relocate Relevance Threshold + Search Mode, popup info icons | G | ✅ | 101 | — | FULL |
 | 109 | Code page build + deploy via `/code-page-deploy`; e2e verification (PCF launch + standalone) | G | 🔲 | 108 | — | STANDARD |
 | 110 | Post-soak cleanup (24–48 hr after 109): drop text-to-text field mappings; drop `sprk_searchindexname` text col on 7 entities; remove BFF text-fallback; remove `AiSearch__AllowedIndexes__*` App Service config | G | 🔲 | 103, 105, 107, 109 + soak | — | FULL |
 | 111 | Phase G wrap-up: lessons learned, runbook update, Find Similar UAT, `.claude/patterns/ai/semantic-vs-relational-views.md` | G | 🔲 | 110 | — | STANDARD |

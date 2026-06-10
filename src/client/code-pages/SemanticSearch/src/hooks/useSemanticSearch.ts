@@ -22,6 +22,7 @@ import type {
   SearchState,
   ApiError,
 } from '../types';
+import type { SearchRequestFragment } from '../services/targetEntityNormalize';
 
 /** Number of results fetched per page */
 const PAGE_SIZE = 20;
@@ -60,12 +61,26 @@ export interface UseSemanticSearchReturn {
    *   tenant default index chain (FR-BFF-04). Empty string MUST NOT be
    *   sent — absence is the protocol signal for "use server default".
    */
+  /**
+   * Execute a new search.
+   *
+   * Phase G (2026-06-10): when `requestFragment` is provided, its
+   * `scope` / `entityType` / `searchIndexName` win over the legacy
+   * `searchIndexName` / `scope` / `entityId` arguments below. The fragment
+   * comes from `targetEntityNormalize.buildSearchRequestFragment` and
+   * represents the dropdown-selected `sprk_aisearchindex` row.
+   *
+   * The legacy positional args remain to support the auto-search-on-mount
+   * code path (URL envelope → PCF-style scope), which doesn't yet have a
+   * fragment in hand.
+   */
   search: (
     query: string,
     filters: SearchFilters,
     searchIndexName?: string | null,
     scope?: string | null,
-    entityId?: string | null
+    entityId?: string | null,
+    requestFragment?: SearchRequestFragment | null
   ) => void;
   /** Load the next page of results (appends to existing) */
   loadMore: () => void;
@@ -185,6 +200,10 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
   // hardcoded `scope: 'all'`). null means "tenant-wide / no entity scope".
   const currentScopeRef = useRef<string | null>(null);
   const currentEntityIdRef = useRef<string | null>(null);
+  // Phase G (2026-06-10) — when a dropdown-derived request fragment is
+  // supplied, it takes precedence over the legacy scope/entityId mapping.
+  // Captured here so loadMore() reuses the same routing across pages.
+  const currentRequestFragmentRef = useRef<SearchRequestFragment | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // --- Derived ---
@@ -202,7 +221,8 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
       filters: SearchFilters,
       searchIndexName?: string | null,
       scope?: string | null,
-      entityId?: string | null
+      entityId?: string | null,
+      requestFragment?: SearchRequestFragment | null
     ): void => {
       // Cancel any in-flight request
       abortControllerRef.current?.abort();
@@ -212,6 +232,7 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
       // Store for loadMore (FR-CP-04: same index routing across pages)
       currentQueryRef.current = query;
       currentFiltersRef.current = filters;
+      currentRequestFragmentRef.current = requestFragment ?? null;
       currentSearchIndexNameRef.current =
         typeof searchIndexName === 'string' && searchIndexName.trim().length > 0 ? searchIndexName.trim() : null;
       currentScopeRef.current = typeof scope === 'string' && scope.trim().length > 0 ? scope.trim() : null;
@@ -224,40 +245,58 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
       setSearchTime(null);
       setSearchState('loading');
 
-      // multi-container-multi-index-r1 UAT 2026-06-09 fix: scope + entityId
-      // were previously hardcoded to 'all', so opening the code page from a
-      // PCF on a Matter form returned tenant-wide results regardless of which
-      // matter the user came from. Both fields now come from URL envelope
-      // (FR-CP-03) so the modal mirrors the PCF's entity-scoped view.
-      //
-      // PCF→BFF contract mapping (mirrors SemanticSearchApiService.transformRequest
-      // in the PCF): URL envelope sends PCF-style `scope` ('matter', 'project',
-      // 'invoice', 'account', 'contact', 'document') + `entityId`. BFF
-      // SemanticSearchRequest expects `scope='entity' + entityType + entityId`
-      // for entity scopes, or `scope='all'` for tenant-wide. Without this
-      // mapping the BFF rejects the request with 400.
-      const ENTITY_SCOPES = ['matter', 'project', 'invoice', 'account', 'contact', 'document'];
-      const incomingScope = currentScopeRef.current;
-      const incomingEntityId = currentEntityIdRef.current;
-
+      // Phase G (2026-06-10) — request-body construction precedence:
+      //   1. If `requestFragment` is provided (from `buildSearchRequestFragment`
+      //      driven by the Search Index dropdown), use its scope/entityType/
+      //      searchIndexName verbatim.
+      //   2. Otherwise fall back to the legacy URL-envelope-driven mapping
+      //      (PCF-style `scope` + `entityId` → BFF `entity` + `entityType`).
+      //      This branch preserves the auto-search-on-mount behavior for code
+      //      pages opened from a PCF entity form.
       let bffScope: string;
       let bffEntityType: string | undefined;
       let bffEntityId: string | undefined;
+      let effectiveSearchIndexName: string | null;
 
-      if (incomingScope && ENTITY_SCOPES.includes(incomingScope) && incomingEntityId) {
-        bffScope = 'entity';
-        bffEntityType = incomingScope;
-        bffEntityId = incomingEntityId;
-      } else if (incomingScope === 'entity' && incomingEntityId) {
-        // Already-translated form (paranoia branch — shouldn't happen from PCF
-        // but defensive in case callers send the BFF shape directly).
-        bffScope = 'entity';
-        bffEntityType = undefined; // caller must include in filters if needed
-        bffEntityId = incomingEntityId;
+      if (requestFragment) {
+        // Phase G path — fragment wins.
+        bffScope = requestFragment.scope;
+        bffEntityType = requestFragment.entityType;
+        // The fragment does NOT carry entityId — the dropdown is the user
+        // selecting an index/scope, not narrowing to a specific record.
+        // Leave entityId undefined unless the legacy entityId is also set
+        // and the fragment scope is 'entity' (allows combining "dropdown
+        // picks Matter index" + "URL envelope brought a matter ID").
+        bffEntityId =
+          requestFragment.scope === 'entity' && currentEntityIdRef.current ? currentEntityIdRef.current : undefined;
+        effectiveSearchIndexName = requestFragment.searchIndexName ?? null;
       } else {
-        bffScope = 'all';
-        bffEntityType = undefined;
-        bffEntityId = undefined;
+        // Legacy path — multi-container-multi-index-r1 UAT 2026-06-09 fix.
+        // PCF→BFF contract mapping (mirrors SemanticSearchApiService.transformRequest
+        // in the PCF): URL envelope sends PCF-style `scope` ('matter', 'project',
+        // 'invoice', 'account', 'contact', 'document') + `entityId`. BFF
+        // SemanticSearchRequest expects `scope='entity' + entityType + entityId`
+        // for entity scopes, or `scope='all'` for tenant-wide.
+        const ENTITY_SCOPES = ['matter', 'project', 'invoice', 'account', 'contact', 'document'];
+        const incomingScope = currentScopeRef.current;
+        const incomingEntityId = currentEntityIdRef.current;
+
+        if (incomingScope && ENTITY_SCOPES.includes(incomingScope) && incomingEntityId) {
+          bffScope = 'entity';
+          bffEntityType = incomingScope;
+          bffEntityId = incomingEntityId;
+        } else if (incomingScope === 'entity' && incomingEntityId) {
+          // Already-translated form (paranoia branch — shouldn't happen from PCF
+          // but defensive in case callers send the BFF shape directly).
+          bffScope = 'entity';
+          bffEntityType = undefined; // caller must include in filters if needed
+          bffEntityId = incomingEntityId;
+        } else {
+          bffScope = 'all';
+          bffEntityType = undefined;
+          bffEntityId = undefined;
+        }
+        effectiveSearchIndexName = currentSearchIndexNameRef.current;
       }
 
       // FR-CP-04 — Conditionally include `searchIndexName` in the body. The
@@ -277,7 +316,7 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
           includeHighlights: true,
           hybridMode: filters.searchMode,
         },
-        ...buildSearchIndexNameFragment(searchIndexName),
+        ...buildSearchIndexNameFragment(effectiveSearchIndexName),
       } as DocumentSearchRequest;
 
       searchDocuments(requestBody)
@@ -324,30 +363,37 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
     const currentLength = results.length;
 
     // FR-CP-04 — Reuse the same `searchIndexName` captured at search() time
-    // so pagination stays bound to the same index. Cast + spread mirrors
-    // the pattern in search() above.
-    //
-    // multi-container-multi-index-r1 UAT 2026-06-09: also reuse the same
-    // scope/entityId captured at search() time so subsequent pages stay
-    // entity-scoped (otherwise pagination silently falls back to tenant-wide
-    // and merges unrelated docs into the result set). PCF→BFF mapping
-    // (matter/project/etc. → entity + entityType + entityId) mirrors the
-    // search() function above; see comment there for full context.
-    const ENTITY_SCOPES = ['matter', 'project', 'invoice', 'account', 'contact', 'document'];
-    const lmIncomingScope = currentScopeRef.current;
-    const lmIncomingEntityId = currentEntityIdRef.current;
+    // so pagination stays bound to the same index. Phase G (2026-06-10) —
+    // same precedence as search(): captured fragment wins over legacy
+    // scope/entityId mapping.
     let lmBffScope: string;
     let lmBffEntityType: string | undefined;
     let lmBffEntityId: string | undefined;
-    if (lmIncomingScope && ENTITY_SCOPES.includes(lmIncomingScope) && lmIncomingEntityId) {
-      lmBffScope = 'entity';
-      lmBffEntityType = lmIncomingScope;
-      lmBffEntityId = lmIncomingEntityId;
+    let lmEffectiveSearchIndexName: string | null;
+
+    const lmFragment = currentRequestFragmentRef.current;
+    if (lmFragment) {
+      lmBffScope = lmFragment.scope;
+      lmBffEntityType = lmFragment.entityType;
+      lmBffEntityId =
+        lmFragment.scope === 'entity' && currentEntityIdRef.current ? currentEntityIdRef.current : undefined;
+      lmEffectiveSearchIndexName = lmFragment.searchIndexName ?? null;
     } else {
-      lmBffScope = 'all';
-      lmBffEntityType = undefined;
-      lmBffEntityId = undefined;
+      const ENTITY_SCOPES = ['matter', 'project', 'invoice', 'account', 'contact', 'document'];
+      const lmIncomingScope = currentScopeRef.current;
+      const lmIncomingEntityId = currentEntityIdRef.current;
+      if (lmIncomingScope && ENTITY_SCOPES.includes(lmIncomingScope) && lmIncomingEntityId) {
+        lmBffScope = 'entity';
+        lmBffEntityType = lmIncomingScope;
+        lmBffEntityId = lmIncomingEntityId;
+      } else {
+        lmBffScope = 'all';
+        lmBffEntityType = undefined;
+        lmBffEntityId = undefined;
+      }
+      lmEffectiveSearchIndexName = currentSearchIndexNameRef.current;
     }
+
     const requestBody = {
       query: currentQueryRef.current,
       scope: lmBffScope,
@@ -360,7 +406,7 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
         includeHighlights: true,
         hybridMode: filters.searchMode,
       },
-      ...buildSearchIndexNameFragment(currentSearchIndexNameRef.current),
+      ...buildSearchIndexNameFragment(lmEffectiveSearchIndexName),
     } as DocumentSearchRequest;
 
     searchDocuments(requestBody)
@@ -388,6 +434,9 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
     currentQueryRef.current = '';
     currentFiltersRef.current = null;
     currentSearchIndexNameRef.current = null;
+    currentScopeRef.current = null;
+    currentEntityIdRef.current = null;
+    currentRequestFragmentRef.current = null;
 
     setResults([]);
     setTotalCount(0);

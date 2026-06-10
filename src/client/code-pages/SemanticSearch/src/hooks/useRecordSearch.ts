@@ -26,6 +26,7 @@ import type {
   SearchState,
   ApiError,
 } from '../types';
+import type { SearchRequestFragment } from '../services/targetEntityNormalize';
 
 /** Number of results fetched per page */
 const PAGE_SIZE = 20;
@@ -65,7 +66,22 @@ export interface UseRecordSearchReturn {
    *   tenant default index chain (FR-BFF-04). Empty string MUST NOT be
    *   sent — absence is the protocol signal for "use server default".
    */
-  search: (query: string, recordTypes: string[], filters: SearchFilters, searchIndexName?: string | null) => void;
+  /**
+   * Execute a new record search.
+   *
+   * Phase G (2026-06-10): when `requestFragment` is provided, its
+   * `searchIndexName` wins over the legacy `searchIndexName` argument.
+   * The fragment also influences `recordTypes` derivation at the caller
+   * — for record-level search, the caller passes recordTypes derived from
+   * the fragment.entityType (e.g., entityType='matter' → ['sprk_matter']).
+   */
+  search: (
+    query: string,
+    recordTypes: string[],
+    filters: SearchFilters,
+    searchIndexName?: string | null,
+    requestFragment?: SearchRequestFragment | null
+  ) => void;
   /** Load the next page of results (appends to existing) */
   loadMore: () => void;
   /** Reset all state to initial idle values */
@@ -152,6 +168,9 @@ export function useRecordSearch(): UseRecordSearchReturn {
   // FR-CP-04 — captured at search() time so loadMore() reuses the same
   // index routing across pages. null means "not provided / use BFF default".
   const currentSearchIndexNameRef = useRef<string | null>(null);
+  // Phase G (2026-06-10) — captured at search() time so loadMore() reuses
+  // the same dropdown-derived index routing across pages.
+  const currentRequestFragmentRef = useRef<SearchRequestFragment | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // --- Derived ---
@@ -164,7 +183,13 @@ export function useRecordSearch(): UseRecordSearchReturn {
    * and filters in refs so loadMore() can reuse them for subsequent pages.
    */
   const search = useCallback(
-    (query: string, recordTypes: string[], filters: SearchFilters, searchIndexName?: string | null): void => {
+    (
+      query: string,
+      recordTypes: string[],
+      filters: SearchFilters,
+      searchIndexName?: string | null,
+      requestFragment?: SearchRequestFragment | null
+    ): void => {
       // Cancel any in-flight request
       abortControllerRef.current?.abort();
       const controller = new AbortController();
@@ -174,6 +199,7 @@ export function useRecordSearch(): UseRecordSearchReturn {
       currentQueryRef.current = query;
       currentRecordTypesRef.current = recordTypes;
       currentFiltersRef.current = filters;
+      currentRequestFragmentRef.current = requestFragment ?? null;
       currentSearchIndexNameRef.current =
         typeof searchIndexName === 'string' && searchIndexName.trim().length > 0 ? searchIndexName.trim() : null;
 
@@ -183,6 +209,11 @@ export function useRecordSearch(): UseRecordSearchReturn {
       setErrorMessage(null);
       setSearchTime(null);
       setSearchState('loading');
+
+      // Phase G (2026-06-10) — request-body `searchIndexName` derivation:
+      //   1. Fragment.searchIndexName if a fragment was supplied
+      //   2. Else the legacy `searchIndexName` argument
+      const effectiveSearchIndexName = requestFragment ? (requestFragment.searchIndexName ?? null) : searchIndexName;
 
       // FR-CP-04 — Conditionally include `searchIndexName` in the body. The
       // spread + cast pattern keeps `RecordSearchRequest` untouched while
@@ -197,7 +228,7 @@ export function useRecordSearch(): UseRecordSearchReturn {
           offset: 0,
           hybridMode: filters.searchMode,
         },
-        ...buildSearchIndexNameFragment(searchIndexName),
+        ...buildSearchIndexNameFragment(effectiveSearchIndexName),
       } as RecordSearchRequest;
 
       searchRecords(requestBody)
@@ -243,9 +274,13 @@ export function useRecordSearch(): UseRecordSearchReturn {
     // Capture current length for offset (stable at call time)
     const currentLength = results.length;
 
-    // FR-CP-04 — Reuse the same `searchIndexName` captured at search() time
-    // so pagination stays bound to the same index. Cast + spread mirrors
-    // the pattern in search() above.
+    // FR-CP-04 — Reuse the same `searchIndexName` captured at search() time.
+    // Phase G (2026-06-10) — fragment.searchIndexName wins over legacy ref.
+    const lmFragment = currentRequestFragmentRef.current;
+    const lmEffectiveSearchIndexName = lmFragment
+      ? (lmFragment.searchIndexName ?? null)
+      : currentSearchIndexNameRef.current;
+
     const requestBody = {
       query: currentQueryRef.current,
       recordTypes: currentRecordTypesRef.current,
@@ -254,7 +289,7 @@ export function useRecordSearch(): UseRecordSearchReturn {
         offset: currentLength,
         hybridMode: filters.searchMode,
       },
-      ...buildSearchIndexNameFragment(currentSearchIndexNameRef.current),
+      ...buildSearchIndexNameFragment(lmEffectiveSearchIndexName),
     } as RecordSearchRequest;
 
     searchRecords(requestBody)
@@ -283,6 +318,7 @@ export function useRecordSearch(): UseRecordSearchReturn {
     currentRecordTypesRef.current = [];
     currentFiltersRef.current = null;
     currentSearchIndexNameRef.current = null;
+    currentRequestFragmentRef.current = null;
 
     setResults([]);
     setTotalCount(0);
