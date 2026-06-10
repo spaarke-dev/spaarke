@@ -115,19 +115,14 @@ class AppInsightsServiceImpl {
   public trackException(
     error: Error,
     properties?: Record<string, unknown>,
-    severity: SeverityLevel = SeverityLevel.Error,
+    severity: SeverityLevel = SeverityLevel.Error
   ): void {
     if (!this._initialized || !this._appInsights) {
-      console.warn(
-        `[AppInsightsService] trackException('${error.message}') called before initialize() — dropped.`,
-      );
+      console.warn(`[AppInsightsService] trackException('${error.message}') called before initialize() — dropped.`);
       return;
     }
     try {
-      this._appInsights.trackException(
-        { exception: error, severityLevel: severity },
-        properties,
-      );
+      this._appInsights.trackException({ exception: error, severityLevel: severity }, properties);
     } catch (err) {
       console.warn('[AppInsightsService] trackException failed:', err);
     }

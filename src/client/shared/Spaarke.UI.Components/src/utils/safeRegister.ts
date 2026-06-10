@@ -1,4 +1,4 @@
-import { reportClientError } from "../services/reportClientError";
+import { reportClientError } from '../services/reportClientError';
 
 /**
  * safeRegister — defensive wrapper for side-effect registration calls.
@@ -34,16 +34,12 @@ import { reportClientError } from "../services/reportClientError";
  * @param action             - The registration call (typically a thunk).
  * @returns                    The action's return value, or undefined if it threw.
  */
-export function safeRegister<T>(
-  registryName: string,
-  registrationLabel: string,
-  action: () => T,
-): T | undefined {
+export function safeRegister<T>(registryName: string, registrationLabel: string, action: () => T): T | undefined {
   try {
     return action();
   } catch (err) {
     reportClientError(err instanceof Error ? err : new Error(String(err)), {
-      scope: "safeRegister",
+      scope: 'safeRegister',
       registryName,
       registrationLabel,
     });

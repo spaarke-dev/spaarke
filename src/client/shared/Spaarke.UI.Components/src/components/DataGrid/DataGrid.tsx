@@ -1044,8 +1044,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     // Reserve space for selection cell (~44px when multiselect), gridScroll
     // horizontal padding (24px = 12+12), and a small scrollbar safety
     // buffer (10px). Anything left over is shared across the columns.
-    const selectionWidth =
-      resolved && resolved.behavior.selectionMode === 'multi' ? 44 : 0;
+    const selectionWidth = resolved && resolved.behavior.selectionMode === 'multi' ? 44 : 0;
     // ai-spaarke-ai-workspace-UI-r1 iter 2 round 11 (2026-06-09):
     // Subtract per-cell horizontal padding (~24px = 12+12 spacingHorizontalM)
     // from each column's available width. Without this, hosts that haven't
@@ -1059,10 +1058,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     // subtraction is the defensive layer for any future surface that misses
     // it.
     const perColPaddingReserve = visibleColumns.length * 24;
-    const available = Math.max(
-      0,
-      containerWidth - selectionWidth - 24 - 10 - perColPaddingReserve,
-    );
+    const available = Math.max(0, containerWidth - selectionWidth - 24 - 10 - perColPaddingReserve);
     // Bidirectional scale: when `available` < `baseSum`, scale < 1 shrinks
     // the columns to fit (down to each column's minimum); when `available`
     // > `baseSum`, scale > 1 expands them to fill. Skip the no-op when the

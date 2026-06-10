@@ -62,15 +62,8 @@ export function setClientErrorTelemetryHook(hook: TelemetryHook | null): void {
  *     componentStack: errorInfo.componentStack ?? undefined,
  *   });
  */
-export function reportClientError(
-  error: Error,
-  context: ClientErrorContext,
-): void {
-  console.error(
-    `[${context.scope}${context.surface ? `:${context.surface}` : ''}]`,
-    error,
-    context,
-  );
+export function reportClientError(error: Error, context: ClientErrorContext): void {
+  console.error(`[${context.scope}${context.surface ? `:${context.surface}` : ''}]`, error, context);
 
   if (_telemetryHook) {
     try {

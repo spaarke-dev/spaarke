@@ -770,34 +770,31 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     return null;
   }, [pending.fromDate, pending.toDate]);
 
-  const applyPreset = React.useCallback(
-    (preset: 'last30' | 'last90' | 'thisYear' | 'lastYear') => {
-      const today = new Date();
-      const toIso = (d: Date) =>
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      let from: Date;
-      let to: Date = today;
-      switch (preset) {
-        case 'last30':
-          from = new Date(today);
-          from.setDate(from.getDate() - 30);
-          break;
-        case 'last90':
-          from = new Date(today);
-          from.setDate(from.getDate() - 90);
-          break;
-        case 'thisYear':
-          from = new Date(today.getFullYear(), 0, 1);
-          break;
-        case 'lastYear':
-          from = new Date(today.getFullYear() - 1, 0, 1);
-          to = new Date(today.getFullYear() - 1, 11, 31);
-          break;
-      }
-      setPending(prev => ({ ...prev, fromDate: toIso(from), toDate: toIso(to) }));
-    },
-    [],
-  );
+  const applyPreset = React.useCallback((preset: 'last30' | 'last90' | 'thisYear' | 'lastYear') => {
+    const today = new Date();
+    const toIso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    let from: Date;
+    let to: Date = today;
+    switch (preset) {
+      case 'last30':
+        from = new Date(today);
+        from.setDate(from.getDate() - 30);
+        break;
+      case 'last90':
+        from = new Date(today);
+        from.setDate(from.getDate() - 90);
+        break;
+      case 'thisYear':
+        from = new Date(today.getFullYear(), 0, 1);
+        break;
+      case 'lastYear':
+        from = new Date(today.getFullYear() - 1, 0, 1);
+        to = new Date(today.getFullYear() - 1, 11, 31);
+        break;
+    }
+    setPending(prev => ({ ...prev, fromDate: toIso(from), toDate: toIso(to) }));
+  }, []);
 
   return (
     <div className={styles.root}>
@@ -810,7 +807,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             <Button
               className={mergeClasses(
                 styles.filterChipButton,
-                pending.eventTypeId ? styles.filterChipButtonActive : undefined,
+                pending.eventTypeId ? styles.filterChipButtonActive : undefined
               )}
               appearance="subtle"
               size="small"
@@ -846,7 +843,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             <Button
               className={mergeClasses(
                 styles.filterChipButton,
-                pending.eventStatusValue !== null ? styles.filterChipButtonActive : undefined,
+                pending.eventStatusValue !== null ? styles.filterChipButtonActive : undefined
               )}
               appearance="subtle"
               size="small"
@@ -882,7 +879,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             <Button
               className={mergeClasses(
                 styles.filterChipButton,
-                dateRangeDisplay ? styles.filterChipButtonActive : undefined,
+                dateRangeDisplay ? styles.filterChipButtonActive : undefined
               )}
               appearance="subtle"
               size="small"
@@ -898,17 +895,13 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             <Input
               type="date"
               value={pending.fromDate}
-              onChange={(_e, data) =>
-                setPending(prev => ({ ...prev, fromDate: data.value }))
-              }
+              onChange={(_e, data) => setPending(prev => ({ ...prev, fromDate: data.value }))}
             />
             <Text className={styles.filterPopoverLabel}>To</Text>
             <Input
               type="date"
               value={pending.toDate}
-              onChange={(_e, data) =>
-                setPending(prev => ({ ...prev, toDate: data.value }))
-              }
+              onChange={(_e, data) => setPending(prev => ({ ...prev, toDate: data.value }))}
             />
             <Text className={styles.filterPopoverLabel}>Quick select</Text>
             <div className={styles.quickSelectGrid}>
@@ -930,9 +923,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
                 <Button
                   size="small"
                   appearance="subtle"
-                  onClick={() =>
-                    setPending(prev => ({ ...prev, fromDate: '', toDate: '' }))
-                  }
+                  onClick={() => setPending(prev => ({ ...prev, fromDate: '', toDate: '' }))}
                 >
                   Clear range
                 </Button>
@@ -947,9 +938,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             <Button
               className={mergeClasses(
                 styles.filterChipButton,
-                pending.dateField && pending.dateField !== DATE_FIELD_NONE
-                  ? styles.filterChipButtonActive
-                  : undefined,
+                pending.dateField && pending.dateField !== DATE_FIELD_NONE ? styles.filterChipButtonActive : undefined
               )}
               appearance="subtle"
               size="small"
@@ -964,9 +953,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
             <Text className={styles.filterPopoverLabel}>Filter by Date Field</Text>
             <RadioGroup
               value={pending.dateField}
-              onChange={(_e, data) =>
-                setPending(prev => ({ ...prev, dateField: data.value }))
-              }
+              onChange={(_e, data) => setPending(prev => ({ ...prev, dateField: data.value }))}
             >
               {DATE_FIELDS.map(f => (
                 <Radio key={f.value || 'none'} value={f.value} label={f.label} />
@@ -988,13 +975,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
           <Tooltip content={calendarCollapsed ? 'Show calendar' : 'Hide calendar'} relationship="label">
             <Button
               appearance={calendarCollapsed ? 'subtle' : 'primary'}
-              icon={
-                calendarCollapsed ? (
-                  <CalendarLtr24Regular />
-                ) : (
-                  <CalendarLtr24Filled />
-                )
-              }
+              icon={calendarCollapsed ? <CalendarLtr24Regular /> : <CalendarLtr24Filled />}
               onClick={toggleCollapsed}
               aria-expanded={!calendarCollapsed}
               aria-label={calendarCollapsed ? 'Show calendar' : 'Hide calendar'}

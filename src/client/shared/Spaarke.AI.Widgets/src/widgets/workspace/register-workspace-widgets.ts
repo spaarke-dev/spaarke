@@ -43,9 +43,7 @@ import type { WorkspaceWidgetComponent } from '../../types/widget-types';
 // failure, missing import) would skip all subsequent registrations, leaving
 // the registry partially populated and the workspace pane rendering empty
 // widget tabs. See safeRegister docblock + brittleness-remediation-plan.md.
-function safeRegisterWidget(
-  ...args: Parameters<typeof registerWorkspaceWidget>
-): void {
+function safeRegisterWidget(...args: Parameters<typeof registerWorkspaceWidget>): void {
   safeRegister('WorkspaceWidget', args[0], () => registerWorkspaceWidget(...args));
 }
 
