@@ -241,7 +241,12 @@ describe('StructuredOutputStreamWidget — backward compatibility (NFR-11)', () 
 // ---------------------------------------------------------------------------
 
 describe('StructuredOutputStreamWidget — malformed JSON in schema-aware field', () => {
-  it('renders an error surface for a malformed array chunk without crashing', () => {
+  // R6 Hotfix Wave B-G10c (2026-06-10): When the server streams VALUE content per
+  // field (not full JSON syntax), schema-aware strict parse fails for content like
+  // "The international..." (a plain string for an `array: string` field). The widget
+  // now FALLS BACK to splitListContent (legacy R5 path) instead of showing an error
+  // surface. Tests below verify the new graceful behavior.
+  it('falls back to splitListContent for malformed array chunks (B-G10c)', () => {
     const data: StructuredOutputStreamWidgetData = {
       mode: 'streaming',
       schema: SUMMARIZE_SCHEMA,
@@ -250,21 +255,23 @@ describe('StructuredOutputStreamWidget — malformed JSON in schema-aware field'
     };
     const { bus } = renderWidget(data);
 
-    // Malformed JSON: missing closing bracket.
+    // Malformed JSON: missing closing bracket — splitListContent's JSON branch
+    // skips (not a complete `[...]` envelope), then falls through to comma split.
     streamFieldComplete(bus, 'tldr', '["first", "second"');
 
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
     expect(tldrBlock).not.toBeNull();
-    const errorBlock = tldrBlock!.querySelector('[data-display-hint="schema-array-error"]');
-    expect(errorBlock).not.toBeNull();
-    expect(errorBlock!.textContent).toMatch(/malformed json/i);
-    // No bulleted list rendered.
-    expect(tldrBlock!.querySelector('ul[data-display-hint="schema-array"]')).toBeNull();
+    // No error surface — fallback path renders bullets.
+    expect(tldrBlock!.querySelector('[data-display-hint="schema-array-error"]')).toBeNull();
+    // Bulleted list renders (content imperfect but user-visible).
+    const list = tldrBlock!.querySelector('ul[data-display-hint="schema-array"]');
+    expect(list).not.toBeNull();
+    expect(list!.querySelectorAll('li').length).toBeGreaterThan(0);
     // Widget envelope still mounted (no crash).
     expect(screen.getByTestId('structured-output-stream-widget')).toBeInTheDocument();
   });
 
-  it('renders an error for non-array JSON (e.g., string passed where array expected)', () => {
+  it('falls back to splitListContent for non-array JSON like a quoted string (B-G10c)', () => {
     const data: StructuredOutputStreamWidgetData = {
       mode: 'streaming',
       schema: SUMMARIZE_SCHEMA,
@@ -276,12 +283,14 @@ describe('StructuredOutputStreamWidget — malformed JSON in schema-aware field'
     streamFieldComplete(bus, 'tldr', JSON.stringify('not an array — a string'));
 
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
-    const errorBlock = tldrBlock!.querySelector('[data-display-hint="schema-array-error"]');
-    expect(errorBlock).not.toBeNull();
-    expect(errorBlock!.textContent).toMatch(/expected json array/i);
+    // No error surface — fallback renders the string as a single-item list.
+    expect(tldrBlock!.querySelector('[data-display-hint="schema-array-error"]')).toBeNull();
+    const list = tldrBlock!.querySelector('ul[data-display-hint="schema-array"]');
+    expect(list).not.toBeNull();
+    expect(list!.querySelectorAll('li').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('error in one schema-aware field does not break sibling field rendering', () => {
+  it('B-G10c fallback in one field does not break sibling field rendering', () => {
     const data: StructuredOutputStreamWidgetData = {
       mode: 'static',
       schema: SUMMARIZE_SCHEMA,
@@ -293,9 +302,10 @@ describe('StructuredOutputStreamWidget — malformed JSON in schema-aware field'
     };
     renderWidget(data);
 
-    // tldr renders error surface.
+    // tldr falls back gracefully — no error surface.
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
-    expect(tldrBlock!.querySelector('[data-display-hint="schema-array-error"]')).not.toBeNull();
+    expect(tldrBlock!.querySelector('[data-display-hint="schema-array-error"]')).toBeNull();
+    expect(tldrBlock!.querySelector('ul[data-display-hint="schema-array"]')).not.toBeNull();
     // summary still renders via legacy paragraph path.
     const summaryBlock = document.querySelector('[data-field-path="summary"]');
     expect(summaryBlock!.querySelector('[data-display-hint="paragraph"]')).not.toBeNull();
@@ -534,7 +544,11 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
     expect(personsList!.querySelectorAll('li')).toHaveLength(1);
   });
 
-  it('renders an inline error surface for malformed object JSON without crashing', () => {
+  // R6 Hotfix Wave B-G10c (2026-06-10): same fallback strategy as the array path
+  // above — when strict JSON parse fails, the widget renders a raw-text fallback
+  // (with intermediate wrap-in-braces retry) so users see SOMETHING rather than
+  // an error surface. Tests below verify the new graceful behavior.
+  it('renders raw-text fallback for malformed object JSON (B-G10c)', () => {
     const data: StructuredOutputStreamWidgetData = {
       mode: 'streaming',
       schema: SUMMARIZE_SCHEMA,
@@ -543,20 +557,22 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
     };
     const { bus } = renderWidget(data);
 
-    // Malformed JSON: missing closing brace.
+    // Malformed JSON: missing closing brace. The B-G10c retry wraps in `{}` and
+    // tries again; if still malformed, falls through to raw-text fallback.
     streamFieldComplete(bus, 'entities', '{"organizations": ["Acme"');
 
     const entitiesBlock = document.querySelector('[data-field-path="entities"]');
-    const errorBlock = entitiesBlock!.querySelector('[data-display-hint="schema-object-error"]');
-    expect(errorBlock).not.toBeNull();
-    expect(errorBlock!.textContent).toMatch(/malformed json/i);
-    // No labeled-block container rendered.
-    expect(entitiesBlock!.querySelector('[data-display-hint="schema-object"]')).toBeNull();
+    // No error surface.
+    expect(entitiesBlock!.querySelector('[data-display-hint="schema-object-error"]')).toBeNull();
+    // Either the wrap-in-braces retry succeeded (renders labeled blocks) OR raw-text fallback.
+    const labeledBlocks = entitiesBlock!.querySelector('[data-display-hint="schema-object"]');
+    const rawFallback = entitiesBlock!.querySelector('[data-display-hint="schema-object-raw-fallback"]');
+    expect(labeledBlocks !== null || rawFallback !== null).toBe(true);
     // Widget envelope still mounted (no crash).
     expect(screen.getByTestId('structured-output-stream-widget')).toBeInTheDocument();
   });
 
-  it('renders an error for non-object JSON (e.g., array passed where object expected)', () => {
+  it('renders raw-text fallback for non-object JSON like an array (B-G10c)', () => {
     const data: StructuredOutputStreamWidgetData = {
       mode: 'streaming',
       schema: SUMMARIZE_SCHEMA,
@@ -568,9 +584,10 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
     streamFieldComplete(bus, 'entities', JSON.stringify(['not', 'an', 'object']));
 
     const entitiesBlock = document.querySelector('[data-field-path="entities"]');
-    const errorBlock = entitiesBlock!.querySelector('[data-display-hint="schema-object-error"]');
-    expect(errorBlock).not.toBeNull();
-    expect(errorBlock!.textContent).toMatch(/expected json object/i);
+    // No error surface.
+    expect(entitiesBlock!.querySelector('[data-display-hint="schema-object-error"]')).toBeNull();
+    // Raw-text fallback (array isn't a valid object even after wrap-in-braces).
+    expect(entitiesBlock!.querySelector('[data-display-hint="schema-object-raw-fallback"]')).not.toBeNull();
   });
 
   it('does NOT activate schema-aware object rendering mid-stream (gate matches array path)', () => {

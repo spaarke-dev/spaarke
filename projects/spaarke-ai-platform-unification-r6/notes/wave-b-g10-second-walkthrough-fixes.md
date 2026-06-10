@@ -125,3 +125,66 @@ Phase B exit-gate still HELD pending B11 root cause + fix + re-deploy + clean re
 - Persona seed-row content polish (these directives should eventually move to the SYS-
   persona seed row's `sprk_systemprompt` per Pillar 1 data-driven design; in B-G10 they
   live in factory code for hotfix expediency)
+
+---
+
+## B-G10c — Widget schema-aware fallback (post-stream-completion-but-not-JSON)
+
+### Third-walkthrough finding
+
+After Wave B-G10 a+b deployed + SpaarkeAi rebuilt with B-G9c2, user re-walked and got:
+- `tldr: Malformed JSON: Unexpected token 'T', "The intern"... is not valid JSON`
+- `entities: Malformed JSON: Unexpected token 'o', "organizati"... is not valid JSON`
+
+### Root cause
+
+The server emits VALUE content per field via `field_delta` SSE events (per R5 task 006
+spike — Azure OpenAI streams properties in declaration order). The widget receives the
+VALUE content NOT the JSON syntax wrapping it. So at streaming_complete, the accumulated
+`tldr` content is the plain bullet text (e.g., "The international..."), not the JSON
+literal `["The international...", "..."]`. Strict `JSON.parse` fails.
+
+R5's `splitListContent` was forgiving — JSON-array first, newline next, comma next,
+single-item last. R6 tasks 040 + 041's strict schema-aware path was added in parallel,
+so the strict path is now hit but the streamed content doesn't match.
+
+### Fix
+
+`StructuredOutputStreamWidget.tsx`: when schema-aware `parseArrayOfString` returns an
+error, fall back to legacy `splitListContent` (same lenient behavior R5 had). When
+schema-aware `parseObject` returns an error, try `{...content}` wrap-and-retry; on final
+failure, render the raw content as a paragraph (`data-display-hint=schema-object-raw-fallback`)
+so the user sees the content rather than an error.
+
+Existing 23 unit tests for 040 + 041 valid-JSON paths still pass. 5 tests that
+SPECIFICALLY verified error-surface behavior were updated to verify the new graceful
+fallback (filename: `StructuredOutputStreamWidget.test.tsx` lines 240+ and 530+).
+
+### B-G10d — Skip empty followup suggestions when dedup-ack fires
+
+Workspace-destination playbooks (B-G9b/B-G10a directive) constrain the chat-side LLM to
+a single-sentence ack. The follow-up `GenerateAndEmitSuggestionsAsync` LLM then has no
+substantive text to base suggestions on, so it generates nothing useful (or empty).
+
+**R6 fix**: Skip suggestion generation when `fullResponse.Length < 150`. Honest empty
+state instead of meaningless suggestions.
+
+**R7 architectural home** (added 2026-06-10 per user feedback):
+1. Add `sprk_followups` JSON column on `sprk_analysisaction` declaring the action's natural
+   followup affordances: `[{label, playbookId, parameterMapping}]`.
+2. `DeliverOutput` node executor emits a `followups` SSE event alongside the widget.
+   SprkChat already has chip-rendering infrastructure (`SprkChatSuggestions`).
+3. Followup click → `invoke_playbook(playbookId, parameters)` via existing Pillar 3
+   dispatch. Click becomes a proper orchestrated playbook execution, not a generic LLM
+   chat turn. Aligns with Pillar 8 "card-as-intent".
+
+This R7 design supersedes B12a's "tighten the formatting" patch — once followups route
+through playbooks, the playbook handles output styling per its outputSchema and the
+generic chat-side `BuildCompactFormattingDirective` becomes the FALLBACK style for
+non-orchestrated turns only.
+
+### B13 — Followup cards missing — SAME root cause as B-G10d
+
+User's "no followup cards displayed" is the same root cause: dedup-ack + suggestion-LLM
+empty signal → no suggestions emitted. B-G10d makes the silence explicit (skips the call
+rather than producing useless output).

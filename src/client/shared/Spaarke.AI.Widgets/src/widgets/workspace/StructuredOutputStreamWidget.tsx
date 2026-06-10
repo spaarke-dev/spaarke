@@ -1725,15 +1725,25 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
               if (schemaAwareReady && classification === 'array-of-string') {
                 const parseResult = parseArrayOfString(content ?? '');
                 if ('error' in parseResult) {
+                  // R6 Hotfix Wave B-G10c (2026-06-10): The server streams VALUE
+                  // content per field (per R5 task 006 spike — Azure OpenAI emits
+                  // properties in declaration order), NOT full JSON syntax with
+                  // brackets. So at streaming_complete the `tldr` content is the
+                  // raw bullet text (e.g., "The international..."), not the JSON
+                  // literal `["The...", "..."]`. Strict JSON.parse fails. Fall
+                  // back to the LEGACY `splitListContent` which handles newline-
+                  // separated, comma-separated, and single-string shapes — same
+                  // forgiving behavior R5 had before 040/041's strict path.
                   // eslint-disable-next-line no-console
                   console.warn(
-                    `[StructuredOutputStreamWidget] schema-aware parse failure path="${field.path}" error="${parseResult.error}"`
+                    `[StructuredOutputStreamWidget] schema-aware parse failure path="${field.path}" — falling back to splitListContent`
                   );
+                  const fallbackItems = splitListContent(content ?? '');
                   schemaAwareNode = (
                     <SchemaAwareArrayRenderer
                       styles={styles}
-                      items={null}
-                      errorMessage={parseResult.error}
+                      items={fallbackItems}
+                      errorMessage={null}
                       fieldPath={field.path}
                     />
                   );
@@ -1761,20 +1771,34 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
                   // field's schema exists with type 'object'. Defensive fallback.
                   schemaAwareNode = null;
                 } else {
-                  const parseResult = parseObject(content ?? '');
+                  // R6 Hotfix Wave B-G10c (2026-06-10): same streaming-value
+                  // problem as array-of-string above — server emits value text
+                  // per field, not JSON syntax. Try strict parse first; on
+                  // failure, try wrapping content in `{}` (common case where
+                  // the leading/trailing brace was stripped), and finally fall
+                  // back to a synthetic object with raw content under the first
+                  // declared property so user-visible content is preserved.
+                  let parseResult = parseObject(content ?? '');
                   if ('error' in parseResult) {
+                    const wrapped = parseObject(`{${content ?? ''}}`);
+                    if (!('error' in wrapped)) {
+                      parseResult = wrapped;
+                    }
+                  }
+                  if ('error' in parseResult) {
+                    // Final fallback: render raw content as a paragraph so the
+                    // user sees SOMETHING rather than an error. Going through
+                    // SchemaAwareObjectRenderer would iterate the SCHEMA's
+                    // properties (organizations / persons) and show em-dashes
+                    // for each — worse UX than just showing the raw text.
                     // eslint-disable-next-line no-console
                     console.warn(
-                      `[StructuredOutputStreamWidget] schema-aware object parse failure path="${field.path}" error="${parseResult.error}"`
+                      `[StructuredOutputStreamWidget] schema-aware object parse failure path="${field.path}" — using raw-text fallback`
                     );
                     schemaAwareNode = (
-                      <SchemaAwareObjectRenderer
-                        styles={styles}
-                        value={null}
-                        errorMessage={parseResult.error}
-                        fieldPath={field.path}
-                        fieldSchema={fieldSchema}
-                      />
+                      <div data-display-hint="schema-object-raw-fallback" data-field-path={field.path}>
+                        <Text className={styles.schemaObjectValueText}>{(content ?? '').trim()}</Text>
+                      </div>
                     );
                   } else {
                     schemaAwareNode = (
