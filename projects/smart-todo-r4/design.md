@@ -68,19 +68,36 @@ R4 closes these gaps by:
 
 **Universal `< >` record-navigation pattern** (UAT screenshot, Document preview modal): When a modal is launched from a list (To Do list, document list, anything), the user should be able to browse `<` previous / `>` next record without close-reopen cycles. Display "N of M" counter in upper-right.
 
+**Adopted architecture (HYBRID — per OQ-1 resolution)**:
+
+A reusable **`<RecordNavigationModalShell>`** Code Page wrapper that:
+1. Provides the **outer chrome**: title, `< >` navigation, "N of M" counter, custom action bar slot
+2. Iframes the **OOB MDA form** as its content (via `pagetype=entityrecord&navbar=off`)
+3. Used **everywhere** a list-launched modal is needed (To Do, future regarding-shaped entities, document preview, etc.)
+
+This pattern wins because it gives us **single consistent navigation UX everywhere** without rebuilding form behavior. The inner OOB form retains native save / business rules / BPF / statuscode controls / per-record permissions — zero maintenance burden for form-designer changes. The outer Code Page chrome owns navigation and styling.
+
 **R4 work**:
-1. Extract the existing navigation logic from `RichFilePreview.tsx` (`currentIndex`, `navigationTotal`, `onNavigate`, `ChevronLeft20Regular` / `ChevronRight20Regular`, `prevDisabled` / `nextDisabled`).
-2. Promote it into a generic **`<RecordNavigationModalShell>`** component in `@spaarke/ui-components` that wraps any modal body and emits next/prev events.
-3. Adopt in SmartTodo card-open path (R4 work).
-4. **Refactor `RichFilePreviewDialog`** to consume the new shell — proves the abstraction works without regressions (NFR-style obligation).
-5. **Modal body**: hosts the To Do main form. Strategy:
-   - **MDA context**: `Xrm.Navigation.navigateTo({pageType: "entityrecord", entityName: "sprk_todo", entityId: <id>, formId: "eca59df4-..." })` — Dataverse renders the form natively in a modal frame.
-   - **Iframe / Code Page context**: Code Page hosts the same form via a thin React wrapper that calls Dataverse Web API to render or that opens the same `Xrm.Navigation.navigateTo` against the parent MDA window (which is available because Code Pages run inside MDA).
-   - **Decision**: try the second strategy first (single code path for both contexts — `Xrm.Navigation.navigateTo` available from inside Code Pages too). Fall back to iframe-rendered form ONLY if that doesn't work.
+1. Extract the navigation logic from `RichFilePreview.tsx` (`currentIndex`, `navigationTotal`, `onNavigate`, `ChevronLeft20Regular` / `ChevronRight20Regular`, `prevDisabled` / `nextDisabled`).
+2. Promote it into `<RecordNavigationModalShell>` in `@spaarke/ui-components`.
+3. The shell renders an iframe pointing at `mainURL?pagetype=entityrecord&etn=sprk_todo&id={recordId}&formid=eca59df4-1364-f111-ab0c-7ced8ddc4cc6&navbar=off`.
+4. Cross-frame messaging contract: the outer shell intercepts `< >` clicks, asks the inner form via `postMessage` whether it's dirty, prompts the user if needed, then navigates iframe `src` to the next record's URL.
+5. **Refactor `RichFilePreviewDialog`** to consume the new shell — proves the abstraction works without regressions.
+6. Adopt in SmartTodo card-open path (single-click Open icon, double-click body, or selection-toolbar Open).
 
 **Retire**: existing `TodoDetailPanel` side-pane component in `src/solutions/SmartTodo/`. OD-4 issues (no save, "Completed" doesn't work) become moot because the MDA main form's native save + statuscode controls take over.
 
 The `TodoDetail` shared-lib component built in R3 task 011 may still be useful for **inline previews** (where you DON'T want a modal) — review during R4; keep if used.
+
+#### OQ-1 trade-off analysis (the question that led to this hybrid)
+
+| Approach | Advantages | Disadvantages |
+|---|---|---|
+| **A. Native `Xrm.Navigation.navigateTo`** (no wrapper) | Zero custom chrome to maintain. Native form behavior end-to-end. Less code. Always up-to-date with form designer changes. | No `< >` nav unless MDA's built-in record-browse is enabled — and that's only present in list-context flows; not guaranteed visible (user noted it may be hidden in command bar). Modal sizing platform-controlled. Look-and-feel doesn't necessarily match Fluent v9. |
+| **B. Pure custom React wrapper** (our React form, no iframe) | Full control of chrome AND content. Single navigation pattern. Can show summary panels, related actions, breadcrumbs. | Heavy: we re-implement save / validation / business rules / BPF / statuscode flows. Risk of drift from MDA form-runtime. Per-record permissions need custom UX. Form-designer changes require code change + redeploy. |
+| **C. HYBRID — Code Page wrapper + iframe-embedded OOB MDA form (ADOPTED)** | Best of both: **outer chrome** = custom `< >` + Fluent v9 styling; **inner content** = native form (save, BPF, rules, statuscode all free). Form-designer changes propagate without code change. Single navigation pattern across To Do, Document preview, future entities. Lower total surface area than B. | A small bridging layer (cross-frame messaging for dirty-check + nav). Some browser-styling coordination needed (iframe border, scrollbar). Not the lowest-code option, but the lowest **maintenance-burden** option once shipped. |
+
+The hybrid (C) **simplifies deployment** vs. B because we never touch the form runtime. It **slightly adds deployment overhead** vs. A (we ship the wrapper) but the wrapper is one shared Code Page used everywhere — amortized across all list-launched modal flows. Net win: one wrapper deploy buys consistent UX for all entities.
 
 ### D. Regarding resolver — multi-environment-stable, reusable
 
@@ -189,31 +206,30 @@ For each: add a Visual Host control bound to the new `Upcoming To Dos — <entit
 |---|---|---|
 | **OD-1** | PCF vs Web Resource for regarding resolver | **Whichever is more resilient + stable for multi-env deployments wins.** Audit step decides; PCF is the likely answer (modern Spaarke standard). |
 | **OD-2** | "My Tasks" vs "Assigned to Me" semantic distinction | **Drop "My Tasks" mode entirely. Use only "Assigned to Me"** (owner field is not important — typically BU-owned). |
-| **OD-3** | Modal hosting strategy (Xrm.Navigation vs Code Page iframe) | **Both MDA form AND iframe context.** Try `Xrm.Navigation.navigateTo` from both contexts first (single code path); iframe fallback only if needed. |
+| **OD-3** | Modal hosting strategy (Xrm.Navigation vs Code Page iframe) | **HYBRID** — Code Page wrapper `<RecordNavigationModalShell>` provides outer chrome (`< >` nav + Fluent v9 styling); iframe-embeds the OOB MDA form as content (native save + BPF + business rules retained). Used in both MDA + Code Page contexts. See C trade-off analysis. |
 | **OD-4** | Side-pane "various issues" — enumerate | **Issues: no save, "Completed" doesn't work.** Resolved by switching to MDA main-form modal (C) — native save + statuscode controls take over. |
 | **OD-5** | Other To Do enhancements | **Add NEW item G**: Visual Host "Upcoming To Dos" cards on Matter / Project / Invoice / WorkAssignment main forms, following UPCOMING TASKS chart-def pattern but targeting `sprk_todo` and drilling through to SmartTodo Code Page modal (not list view). |
 | **OD-6** | 10 deferred parent-form ribbons | **Defer.** Not needed for R4 acceptance. Can be picked up in a separate small task later. |
 
 ---
 
-## Open Questions (NEW — from R4 design v2 — answer before /design-to-spec)
+## Resolved Open Questions (OQ-1 through OQ-3)
 
-| ID | Question |
-|---|---|
-| OQ-1 | Confirm: should the `< >` navigation also work in **MDA-context modal** (where `Xrm.Navigation.navigateTo` renders the form), or only in **Code-Page-context modal** (where we control the shell)? MDA native modal may not allow injecting custom chrome — would need a wrapper Code Page even for MDA flows. |
-| OQ-2 | Workspace widget audit: which specific widget surface fails with the `sprk_todoflag` error? Likely `@spaarke/ai-widgets` or LegalWorkspace `SmartToDo` widget. Audit will identify in R4 task 1. |
-| OQ-3 | The 4 entities for "Upcoming To Dos" Visual Host cards are Matter / Project / Invoice / WorkAssignment. Should we also add to **Event** and **Communication** main forms? Or is that intentional scope-limiting? |
+| ID | Question | Resolution |
+|---|---|---|
+| **OQ-1** | Should `< >` navigation work in MDA-context modal too? Trade-offs? | **YES — adopt hybrid Code Page wrapper everywhere.** Single navigation pattern across all modal-launched flows. The wrapper iframes the OOB MDA form so we get native save / BPF / business rules for free, while we own the outer chrome. Lowest **maintenance-burden** option even if not the lowest code; standardizes UX and simplifies long-term deploys (one wrapper, many entities). See C trade-off table. |
+| **OQ-2** | Which widget surface fails with `sprk_todoflag` error? | **Source code is clean** (only JSDoc / migration notes, verified by repo-wide grep + chart-def / saved-query / user-query SQL checks). The failure is from **stale deployed bundles** — most likely the LegalWorkspace `SmartToDo` widget (`src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx`) that's loaded both as a "system" workspace section AND when a user adds it via the widget chooser. **R4 audit step**: identify all deployed surfaces still serving the old bundle, rebuild + redeploy. May also catch any PCF whose `bundle.js` was committed pre-R3. |
+| **OQ-3** | Add Visual Host "Upcoming To Dos" to Event + Communication too? | **No.** Out of scope for R4. Only Matter / Project / Invoice / WorkAssignment. |
 
 ---
 
 ## Next Steps
 
-1. Answer OQ-1 through OQ-3 (above)
-2. Add any further enhancements you remember
-3. Run `/design-to-spec projects/smart-todo-r4` → produces `spec.md` (formal FRs/NFRs + acceptance criteria)
-4. Run `/project-pipeline projects/smart-todo-r4` → produces `plan.md` + `tasks/` POML decomposition + commit on a new feature branch
-5. Begin task execution
+1. **Ready for `/design-to-spec`.** No open questions remaining; OQ-1/2/3 resolved. If you have additional enhancements to add, flag them in the next message and I'll fold them in before running the skill.
+2. Run `/design-to-spec projects/smart-todo-r4` → produces `spec.md` (formal FRs/NFRs + acceptance criteria)
+3. Run `/project-pipeline projects/smart-todo-r4` → produces `plan.md` + `tasks/` POML decomposition + commits on a new feature branch
+4. Begin task execution
 
 ---
 
-*Draft v2 — UAT feedback resolved; 3 new open questions for review before /design-to-spec.*
+*Draft v3 — all UAT feedback + open questions resolved. Ready for /design-to-spec unless you add more scope.*
