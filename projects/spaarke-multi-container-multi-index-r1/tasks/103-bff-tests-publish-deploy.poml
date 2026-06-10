@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="103" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>BFF tests + publish + deploy; App Insights verification of lookup-first and text-fallback paths</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>102</dependencies>
+    <blocks>104, 110</blocks>
+    <tags>bff-api, testing, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tests + deploy; no new code logic. Existing test suite + new tests added in 102 cover the behavior changes.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 102 — verifies that task's deliverable.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add focused unit tests for the new resolver path (lookup-first + text-fallback) and `DataverseAllowedIndexesProvider` (cache + Dataverse-empty fallback). Run the full BFF test suite. Publish + deploy via `/bff-deploy` skill. Verify in App Insights that both code paths fire correctly when probed (one entity with lookup set, one with text-only).
+  </prompt>
+
+  <role>
+    BFF developer comfortable with xUnit + Moq + the canonical deploy skill (`.claude/skills/bff-deploy/SKILL.md`).
+  </role>
+
+  <goal>
+    Test suite green (existing + new tests for 102 behavior). BFF deployed to `spaarke-bff-dev`. App Insights shows resolver returning from BOTH paths during smoke probes (proves text-fallback is intact for migration soak; proves lookup-first works after seed in 101).
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md §12">Unit tests required: resolver lookup-first; resolver text-fallback (with WARNING log assertion); resolver returns null when both empty; provider cache hit/miss; provider Dataverse-empty fallback to appsettings.</constraint>
+    <constraint source="CLAUDE.md §10 bullet 4">BFF publish-size verification — must be ≤ 60 MB compressed (current baseline ~45.65 MB).</constraint>
+    <constraint source=".claude/skills/bff-deploy/SKILL.md">Deploy via the canonical `Deploy-BffApi.ps1`. Hash-verify + healthz are non-negotiable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add new unit tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/`: `SearchIndexNameResolverTests` (lookup-first, text-fallback w/ log assertion, both-null returns null, chain walks doc → parent → BU correctly under outer join). `DataverseAllowedIndexesProviderTests` (cache 100-rapid-calls assert one fetch, Dataverse-empty → appsettings fallback + warning log).</step>
+    <step order="2">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — all green.</step>
+    <step order="3">Run `dotnet publish src/server/api/Sprk.Bff.Api/ -c Release -o deploy/api-publish/` — verify compressed size ≤ 60 MB and report delta vs the baseline.</step>
+    <step order="4">Invoke `/bff-deploy` skill (or run `scripts/Deploy-BffApi.ps1` directly). Confirms hash-verify + healthz passes.</step>
+    <step order="5">Smoke test: call `POST /api/ai/search` from `curl` (or the existing PCF) against (a) a Matter with `sprk_aisearchindexid` SET (expect lookup path), (b) a Matter with only `sprk_searchindexname` text set (expect text-fallback path + WARNING in App Insights). Confirm both return 200 OK with results.</step>
+    <step order="6">App Insights query (per the skill): `traces | where timestamp > ago(15m) | where message has "PhaseG" | project timestamp, severityLevel, message`. Confirms at least one "TextFallback" warning + at least one normal lookup resolution within 15 min.</step>
+    <step order="7">Update `TASK-INDEX.md`: 103 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run dotnet test + dotnet publish + scripts/Deploy-BffApi.ps1</tool>
+    <tool name="Bash">App Insights kusto query via az monitor command</tool>
+  </tools>
+
+  <outputs>
+    <output type="tests">~6 new unit tests for resolver + provider</output>
+    <output type="deploy">BFF deployed to spaarke-bff-dev; healthz=200; hash-verified</output>
+    <output type="verification">App Insights traces showing both lookup-first and text-fallback paths firing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet test tests/unit/Sprk.Bff.Api.Tests/` exits 0; new tests all pass.</criterion>
+    <criterion testable="true">BFF publish size compressed ≤ 60 MB; delta vs ~45.65 MB baseline reported in task notes.</criterion>
+    <criterion testable="true">`Deploy-BffApi.ps1` exits 0 with "All N critical files match" + healthz=200.</criterion>
+    <criterion testable="true">App Insights kusto query shows at least one "PhaseG.TextFallback" WARNING and one normal lookup resolution within the 15-min window post-smoke.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <deploy-skill>.claude/skills/bff-deploy/SKILL.md</deploy-skill>
+  </execution>
+</task>

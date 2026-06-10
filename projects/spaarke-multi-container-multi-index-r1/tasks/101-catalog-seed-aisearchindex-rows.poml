@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Catalog: seed `sprk_aisearchindex` with 8 rows (file indexes + record indexes + All)</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>102, 108</blocks>
+    <tags>dataverse, data-seed</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data-only seed via Power Apps maker or Dataverse MCP. No code changes. Reversible.</rigor-reason>
+    <parallel-group>G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent of lookup-column adds (100) — different operation surface.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Populate the `sprk_aisearchindex` table with the 8 canonical rows: 2 file-index rows (Development Files 1 / 2 → spaarke-knowledge-index-v2 / spaarke-file-index, both targeting Document) and 6 record-index rows (Matters / Projects / Invoices / Events / Work Assignments / All Records → spaarke-records-index, one per Choice value). Mark "Development Files 2" as `sprk_isdefault = Yes`. Set `sprk_displayorder` for stable dropdown sort. Populate `sprk_displayname`, `sprk_description`, `sprk_targetentitytype` Choice per spec §4.
+  </prompt>
+
+  <role>
+    Dataverse maker / ops admin. Familiar with `sprk_aisearchindex` schema and the Choice values defined in spec §4.
+  </role>
+
+  <goal>
+    8 active rows in `sprk_aisearchindex` matching the seed table in spec §4. The dropdown in the code page (task 108) populates correctly from this data. The BFF `DataverseAllowedIndexesProvider` (task 102) finds the same names.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md §4">Final seed table: 8 rows with specified Choice values, displaynames, sort order, and one row marked `sprk_isdefault=Yes`.</constraint>
+    <constraint source="spec.md §6.5">Choice labels MUST be URL/identifier-safe (letters + spaces only) — convention enforced by the code-page normalize function.</constraint>
+    <constraint source="spec.md §13 Q4">If table is empty post-seed, BFF falls back to appsettings default with warning log — but the table MUST be populated before task 109 deploys the code page dropdown.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open `sprk_aisearchindex` table in Power Apps maker (or use Dataverse MCP `create_record`).</step>
+    <step order="2">Create 8 rows per spec §4 seed table. For each row set: `sprk_displayname`, `sprk_searchindexname`, `sprk_targetentitytype` (Choice), `sprk_isdefault`, `sprk_displayorder`, optionally `sprk_description`. Leave `sprk_endpoint` blank unless multi-region is in scope.</step>
+    <step order="3">Verify only ONE row has `sprk_isdefault = Yes` (Development Files 2).</step>
+    <step order="4">Verify rows via Dataverse MCP `read_query`: `SELECT sprk_displayname, sprk_searchindexname, sprk_targetentitytype, sprk_isdefault FROM sprk_aisearchindex WHERE statecode = 0 ORDER BY sprk_displayorder`. Should return 8 rows.</step>
+    <step order="5">Update `TASK-INDEX.md`: 101 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Verify via Dataverse MCP read_query post-seed</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">8 active rows in `sprk_aisearchindex`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dataverse MCP query returns 8 rows from `sprk_aisearchindex` where `statecode = 0`.</criterion>
+    <criterion testable="true">Exactly one row has `sprk_isdefault = Yes` (Development Files 2).</criterion>
+    <criterion testable="true">All 7 Choice values for `sprk_targetentitytype` are represented (Document appears in 2 rows; others once each).</criterion>
+    <criterion testable="true">Display names are human-friendly (e.g., "Development Files 2", not the raw Azure index name).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 100. The catalog rows are what makes the dropdown dataset meaningful for tasks 108 (code page) and 102 (BFF allow-list query).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

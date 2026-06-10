@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="108" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Code page: dropdown component (DV Web API) + side-pane redesign (replace 4 tabs; relocate Relevance Threshold + Search Mode; popup info icons)</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>not-started</status>
+    <estimated-hours>5-7</estimated-hours>
+    <dependencies>101</dependencies>
+    <blocks>109</blocks>
+    <tags>code-page, frontend, fluent-ui, react-18</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx` files in side-pane + main App; introduces new service module + normalize utility; UX-visible changes. Code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Multiple files in same module — App.tsx, SearchPane, hooks all touch each other.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the side-pane redesign from spec §6. (1) New `aiSearchIndexService.ts` — direct Dataverse Web API call for active `sprk_aisearchindex` rows (with `Prefer: odata.include-annotations` for the Choice FormattedValue). (2) New `targetEntityNormalize.ts` — `normalizeTargetEntityLabel` (lowercase + strip spaces) + `buildSearchRequestFragment` (Choice label → `{scope, entityType, searchIndexName}` fragment, with "All" → scope='all'). (3) Replace the 4 domain tabs (Documents/Matters/Projects/Invoices) at the top of the side pane with a single "Search Index" Dropdown sourced from the new service. (4) Move `Relevance Threshold` + `Search Mode` from the hidden top-right area INTO the side pane (below the existing filters, above Search button). (5) Convert any inline-help labels (`(i)` etc.) to Fluent UI v9 `Popover` triggered by `Info16Regular` icon. (6) Default selection precedence per spec §6: URL envelope → `sprk_isdefault=true` → first row alphabetically. (7) On-change triggers re-search with the new searchIndexName + entityType. (8) Wire request body to use `buildSearchRequestFragment` output.
+  </prompt>
+
+  <role>
+    Code-page (React 18 + Fluent UI v9) developer comfortable with `@spaarke/auth`, Dataverse Web API, and the existing `useSemanticSearch` / `useRecordSearch` hooks.
+  </role>
+
+  <goal>
+    Code page side pane reflects spec §6 layout. Dropdown lists active `sprk_aisearchindex` rows by `sprk_displayname`. Selecting a row determines both `searchIndexName` AND entity filter (via `sprk_targetentitytype` Choice label normalize). `Relevance Threshold` + `Search Mode` are now in the side pane (discoverable). Popup `Info` icons replace inline-help labels.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/client/code-pages/SemanticSearch/src/App.tsx</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/types/index.ts</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md §6">Side-pane structure per spec §6: Search Index dropdown at top (replaces 4 tabs); existing filters keep label-above-control layout; Relevance Threshold + Search Mode moved IN below filters; Search button at bottom.</constraint>
+    <constraint source="spec.md §6.5">Use Choice's `@OData.Community.Display.V1.FormattedValue` (label string), NOT the integer value, for entity-type derivation. Normalize via `toLowerCase + replace(/\s+/g, '')`. "All" label → `scope: 'all'` (no entityType filter).</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + `tokens.*` for all styling. No hex literals. Dark-mode tokens for the new Dropdown + Popover.</constraint>
+    <constraint source="ADR-022">React 18 in code pages (different boundary from PCF which is React 16).</constraint>
+    <constraint source="ADR-028">Dataverse Web API call uses `credentials: 'include'` for the user session cookie; not via `authenticatedFetch` (which is for BFF). Dataverse OAuth is the user's session in the code page.</constraint>
+    <constraint source="NFR-11">Code page clean-rebuild required before deploy (rm -rf out/; npm run build) — covered in task 109.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-026-full-page-code-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse Web API in code page" location="standard">
+        `await fetch(${dataverseUrl}/api/data/v9.2/&lt;entityset&gt;?$select=...&amp;$filter=...&amp;$orderby=..., { headers: { Accept: 'application/json', 'OData-Version': '4.0', Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"' }, credentials: 'include' })`.
+      </pattern>
+      <pattern name="Fluent v9 Popover info icon" location="ADR-021">
+        `&lt;Popover&gt;&lt;PopoverTrigger&gt;&lt;Button icon={&lt;Info16Regular /&gt;} appearance="transparent" /&gt;&lt;/PopoverTrigger&gt;&lt;PopoverSurface&gt;...&lt;/PopoverSurface&gt;&lt;/Popover&gt;`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create `src/client/code-pages/SemanticSearch/src/services/aiSearchIndexService.ts` per spec §6 with `AiSearchIndexRow` interface + `listActiveSearchIndexes()` function. Include the `Prefer: odata.include-annotations="OData.Community.Display.V1.FormattedValue"` header so FormattedValue comes through.</step>
+    <step order="2">Create `src/client/code-pages/SemanticSearch/src/services/targetEntityNormalize.ts` per spec §6.5 with `normalizeTargetEntityLabel` + `buildSearchRequestFragment` + `ALL_SENTINEL` constant.</step>
+    <step order="3">Add unit tests for `targetEntityNormalize.ts`: each known label → expected wire form ("Matter"→"matter", "Work Assignment"→"workassignment", "All"→null+scope='all', etc.). Boundary tests: empty label → null; whitespace-only → null.</step>
+    <step order="4">Identify the current 4-domain-tab component in App.tsx (likely a `SearchDomain` enum + a TabList in the side pane). Replace with a Fluent v9 `Dropdown` populated by `listActiveSearchIndexes()`. The Dropdown calls `setActiveDomain` (or equivalent state) to a new shape: `{ searchIndexName, targetEntityType, displayName }`.</step>
+    <step order="5">Default selection per spec §6: on mount, fetch active rows; pick the row matching URL envelope `searchIndexName` (if present); else the row with `sprk_isdefault=true`; else the first by `sprk_displayorder` then `sprk_displayname`. If empty list, show a "no indexes configured" disabled state (spec §6 Authorization).</step>
+    <step order="6">Wire on-change: when user picks a different row, call existing `executeSearch` with the new fragment built from `buildSearchRequestFragment`. Cancel any in-flight search first.</step>
+    <step order="7">Update the request-body construction in `useSemanticSearch.ts` + `useRecordSearch.ts` to use `buildSearchRequestFragment` output (scope, entityType, searchIndexName) instead of the prior hard-coded scope logic. Keep the existing flow (request body shape, fetch, response handling) unchanged otherwise.</step>
+    <step order="8">Locate the current `Relevance Threshold` + `Search Mode` controls (likely in a Settings menu in the top-right). Move the controls into the side pane below the existing filters, above the Search button. Use the SAME control types (Slider for Threshold, Dropdown for Mode) — just relocated.</step>
+    <step order="9">Convert any inline-help labels (e.g., text after a field name like "Filter to threshold (0.0-1.0)") to a Fluent v9 `Popover` triggered by an `Info16Regular` Button next to the label. Help text content moves into the PopoverSurface.</step>
+    <step order="10">Add unit tests for `aiSearchIndexService.ts` (mock fetch; assert URL + headers; assert FormattedValue mapping into `sprk_targetentitytypeLabel`). Add component tests for the new Dropdown behavior (mount fetches; default selection precedence; on-change fires search).</step>
+    <step order="11">Run `npm test` — all green. Run `npm run lint`.</step>
+    <step order="12">Run code-review + adr-check at Step 9.5 (FULL rigor). Update `TASK-INDEX.md`: 108 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing App.tsx, hooks, parseUrlParams</tool>
+    <tool name="Write">New service + normalize files</tool>
+    <tool name="Edit">App.tsx side pane + hooks request-body changes</tool>
+    <tool name="Bash">npm test + npm run lint</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/services/aiSearchIndexService.ts (new)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/services/targetEntityNormalize.ts (new)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (side pane: dropdown replaces tabs; threshold + mode relocated; popups added)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts (use buildSearchRequestFragment)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts (use buildSearchRequestFragment)</output>
+    <output type="tests">Unit + component tests for new service, normalize, dropdown behavior</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Side pane shows a single "Search Index" Dropdown at top; 4 domain tabs removed.</criterion>
+    <criterion testable="true">Dropdown lists 8 options (per task 101 seed) sourced from `sprk_aisearchindex` via DV Web API; ordered by sprk_displayorder.</criterion>
+    <criterion testable="true">Default selection follows URL envelope → isdefault=true → first row precedence.</criterion>
+    <criterion testable="true">Selecting "Matters" sends request with scope='entity', entityType='matter', searchIndexName='spaarke-records-index'.</criterion>
+    <criterion testable="true">Selecting "All Records" sends request with scope='all' (no entityType), searchIndexName='spaarke-records-index'.</criterion>
+    <criterion testable="true">"Relevance Threshold" + "Search Mode" controls visible in side pane below the existing filters.</criterion>
+    <criterion testable="true">Popover info icons replace inline-help labels.</criterion>
+    <criterion testable="true">All unit + component tests pass.</criterion>
+    <criterion testable="true">Dark-mode renders correctly per ADR-021 (token-based; no hex).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
