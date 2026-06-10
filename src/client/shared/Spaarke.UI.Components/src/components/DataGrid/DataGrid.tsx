@@ -1191,21 +1191,24 @@ export const DataGrid: React.FC<DataGridProps> = props => {
              * Power Apps OOB pattern: header always visible, body empty,
              * empty-state message sits below the (empty) body.
              *
-             * ai-spaarke-ai-workspace-UI-r1 iter 2 round 3 (2026-06-09):
+             * ai-spaarke-ai-workspace-UI-r1 iter 2 round 4 (2026-06-09):
              * FluentDataGrid treats `columnSizingOptions` as INITIAL-only —
-             * once mounted, prop changes to those options do not re-flow the
-             * columns. To get responsive sizing in containers whose width
-             * changes (workspace section embeds; window resize), we gate
-             * mount on the first valid container-width measurement (skips
-             * the useless containerWidth=0 first frame) and use a key bucket
-             * (every 50px) so big resize deltas force a remount with fresh
-             * column widths. Selection state lives in DataGrid's React state
-             * (above this FluentDataGrid), so remount only loses Fluent's
-             * internal sort/filter-popover UI state — acceptable trade-off.
+             * once mounted, prop changes to those options do not re-flow
+             * the columns. To get responsive sizing in containers whose
+             * width changes (workspace section embeds; window resize), we
+             * use a key bucket (every 50px) so significant width changes
+             * force a remount with fresh column widths. We do NOT gate the
+             * mount on a non-zero width — that would collapse gridScroll's
+             * flex:1 layout (no children) and prevent the initial width
+             * measurement, leaving an empty pane. Instead the grid mounts
+             * immediately with the baseline (containerWidth=0) widths and
+             * remounts ~one frame later when useLayoutEffect measures.
+             * Selection state lives in DataGrid's React state above this
+             * FluentDataGrid, so remount only loses Fluent's internal
+             * sort/filter-popover UI state — acceptable trade-off.
              */}
-            {containerWidth > 0 && (
             <FluentDataGrid
-              key={`fg-${Math.floor(containerWidth / 50)}`}
+              key={`fg-${Math.floor((containerWidth || 0) / 50)}`}
               items={items}
               columns={tableColumns}
               selectionMode={
@@ -1253,7 +1256,6 @@ export const DataGrid: React.FC<DataGridProps> = props => {
                 )}
               </DataGridBody>
             </FluentDataGrid>
-            )}
 
             {isEmpty && (
               <div className={styles.emptyState}>
