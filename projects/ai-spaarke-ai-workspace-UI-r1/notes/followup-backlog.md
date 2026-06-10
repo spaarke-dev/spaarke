@@ -268,6 +268,37 @@ deploy scripts when convenient.
 
 ---
 
+## 7. CalendarSidePane — orphaned build (pre-existing) — LOW
+
+**Surfaced**: 2026-06-10 during Wave 3 deploy attempts.
+
+**Symptom**: `npm run build` in `src/solutions/CalendarSidePane/` fails with
+*"Could not resolve `./components` from `src/App.tsx`"*.
+
+**Root cause**: commit `dfabe436a` (r4 docs wave) deleted
+`src/solutions/CalendarSidePane/src/components/CalendarSection.tsx` and
+`components/index.ts` as part of the R4 hoist that consolidated calendar
+components into `@spaarke/events-components`. However, `CalendarSidePane/
+src/App.tsx` line 23 still imports `{ CalendarSection, type
+CalendarFilterOutput } from "./components"`. The expected follow-up — update
+App.tsx to import from `@spaarke/events-components` instead — was never done.
+
+**Box-sizing reset status**: ✅ applied to `index.html` (Wave 3 batch
+commit `69193486`). When the build is repaired and the next deploy happens,
+the reset is already in place.
+
+**Recommended fix**: change line 23 of `src/solutions/CalendarSidePane/src/
+App.tsx` from `"./components"` to `"@spaarke/events-components"`, verify
+CalendarSection's exported API matches the destructure, rebuild, redeploy.
+Estimated 15 minutes if the exports line up; longer if the API changed in
+the hoist.
+
+**Recommended owner**: whichever project owns CalendarSidePane long-term.
+If it's truly orphaned (no consumer), candidate for retirement in a future
+solutions audit.
+
+---
+
 ## Cross-cutting follow-up — CI gate adoption
 
 The new `scripts/check-html-css-reset.mjs` is currently invoked from 3
