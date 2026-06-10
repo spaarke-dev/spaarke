@@ -15,7 +15,11 @@ import {
   PopoverSurface,
   Divider,
 } from "@fluentui/react-components";
-import { Settings20Regular } from "@fluentui/react-icons";
+import {
+  Settings20Regular,
+  CheckmarkCircleFilled,
+  ErrorCircleFilled,
+} from "@fluentui/react-icons";
 import type {
   DailyDigestPreferences,
   NotificationCategory,
@@ -79,6 +83,32 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     textAlign: "right" as const,
     paddingTop: tokens.spacingVerticalXS,
+  },
+  // ai-spaarke-ai-workspace-UI-r1 #2 (2026-06-08): footer row with Save button
+  // + status message. Replaces the auto-save-on-every-change pattern with an
+  // explicit Save + visible confirmation per operator feedback.
+  footerRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  statusMessage: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    fontSize: tokens.fontSizeBase200,
+  },
+  statusSaved: {
+    color: tokens.colorStatusSuccessForeground1,
+  },
+  statusSaving: {
+    color: tokens.colorNeutralForeground3,
+  },
+  statusError: {
+    color: tokens.colorStatusDangerForeground1,
   },
 });
 
@@ -151,98 +181,142 @@ export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({
   onUpdatePreferences,
 }) => {
   const styles = useStyles();
-  const [saving, setSaving] = React.useState(false);
+
+  // ai-spaarke-ai-workspace-UI-r1 #2 (2026-06-08): explicit-save model.
+  // Replaces auto-save-on-every-change with a pending-state buffer + explicit
+  // Save button. Operator feedback: "need to expose Preferences and add a
+  // save button with confirm that saved." The previous auto-save UX had no
+  // visible confirmation that work was persisted.
+  //
+  // pendingPrefs holds the user's in-flight edits; preferences (prop) holds
+  // the last known persisted state. They diverge while the user is editing
+  // and re-converge on a successful Save.
+  const [pendingPrefs, setPendingPrefs] = React.useState<DailyDigestPreferences>(
+    preferences,
+  );
+  const [status, setStatus] = React.useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const statusTimerRef = React.useRef<number | null>(null);
+
+  // Sync pendingPrefs from prop when the parent fetches fresh state (e.g.
+  // after a successful save or a background refresh). Only resets when the
+  // user has no unsaved edits to avoid clobbering work in progress.
+  React.useEffect(() => {
+    setPendingPrefs(prev =>
+      JSON.stringify(prev) === JSON.stringify(preferences) ? prev : preferences,
+    );
+    // We want this effect to fire ONLY when the prop changes (not when
+    // pendingPrefs changes internally).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferences]);
+
+  React.useEffect(() => {
+    return () => {
+      if (statusTimerRef.current !== null) {
+        window.clearTimeout(statusTimerRef.current);
+      }
+    };
+  }, []);
+
+  const isDirty = React.useMemo(
+    () => JSON.stringify(pendingPrefs) !== JSON.stringify(preferences),
+    [pendingPrefs, preferences],
+  );
+
+  const scheduleStatusClear = React.useCallback((ms: number) => {
+    if (statusTimerRef.current !== null) {
+      window.clearTimeout(statusTimerRef.current);
+    }
+    statusTimerRef.current = window.setTimeout(() => {
+      setStatus('idle');
+      statusTimerRef.current = null;
+    }, ms);
+  }, []);
 
   // -----------------------------------------------------------------------
-  // Channel toggle handler
+  // Local-state handlers (no longer persist immediately)
   // -----------------------------------------------------------------------
 
   const handleChannelToggle = React.useCallback(
-    async (category: NotificationCategory, checked: boolean) => {
-      const currentDisabled = preferences.disabledChannels;
-      let updated: NotificationCategory[];
-
-      if (checked) {
-        // Enabling channel: remove from disabled list
-        updated = currentDisabled.filter((c) => c !== category);
-      } else {
-        // Disabling channel: add to disabled list
-        updated = currentDisabled.includes(category)
-          ? currentDisabled
-          : [...currentDisabled, category];
-      }
-
-      setSaving(true);
-      try {
-        await onUpdatePreferences({ disabledChannels: updated });
-      } finally {
-        setSaving(false);
-      }
+    (category: NotificationCategory, checked: boolean) => {
+      setPendingPrefs(prev => {
+        const currentDisabled = prev.disabledChannels;
+        const updated: NotificationCategory[] = checked
+          ? currentDisabled.filter(c => c !== category)
+          : currentDisabled.includes(category)
+            ? currentDisabled
+            : [...currentDisabled, category];
+        return { ...prev, disabledChannels: updated };
+      });
     },
-    [preferences.disabledChannels, onUpdatePreferences]
+    [],
   );
 
-  // -----------------------------------------------------------------------
-  // Parameter dropdown handlers
-  // -----------------------------------------------------------------------
-
   const handleDueWindowChange = React.useCallback(
-    async (_event: unknown, data: { optionValue?: string }) => {
+    (_event: unknown, data: { optionValue?: string }) => {
       if (!data.optionValue) return;
       const value = Number(data.optionValue) as DueWindowDays;
-      setSaving(true);
-      try {
-        await onUpdatePreferences({ dueWithinDays: value });
-      } finally {
-        setSaving(false);
-      }
+      setPendingPrefs(prev => ({ ...prev, dueWithinDays: value }));
     },
-    [onUpdatePreferences]
+    [],
   );
 
   const handleTimeWindowChange = React.useCallback(
-    async (_event: unknown, data: { optionValue?: string }) => {
+    (_event: unknown, data: { optionValue?: string }) => {
       if (!data.optionValue) return;
       const value = data.optionValue as TimeWindow;
-      setSaving(true);
-      try {
-        await onUpdatePreferences({ timeWindow: value });
-      } finally {
-        setSaving(false);
-      }
+      setPendingPrefs(prev => ({ ...prev, timeWindow: value }));
     },
-    [onUpdatePreferences]
+    [],
   );
 
   const handleConfidenceChange = React.useCallback(
-    async (_event: unknown, data: { optionValue?: string }) => {
+    (_event: unknown, data: { optionValue?: string }) => {
       if (!data.optionValue) return;
       const value = Number(data.optionValue) as AiConfidenceThreshold;
-      setSaving(true);
-      try {
-        await onUpdatePreferences({ minConfidence: value });
-      } finally {
-        setSaving(false);
-      }
+      setPendingPrefs(prev => ({ ...prev, minConfidence: value }));
     },
-    [onUpdatePreferences]
+    [],
   );
-
-  // -----------------------------------------------------------------------
-  // Auto-popup toggle handler
-  // -----------------------------------------------------------------------
 
   const handleAutoPopupToggle = React.useCallback(
-    async (_ev: unknown, data: { checked: boolean }) => {
-      setSaving(true);
-      try {
-        await onUpdatePreferences({ autoPopup: data.checked });
-      } finally {
-        setSaving(false);
-      }
+    (_ev: unknown, data: { checked: boolean }) => {
+      setPendingPrefs(prev => ({ ...prev, autoPopup: data.checked }));
     },
-    [onUpdatePreferences]
+    [],
   );
+
+  // -----------------------------------------------------------------------
+  // Save handler
+  // -----------------------------------------------------------------------
+
+  const handleSave = React.useCallback(async () => {
+    // Compute partial diff so only changed keys are sent to the persistence
+    // layer (preserves the existing onUpdatePreferences contract that accepts
+    // Partial<DailyDigestPreferences>).
+    const partial: Partial<DailyDigestPreferences> = {};
+    const allKeys = Object.keys(pendingPrefs) as Array<
+      keyof DailyDigestPreferences
+    >;
+    for (const k of allKeys) {
+      if (JSON.stringify(pendingPrefs[k]) !== JSON.stringify(preferences[k])) {
+        (partial as Record<string, unknown>)[k] = pendingPrefs[k];
+      }
+    }
+    if (Object.keys(partial).length === 0) return; // nothing to save
+
+    setStatus('saving');
+    try {
+      await onUpdatePreferences(partial);
+      setStatus('saved');
+      scheduleStatusClear(3000);
+    } catch (err) {
+      console.error('[PreferencesDropdown] save failed:', err);
+      setStatus('error');
+      scheduleStatusClear(6000);
+    }
+  }, [pendingPrefs, preferences, onUpdatePreferences, scheduleStatusClear]);
 
   // -----------------------------------------------------------------------
   // Render
@@ -266,7 +340,7 @@ export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({
         <div className={styles.section}>
           <Caption1 className={styles.sectionTitle}>Channels</Caption1>
           {TOGGLEABLE_CHANNELS.map((channel) => {
-            const isEnabled = !preferences.disabledChannels.includes(
+            const isEnabled = !pendingPrefs.disabledChannels.includes(
               channel.category
             );
             return (
@@ -302,10 +376,10 @@ export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({
               className={styles.dropdown}
               value={
                 DUE_WINDOW_OPTIONS.find(
-                  (o) => o.value === preferences.dueWithinDays
+                  (o) => o.value === pendingPrefs.dueWithinDays
                 )?.label ?? ""
               }
-              selectedOptions={[String(preferences.dueWithinDays)]}
+              selectedOptions={[String(pendingPrefs.dueWithinDays)]}
               onOptionSelect={handleDueWindowChange}
               aria-label="Due-soon window"
             >
@@ -327,10 +401,10 @@ export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({
               className={styles.dropdown}
               value={
                 TIME_WINDOW_OPTIONS.find(
-                  (o) => o.value === preferences.timeWindow
+                  (o) => o.value === pendingPrefs.timeWindow
                 )?.label ?? ""
               }
-              selectedOptions={[preferences.timeWindow]}
+              selectedOptions={[pendingPrefs.timeWindow]}
               onOptionSelect={handleTimeWindowChange}
               aria-label="Recency time window"
             >
@@ -355,10 +429,10 @@ export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({
               className={styles.dropdown}
               value={
                 CONFIDENCE_OPTIONS.find(
-                  (o) => o.value === preferences.minConfidence
+                  (o) => o.value === pendingPrefs.minConfidence
                 )?.label ?? ""
               }
-              selectedOptions={[String(preferences.minConfidence)]}
+              selectedOptions={[String(pendingPrefs.minConfidence)]}
               onOptionSelect={handleConfidenceChange}
               aria-label="AI confidence threshold"
             >
@@ -377,16 +451,53 @@ export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({
         <div className={styles.autoPopupRow}>
           <Body1>Auto-open on launch</Body1>
           <Switch
-            checked={preferences.autoPopup}
+            checked={pendingPrefs.autoPopup}
             onChange={handleAutoPopupToggle}
             aria-label="Auto-open digest on workspace launch"
           />
         </div>
 
-        {/* Save indicator */}
-        {saving && (
-          <Caption1 className={styles.saveIndicator}>Saving...</Caption1>
-        )}
+        {/* Footer: status message + explicit Save button.
+            ai-spaarke-ai-workspace-UI-r1 #2 (2026-06-08). */}
+        <div className={styles.footerRow}>
+          <span
+            className={`${styles.statusMessage} ${
+              status === 'saved'
+                ? styles.statusSaved
+                : status === 'error'
+                  ? styles.statusError
+                  : styles.statusSaving
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {status === 'saving' && 'Saving…'}
+            {status === 'saved' && (
+              <>
+                <CheckmarkCircleFilled />
+                Saved
+              </>
+            )}
+            {status === 'error' && (
+              <>
+                <ErrorCircleFilled />
+                Save failed — try again
+              </>
+            )}
+            {status === 'idle' && isDirty && (
+              <Caption1>Unsaved changes</Caption1>
+            )}
+          </span>
+          <Button
+            appearance="primary"
+            size="small"
+            onClick={handleSave}
+            disabled={!isDirty || status === 'saving'}
+            aria-label="Save preferences"
+          >
+            Save
+          </Button>
+        </div>
       </PopoverSurface>
     </Popover>
   );

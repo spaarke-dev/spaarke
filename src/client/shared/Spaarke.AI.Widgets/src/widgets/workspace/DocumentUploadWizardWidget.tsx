@@ -56,12 +56,12 @@ import {
   Checkmark24Regular,
 } from '@fluentui/react-icons';
 
-import { FileUploadZone } from '@spaarke/ui-components/src/components/FileUpload/FileUploadZone';
-import { UploadedFileList } from '@spaarke/ui-components/src/components/FileUpload/UploadedFileList';
+import { FileUploadZone } from '@spaarke/ui-components/components/FileUpload/FileUploadZone';
+import { UploadedFileList } from '@spaarke/ui-components/components/FileUpload/UploadedFileList';
 import type {
   IUploadedFile,
   IFileValidationError,
-} from '@spaarke/ui-components/src/components/FileUpload/fileUploadTypes';
+} from '@spaarke/ui-components/components/FileUpload/fileUploadTypes';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';

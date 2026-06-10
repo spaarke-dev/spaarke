@@ -115,5 +115,6 @@ export function resolveConfig(userConfig?: IAuthConfig): Required<IAuthConfig> {
     bffBaseUrl,
     proactiveRefresh: userConfig?.proactiveRefresh ?? false,
     requireXrm: userConfig?.requireXrm ?? false,
+    requireSilentOnly: userConfig?.requireSilentOnly ?? false,
   };
 }

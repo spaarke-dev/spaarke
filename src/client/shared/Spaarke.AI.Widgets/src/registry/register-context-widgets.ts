@@ -28,14 +28,26 @@
  */
 
 import { registerContextWidget } from './ContextWidgetRegistry';
+import { safeRegister } from '@spaarke/ui-components';
 import type { ContextWidgetComponent } from '../types/widget-types';
+
+// ai-spaarke-ai-workspace-UI-r1 brittleness Phase B.5 (2026-06-09):
+// Isolate each registration so a synchronous throw from one call (factory-
+// expression evaluation failure, malformed registration object) does not skip
+// the registrations that follow. See safeRegister docblock + the same pattern
+// in `register-workspace-widgets.ts`.
+function safeRegisterContext(
+  ...args: Parameters<typeof registerContextWidget>
+): void {
+  safeRegister('ContextWidget', args[0], () => registerContextWidget(...args));
+}
 
 // ---------------------------------------------------------------------------
 // progress-tracker
 // (also registered inline in index.ts — duplicate is safe, first wins)
 // ---------------------------------------------------------------------------
 
-registerContextWidget('progress-tracker', {
+safeRegisterContext('progress-tracker', {
   factory: () => import('../widgets/context/ProgressTrackerWidget').then(m => ({ default: m.default })),
 });
 
@@ -48,7 +60,7 @@ registerContextWidget('progress-tracker', {
 // (also registered inline in index.ts — duplicate is safe, first wins)
 // ---------------------------------------------------------------------------
 
-registerContextWidget('playbook-gallery', {
+safeRegisterContext('playbook-gallery', {
   factory: () =>
     // Type-erasure cast: ContextWidgetComponent<unknown> at registry vs widget's
     // typed default (ContextWidgetComponent<PlaybookGalleryData>) — registry
@@ -70,7 +82,7 @@ registerContextWidget('playbook-gallery', {
 //              when the user navigates to a different entity record.
 // ---------------------------------------------------------------------------
 
-registerContextWidget('entity-info', {
+safeRegisterContext('entity-info', {
   factory: () =>
     // Type-erasure cast: registry boundary variance (see playbook-gallery above).
     import('../widgets/context/EntityInfoWidget').then(m => ({
@@ -90,7 +102,7 @@ registerContextWidget('entity-info', {
 // (also registered inline in index.ts — duplicate is safe, first wins)
 // ---------------------------------------------------------------------------
 
-registerContextWidget('findings', {
+safeRegisterContext('findings', {
   factory: () =>
     // Type-erasure cast: registry boundary variance (see playbook-gallery above).
     import('../widgets/context/FindingsWidget').then(m => ({
@@ -117,7 +129,7 @@ registerContextWidget('findings', {
 //              into the Workspace pane as a `document-viewer` tab.
 // ---------------------------------------------------------------------------
 
-registerContextWidget('file-preview', {
+safeRegisterContext('file-preview', {
   factory: () =>
     // Type-erasure cast: registry boundary variance (see playbook-gallery above).
     import('../widgets/context/FilePreviewContextWidget').then(m => ({

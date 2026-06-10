@@ -1,366 +1,67 @@
 /**
- * documents.registration.ts — SectionRegistration for the My Documents section.
+ * documents.registration.ts — SectionRegistration for the My Documents workspace section.
  *
- * Migrates the My Documents (DocumentsTab content) section from the monolithic
- * workspaceConfig to the dynamic Section Registry pattern (WKSP-001). Moves
- * toolbar construction and handler wiring into the factory.
+ * ai-spaarke-ai-workspace-UI-r1 #4 (2026-06-08):
+ *   Retired the card-view `DocumentsTab` implementation in favour of the shared
+ *   `<DataverseEntityViewWidget>` from `@spaarke/ai-widgets`. The section now
+ *   embeds a Spaarke DataGrid driven by an operator-created
+ *   `sprk_gridconfiguration` row (constant DOCUMENTS_CONFIG_ID below — must be
+ *   replaced before deployment). The grid framework owns the view picker,
+ *   filter chips, command bar, and lazy paging that the previous card view
+ *   approximated by hand.
  *
- * The section title area renders a plain-text Menu-based view picker (instead of
- * a bordered Dropdown) so users can switch between available sprk_document views.
- * Selecting a view updates both the card list AND which view opens in the dialog.
+ * Pattern D (dual-use):
+ *   Same widget is registered as a Direct widget (`documents-list` widgetType)
+ *   in `@spaarke/ai-widgets/widgets/workspace/register-workspace-widgets.ts`.
+ *   The component is the single source of truth; this file is the LW-side shim.
  *
- * Architecture: DocumentsViewMenuTitle (title) and DocumentsSectionContent
- * (body) are siblings in SectionPanel. They share state via a mutable controller
- * ref — the title writes a setter into the ref on mount, and the body calls it
- * when the view changes. This avoids lifting state into the workspace root.
- *
- * R8 Wave 3 task 111 (2026-05-22): the rendered DocumentsTab is now in GRID
- * MODE — 2 columns × 10 rows = 20-card cap with no scrollbar. Operator request
- * for the Dataverse-seeded "Documents" system workspace embedded via
- * WorkspaceLayoutWidget → LegalWorkspaceApp. Overflow falls through the
- * existing "Open documents list" / "View all..." handler so users still
- * reach all sprk_document records when total > 20.
- *
- * Standards: ADR-012 (shared components), ADR-021 (Fluent v9)
+ * Standards: ADR-012 (shared lib widget), ADR-021 (Fluent v9), ADR-022 (React 19),
+ *            ADR-028 (Xrm.WebApi — no token snapshots).
  */
 
 import * as React from "react";
-import {
-  Button,
-  Text,
-  Menu,
-  MenuTrigger,
-  MenuButton,
-  MenuPopover,
-  MenuList,
-  MenuItem,
-  tokens,
-} from "@fluentui/react-components";
-import {
-  DocumentRegular,
-  ArrowClockwiseRegular,
-  AddRegular,
-  OpenRegular,
-  CheckmarkRegular,
-} from "@fluentui/react-icons";
-import { ViewService, getXrm } from "@spaarke/ui-components";
-import type { IViewDefinition } from "@spaarke/ui-components";
+import { DocumentRegular } from "@fluentui/react-icons";
 import type {
   SectionRegistration,
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import { DocumentsTab } from "../components/RecordCards/DocumentsTab";
-import type { DataverseService } from "../services/DataverseService";
+import { DataverseEntityViewWidget } from "@spaarke/ai-widgets/widgets/workspace/DataverseEntityViewWidget";
 
-// ---------------------------------------------------------------------------
-// Toolbar divider — thin vertical separator between toolbar button groups.
-// ---------------------------------------------------------------------------
-
-const ToolbarDivider: React.FC = () =>
-  React.createElement("span", {
-    "aria-hidden": "true",
-    style: {
-      width: "1px",
-      height: "20px",
-      backgroundColor: "var(--colorNeutralStroke2)",
-      marginLeft: "2px",
-      marginRight: "2px",
-      flexShrink: 0,
-      display: "inline-block",
-    },
-  });
-
-// ---------------------------------------------------------------------------
-// DocumentsViewMenuTitle — renders a plain-text Menu-based view picker in the
-// section title area. Looks like "My Documents ∨" with no border or background,
-// matching the section title font (size 400, semibold).
-//
-// Exposes view changes to the factory via onViewChange callback.
-// ---------------------------------------------------------------------------
-
-interface IDocumentsViewMenuTitleProps {
-  onViewChange: (view: IViewDefinition) => void;
-}
-
-const DocumentsViewMenuTitle: React.FC<IDocumentsViewMenuTitleProps> = ({
-  onViewChange,
-}) => {
-  const [views, setViews] = React.useState<IViewDefinition[]>([]);
-  const [selectedView, setSelectedView] = React.useState<IViewDefinition | undefined>();
-  const xrm = getXrm();
-
-  React.useEffect(() => {
-    if (!xrm) return;
-    let mounted = true;
-    const service = new ViewService(xrm);
-    service
-      .getViews("sprk_document", { includePersonal: true })
-      .then((fetchedViews) => {
-        if (!mounted) return;
-        setViews(fetchedViews);
-        // Auto-select the default view but don't call onViewChange —
-        // the default is already what the tab shows on initial load.
-        const defaultView = fetchedViews.find((v) => v.isDefault) ?? fetchedViews[0];
-        if (defaultView) setSelectedView(defaultView);
-      })
-      .catch(() => {
-        // View fetch failed — graceful fallback to static title
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [xrm]);
-
-  const displayName = selectedView?.name ?? "My Documents";
-
-  // No Xrm or no views yet — render static title
-  if (!xrm || views.length === 0) {
-    return React.createElement(
-      Text,
-      { size: 400, weight: "semibold" as const },
-      displayName,
-    );
-  }
-
-  return React.createElement(
-    Menu,
-    null,
-    React.createElement(
-      MenuTrigger,
-      { disableButtonEnhancement: true },
-      React.createElement(
-        MenuButton,
-        {
-          appearance: "transparent" as const,
-          size: "small" as const,
-          style: {
-            fontSize: tokens.fontSizeBase400,
-            fontWeight: tokens.fontWeightSemibold,
-            color: tokens.colorNeutralForeground1,
-            padding: "0 2px",
-            minWidth: "unset",
-            height: "auto",
-            lineHeight: "normal",
-          },
-        },
-        displayName,
-      ),
-    ),
-    React.createElement(
-      MenuPopover,
-      null,
-      React.createElement(
-        MenuList,
-        null,
-        ...views.map((view) =>
-          React.createElement(
-            MenuItem,
-            {
-              key: view.id,
-              icon:
-                selectedView?.id === view.id
-                  ? React.createElement(CheckmarkRegular)
-                  : React.createElement("span", { style: { width: "16px", display: "inline-block" } }),
-              onClick: () => {
-                setSelectedView(view);
-                onViewChange(view);
-              },
-            },
-            view.name,
-          ),
-        ),
-      ),
-    ),
-  );
-};
-
-// ---------------------------------------------------------------------------
-// DocumentsSectionContent — wrapper that holds selectedViewId React state.
-//
-// This component is the "body" sibling of DocumentsViewMenuTitle in SectionPanel.
-// Since they cannot share React state directly, the factory creates a controller
-// ref. This component writes its setSelectedViewId into that ref via
-// onControllerReady; the title calls it when the user picks a different view.
-// ---------------------------------------------------------------------------
-
-interface ISelectedView {
-  viewId: string | undefined;
-  viewType: string | undefined;
-}
-
-interface IDocumentsSectionContentProps {
-  service: DataverseService;
-  userId: string;
-  onCountChange?: (count: number) => void;
-  onRefetchReady?: (refetch: () => void) => void;
-  onControllerReady?: (setView: (view: ISelectedView) => void) => void;
-  onShowMore?: () => void;
-  maxVisible?: number;
-  scope?: "my" | "all";
-  businessUnitId?: string;
-  /** When set, renders cards in a CSS grid (columns × maxRows, no scrollbar). */
-  gridMode?: { columns: number; maxRows: number };
-}
-
-const DocumentsSectionContent: React.FC<IDocumentsSectionContentProps> = ({
-  service,
-  userId,
-  onCountChange,
-  onRefetchReady,
-  onControllerReady,
-  onShowMore,
-  maxVisible,
-  scope,
-  businessUnitId,
-  gridMode,
-}) => {
-  const [selectedView, setSelectedView] = React.useState<ISelectedView>({ viewId: undefined, viewType: undefined });
-
-  // Register the setter so the title component can trigger view changes.
-  // Runs on every render to ensure the controller ref always has the latest setter
-  // (the ref is recreated when the factory's config memo re-evaluates).
-  React.useEffect(() => {
-    onControllerReady?.(setSelectedView);
-  });
-
-  return React.createElement(DocumentsTab, {
-    service,
-    userId,
-    maxVisible: maxVisible ?? 6,
-    selectedViewId: selectedView.viewId,
-    scope,
-    businessUnitId,
-    selectedViewType: selectedView.viewType,
-    onCountChange,
-    onRefetchReady,
-    onShowMore,
-    gridMode,
-  });
-};
-
-// ---------------------------------------------------------------------------
-// Registration
-// ---------------------------------------------------------------------------
+/**
+ * GUID of the `sprk_gridconfiguration` Dataverse row for the My Documents view.
+ *
+ * **DEPLOYMENT REQUIREMENT**: Operator MUST replace this placeholder with the
+ * real GUID before deployment. See
+ * `projects/ai-spaarke-ai-workspace-UI-r1/notes/entity-view-widget-deployment.md`
+ * for the operator setup. The DataGrid framework renders a clear empty state
+ * when this id resolves to an unknown record.
+ */
+// spaarkedev1 sprk_gridconfiguration: 'Active Documents (Workspace)'
+// (created 2026-06-09; replaces the legacy 'Semantic Search Documents View'
+// row d99a4352-… which had the SemanticSearchControl PCF config shape
+// instead of the DataGrid framework `source` shape).
+const DOCUMENTS_CONFIG_ID = "1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6";
 
 export const documentsRegistration: SectionRegistration = {
   id: "documents",
   label: "My Documents",
-  description: "Recent documents with quick actions",
+  description: "Your documents",
   icon: DocumentRegular,
   category: "data",
-  defaultHeight: "560px",
+  defaultHeight: "480px",
 
-  factory(context: SectionFactoryContext): ContentSectionConfig {
-    // selectedViewIdRef — the currently selected view ID.
-    // Written by DocumentsViewMenuTitle, read by the Open button onClick.
-    const selectedViewIdRef: { current: string | undefined } = { current: undefined };
-
-    // contentControllerRef — holds the setter exposed by DocumentsSectionContent.
-    // Written by DocumentsSectionContent on mount, called by DocumentsViewMenuTitle.
-    const contentControllerRef: {
-      current: ((view: ISelectedView) => void) | undefined;
-    } = { current: undefined };
-
-    // Refetch handle — captured by the refresh button's onClick closure.
-    let refetchFn: (() => void) | undefined;
-
-    // Title: plain-text Menu-based view picker
-    const titleContent = React.createElement(DocumentsViewMenuTitle, {
-      onViewChange: (view: IViewDefinition) => {
-        selectedViewIdRef.current = view.id;
-        contentControllerRef.current?.({ viewId: view.id, viewType: view.viewType });
-      },
-    });
-
-    const toolbar = React.createElement(
-      React.Fragment,
-      null,
-      // Refresh button (left-aligned via marginRight: auto)
-      React.createElement(Button, {
-        appearance: "subtle",
-        size: "small",
-        icon: React.createElement(ArrowClockwiseRegular),
-        onClick: () => refetchFn?.(),
-        "aria-label": "Refresh documents",
-        style: { marginRight: "auto" },
-      }),
-      // Divider
-      React.createElement(ToolbarDivider),
-      // Right button group: add + open (15px gap)
-      React.createElement(
-        "div",
-        {
-          style: {
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: "15px",
-          },
-        },
-        // Add document button
-        React.createElement(Button, {
-          appearance: "subtle",
-          size: "small",
-          icon: React.createElement(AddRegular),
-          onClick: () => context.onOpenWizard("sprk_documentuploadwizard"),
-          "aria-label": "Add document",
-        }),
-        // Open documents list button — opens the selected view in Dataverse
-        React.createElement(Button, {
-          appearance: "subtle",
-          size: "small",
-          icon: React.createElement(OpenRegular),
-          onClick: () =>
-            context.onOpenDocumentsDialog?.(selectedViewIdRef.current),
-          "aria-label": "Open documents list",
-        }),
-      ),
-    );
-
+  factory(_context: SectionFactoryContext): ContentSectionConfig {
     return {
       id: "documents",
       type: "content",
       title: "My Documents",
-      titleContent,
-      toolbar,
-      style: { overflow: "visible" },
+      style: { overflow: "hidden" },
       renderContent: () =>
-        React.createElement(
-          "div",
-          {
-            style: {
-              display: "flex",
-              flexDirection: "column",
-              flex: "1 1 0",
-              overflow: "visible",
-            },
-          },
-          React.createElement(DocumentsSectionContent, {
-            service: context.service as DataverseService,
-            userId: context.userId,
-            // R8 Wave 3 task 111: render a 2 wide × 10 tall grid (20 cards
-            // max). Operator (2026-05-22) requested NO scrollbar on the
-            // embedded "Documents" system workspace, so the cap is also the
-            // hard visual limit. Overflow ("View all...") reuses the existing
-            // onOpenDocumentsDialog handler so users still reach the full
-            // sprk_document view when totalCount > 20.
-            maxVisible: 20,
-            gridMode: { columns: 2, maxRows: 10 },
-            scope: context.scope,
-            businessUnitId: context.businessUnitId,
-            onCountChange: context.onBadgeCountChange,
-            onRefetchReady: (refetch: () => void) => {
-              refetchFn = refetch;
-              context.onRefetchReady(refetch);
-            },
-            onControllerReady: (setView) => {
-              contentControllerRef.current = setView;
-            },
-            onShowMore: () =>
-              context.onOpenDocumentsDialog?.(selectedViewIdRef.current),
-          }),
-        ),
+        React.createElement(DataverseEntityViewWidget, {
+          data: { configId: DOCUMENTS_CONFIG_ID },
+          widgetType: "documents-list",
+        }),
     };
   },
 };

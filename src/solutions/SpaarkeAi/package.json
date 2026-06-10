@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/spaarkeai.html');\"",
+    "typecheck": "node ../../../scripts/tsc-surface-gate.mjs",
+    "check:html-reset": "node ../../../scripts/check-html-css-reset.mjs",
+    "build": "node ../../../scripts/check-html-css-reset.mjs && node ../../../scripts/tsc-surface-gate.mjs && vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/spaarkeai.html');\"",
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
@@ -44,7 +46,9 @@
     "diff": "^8.0.3",
     "dompurify": "^3.4.0",
     "lexical": "^0.41.0",
+    "mammoth": "^1.12.0",
     "marked": "^17.0.4",
+    "pdfjs-dist": "^5.7.284",
     "react-window": "^1.8.11",
     "scheduler": "^0.27.0"
   },
@@ -54,6 +58,7 @@
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.6.1",
     "@types/jest": "^30.0.0",
+    "@types/powerapps-component-framework": "^1.3.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.2.1",

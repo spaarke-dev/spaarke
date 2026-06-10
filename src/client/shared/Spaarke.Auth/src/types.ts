@@ -32,6 +32,25 @@ export interface IAuthConfig {
   proactiveRefresh?: boolean;
   /** If true, throw AuthError if Xrm is not available. */
   requireXrm?: boolean;
+  /**
+   * If true, `BrowserMsalStrategy.acquire()` skips the interactive
+   * `acquireTokenPopup` fallback (step 3) and returns an empty token result
+   * when both silent paths fail. The caller is then expected to surface the
+   * unauthenticated state gracefully (e.g. via `authenticatedFetch`'s 401
+   * retry, or by showing a "Please reload" UI).
+   *
+   * Use case: hosts that launch in a popup / child window with their own
+   * isolated MSAL cache (e.g. `WorkspaceLayoutWizard` opened via
+   * `Xrm.Navigation.navigateTo({ target: 2 })`). The popup's empty cache
+   * would otherwise force `acquireTokenPopup` on first `initAuth()`, which
+   * violates ADR-028 INV-5 ("popup only when user explicitly triggers an
+   * auth-dependent action"). Setting this flag accepts a degraded steady
+   * state (BFF calls may 401 once until the silent path succeeds) in
+   * exchange for no involuntary sign-in popups.
+   *
+   * Default: false (existing behavior — popup fallback is enabled).
+   */
+  requireSilentOnly?: boolean;
 }
 
 /**

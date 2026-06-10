@@ -92,25 +92,31 @@
 import * as React from 'react';
 import {
   makeStyles,
+  mergeClasses,
   tokens,
   shorthands,
-  Dropdown,
-  Option,
-  Input,
   Label,
   Button,
   Tooltip,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  RadioGroup,
+  Radio,
+  Input,
+  Text,
 } from '@fluentui/react-components';
 import {
   ChevronLeft20Regular,
   ChevronRight20Regular,
-  CaretUp24Regular,
-  CaretDown24Regular,
+  ChevronDown16Regular,
+  CalendarLtr24Filled,
+  CalendarLtr24Regular,
 } from '@fluentui/react-icons';
 
 import { EventsPageProvider, useEventsPageContext } from '../../context/EventsPageContext';
 import { CalendarSection } from '../../components/CalendarSection/CalendarSection';
-import type { IEventDateInfo } from '../../components/CalendarSection/CalendarSection';
+import type { IEventDateInfo, CalendarFilterOutput } from '../../components/CalendarSection/CalendarSection';
 import { addMonths, startOfMonth } from '../../utils/dateMath';
 
 // Cross-package SOURCE imports. Deep paths (not the @spaarke/ui-components
@@ -301,38 +307,69 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     ...shorthands.padding('8px'),
     ...shorthands.gap('8px'),
-    overflowY: 'auto',
+    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): root no longer scrolls.
+    // The grid container owns its own scroll so the filter row + calendar
+    // strip stay anchored at the top while only the event grid scrolls.
+    overflow: 'hidden',
     boxSizing: 'border-box',
-    scrollbarWidth: 'none',
-    '::-webkit-scrollbar': {
-      display: 'none',
-    },
   },
+  // ai-spaarke-ai-workspace-UI-r1 iteration 2 (2026-06-08): filter row is
+  // now a Semantic-Search-style toolbar of chip buttons (Event Type ⌄,
+  // Event Status ⌄, Date Range ⌄, Filter by Date Field ⌄). Gray toolbar
+  // background per operator feedback (match the DataGrid header).
   dateRangeRow: {
     display: 'flex',
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     flexWrap: 'wrap',
-    rowGap: '12px',
+    rowGap: tokens.spacingVerticalS,
+    columnGap: tokens.spacingHorizontalS,
     flexShrink: 0,
-    ...shorthands.padding('4px', '4px', '8px', '4px'),
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
   },
-  dateRangeField: {
+  filterChipButton: {
+    minWidth: 'auto',
+    fontWeight: tokens.fontWeightRegular,
+  },
+  filterChipButtonActive: {
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground2,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  filterPopoverSurface: {
+    minWidth: '240px',
+    padding: tokens.spacingHorizontalM,
     display: 'flex',
     flexDirection: 'column',
-    flex: '1 0 140px',
-    minWidth: '140px',
+    rowGap: tokens.spacingVerticalS,
   },
-  dateRangeLabel: {
+  filterPopoverLabel: {
     fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-    marginBottom: '4px',
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  filterPopoverFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    columnGap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  quickSelectGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: tokens.spacingHorizontalS,
   },
   filterActions: {
     display: 'flex',
     alignItems: 'flex-end',
     flexShrink: 0,
+    // Push the Apply/Clear/Calendar-toggle cluster all the way to the right
+    // edge of the chip toolbar (operator testing feedback, 2026-06-09 round 2).
+    marginLeft: 'auto',
     ...shorthands.gap('8px'),
   },
   calendarRow: {
@@ -360,7 +397,14 @@ const useStyles = makeStyles({
     flex: '1 1 auto',
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '320px',
+    // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): fit the event grid to
+    // the widget container. `minHeight: 0` lets the flex child shrink below
+    // its intrinsic content height so the DataGrid can size to the
+    // remaining space and scroll internally instead of pushing the root
+    // beyond its bounds. `overflow: hidden` clips any DataGrid bleed
+    // (header sticky / footer pagination) to the container edge.
+    minHeight: 0,
+    overflow: 'hidden',
     marginTop: tokens.spacingVerticalL,
   },
 });
@@ -443,10 +487,13 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     });
   }, []);
 
-  // ── Day-cell selection (task 118) ────────────────────────────────────────
-  // Day-click bypasses pending/applied; selectedDate drives a one-day
-  // hostFilter directly in the useMemo below.
-  const [selectedDate, setSelectedDate] = React.useState<Date | null>(null);
+  // ── Day-cell selection ───────────────────────────────────────────────────
+  // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): the previous `selectedDate`
+  // single-day state has been removed. Day clicks now drive the range via
+  // `pending.fromDate` / `pending.toDate` exclusively (CalendarSection runs in
+  // `clickMode='range'`, emits `single` / `range` / `clear` via
+  // `onFilterChange`, and `onCalendarFilter` below mirrors that into pending
+  // state). One source of truth for date filtering.
 
   // ── Event-day derivation (task 120) ──────────────────────────────────────
   const lastAutoAnchorSignatureRef = React.useRef<string | null>(null);
@@ -547,14 +594,19 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
   const [applied, setApplied] = React.useState<ICalendarFilterSet>(initialFilterSet);
 
   const hasUnapplied = !filterSetsEqual(pending, applied);
-  const hasAnyApplied = !filterSetIsEmpty(applied) || selectedDate !== null;
+  const hasAnyApplied = !filterSetIsEmpty(applied);
 
-  // ── hostFilters useMemo (Task 033b — the rewire) ─────────────────────────
-  // Map applied + selectedDate to a flat HostFilterCondition[] (task 033a API).
-  // selectedDate (day-click) takes precedence over the filter row's range
-  // when both are present — the original divergence effect handled this by
-  // clearing selectedDate when range fired; here we express the priority
-  // directly so there's only one source of truth.
+  // ── hostFilters useMemo ──────────────────────────────────────────────────
+  // Map applied → flat HostFilterCondition[] (task 033a API).
+  //
+  // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): single source of truth for
+  // date filtering — `applied.fromDate` / `applied.toDate` (the range set by
+  // CalendarSection day clicks in `clickMode='range'`). When the user has
+  // not chosen a date-field, default to `sprk_duedate` so the range still
+  // filters something meaningful. When both ends of the range equal the same
+  // day (the "first-click-only" interim state), this emits a single-day
+  // `on` filter — exactly what the user expects to see after the first
+  // click before they pick the second.
   const hostFilters = React.useMemo<HostFilterCondition[]>(() => {
     const conditions: HostFilterCondition[] = [];
 
@@ -574,33 +626,32 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
       });
     }
 
-    // Date filter: selectedDate wins if set; otherwise fall through to the
-    // applied dateField / from / to range. dateField "(none)" → no date filter.
-    if (selectedDate) {
-      const iso = toIsoDate(selectedDate);
+    if (applied.fromDate || applied.toDate) {
       const effectiveDateField =
         applied.dateField && applied.dateField !== DATE_FIELD_NONE ? applied.dateField : 'sprk_duedate';
-      conditions.push({
-        attribute: effectiveDateField,
-        operator: 'on',
-        value: iso,
-      });
-    } else if (applied.dateField && applied.dateField !== DATE_FIELD_NONE) {
       if (applied.fromDate && applied.toDate) {
-        conditions.push({
-          attribute: applied.dateField,
-          operator: 'between',
-          value: [applied.fromDate, applied.toDate],
-        });
+        if (applied.fromDate === applied.toDate) {
+          conditions.push({
+            attribute: effectiveDateField,
+            operator: 'on',
+            value: applied.fromDate,
+          });
+        } else {
+          conditions.push({
+            attribute: effectiveDateField,
+            operator: 'between',
+            value: [applied.fromDate, applied.toDate],
+          });
+        }
       } else if (applied.fromDate) {
         conditions.push({
-          attribute: applied.dateField,
+          attribute: effectiveDateField,
           operator: 'on-or-after',
           value: applied.fromDate,
         });
       } else if (applied.toDate) {
         conditions.push({
-          attribute: applied.dateField,
+          attribute: effectiveDateField,
           operator: 'on-or-before',
           value: applied.toDate,
         });
@@ -608,24 +659,48 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     }
 
     return conditions;
-  }, [applied, selectedDate]);
+  }, [applied]);
 
   // ── Apply + Clear handlers ───────────────────────────────────────────────
   const onApply = React.useCallback(() => {
     setApplied(pending);
   }, [pending]);
 
+  // 2026-06-09 round 2: CalendarSection holds its own internal "selected
+  // range" state (which drives the highlighted-day visual). Clearing the
+  // host's pending/applied filters doesn't reset that internal state, so
+  // the calendar still shows the previously-selected day(s) highlighted.
+  // Fix: bump a key on Clear so React fully unmounts + remounts the
+  // CalendarSection — its internal state resets back to nothing.
+  const [calendarResetKey, setCalendarResetKey] = React.useState(0);
   const onClear = React.useCallback(() => {
     setPending(EMPTY_FILTER_SET);
     setApplied(EMPTY_FILTER_SET);
-    setSelectedDate(null);
+    setCalendarResetKey(k => k + 1);
   }, []);
 
-  // ── Day-cell click handler (task 118 — preserved) ────────────────────────
-  // Updates only selectedDate; hostFilters useMemo recomputes and the
-  // grid re-fetches.
-  const onDaySelect = React.useCallback((date: Date | null) => {
-    setSelectedDate(date);
+  // ── Calendar range click handler ─────────────────────────────────────────
+  // ai-spaarke-ai-workspace-UI-r1 #1 (2026-06-08): CalendarSection runs in
+  // `clickMode='range'` and emits three filter shapes:
+  //   • `{ type: 'single', date }` after the first click — range start picked,
+  //     range end still pending. We mirror this as `fromDate=toDate=date` so
+  //     the grid filters to the chosen day immediately.
+  //   • `{ type: 'range', start, end }` after the second click — finalize.
+  //   • `{ type: 'clear' }` when the calendar's third-click reset occurs (or
+  //     the host's Clear button — but we drive that via setPending directly).
+  // The Apply button stays the gate to push `pending` → `applied` so all
+  // filter changes (date + type + status) feel coherent.
+  const onCalendarFilter = React.useCallback((filter: CalendarFilterOutput | null) => {
+    if (!filter || filter.type === 'clear') {
+      setPending(prev => ({ ...prev, fromDate: '', toDate: '' }));
+      return;
+    }
+    if (filter.type === 'single') {
+      setPending(prev => ({ ...prev, fromDate: filter.date, toDate: filter.date }));
+      return;
+    }
+    // 'range'
+    setPending(prev => ({ ...prev, fromDate: filter.start, toDate: filter.end }));
   }, []);
 
   // ── Month navigation handlers (task 116) ─────────────────────────────────
@@ -678,89 +753,227 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     [openEvent]
   );
 
+  // ── Date-range chip helpers ─────────────────────────────────────────────
+  // ai-spaarke-ai-workspace-UI-r1 iteration 2 (2026-06-08): Date Range
+  // re-introduced as a chip popover (operator request — bring it back from
+  // the field-dropdown pattern in Semantic Search). The popover surfaces
+  // From / To date inputs AND Quick Select presets. State still flows via
+  // pending.fromDate / pending.toDate so calendar day-clicks (clickMode=range)
+  // and the chip's edits share one source of truth.
+  const dateRangeDisplay = React.useMemo(() => {
+    if (pending.fromDate && pending.toDate) {
+      if (pending.fromDate === pending.toDate) return pending.fromDate;
+      return `${pending.fromDate} → ${pending.toDate}`;
+    }
+    if (pending.fromDate) return `from ${pending.fromDate}`;
+    if (pending.toDate) return `to ${pending.toDate}`;
+    return null;
+  }, [pending.fromDate, pending.toDate]);
+
+  const applyPreset = React.useCallback(
+    (preset: 'last30' | 'last90' | 'thisYear' | 'lastYear') => {
+      const today = new Date();
+      const toIso = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      let from: Date;
+      let to: Date = today;
+      switch (preset) {
+        case 'last30':
+          from = new Date(today);
+          from.setDate(from.getDate() - 30);
+          break;
+        case 'last90':
+          from = new Date(today);
+          from.setDate(from.getDate() - 90);
+          break;
+        case 'thisYear':
+          from = new Date(today.getFullYear(), 0, 1);
+          break;
+        case 'lastYear':
+          from = new Date(today.getFullYear() - 1, 0, 1);
+          to = new Date(today.getFullYear() - 1, 11, 31);
+          break;
+      }
+      setPending(prev => ({ ...prev, fromDate: toIso(from), toDate: toIso(to) }));
+    },
+    [],
+  );
+
   return (
     <div className={styles.root}>
-      {/* (1) Filter row — preserved AS-IS from task 130/136 per Q2 sign-off. */}
+      {/* (1) Filter row — Semantic-Search-style chip toolbar.
+          ai-spaarke-ai-workspace-UI-r1 iteration 2 (2026-06-08). */}
       <div className={styles.dateRangeRow}>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
-          <Label className={styles.dateRangeLabel}>Event Type</Label>
-          <Dropdown
-            value={eventTypeDisplay}
-            selectedOptions={pending.eventTypeId ? [pending.eventTypeId] : ['']}
-            onOptionSelect={(_e, data) => {
-              const v = data.optionValue ?? '';
-              setPending(prev => ({
-                ...prev,
-                eventTypeId: v === '' ? null : v,
-              }));
-            }}
-          >
-            <Option value="" text="All">
-              All
-            </Option>
-            {eventTypeOptions.map(t => (
-              <Option key={t.id} value={t.id} text={t.name}>
-                {t.name}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
-          <Label className={styles.dateRangeLabel}>Event Status</Label>
-          <Dropdown
-            value={eventStatusDisplay}
-            selectedOptions={pending.eventStatusValue !== null ? [String(pending.eventStatusValue)] : ['']}
-            onOptionSelect={(_e, data) => {
-              const v = data.optionValue ?? '';
-              setPending(prev => ({
-                ...prev,
-                eventStatusValue: v === '' ? null : Number(v),
-              }));
-            }}
-          >
-            <Option value="" text="All">
-              All
-            </Option>
-            {STATUS_OPTIONS.map(s => (
-              <Option key={s.value} value={String(s.value)} text={s.label}>
-                {s.label}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
-          <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
-          <Dropdown
-            value={dateFieldDisplay}
-            selectedOptions={[pending.dateField]}
-            onOptionSelect={(_e, data) => {
-              const next = data.optionValue ?? DATE_FIELD_NONE;
-              setPending(prev => ({ ...prev, dateField: next }));
-            }}
-          >
-            {DATE_FIELDS.map(f => (
-              <Option key={f.value || 'none'} value={f.value} text={f.label}>
-                {f.label}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
-          <Label className={styles.dateRangeLabel}>From</Label>
-          <Input
-            type="date"
-            value={pending.fromDate}
-            onChange={(_e, data) => setPending(prev => ({ ...prev, fromDate: data.value }))}
-          />
-        </div>
-        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
-          <Label className={styles.dateRangeLabel}>To</Label>
-          <Input
-            type="date"
-            value={pending.toDate}
-            onChange={(_e, data) => setPending(prev => ({ ...prev, toDate: data.value }))}
-          />
-        </div>
+        {/* Event Type chip */}
+        <Popover trapFocus>
+          <PopoverTrigger disableButtonEnhancement>
+            <Button
+              className={mergeClasses(
+                styles.filterChipButton,
+                pending.eventTypeId ? styles.filterChipButtonActive : undefined,
+              )}
+              appearance="subtle"
+              size="small"
+              iconPosition="after"
+              icon={<ChevronDown16Regular />}
+              aria-label="Event Type filter"
+            >
+              {`Event Type${pending.eventTypeId ? `: ${eventTypeDisplay}` : ''}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverSurface className={styles.filterPopoverSurface}>
+            <Text className={styles.filterPopoverLabel}>Event Type</Text>
+            <RadioGroup
+              value={pending.eventTypeId ?? ''}
+              onChange={(_e, data) =>
+                setPending(prev => ({
+                  ...prev,
+                  eventTypeId: data.value === '' ? null : data.value,
+                }))
+              }
+            >
+              <Radio value="" label="All" />
+              {eventTypeOptions.map(t => (
+                <Radio key={t.id} value={t.id} label={t.name} />
+              ))}
+            </RadioGroup>
+          </PopoverSurface>
+        </Popover>
+
+        {/* Event Status chip */}
+        <Popover trapFocus>
+          <PopoverTrigger disableButtonEnhancement>
+            <Button
+              className={mergeClasses(
+                styles.filterChipButton,
+                pending.eventStatusValue !== null ? styles.filterChipButtonActive : undefined,
+              )}
+              appearance="subtle"
+              size="small"
+              iconPosition="after"
+              icon={<ChevronDown16Regular />}
+              aria-label="Event Status filter"
+            >
+              {`Event Status${pending.eventStatusValue !== null ? `: ${eventStatusDisplay}` : ''}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverSurface className={styles.filterPopoverSurface}>
+            <Text className={styles.filterPopoverLabel}>Event Status</Text>
+            <RadioGroup
+              value={pending.eventStatusValue !== null ? String(pending.eventStatusValue) : ''}
+              onChange={(_e, data) =>
+                setPending(prev => ({
+                  ...prev,
+                  eventStatusValue: data.value === '' ? null : Number(data.value),
+                }))
+              }
+            >
+              <Radio value="" label="All" />
+              {STATUS_OPTIONS.map(s => (
+                <Radio key={s.value} value={String(s.value)} label={s.label} />
+              ))}
+            </RadioGroup>
+          </PopoverSurface>
+        </Popover>
+
+        {/* Date Range chip — popover with From / To + Quick Select presets */}
+        <Popover trapFocus>
+          <PopoverTrigger disableButtonEnhancement>
+            <Button
+              className={mergeClasses(
+                styles.filterChipButton,
+                dateRangeDisplay ? styles.filterChipButtonActive : undefined,
+              )}
+              appearance="subtle"
+              size="small"
+              iconPosition="after"
+              icon={<ChevronDown16Regular />}
+              aria-label="Date Range filter"
+            >
+              {`Date Range${dateRangeDisplay ? `: ${dateRangeDisplay}` : ''}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverSurface className={styles.filterPopoverSurface}>
+            <Text className={styles.filterPopoverLabel}>From</Text>
+            <Input
+              type="date"
+              value={pending.fromDate}
+              onChange={(_e, data) =>
+                setPending(prev => ({ ...prev, fromDate: data.value }))
+              }
+            />
+            <Text className={styles.filterPopoverLabel}>To</Text>
+            <Input
+              type="date"
+              value={pending.toDate}
+              onChange={(_e, data) =>
+                setPending(prev => ({ ...prev, toDate: data.value }))
+              }
+            />
+            <Text className={styles.filterPopoverLabel}>Quick select</Text>
+            <div className={styles.quickSelectGrid}>
+              <Button size="small" appearance="subtle" onClick={() => applyPreset('last30')}>
+                Last 30 days
+              </Button>
+              <Button size="small" appearance="subtle" onClick={() => applyPreset('last90')}>
+                Last 90 days
+              </Button>
+              <Button size="small" appearance="subtle" onClick={() => applyPreset('thisYear')}>
+                This year
+              </Button>
+              <Button size="small" appearance="subtle" onClick={() => applyPreset('lastYear')}>
+                Last year
+              </Button>
+            </div>
+            {(pending.fromDate || pending.toDate) && (
+              <div className={styles.filterPopoverFooter}>
+                <Button
+                  size="small"
+                  appearance="subtle"
+                  onClick={() =>
+                    setPending(prev => ({ ...prev, fromDate: '', toDate: '' }))
+                  }
+                >
+                  Clear range
+                </Button>
+              </div>
+            )}
+          </PopoverSurface>
+        </Popover>
+
+        {/* Filter by Date Field chip */}
+        <Popover trapFocus>
+          <PopoverTrigger disableButtonEnhancement>
+            <Button
+              className={mergeClasses(
+                styles.filterChipButton,
+                pending.dateField && pending.dateField !== DATE_FIELD_NONE
+                  ? styles.filterChipButtonActive
+                  : undefined,
+              )}
+              appearance="subtle"
+              size="small"
+              iconPosition="after"
+              icon={<ChevronDown16Regular />}
+              aria-label="Date field filter"
+            >
+              {`Date Field${pending.dateField && pending.dateField !== DATE_FIELD_NONE ? `: ${dateFieldDisplay}` : ''}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverSurface className={styles.filterPopoverSurface}>
+            <Text className={styles.filterPopoverLabel}>Filter by Date Field</Text>
+            <RadioGroup
+              value={pending.dateField}
+              onChange={(_e, data) =>
+                setPending(prev => ({ ...prev, dateField: data.value }))
+              }
+            >
+              {DATE_FIELDS.map(f => (
+                <Radio key={f.value || 'none'} value={f.value} label={f.label} />
+              ))}
+            </RadioGroup>
+          </PopoverSurface>
+        </Popover>
         <div className={styles.filterActions}>
           {hasUnapplied && (
             <Button appearance="primary" size="small" onClick={onApply} aria-label="Apply filters">
@@ -772,13 +985,19 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
               Clear
             </Button>
           )}
-          <Tooltip content={calendarCollapsed ? 'Expand calendar' : 'Collapse calendar'} relationship="label">
+          <Tooltip content={calendarCollapsed ? 'Show calendar' : 'Hide calendar'} relationship="label">
             <Button
-              appearance="subtle"
-              icon={calendarCollapsed ? <CaretDown24Regular /> : <CaretUp24Regular />}
+              appearance={calendarCollapsed ? 'subtle' : 'primary'}
+              icon={
+                calendarCollapsed ? (
+                  <CalendarLtr24Regular />
+                ) : (
+                  <CalendarLtr24Filled />
+                )
+              }
               onClick={toggleCollapsed}
               aria-expanded={!calendarCollapsed}
-              aria-label={calendarCollapsed ? 'Expand calendar' : 'Collapse calendar'}
+              aria-label={calendarCollapsed ? 'Show calendar' : 'Hide calendar'}
             />
           </Tooltip>
         </div>
@@ -799,19 +1018,13 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
           </Tooltip>
           <div ref={stripRef} className={styles.calendarStrip}>
             <CalendarSection
+              key={calendarResetKey}
               eventDates={eventDates as IEventDateInfo[]}
-              onFilterChange={() => {
-                /* No-op: calendar strip's onFilterChange was previously the
-                   day-click dispatch path through context. Day-click now flows
-                   through onSelectDate → setSelectedDate → hostFilters useMemo.
-                   This handler is kept on the CalendarSection prop surface for
-                   API stability but does nothing in the DataGrid-backed widget. */
-              }}
+              onFilterChange={onCalendarFilter}
               viewDate={viewDate}
               monthsToShow={monthsToShow}
               layout="horizontal"
-              selectedDate={selectedDate}
-              onSelectDate={onDaySelect}
+              clickMode="range"
             />
           </div>
           <Tooltip content="Next month (Shift+click: jump by window)" relationship="label">

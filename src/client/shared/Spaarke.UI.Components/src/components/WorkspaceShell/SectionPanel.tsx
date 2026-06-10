@@ -76,6 +76,16 @@ const useStyles = makeStyles({
     ...shorthands.borderColor(tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
     overflow: 'hidden',
+    // ai-spaarke-ai-workspace-UI-r1 iter 2 round 7 (2026-06-09):
+    // SectionPanel cards are placed in a CSS grid row (WorkspaceShell.row,
+    // gridTemplateColumns: '1fr' / '1fr 1fr' / etc). Grid items default to
+    // `min-width: auto` which equals their intrinsic content width — so if
+    // an embedded DataGrid renders wide, the card grows to fit the grid
+    // instead of constraining to its `1fr` track. Explicit `min-width: 0`
+    // breaks that intrinsic-width inflation and lets the track constraint
+    // win. Same fix pattern as in DataGrid root/innerCard/gridScroll +
+    // DataverseEntityViewWidget root — this completes the chain.
+    minWidth: 0,
   },
   titleBar: {
     display: 'flex',

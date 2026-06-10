@@ -65,7 +65,11 @@ import {
 // renderer. `WorkspaceLayoutWidget` in `@spaarke/ai-widgets` consults this
 // slot at render time instead of importing `@spaarke/legal-workspace` directly.
 // Zero behavioural change today — `LegalWorkspaceRenderer` IS `LegalWorkspaceApp`.
-import { setDefaultWorkspaceRenderer } from "@spaarke/ui-components";
+import {
+  setDefaultWorkspaceRenderer,
+  AppErrorBoundary,
+  AppInsightsService,
+} from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // BFF base URL baked in at build time via Vite env var (AIPU-091).
@@ -181,6 +185,20 @@ function suppressLegalWorkspaceDailyDigestAutoPopup(): void {
 
 async function bootstrap(): Promise<void> {
   const t0 = performance.now();
+
+  // ai-spaarke-ai-workspace-UI-r1 brittleness Phase D (2026-06-09):
+  // Initialize Application Insights so AppErrorBoundary, WidgetErrorBoundary,
+  // and safeRegister can ship caught errors to the "Failures" pane via
+  // reportClientError(). The instrumentation key is sourced from a build-time
+  // Vite env var to avoid extending IRuntimeConfig (which would force a BFF
+  // /config/client schema change). When unset (default in dev), the
+  // AppInsightsService.initialize() call no-ops with a warn and the
+  // boundaries continue to log to console only.
+  // Override for non-dev environments: VITE_APP_INSIGHTS_KEY=<key> npm run build
+  const appInsightsKey: string = import.meta.env.VITE_APP_INSIGHTS_KEY ?? "";
+  if (appInsightsKey) {
+    AppInsightsService.initialize(appInsightsKey);
+  }
 
   // Task 105: suppress LegalWorkspace's Daily Digest auto-popup BEFORE any
   // React tree (including any embedded LegalWorkspaceApp instances) mounts.
@@ -343,12 +361,14 @@ async function bootstrap(): Promise<void> {
   const root = createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <App
-        entityLogicalName={entityLogicalName}
-        entityId={entityId}
-        matterId={matterId}
-        sessionId={sessionId}
-      />
+      <AppErrorBoundary surfaceName="SpaarkeAi">
+        <App
+          entityLogicalName={entityLogicalName}
+          entityId={entityId}
+          matterId={matterId}
+          sessionId={sessionId}
+        />
+      </AppErrorBoundary>
     </React.StrictMode>
   );
 

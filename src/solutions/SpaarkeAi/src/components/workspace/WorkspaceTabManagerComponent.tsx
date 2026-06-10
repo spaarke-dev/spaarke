@@ -36,6 +36,7 @@ import {
   Dismiss12Regular,
   WarningRegular,
 } from "@fluentui/react-icons";
+import { WidgetErrorBoundary } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
 
@@ -263,13 +264,24 @@ function ActiveWidgetContent({ tab, styles }: ActiveWidgetContentProps): React.J
 
   const Widget = tab.Component as React.ComponentType<WorkspaceWidgetProps>;
 
+  // ai-spaarke-ai-workspace-UI-r1 brittleness Phase D.2 (2026-06-09):
+  // Per-widget isolation — a render error in this widget is caught and
+  // displayed inline so sibling tabs keep rendering normally. Without this,
+  // a crashing widget propagates to AppErrorBoundary at the surface root
+  // and blanks the whole SpaarkeAi page.
   return (
     <div className={styles.widgetWrapper}>
-      <Widget
-        data={tab.widgetData}
+      <WidgetErrorBoundary
         widgetType={tab.widgetType}
-        isLoading={false}
-      />
+        displayName={tab.displayName}
+        surface="SpaarkeAi"
+      >
+        <Widget
+          data={tab.widgetData}
+          widgetType={tab.widgetType}
+          isLoading={false}
+        />
+      </WidgetErrorBoundary>
     </div>
   );
 }

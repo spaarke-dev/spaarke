@@ -20,6 +20,14 @@ import { todoRegistration } from "./sections/todo.registration";
 import { documentsRegistration } from "./sections/documents.registration";
 import { dailyBriefingRegistration } from "./sections/dailyBriefing/dailyBriefing.registration";
 import { calendarRegistration } from "./sections/calendar.registration";
+// ai-spaarke-ai-workspace-UI-r1 #4 (2026-06-08): three new Dataverse entity-view
+// sections that share <DataverseEntityViewWidget> with the (already-modified)
+// documents section. Each is a thin shim with a hardcoded sprk_gridconfiguration
+// GUID — see each file's DEPLOYMENT REQUIREMENT note.
+import { projectsRegistration } from "./sections/projects.registration";
+import { invoicesRegistration } from "./sections/invoices.registration";
+import { workAssignmentsRegistration } from "./sections/workAssignments.registration";
+import { mattersRegistration } from "./sections/matters.registration";
 
 /** All available workspace sections in default display order. */
 export const SECTION_REGISTRY: readonly SectionRegistration[] = [
@@ -28,6 +36,10 @@ export const SECTION_REGISTRY: readonly SectionRegistration[] = [
   latestUpdatesRegistration,
   todoRegistration,
   documentsRegistration,
+  mattersRegistration,
+  projectsRegistration,
+  invoicesRegistration,
+  workAssignmentsRegistration,
   dailyBriefingRegistration,
   calendarRegistration,
 ] as const;
