@@ -1,0 +1,79 @@
+<task id="R4-031" project="smart-todo-r4">
+  <metadata>
+    <title>B — "Assigned to Me" filter mode (drop "My Tasks" parallel mode)</title>
+    <phase>Phase 2: Wave 2a</phase>
+    <workstream>B</workstream>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>code-page, smart-todo, ui, fluent-v9, filter</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-030</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/components/Header/ (modified)</file>
+      <file>src/solutions/SmartTodo/src/hooks/useTodoItems.ts (filter logic)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Reduce filter modes to ONLY "Assigned to Me" — drop the "My Tasks" parallel mode per OD-2. UAT users were confused by two parallel modes; `ownerid` is BU-owned (not user-meaningful).
+  </prompt>
+
+  <role>React + Fluent v9 engineer maintaining SmartTodo filter logic.</role>
+
+  <goal>SmartTodo Code Page filter UI shows only one mode-equivalent toggle ("Assigned to Me"). Filter logic queries `sprk_todo` where `assigneduser eq currentUser` (or `_sprk_assignedto_value`). "My Tasks" mode + UI fully removed.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="target">src/solutions/SmartTodo/src/hooks/useTodoItems.ts</file>
+    <file purpose="target">src/solutions/SmartTodo/src/components/Header/</file>
+    <file purpose="parent-task">projects/smart-todo-r4/tasks/030-B-smarttodo-4row-layout.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel</constraint>
+    <constraint source="spec FR-07">Filter UI MUST show only one mode-equivalent toggle</constraint>
+    <constraint source="spec OD-2">"My Tasks" parallel mode dropped; `ownerid` field BU-owned, not user-meaningful</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/filter</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>R3 introduced both "Assigned to Me" and "My Tasks" filter modes. UAT surfaced that users couldn't distinguish them; the `ownerid` field is BU-owned (assigned by the system / admin), not by the user, so "My Tasks" had no user-meaningful semantics.</background>
+    <dependencies>
+      <dependency task="R4-030" status="must-complete">4-row layout in place</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%.</step>
+    <step order="1" name="Locate current filter logic">Read `useTodoItems.ts` + Header components; find "My Tasks" vs "Assigned to Me" branching.</step>
+    <step order="2" name="Remove "My Tasks" branch">Delete UI toggle + filter branch + any state for the dropped mode.</step>
+    <step order="3" name="Verify "Assigned to Me" is now the sole mode">It should be the default and only filter applied to the query.</step>
+    <step order="4" name="Update unit tests">Remove tests for "My Tasks"; add tests confirming only one filter mode is exposed.</step>
+    <step order="5" name="Build + test">`npm run build:prod` + `npm test`.</step>
+    <step order="6" name="Visual review">Open Code Page; confirm only one toggle visible.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/hooks/useTodoItems.ts (modified)</output>
+    <output type="code">src/solutions/SmartTodo/src/components/Header/ (modified)</output>
+    <output type="test">Updated unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UI shows only one mode-equivalent toggle ("Assigned to Me")</criterion>
+    <criterion testable="true">No "My Tasks" UI or state remains in source</criterion>
+    <criterion testable="true">Filter query targets `assigneduser eq currentUser` only</criterion>
+    <criterion testable="true">Existing tests pass; new tests cover single-mode behavior</criterion>
+  </acceptance-criteria>
+</task>

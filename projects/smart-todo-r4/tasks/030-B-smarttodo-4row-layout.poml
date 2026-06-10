@@ -1,0 +1,126 @@
+<task id="R4-030" project="smart-todo-r4">
+  <metadata>
+    <title>B — SmartTodo Code Page 4-row layout (title + search/actions + filter bar + toolbar)</title>
+    <phase>Phase 2: Wave 2a</phase>
+    <workstream>B</workstream>
+    <status>not-started</status>
+    <estimated-effort>2 days</estimated-effort>
+    <tags>code-page, smart-todo, ui, fluent-v9, layout, react</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-012</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/App.tsx</file>
+      <file>src/solutions/SmartTodo/src/components/Header/ (new or refactored)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Implement the SmartTodo Code Page 4-row header/toolbar layout aligned with `SemanticSearchControl` PCF visual pattern. Row 1: page title "Smart To Do" full-width. Row 2: search box + Refresh + "+ New" icons. Row 3: filter bar (facets + Clear). Row 4: selection-aware toolbar (when ≥1 card selected — uses task 012 `<SelectionAwareToolbar>`).
+  </prompt>
+
+  <role>
+React + Fluent v9 engineer working on SmartTodo Code Page. You consume `@spaarke/ui-components` primitives.
+  </role>
+
+  <goal>
+SmartTodo Code Page renders 4-row layout pixel-comparable to `SemanticSearchControl`. All styling via Griffel makeStyles + semantic tokens. No inline styles. Selection-aware toolbar wired to task 032's actions.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="visual-reference">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+    <file purpose="target">src/solutions/SmartTodo/src/App.tsx</file>
+    <file purpose="shared-lib-export">src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    <file purpose="pattern">.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel + semantic tokens; NO v8; NO inline styles</constraint>
+    <constraint source="ADR-012">Use shared primitives from `@spaarke/ui-components`; no inline component definitions in `src/solutions/SmartTodo/`</constraint>
+    <constraint source="ADR-026">React 19 + Vite Code Page build</constraint>
+    <constraint source="spec FR-06">Layout MUST be 4 stacked rows as specified; pixel-comparable to `SemanticSearchControl`</constraint>
+    <constraint source="spec FR-10">All new shared primitives MUST ship from `@spaarke/ui-components`</constraint>
+    <constraint source="spec NFR-07">WCAG 2.1 AA — keyboard nav, focus rings, ARIA</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/layout</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-026-code-page-build-standard.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+    </files>
+    <patterns>
+      <pattern name="SemanticSearchControl 4-row layout" location="src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx">
+        Title row + search/action row + filter row + selection toolbar row. Reference pixel layout + spacing.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R3 UAT users learned the `SemanticSearchControl` 4-row pattern. SmartTodo's old toolbar diverges, causing user confusion. Aligning closes the UX gap.</background>
+    <dependencies>
+      <dependency task="R4-012" status="must-complete">Toolbar primitives hoisted (SelectionAwareToolbar, ViewToggle, OrientationToggle)</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 031: "Assigned to Me" filter mode (drops "My Tasks")</item>
+      <item>Task 032: Selection-aware toolbar actions</item>
+      <item>Task 033: List/Card view toggle + persistence</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%.</step>
+    <step order="1" name="Read SemanticSearchControl layout">Identify exact row structure, spacing, icon set.</step>
+    <step order="2" name="Verify task 012 complete">Confirm primitives exported from `@spaarke/ui-components`.</step>
+    <step order="3" name="Refactor SmartTodo App.tsx header">Replace existing header with 4-row layout consuming shared primitives.</step>
+    <step order="4" name="Wire search box + Refresh + + New icons">Row 2 — search debounced; Refresh re-queries; "+ New" opens new-todo flow (existing or stub for task 040 hookup).</step>
+    <step order="5" name="Wire filter bar">Row 3 — facets (rendered as Fluent v9 `<Pill>` or `<Tag>`) + Clear button.</step>
+    <step order="6" name="Wire selection-aware toolbar slot">Row 4 — render `<SelectionAwareToolbar>` with actions to be filled by task 032.</step>
+    <step order="7" name="Build">`npm run build:prod` (per CLAUDE.md AP-1 — NOT `npm run build`).</step>
+    <step order="8" name="Visual review">Open SmartTodo Code Page; visually compare to SemanticSearchControl PCF.</step>
+    <step order="9" name="A11y review">Tab through; verify focus rings + ARIA.</step>
+    <step order="10" name="Quality gates">Run `code-review` + `adr-check`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build (build:prod) + test</tool>
+    <tool name="git">Stage + commit</tool>
+    <tool name="ui-test">Visual review</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/App.tsx (modified)</output>
+    <output type="code">src/solutions/SmartTodo/src/components/Header/ (new)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="4-row layout matches SemanticSearchControl">
+      <steps>
+        <step>Open SmartTodo Code Page in spaarkedev1</step>
+        <step>Open SemanticSearchControl in another tab</step>
+        <step>Visually compare row structure + spacing + icon set</step>
+      </steps>
+      <expected>Pixel-comparable; same row hierarchy; same icon set</expected>
+    </test>
+    <test name="A11y keyboard nav">
+      <steps>
+        <step>Tab through title → search → refresh → +New → filter pills → Clear → toolbar (if visible)</step>
+        <step>Verify each focused element has visible focus ring</step>
+      </steps>
+      <expected>All elements keyboard accessible; visible focus rings; ARIA labels present</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">SmartTodo Code Page renders 4 stacked rows per spec FR-06</criterion>
+    <criterion testable="true">Visual diff vs SemanticSearchControl: pixel-comparable layout</criterion>
+    <criterion testable="true">All new components consume `@spaarke/ui-components` primitives; no inline component definitions in `src/solutions/SmartTodo/`</criterion>
+    <criterion testable="true">No v8 imports; no inline styles; eslint clean</criterion>
+    <criterion testable="true">WCAG 2.1 AA verified for new layout</criterion>
+    <criterion testable="true">Existing card grid still renders below the new header (no regression)</criterion>
+  </acceptance-criteria>
+</task>

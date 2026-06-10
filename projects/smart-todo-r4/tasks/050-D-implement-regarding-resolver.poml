@@ -1,0 +1,122 @@
+<task id="R4-050" project="smart-todo-r4">
+  <metadata>
+    <title>D — Implement audited regarding resolver (winner from task 002)</title>
+    <phase>Phase 2: Wave 2a</phase>
+    <workstream>D</workstream>
+    <status>not-started</status>
+    <estimated-effort>3 days</estimated-effort>
+    <tags>pcf-or-webresource-or-codepage, regarding, polymorphic-resolver, fluent-v9, dataverse</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-002</dependencies>
+    <relevant-files>
+      <file>per audit (R4-002): src/client/pcf/RegardingResolver/ OR src/client/webresources/RegardingResolver.js OR src/solutions/RegardingResolver/</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Implement the regarding resolver component per the architecture chosen in task 002 audit. Wrap `PolymorphicResolverService.applyResolverFields` for writes (no reimplementation of FR-13 mutual-exclusivity logic). Support all 11 entity targets: Matter / Project / Event / Communication / WorkAssignment / Invoice / Budget / Analysis / Organization / Contact / Document. Reusable for `sprk_todo` AND `sprk_communication` (FR-22 — zero entity-specific branching; entity is a prop / configuration).
+  </prompt>
+
+  <role>
+React + Fluent v9 + Dataverse engineer. If audit chose PCF: PCF developer per ADR-022. If Web Resource: form-script developer. If Code Page embed: Vite + React 19 per ADR-026.
+  </role>
+
+  <goal>
+A reusable regarding resolver component supporting:
+- All 11 entity targets in a single picker UX (similar to R3 `AssociateToStep`).
+- Mutual-exclusivity enforced via `PolymorphicResolverService.applyResolverFields` (FR-21 — wrap, don't reimplement).
+- Entity parameter as prop/config (FR-22 — works for `sprk_todo` AND `sprk_communication`).
+- Saving persists 5 fields atomically: `sprk_regarding<X>`, `sprk_regardingrecordtype`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`.
+- Read-only mode when form is non-edit (FR-24).
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="audit-outcome">projects/smart-todo-r4/notes/regarding-resolver-audit.md</file>
+    <file purpose="resolver-service">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    <file purpose="picker-ux-reference">src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx</file>
+    <file purpose="pattern">.claude/patterns/dataverse/polymorphic-resolver.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-024">MUST wrap `PolymorphicResolverService.applyResolverFields` — NO reimplementation of FR-13 mutual-exclusivity logic</constraint>
+    <constraint source="ADR-021">Fluent v9 + Griffel mandatory regardless of surface choice</constraint>
+    <constraint source="ADR-022">If PCF: React 16 boundary + platform-provided Fluent</constraint>
+    <constraint source="ADR-026">If Code Page embed: Vite + React 19</constraint>
+    <constraint source="ADR-012">All shared logic MUST hoist to `@spaarke/ui-components`</constraint>
+    <constraint source="spec FR-20">Component supports all 11 entity targets; single-row picker UX; mutual-exclusivity enforced</constraint>
+    <constraint source="spec FR-22">Reusable for `sprk_todo` AND `sprk_communication`; zero entity-specific branching; entity is a prop / config</constraint>
+    <constraint source="spec FR-24">Read-only mode when form is non-edit; render current value(s) without edit UI</constraint>
+    <constraint source="spec NFR-03">Multi-environment portable; no hardcoded environment values</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>polymorphic-resolver/picker</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-026-code-page-build-standard.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="PolymorphicResolverService.applyResolverFields" location="src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts">
+        Single source of truth for writing 5 regarding fields atomically with mutual exclusivity. WRAP, don't reimplement.
+      </pattern>
+      <pattern name="AssociateToStep 11-entity picker" location="src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx">
+        R3 picker UX — reuse, adapt, or use as reference for the resolver picker shape.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R3 introduced the polymorphic regarding shape on `sprk_todo` (and `sprk_communication`). R4 unifies the picker UX in one reusable component so both entities (and future entities with same shape) avoid per-form duplication.</background>
+    <dependencies>
+      <dependency task="R4-002" status="must-complete">Audit picked PCF / Web Resource / Code Page embed; implementation outline written</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 051: Add this component to To Do main form (form-designer change).</item>
+      <item>Task 052: Read-only mode handling for view roles.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Read audit outcome">Confirm chosen architecture + implementation outline.</step>
+    <step order="2" name="Set up component directory">Per audit outcome (e.g., `src/client/pcf/RegardingResolver/` if PCF).</step>
+    <step order="3" name="Design component API">Props: `entity: "sprk_todo" | "sprk_communication"`, `recordId: string`, `readOnly?: boolean`, `onChange?: (resolvedFields) => void`. JSDoc each.</step>
+    <step order="4" name="Implement picker UX">Reuse or adapt `AssociateToStep` for the 11-entity selector; entity-type dropdown + entity-record lookup.</step>
+    <step order="5" name="Wire write path through PolymorphicResolverService">On select, call `applyResolverFields(entity, recordId, selectedTarget)` — service handles 5-field write + mutual exclusivity.</step>
+    <step order="6" name="Implement read-only mode (FR-24)">When `readOnly=true`, render selected target's link without edit UI.</step>
+    <step order="7" name="Multi-env portability">No hardcoded env URLs. Use `getClientUrl()` or PCF context.</step>
+    <step order="8" name="Build">Per chosen build pipeline (npm + PCF / Vite + Code Page / Web Resource bundle).</step>
+    <step order="9" name="Unit tests">Cover: entity-type switching, write through resolver service (mock), read-only render.</step>
+    <step order="10" name="Quality gates">code-review + adr-check.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="git">Stage + commit</tool>
+    <tool name="pcf-deploy">If PCF</tool>
+    <tool name="code-page-deploy">If Code Page embed</tool>
+    <tool name="dataverse-deploy">Web Resource if applicable</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Per audit outcome — component directory + source files</output>
+    <output type="test">Unit tests for write path + read-only + entity prop</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Component renders 11-entity picker</criterion>
+    <criterion testable="true">Write path delegates to `PolymorphicResolverService.applyResolverFields` (no reimplementation)</criterion>
+    <criterion testable="true">All 5 regarding fields persist atomically</criterion>
+    <criterion testable="true">Entity parameter is a prop — zero `sprk_todo` vs `sprk_communication` branching in component source</criterion>
+    <criterion testable="true">Read-only mode (FR-24) renders without edit UI</criterion>
+    <criterion testable="true">No hardcoded environment URLs</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

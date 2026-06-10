@@ -1,0 +1,98 @@
+<task id="R4-003" project="smart-todo-r4">
+  <metadata>
+    <title>G — Spike: confirm sprk_smarttodo Code Page accepts query-string + modal-style render</title>
+    <phase>Phase 0: Foundation</phase>
+    <workstream>G</workstream>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>spike, code-page, dataverse-navigation, smart-todo, drill-through, visual-host</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <relevant-files>
+      <file>projects/smart-todo-r4/notes/drill-through-spike.md (new)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Confirm that `Xrm.Navigation.navigateTo({pageType: "webresource", webresourceName: "sprk_smarttodo"}, {target: 2})` accepts a query-string with launch context (e.g., `?regardingType=sprk_matter&regardingId=<guid>`) AND renders the Code Page in modal-style (not full-window). If the contract fails, document the fallback strategy. This gates G drill-through implementation (tasks 081-084).
+  </prompt>
+
+  <role>
+Dataverse navigation engineer with experience in `Xrm.Navigation.navigateTo` modal patterns and Vite-bundled Code Pages.
+  </role>
+
+  <goal>
+A written spike at `projects/smart-todo-r4/notes/drill-through-spike.md` that:
+1. Documents the exact `Xrm.Navigation.navigateTo` payload that opens `sprk_smarttodo` in modal-style.
+2. Confirms whether query-string params are surfaced to the Code Page (window.location.search inside iframe).
+3. If launch params fail to propagate: documents the fallback strategy (e.g., session storage, post-message from opener).
+4. Captures actual measured behavior in spaarkedev1, not just documentation reading.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="project-plan">projects/smart-todo-r4/plan.md</file>
+    <file purpose="code-page">src/solutions/SmartTodo/src/App.tsx</file>
+    <file purpose="existing-launch-context">src/solutions/SmartTodo/src/hooks/</file>
+    <file purpose="visual-host">src/client/pcf/VisualHost/control/</file>
+    <file purpose="pattern">.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-34">Drill-through MUST open SmartTodo Code Page modal, NOT entity list view</constraint>
+    <constraint source="spec NFR-03">No hardcoded environment URLs / app IDs</constraint>
+    <constraint source="ADR-006">Code Page surface decision per ADR-006</constraint>
+    <constraint source="ADR-026">Code Page build: Vite + vite-plugin-singlefile + React 19</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/navigation</topic>
+    <files>
+      <file>.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>.claude/adr/ADR-026-code-page-build-standard.md</file>
+    </files>
+    <patterns>
+      <pattern name="Xrm.Navigation.navigateTo modal" location="Microsoft Learn — Client API reference">
+        `{pageType: "webresource", webresourceName: <name>, data: <obj>}` with `{target: 2, width: {value: X, unit: "%"}, height: {value: Y, unit: "%"}}` opens a modal. Data param surfacing to iframe is the question.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R3 task 070b (per spec) introduced a `useLaunchContext` hook for URL-param parsing — but task 004 confirms whether that hook actually exists. This spike is independent: it verifies the navigation contract from the OUTSIDE (caller side) regardless of how the Code Page consumes the params on the inside.</background>
+    <related-work>
+      <item>Task 004 decides whether `useLaunchContext` is implemented new or reuses existing.</item>
+      <item>VisualHost PCF in production renders `sprk_chartdefinition` records — `sprk_drillthroughtarget` field carries the navigation target.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%. Load task + spec + plan.</step>
+    <step order="1" name="Read Microsoft client API docs">Look up `Xrm.Navigation.navigateTo` for pageType `webresource` — what params does it accept? How does `data` propagate? What's the modal-style target option?</step>
+    <step order="2" name="Read existing precedent in repo">grep for `Xrm.Navigation.navigateTo` callers across `src/`. Any existing Code Page invocations? Any existing webresource modal opens? Reference their patterns.</step>
+    <step order="3" name="Author spike browser-test plan">Write a minimal test plan: open spaarkedev1 → form record → invoke `Xrm.Navigation.navigateTo` from browser console with specific payload → observe modal render + URL surfacing. Document expected vs actual.</step>
+    <step order="4" name="Execute test (live env)">Use ui-test skill or manual browser session to execute the test plan in spaarkedev1. Capture screenshots / console output as evidence.</step>
+    <step order="5" name="Document fallback if needed">If query params don't surface to iframe, document fallback: session storage write before navigateTo + read inside Code Page; or `postMessage` from opener; or alternative `window.open` with modal CSS.</step>
+    <step order="6" name="Write spike report">Author `notes/drill-through-spike.md` with: working payload, evidence (screenshots / console), fallback strategy if needed, recommendations for tasks 081-084.</step>
+  </steps>
+
+  <tools>
+    <tool name="WebFetch">Microsoft Learn docs for Xrm.Navigation.navigateTo</tool>
+    <tool name="Grep">Find existing navigateTo callers in repo</tool>
+    <tool name="ui-test">Browser-based test execution against spaarkedev1</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/smart-todo-r4/notes/drill-through-spike.md</output>
+    <output type="report">Task completion report — working payload + fallback plan if needed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/drill-through-spike.md` documents the working `Xrm.Navigation.navigateTo` payload</criterion>
+    <criterion testable="true">Test executed in spaarkedev1 with captured evidence (screenshot or console log)</criterion>
+    <criterion testable="true">Query-string param propagation to Code Page iframe is confirmed (works) or fallback documented (doesn't work)</criterion>
+    <criterion testable="true">Modal-style render confirmed (no full-window navigation)</criterion>
+    <criterion testable="true">Tasks 081-084 have clear navigation contract to implement against</criterion>
+  </acceptance-criteria>
+</task>

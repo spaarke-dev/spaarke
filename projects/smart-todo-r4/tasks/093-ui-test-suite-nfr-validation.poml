@@ -1,0 +1,72 @@
+<task id="R4-093" project="smart-todo-r4">
+  <metadata>
+    <title>Phase 3 — UI test suite for NFR-05 / NFR-07 / NFR-08</title>
+    <phase>Phase 3: Deployment</phase>
+    <workstream>cross-cutting</workstream>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>ui-test, a11y, performance, regression, smart-todo</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>R4-092</dependencies>
+    <relevant-files>
+      <file>projects/smart-todo-r4/notes/ui-test-report.md (new)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Run the full UI test suite against the deployed spaarkedev1 environment. Validate NFR-05 (modal nav latency &lt;500ms), NFR-07 (WCAG 2.1 AA across new surfaces), NFR-08 (orientation switch &lt;300ms; no jank). Document results in `notes/ui-test-report.md`.
+  </prompt>
+
+  <role>UI test engineer using the `ui-test` skill against deployed spaarkedev1.</role>
+
+  <goal>Three NFR-targeted test reports produced; all NFRs met or failures explicitly documented with mitigation plan.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="all-ui-tests">embedded `<ui-tests>` sections in tasks 020-084</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-05">Modal nav `<` `>` &lt;500ms perceived latency on representative network</constraint>
+    <constraint source="spec NFR-07">WCAG 2.1 AA — keyboard nav, focus rings, ARIA, screen-reader compatible</constraint>
+    <constraint source="spec NFR-08">Orientation switch &lt;300ms; no layout jank on widget mount</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui-test/nfr</topic>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R4-092" status="must-complete">All affected solutions deployed</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Execute NFR-05 test">Open modal; navigate `<` `>` repeatedly; measure perceived latency in dev tools Performance panel. Capture under representative network throttling.</step>
+    <step order="2" name="Execute NFR-07 a11y suite">Tab through every new surface (widget, toolbar, modal, dirty prompt, resolver). Verify focus rings + ARIA + screen-reader announcements. Use axe DevTools or similar.</step>
+    <step order="3" name="Execute NFR-08 orientation switch">Toggle horizontal ↔ vertical Kanban; measure layout swap time; check for jank.</step>
+    <step order="4" name="Execute regression sweep">Verify file preview + To Do save + statuscode flows + existing workflows.</step>
+    <step order="5" name="Document in notes/ui-test-report.md">Pass/fail per NFR + per scenario; screenshots; measurements.</step>
+  </steps>
+
+  <tools>
+    <tool name="ui-test">Browser-based testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/smart-todo-r4/notes/ui-test-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NFR-05 verified: modal nav &lt;500ms perceived latency</criterion>
+    <criterion testable="true">NFR-07 verified: WCAG 2.1 AA across all new surfaces</criterion>
+    <criterion testable="true">NFR-08 verified: orientation switch &lt;300ms; no jank</criterion>
+    <criterion testable="true">Regression sweep: file preview + To Do save + statuscode all pass</criterion>
+    <criterion testable="true">ui-test-report.md captures pass/fail + evidence</criterion>
+  </acceptance-criteria>
+</task>
