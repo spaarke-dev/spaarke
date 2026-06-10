@@ -3,7 +3,7 @@
     <title>B — SmartTodo Code Page 4-row layout (title + search/actions + filter bar + toolbar)</title>
     <phase>Phase 2: Wave 2a</phase>
     <workstream>B</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2 days</estimated-effort>
     <tags>code-page, smart-todo, ui, fluent-v9, layout, react</tags>
     <parallel-safe>true</parallel-safe>

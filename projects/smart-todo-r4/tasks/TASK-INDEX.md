@@ -4,8 +4,8 @@
 > **Last Updated**: 2026-06-10 (Wave G0 complete + new task 034 registered)
 > **Branch**: `work/smart-todo-r4`
 > **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
-> **Status**: 🔲 22 not-started · 🔄 0 in-progress · ✅ 9 complete · ❌ 0 blocked
-> **Active wave**: none — Wave G1+2a ✅ complete; ready to dispatch G1+2a-followups
+> **Status**: 🔲 18 not-started · 🔄 0 in-progress · ✅ 13 complete · ❌ 0 blocked
+> **Active wave**: none — Wave G1+2a-followups ✅ complete (build-verified)
 
 ---
 
@@ -81,7 +81,7 @@
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
 | ✅ | [010](010-extract-RecordNavigationModalShell.poml) | Extract `<RecordNavigationModalShell>` from RichFilePreview.tsx → 6 files + 15 tests | shared-lib, hoist, fluent-v9 | ✅ | — | 011, 040, 041 |
-| 🔲 | [011](011-refactor-RichFilePreviewDialog.poml) | Refactor RichFilePreviewDialog to consume new shell (regression-safety) | shared-lib, regression-safety | ❌ (after 010 ✅) | 010 ✅ | — |
+| ✅ | [011](011-refactor-RichFilePreviewDialog.poml) | RichFilePreviewDialog refactored → adapter (`onNavigate(dir)` ↔ `onNavigate(idx)`); smart bypass when no nav props (zero visual change for LegalWorkspace consumer) | shared-lib, regression-safety | ❌ (after 010 ✅) | 010 ✅ | — |
 | ✅ | [012](012-hoist-toolbar-primitives.poml) | Hoist toolbar primitives → 3 components + 20 tests; icon corrections noted | shared-lib, hoist, fluent-v9 | ✅ | — | 030, 032, 033, 070 |
 
 ---
@@ -90,8 +90,8 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [020](020-A-rebuild-workspace-widget.poml) | A — Rebuild SmartToDo workspace widget against sprk_todo | widget, smart-todo, deploy | ✅ | 001 | 092 |
-| 🔲 | [030](030-B-smarttodo-4row-layout.poml) | B — SmartTodo Code Page 4-row layout | code-page, smart-todo, ui | ✅ | 012 | 031, 032, 033, 040, 060 |
+| ✅ | [020](020-A-rebuild-workspace-widget.poml) | A — Pattern D widget shipped → new `@spaarke/smart-todo-components` peer package + LW shim with FeedTodoSyncContext lift. Builds clean (peer 0 err, LW 3,303 modules). Rich-feature LW Kanban hoist deferred by design | widget, smart-todo, deploy | ✅ | 001 ✅ | 092 |
+| ✅ | [030](030-B-smarttodo-4row-layout.poml) | B — 4-row layout shipped (Header 257 LOC + styles + barrel). 3,259 modules clean. ViewToggle deferred → 033; OrientationToggle deferred → 070+ | code-page, smart-todo, ui | ✅ | 012 ✅ | 031, 032, 033, 040, 060 |
 | ✅ | [050](050-D-implement-regarding-resolver.poml) | D — Virtual PCF resolver (mirrors AssociationResolver) → 20/20 tests, bundle 1.56 MiB | resolver, fluent-v9 | ✅ | 002 ✅ | 051, 052 |
 | ✅ | [080](080-G-create-chart-definitions.poml) | G — 4 chart def JSONs + PS deploy script (live-deploy DEFERRED to user command) | dataverse-schema, deploy | ✅ | 003 ✅ | 081, 082, 083, 084 |
 
@@ -108,7 +108,7 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [051](051-D-add-to-todo-main-form.poml) | D — Add resolver to To Do main form | dataverse, form-designer, deploy | ❌ (after 050) | 050 | 081-084 |
+| ✅ | [051](051-D-add-to-todo-main-form.poml) | D — JS Web Resource `sprk_todo_regarding_presave.js` (347 LOC) + 9-section form-bind instructions doc. Live form-designer steps deferred to user. **PCF enhancement follow-up flagged** (see Wave outcomes below) | dataverse, form-designer, deploy | ❌ (after 050 ✅) | 050 ✅ | 081-084 |
 | 🔲 | [052](052-D-read-only-mode.poml) | D — Read-only mode for view-only roles | regarding, security | ❌ (after 051) | 050, 051 | — |
 
 ---
@@ -234,6 +234,29 @@ G4 Wrap-up
 | **PR #372** `feature/ai-spaarke-ai-workspace-UI-r1` | `Spaarke.AI.Widgets` (R4-020) | Coordinate at task 001 audit time; rebase if #372 merges first |
 | **work/spaarke-datagrid-framework-r1** (55 unmerged, no PR) | `Spaarke.UI.Components` (R4-010, R4-012, R4-040) | Sequence R4-010 + R4-012 AFTER datagrid-framework merge if possible; resolve at PR time |
 | **work/matter-ui-r1-v1.1.72-vh-polish** (18 unmerged) | Visual Host (R4-081) | Monitor; coordinate if Visual Host source changes |
+
+---
+
+## Wave G1+2a-followups Outcomes — 4 tasks complete (2026-06-10)
+
+| Task | Deliverable | Build | Carry-forward findings |
+|---|---|---|---|
+| **011** RichFilePreviewDialog refactor | Adapter (`onNavigate(dir)` → `onNavigate(idx)`); 10 tests; 25/25 across dialog+shell | `tsc` clean | **Smart bypass**: non-nav path bypasses shell entirely → zero visual change for LegalWorkspace (only real consumer). **Shell-API feedback (deferred)**: duplicate-title-bar when nav props supplied AND content has its own title bar (RichFilePreview case). Two API options proposed: `chromeMode?: 'full'\|'content-only'` on shell OR `suppressTitleBar?` on RichFilePreview. Not blocking task 040 (iframe-embedded MDA form is self-chromed). |
+| **020** SmartTodo widget rebuild (Pattern D) | New `@spaarke/smart-todo-components` peer package (widget 448 LOC + types + tests) + LW shim rewired in `todo.registration.ts` + LW `package.json` adds workspace dep | Peer pkg `tsc --noEmit` 0 err; LW `npm run build` 3,303 modules 14.98s clean | **Agent hit stream timeout at 52min / 81 tool uses** — operational not work-quality. Main session did POML closeout. **Deliberate scope decision** (documented in `todo.registration.ts` comments): rich-feature LW Kanban 13-file subtree (score cards, dismissed section, threshold settings, AI summary dialog) NOT hoisted in initial 0.1.0 — deferred. Satisfies FR-02 (sprk_todoflag eliminated) + FR-04 + FR-05. `FeedTodoSyncContext` lives in shim per user decision. |
+| **030** SmartTodo 4-row layout | New `Header/` (257 LOC + styles + barrel) + SmartTodoApp.tsx | `npm run build` 3,259 modules 11.62s clean | App-level state: `searchQuery`, `selectedIds: Set<string>` at `SmartTodoLayout:~109`. Stub toolbar actions at `SmartTodoApp.tsx:115-139` → 032 replaces. ViewToggle deferred → 033; OrientationToggle → 070+. Outlook ribbon createTodo flow preserved verbatim. |
+| **051** D form-binding + pre-save handler | `src/client/webresources/js/sprk_todo_regarding_presave.js` (347 LOC) + 9-section instructions doc | JS syntax clean | Solution wrappers deferred to R4-092. **🚨 PCF enhancement follow-up needed**: `RegardingResolverApp.tsx handleSelectRecord` must populate `window.__sprk_regarding_pending__` on CREATE so OnSave handler can stage fields. Without it, 5 companion fields stay empty after first CREATE save. Sketch in instructions doc. **Must land before R4-092 deploy.** |
+
+---
+
+## Follow-ups Surfaced (Not Yet Filed As Tasks)
+
+| # | Follow-up | Source | Priority | Notes |
+|---|---|---|---|---|
+| 1 | **PCF CREATE-mode bridge**: `RegardingResolverApp.tsx handleSelectRecord` populates `window.__sprk_regarding_pending__` on CREATE | R4-051 finding | **High** — blocks D path on new records; must land before R4-092 deploy | Sketch in `notes/d-form-bind-instructions.md` |
+| 2 | **Shell API tweak**: `<RecordNavigationModalShell>` `chromeMode?: 'full'\|'content-only'` OR `<RichFilePreview>` `suppressTitleBar?` | R4-011 finding | Low — not blocking current R4; SmartTodo iframe self-chromed | Two options in R4-011 notes |
+| 3 | **PR #376 overlap**: `WidgetErrorBoundary.tsx` rewrite (17 add / 35 del) on `feature/ai-workspace-ui-r1-followups` — R4-020 LW shim consumes WidgetErrorBoundary | external PR | **Monitor** — open, not merged today | Re-verify usage when #376 merges |
+| 4 | **SmartTodo test runner**: pre-existing — no vitest/jest. 22 useLaunchContext tests are executable-spec shims | R4-034 / pre-existing | Low | ~2hr to wire vitest |
+| 5 | **LW Kanban rich-feature hoist**: 13-file subtree NOT hoisted into `@spaarke/smart-todo-components` 0.1.0 | R4-020 deliberate | Medium — future widget consumers need it; LW shim ships full features today | In R4-020 deliverable comments |
 
 ---
 

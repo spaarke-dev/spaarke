@@ -15,11 +15,13 @@
 |-------|-------|
 | **Wave G0** | ✅ COMPLETE — 4 audits, all binding decisions captured |
 | **Wave G1+2a** | ✅ COMPLETE — 5 parallel agents (010, 012, 034, 050, 080) all delivered |
+| **Wave G1+2a-followups** | ✅ COMPLETE — 4 agents (011, 020, 030, 051); 020 hit operational stream timeout but produced clean buildable work; main session handled closeout |
 | **Active Task** | none — between waves |
-| **Status** | 9 of 31 tasks ✅; ready to dispatch Wave G1+2a-followups (011, 030, 020, 051) |
-| **Next Action** | Dispatch Wave G1+2a-followups in parallel: 011 (RichFilePreviewDialog refactor — regression-safety on shell), 030 (B 4-row layout — consumes toolbar primitives), 020 (A widget rebuild — Pattern D, FeedTodoSyncContext lift-to-shim per user decision), 051 (D resolver form-bind — verify hidden field first). |
-| **Phase 0 outcomes** | See [`tasks/TASK-INDEX.md` Phase 0 Outcomes table](tasks/TASK-INDEX.md#phase-0-outcomes--binding-decisions-2026-06-10) |
-| **Wave G1+2a outcomes** | See [`tasks/TASK-INDEX.md` Wave G1+2a Outcomes table](tasks/TASK-INDEX.md#wave-g12a-outcomes--5-tasks-complete-2026-06-10) |
+| **Status** | **13 of 31 tasks ✅** (42% by count, more by impact); all R4 client surfaces built clean |
+| **Next Action** | (a) **Deploy planning** for R4 surfaces with user (LW Code Page + SmartTodo Code Page + RegardingResolver PCF + form-binding + chart defs); OR (b) Dispatch Wave G2a-B/G2b (031/032/033 B sub-tasks, 052 D read-only, 040/041/042 C wave, 060 E, 070/071 F) |
+| **Follow-ups flagged (not yet filed)** | See [`tasks/TASK-INDEX.md` Follow-ups Surfaced section](tasks/TASK-INDEX.md#follow-ups-surfaced-not-yet-filed-as-tasks) — most important: PCF CREATE-mode bridge (R4-051 follow-up; must land before R4-092 deploy) |
+| **All build verifications clean** | Peer pkg `tsc` 0 err; LegalWorkspace `npm run build` 3,303 modules; SmartTodo `npm run build` 3,259 modules; Spaarke.UI.Components `tsc`; RegardingResolver PCF `build:prod` 1.56 MiB bundle; `dotnet build BFF` 0 err |
+| **Master sync** | 0 behind `a338f4b24`; PR #376 (WidgetErrorBoundary rewrite) open but not merged — monitor |
 
 ### Files Modified This Session (Wave G0 + aggregation)
 

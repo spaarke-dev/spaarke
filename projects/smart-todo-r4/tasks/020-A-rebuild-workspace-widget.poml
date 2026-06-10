@@ -3,7 +3,7 @@
     <title>A — Rebuild SmartToDo workspace widget against sprk_todo</title>
     <phase>Phase 2: Wave 2a</phase>
     <workstream>A</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2-3 days</estimated-effort>
     <tags>widget, smart-todo, react, fluent-v9, dataverse, spaarkeai, deploy</tags>
     <parallel-safe>true</parallel-safe>

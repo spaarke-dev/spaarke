@@ -26,6 +26,7 @@ import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { PanelSplitter } from "@spaarke/ui-components/PanelSplitter";
 import { useTwoPanelLayout } from "@spaarke/ui-components/hooks";
 import { CreateTodoWizard } from "@spaarke/ui-components";
+import type { ToolbarAction } from "@spaarke/ui-components";
 import {
   createXrmDataService,
   createXrmNavigationService,
@@ -34,6 +35,7 @@ import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/aut
 import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
 import { TodoDetailPanel } from "./components/TodoDetailPanel";
+import { Header } from "./components/Header";
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
 import { useLaunchContext } from "./hooks/useLaunchContext";
 
@@ -42,9 +44,22 @@ import { useLaunchContext } from "./hooks/useLaunchContext";
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  /**
+   * Outer page frame — vertical stack: 4-row Header on top, two-pane
+   * (kanban + detail) `container` below. New in R4 task 030 (FR-06).
+   */
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    overflow: "hidden",
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  /** Two-pane row — fills remaining height under the header. */
   container: {
     display: "flex",
-    height: "100%",
+    flexGrow: 1,
+    minHeight: 0,
     overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1,
   },
@@ -77,7 +92,64 @@ const useStyles = makeStyles({
 
 function SmartTodoLayout(): React.ReactElement {
   const styles = useStyles();
-  const { selectedEventId } = useTodoContext();
+  const { selectedEventId, refetch } = useTodoContext();
+
+  // ── R4 task 030 — Header state (App-level, per task brief) ───────────────
+  //
+  // `searchQuery` is owned here so future tasks (031 facets, 033 list view)
+  // can read it. `selectedIds` is the **multi-select** set driving Row 4 of
+  // the header (card affordances — task 060). It is INDEPENDENT of
+  // `selectedEventId` (which drives the detail panel, task 060+).
+  //
+  // For task 030 `selectedIds` is initialized empty; the toolbar renders
+  // `null` (zero selection). Task 060 will populate the Set as the user
+  // multi-selects cards in the kanban + list views.
+  const [searchQuery, setSearchQuery] = React.useState<string>("");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [selectedIds, _setSelectedIds] = React.useState<Set<string>>(
+    () => new Set<string>(),
+  );
+
+  // Stub toolbar actions — task 032 will replace these with real Open /
+  // Delete / Email / Pin handlers wired to the underlying data layer.
+  const toolbarActions: ToolbarAction[] = React.useMemo(
+    () => [
+      {
+        id: "open",
+        label: "Open",
+        onClick: () => console.log("[SmartTodo] Open clicked — wired by task 032"),
+      },
+      {
+        id: "delete",
+        label: "Delete",
+        onClick: () => console.log("[SmartTodo] Delete clicked — wired by task 032"),
+      },
+      {
+        id: "email",
+        label: "Email",
+        onClick: () => console.log("[SmartTodo] Email clicked — wired by task 032"),
+      },
+      {
+        id: "pin",
+        label: "Pin",
+        onClick: () => console.log("[SmartTodo] Pin clicked — wired by task 032"),
+      },
+    ],
+    [],
+  );
+
+  // Refresh → re-query todos via the existing context refetch (task 022).
+  const handleRefresh = React.useCallback(() => {
+    refetch();
+  }, [refetch]);
+
+  // "+ New" — stub for task 040. The CreateTodoWizard host already handles
+  // the Outlook ribbon `createTodo` launch path (see LaunchCreateTodoWizardHost
+  // below); the toolbar "+ New" button will reuse that wizard in a later
+  // task. For task 030 we log + leave the wiring open.
+  const handleCreateTodo = React.useCallback(() => {
+    console.log("[SmartTodo] + New clicked — wired by task 040");
+  }, []);
 
   const {
     primaryWidth,
@@ -112,33 +184,46 @@ function SmartTodoLayout(): React.ReactElement {
   }, [selectedEventId]);
 
   return (
-    <div ref={containerRef} className={styles.container}>
-      {/* Left panel — Kanban Board */}
-      <div className={styles.primaryPanel} style={{ width: primaryWidth }}>
-        <SmartToDo webApi={getWebApi()} userId={getUserId()} />
-      </div>
+    <div className={styles.page}>
+      {/* ── R4 task 030 — 4-row header (FR-06) ──────────────────────────── */}
+      <Header
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onRefresh={handleRefresh}
+        onCreateTodo={handleCreateTodo}
+        selectedCount={selectedIds.size}
+        toolbarActions={toolbarActions}
+      />
 
-      {/* Splitter + Detail Panel (only when visible) */}
-      {isDetailVisible && (
-        <>
-          <PanelSplitter
-            onMouseDown={splitterHandlers.onMouseDown}
-            onKeyDown={splitterHandlers.onKeyDown}
-            onDoubleClick={splitterHandlers.onDoubleClick}
-            isDragging={isDragging}
-            currentRatio={currentRatio}
-          />
-          <div
-            className={mergeClasses(
-              styles.detailPanel,
-              !isDragging && styles.detailPanelAnimated,
-            )}
-            style={{ width: detailWidth }}
-          >
-            <TodoDetailPanel />
-          </div>
-        </>
-      )}
+      {/* ── Two-pane content — kanban + (optional) detail panel ─────────── */}
+      <div ref={containerRef} className={styles.container}>
+        {/* Left panel — Kanban Board */}
+        <div className={styles.primaryPanel} style={{ width: primaryWidth }}>
+          <SmartToDo webApi={getWebApi()} userId={getUserId()} />
+        </div>
+
+        {/* Splitter + Detail Panel (only when visible) */}
+        {isDetailVisible && (
+          <>
+            <PanelSplitter
+              onMouseDown={splitterHandlers.onMouseDown}
+              onKeyDown={splitterHandlers.onKeyDown}
+              onDoubleClick={splitterHandlers.onDoubleClick}
+              isDragging={isDragging}
+              currentRatio={currentRatio}
+            />
+            <div
+              className={mergeClasses(
+                styles.detailPanel,
+                !isDragging && styles.detailPanelAnimated,
+              )}
+              style={{ width: detailWidth }}
+            >
+              <TodoDetailPanel />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
