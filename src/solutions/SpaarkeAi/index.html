@@ -5,7 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SpaarkeAi</title>
     <style>
-      /* Reset styles for Dataverse iframe context (ADR-026) */
+      /* Reset styles for Dataverse iframe context (ADR-026).
+       *
+       * `box-sizing: border-box` is REQUIRED for the DataGrid framework: without
+       * it, every grid cell renders 24px wider than its declared width (12px
+       * padding-left + 12px padding-right adds to content-box), summing to
+       * 100+ px overshoot across a few columns and forcing the horizontal
+       * scrollbar. Same reset that `sprk_eventspage` + `sprk_invoicespage`
+       * Code Pages have in their index.html. See iter-2 round 11 fix
+       * (2026-06-09) — operator diagnostic confirmed every column was rendering
+       * exactly 24px wider than its width attribute.
+       */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
       html, body, #root {
         margin: 0;
         padding: 0;

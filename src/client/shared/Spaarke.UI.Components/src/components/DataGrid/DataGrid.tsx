@@ -1046,7 +1046,23 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     // buffer (10px). Anything left over is shared across the columns.
     const selectionWidth =
       resolved && resolved.behavior.selectionMode === 'multi' ? 44 : 0;
-    const available = Math.max(0, containerWidth - selectionWidth - 24 - 10);
+    // ai-spaarke-ai-workspace-UI-r1 iter 2 round 11 (2026-06-09):
+    // Subtract per-cell horizontal padding (~24px = 12+12 spacingHorizontalM)
+    // from each column's available width. Without this, hosts that haven't
+    // declared `*, *::before, *::after { box-sizing: border-box }` in their
+    // index.html render every cell `+24px` wider than its declared width
+    // (content-box adds padding on top of width), causing the columns to
+    // sum past `available` even when the column math is otherwise correct.
+    // Operator round 10 diagnostic confirmed exactly this for the SpaarkeAi
+    // surface (col[1] declared 150px → rendered 174px). The box-sizing reset
+    // has now been added to SpaarkeAi/index.html (the primary fix), but this
+    // subtraction is the defensive layer for any future surface that misses
+    // it.
+    const perColPaddingReserve = visibleColumns.length * 24;
+    const available = Math.max(
+      0,
+      containerWidth - selectionWidth - 24 - 10 - perColPaddingReserve,
+    );
     // Bidirectional scale: when `available` < `baseSum`, scale < 1 shrinks
     // the columns to fit (down to each column's minimum); when `available`
     // > `baseSum`, scale > 1 expands them to fill. Skip the no-op when the
