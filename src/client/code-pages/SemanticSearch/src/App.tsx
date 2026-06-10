@@ -447,17 +447,48 @@ export const App: React.FC<AppProps> = ({
       // loading or empty), the hooks fall back to legacy URL-envelope behavior.
       const fragment = currentFragment;
       const envelopeSearchIndexName = urlParams?.searchIndexName ?? null;
+
+      // Phase G hot-fix (2026-06-10): Document-target dropdown rows are *file
+      // indexes* — the user's intent when switching among them is "search this
+      // file index for the documents associated with my current parent record".
+      // The fragment's `entityType='document'` is NOT a valid BFF parent-record
+      // scope (you can't search "within a document"); applying it as scope=entity
+      // + entityType=document yields a 400 with EntityIdRequired/InvalidEntity.
+      // Treat Document-target rows as "envelope-context preserved, only index
+      // overridden": pass null fragment + fragment.searchIndexName as the
+      // envelope override; the hook then runs the legacy URL-envelope-driven
+      // path (scope/entityType/entityId from the host record) with the new
+      // index name.
+      const isDocumentTargetFragment = fragment?.scope === 'entity' && fragment.entityType === 'document';
+      const effectiveFragment = isDocumentTargetFragment ? null : fragment;
+      const effectiveEnvelopeSearchIndexName = isDocumentTargetFragment
+        ? fragment.searchIndexName
+        : envelopeSearchIndexName;
+
       const scopeArg = hasUserInitiatedSearch ? null : initialScope || null;
       const entityIdArg = hasUserInitiatedSearch ? null : initialEntityId || null;
 
       if (domain === 'documents') {
-        searchDocuments(searchQuery, searchFilters, envelopeSearchIndexName, scopeArg, entityIdArg, fragment);
+        searchDocuments(
+          searchQuery,
+          searchFilters,
+          effectiveEnvelopeSearchIndexName,
+          scopeArg,
+          entityIdArg,
+          effectiveFragment
+        );
       } else {
         // Record-level search (matters/projects/invoices). The fragment's
         // searchIndexName flows through, but `recordTypes` is still derived
         // from `domain` (which is itself derived from `fragment.entityType`
         // via `deriveSearchDomain`).
-        searchRecords(searchQuery, DOMAIN_RECORD_TYPES[domain], searchFilters, envelopeSearchIndexName, fragment);
+        searchRecords(
+          searchQuery,
+          DOMAIN_RECORD_TYPES[domain],
+          searchFilters,
+          effectiveEnvelopeSearchIndexName,
+          effectiveFragment
+        );
       }
     },
     [searchDocuments, searchRecords, hasUserInitiatedSearch, initialScope, initialEntityId, urlParams, currentFragment]
@@ -485,19 +516,41 @@ export const App: React.FC<AppProps> = ({
       setSelectedSearchIndexId(row.sprk_aisearchindexid);
       setActiveDomain(newDomain);
       setSelectedIds([]);
-      setHasUserInitiatedSearch(true);
 
-      // Execute the search directly using the new fragment (don't rely on
-      // the `currentFragment` memo — it won't update until React flushes
-      // the `selectedSearchIndexId` state above).
+      // Phase G hot-fix (2026-06-10): Document-target rows preserve the URL-
+      // envelope's host context (the user is just switching which file index
+      // to query within the SAME parent record). Non-Document-target rows
+      // (Matter / Project / All) represent a genuine context switch — drop
+      // the host record context.
+      const isDocumentTargetFragment = fragment.scope === 'entity' && fragment.entityType === 'document';
       const envelopeSearchIndexName = urlParams?.searchIndexName ?? null;
+      const effectiveEnvelopeSearchIndexName = isDocumentTargetFragment
+        ? fragment.searchIndexName
+        : envelopeSearchIndexName;
+      const effectiveFragment = isDocumentTargetFragment ? null : fragment;
+
+      // For Document-target switches, keep the URL-envelope scope/entityId
+      // (preserve host context). For non-Document-target switches, drop them
+      // (the dropdown intent supersedes the URL-envelope context).
+      if (!isDocumentTargetFragment) {
+        setHasUserInitiatedSearch(true);
+      }
+      const scopeArg = isDocumentTargetFragment ? initialScope || null : null;
+      const entityIdArg = isDocumentTargetFragment ? initialEntityId || null : null;
+
       if (newDomain === 'documents') {
-        searchDocuments(query, filters, envelopeSearchIndexName, null, null, fragment);
+        searchDocuments(query, filters, effectiveEnvelopeSearchIndexName, scopeArg, entityIdArg, effectiveFragment);
       } else {
-        searchRecords(query, DOMAIN_RECORD_TYPES[newDomain], filters, envelopeSearchIndexName, fragment);
+        searchRecords(
+          query,
+          DOMAIN_RECORD_TYPES[newDomain],
+          filters,
+          effectiveEnvelopeSearchIndexName,
+          effectiveFragment
+        );
       }
     },
-    [query, filters, urlParams, searchDocuments, searchRecords]
+    [query, filters, urlParams, initialScope, initialEntityId, searchDocuments, searchRecords]
   );
 
   const handleFiltersChange = useCallback((newFilters: SearchFilters) => {

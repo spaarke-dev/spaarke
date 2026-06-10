@@ -283,7 +283,7 @@ public partial class RagService : IRagService
                     KnowledgeSourceName = result.Document.KnowledgeSourceName,
                     Score = effectiveScore,
                     SemanticScore = semanticScore,
-                    ChunkIndex = result.Document.ChunkIndex,
+                    ChunkIndex = result.Document.ChunkIndex ?? 0,
                     ChunkCount = result.Document.ChunkCount,
                     Highlights = GetHighlights(result),
                     Metadata = result.Document.Metadata,

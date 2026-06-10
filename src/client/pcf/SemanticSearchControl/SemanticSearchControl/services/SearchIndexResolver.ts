@@ -63,20 +63,32 @@ export async function resolveSearchIndexNameAsync(
   }
 
   try {
-    // Phase G — Schema note (spec §3.1): the column on host entities is
-    // `sprk_ai_search_index` (NOT `sprk_aisearchindexid`, which was the spec's
-    // placeholder text). The OData wire form for a lookup column is
-    // `_<schemaname>_value`; the navigation property used in $expand is the
-    // schema name itself.
+    // Phase G — Schema notes:
+    //   - The column on host entities is `sprk_ai_search_index` (per spec §3.1;
+    //     NOT `sprk_aisearchindexid` which was the spec's placeholder text).
+    //   - The OData wire form for the lookup *value* is `_sprk_ai_search_index_value`.
+    //   - The OData *navigation property* used in `$expand` is the
+    //     `associatednavigationproperty` annotation name, which for a custom
+    //     lookup column is the column's display-name in PascalCase with
+    //     underscores: **`sprk_AI_Search_Index`** (display name "AI Search Index"
+    //     under the `sprk_` publisher prefix). v1.1.75 used the lowercase
+    //     column-logical-name `sprk_ai_search_index` here and Dataverse returned
+    //     "Could not find a property named 'sprk_ai_search_index'" → 400 →
+    //     dropdown silently fell back to the wrong default index. v1.1.76 fixes
+    //     the casing. Verified via:
+    //       GET /api/data/v9.2/sprk_matters({id})?$select=_sprk_ai_search_index_value
+    //       Prefer: odata.include-annotations=*
+    //       → "_sprk_ai_search_index_value@Microsoft.Dynamics.CRM.associatednavigationproperty":
+    //         "sprk_AI_Search_Index"
     const record = (await context.webAPI.retrieveRecord(
       entityType,
       entityId,
-      '?$select=_sprk_ai_search_index_value' + '&$expand=sprk_ai_search_index($select=sprk_searchindexname)'
+      '?$select=_sprk_ai_search_index_value' + '&$expand=sprk_AI_Search_Index($select=sprk_searchindexname)'
     )) as unknown as {
-      sprk_ai_search_index?: { sprk_searchindexname?: string } | null;
+      sprk_AI_Search_Index?: { sprk_searchindexname?: string } | null;
     };
 
-    return record?.sprk_ai_search_index?.sprk_searchindexname ?? null;
+    return record?.sprk_AI_Search_Index?.sprk_searchindexname ?? null;
   } catch {
     // Lookup column may not exist yet (mid-Phase-G migration), the user may
     // lack read on the linked catalog row, or the WebAPI call may fail
