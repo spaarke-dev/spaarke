@@ -1052,13 +1052,44 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     // > `baseSum`, scale > 1 expands them to fill. Skip the no-op when the
     // ResizeObserver hasn't fired yet (containerWidth === 0).
     const scale = available > 0 && baseSum > 0 ? available / baseSum : 1;
+    // ai-spaarke-ai-workspace-UI-r1 iter 2 round 10 (2026-06-09):
+    // Pass 1 — initial per-column scale + minWidth floor. Some columns will
+    // hit their minWidth floor and stop shrinking; others stay scaled. The
+    // total may overshoot `available` because of that asymmetry.
+    const targets: number[] = [];
+    const mins: number[] = [];
+    let sum = 0;
     for (const col of visibleColumns) {
       const minW = Math.max(80, Math.round(col.width * 0.5));
       const target = Math.max(minW, Math.round(col.width * scale));
-      options[col.name] = {
-        defaultWidth: target,
-        minWidth: minW,
-        idealWidth: target,
+      targets.push(target);
+      mins.push(minW);
+      sum += target;
+    }
+    // Pass 2 — if pass 1's sum exceeds `available` (caused by minWidth floors
+    // refusing to shrink some columns while others were free to), redistribute
+    // the overflow by proportionally shrinking columns that are STILL above
+    // their minimum. The columns at minWidth stay put. This is the exact
+    // step that prevents the operator round 8 symptom (table scrollWidth >
+    // gridScroll clientWidth → horizontal scrollbar appears even though
+    // column-by-column math looked fine).
+    if (sum > available && available > 0) {
+      const overflow = sum - available;
+      const slackPerCol: number[] = targets.map((t, i) => t - mins[i]);
+      const totalSlack = slackPerCol.reduce((s, x) => s + x, 0);
+      if (totalSlack > 0) {
+        const shrinkFactor = Math.min(1, overflow / totalSlack);
+        for (let i = 0; i < targets.length; i++) {
+          const shrink = Math.round(slackPerCol[i] * shrinkFactor);
+          targets[i] = targets[i] - shrink;
+        }
+      }
+    }
+    for (let i = 0; i < visibleColumns.length; i++) {
+      options[visibleColumns[i].name] = {
+        defaultWidth: targets[i],
+        minWidth: mins[i],
+        idealWidth: targets[i],
       };
     }
     return options;
