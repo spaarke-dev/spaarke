@@ -3,7 +3,7 @@
     <title>Extract &lt;RecordNavigationModalShell&gt; from RichFilePreview.tsx into @spaarke/ui-components</title>
     <phase>Phase 1: Shared-lib hoist</phase>
     <workstream>C (foundation)</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1-2 days</estimated-effort>
     <tags>shared-lib, ui-components, fluent-v9, hoist, modal, file-preview, smart-todo</tags>
     <parallel-safe>true</parallel-safe>

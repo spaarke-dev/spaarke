@@ -3,7 +3,7 @@
     <title>D — Implement audited regarding resolver (winner from task 002)</title>
     <phase>Phase 2: Wave 2a</phase>
     <workstream>D</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>3 days</estimated-effort>
     <tags>pcf-or-webresource-or-codepage, regarding, polymorphic-resolver, fluent-v9, dataverse</tags>
     <parallel-safe>true</parallel-safe>

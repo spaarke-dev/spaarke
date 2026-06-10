@@ -167,7 +167,13 @@ function SmartTodoLayout(): React.ReactElement {
 
 function LaunchCreateTodoWizardHost(): React.ReactElement | null {
   const launchContext = useLaunchContext();
-  const isCreateTodoLaunch = launchContext?.action === "createTodo";
+  // Narrow once to the createTodo branch — `useLaunchContext` returns a
+  // discriminated union (createTodo | openTodos | undefined; R4 task 034); this
+  // host only handles the createTodo flow. The openTodos branch is consumed by
+  // the Kanban filter (see R4 task 030).
+  const createTodoContext =
+    launchContext?.action === "createTodo" ? launchContext : undefined;
+  const isCreateTodoLaunch = createTodoContext !== undefined;
 
   const [wizardOpen, setWizardOpen] = React.useState<boolean>(isCreateTodoLaunch);
   const [isAuthReady, setIsAuthReady] = React.useState<boolean>(false);
@@ -239,7 +245,7 @@ function LaunchCreateTodoWizardHost(): React.ReactElement | null {
       onClose={handleClose}
       dataService={dataService}
       navigationService={navigationService}
-      initialRegarding={launchContext?.initialRegarding}
+      initialRegarding={createTodoContext?.initialRegarding}
       authenticatedFetch={authenticatedFetch}
       bffBaseUrl={bffBaseUrl}
       resolveSpeContainerId={resolveSpeContainerId}

@@ -3,7 +3,7 @@
     <title>G — Create 4 sprk_chartdefinition records (Matter / Project / Invoice / WorkAssignment)</title>
     <phase>Phase 2: Wave 2a</phase>
     <workstream>G</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>dataverse-schema, chart-definition, deploy, powershell, scripts</tags>
     <parallel-safe>true</parallel-safe>

@@ -216,6 +216,28 @@ Phase 4: Wrap-up (Week 4, day 1)
 
 ---
 
+### Wave G1+2a — Phase 1 hoists + audit-unblocked Wave 2a ✅ COMPLETE (2026-06-10)
+
+**5 parallel agents, all delivered same day.**
+
+| Task | Status | Bundle / Lines | Tests | Key carry-forward findings |
+|---|---|---|---|---|
+| **010** RecordNavigationModalShell | ✅ | 270 LOC + README | 15 ✅ | Task 011 must adapt `onNavigate(idx)` → `onNavigate("prev"\|"next")`; shell renders chrome only (not Dialog envelope, not iframe); arrow-key nav left in `RichFilePreview.tsx` (not extracted) |
+| **012** Toolbar primitives | ✅ | 3 components | 20 ✅ | `LayoutRowTwoSplit20Regular` doesn't exist in `@fluentui/react-icons` v2.0.320; used `LayoutRowTwo20Regular`. `<ToolbarButton>` rejects `appearance="outline"` — used `<Button size="small">` |
+| **034** useLaunchContext extension | ✅ | 235→471 LOC | 22 ✅ | Test runner gap (no vitest/jest) is **pre-existing** — small follow-up task to wire one ~2hr. `entityType` derivation rule: strip `sprk_regarding` → prepend `sprk_` (e.g., `sprk_regardingmatter` → `sprk_matter`). NEW: hook clears `data=` envelope after first read |
+| **050** RegardingResolver PCF | ✅ | 1.56 MiB bundle | 20 ✅ | **Task 051 blockers**: verify hidden `sprk_regardingrecordtype` field on To Do main form; pre-save handler needed for new-record CREATE transaction (Xrm.Page setValue staging — AssociationResolver pattern). Pinned `@fluentui/react-icons@^2.0.226` + `ajv@^8.20.0` workarounds for React 17+ griffel compat — DO NOT bump |
+| **080** Chart def records | ✅ | 4 JSONs + PS1 + notes | n/a | **Schema correction**: live column is `sprk_fetchxmlquery` (not `sprk_fetchxml` as spec used). Live deploy DEFERRED to user command. Tasks 081-084 must remove old `154bd4a4-...` UPCOMING TASKS chart def from Matter form; SmartTodo Code Page MUST deploy with `.html` suffix; R4-034 is hard prerequisite for drill-through pre-filter |
+
+**Index.ts merge handled by main session**: 4 new exports added to `src/client/shared/Spaarke.UI.Components/src/components/index.ts` (RecordNavigationModalShell + SelectionAwareToolbar + ViewToggle + OrientationToggle). Race-free per the dispatch protocol — agents documented exports + main session batch-merged post-wave.
+
+**Build verification after wave** (per project-pipeline mandatory rule):
+- `Spaarke.UI.Components` tsc: clean
+- SmartTodo Code Page `npm run build`: clean (9.53s, 3,256 modules — confirms shared-lib export integration)
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors (sanity)
+- RegardingResolver PCF: agent verified `npm run build:prod` clean during execution
+
+---
+
 ### Phase 1: Shared-lib hoist (Week 1, days 3-5)
 
 **Objectives**:

@@ -3,7 +3,7 @@
     <title>B — Extend useLaunchContext with `openTodos` action + parseDataParams() envelope (R4-003 + R4-004 follow-up)</title>
     <phase>Phase 2: Wave 2a</phase>
     <workstream>B (cross-cutting with G)</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>0.5-1 day</estimated-effort>
     <tags>smart-todo, hook, launch-context, url-params, react, code-page</tags>
     <parallel-safe>true</parallel-safe>

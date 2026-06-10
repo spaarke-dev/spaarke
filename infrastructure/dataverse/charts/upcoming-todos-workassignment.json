@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "metadata": {
+    "purpose": "sprk_chartdefinition record for VisualHost 'Upcoming To Dos' card on Work Assignment main form",
+    "project": "smart-todo-r4",
+    "task": "080-G-create-chart-definitions",
+    "predecessor": "Modeled on UPCOMING TASKS chart def (154bd4a4-f359-f111-a825-3833c5d9bcab)",
+    "createdDate": "2026-06-10",
+    "version": "1.0",
+    "specReference": "FR-31 through FR-36",
+    "drillThroughSpike": "projects/smart-todo-r4/notes/drill-through-spike.md (R4-003)",
+    "fields": {
+      "sprk_drillthroughtarget": "Per R4-003 spike: web resource name only ('sprk_smarttodo.html'). VisualHost auto-injects data envelope at runtime (entityName=sprk_todo&filterField=sprk_regardingworkassignment&filterValue=<parentId>&mode=dialog) and opens via Xrm.Navigation.navigateTo with target:2 (dialog).",
+      "sprk_visualtype": "100000009 = DueDateCardList (per VisualType enum in src/client/pcf/VisualHost/control/types/index.ts)",
+      "sprk_fetchxmlquery": "FetchXML per FR-32: statecode=0 AND statuscode in {1=Open, 659490001=In Progress} AND (sprk_duedate next-5-days OR sprk_todopinned=true). VisualHost adds the parent-record filter on sprk_contextfieldname at runtime."
+    }
+  },
+  "record": {
+    "sprk_name": "Upcoming To Dos — Work Assignment",
+    "sprk_entitylogicalname": "sprk_todo",
+    "sprk_contextfieldname": "sprk_regardingworkassignment",
+    "sprk_drillthroughtarget": "sprk_smarttodo.html",
+    "sprk_visualtype": 100000009,
+    "sprk_fetchxmlquery": "<fetch>\n  <entity name=\"sprk_todo\">\n    <filter type=\"and\">\n      <condition attribute=\"statecode\" operator=\"eq\" value=\"0\" />\n      <filter type=\"or\">\n        <condition attribute=\"statuscode\" operator=\"eq\" value=\"1\" />\n        <condition attribute=\"statuscode\" operator=\"eq\" value=\"659490001\" />\n      </filter>\n      <filter type=\"or\">\n        <condition attribute=\"sprk_duedate\" operator=\"next-x-days\" value=\"5\" />\n        <condition attribute=\"sprk_todopinned\" operator=\"eq\" value=\"1\" />\n      </filter>\n    </filter>\n  </entity>\n</fetch>"
+  }
+}

@@ -4,8 +4,8 @@
 > **Last Updated**: 2026-06-10 (Wave G0 complete + new task 034 registered)
 > **Branch**: `work/smart-todo-r4`
 > **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
-> **Status**: 🔲 27 not-started · 🔄 0 in-progress · ✅ 4 complete · ❌ 0 blocked
-> **Active wave**: ready to dispatch G1+2a (Phase 1 hoists + audit-unblocked Wave 2a)
+> **Status**: 🔲 22 not-started · 🔄 0 in-progress · ✅ 9 complete · ❌ 0 blocked
+> **Active wave**: none — Wave G1+2a ✅ complete; ready to dispatch G1+2a-followups
 
 ---
 
@@ -19,6 +19,18 @@
 | **R4-004** useLaunchContext | Hook **EXISTS** (initial discovery wrong); **REPURPOSE + EXTEND** with `openTodos` discriminator; only 030 + 081-084 consume it (020/060 don't) | 030, 081-084 | [launch-context-decision.md](../notes/launch-context-decision.md) |
 
 **New task added**: [034](034-B-extend-useLaunchContext.poml) — combines R4-003 + R4-004 follow-up (extend `useLaunchContext` with `openTodos` discriminator + `parseDataParams()` envelope consumption). Parallel-safe, blocks 081-084.
+
+---
+
+## Wave G1+2a Outcomes — 5 tasks complete (2026-06-10)
+
+| Task | Deliverable | Tests | Build | Carry-forward findings |
+|---|---|---|---|---|
+| **010** RecordNavigationModalShell | 6 files (`tsx/styles/types/index/README/test`) in new shared-lib dir; postMessage dirty-check + origin allow-list; Fluent v9 + Griffel | 15 ✅ | clean | Task 011 must adapt: legacy `onNavigate(index)` vs new `onNavigate("prev"\|"next")`; arrow-key nav stays in `RichFilePreview.tsx`, NOT extracted; shell renders chrome only — dialog envelope + iframe stay with consumer |
+| **012** Toolbar primitives | 3 components (SelectionAwareToolbar / ViewToggle / OrientationToggle); icon corrections from spec | 20 ✅ | clean | `LayoutRowTwoSplit20Regular` doesn't exist in `@fluentui/react-icons` v2.0.320 — used `LayoutRowTwo20Regular`. `<ToolbarButton>` rejects `appearance="outline"` — used `<Button size="small">` inside `<Toolbar>` landmark |
+| **034** useLaunchContext extension | Hook 235→471 LOC, tests 217→410 LOC, parseDataParams extended with `search?` test-injection param, SmartTodoApp.tsx narrowing fix | 22 ✅ (8 narrowed + 14 new) | clean (9.53s build) | Test runner gap (no vitest/jest in SmartTodo) is **pre-existing**; tests are executable-spec shims. `entityType` derivation: `sprk_regarding<X>` prefix stripped → prepend `sprk_` → e.g., `sprk_regardingmatter` → `sprk_matter`. NEW behavior: hook clears `data=` envelope after first read |
+| **050** RegardingResolver PCF | `src/client/pcf/RegardingResolver/` mirrors SemanticSearchControl nested layout; `ResolverWriteHandler::applyRegardingSelection` = SOLE write path; wraps `applyResolverFields`; nulls 10 other lookups before SET | 20 ✅ | `build:prod` clean, bundle 1.56 MiB | **Task 051 hard-blockers**: verify `sprk_regardingrecordtype` exists on To Do main form; pre-save handler for new-record CREATE transaction (Xrm.Page setValue staging — AssociationResolver pattern). Pinned `@fluentui/react-icons@^2.0.226` + `ajv@^8.20.0` workarounds — DO NOT bump |
+| **080** Chart def records | 4 JSON files + `Create-UpcomingTodosChartDefinitions.ps1` + deploy-notes doc | n/a | JSON valid + PS syntax-checks | **Schema correction**: live column = `sprk_fetchxmlquery` (not `sprk_fetchxml` as spec used). Live deploy DEFERRED to user command. Task 081-084 must remove old `154bd4a4-...` UPCOMING TASKS chart def from Matter form; SmartTodo Code Page MUST deploy with `.html` suffix; R4-034 is hard prerequisite for drill-through pre-filter |
 
 ---
 
@@ -68,9 +80,9 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [010](010-extract-RecordNavigationModalShell.poml) | Extract `<RecordNavigationModalShell>` from RichFilePreview.tsx | shared-lib, hoist, fluent-v9 | ✅ | — | 011, 040, 041 |
-| 🔲 | [011](011-refactor-RichFilePreviewDialog.poml) | Refactor RichFilePreviewDialog to consume new shell (regression-safety) | shared-lib, regression-safety | ❌ (after 010) | 010 | — |
-| 🔲 | [012](012-hoist-toolbar-primitives.poml) | Hoist toolbar primitives (SelectionAwareToolbar, ViewToggle, OrientationToggle) | shared-lib, hoist, fluent-v9 | ✅ | — | 030, 032, 033, 070 |
+| ✅ | [010](010-extract-RecordNavigationModalShell.poml) | Extract `<RecordNavigationModalShell>` from RichFilePreview.tsx → 6 files + 15 tests | shared-lib, hoist, fluent-v9 | ✅ | — | 011, 040, 041 |
+| 🔲 | [011](011-refactor-RichFilePreviewDialog.poml) | Refactor RichFilePreviewDialog to consume new shell (regression-safety) | shared-lib, regression-safety | ❌ (after 010 ✅) | 010 ✅ | — |
+| ✅ | [012](012-hoist-toolbar-primitives.poml) | Hoist toolbar primitives → 3 components + 20 tests; icon corrections noted | shared-lib, hoist, fluent-v9 | ✅ | — | 030, 032, 033, 070 |
 
 ---
 
@@ -80,8 +92,8 @@
 |:---:|:---|---|---|:---:|---|---|
 | 🔲 | [020](020-A-rebuild-workspace-widget.poml) | A — Rebuild SmartToDo workspace widget against sprk_todo | widget, smart-todo, deploy | ✅ | 001 | 092 |
 | 🔲 | [030](030-B-smarttodo-4row-layout.poml) | B — SmartTodo Code Page 4-row layout | code-page, smart-todo, ui | ✅ | 012 | 031, 032, 033, 040, 060 |
-| 🔲 | [050](050-D-implement-regarding-resolver.poml) | D — Implement audited regarding resolver | resolver, fluent-v9 | ✅ | 002 | 051, 052 |
-| 🔲 | [080](080-G-create-chart-definitions.poml) | G — Create 4 sprk_chartdefinition records | dataverse-schema, deploy | ✅ | 003 | 081, 082, 083, 084 |
+| ✅ | [050](050-D-implement-regarding-resolver.poml) | D — Virtual PCF resolver (mirrors AssociationResolver) → 20/20 tests, bundle 1.56 MiB | resolver, fluent-v9 | ✅ | 002 ✅ | 051, 052 |
+| ✅ | [080](080-G-create-chart-definitions.poml) | G — 4 chart def JSONs + PS deploy script (live-deploy DEFERRED to user command) | dataverse-schema, deploy | ✅ | 003 ✅ | 081, 082, 083, 084 |
 
 #### B sub-tasks (after 030)
 
@@ -90,7 +102,7 @@
 | 🔲 | [031](031-B-assigned-to-me-filter.poml) | B — "Assigned to Me" filter mode (drop "My Tasks") | smart-todo, filter | ✅ (with 032, 033) | 030 | — |
 | 🔲 | [032](032-B-selection-aware-toolbar-actions.poml) | B — Selection-aware toolbar actions (Open / Delete / Email / Pin) | smart-todo, toolbar | ✅ (with 031, 033) | 012, 030 | 040 (Open action) |
 | 🔲 | [033](033-B-list-card-view-toggle.poml) | B — List / Card view toggle with persistence | smart-todo, user-preference | ✅ (with 031, 032) | 012, 030 | — |
-| 🔲 | [034](034-B-extend-useLaunchContext.poml) | B — Extend useLaunchContext with `openTodos` + parseDataParams envelope **(NEW from Phase 0 aggregation)** | smart-todo, hook, url-params | ✅ | — | 081, 082, 083, 084 |
+| ✅ | [034](034-B-extend-useLaunchContext.poml) | B — Extended useLaunchContext (235→471 LOC, 22 tests) **(NEW from Phase 0)** + parseDataParams extended | smart-todo, hook, url-params | ✅ | — | 081, 082, 083, 084 |
 
 #### D sub-tasks (serial after 050)
 

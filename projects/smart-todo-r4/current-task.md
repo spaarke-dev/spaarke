@@ -13,11 +13,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Wave G0** | ✅ COMPLETE — 4 audits done, all binding decisions captured |
+| **Wave G0** | ✅ COMPLETE — 4 audits, all binding decisions captured |
+| **Wave G1+2a** | ✅ COMPLETE — 5 parallel agents (010, 012, 034, 050, 080) all delivered |
 | **Active Task** | none — between waves |
-| **Status** | Phase 0 ✅ complete; ready for Wave G1+2a dispatch |
-| **Next Action** | Dispatch Wave G1+2a in parallel: 010 (shell extract), 012 (toolbar primitives), 050 (D PCF resolver), 080 (G chart defs), 034 (useLaunchContext extension). Tasks 020 (A widget) requires `FeedTodoSyncContext` coupling design decision — discuss with user before kickoff. |
-| **Phase 0 outcomes** | See [`plan.md` §Phase 0 Outcomes](plan.md#phase-0-foundation--audit--spike--complete-2026-06-10) + [`tasks/TASK-INDEX.md` Phase 0 Outcomes table](tasks/TASK-INDEX.md#phase-0-outcomes--binding-decisions-2026-06-10) |
+| **Status** | 9 of 31 tasks ✅; ready to dispatch Wave G1+2a-followups (011, 030, 020, 051) |
+| **Next Action** | Dispatch Wave G1+2a-followups in parallel: 011 (RichFilePreviewDialog refactor — regression-safety on shell), 030 (B 4-row layout — consumes toolbar primitives), 020 (A widget rebuild — Pattern D, FeedTodoSyncContext lift-to-shim per user decision), 051 (D resolver form-bind — verify hidden field first). |
+| **Phase 0 outcomes** | See [`tasks/TASK-INDEX.md` Phase 0 Outcomes table](tasks/TASK-INDEX.md#phase-0-outcomes--binding-decisions-2026-06-10) |
+| **Wave G1+2a outcomes** | See [`tasks/TASK-INDEX.md` Wave G1+2a Outcomes table](tasks/TASK-INDEX.md#wave-g12a-outcomes--5-tasks-complete-2026-06-10) |
 
 ### Files Modified This Session (Wave G0 + aggregation)
 
@@ -32,7 +34,17 @@
 
 ### Critical Context
 
-R4 is the UX-closure follow-up to R3 (`sprk_todo` decoupling). 7 workstreams (A-G), now **31 tasks** (was 30; +034 from Phase 0 aggregation). Phase 0 ✅ complete — all 4 binding decisions captured: **Pattern D dual-use** for A; **virtual PCF** for D (mirrors `AssociationResolver` precedent); drill-through payload **confirmed**; `useLaunchContext` **EXISTS** (needs extension via 034, not new build). Worktree at `c:\code_files\spaarke-wt-smart-todo-r4` on branch `work/smart-todo-r4`. Master moved to `a338f4b24` during Wave G0 (PR #372 merged) — needs merge before task 020 starts.
+R4 is the UX-closure follow-up to R3 (`sprk_todo` decoupling). 7 workstreams (A-G), 31 tasks. **9 complete** through Waves G0 + G1+2a (audits + shared-lib hoists + PCF resolver + hook extension + chart-def authoring).
+
+**Wave G1+2a key outcomes ready for downstream consumption:**
+- `<RecordNavigationModalShell>` + 3 toolbar primitives exported from `@spaarke/ui-components` — ready for 011 (regression refactor) and 030 (B 4-row layout)
+- `RegardingResolver` PCF built (1.56 MiB bundle), 20 tests — ready for 051 (form bind, hidden-field check, pre-save handler)
+- `useLaunchContext` extended with `openTodos` discriminator + envelope handling — drill-through gap closed
+- 4 chart def JSONs + deploy script in repo — live deploy is a deferred user command (`pwsh -File scripts/Create-UpcomingTodosChartDefinitions.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"`)
+- Master synced to `a338f4b24` (PR #372 merged in Wave G0 aggregation)
+
+**User decisions in hand for next wave:**
+- Task 020: lift `FeedTodoSyncContext` into LegalWorkspace section shim per audit (Calendar pattern)
 
 ---
 

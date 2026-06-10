@@ -3,7 +3,7 @@
     <title>Hoist toolbar primitives to @spaarke/ui-components (SelectionAwareToolbar, ViewToggle, OrientationToggle)</title>
     <phase>Phase 1: Shared-lib hoist</phase>
     <workstream>B (foundation)</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>shared-lib, ui-components, fluent-v9, hoist, toolbar, smart-todo</tags>
     <parallel-safe>true</parallel-safe>
