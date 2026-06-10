@@ -41,7 +41,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { DismissRegular, Open16Regular, SearchRegular } from '@fluentui/react-icons';
-import { TODO_REGARDING_CATALOG, type ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components';
+import { TODO_REGARDING_CATALOG, buildRecordUrl, type ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import {
   applyRegardingSelection,
@@ -290,6 +290,30 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       }
 
       setSelectedTarget(selection);
+
+      // CREATE-mode bridge for the form's OnSave handler (R4-051 follow-up):
+      // On UPDATE forms, applyResolverFields persisted all 5 fields directly
+      // via webApi.updateRecord — no further action needed. On CREATE forms,
+      // the row doesn't exist yet so persistence was deferred. Surface the
+      // resolved payload on a stable global so sprk_todo_regarding_presave.js
+      // can stage the 4 companion fields (sprk_regarding<X>, recordid,
+      // recordname, recordurl) onto the form's pending-attribute buffer via
+      // getAttribute().setValue() so they ride the INSERT transaction.
+      // sprk_regardingrecordtype is already propagated via notifyOutputChanged.
+      // See projects/smart-todo-r4/notes/d-form-bind-instructions.md.
+      if (!writeCtx.hostRecordId) {
+        (window as unknown as {
+          __sprk_regarding_pending__?: Record<string, unknown>;
+        }).__sprk_regarding_pending__ = {
+          hostEntity: writeCtx.hostEntity,
+          entityType: selection.entityType,
+          entitySet: result.catalogEntry?.entitySet,
+          lookupAttribute: result.catalogEntry?.lookupAttribute,
+          recordId: selection.recordId,
+          recordName: selection.recordName,
+          recordUrl: buildRecordUrl(selection.entityType, selection.recordId),
+        };
+      }
 
       // Notify PCF class so the bound lookup output is kept in sync. The
       // sprk_regardingrecordtype was written by applyResolverFields via
