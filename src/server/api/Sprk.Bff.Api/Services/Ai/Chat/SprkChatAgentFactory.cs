@@ -283,6 +283,20 @@ public class SprkChatAgentFactory
         }
         // === End R5 task 033 ====================================================
 
+        // === R6 Hotfix Wave B-G10b — Compact-formatting directive (B12a) ========
+        // The chat-pane LLM markdown renderer (SprkChat) uses Fluent markdown styles.
+        // Without guidance, GPT models default to verbose markdown with many heading
+        // levels, generous spacing, and deeply-nested bullets. This produces a
+        // chat surface that feels document-like rather than conversational. The
+        // user surfaced this in the Phase B re-walkthrough (B12, 2026-06-10) —
+        // followup-card responses ("Explain the main conclusions") had ## /### /
+        // numbered lists with 3-level nested bullets.
+        //
+        // This directive is presentation-only — does NOT change the LLM's actual
+        // content. NFR-01 conversational primacy preserved.
+        context = context with { SystemPrompt = context.SystemPrompt + BuildCompactFormattingDirective() };
+        // === End R6 Hotfix Wave B-G10b =========================================
+
         // Resolve playbook capabilities from Dataverse to determine which tools should be available.
         // When no playbook is specified (generic/standalone chat mode), use core capabilities only.
         // This prevents tools with unconfigured dependencies (LegalResearch, CodeInterpreter)
@@ -1817,14 +1831,20 @@ public class SprkChatAgentFactory
         // Two leading newlines isolate the directive as its own paragraph. The exact
         // wording is calibrated to keep the LLM brief WITHOUT silencing it (NFR-01:
         // conversational primacy preserved — the LLM still acknowledges the intent).
-        return $"\n\n## Render Routing Directive (R6 task 042 / FR-30)\n" +
+        return $"\n\n## Render Routing Directive (R6 task 042 / FR-30, hardened B-G10)\n" +
                $"This user intent resolves to a playbook that renders its output to {target} " +
                $"({surface}). When you invoke the `invoke_playbook` tool for this intent, " +
                $"respond with a SINGLE-SENTENCE acknowledgment ONLY (e.g., " +
                $"\"Generating your result in {target}…\"). " +
                $"Do NOT emit the analysis content inline in this chat turn — the playbook " +
                $"output will render in {target}. This prevents a duplicate render " +
-               $"(\"path A vs path B\" parallelism — R5 Gap A). The user's subsequent " +
+               $"(\"path A vs path B\" parallelism — R5 Gap A). " +
+               $"In particular, do NOT speculate about whether the document is " +
+               $"extractable / readable / contains text — the extraction pipeline runs " +
+               $"asynchronously and the playbook handles it. This prevents hallucinated " +
+               $"\"I attempted to retrieve\" / \"content not accessible\" messages on " +
+               $"async-extracted formats (PDF, scanned images). " +
+               $"The user's subsequent " +
                $"follow-up turns (refinement, comparison, context injection) are " +
                $"unaffected — respond conversationally as normal on those turns.";
     }
@@ -1874,6 +1894,29 @@ public class SprkChatAgentFactory
     /// widen the AI public-contracts surface.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Hotfix Wave B-G10b (R6, 2026-06-10) — builds the system-prompt suffix that
+    /// instructs the LLM to use compact markdown formatting in chat-pane responses.
+    /// Caps heading depth at one level, bullet nesting at two levels, and prefers
+    /// short paragraphs over heavy structural markup. Presentation-only — does NOT
+    /// affect the LLM's content. Applied to ALL chat turns.
+    /// </summary>
+    internal static string BuildCompactFormattingDirective()
+    {
+        return $"\n\n## Chat Response Formatting (Hotfix Wave B-G10b)\n" +
+               $"Use COMPACT markdown for chat responses. Specific rules:\n" +
+               $"- Prefer short paragraphs (2-4 sentences) over headings when possible.\n" +
+               $"- Use AT MOST one heading level (e.g., '## Section'). Do NOT use '###' or deeper.\n" +
+               $"- Cap bullet nesting at TWO levels (parent → child). Do NOT use 3+ level nesting.\n" +
+               $"- Do NOT bold inside bullets unless naming a defined term.\n" +
+               $"- For substantive responses (more than ~150 words), lead with a 2-3 sentence TL;DR " +
+               $"paragraph before any headings or lists.\n" +
+               $"- Skip blank lines between adjacent bullets in the same list.\n" +
+               $"- Use prose where it flows naturally; reserve lists for genuinely enumerable items " +
+               $"(3+ parallel items).\n" +
+               $"- The chat surface is conversational — match the user's register.";
+    }
+
     internal static string BuildChatDestinationAckDirective()
     {
         // The wording instructs a SHORT acknowledgment WITHOUT forbidding chat as a render
