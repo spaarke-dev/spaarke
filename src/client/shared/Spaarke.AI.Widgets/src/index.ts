@@ -81,6 +81,34 @@ export type {
   WorkspaceTabMatterContext,
 } from './types/WorkspaceTab';
 
+// ---------------------------------------------------------------------------
+// Types — Pillar 9 Widget Visibility Contract (R6 task 071; FR-55)
+//
+// Discriminated union (4 variants — Summary, DocumentViewer, Dashboard, Table)
+// describing the agent-visible state each widget MAY opt into exposing to
+// Pillar 9's prompt builder. Consumed by:
+//   - task 072 (WorkspaceWidgetRegistry getVisibleState extension)
+//   - task 073 (per-widget implementations)
+//   - task 074 (Pillar 9 prompt builder — per-turn system-prompt snippet)
+//
+// Privacy default per ADR-015: widgets that don't implement
+// `getAgentVisibleState()` contribute nothing to the prompt. Opt-in is
+// explicit. See `./types/SerializedWidgetState.ts` for full per-variant
+// rationale.
+// ---------------------------------------------------------------------------
+
+export type {
+  SerializedWidgetState,
+  SerializedSummaryState,
+  SerializedDocumentViewerState,
+  SerializedDashboardState,
+  SerializedTableState,
+  GetAgentVisibleState,
+  _DiscriminatorAlignment,
+} from './types/SerializedWidgetState';
+
+export { assertNeverSerializedState } from './types/SerializedWidgetState';
+
 export * from './types/event-types';
 
 // ---------------------------------------------------------------------------

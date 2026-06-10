@@ -1,7 +1,8 @@
 <task id="071" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-26 — `getAgentVisibleState(): SerializedWidgetState` TypeScript interface</title>
-    <status>pending</status>
+    <status>completed</status>
+    <outcome-note>2026-06-09: Pillar 9 visibility contract shipped to `@spaarke/ai-widgets`. SerializedWidgetState 4-variant discriminated union (Summary/DocumentViewer/Dashboard/Table) reuses WorkspaceTabWidgetType from task 050 (cross-task alignment guard `_DiscriminatorAlignment` enforces drift detection at compile time). GetAgentVisibleState returns union | null (null = privacy default per ADR-015). Type-check 0 errors. Consumer-smoke: 3 anticipatory JSDoc references in tasks 050/051/052 — no migration needed; tasks 072/073/074 are the actual consumers. Dispatched in parallel with Phase B walkthrough; 053 is logical-not-actual dependency (053 is C# in Sprk.Bff.Api, 071 is TypeScript in @spaarke/ai-widgets — zero file overlap). Evidence: `notes/task-071-visibility-contract-evidence.md`.</outcome-note>
     <estimated-effort>2 hours</estimated-effort>
     <phase>Phase C — Widget Visibility Contract (Pillar 9)</phase>
     <wave>C-G2 (parallel after 6a)</wave>

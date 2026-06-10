@@ -103,8 +103,8 @@
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 059 | C-G5 | Additive `context.*` PaneEventBus event types (ADR-015 binding) (D-C-12) | 🔲 | FULL | true | 053 |
-| 060 | C-G5 | Additive `workspace.*` PaneEventBus event types (D-C-13) | 🔲 | FULL | true | 053 |
+| 059 | C-G5 | Additive `context.*` PaneEventBus event types (ADR-015 binding) (D-C-12) | ✅ | FULL | true | 053 |
+| 060 | C-G5 | Additive `workspace.*` PaneEventBus event types (D-C-13) — TS via timed-out sub-agent; closeout 2026-06-09 main session | ✅ | FULL | true | 053 |
 | 061 | C-G8 | `ExecutionTraceWidget.tsx` (Context-pane; ordered timeline) (D-C-14) | 🔲 | FULL | false | 059 |
 | 062 | C-G9 | Register trace widget with `ContextWidgetRegistry` (D-C-15) | 🔲 | STANDARD | false | 061 |
 | 063 | C-G10 | Emit `context.*` events from chat agent + playbook execution (D-C-16) | 🔲 | FULL | false | 059 |
@@ -125,7 +125,7 @@
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 071 | C-G5 | `getAgentVisibleState()` TypeScript interface (D-C-26) | 🔲 | FULL | true | 053 |
+| 071 | C-G5 | `getAgentVisibleState()` TypeScript interface (D-C-26) | ✅ | FULL | true | 053 |
 | 072 | C-G16 | Extend `WorkspaceWidgetRegistry` with `getVisibleState?` (D-C-27) | 🔲 | STANDARD | false | 071 |
 | 073 | C-G17 | Implement `getAgentVisibleState()` per widget type (D-C-28) | 🔲 | FULL | false | 072 |
 | 074 | C-G18 | Per-turn agent prompt builder gathers visible state (D-C-29/30) | 🔲 | FULL | false | 053, 073 |

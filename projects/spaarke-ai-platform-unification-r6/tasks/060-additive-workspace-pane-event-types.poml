@@ -1,7 +1,8 @@
 <task id="060" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-13 — Additive `workspace.*` PaneEventBus event types (reverse-flow workspace → assistant + context)</title>
-    <status>pending</status>
+    <status>completed</status>
+    <outcome-note>TS work landed via sub-agent before stream timeout at ~3.6h; main session closeout 2026-06-09 completed evidence note + POML + TASK-INDEX. 4 new variants on `WorkspacePaneEvent.type`: user_selection (200-char selectionText cap; user-visible-by-design per FR-38 + Pillar 9), tab_edited (editedFields = NAMES not values), tab_focused, tab_provenance_clicked. ADR-015 distinction (selectionText user-content vs telemetry-prohibited content on context.*) documented inline. Type-check 0 errors. ADR-030 4-channel preserved. Same pattern as task 034 (sub-agent timeout closeout from main session). Full evidence: notes/task-060-workspace-pane-events-evidence.md.</outcome-note>
     <estimated-effort>4 hours</estimated-effort>
     <phase>Phase C — Tri-directional Workspace (Pillar 6c)</phase>
     <wave>C-G2 (parallel after 6a)</wave>
