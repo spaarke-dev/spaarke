@@ -56,6 +56,24 @@ Write-Host "`n=== Office Add-ins Deployment ===" -ForegroundColor Cyan
 Write-Host "Environment: $Environment" -ForegroundColor Gray
 Write-Host "Source: $SourceDir" -ForegroundColor Gray
 
+# Step 0: Sanity check .env — refuse to deploy with unsubstituted placeholders
+$envPath = Join-Path $SourceDir '.env'
+if (Test-Path $envPath) {
+    $envContent = Get-Content $envPath -Raw
+    $placeholderMatches = [regex]::Matches($envContent, 'your-(addin|bff|tenant)-[a-z-]+-here')
+    if ($placeholderMatches.Count -gt 0) {
+        Write-Host "`nERROR: .env contains unsubstituted placeholder values:" -ForegroundColor Red
+        foreach ($m in $placeholderMatches) { Write-Host "  - $($m.Value)" -ForegroundColor Red }
+        Write-Host "Fix the placeholders in $envPath before deploying." -ForegroundColor Red
+        Write-Host "See .github/workflows/deploy-office-addins.yml for the real values used by CI." -ForegroundColor Yellow
+        exit 1
+    }
+} else {
+    Write-Host "`nERROR: .env not found at $envPath" -ForegroundColor Red
+    Write-Host "Copy .env.example to .env and populate real values." -ForegroundColor Yellow
+    exit 1
+}
+
 # Step 1: Build (unless skipped)
 if (-not $SkipBuild) {
     Write-Host "`n[1/4] Building production bundle..." -ForegroundColor Yellow

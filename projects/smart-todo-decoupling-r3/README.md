@@ -1,8 +1,10 @@
 # Smart To Do — Decoupling from Events (R3)
 
-> **Last Updated**: 2026-06-07
+> **Last Updated**: 2026-06-10
 >
-> **Status**: Draft
+> **Status**: ✅ Complete — PR #373 squash-merged to master `e328beaf` (2026-06-09); wrap-up PR (tasks 082, 083, 085, 090 + ✅ flips for 024, 072) follows
+>
+> **Outcome**: 36/46 tasks closed. Remainder deferred (task 005 orphan-but-not-deleted) or blocked on external action (AAD scope for Phase 7 MS To Do sync). See [`lessons-learned.md`](./lessons-learned.md) and `tasks/TASK-INDEX.md`.
 
 ## Overview
 

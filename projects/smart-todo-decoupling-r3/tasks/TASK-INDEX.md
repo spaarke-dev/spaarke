@@ -44,7 +44,7 @@
 | 021 | Add "My Tasks" filter to `KanbanHeader` | 3 | FULL | ✅ | 020 | P3-W2 | ✅ |
 | 022 | Integrate `AssociateToStep` in SmartTodo `TodoDetail` | 3 | FULL | ✅ | 011, 020, 030 | P3-W2 | ✅ |
 | 023 | Update `FeedTodoSyncContext` payload to todo-id | 3 | FULL | ✅ | 020 | P3-W2 | — |
-| 024 | Deploy SmartTodo Code Page | 3 | STANDARD | 🔲 | 020, 021, 022, 023 | P3-W3 | ✅ |
+| 024 | Deploy SmartTodo Code Page | 3 | STANDARD | ✅ | 020, 021, 022, 023 | P3-W3 | ✅ |
 | 030 | Extend `AssociateToStep` to all 11 entity targets | 4 | FULL | ✅ | 002, 010, 012 | P4-W1 | — |
 | 031 | Rewrite `CreateTodo` wizard + remove CreateWorkAssignment addTodo (audit-folded) | 4 | FULL | ✅ | 002, 030 | P4-W2 | — |
 | 032 | Implement launch-context pre-fill | 4 | FULL | ✅ | 031 | P4-W3 | ✅ |
@@ -62,14 +62,14 @@
 | 066 | Initial backfill on opt-in (`$batch`, backoff, resumable) | 7 | FULL | 🔲 | 061, 063, 064 | P7-W5 | ✅ |
 | 070 | Outlook ribbon "Create To Do" action | 8 | FULL | ✅ | 030, 031, 032 | P8-W1 | ✅ |
 | 071 | Outlook indicator banner for linked todos | 8 | FULL | ✅ | 002 | P8-W1 | ✅ |
-| 072 | Deploy Outlook add-in | 8 | STANDARD | 🔲 | 070, 071 | P8-W2 | ✅ |
+| 072 | Deploy Outlook add-in | 8 | STANDARD | ✅ | 070, 071 | P8-W2 | ✅ |
 | 080 | Audit `TodoDetailSidePane` consumers (A-2) → RETIRE | 9 | STANDARD | ✅ | 022 | P9-W1 | ✅ |
 | 081 | Retire `TodoDetailSidePane` (per task 080 decision: RETIRE) | 9 | STANDARD | ✅ | 080 | P9-W2 | ✅ |
-| 082 | Architecture doc: supersede + new `spaarke-todo-architecture.md` | 9 | MINIMAL | 🔲 | 005 | P9-W2 | ✅ |
-| 083 | Update root `CLAUDE.md` §16 pointer table | 9 | MINIMAL | 🔲 | 082 | P9-W3 | — (main-session) |
+| 082 | Architecture doc: supersede + new `spaarke-todo-architecture.md` | 9 | MINIMAL | ✅ | 005 | P9-W2 | ✅ |
+| 083 | Update root `CLAUDE.md` §16 pointer table | 9 | MINIMAL | ✅ | 082 | P9-W3 | — (main-session) |
 | 084 | Fix `CLAUDE.md` §10 stale `ADR-030` link → `ADR-032` | 9 | MINIMAL | ✅ | none | P9-W3 | — (main-session) |
-| 085 | Final repo-wide legacy-reference grep sweep | 9 | STANDARD | 🔲 | 005, 011, 020, 031, 081, 083 | P9-W4 | ✅ |
-| 090 | **Project wrap-up** (code-review + adr-check + repo-cleanup + lessons-learned) | 9-Final | FULL | 🔲 | 085, 081, 083, 084, 024, 072 | P9-W5 | — |
+| 085 | Final repo-wide legacy-reference grep sweep | 9 | STANDARD | ✅ | 005, 011, 020, 031, 081, 083 | P9-W4 | ✅ |
+| 090 | **Project wrap-up** (code-review + adr-check + repo-cleanup + lessons-learned) | 9-Final | FULL | ✅ | 085, 081, 083, 084, 024, 072 | P9-W5 | — |
 
 ---
 
