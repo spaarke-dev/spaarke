@@ -1,162 +1,385 @@
 # RESUME AFTER COMPACTION — ai-spaarke-ai-workspace-UI-r1
 
-> **Date saved**: 2026-06-09 — UPDATED after Phase A + B completion
+> **Date saved**: 2026-06-10 (full session refresh — supersedes all prior versions)
 > **Active branch**: `feature/ai-spaarke-ai-workspace-UI-r1`
 > **Active PR**: #372
-> **Last commit on branch**: `1240fd65` (Phase B — AppErrorBoundary + safeRegister, pushed)
-> **Working baseline still deployed in spaarkedev1**: `sprk_spaarkeai` web resource at commit `60b98770` (Phase A + B NOT yet deployed; rebuild + redeploy in Final step)
+> **HEAD**: `275add458` (pushed)
+> **Worktree dir**: `c:/code_files/spaarke` (the main repo path)
+> **Uncommitted**: 3 `package-lock.json` files (CalendarSidePane, EventDetailSidePane, TodoDetailSidePane) from npm installs — safe to discard or commit-as-noise
+> **Deployment target**: `https://spaarkedev1.crm.dynamics.com`
 
 ---
 
-## Progress since the previous save
+## CRITICAL CONTEXT — READ FIRST
 
-### Phase A — STATIC HARDENING (✅ COMPLETE)
-- A.1: `tsconfig.base.json` at repo root (committed `fe4d37389`)
-- A.2: 3 Code Pages extend base (committed `fe4d37389`)
-- A.3: Softened `noUnusedLocals`/`noUnusedParameters` in base; fixed 3 SpaarkeAi-owned tsc errors in `ContextPaneController.test.tsx` (committed `2aeb2d98`)
-- A.4: `scripts/tsc-surface-gate.mjs` — surface-scoped tsc gate (filters to `src/**` errors so shared-lib hygiene doesn't block builds). Wired into SpaarkeAi + DailyBriefing `npm run build` and `npm run typecheck`. **WLW deferred — 24 pre-existing owned errors (real type bugs in App.tsx + missing @testing-library/react types).** (committed `2aeb2d98`)
-- A.5: Added `pdfjs-dist@^5.7.284` + `mammoth@^1.12.0` to SpaarkeAi's `package.json` (dynamic imports via SprkChat hook). (committed `2aeb2d98`)
+### 1. This branch's work was OVERWRITTEN in spaarkedev1 today
+A parallel Claude session (likely on `work/spaarke-ai-platform-unification-r6`)
+deployed an old version of `sprk_spaarkeai` after this branch's deploys,
+silently reverting all iter-2 work and the box-sizing chain from operator view.
+**Restoration was performed** at the end of this session:
 
-### Phase B — RUNTIME RESILIENCE (✅ COMPLETE)
-- B.1: `AppErrorBoundary` in `@spaarke/ui-components/src/components/AppErrorBoundary/`. Self-contained FluentProvider in fallback render path (works even if parent FluentProvider crashed). Surface, onError, fallback props. (committed `1240fd65`)
-- B.2-B.3: Wrapped all 3 Code Page entry points (SpaarkeAi/main.tsx, DailyBriefing/main.tsx, WorkspaceLayoutWizard/main.tsx). WLW tsconfig also got the @spaarke/auth + @spaarke/ui-components source path mappings. (committed `1240fd65`)
-- B.4: `safeRegister` helper in `@spaarke/ui-components/src/utils/`. Thin try/catch wrapper that logs + returns undefined on registration error. (committed `1240fd65`)
-- B.5: Wrapped 26/28 registration calls — `register-workspace-widgets.ts` (21 calls via local `safeRegisterWidget`) + `register-context-widgets.ts` (5 calls via local `safeRegisterContext`). 3 single-call register-*.ts files NOT wrapped (no cascade risk for single-call modules). (committed `1240fd65`)
+- Rebuilt SpaarkeAi from HEAD `275add458` (verified bundle has all markers: `matters-list`, `BriefcaseSearchRegular`, `filterChipButton`, `WidgetErrorBoundary`, `1cdd19d2-3964`, `gridTableOverride`).
+- Redeployed via `scripts\Deploy-SpaarkeAi.ps1` (3704 KB).
+- User asked to verify via hard-refresh in Incognito — **pending verification at compaction time**.
 
-### Completed since prior save
-- **Phase D** — `WidgetErrorBoundary` + reportClientError + App Insights bootstrap; all in `ff66d005`.
-- **Phase C** — deferred per user decision; A+B+D defenses considered sufficient absent a fast PR cadence.
-- **Iteration 2 bisect** — landed in 3 slices, each independently committed + deployed:
-   - `17e1ca67` slice 1 — DataGrid ResizeObserver responsive column sizing
-   - `a00a8b03` slice 2 — Matters widget chain (registration shim, sectionRegistry, sections/index, sectionMetadataCatalog, register-workspace-widgets safeRegisterWidget)
-   - `472bb36d` slice 3 — Calendar filter-chip rewrite (Popover-based chips, Date Range chip with Quick Select, gray toolbar)
-- **Round 2 testing fixes** (`70b1d6c7`):
-   - Fix #1: DataGrid bidirectional scale (down-to-fit when container < baseline)
-   - Fix #2: WorkspaceLayoutWizard rebuilt + redeployed to surface Matters entry from `SECTION_METADATA_CATALOG`
-   - Fix #3a: Calendar filter actions right-justified (`marginLeft: auto`)
-   - Fix #3b: Calendar Clear button bumps a `key` on CalendarSection so its internal range highlight resets
-- **Round 3 testing fix** (`389e63f8`):
-   - Fix #4: New `sprk_gridconfiguration` row `1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6` ("Active Documents (Workspace)", `sprk_document`, pointed at OOB "Active Documents" savedquery). `ENTITY_VIEW_CONFIG_IDS.documents` now points there. The legacy `d99a4352-…` "Semantic Search Documents View" row was authored for SemanticSearchControl PCF (`_type='semantic-search-view'`) and left untouched.
+### 2. ALL parallel branches are the SAME user (you) running parallel Claude sessions across worktrees
+This changes the coordination model. There's no "other developer" to slack —
+all overwrites are session-to-session collisions on a shared spaarkedev1.
 
-### Pending — DEFERRED to other projects
-- **Fix #5 (Smart To Do widget) — deferred to smart-todo-r4 task A** (2026-06-09 user decision). The R3 schema cut (PR #373 squash `e328beaf`) removed `sprk_event.sprk_todoflag` but never propagated the migration through client code — 36 files in this repo still reference the old shape. The R4 design.md task A is exactly scoped to this work: rewrite `useTodoItems.ts` + `DataverseService.ts` todo methods to query `sprk_todo`, update the `TodoEntity` interface + all field references across LegalWorkspace + SmartTodo Code Page + ai-widgets. AppErrorBoundary / WidgetErrorBoundary catch the current failure as a fallback card (not a blank page), so operators see a graceful error until R4 runs.
-- **Phase B follow-up (shared-lib hygiene)** — ~42 shared-lib tsc errors deferred during brittleness work. Includes 12 missing-module errors in `register-workspace-widgets.ts` import paths, 20 `ComponentFramework` namespace errors in PCF-bridging files. When fixed, re-enable `noUnusedLocals` / `noUnusedParameters` in `tsconfig.base.json`.
-- **WorkspaceLayoutWizard tsc gate** — 24 pre-existing owned errors must be fixed before adding the gate. Deferred per Phase A.4 strategy.
+### 3. The fix proposed at compaction time was a "deploy ledger" pattern
+Not yet implemented. Documented below in §7 so it survives compaction.
 
 ---
 
----
+## What this branch shipped (all committed + pushed at HEAD 275add458)
 
-## TL;DR — what's happening
+### Phase A — Static hardening (commits `fe4d37389`, `2aeb2d98`)
+- `tsconfig.base.json` at repo root — shared TS strict settings
+- 3 surface tsconfigs (SpaarkeAi, DailyBriefing, WLW) extend the base
+- `scripts/tsc-surface-gate.mjs` — surface-scoped tsc gate (filters to `src/**` errors; shared-lib errors non-fatal)
+- Wired into SpaarkeAi + DailyBriefing `npm run build` (WLW deferred — 24 pre-existing owned errors)
+- `pdfjs-dist` + `mammoth` added to SpaarkeAi package.json (dynamic imports via SprkChat hook)
 
-1. Project was completing iteration 2 (testing-feedback fixes) when the SpaarkeAi page blanked.
-2. Root cause: `tabs.some(...)` referenced a prop that was never destructured in `WorkspacePaneMenu.tsx`. TypeScript was happy (prop existed on the interface), but vite's prod build doesn't run `tsc --noEmit`, so the bundle shipped with a runtime ReferenceError.
-3. Operator decision: **stop and fix systemic brittleness first** — same gaps exist across all 50+ Spaarke client surfaces. Then resume iteration 2.
-4. **The brittleness fix plan is approved (Phases A+B+C+D, ~8h estimated)** and documented in `brittleness-remediation-plan.md`. Phase A is in progress.
+### Phase B — Runtime resilience (commit `1240fd65`)
+- `AppErrorBoundary` in `@spaarke/ui-components/src/components/AppErrorBoundary/` — self-contained FluentProvider, surface name, onError, fallback props
+- All 3 Code Page entry points wrapped (SpaarkeAi, DailyBriefing, WLW)
+- `safeRegister` helper in `@spaarke/ui-components/src/utils/safeRegister.ts`
+- 26/28 registration calls wrapped (`register-workspace-widgets.ts` 21 calls + `register-context-widgets.ts` 5 calls)
 
----
+### Phase D — Per-widget boundary + telemetry (commit `ff66d005`)
+- `WidgetErrorBoundary` in `@spaarke/ui-components/src/components/WidgetErrorBoundary/`
+- `reportClientError` helper in `@spaarke/ui-components/src/services/reportClientError.ts`
+- `AppInsightsService.trackException` method added
+- AppErrorBoundary + safeRegister wired through reportClientError
+- `<Widget />` mount in WorkspaceTabManagerComponent wrapped in WidgetErrorBoundary
+- SpaarkeAi + DailyBriefing bootstrap AppInsightsService from `VITE_APP_INSIGHTS_KEY` env var
+- vite-env.d.ts files declare the env var
 
-## State of working tree (at save time)
+### Iteration 2 slices (3 commits)
+- **Slice 1** (`17e1ca67`): DataGrid `ResizeObserver` responsive column sizing in `DataGrid.tsx`
+- **Slice 2** (`a00a8b03`): Matters widget chain
+   - `LegalWorkspace/src/sections/matters.registration.ts` (new)
+   - `sectionRegistry.ts` + `sections/index.ts` + `sectionMetadataCatalog.ts` updated (`BriefcaseSearchRegular` icon)
+   - `register-workspace-widgets.ts` registers `matters-list` direct widget via `safeRegisterWidget`
+- **Slice 3** (`472bb36d`): Calendar filter-chip rewrite
+   - `CalendarWorkspaceWidget.tsx` filter row → Popover-anchored chip toolbar
+   - Event Type / Status / Date Field chips use RadioGroup popovers
+   - Date Range chip with From/To inputs + Quick Select presets
+   - Calendar day-click + chip edits share `pending.fromDate/toDate` state
 
-### Committed on branch (`60b98770`):
-- Iteration 2 partial: `CalendarLtr24Regular/Filled` icon swap on the Calendar widget's expand/collapse button; `tabs.some(...)` + `dispatch(...)` in `handlePinToggle`; **`tabs` destructured from props** (the root-cause fix).
+### Round 2-11 DataGrid layout fixes (10 commits — the 11-round saga)
+**Final pattern that works:**
+1. `box-sizing: border-box` reset in host `index.html` (round 11 — primary fix)
+2. `min-width: 0` on every flex/grid ancestor from workspace row → SectionPanel.card → DataverseEntityViewWidget root → DataGrid root → innerCard → gridScroll
+3. ResizeObserver pixel cap on DataverseEntityViewWidget root
+4. Griffel `!important` override of FluentDataGrid's hardcoded `min-width: fit-content` (`gridTableOverride` class)
+5. 2-pass column-math redistribution + per-cell `visibleColumns.length × 24px` padding reserve
+6. Width-bucket key on FluentDataGrid for re-mount on big resizes
 
-### Uncommitted in working tree (Phase A.1 + A.2 of brittleness plan):
-- New file: `tsconfig.base.json` at repo root — shared strict TS settings.
-- Modified: `src/solutions/SpaarkeAi/tsconfig.json` — now extends `tsconfig.base.json`; AI.Context/Outputs paths aligned to `/src` (was stale `/dist`).
-- Modified: `src/solutions/WorkspaceLayoutWizard/tsconfig.json` — extends base.
-- Modified: `src/solutions/DailyBriefing/tsconfig.json` — extends base; preserves its `jsx: react-jsx` (the other two are `jsx: react`).
-- Reverted: `src/solutions/LegalWorkspace/src/sections/matters.registration.ts` (untracked rollback artifact from earlier bisect).
+Each surface that hosts DataGrid MUST have item 1. Without it cells render `+24px` wider than declared.
 
-### Phase A.3 in progress (NOT YET TOUCHED):
-Running `npx tsc --noEmit` in SpaarkeAi after the tsconfig path fix reveals **112 pre-existing errors**:
-- **3 errors in SpaarkeAi-owned code** (all in `src/components/context/__tests__/ContextPaneController.test.tsx`) — fixable individually.
-- **92 errors in shared libs** (mostly `noUnusedLocals` / `noUnusedParameters` warnings in `@spaarke/ai-context`, `@spaarke/ai-outputs`, `@spaarke/ai-widgets`, `@spaarke/events-components`).
-- A handful of **"Cannot find module"** errors in `@spaarke/ai-widgets/widgets/workspace/CreateMatterWizardWidget.tsx`, `DocumentUploadWizardWidget.tsx`, `register-workspace-widgets.ts` pointing at non-existent paths like `@spaarke/ui-components/src/components/CreateMatterWizard`, `FileUpload/FileUploadZone`, `@spaarke/ai-outputs/src/output-widgets/BudgetDashboardWidget`. These need investigation — they may be deleted-file references or path-resolution gaps.
+### Documents config row swap (commit `389e63f8` + `e2ac8d0a`)
+- Created new `sprk_gridconfiguration` row `1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6` ("Active Documents (Workspace)", `sprk_document`, points at OOB "Active Documents" savedquery `82d75343-…`)
+- Updated `ENTITY_VIEW_CONFIG_IDS.documents` in `register-workspace-widgets.ts` to the new GUID
+- ALSO updated `documents.registration.ts` in LegalWorkspace (the LW-side shim) to the new GUID — this was the second-pass fix; the LW shim had its own hardcoded constant separate from the direct-widget registration
 
-**Key strategic question for Phase A.3 resumption**: 92 of 112 errors are in shared libs. Three options:
-1. Fix every error upstream (substantial — touches multiple shared libs).
-2. Soften the base `noUnusedLocals` / `noUnusedParameters` to `false` so the shared-lib errors don't surface in SpaarkeAi's tsc run; each surface opts back in if it wants.
-3. Use TS project references properly so shared libs are pre-checked in their own context and SpaarkeAi trusts their types via `dist/`. Big architectural change — defer.
+### Box-sizing audit cleanup (commits `b547ae03`, `69193486`, `275add45`)
 
-**Recommendation when resuming**: Option 2 for this PR + a Phase B follow-up to fix shared-lib hygiene. The remaining 3 SpaarkeAi-owned errors get fixed inline.
+**Audit results** (from `notes/box-sizing-reset-audit.md`):
+17 of 23 Code Pages were MISSING the canonical reset.
 
----
+**Wave 1 — DataGrid hosts (deployed)**:
+- AllDocuments (1185 KB) + Reporting (1777 KB)
 
-## Plan reference — read in this order on resume
+**Wave 2 pilot (deployed, user-verified clean)**:
+- CreateTodoWizard (1498 KB)
+- Preemptive: DailyBriefing + WorkspaceLayoutWizard (reset needed before CI gate wired)
 
-1. [`brittleness-remediation-plan.md`](./brittleness-remediation-plan.md) — full Phase A/B/C/D plan + R6 coordination notes
-2. This file — current state
-3. Original [`design.md`](../design.md) — project overall scope (Batches 1–3 of testing-feedback work)
-
----
-
-## Active todo list at save (15 items, 1 in_progress)
-
-```
-[in_progress] A1: Create tsconfig.base.json at repo root         ← effectively done; needs commit
-[pending]     A2: Have 3 Code Pages extend tsconfig.base.json    ← effectively done; needs commit
-[pending]     A3: Fix pre-existing tsc failures                  ← see decision above
-[pending]     A4: Add tsc --noEmit gate to 3 Code Pages' build
-[pending]     A5: Persist pdfjs-dist, mammoth, applicationinsights-web in package.json
-[pending]     B1: Create AppErrorBoundary in @spaarke/ui-components
-[pending]     B2-B3: Wrap 3 Code Page entry points in AppErrorBoundary
-[pending]     B4: Create safeRegister/createRegistry helpers
-[pending]     B5-B6: Wrap registration calls in try/catch
-[pending]     C1: Add playwright + smoke test infrastructure
-[pending]     C2: Add code-pages-smoke CI job
-[pending]     C3: Add CI tsc gate for Code Pages
-[pending]     D1: Wire createRegistry into WorkspaceLayoutWidget
-[pending]     D2: Per-widget Error Boundary at WorkspaceTabManager
-[pending]     Final: rebuild + deploy + verify; resume iteration 2 bisect
-```
-
-After brittleness phases land, **resume iteration 2 bisect**:
-- Slice 1 of iteration 2 partially landed via `60b98770`. Remaining iteration 2 changes to layer in:
-   - DataGrid `ResizeObserver` responsive column sizing.
-   - Matters widget chain (Matters config row at `113ad380-9e63-f111-ab0c-70a8a53ec687`; `matters.registration.ts` + sectionRegistry + section/index export + catalog entry + `matters-list` widget registration).
-   - Calendar filter-chip rewrite (Popover-based chips replacing Dropdown row; Date Range chip with Quick Select; gray toolbar bg).
-
----
-
-## Operator decisions captured during the session
-
-| Decision | Made when | Notes |
+**Wave 3 (12 surfaces — code committed; 11 of 12 deployed)**:
+| Surface | Build | Deploy |
 |---|---|---|
-| Roll back iteration 2 commit `8b9411d8` on the branch to keep PR in sync with deployed | mid-session | Done; revert commit is `fee6b785`. |
-| Re-apply iteration 2 in slices (smallest first) after research | mid-session | Slice 1's `tabs` bug fix landed in `60b98770`. |
-| Investigate brittleness BEFORE continuing iteration 2 | late session | Plan in `brittleness-remediation-plan.md`. |
-| Brittleness scope = A + B + C + D in-session | late session | E (lazy refactor + staging) deferred to Phase B follow-up. |
-| AI.Context/Outputs tsconfig path: align with other shared libs (`/src`) | late session | Not dist/; consistency with the 5 other shared libs. |
-| R6 coordination documented in plan | late session | Plan has explicit R6 section. R6 will extend `WorkspaceWidgetRegistry`; my `safeRegister<T>` helper is type-generic to accommodate. |
+| CreateEventWizard | ✅ | ✅ via WizardCodePages |
+| CreateMatterWizard | ✅ | ✅ |
+| CreateProjectWizard | ✅ | ✅ |
+| CreateWorkAssignmentWizard | ✅ | ✅ |
+| SummarizeFilesWizard | ✅ | ✅ |
+| FindSimilarCodePage | ✅ | ✅ |
+| PlaybookLibrary | ✅ | ✅ |
+| SmartTodo | ✅ | ✅ via Deploy-SmartTodo |
+| SpeAdminApp | ✅ | ✅ via Deploy-SpeAdminApp |
+| EventDetailSidePane | ✅ | ✅ |
+| TodoDetailSidePane | ✅ | ✅ inline deploy |
+| **CalendarSidePane** | ❌ | ❌ pre-existing build orphan |
+
+**CalendarSidePane orphan**: commit `dfabe436a` deleted its `src/components/` as part of the R4 hoist to `@spaarke/events-components`, but `App.tsx` line 23 still imports `{ CalendarSection, type CalendarFilterOutput } from "./components"`. **Fix**: change to `from "@spaarke/events-components"`. Reset is already in CalendarSidePane/index.html waiting for the build to be repaired. Tracked in `notes/followup-backlog.md` §7.
+
+### CI gate (commit `b547ae03`)
+- `scripts/check-html-css-reset.mjs` — regex-validates `*, *::before, *::after { box-sizing: border-box }` in a Code Page's index.html
+- Wired into SpaarkeAi, DailyBriefing, WLW `package.json` build scripts
+- Clear failure message + remediation tip
+- Other surfaces opt-in by adding the gate call to their `build` script
+
+### Shared-lib hygiene (commit `b547ae03`)
+Cleared 32 pre-existing deferred tsc errors:
+- **12 TS2307 wrong import paths** — `@spaarke/{ai-outputs|ui-components}/src/X` → `/X` (path map already expands `/src/`)
+  - Fixed in `register-workspace-widgets.ts`, `CreateMatterWizardWidget.tsx`, `DocumentUploadWizardWidget.tsx`
+- **20 TS2503 `ComponentFramework` namespace** — added `@types/powerapps-component-framework@^1.3.4` to SpaarkeAi devDeps so SpaarkeAi's `typeRoots: ['./node_modules/@types']` picks it up
+- **Re-enabled** `noUnusedLocals: true` + `noUnusedParameters: true` at `tsconfig.base.json`
+- Cleaned 3 newly-surfaced surface-owned errors:
+  - SpaarkeAi: 2 dead `capturedHighlightCalls` / `highlightCalls` vars in ContextPaneController.test.tsx
+  - DailyBriefing: 1 dead `_handleNavigate` useCallback in App.tsx
+
+Post-cleanup state:
+- SpaarkeAi: 0 owned / 71 shared-lib errors (deferred for next-pass cleanup)
+- DailyBriefing: 0 owned / 65 shared-lib errors
+- WLW: 27 owned errors (no gate; pre-existing real type bugs)
+
+### Documentation (commit `976871e3`)
+- `docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md` §9.1 NEW — embedded workspace-widget hosts (5 contract rules + diagnostic script + reference impls)
+- `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` §7.1 NEW — sizing & layout chain (4-step contract + boilerplate + anti-patterns)
+- `.claude/patterns/ui/embedded-widget-sizing.md` NEW — 25-line pointer file; indexed in parent INDEX.md
+- `projects/ai-spaarke-ai-workspace-UI-r1/notes/box-sizing-reset-audit.md` — the 17-host audit results + recommended follow-up
 
 ---
 
-## How to resume
+## Followup backlog (NOT in this PR — see `notes/followup-backlog.md`)
 
-1. Read this file + [`brittleness-remediation-plan.md`](./brittleness-remediation-plan.md).
-2. `git status` and `git log --oneline -5` to confirm working tree state matches the save above.
-3. Pick up at Phase A.3 — fix the 3 SpaarkeAi-owned errors in `ContextPaneController.test.tsx`. Defer the 92 shared-lib errors per Option 2 (soften `noUnusedLocals`/`noUnusedParameters` in `tsconfig.base.json`).
-4. Proceed sequentially through the todo list.
-5. After Phase D, **return to iteration 2 bisect** — layer in the DataGrid `ResizeObserver` next, then Matters, then Calendar filter chips. Use `localhost` smoke test after each one (now that infrastructure exists).
+These came out of operator testing feedback today and exceed this PR's scope:
+
+1. **Modal-preview record-open standard for ALL dataset grids** (HIGH — recommended new project `dataset-grid-modal-preview-r1`)
+   - Today row-click → `Xrm.Navigation.openForm` opens a new tab
+   - Wanted: in-page modal showing entity main view, with browse-records chevrons + toolbar dropdown (matches the Document Preview pattern from SemanticSearchControl PCF)
+   - Exceptions: Documents use existing preview modal; To Do uses Kanban Code Page
+2. **Documents widget "New" → UploadDocumentWizard** (MEDIUM)
+   - Today: opens OOB new form
+   - Fix needs: custom command handler registered in SpaarkeAi/main.tsx + DataGrid framework's custom-handler context surface verification + sprk_gridconfiguration JSON patch
+3. **Find Similar Documents 403 + iframe login prompt** (HIGH operational)
+   - 403 is Dataverse RetrievePrincipalAccess on the source document — operator permission grant
+   - Login prompt suggests DocumentRelationshipViewer iframe MSAL bootstrap not sharing cache
+4. **CreateTodoWizard placement / Quick Start card** (MEDIUM)
+   - Ribbon DisplayRule is `<FormStateRule State="Existing" />` — intentional; only shows on saved Matters
+   - Wanted: also add to Quick Start widget in SpaarkeAi (action card in `getStarted.registration.ts`)
+5. **Summarize Files bugs** (HIGH)
+   - Email step → 400 (payload validation failure)
+   - Project step → created but missing Project Number + no linked Documents
+6. **CalendarSidePane build orphan** (LOW)
+   - One-line fix; documented above
+7. **Cross-cutting CI gate adoption** — extend `check-html-css-reset.mjs` to a top-level CI workflow
 
 ---
 
-## Quick file references
+## Cross-branch deploy coordination state
 
-| What | Where |
-|---|---|
-| Brittleness plan | `projects/ai-spaarke-ai-workspace-UI-r1/notes/brittleness-remediation-plan.md` |
-| Project design.md | `projects/ai-spaarke-ai-workspace-UI-r1/design.md` |
-| Project deployment notes | `projects/ai-spaarke-ai-workspace-UI-r1/notes/entity-view-widget-deployment.md` |
-| New file: tsconfig base | `tsconfig.base.json` (repo root) |
-| Iteration 2 partial commit | `60b98770` |
-| Reverted iteration 2 full commit | `8b9411d8` (the commit) + `fee6b785` (the revert) |
-| Active feature branch | `feature/ai-spaarke-ai-workspace-UI-r1` |
-| PR | #372 |
-| Deployed env | `https://spaarkedev1.crm.dynamics.com` |
-| Deployed `sprk_spaarkeai` web resource ID | `5206a442-3451-f111-bec7-7ced8d1dc988` |
+**Master HEAD**: `a2ac6a849` (= `work/smart-todo-r4` just merged via PR #374 at 14:24 today)
+
+### Active branches (8 worktrees, all you in parallel Claude sessions)
+
+| Branch | Worktree path | Ahead | Behind | State |
+|---|---|---|---|---|
+| `feature/ai-spaarke-ai-workspace-UI-r1` | `c:/code_files/spaarke` | 33 | 6 | THIS branch — pushed, 3 uncommitted noise files |
+| `work/spaarke-ai-platform-unification-r6` | `c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r6` | 42 | 2 | **Very active** — heavy SpaarkeAi UI work (Pillar 6c events, Pillar 9 visibility, widget schema-aware dispatch). LIKELY OVERWROTE SPAARKEAI TODAY. |
+| `work/spaarke-multi-container-multi-index-r1` | `c:/code_files/spaarke-wt-spaarke-multi-container-multi-index-r1` | 49 | 5 | **Very active** — BFF resolver + PCF + Code Page deploys. TASK-INDEX mentions deploys done today, UAT pending. |
+| `work/smart-todo-r3-wrap-up` | `c:/code_files/spaarke-wt-smart-todo-decoupling-r3` | 5 | 0 | Active, docs only + R4 design — up-to-date with master |
+| `work/email-communication-solution-r3` | `c:/code_files/spaarke-wt-email-communication-solution-r3` | 2 | 11 | Slow — planning artifacts only |
+| `work/ai-spaarke-action-engine-r1` | `c:/code_files/spaarke-wt-ai-spaarke-action-engine-r1` | 1 | 363 | Dormant scaffold — last touched 2026-05-30 |
+
+### Deploy collision diagnosis
+
+The SpaarkeAi overwrite today (12:51 deploy → user saw old behavior) was almost
+certainly caused by a deploy from `work/spaarke-ai-platform-unification-r6` after
+my 12:51 deploy. R6's name ("ai platform unification") + recent commits on
+SpaarkeAi UI (Pillar 9 visibility, widget dispatch) point directly there.
+
+**Database confirms**: `modifiedon` of sprk_spaarkeai showed 12:51 (my deploy),
+but the bundle content the user saw was OLD. Either someone deployed AFTER me
+without updating the timestamp (unlikely), OR the user was hitting cache, OR
+the 12:51 deploy itself overwrote a brief r6 deploy I didn't see.
+
+**Current state (end of session)**: I redeployed SpaarkeAi from this branch's
+HEAD `275add45` — verified markers present. User asked to hard-refresh in
+Incognito to confirm. Confirmation pending at compaction time.
+
+### Proposed deploy ledger pattern (NOT YET IMPLEMENTED)
+
+To prevent silent overwrites between your parallel sessions:
+
+**Location**: `~/.spaarke-deploy-ledger.json` (outside repo so all worktrees share it)
+
+**Shape**:
+```json
+{
+  "spaarkedev1": {
+    "sprk_spaarkeai": {
+      "branch": "ai-spaarke-ai-workspace-UI-r1",
+      "commit": "275add458",
+      "deployed_at": "2026-06-10T14:32:00Z"
+    },
+    "sprk_reporting": { ... }
+  }
+}
+```
+
+**Helper**: `scripts/deploy-ledger.mjs` exposes `recordDeploy(env, webResource, branch, commit)` and `peekLastDeploy(env, webResource)`.
+
+**Patch each deploy script** to:
+1. Read the ledger before deploying
+2. If last deploy of THIS web resource was from a different branch, print a clear warning ("⚠ sprk_spaarkeai was last deployed from r6/97f7e6bcb at 14:42 — you're overwriting with ai-spaarke-ai-workspace-UI-r1/275add45. Continue? y/N")
+3. On confirmation, write to ledger, then deploy
+4. Patch list: `Deploy-SpaarkeAi.ps1`, `Deploy-DailyBriefing.ps1`, `Deploy-WizardCodePages.ps1`, `Deploy-ReportingCodePage.ps1`, `Deploy-SmartTodo.ps1`, `Deploy-SpeAdminApp.ps1`, `Deploy-EventDetailSidePane.ps1`, `Deploy-CalendarSidePane.ps1` (~8 scripts)
+
+**Estimated work**: 60-90 min to implement + test.
+
+### Master deploy strategy (PROPOSED)
+
+**Wave A — Ready to merge** (low risk, low conflict):
+- `feature/ai-spaarke-ai-workspace-UI-r1` (this)
+- `work/smart-todo-r3-wrap-up` (docs only, 0 behind)
+
+Action: rebase each on master, merge PRs, deploy from master.
+
+**Wave B — Negotiate before merging** (high in-flight, possible SpaarkeAi conflict):
+- `work/spaarke-ai-platform-unification-r6` (42 ahead)
+- `work/spaarke-multi-container-multi-index-r1` (49 ahead)
+
+Action: read each branch's commit log + impact-on-SpaarkeAi diff vs this branch.
+Decide merge order to minimize merge conflicts on `SpaarkeAi/`, `LegalWorkspace/`,
+`@spaarke/ui-components/`, `@spaarke/ai-widgets/`.
+
+**Wave C — Triage** (slow / dormant):
+- `work/email-communication-solution-r3` — confirm still active; rebase or park
+- `work/ai-spaarke-action-engine-r1` — 363 behind, near-scaffold; likely close + archive
 
 ---
 
-*End of resume doc. Commit the current uncommitted tsconfig changes before context compaction.*
+## Pending verification at compaction time
+
+1. **SpaarkeAi redeploy** — user hard-refreshes in Incognito; confirms Matters widget mountable, Calendar chip toolbar back, DataGrid columns fit container
+2. **Cross-branch conflict assessment** — has `r6` touched the same SpaarkeAi files this branch did? Quick test: `git log origin/master..work/spaarke-ai-platform-unification-r6 --name-only -- src/solutions/SpaarkeAi/ src/client/shared/Spaarke.AI.Widgets/ src/client/shared/Spaarke.UI.Components/ src/solutions/LegalWorkspace/` from the r6 worktree
+
+---
+
+## How to resume after compaction
+
+### Action 0 — Re-orient
+1. Read this file end-to-end.
+2. `git log --oneline -3` in `c:/code_files/spaarke` to confirm HEAD is still `275add45`.
+3. Confirm with user: did the SpaarkeAi redeploy from end-of-session restore visible behavior?
+
+### Action 1 — Cross-branch conflict assessment (15-20 min)
+For each of the two heavy active branches (r6 + multi-container), run:
+```
+git log origin/master..<branch> --name-only -- src/solutions/SpaarkeAi/ src/client/shared/ src/solutions/LegalWorkspace/
+```
+Catalog overlap with files this branch modified. If r6 also touched
+`SpaarkeAi/main.tsx` / `LegalWorkspace/src/sectionRegistry.ts` / `register-workspace-widgets.ts` etc., that's a merge conflict to plan for.
+
+### Action 2 — Decide on deploy ledger implementation
+If user wants the ledger pattern, implement it per §7 above. ~60-90 min.
+
+### Action 3 — Wave A master deploy
+- Coordinate with user: which branch first (smart-todo-r3-wrap-up is small/clean; this branch is bigger; either order works)
+- Rebase, merge PR, deploy from master
+- Verify spaarkedev1 looks right
+
+### Action 4 — Followup item triage
+Items 1–6 in `followup-backlog.md` need owners + projects. User decides which (if any) to start in-session vs. defer to new projects.
+
+---
+
+## File index (everything in this PR that matters)
+
+### New files
+- `scripts/check-html-css-reset.mjs`
+- `scripts/tsc-surface-gate.mjs`
+- `tsconfig.base.json`
+- `src/client/shared/Spaarke.UI.Components/src/components/AppErrorBoundary/AppErrorBoundary.tsx`
+- `src/client/shared/Spaarke.UI.Components/src/components/WidgetErrorBoundary/WidgetErrorBoundary.tsx`
+- `src/client/shared/Spaarke.UI.Components/src/services/reportClientError.ts`
+- `src/client/shared/Spaarke.UI.Components/src/utils/safeRegister.ts`
+- `src/solutions/LegalWorkspace/src/sections/matters.registration.ts`
+- `src/solutions/DailyBriefing/src/vite-env.d.ts`
+- `docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md` §9.1 (added)
+- `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` §7.1 (added)
+- `.claude/patterns/ui/embedded-widget-sizing.md`
+- `projects/ai-spaarke-ai-workspace-UI-r1/notes/box-sizing-reset-audit.md`
+- `projects/ai-spaarke-ai-workspace-UI-r1/notes/followup-backlog.md`
+- This file
+
+### Modified files (key entries — full list via `git log --name-only`)
+- `src/solutions/SpaarkeAi/index.html` (round 11 box-sizing reset)
+- `src/solutions/SpaarkeAi/src/main.tsx` (AppErrorBoundary + AppInsights bootstrap)
+- `src/solutions/SpaarkeAi/src/vite-env.d.ts` (VITE_APP_INSIGHTS_KEY)
+- `src/solutions/SpaarkeAi/package.json` (devDeps: powerapps-component-framework types; scripts: typecheck, check:html-reset, build chain)
+- `src/solutions/SpaarkeAi/tsconfig.json` (extends base)
+- `src/solutions/DailyBriefing/index.html`, `src/main.tsx`, `package.json`, `tsconfig.json`, `src/App.tsx` (dead code removed)
+- `src/solutions/WorkspaceLayoutWizard/index.html`, `src/main.tsx`, `package.json`, `tsconfig.json`
+- All 12 Wave 3 surfaces' `index.html` (box-sizing reset added)
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx` (rounds 6-11 layout chain + 2-pass column math + width-bucket key + gridTableOverride + responsive useLayoutEffect)
+- `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/SectionPanel.tsx` (round 7 — min-width: 0 on card)
+- `src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts` (trackException)
+- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx` (round 9 pixel-cap wrapper + min-width: 0 + width: 100%)
+- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts` (matters-list registration, `/src/` removed from import paths, safeRegisterWidget wrapper)
+- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateMatterWizardWidget.tsx` (`/src/` removed)
+- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentUploadWizardWidget.tsx` (`/src/` removed)
+- `src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts` (safeRegisterContext wrapper)
+- `src/solutions/LegalWorkspace/src/sections/documents.registration.ts` (DOCUMENTS_CONFIG_ID → `1cdd19d2-3964-…`)
+- `src/solutions/LegalWorkspace/src/sectionRegistry.ts` (mattersRegistration added)
+- `src/solutions/LegalWorkspace/src/sections/index.ts` (export mattersRegistration)
+- `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx` (slice 3 chip toolbar)
+- `tsconfig.base.json` (noUnusedLocals re-enabled)
+
+### Deploy scripts touched
+- `scripts/Deploy-SpaarkeAi.ps1` (no changes; canonical)
+- All wizard deploys went through `scripts/Deploy-WizardCodePages.ps1`
+- Dedicated scripts used: `Deploy-SmartTodo.ps1`, `Deploy-SpeAdminApp.ps1`, `Deploy-EventDetailSidePane.ps1`, `Deploy-ReportingCodePage.ps1`
+- Inline deploys (no script): AllDocuments, TodoDetailSidePane, WLW
+
+---
+
+## Important Dataverse state in spaarkedev1
+
+### Web resources currently deployed (as of end of session)
+
+| Web resource | Branch | Bundle KB | Deployed at | Status |
+|---|---|---|---|---|
+| `sprk_spaarkeai` | this | 3704 | end of session redeploy | ✅ restored from overwrite |
+| `sprk_alldocuments` | this | 1185 | 13:39 | ✅ |
+| `sprk_reporting` | this | 1777 | 10:36 | ✅ |
+| `sprk_dailyupdate` | this | 1570 | 2026-06-09 12:12 | ⚠️ DailyBriefing not redeployed since Wave 3 reset added |
+| `sprk_workspacelayoutwizard` | this | 1769 | 13:39 | ✅ |
+| `sprk_createtodowizard` | this | 1498 | 13:39 | ✅ |
+| `sprk_creatematterwizard` etc. (6 wizards) | this | various | 13:39 | ✅ via WizardCodePages |
+| `sprk_playbooklibrary` | this | 1495 | 13:39 | ✅ |
+| `sprk_findsimilar` | this | 1374 | 13:39 | ✅ |
+| `sprk_summarizefileswizard` | this | 1525 | 13:39 | ✅ |
+| `sprk_documentuploadwizard` | this | 1075 | 13:39 | ✅ |
+| `sprk_smarttodo` | this | 814 | 13:43 | ✅ |
+| `sprk_speadmin` | this | 1803 | 13:52 | ✅ |
+| `sprk_eventdetailsidepane` | this | 1555 | 13:54 | ✅ |
+| `sprk_tododetailsidepane` | this | 1103 | 13:56 | ✅ |
+| `sprk_calendarsidepane` | n/a | n/a | (skipped — build orphan) | ❌ |
+
+### Dataverse data changes (still present)
+
+- `sprk_gridconfiguration` row `1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6` ("Active Documents (Workspace)") — created during round 3 fixes for the Documents widget; points at OOB "Active Documents" savedquery `82d75343-…`
+- Existing row `d99a4352-…` ("Semantic Search Documents View") UNCHANGED — left for SemanticSearchControl PCF
+- Existing row `113ad380-9e63-…` ("Active Matters (Workspace)") for Matters — created earlier in iter-2 slice 2 work
+
+---
+
+## Active task list at compaction
+
+```
+[completed] SpaarkeAi redeployed from current HEAD (3704 KB; markers verified)
+[in_progress] USER: hard-refresh in Incognito; confirm Matters widget + chip toolbar + DataGrid layout are back
+[pending] Plan: master deploy workflow for all active project branches
+```
+
+The "Plan: master deploy workflow" task is what the user wanted addressed when
+they invoked the resume-doc save. The proposed plan + ledger pattern are in §7
+above; not yet implemented.
+
+---
+
+*End of resume doc. After /compact, the next session re-loads this file as its
+first action and continues from §"How to resume after compaction".*
