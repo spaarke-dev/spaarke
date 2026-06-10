@@ -1,24 +1,21 @@
 /**
- * todoDetailService — Load and update records for the TodoDetail panel.
+ * todoDetailService — Load and update `sprk_todo` records for the TodoDetail panel.
  *
- * Adapted from TodoDetailSidePane/services/todoService.ts for use within the
- * SmartTodo Code Page. Uses the SmartTodo xrmProvider for Xrm access.
+ * Single-entity model (R3 FR-09 / task 011). The legacy two-entity
+ * (`sprk_event` + `sprk_eventtodo`) loaders + the `loadTodoExtension`,
+ * `saveTodoExtensionFields`, `deactivateTodoExtension`, `removeTodoFlag`
+ * exports were removed per OS-1 (no compat shims).
  *
- * Data spans TWO entities:
- *   - sprk_event: core event fields (description, scores, lookups)
- *   - sprk_eventtodo: to-do extension fields (notes, completed, statuscode)
+ * Uses the SmartTodo xrmProvider for Xrm.WebApi access.
  */
 
 import { getWebApi } from "./xrmProvider";
-import { setRecordState } from "../utils/xrmAccess";
 import type {
   ITodoRecord,
-  ITodoExtension,
-  IEventFieldUpdates,
-  ITodoExtensionUpdates,
+  ITodoFieldUpdates,
   IContactOption,
 } from "@spaarke/ui-components/TodoDetail";
-import { TODO_DETAIL_SELECT, TODO_EXTENSION_SELECT } from "@spaarke/ui-components/TodoDetail";
+import { TODO_DETAIL_SELECT } from "@spaarke/ui-components/TodoDetail";
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -30,25 +27,19 @@ export interface ILoadResult {
   error?: string;
 }
 
-export interface ILoadExtensionResult {
-  success: boolean;
-  data: ITodoExtension | null;
-  error?: string;
-}
-
 export interface ISaveResult {
   success: boolean;
   error?: string;
 }
 
 // ---------------------------------------------------------------------------
-// Load sprk_event
+// Load sprk_todo
 // ---------------------------------------------------------------------------
 
 /**
- * Load a single event record for the detail panel.
+ * Load a single `sprk_todo` record for the detail panel.
  */
-export async function loadTodoRecord(eventId: string): Promise<ILoadResult> {
+export async function loadTodoRecord(todoId: string): Promise<ILoadResult> {
   const webApi = getWebApi();
   if (!webApi) {
     return { success: false, data: null, error: "Xrm.WebApi not available" };
@@ -56,89 +47,33 @@ export async function loadTodoRecord(eventId: string): Promise<ILoadResult> {
 
   try {
     const record = await webApi.retrieveRecord(
-      "sprk_event",
-      eventId,
+      "sprk_todo",
+      todoId,
       `?$select=${TODO_DETAIL_SELECT}`,
     );
     return { success: true, data: record as ITodoRecord };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[todoDetailService] Failed to load event record:", message);
+    console.error("[todoDetailService] Failed to load todo record:", message);
     return { success: false, data: null, error: message };
   }
 }
 
 // ---------------------------------------------------------------------------
-// Load sprk_eventtodo (by event ID)
+// Save sprk_todo fields
 // ---------------------------------------------------------------------------
 
 /**
- * Load the sprk_eventtodo record associated with a given event.
- * Returns null data (success=true) if no todo extension exists for the event.
- */
-export async function loadTodoExtension(
-  eventId: string,
-): Promise<ILoadExtensionResult> {
-  const webApi = getWebApi();
-  if (!webApi) {
-    return { success: false, data: null, error: "Xrm.WebApi not available" };
-  }
-
-  try {
-    const filter = `_sprk_regardingevent_value eq ${eventId}`;
-    const result = await webApi.retrieveMultipleRecords(
-      "sprk_eventtodo",
-      `?$select=${TODO_EXTENSION_SELECT}&$filter=${filter}&$top=1`,
-    );
-    const entities = result.entities ?? [];
-    if (entities.length === 0) {
-      return { success: true, data: null };
-    }
-    return { success: true, data: entities[0] as ITodoExtension };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn("[todoDetailService] Failed to load todo extension:", message);
-    // Non-fatal: the panel can still show event fields
-    return { success: true, data: null };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Save sprk_event fields
-// ---------------------------------------------------------------------------
-
-/**
- * Save one or more editable fields on the sprk_event record.
+ * Save one or more editable fields on a `sprk_todo` record. Single
+ * Xrm.WebApi.updateRecord call (no parallel two-entity save).
+ *
+ * Callers must use PolymorphicResolverService when changing any
+ * `sprk_regarding*` specific lookup; this helper is intended for the simple
+ * field updates (name, description, notes, due date, scores, statuscode).
  */
 export async function saveTodoFields(
-  eventId: string,
-  fields: IEventFieldUpdates,
-): Promise<ISaveResult> {
-  const webApi = getWebApi();
-  if (!webApi) {
-    return { success: false, error: "Xrm.WebApi not available" };
-  }
-
-  try {
-    await webApi.updateRecord("sprk_event", eventId, fields);
-    return { success: true };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[todoDetailService] Failed to save event fields:", message);
-    return { success: false, error: message };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Save sprk_eventtodo fields
-// ---------------------------------------------------------------------------
-
-/**
- * Save fields on the sprk_eventtodo record.
- */
-export async function saveTodoExtensionFields(
   todoId: string,
-  fields: ITodoExtensionUpdates,
+  fields: ITodoFieldUpdates,
 ): Promise<ISaveResult> {
   const webApi = getWebApi();
   if (!webApi) {
@@ -146,47 +81,57 @@ export async function saveTodoExtensionFields(
   }
 
   try {
-    await webApi.updateRecord("sprk_eventtodo", todoId, fields);
+    await webApi.updateRecord("sprk_todo", todoId, fields);
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[todoDetailService] Failed to save todo extension:", message);
+    console.error("[todoDetailService] Failed to save todo fields:", message);
     return { success: false, error: message };
   }
 }
 
 // ---------------------------------------------------------------------------
-// Deactivate sprk_eventtodo (state change via direct REST API)
+// Dismiss sprk_todo (statecode=1 Inactive, statuscode=659490002 Dismissed)
 // ---------------------------------------------------------------------------
 
 /**
- * Deactivate a sprk_eventtodo record (statecode=1 Inactive, statuscode=2 Completed).
+ * Dismiss a `sprk_todo` record. Sets statecode=1 / statuscode=659490002 per
+ * task 009 — preserved in the DismissedSection and restorable later.
  *
- * Uses direct REST API fetch because Xrm.WebApi.updateRecord silently ignores
- * statecode/statuscode fields in some Dataverse environments.
+ * Per the task 011 follow-up note (`tododetail-consumer-breakage-task011.md`),
+ * Dismiss is the recommended host implementation for `TodoDetail.onDismissTodo`
+ * in SmartTodo so users can recover dismissed items from the DismissedSection.
+ * The alternative is hard delete via `webApi.deleteRecord('sprk_todo', id)`.
  */
-export async function deactivateTodoExtension(
-  todoId: string,
-): Promise<ISaveResult> {
+export async function dismissTodo(todoId: string): Promise<ISaveResult> {
+  const webApi = getWebApi();
+  if (!webApi) {
+    return { success: false, error: "Xrm.WebApi not available" };
+  }
+
   try {
-    await setRecordState("sprk_eventtodos", todoId, 1, 2);
+    await webApi.updateRecord("sprk_todo", todoId, {
+      statecode: 1,             // Inactive
+      statuscode: 659490002,    // Dismissed
+    });
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(
-      "[todoDetailService] Failed to deactivate todo extension:",
-      message,
-    );
+    console.error("[todoDetailService] Failed to dismiss todo:", message);
     return { success: false, error: message };
   }
 }
 
 // ---------------------------------------------------------------------------
-// Contact search for Assigned To lookup
+// Search systemusers for the Assigned To lookup
 // ---------------------------------------------------------------------------
 
 /**
- * Search standard contact records by name for the Assigned To picker.
+ * Search `systemuser` records by name for the Assigned To picker.
+ *
+ * Per `sprk_todo` entity schema (R3 D-1 revised 2026-06-07),
+ * `sprk_assignedto` is a `systemuser` lookup — not contact. The
+ * IContactOption shape is generic ({id, name}) and reused for the picker.
  */
 export async function searchContacts(
   query: string,
@@ -195,29 +140,18 @@ export async function searchContacts(
   if (!webApi || !query.trim()) return [];
 
   try {
-    const filter = `contains(fullname,'${query.replace(/'/g, "''")}')`;
+    const filter = `contains(fullname,'${query.replace(/'/g, "''")}') and isdisabled eq false`;
     const result = await webApi.retrieveMultipleRecords(
-      "contact",
-      `?$select=contactid,fullname&$filter=${filter}&$top=10&$orderby=fullname asc`,
+      "systemuser",
+      `?$select=systemuserid,fullname&$filter=${filter}&$top=10&$orderby=fullname asc`,
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (result.entities ?? []).map((e: any) => ({
-      id: e.contactid as string,
+      id: e.systemuserid as string,
       name: (e.fullname ?? "") as string,
     }));
   } catch (err) {
-    console.warn("[todoDetailService] Contact search failed:", err);
+    console.warn("[todoDetailService] systemuser search failed:", err);
     return [];
   }
-}
-
-// ---------------------------------------------------------------------------
-// Remove from To Do (set sprk_todoflag = false)
-// ---------------------------------------------------------------------------
-
-/**
- * Remove an event from the To Do board by setting sprk_todoflag = false.
- */
-export async function removeTodoFlag(eventId: string): Promise<ISaveResult> {
-  return saveTodoFields(eventId, { sprk_todoflag: false });
 }

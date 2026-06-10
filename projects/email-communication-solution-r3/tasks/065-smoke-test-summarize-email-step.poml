@@ -1,0 +1,189 @@
+<task id="065" project="email-communication-solution-r3">
+  <metadata>
+    <title>Smoke test SummarizeFilesWizard email step in both standalone solution + LegalWorkspace</title>
+    <phase>Wave 4 — SummarizeFiles Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>063, 064</dependencies>
+    <blocks>070</blocks>
+    <tags>testing, e2e-test, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Manual smoke test; not code or architectural change. STANDARD covers documentation + verification rigor.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential gate before Wave 5 starts (blocks 070). Manual browser test against dev; not safely parallelized with other deploys/smoke tests against the same environment.</parallel-reason>
+    <fr-refs>FR-15</fr-refs>
+  </metadata>
+
+  <prompt>
+    Manually smoke-test the SummarizeFilesWizard email-send step in TWO contexts:
+    1. **Standalone SummarizeFilesWizard solution** (deployed by task 063)
+    2. **LegalWorkspace** (deployed by task 064, post-fork-cleanup)
+
+    Both contexts now consume the canonical `<SendEmailStep />` wrapper. The smoke test verifies the Wave 4 migration is functionally correct end-to-end in both deployment surfaces.
+
+    Test scenario per context:
+    1. Sign into the dev environment
+    2. Navigate to the surface that launches SummarizeFilesWizard (varies per context)
+    3. Select 2-3 files for summarization
+    4. Run through the wizard steps until the email step
+    5. Verify: the canonical `<SendEmailStep />` renders inline (no internal header/action bar per NFR-03 inline variant)
+    6. Verify: the wizard's "Send / Finish" button at the wizard-level chrome is now responsible for triggering send (via `composerRef.current.send()`)
+    7. Fill: To = test recipient, Subject = "Wave 4 smoke test [standalone|legalworkspace]", confirm the auto-generated summary body is present
+    8. Click Send / Finish
+    9. Verify: success toast / dialog close
+    10. Verify in Dataverse: outbound `sprk_communication` record created with `statuscode = Sent`, `sprk_internetmessageid` populated, summary body persisted, file attachments linked
+
+    Failure scenarios:
+    - Try Send with empty To → canonical `TO_REQUIRED` validation surfaces
+    - Try Send with malformed email → canonical `TO_INVALID_EMAIL` surfaces
+
+    Network observation: confirm exactly ONE POST to `/api/communications/send` per send action — no leftover inline fetch.
+
+    Document results in `notes/test-results/065-summarize-smoke.md` covering BOTH contexts.
+  </prompt>
+
+  <role>
+    QA / smoke-test engineer authoritative on SummarizeFilesWizard flows. Familiar with both standalone solution navigation and LegalWorkspace consumer navigation, Dataverse record verification, and the canonical Communication architecture's expected behavior.
+  </role>
+
+  <goal>
+    The SummarizeFilesWizard email step round-trip is verified working in BOTH dev contexts (standalone solution + LegalWorkspace). Smoke results documented in `notes/test-results/065-summarize-smoke.md` including: per-context positive test pass/fail, validation tests, outbound record GUIDs, network observation, screenshots (optional).
+  </goal>
+
+  <context>
+    <background>
+      Wave 4 migrated SummarizeFilesDialog to canonical `<SendEmailStep />` (task 060) and deleted the LegalWorkspace fork (tasks 061-062), so BOTH consumer paths now flow through the same canonical wrapper. The smoke test exercises both paths to confirm:
+      - The canonical inline-mount wrapper renders correctly in both UIs
+      - Wizard step navigation still works post-migration
+      - File attachments carry through `wizardContext` (the previously-selected files from the file-selection step)
+      - The auto-generated summary text is consumed as `initialBody` correctly
+      - Outbound `sprk_communication` record gets correct attachments, body, and `sprk_internetmessageid`
+
+      Key cross-wave integration: the outbound record's `sprk_internetmessageid` verifies Wave 0 task 003 (server post-send capture) still functions through the Wave 4 client-side change. If `sprk_internetmessageid` is null on Wave 4 records but populated on Wave 3 records (task 055), root-cause to Wave 4 — something in the request path changed.
+
+      Dev environment URLs come from `notes/wave-4-deploy-summarize.md` (task 063) and `notes/wave-4-deploy-legalworkspace.md` (task 064).
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/wave-4-deploy-summarize.md (standalone solution dev URL)</file>
+      <file>projects/email-communication-solution-r3/notes/wave-4-deploy-legalworkspace.md (LegalWorkspace dev URL)</file>
+      <file>projects/email-communication-solution-r3/notes/test-results/055-filepreview-smoke.md (Wave 3 smoke for cross-reference)</file>
+      <file>projects/email-communication-solution-r3/notes/test-results/065-summarize-smoke.md (NEW — smoke result)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-15">Acceptance: "Summarize wizard's email step works in dev." Both contexts (standalone + LegalWorkspace) MUST pass.</constraint>
+    <constraint source="ADR-019">Error path uses typed `SendCommunicationError`.</constraint>
+    <constraint source="ADR-021">Validation errors render via Fluent v9 (canonical wrapper).</constraint>
+    <constraint source="ADR-033">Verify NO inline `fetch` fires from the wizard. Network panel: only ONE POST to `/api/communications/send` per send action.</constraint>
+    <constraint source="NFR-03">Inline-mount variant: no internal header/action bar in the email step — wizard owns navigation. Verify visually.</constraint>
+    <constraint source="project">Test results in `notes/test-results/065-summarize-smoke.md`. PR description summarizes pass/fail for both contexts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/email-communication-solution-r3/notes/wave-4-deploy-summarize.md</file>
+      <file>projects/email-communication-solution-r3/notes/wave-4-deploy-legalworkspace.md</file>
+      <file>projects/email-communication-solution-r3/notes/test-results/055-filepreview-smoke.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read both deploy notes (task 063 + task 064) to capture dev environment URLs and confirm both deploys succeeded.</step>
+    <step order="2">**Context A — Standalone SummarizeFilesWizard solution**: navigate to the surface where the wizard launches in dev (per the solution's expected entry point — likely from a related record or a launcher button).</step>
+    <step order="3">Run the wizard: select 2-3 files → progress through summarization steps → reach the email step.</step>
+    <step order="4">Verify visual: inline mount renders without internal header/action bar (per NFR-03); the wizard chrome owns navigation. Auto-generated summary appears as `initialBody`.</step>
+    <step order="5">Fill the email step: To = test recipient, Subject = "Wave 4 smoke test standalone". Click the wizard's Finish/Send button.</step>
+    <step order="6">Verify success: toast appears, dialog/wizard closes. In Dataverse, query `sprk_communication` for the new record. Verify: `statuscode = Sent`, `sprk_internetmessageid` populated, body contains the summary, file attachments linked. Record `sprk_communicationid` GUID.</step>
+    <step order="7">**Context B — LegalWorkspace**: navigate to the surface that previously mounted the fork (varies; check `current-task.md` audit list from task 061 for consumer location).</step>
+    <step order="8">Repeat steps 3-6 in the LegalWorkspace context. Subject = "Wave 4 smoke test legalworkspace". Record `sprk_communicationid` GUID.</step>
+    <step order="9">**Validation tests (one context only — Context A or B)**: run TO_REQUIRED + TO_INVALID_EMAIL cases. Verify canonical wrapper surfaces correct error codes.</step>
+    <step order="10">**Network observation (both contexts)**: open DevTools Network. Confirm exactly ONE POST to `/api/communications/send` per send action. Zero non-canonical request paths.</step>
+    <step order="11">Compile results into `notes/test-results/065-summarize-smoke.md` with structure:
+      <code>
+      # Wave 4 SummarizeFilesWizard Smoke Test
+      Date: [date]
+      Tester: [name]
+
+      ## Context A — Standalone SummarizeFilesWizard solution
+      Environment: [dev URL from wave-4-deploy-summarize.md]
+      - Wizard navigation pass: ✅ / ❌
+      - Email step renders inline (no internal chrome): ✅ / ❌
+      - Send: ✅ PASS / ❌ FAIL
+      - sprk_communicationid: [GUID]
+      - sprk_internetmessageid populated: yes / no
+      - Attachments linked: yes / no
+      - Network: single POST to /api/communications/send: ✅ / ❌
+
+      ## Context B — LegalWorkspace
+      Environment: [dev URL from wave-4-deploy-legalworkspace.md]
+      - Wizard navigation pass: ✅ / ❌
+      - Email step renders inline: ✅ / ❌
+      - Send: ✅ PASS / ❌ FAIL
+      - sprk_communicationid: [GUID]
+      - sprk_internetmessageid populated: yes / no
+      - Attachments linked: yes / no
+      - Network: single POST: ✅ / ❌
+
+      ## Validation tests (Context A or B)
+      - TO_REQUIRED: ✅ / ❌
+      - TO_INVALID_EMAIL: ✅ / ❌
+
+      ## Issues / Defects
+      [List any defects]
+      </code>
+    </step>
+    <step order="12">If smoke fails in EITHER context: escalate. Standalone fail → task 060 (shared canonical defect). LegalWorkspace fail → task 062 (consumer retarget defect). Do NOT mark complete until both pass.</step>
+    <step order="13">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 065 ✅ completed.</step>
+    <step order="14">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (070 — Wave 5 start).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Verify dev URLs from deploy notes</tool>
+    <tool name="write">Create `notes/test-results/065-summarize-smoke.md`</tool>
+    <tool name="browser">Manual interaction in dev environment (use ui-test skill if Chrome integration available)</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/email-communication-solution-r3/notes/test-results/065-summarize-smoke.md (NEW — smoke result for both contexts)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Standalone SummarizeFilesWizard: send-email round-trip passes → outbound `sprk_communication` record created with `statuscode = Sent`.</criterion>
+    <criterion testable="true">LegalWorkspace SummarizeFiles: send-email round-trip passes → outbound `sprk_communication` record created.</criterion>
+    <criterion testable="true">Both records have `sprk_internetmessageid` populated (or known-issue warn-log documented per FR-22 best-effort).</criterion>
+    <criterion testable="true">Both records have correct file attachments linked.</criterion>
+    <criterion testable="true">Validation tests: `TO_REQUIRED` and `TO_INVALID_EMAIL` surface via canonical wrapper.</criterion>
+    <criterion testable="true">Network panel confirms ONE POST to `/api/communications/send` per send action in BOTH contexts.</criterion>
+    <criterion testable="true">`notes/test-results/065-summarize-smoke.md` documents both contexts + all results.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 065 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Cross-wave verification: if Context A passes but Context B fails (or vice versa), the failure points to consumer-level integration (task 062) — the shared canonical itself is fine since Context A uses it. If BOTH fail, root-cause to task 060 (shared canonical defect).
+
+    The `sprk_internetmessageid` verification across Waves 3 + 4 confirms Wave 0 task 003 (server post-send capture) is stable through TWO independent client-side migration paths (FilePreview dialog + SummarizeFiles wizard step). If it populates in Wave 3 smoke (task 055) but NOT in Wave 4, root-cause to Wave 4 — likely a missing field passed to the BFF.
+
+    Browser automation: if `ui-test` skill / Chrome integration available, partial scripting reduces tester load. Otherwise manual is acceptable for a smoke test.
+
+    Context A's launcher: SummarizeFilesWizard standalone solution may launch from a specific Dataverse view or a custom button. If the launcher isn't obvious, consult `notes/wave-4-deploy-summarize.md` (task 063) which captured the deploy details.
+
+    Context B's launcher: LegalWorkspace's SummarizeFiles consumer surface comes from the consumer audit list (task 061 → 062). Use that list to find the right place to test.
+
+    This task gates Wave 5 start. Wave 5 (5-wizard migration) is the largest single PR in R3; do not start it with unresolved Wave 4 defects.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 SKIPPED for STANDARD rigor — this is a smoke test.
+    </protocol>
+  </execution>
+</task>

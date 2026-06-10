@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Integration test `ActionEngine.IntegrationTests.PhaseDeniedTools` — verify `PhaseToolDeniedException` thrown when execute Tool dispatched during authoring phase (G4)</title>
+    <phase>Phase 6: Quality Gates + Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>026</dependencies>
+    <blocks>070, 071, 090</blocks>
+    <tags>testing, integration-test, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration test with explicit ADR constraints; creates new test file; Phase 6 quality gate</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent test class; no file overlap with peer integration tests in Group F (060, 061, 062)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the `ActionEngine.IntegrationTests.PhaseDeniedTools` integration test suite that proves graduation criterion G4: `IToolHandlerRegistry` mechanically enforces phase-keyed deny-lists at dispatch time — dispatching an execute Tool during the authoring phase throws `PhaseToolDeniedException` with phase + tool name in the message.
+  </prompt>
+
+  <role>
+    Senior Spaarke platform engineer with BFF integration-testing experience. Familiar with the LAVERN-derived Phase deny-tools pattern and the `IToolHandlerRegistry` dispatch choke point.
+  </role>
+
+  <goal>
+    `tests/integration/Sprk.Bff.Api.Tests/ActionEngine/PhaseDeniedToolsIntegrationTests.cs` exists with tests covering:
+    1. Dispatching an execute-phase Tool (e.g., `SendEmail`) during the authoring phase throws `PhaseToolDeniedException`
+    2. The exception message contains both the current phase and the denied Tool name
+    3. Dispatching a phase-allowed Tool (e.g., `QueryDataverse` during authoring) succeeds
+    4. At least one positive case per phase (`authoring`, `schedule`, `execute`, `approve`, `deliver`)
+    Graduation criterion G4 is verifiable from `dotnet test --filter FullyQualifiedName~PhaseDeniedTools`.
+  </goal>
+
+  <context>
+    <background>
+      G4 codifies a mechanical (not prompt-coached) safety control. Phase deny-tools enforcement at the `IToolHandlerRegistry` dispatch layer is the canonical "side effects can't fire during authoring" guard. The exception is thrown deterministically — no prompt drift, no LLM-induced bypass.
+
+      LAVERN Pattern #8 is the design source (LAVERN is an external Apache-2.0 reference; patterns adopted inline per spec.md owner clarifications).
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.Tests/ActionEngine/PhaseDeniedToolsIntegrationTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/IToolHandlerRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/ToolRegistry/PhaseToolDeniedException.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Tests live in `tests/integration/Sprk.Bff.Api.Tests/`; use `WebApplicationFactory&lt;Program&gt;`.</constraint>
+    <constraint source="ADR-013">Tests exercise `IToolHandlerRegistry` via DI (or via a thin wrapper) — not by calling internal services directly.</constraint>
+    <constraint source="project">The exception message format is part of the contract — assertions MUST check both phase and tool name appear in the message text.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-022-test-organization.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Mechanical enforcement assertion" location=".claude/patterns/testing/integration-tests.md">`Assert.Throws&lt;PhaseToolDeniedException&gt;` + message-substring check is the canonical shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: task 026 (Phase deny-tools enforcement) complete in TASK-INDEX.md.</step>
+    <step order="1">Read knowledge files; locate `IToolHandlerRegistry` + `PhaseToolDeniedException` types; review their constructor surface for test instantiation.</step>
+    <step order="2">Create `tests/integration/Sprk.Bff.Api.Tests/ActionEngine/PhaseDeniedToolsIntegrationTests.cs` with `WebApplicationFactory` fixture.</step>
+    <step order="3">Add `Dispatch_DeniedTool_ThrowsPhaseToolDeniedException` test: set current phase to `authoring`; dispatch `SendEmail` (or any execute-phase-denied Tool); `Assert.Throws&lt;PhaseToolDeniedException&gt;`; assert message contains both `"authoring"` and `"SendEmail"`.</step>
+    <step order="4">Add `Dispatch_AllowedTool_DuringAuthoring_Succeeds` test: phase = authoring; dispatch `QueryDataverse`; assert successful dispatch (no exception).</step>
+    <step order="5">Add positive-case tests for each remaining phase (`schedule`, `execute`, `approve`, `deliver`): dispatch a Tool allowed in that phase; assert success.</step>
+    <step order="6">Run `dotnet test --filter FullyQualifiedName~PhaseDeniedTools` and verify all pass.</step>
+    <step order="7">Run full `dotnet test` to confirm no regression.</step>
+    <step order="9.5">Quality gates skipped per rigor STANDARD.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 063 status ✅. Update `current-task.md`: G4 verified.</step>
+    <step order="11">Document deviations under `projects/ai-spaarke-action-engine-r1/notes/handoffs/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test runner</tool>
+    <tool name="terminal">Shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/ActionEngine/PhaseDeniedToolsIntegrationTests.cs</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">**G4**: Phase deny-tools throws `PhaseToolDeniedException` when execute Tool dispatched during authoring phase. Test passes via `dotnet test --filter FullyQualifiedName~PhaseDeniedTools`.</criterion>
+    <criterion testable="true">Exception message contains both the phase name and the Tool name.</criterion>
+    <criterion testable="true">At least one positive (allowed) dispatch test exists per phase: authoring, schedule, execute, approve, deliver.</criterion>
+    <criterion testable="true">Full `dotnet test` suite passes after additions.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task directly verifies graduation gate **G4** (spec.md Success Criteria #4). Mechanical enforcement is the contract — the LLM cannot "talk its way past" this check.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge files. Declare RIGOR LEVEL: STANDARD. Follow task-execute skill.
+    </protocol>
+  </execution>
+</task>

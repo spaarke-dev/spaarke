@@ -90,6 +90,14 @@ export const EMPTY_ASSIGN_WORK_STATE: IAssignWorkState = {
 // Follow-on: Create Event state
 // ---------------------------------------------------------------------------
 
+/**
+ * Follow-on Create Event state for the Work Assignment wizard.
+ *
+ * Per R3 FR-29 / OS-1 (task 013): the legacy `addTodo` checkbox that wrote
+ * `sprk_event.sprk_todoflag = true` was removed. Users who want a companion
+ * `sprk_todo` should launch the shared CreateTodoWizard with the work-assignment
+ * event as the regarding record (matches the shared-lib decision from task 031).
+ */
 export interface ICreateFollowOnEventState {
   eventName: string;
   eventDescription: string;
@@ -98,7 +106,6 @@ export interface ICreateFollowOnEventState {
   eventFinalDueDate: string;
   assignedToId: string;
   assignedToName: string;
-  addTodo: boolean;
 }
 
 export const EMPTY_FOLLOW_ON_EVENT_STATE: ICreateFollowOnEventState = {
@@ -109,7 +116,6 @@ export const EMPTY_FOLLOW_ON_EVENT_STATE: ICreateFollowOnEventState = {
   eventFinalDueDate: '',
   assignedToId: '',
   assignedToName: '',
-  addTodo: false,
 };
 
 // ---------------------------------------------------------------------------

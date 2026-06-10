@@ -1,16 +1,29 @@
 /**
  * SmartTodo — Task management component for the Secure Project Workspace SPA.
  *
- * Displays tasks (sprk_event records with sprk_todoflag=true) associated with
- * a secure project. External users can view tasks, and create or update them
+ * Displays to-dos (sprk_todo records regarding the given project) for an
+ * external user. External users can view to-dos, and create or update them
  * if their access level is Collaborate or Full Access.
  *
- * Design reference: src/solutions/TodoDetailSidePane/src/components/TodoDetail.tsx
+ * Contract change (R3 task 007): this component previously queried
+ * `sprk_event` filtered by the legacy event-as-todo boolean toggle. To-dos
+ * are now first-class `sprk_todo` records returned by the BFF route
+ * `GET /api/v1/external/projects/{id}/todos` with ADR-024 polymorphic-resolver
+ * fields populated server-side.
+ *
+ * Design reference: @spaarke/ui-components/TodoDetail
+ *   (src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx)
  *
  * Access level enforcement (ADR per project CLAUDE.md):
- *   - ViewOnly    (100000000): Read-only. Can view tasks, cannot create or modify.
- *   - Collaborate (100000001): Can create tasks and toggle status.
+ *   - ViewOnly    (100000000): Read-only. Can view to-dos, cannot create or modify.
+ *   - Collaborate (100000001): Can create to-dos and toggle status.
  *   - FullAccess  (100000002): Same as Collaborate plus invite rights (not relevant here).
+ *
+ * Status values (FR-24):
+ *   1         = Open
+ *   659490001 = In Progress
+ *   2         = Completed
+ *   659490002 = Dismissed
  *
  * All colours via Fluent UI v9 design tokens (ADR-021). No hard-coded colors.
  * React 18 bundled (ADR-022, ADR-026). Fluent v9 makeStyles (ADR-021).
@@ -46,7 +59,7 @@ import {
   WarningRegular,
 } from '@fluentui/react-icons';
 
-import { getEvents, createEvent, updateEvent, type ODataEvent } from '../api/web-api-client';
+import { getProjectTodos, createTodo, updateTodo, type ODataTodo } from '../api/web-api-client';
 import { AccessLevel } from '../types';
 import { SectionCard } from './SectionCard';
 
@@ -222,21 +235,18 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Priority mapping (sprk_status option set for tasks)
-// Reusing event status field — 0=Not Started, 1=In Progress, 2=Completed
-// Priority is a separate concern — stored as sprk_priorityscore not available
-// in the external Web API. We use a local priority option for the create dialog.
+// To-Do status mapping (sprk_todo.statuscode per FR-24)
 // ---------------------------------------------------------------------------
 
-/** Task status values on sprk_event.sprk_status */
-const TASK_STATUS = {
-  NOT_STARTED: 0,
-  IN_PROGRESS: 1,
+/** To-Do statuscode values per FR-24. */
+const TODO_STATUS = {
+  OPEN: 1,
+  IN_PROGRESS: 659490001,
   COMPLETED: 2,
+  DISMISSED: 659490002,
 } as const;
 
-/** Priority options for the create task dialog (stored in sprk_status initially,
- *  then sprk_priorityscore is not surfaced; we map to display only). */
+/** Priority options for the create to-do dialog (maps to sprk_priorityscore 0-100). */
 interface PriorityOption {
   label: string;
   value: number;
@@ -262,7 +272,7 @@ function formatDueDate(isoDate: string | null | undefined): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-/** Check if a task due date is overdue. */
+/** Check if a to-do due date is overdue. */
 function isOverdue(isoDate: string | null | undefined, isCompleted: boolean): boolean {
   if (!isoDate || isCompleted) return false;
   const d = new Date(isoDate);
@@ -279,21 +289,18 @@ function dateInputToIso(value: string): string | undefined {
   return d.toISOString();
 }
 
-/** Convert ISO date string to YYYY-MM-DD for input[type="date"]. */
-function toDateInputValue(isoDate: string | null | undefined): string {
-  if (!isoDate) return '';
-  const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return '';
-  return d.toISOString().split('T')[0];
-}
-
 // ---------------------------------------------------------------------------
 // CanEdit helper
 // ---------------------------------------------------------------------------
 
-/** Returns true if the access level allows creating or editing tasks. */
+/** Returns true if the access level allows creating or editing to-dos. */
 function canEdit(accessLevel: AccessLevel): boolean {
   return accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
+}
+
+/** Whether the to-do is considered "done" (Completed or Dismissed). */
+function isTerminalStatus(statuscode: number | null | undefined): boolean {
+  return statuscode === TODO_STATUS.COMPLETED || statuscode === TODO_STATUS.DISMISSED;
 }
 
 // ---------------------------------------------------------------------------
@@ -301,16 +308,16 @@ function canEdit(accessLevel: AccessLevel): boolean {
 // ---------------------------------------------------------------------------
 
 interface TaskItemProps {
-  task: ODataEvent;
+  task: ODataTodo;
   accessLevel: AccessLevel;
   isToggling: boolean;
-  onToggleStatus: (task: ODataEvent) => void;
+  onToggleStatus: (task: ODataTodo) => void;
 }
 
 const TaskItem: React.FC<TaskItemProps> = ({ task, accessLevel, isToggling, onToggleStatus }) => {
   const styles = useStyles();
 
-  const isCompleted = task.sprk_status === TASK_STATUS.COMPLETED;
+  const isCompleted = isTerminalStatus(task.statuscode);
   const overdueFlag = isOverdue(task.sprk_duedate, isCompleted);
   const allowEdit = canEdit(accessLevel);
 
@@ -367,19 +374,24 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, accessLevel, isToggling, onTo
 
         {/* Status badge */}
         <div className={styles.taskMeta}>
-          {task.sprk_status === TASK_STATUS.IN_PROGRESS && (
+          {task.statuscode === TODO_STATUS.IN_PROGRESS && (
             <Badge appearance="tint" color="informative" size="small">
               In Progress
             </Badge>
           )}
-          {task.sprk_status === TASK_STATUS.COMPLETED && (
+          {task.statuscode === TODO_STATUS.COMPLETED && (
             <Badge appearance="tint" color="success" size="small">
               Completed
             </Badge>
           )}
-          {(task.sprk_status === TASK_STATUS.NOT_STARTED || task.sprk_status == null) && (
+          {task.statuscode === TODO_STATUS.DISMISSED && (
             <Badge appearance="tint" color="subtle" size="small">
-              Not Started
+              Dismissed
+            </Badge>
+          )}
+          {(task.statuscode === TODO_STATUS.OPEN || task.statuscode == null) && (
+            <Badge appearance="tint" color="brand" size="small">
+              Open
             </Badge>
           )}
         </div>
@@ -547,7 +559,7 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
 // ---------------------------------------------------------------------------
 
 export interface SmartTodoProps {
-  /** Dataverse GUID of the sprk_project record whose tasks to display. */
+  /** Dataverse GUID of the sprk_project record whose to-dos to display. */
   projectId: string;
   /** The current user's access level — controls create/edit permissions. */
   accessLevel: AccessLevel;
@@ -556,19 +568,20 @@ export interface SmartTodoProps {
 /**
  * SmartTodo — Task management panel for the Secure Project Workspace SPA.
  *
- * Fetches sprk_event records where sprk_todoflag=true for the given project.
- * Respects access level: View Only users can only read; Collaborate and
- * Full Access users can create tasks and toggle their completion status.
+ * Fetches `sprk_todo` records regarding the given project via the BFF route
+ * `GET /api/v1/external/projects/{id}/todos`. Respects access level: View Only
+ * users can only read; Collaborate and Full Access users can create to-dos
+ * and toggle their completion status.
  */
 export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) => {
   const styles = useStyles();
 
-  // Task list state
-  const [tasks, setTasks] = React.useState<ODataEvent[]>([]);
+  // To-do list state
+  const [tasks, setTasks] = React.useState<ODataTodo[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
-  // Status toggle state — tracks which task ID is currently being toggled
+  // Status toggle state — tracks which to-do ID is currently being toggled
   const [togglingTaskId, setTogglingTaskId] = React.useState<string | null>(null);
   const [toggleError, setToggleError] = React.useState<string | null>(null);
 
@@ -580,7 +593,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   const allowEdit = canEdit(accessLevel);
 
   // ---------------------------------------------------------------------------
-  // Load tasks
+  // Load to-dos
   // ---------------------------------------------------------------------------
 
   const loadTasks = React.useCallback(async () => {
@@ -588,13 +601,14 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
     setLoadError(null);
 
     try {
-      const events = await getEvents(projectId, {
-        $filter: `_sprk_projectid_value eq '${projectId}' and sprk_todoflag eq true`,
-        $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_status,sprk_todoflag,_sprk_projectid_value,createdon',
+      // BFF route /api/v1/external/projects/{id}/todos returns sprk_todo records
+      // regarding the given project (server-side resolver). No client-side
+      // todoflag filter is needed — the new route returns only to-dos.
+      const todos = await getProjectTodos(projectId, {
         $orderby: 'createdon desc',
         $top: 200,
       });
-      setTasks(events);
+      setTasks(todos);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load tasks';
       setLoadError(message);
@@ -612,24 +626,24 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   // ---------------------------------------------------------------------------
 
   const handleToggleStatus = React.useCallback(
-    async (task: ODataEvent) => {
+    async (task: ODataTodo) => {
       if (!allowEdit || togglingTaskId) return;
 
-      setTogglingTaskId(task.sprk_eventid);
+      setTogglingTaskId(task.sprk_todoid);
       setToggleError(null);
 
-      const isCurrentlyCompleted = task.sprk_status === TASK_STATUS.COMPLETED;
-      const newStatus = isCurrentlyCompleted ? TASK_STATUS.NOT_STARTED : TASK_STATUS.COMPLETED;
+      const isCurrentlyCompleted = isTerminalStatus(task.statuscode);
+      const newStatus = isCurrentlyCompleted ? TODO_STATUS.OPEN : TODO_STATUS.COMPLETED;
 
       // Optimistic update
-      setTasks(prev => prev.map(t => (t.sprk_eventid === task.sprk_eventid ? { ...t, sprk_status: newStatus } : t)));
+      setTasks(prev => prev.map(t => (t.sprk_todoid === task.sprk_todoid ? { ...t, statuscode: newStatus } : t)));
 
       try {
-        await updateEvent(task.sprk_eventid, { sprk_status: newStatus });
+        await updateTodo(task.sprk_todoid, { statuscode: newStatus });
       } catch (err) {
         // Revert on failure
         setTasks(prev =>
-          prev.map(t => (t.sprk_eventid === task.sprk_eventid ? { ...t, sprk_status: task.sprk_status } : t))
+          prev.map(t => (t.sprk_todoid === task.sprk_todoid ? { ...t, statuscode: task.statuscode } : t))
         );
         const message = err instanceof Error ? err.message : 'Failed to update task status';
         setToggleError(message);
@@ -641,7 +655,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   );
 
   // ---------------------------------------------------------------------------
-  // Create task
+  // Create to-do
   // ---------------------------------------------------------------------------
 
   const handleOpenDialog = React.useCallback(() => {
@@ -662,15 +676,18 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
       setSubmitError(null);
 
       try {
-        const newEvent = await createEvent(projectId, {
+        // The BFF applies the regarding-project lookup + 4 ADR-024 resolver
+        // fields server-side using the projectId from the route — clients
+        // don't send those in the body.
+        const newTodo = await createTodo(projectId, {
           sprk_name: formData.title,
-          sprk_todoflag: true,
-          sprk_status: TASK_STATUS.NOT_STARTED,
-          ...(formData.dueDate ? { sprk_duedate: dateInputToIso(formData.dueDate) } : {}),
+          ...(formData.description ? { sprk_notes: formData.description } : {}),
+          ...(formData.dueDate ? { sprk_duedate: dateInputToIso(formData.dueDate) ?? null } : {}),
+          sprk_priorityscore: formData.priority,
         });
 
-        // Add new task to the top of the list
-        setTasks(prev => [newEvent, ...prev]);
+        // Add new to-do to the top of the list
+        setTasks(prev => [newTodo, ...prev]);
         setIsDialogOpen(false);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to create task';
@@ -686,7 +703,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   // Computed values
   // ---------------------------------------------------------------------------
 
-  const pendingCount = tasks.filter(t => t.sprk_status !== TASK_STATUS.COMPLETED).length;
+  const pendingCount = tasks.filter(t => !isTerminalStatus(t.statuscode)).length;
   const totalCount = tasks.length;
 
   // ---------------------------------------------------------------------------
@@ -746,20 +763,20 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
           {/* Task list */}
           {!isLoading && tasks.length > 0 && (
             <>
-              {/* Pending tasks first, then completed */}
+              {/* Pending to-dos first, then completed/dismissed */}
               {(() => {
-                const pending = tasks.filter(t => t.sprk_status !== TASK_STATUS.COMPLETED);
-                const completed = tasks.filter(t => t.sprk_status === TASK_STATUS.COMPLETED);
+                const pending = tasks.filter(t => !isTerminalStatus(t.statuscode));
+                const completed = tasks.filter(t => isTerminalStatus(t.statuscode));
 
                 return (
                   <div className={styles.taskList} role="list" aria-label="Tasks">
-                    {/* Pending tasks */}
+                    {/* Pending to-dos */}
                     {pending.map(task => (
                       <TaskItem
-                        key={task.sprk_eventid}
+                        key={task.sprk_todoid}
                         task={task}
                         accessLevel={accessLevel}
-                        isToggling={togglingTaskId === task.sprk_eventid}
+                        isToggling={togglingTaskId === task.sprk_todoid}
                         onToggleStatus={handleToggleStatus}
                       />
                     ))}
@@ -772,13 +789,13 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
                       <Divider className={styles.divider}>Completed</Divider>
                     )}
 
-                    {/* Completed tasks */}
+                    {/* Completed / dismissed to-dos */}
                     {completed.map(task => (
                       <TaskItem
-                        key={task.sprk_eventid}
+                        key={task.sprk_todoid}
                         task={task}
                         accessLevel={accessLevel}
-                        isToggling={togglingTaskId === task.sprk_eventid}
+                        isToggling={togglingTaskId === task.sprk_todoid}
                         onToggleStatus={handleToggleStatus}
                       />
                     ))}

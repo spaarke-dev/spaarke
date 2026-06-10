@@ -40,7 +40,6 @@ import { useEvents, sortEvents } from "../../hooks/useEvents";
 import { useActivityFeedFilters } from "../../hooks/useActivityFeedFilters";
 import { EventFilterCategory } from "../../types/enums";
 import { IEvent } from "../../types/entities";
-import { useFeedTodoSync } from "../../hooks/useFeedTodoSync";
 import { openRecordDialog } from "../../utils/navigation";
 import type { IWebApi } from "../../types/xrm";
 
@@ -286,15 +285,10 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
     businessUnitId,
   });
 
-  // Seed FeedTodoSyncContext with initial todoflag states from the fetched events.
-  // This ensures the flag toggle UI reflects persisted Dataverse state on first
-  // render, before the user has interacted with any flags.
-  const { initFlags } = useFeedTodoSync();
-  React.useEffect(() => {
-    if (allEvents.length > 0) {
-      initFlags(allEvents);
-    }
-  }, [allEvents, initFlags]);
+  // Per R3 FR-14 / OS-1: the FeedTodoSyncContext no longer tracks per-event
+  // `sprk_todoflag` state (that column on `sprk_event` is removed in R3). The
+  // ActivityFeed no longer seeds flag state — `sprk_todo` records are managed
+  // independently and reach the SmartToDo block via the lifecycle bus.
 
   // Report event count to parent for tab badge display (embedded mode)
   React.useEffect(() => {

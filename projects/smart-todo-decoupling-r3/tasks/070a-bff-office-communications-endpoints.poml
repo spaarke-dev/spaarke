@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070a" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Add BFF Office endpoints: `/by-message-id/{id}` + `/{commId}/linked-todos` (task 070 + 071 dependency gap)</title>
+    <phase>Phase 8: Outlook Add-in (audit-surfaced follow-up)</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>002, 016, 070, 071</dependencies>
+    <blocks>none (Outlook end-to-end functional after this + 070b)</blocks>
+    <tags>bff-api, api, backend, endpoints, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF endpoints; tags include `bff-api` + `minimal-api`. FULL rigor with publish-size + CVE checks.</rigor-reason>
+    <parallel-group>P8-W3a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add two BFF endpoints under `Sprk.Bff.Api/Api/Office/CommunicationsEndpoints.cs` (or similar) that the Outlook add-in (tasks 070 + 071) already consumes but were never implemented:
+
+    1. **`GET /api/office/communications/by-message-id/{internetMessageId}`** — Used by task 070's `createTodoLauncher.ts` to look up an existing `sprk_communication` from an email's `internetMessageId`. Returns `{ communicationId, subject, ... }` or 404.
+    2. **`GET /api/office/communications/{commId}/linked-todos`** — Used by task 071's `useLinkedTodosForCommunication` hook to fetch linked sprk_todo records. Returns `[ { sprk_todoid, sprk_name, statecode } ]` (max 10).
+
+    Both endpoints use standard OBO auth. Both query Dataverse via existing patterns.
+  </prompt>
+
+  <role>Spaarke BFF API developer with Minimal API + Dataverse Web API + OBO expertise.</role>
+
+  <goal>Two new endpoints implemented + DI registered + unit tests. BFF deploys with both endpoints returning 401 (auth required, route registered). After deploy, Outlook taskpane fetches communication + linked todos without 404.</goal>
+
+  <context>
+    <background>Tasks 070 + 071 client code was committed expecting these endpoints to exist. They don't. Identified in post-deploy tech-debt review 2026-06-08. Both client sites already handle errors gracefully (Outlook banner suppresses, ribbon shows "save first") so production isn't crashing — it's silently broken.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/ (likely new directory)</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (DI registration)</file>
+      <file>src/client/office-addins/shared/taskpane/services/communicationLookupService.ts (client expecting endpoint #1)</file>
+      <file>src/client/office-addins/shared/taskpane/hooks/useLinkedTodosForCommunication.ts (client expecting endpoint #2)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern</constraint>
+    <constraint source="ADR-008">Endpoint filter for authorization (RequireAuthorization)</constraint>
+    <constraint source="ADR-028">OBO token flow via GraphClientFactory / DataverseService</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish-size verification mandatory</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation: unit tests for both endpoints</constraint>
+    <constraint source="Product portability">No hardcoded URLs / tenant IDs</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect existing Office-context endpoints in `Sprk.Bff.Api/Api/Office/` (or equivalent) to match conventions (auth pattern, response shapes, error handling).</step>
+    <step order="2">Create `CommunicationsEndpoints.cs` with both routes. Use OBO via existing pattern. Query Dataverse:
+- by-message-id: `sprk_communications?$filter=sprk_internetmessageid eq '{id}'&$select=sprk_communicationid,subject,sprk_internetmessageid&$top=1`
+- linked-todos: `sprk_todos?$filter=_sprk_regardingcommunication_value eq {commId}&$select=sprk_todoid,sprk_name,statecode,statuscode&$top=10`</step>
+    <step order="3">Register endpoints in Program.cs (or new module).</step>
+    <step order="4">Create response DTOs (e.g., `CommunicationLookupResponse`, `LinkedTodoSummary`).</step>
+    <step order="5">Unit tests in `tests/unit/Sprk.Bff.Api.Tests/Api/Office/`: 401 without auth, 200 with auth + valid id, 404 for missing.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`. Verify clean.</step>
+    <step order="7">BFF publish-size check vs current baseline (45.5 MB post-deploy). Expected: small delta (~0.1 MB).</step>
+    <step order="8">CVE scan: zero new HIGH.</step>
+    <step order="9">**MAIN SESSION will redeploy BFF after task completes** — do NOT redeploy from sub-agent context.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Api/Office/CommunicationsEndpoints.cs`</output>
+    <output type="code">DTOs + DI registration</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Api/Office/CommunicationsEndpointsTests.cs`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both endpoints registered; respond 401 without auth + 200 with valid auth + 404 for missing records.</criterion>
+    <criterion testable="true">Unit tests pass.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+5 MB.</criterion>
+    <criterion testable="true">Zero new HIGH CVEs.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

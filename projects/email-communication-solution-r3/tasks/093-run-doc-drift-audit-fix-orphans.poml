@@ -1,0 +1,129 @@
+<task id="093" project="email-communication-solution-r3">
+  <metadata>
+    <title>Run `/doc-drift-audit` skill on repo; fix orphans referencing retired components</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>084, 085, 086, 087, 088, 089, 090, 091, 092</dependencies>
+    <blocks>099</blocks>
+    <tags>docs, cleanup, audit</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit gating Wave 6 completion; verifies the 13 documentation updates + retirements + cleanups successfully removed all orphan references</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final audit task — runs after ALL Wave 6 docs land (tasks 084–092 must be complete); cleans up any orphan references introduced or missed</parallel-reason>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Run the `/doc-drift-audit` skill on the entire repo to detect orphaned references to retired components after Waves 0–6. Fix any orphans found. Document the audit results in `notes/research/093-doc-drift-audit.md` for the Wave 6 PR description.
+
+    Specifically look for orphans referencing:
+    - `sprk_communication_send.js` (retired in tasks 081, 082, 083)
+    - The two RETIRED architecture docs (banners added in task 090) — verify no doc treats them as canonical
+    - LegalWorkspace forks (deleted across Waves 3–5; final audit in task 084)
+    - Any stale `sprk_email*` field references missed by task 091
+    - Old send-email pattern references (replaced in task 086)
+  </prompt>
+
+  <role>
+    Spaarke documentation hygiene specialist. Familiar with the `/doc-drift-audit` skill's diff-based audit pattern and the typical orphan classes that emerge after a multi-wave deletion + documentation update project.
+  </role>
+
+  <goal>
+    Doc drift audit complete with zero unresolved orphan references to retired components. Audit results documented in `notes/research/093-doc-drift-audit.md`. Wave 6 PR description references the audit.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-27 acceptance: "doc-drift-audit skill confirms no orphaned references". The skill scans for stale references in docs and `.claude/` that no longer match current code. After R3's 6 waves of deletions + 13 documentation updates, residual orphans are likely.
+
+      The `doc-drift-audit` skill is designed for exactly this scenario — a compact, diff-based alternative to a full-repo audit.
+    </background>
+    <relevant-files>
+      <file>notes/research/093-doc-drift-audit.md</file>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-27">Audit MUST confirm zero orphaned references to retired components</constraint>
+    <constraint source="project">All Wave 6 tasks 084–092 MUST be complete before this task runs</constraint>
+    <constraint source="project">Any orphan found MUST be fixed (not just documented)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>notes/research/080-webresource-entry-point-audit.md</file>
+      <file>notes/research/084-final-fork-audit.md</file>
+    </files>
+    <patterns>
+      <pattern name="doc-drift-audit skill" location=".claude/skills/doc-drift-audit/SKILL.md">
+        Diff-based audit — scans for stale references in docs and `.claude/`. Use as the primary tool for this task.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify tasks 084–092 all ✅ completed. If any pending, STOP.</step>
+    <step order="2">Invoke `/doc-drift-audit` skill on the repo. Capture results.</step>
+    <step order="3">Grep manually for known retirement targets (skill-independent verification):
+      - `grep -r "sprk_communication_send" .` (excluding `.git`) — expect zero hits in non-historical contexts
+      - `grep -r "email-to-document-architecture" docs/` — expect only retirement-banner-aware references
+      - `grep -r "email-to-document-automation" docs/` — same
+      - `grep -r "sprk_email" docs/architecture/sdap-overview.md` — expect zero stale field refs
+    </step>
+    <step order="4">For each orphan found: classify (a) reference to deleted source file, (b) reference to retired doc as-canonical, (c) stale field name, (d) outdated pattern reference. List each with proposed fix.</step>
+    <step order="5">Apply fixes. For docs touched by other Wave 6 tasks, prefer minor edits over wholesale rewrite.</step>
+    <step order="6">Re-run `/doc-drift-audit` to confirm no remaining orphans.</step>
+    <step order="7">Document the audit in `notes/research/093-doc-drift-audit.md`:
+      - Audit invocation results (initial)
+      - Orphans found + classification
+      - Fixes applied
+      - Final audit results (should be clean)
+      - Verdict ✅ / ⚠
+    </step>
+    <step order="8">Cross-reference this audit doc from the Wave 6 PR description.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 093 ✅ completed.</step>
+    <step order="10">Update `current-task.md`: status → completed, Wave 6 done; next is wrap-up task 099.</step>
+  </steps>
+
+  <tools>
+    <tool name="doc-drift-audit">Primary audit mechanism</tool>
+    <tool name="grep">Skill-independent verification</tool>
+    <tool name="edit">Apply fixes</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">notes/research/093-doc-drift-audit.md (NEW — final audit record + verdict)</output>
+    <output type="docs">Various small fixes across docs to remove orphan references</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/doc-drift-audit` skill returns a clean report (zero orphans).</criterion>
+    <criterion testable="true">Manual grep for known retirement targets returns zero non-historical hits.</criterion>
+    <criterion testable="true">Audit document at `notes/research/093-doc-drift-audit.md` exists with verdict.</criterion>
+    <criterion testable="true">Wave 6 PR description references the audit document.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical findings from project pipeline (relevant here):
+    - Wave 6 retirements (tasks 081, 082, 083, 084) deleted ~2.3K LOC + LegalWorkspace forks; orphans likely exist in docs/tests.
+    - Wave 6 documentation tasks (085–092) introduced 3 new docs + 8 updates; cross-link integrity is part of the audit.
+
+    This task is the final Wave 6 gate before wrap-up (task 099).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Step 6 re-audit is the binding gate.
+    </protocol>
+  </execution>
+</task>

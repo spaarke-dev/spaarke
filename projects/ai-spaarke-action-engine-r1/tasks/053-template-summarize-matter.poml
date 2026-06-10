@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Action Template — "Summarize a matter" (Deterministic Dataverse query + AI narrative summary)</title>
+    <phase>Phase 5: Surfaces + Templates</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040, 041, 052</dependencies>
+    <blocks>060</blocks>
+    <tags>dataverse, ai, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>JPS Action JSON authoring + Dataverse seed. Produces the "Conservative 3" Template #1 per spec.md FR-19. No new C# code; deliverable is a JPS-validated JSON definition + a deploy invocation. Has explicit ADR constraints (013, 015, 018) and dependencies (040, 041, 052).</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent JPS JSON authoring; no file overlap with tasks 054, 055 (each writes to its own `infra/insights/schemas/template-*.json`). Same prerequisite set (040 + 041 + 052). Safe for parallel sub-agent execution.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author the "Summarize a matter" Action Template as a JPS-compliant JSON definition at `infra/insights/schemas/template-summarize-matter.json` and seed it into Dataverse (`sprk_actiontemplate` entity). Per spec.md FR-19 + design.md "Conservative 3", this is a Hybrid two-step Action: (Step 1) Deterministic `QueryDataverse` Tool fetches a matter rollup — status, key dates, recent activity, open tasks, active counterparties; (Step 2) AI Tool composes a narrative multi-paragraph summary grounded in step 1's output. Default `humanGate.required = false` for the summary itself; output routes to chat surface AND offers an optional `SendEmail` Tool (which requires gate) as a follow-up Action. Validates against the JPS schema via the `jps-validate` skill before deployment.
+  </prompt>
+
+  <role>
+    Spaarke AI Template author with deep familiarity with the JPS (JSON Prompt Schema) Action definition format, the `jps-action-create` + `jps-validate` skills, the Tool Registry contract from task 020 (Classification / CostClass / LatencyClass / EvidenceRequired / SourceCitations), and the default `Spaarke Assistant — General` playbook seeded in task 052. You author with discipline — the LLM-facing Tool descriptions ARE contracts (design.md §7.4.5 guardrail #2).
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **JPS Action JSON** — `infra/insights/schemas/template-summarize-matter.json` with `instruction`, `output` field schema (multi-paragraph narrative + `sourceCitations` array), `scopes` (the matter record id input parameter), `templateParams` (optional rollup-depth, lookback window), and at least one `examples` block. Wires Step 1 (Deterministic `QueryDataverse` for matter rollup) → Step 2 (AI `SummarizeText` Tool with the rollup as evidence).
+    2. **Dataverse seed** — upsert `sprk_actiontemplate` row pointing at this JSON. Parameter schema published. References the default playbook from task 052 (system prompt inherited).
+    3. **E2E test seed** — a worked example invocation: "Summarize Matter X" via SpaarkeAi chat resolves to this Template via `FindResources`, runs both steps, returns the narrative with source citations. This is the **G2 acceptance gate** (conversational invocation resolves user intent → Tool).
+
+    Deliverable: `infra/insights/schemas/template-summarize-matter.json`, a deploy invocation recorded in `notes/deploys/053-template-summarize-matter.md`, and a verification of the JPS schema via `jps-validate`.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-19 mandates the "Summarize a matter" Template. Design.md §10 "Phased Delivery" + "Conservative 3" decision (owner clarification table) confirms this as MVP Template #1. The output routes to the SpaarkeAi chat surface; the optional `SendEmail` follow-up Tool (which requires gate per `IGateResolver` rules) is exposed in the result tile as a button — but the email itself is NOT in this Template; it's invoked separately by the user.
+
+      Spec.md Success Criterion #2: "Conversational invocation via SpaarkeAi Code Page resolves user intent → Tool via meta-tools and executes. **Verify**: E2E test with 'Summarize Matter X' yielding the matter's summary in chat with citations." — this is the **G2 acceptance gate**. This Template is the test subject for G2.
+
+      The Template's `EvidenceRequired: true` flag (design.md §7.4.5 guardrail #3) means the AI `SummarizeText` step MUST NOT produce a summary without supporting evidence from Step 1's deterministic query. The Tool dispatch layer (`IToolHandlerRegistry`) enforces this — runtime guard, not prompt-coached.
+
+      Per ADR-015, every Tool dispatch this Template makes writes audit (Tier 2 hash-only + Tier 3 Cosmos work history with tenant scoping). The Template authors do NOT add audit code — `AuditEnrichmentMiddleware` (task 044) is the choke point. This task's responsibility is only to ensure the Template's JSON contract correctly identifies which Tool dispatches happen (so audit can fingerprint them).
+
+      Per ADR-018, this Template's governance block MUST reference a feature flag (e.g., `feature.actionEngine.template.summarizeMatter`) so it can be disabled per environment.
+    </background>
+    <relevant-files>
+      <file>infra/insights/schemas/template-summarize-matter.json</file>
+      <file>infra/insights/schemas/playbook-spaarke-assistant-general.json</file>
+      <file>scripts/Seed-JpsActions.ps1</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/deploys/053-template-summarize-matter.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI placement: Template lives in Dataverse + `infra/insights/schemas/`; BFF reads via `Services/Ai/PublicContracts/` facade. No CRUD-side caller injects `IActionTemplateService` or other internals.</constraint>
+    <constraint source="ADR-015">Audit on every Tool dispatch this Template makes (Tier 2 hash + Tier 3 work history). This task authors the Template; the audit machinery (task 044 `AuditEnrichmentMiddleware`) does the writing. Verify the Template's Tool ids match what audit will fingerprint.</constraint>
+    <constraint source="ADR-018">Feature flag: `feature.actionEngine.template.summarizeMatter` referenced in the Template's `governance` block per spec.md §5 "Governance" field.</constraint>
+    <constraint source="ADR-029">Publish size impact: Templates are JSON, low impact. Adds NO BFF code, NO new NuGet. Zero publish-size delta.</constraint>
+    <constraint source="project">Validate the JPS JSON via `jps-validate` skill BEFORE seeding to Dataverse. Schema violations halt deployment.</constraint>
+    <constraint source="project">`EvidenceRequired: true` on the AI summarize step. Tool dispatch layer enforces this.</constraint>
+    <constraint source="project">Tool description for the `SummarizeMatter` Action is the LLM-facing contract (design.md §7.4.5 guardrail #2). Write it as a precise interface declaration: "Summarize the open status, key dates, recent activity, and active counterparties of a specific matter record. Input: matter record id. Output: multi-paragraph narrative with source citations to the underlying Dataverse records."</constraint>
+    <constraint source="project">Default `humanGate.required = false` for the summary itself. The optional `SendEmail` follow-up Action (which DOES require gate) is NOT part of this Template — it's a separate Action surfaced as a follow-up button in the result tile.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="JPS Action authoring workflow" location=".claude/skills/jps-action-create/SKILL.md">Canonical workflow: define instruction, output schema, scopes, templateParams, examples. Validate before deploy.</pattern>
+      <pattern name="Tool description as contract" location="projects/ai-spaarke-action-engine-r1/design.md §7.4.5">Tool descriptions ARE the LLM-facing interface declaration. Write with precision.</pattern>
+      <pattern name="Evidence-required runtime guard" location="projects/ai-spaarke-action-engine-r1/design.md §7.4.5">Inference Tools with `EvidenceRequired: true` MUST receive supporting evidence in the dispatch payload or the dispatch is rejected.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, dependencies (tasks 040 Action endpoints, 041 orchestration service, 052 default playbook) marked ✅ in `TASK-INDEX.md`. (task-execute Step 0)</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;` — especially spec.md FR-19, design.md §7.4.5 (8 guardrails), the `jps-action-create` skill workflow, and the seeded playbook from task 052 (system prompt inheritance).</step>
+    <step order="2">Use the `jps-action-create` skill to scaffold the Template JSON. Populate:
+      - `instruction`: brief LLM-facing description of the Template's purpose
+      - `scopes`: `[{name: "matterId", type: "guid", required: true, sourceHints: ["surface", "ask"]}]`
+      - `templateParams`: `[{name: "lookbackDays", type: "int", default: 30}, {name: "rollupDepth", type: "enum", values: ["concise", "detailed"], default: "concise"}]`
+      - `steps`:
+        - Step 1: `{tool: "QueryDataverse", params: {entity: "sprk_matter", id: "{matterId}", related: ["sprk_task", "sprk_event", "contact"], lookbackDays: "{lookbackDays}"}}` — Deterministic, no gate
+        - Step 2: `{tool: "SummarizeText", params: {evidence: "{step1.output}", style: "narrative", depth: "{rollupDepth}"}, evidenceRequired: true}` — AI, no gate, requires evidence from step 1
+      - `output`: schema for `{narrative: string, sourceCitations: [{recordId, entityType, fieldName}]}`
+      - `examples`: at least one worked example with input/output pair
+      - `governance.featureFlag`: `"feature.actionEngine.template.summarizeMatter"`
+      - `governance.killSwitch`: `false`
+    </step>
+    <step order="3">Run the `jps-validate` skill against the JSON. Halt on schema violations; fix and re-validate.</step>
+    <step order="4">Deploy via `scripts/Seed-JpsActions.ps1` (or equivalent — verify via `Glob`): upsert `sprk_actiontemplate` row keyed by `sprk_name = 'summarize-matter'`. Capture stdout/stderr to `notes/deploys/053-template-summarize-matter.md`.</step>
+    <step order="5">**Verification** — execute the Template manually via the BFF `/run` endpoint (POST /api/actions/run with `{templateId: 'summarize-matter', parameters: {matterId: '&lt;dev-matter-guid&gt;'}}`). Confirm:
+      - The Run record is created in `sprk_actionrun` with `Queued → Running → Completed` status sequence
+      - Step 1 (QueryDataverse) audit row exists (Tier 2 hash)
+      - Step 2 (SummarizeText) audit row exists with `EvidenceRequired: true` honored (dispatch payload included step 1's output)
+      - Output narrative contains source citations referring to the matter's actual records
+    </step>
+    <step order="6">**G2 acceptance gate** — verify conversational invocation via SpaarkeAi resolves user intent → Tool (E2E test: "Summarize Matter X" — G2 per spec.md Success Criterion #2):
+      - Open SpaarkeAi Code Page (no-context landing)
+      - Type "Summarize Matter X" (using a real matter name from the dev environment)
+      - Verify the agent calls `FindResources("summarize matter X")` → returns the `summarize-matter` Template id with high confidence
+      - Verify the agent calls `GetResourceDetail("summarize-matter")` → returns the parameter schema
+      - Verify the agent resolves `matterId` via `QueryDataverse` (entity lookup by name)
+      - Verify the agent calls `InvokeResource("summarize-matter", {matterId: "..."})` → runs the Template
+      - Verify the summary appears in chat with source citations
+      Capture the run id + audit record ids in `notes/deploys/053-template-summarize-matter.md` as evidence for the G2 gate.
+    </step>
+    <step order="7">**Idempotency verification**: re-run the seed script. Confirm record count = 1 (no duplicate).</step>
+    <step order="8">Update `current-task.md` with progress; checkpoint via `context-handoff` skill.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 053 status ✅. Note the G2 gate verification evidence in the project's "Decisions" or "Acceptance Evidence" appendix.</step>
+    <step order="10">If any deviations from this plan, document in `projects/ai-spaarke-action-engine-r1/notes/handoffs/053-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="jps-action-create">Scaffold the JPS Action JSON</tool>
+    <tool name="jps-validate">Validate JSON against JPS schema</tool>
+    <tool name="dataverse-deploy">Upsert `sprk_actiontemplate` row</tool>
+    <tool name="powershell">Run Seed-JpsActions.ps1</tool>
+    <tool name="curl">Invoke BFF `/run` endpoint for verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">infra/insights/schemas/template-summarize-matter.json</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/deploys/053-template-summarize-matter.md</output>
+    <output type="dataverse-record">`sprk_actiontemplate` row `summarize-matter` in dev environment</output>
+    <output type="evidence">G2 gate verification (conversational invocation E2E test result)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`infra/insights/schemas/template-summarize-matter.json` exists and passes the `jps-validate` schema check.</criterion>
+    <criterion testable="true">The Template's Step 2 (`SummarizeText`) has `EvidenceRequired: true` and references Step 1's output as evidence.</criterion>
+    <criterion testable="true">The Template's `governance.featureFlag` references `feature.actionEngine.template.summarizeMatter`.</criterion>
+    <criterion testable="true">After deployment, exactly one `sprk_actiontemplate` row with `sprk_name='summarize-matter'` exists in the dev environment. Re-running the seed yields no duplicate.</criterion>
+    <criterion testable="true">Manual invocation via BFF `/run` endpoint completes with status `Completed`; both audit rows (Tier 2 for each Tool dispatch) exist.</criterion>
+    <criterion testable="true">**G2 acceptance gate**: Conversational invocation via SpaarkeAi resolves user intent → Tool (E2E test: 'Summarize Matter X' — G2). Verified by an interactive session with a real matter name; summary appears in chat with citations.</criterion>
+    <criterion testable="true">The output narrative includes `sourceCitations` array referring to underlying Dataverse record ids (citation discipline per design.md §7.4.5 guardrail #7).</criterion>
+    <criterion testable="true">Publish-size delta zero — no BFF code change.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The optional `SendEmail` follow-up Action is NOT part of this Template. It's a separate Action (defined elsewhere, possibly task 054's SendEmail Tool reused) surfaced as a follow-up button in the SpaarkeAi result tile. The user explicitly invokes it; that invocation triggers its own `IGateResolver` flow.
+
+    The `SummarizeText` Tool referenced in Step 2 is one of the "always-on" tools or a registered AI Tool — verify its id matches the registered Tool from task 022 (FindResources implementation) before deploying.
+
+    The G2 gate evidence (an interactive E2E run with a real matter) is recorded in `notes/deploys/053-template-summarize-matter.md` and referenced from the `TASK-INDEX.md` "Acceptance Evidence" section. This is the load-bearing piece — without it, the project's overall G2 gate is unverified.
+
+    Per design.md §7.4.5 guardrail #7 (citation discipline): the output schema's `sourceCitations` array is non-optional. The AI `SummarizeText` Tool's response MUST include them. If the dev-environment AI service returns a summary without citations, that's a Tool implementation bug (in task 022's registration) — fix by tightening the Tool's prompt template, not by relaxing the Template's schema.
+
+    Do not duplicate Tool ids across Templates. If `QueryDataverse` is already registered (as expected — it's an always-on foundational Tool from task 052), reference the existing id; do not create a new one.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: STANDARD with the reason from `&lt;rigor-reason&gt;`. Use the `jps-action-create` skill for scaffolding and `jps-validate` for schema checks. Use `dataverse-deploy` for the upsert. Follow the task-execute skill for proactive checkpointing. Skip Step 9.5 quality gate (STANDARD rigor — no .cs/.ts changes), but record the G2 verification evidence carefully.
+    </protocol>
+  </execution>
+</task>

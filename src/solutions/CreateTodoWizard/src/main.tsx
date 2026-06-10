@@ -77,6 +77,7 @@ function App() {
       <CreateTodoWizard
         open={true}
         dataService={dataService}
+        navigationService={navigationService}
         embedded={true}
         onClose={handleClose}
         authenticatedFetch={authenticatedFetch}

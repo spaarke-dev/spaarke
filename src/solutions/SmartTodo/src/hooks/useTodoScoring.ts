@@ -33,7 +33,7 @@
  *   } = useTodoScoring({ bffBaseUrl, authenticatedFetch });
  *
  *   // Open dialog for a to-do event
- *   openScoring(event.sprk_eventid, event.sprk_eventname);
+ *   openScoring(todo.sprk_todoid, todo.sprk_name);
  */
 
 import { useState, useCallback, useRef } from 'react';

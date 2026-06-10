@@ -8,18 +8,7 @@
  * Dependencies are injected via props -- no solution-specific imports.
  */
 import * as React from 'react';
-import {
-  Text,
-  Input,
-  Textarea,
-  Dropdown,
-  Option,
-  Field,
-  Checkbox,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { searchUsersAsLookup } from './workAssignmentService';
@@ -76,12 +65,8 @@ const useStyles = makeStyles({
     gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
   },
-  todoCheckbox: {
-    color: tokens.colorNeutralForeground1,
-  },
-  todoCheckboxActive: {
-    color: tokens.colorBrandForeground1,
-  },
+  // Note (R3, task 031): `todoCheckbox` / `todoCheckboxActive` styles removed
+  // along with the "Add a 'To Do' Item" checkbox. See FR-15 / OS-1.
 });
 
 // ---------------------------------------------------------------------------
@@ -135,9 +120,10 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
     }));
   }, []);
 
-  const handleTodoChange = React.useCallback((_e: unknown, data: { checked: boolean | 'mixed' }) => {
-    setFormValues(prev => ({ ...prev, addTodo: data.checked === true }));
-  }, []);
+  // R3 (smart-todo-decoupling-r3, task 031): The `handleTodoChange` handler
+  // (formerly setting `formValues.addTodo`) was removed per FR-15 / OS-1.
+  // See `formTypes.ts` for the rationale — `sprk_event.sprk_todoflag` is
+  // being dropped from the schema in favor of first-class `sprk_todo`.
 
   const handleSearchUsers = React.useCallback(
     (query: string) => searchUsersAsLookup(dataService, query),
@@ -211,12 +197,14 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
         </Field>
       </div>
 
-      <Checkbox
-        checked={formValues.addTodo}
-        onChange={handleTodoChange}
-        label="Add a 'To Do' Item"
-        className={mergeClasses(styles.todoCheckbox, formValues.addTodo && styles.todoCheckboxActive)}
-      />
+      {/*
+        R3 (smart-todo-decoupling-r3, task 031): The "Add a 'To Do' Item"
+        checkbox was removed per FR-15 / OS-1. The legacy implementation
+        wrote `sprk_event.sprk_todoflag=true`; that column is being dropped
+        from the schema. Companion To Dos are now first-class `sprk_todo`
+        records created via the CreateTodoWizard (which can set the new
+        event as its regarding record).
+      */}
     </div>
   );
 };

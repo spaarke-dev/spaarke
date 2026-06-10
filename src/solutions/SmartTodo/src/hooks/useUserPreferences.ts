@@ -31,14 +31,50 @@ export const DEFAULT_TOMORROW_THRESHOLD = 30;
  */
 export const PREFERENCE_TYPE_TODO_KANBAN = 100000000;
 
+/**
+ * MyTasksFilter mode values (R3 FR-12 / A-6).
+ *
+ * MyTasks      = owner OR assignee = current user (+ team-member clause per
+ *                A-6, deferred to v2 — see queryHelpers.buildTodoItemsQuery
+ *                for the team-clause TODO)
+ * AssignedToMe = assignee = current user
+ * All          = no ownership filter (statecode/statuscode still applied)
+ *
+ * Persisted as a string in the same JSON payload as the kanban thresholds
+ * (preference-type 100000000) to avoid adding a new optionset value.
+ */
+export type MyTasksFilterMode = 'MyTasks' | 'AssignedToMe' | 'All';
+
+/** Default filter mode shown on first load (FR-12). */
+export const DEFAULT_MY_TASKS_FILTER_MODE: MyTasksFilterMode = 'MyTasks';
+
+const VALID_FILTER_MODES: ReadonlyArray<MyTasksFilterMode> = [
+  'MyTasks',
+  'AssignedToMe',
+  'All',
+];
+
+function isValidFilterMode(value: unknown): value is MyTasksFilterMode {
+  return typeof value === 'string' && (VALID_FILTER_MODES as readonly string[]).includes(value);
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Kanban threshold preferences shape (stored as JSON in sprk_preferencevalue). */
+/**
+ * Kanban threshold preferences shape (stored as JSON in sprk_preferencevalue).
+ *
+ * R3 task 021 extended this JSON with an optional `myTasksFilterMode` field so
+ * the My Tasks filter persists alongside the column thresholds without
+ * requiring a new sprk_preferencetype optionset value. When the field is
+ * absent on read, the hook substitutes DEFAULT_MY_TASKS_FILTER_MODE.
+ */
 export interface ITodoKanbanPreferences {
   todayThreshold: number;
   tomorrowThreshold: number;
+  /** R3 FR-12 — persisted My Tasks filter selection. Defaults to "MyTasks". */
+  myTasksFilterMode: MyTasksFilterMode;
 }
 
 export interface IUseUserPreferencesOptions {
@@ -64,6 +100,7 @@ export interface IUseUserPreferencesResult {
 const DEFAULT_PREFERENCES: ITodoKanbanPreferences = {
   todayThreshold: DEFAULT_TODAY_THRESHOLD,
   tomorrowThreshold: DEFAULT_TOMORROW_THRESHOLD,
+  myTasksFilterMode: DEFAULT_MY_TASKS_FILTER_MODE,
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +156,9 @@ export function useUserPreferences(
               tomorrowThreshold: typeof parsed.tomorrowThreshold === 'number'
                 ? parsed.tomorrowThreshold
                 : DEFAULT_TOMORROW_THRESHOLD,
+              myTasksFilterMode: isValidFilterMode(parsed.myTasksFilterMode)
+                ? parsed.myTasksFilterMode
+                : DEFAULT_MY_TASKS_FILTER_MODE,
             });
           } catch {
             console.warn('[useUserPreferences] Failed to parse preference JSON, using defaults');

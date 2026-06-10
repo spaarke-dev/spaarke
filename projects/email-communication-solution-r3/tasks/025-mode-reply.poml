@@ -1,0 +1,158 @@
+<task id="025" project="email-communication-solution-r3">
+  <metadata>
+    <title>Reply mode — pre-fill from source + sprk_inreplyto stamping + thread carry</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020, 003</dependencies>
+    <blocks>028</blocks>
+    <tags>react, frontend, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Reply pre-fill + sprk_inreplyto + thread-id carry are the load-bearing client side of reply-thread closure (success criterion 9). Subject prefix dedup ("Re: Re: …" avoidance) + body wrapping + association carry all matter. FULL appropriate.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-11</fr-refs>
+  </metadata>
+
+  <prompt>
+    Implement `reply` mode behavior in `EmailComposer/modes/replyMode.ts` (pure logic) + integration in the reducer + send path.
+
+    Pre-fill behavior (FR-11) — derived from `sourceRecord`:
+    - `to` = `[sourceRecord.from]` (reply goes back to original sender)
+    - `cc` = `[]` (Cc blank by default in Reply — Reply-All is out-of-scope for v1)
+    - `subject`:
+      * If `sourceRecord.subject` starts with `/^Re:\s*/i` → keep as-is (don't double-prefix)
+      * Else → `Re: ${sourceRecord.subject}`
+    - `body` = wrap original body with a divider:
+      ```
+      <blockquote>
+        <p>On {sentDate}, {sourceRecord.from.displayName} wrote:</p>
+        {sourceRecord.body}
+      </blockquote>
+      ```
+      (For HTML body; for plaintext body, prefix each line with `> `.)
+    - `attachments` = `[]` (Reply does NOT carry attachments by default per FR-11)
+    - `associations` = `[...sourceRecord.associations]` (carry forward to new record)
+
+    Stamping on send (FR-11 + dep on Wave 0 task 003 Internet-Message-Id):
+    - When `send()` posts a Reply, the new `sprk_communication` record's `sprk_inreplyto` lookup is set to `sourceRecord.communicationId` (canonical client-stamp via the `sendCommunication()` API)
+    - `sprk_threadid` (if present on sourceRecord) carried over to the new record
+    - `BFF SendCommunicationRequest` extended with optional `inReplyTo: string` + `threadId: string` fields if not already present; communicationApi.ts wrapper passes them through
+
+    Depends on Wave 0 task 003 (server-side Internet-Message-Id capture) so the inbound reply matcher (`IncomingAssociationResolver` per ADR-024) can close the loop. THIS task only handles the client-side reply pre-fill + outbound stamping; the inbound matching is existing R2 work.
+
+    Files:
+    - `modes/replyMode.ts` (NEW)
+    - Update reducer to handle `mode === 'reply'` initialState + transition from view
+    - Update send-path in engine to include `inReplyTo` + `threadId` in the request body
+    - Update `communicationApi.ts` `SendCommunicationRequest` type to include optional `inReplyTo?: string` and `threadId?: string` — verify with Wave 0 task 005 + 002 that the BFF DTO accepts these
+  </prompt>
+
+  <role>
+    React + TypeScript developer with email-quoting + thread-tracking experience.
+  </role>
+
+  <goal>
+    `reply` mode pre-fills correctly per FR-11. Subject prefix dedup works. Body quoting matches the bodyFormat. New record's `sprk_inreplyto` set to source's communicationId. ThreadId carried. `npm run build` + `npm run lint` clean.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-11 + spec success criterion 9 (reply-thread closure): client-side reply mode + Wave 0 server `Internet-Message-Id` capture + existing R2 inbound matching close the round-trip.
+
+      Subject dedup: prevents the embarrassing "Re: Re: Re: Re: ..." chain from users replying to replies. Industry standard is single "Re:" prefix preserved.
+
+      `sprk_inreplyto` is a self-lookup on `sprk_communication` (Wave 0 task 004 verifies it exists). The client stamps it on send by including the source's communicationId in the request body; the BFF setter on the server populates the lookup.
+
+      Wave 0 task 002 added `AttachmentDriveItemIds` to the DTO. For reply, we also need `inReplyTo` + `threadId` — confirm during this task whether they're already in the request DTO or need to be added.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/modes/replyMode.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (UPDATE — send-path stamp)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (UPDATE — inReplyTo/threadId fields if missing)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs (POSSIBLY UPDATE — add fields if missing)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">Server-side `IncomingAssociationResolver` consumes `Internet-Message-Id` for inbound match — unchanged; client just stamps `sprk_inreplyto` on outbound</constraint>
+    <constraint source="ADR-019">Send errors use SendCommunicationError (existing contract)</constraint>
+    <constraint source="ADR-033">Reply-mode logic lives in the canonical engine — no parallel reply UI</constraint>
+    <constraint source="project">Subject dedup: `/^Re:\s*/i` regex check — case insensitive, allows trailing spaces</constraint>
+    <constraint source="project">Attachments NOT carried in Reply per FR-11 (Forward carries them — task 026)</constraint>
+    <constraint source="project">Associations carried from sourceRecord</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `modes/replyMode.ts`:
+      - `deriveReplyState(sourceRecord: IComposerSourceRecord): Partial&lt;EmailComposerState&gt;` — pure function applying the FR-11 rules
+      - `formatReplyBody(originalBody: string, bodyFormat: 'html' | 'plaintext', metadata: { sentDate; fromName }): string` — quoting logic
+      - `dedupSubjectPrefix(subject: string, prefix: 'Re:' | 'Fwd:'): string` — checks `/^${prefix}\s*/i`</step>
+    <step order="2">Update `EmailComposer.reducer.ts`:
+      - `initialState` handles `mode === 'reply' &amp;&amp; sourceRecord` by applying `deriveReplyState`
+      - `SET_MODE` from view → reply applies the same logic + preserves `sourceRecord` reference for stamp-on-send</step>
+    <step order="3">Update `EmailComposer.tsx` send-path:
+      - When state has `sourceRecord` AND `mode === 'reply'`, include `inReplyTo: sourceRecord.communicationId` + `threadId: sourceRecord.threadId` in the `sendCommunication()` call</step>
+    <step order="4">Check `communicationApi.ts` (post-task-005) for `inReplyTo` + `threadId` fields in `SendCommunicationRequest` type:
+      - If present (added in Wave 0 task 005): use them
+      - If missing: add them as optional + update `sendCommunication()` to forward them in the request body; coordinate with task 002 reviewer about whether the BFF DTO already accepts them (it should from Wave 0 task 003)</step>
+    <step order="5">Smoke test in dev: load a record, click Reply, verify subject `Re: ${original}` (or no double Re:), to = original.from, body wrapped, attachments empty, associations carried.</step>
+    <step order="6">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="6.5">Step 9.5 quality gates — code-review + adr-check.</step>
+    <step order="7">Update `TASK-INDEX.md`: 025 ✅.</step>
+    <step order="8">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="write">replyMode.ts</tool>
+    <tool name="edit">reducer, EmailComposer.tsx send-path, possibly communicationApi.ts</tool>
+    <tool name="bash">npm run build + lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/modes/replyMode.ts (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.reducer.ts (UPDATED — reply initialState + transition)</output>
+    <output type="file">EmailComposer/EmailComposer.tsx (UPDATED — send-path stamping)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (POSSIBLY UPDATED — inReplyTo/threadId fields)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Reply pre-fill: `to = [sourceRecord.from]`, `cc = []`, `subject` = single "Re: " prefix (dedup'd), body wrapped, attachments empty, associations carried.</criterion>
+    <criterion testable="true">Subject dedup: `Re: Re: foo` input → output `Re: Re: foo` (preserves), but `subject = "foo"` input → output `Re: foo` (adds prefix).</criterion>
+    <criterion testable="true">On send, request body contains `inReplyTo: sourceRecord.communicationId`.</criterion>
+    <criterion testable="true">`threadId` carried from source if present.</criterion>
+    <criterion testable="true">Body quoting respects `bodyFormat` (HTML blockquote vs `> ` plaintext prefix).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reply-thread closure success criterion 9 verification happens at Wave 2 UI testing (round-trip: send reply → recipient replies back → inbound auto-associates). This task lays the outbound stamp half of the loop.
+
+    Reply-All deferred — Owner can request as a follow-up if needed; not in current FR-11 scope.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 9.5 mandatory.
+    </protocol>
+  </execution>
+</task>

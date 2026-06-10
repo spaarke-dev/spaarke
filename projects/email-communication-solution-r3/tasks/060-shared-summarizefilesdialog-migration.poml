@@ -1,0 +1,149 @@
+<task id="060" project="email-communication-solution-r3">
+  <metadata>
+    <title>Migrate shared `SummarizeFilesDialog.tsx` to canonical `<SendEmailStep />` wrapper</title>
+    <phase>Wave 4 — SummarizeFiles Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>055, 021</dependencies>
+    <blocks>063</blocks>
+    <tags>react, frontend, communication, refactoring, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Removes inline `fetch` to `/api/communications/send` from a shared-lib production-shipped component (line 436 — empirically confirmed); changes a wizard step's send behavior; must respect ADR-033 (canonical send-email pattern) + ADR-019 (typed error contract) + ADR-021 (Fluent UI v9). Highest-leverage FR-15 deliverable since `@spaarke/ui-components` is consumed by multiple solutions.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential: blocks 063 (deploy) which requires the migrated code shipped. Cannot parallelize with 061 (LegalWorkspace fork deletion) — fork deletion depends on the shared canonical being live first to avoid breaking the LegalWorkspace consumer.</parallel-reason>
+    <fr-refs>FR-15</fr-refs>
+  </metadata>
+
+  <prompt>
+    Migrate `src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx` to use the canonical `<SendEmailStep />` wrapper from the `EmailComposer` module. Remove the inline `fetch` to `/api/communications/send` at line 436 (empirically confirmed per CLAUDE.md row 6).
+
+    Empirical state: `SummarizeFilesDialog.tsx` contains an inline send-email implementation at line 436. This is the LATENT DUPLICATION case spec FR-15 targets — even though the wizard ALSO uses a `SendEmailStep` step elsewhere, the dialog has its own bypass path. After this task, the file MUST contain zero `fetch.*communications/send` references.
+
+    Post-migration acceptance: the SummarizeFiles wizard's email-send step is `<SendEmailStep />` (canonical wrapper); the dialog parent uses `composerRef.current.send()` to invoke send when the user clicks the wizard's Finish action. The inline `fetch` block and any colocated request-body construction are deleted.
+
+    Note: SummarizeFilesDialog is one of the most-touched components in the shared lib (consumed by the SummarizeFilesWizard solution + previously by LegalWorkspace's fork). Treat carefully — preserve all non-send-related behavior (file selection, summary generation orchestration, etc.).
+  </prompt>
+
+  <role>
+    Frontend developer authoritative on `@spaarke/ui-components` SummarizeFilesWizard surface. Familiar with the wizard step pattern (composerRef + imperative handle), the canonical `<SendEmailStep />` wrapper signature per FR-02, and the latent-fetch anti-pattern this migration replaces.
+  </role>
+
+  <goal>
+    `src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx` consumes `<SendEmailStep />` (or the wizard's email step uses the canonical wrapper internally). Zero `fetch.*communications/send` references in the file. `@spaarke/ui-components` builds clean. SummarizeFilesWizard surface continues to function (no regression in summary generation, file selection, wizard step navigation).
+  </goal>
+
+  <context>
+    <background>
+      `SummarizeFilesDialog.tsx` is the shared-lib dialog that hosts the multi-step Summarize-and-send-email wizard. The wizard's final "Send email" step previously bypassed the canonical pattern by calling `fetch('/api/communications/send', ...)` directly at line 436 — even though a wrapper called `SendEmailStep` exists in the same lib (used by other wizards like CreateMatter/Project/etc.). This is the canonical example of "latent duplication" spec FR-15 targets.
+
+      Empirical state (CLAUDE.md row 6 + spec FR-15): inline fetch confirmed at line 436. The file ALSO has a separate `SummarizeSendEmailStep.tsx` (LegalWorkspace fork uses this name — see task 061), but the SHARED `SummarizeFilesDialog.tsx` itself contains an inline-fetch path.
+
+      Migration approach: replace the inline `fetch` block + its surrounding handler with a mount of `<SendEmailStep />` (per FR-02 — inline mount wrapper, wizard owns the Send action via composerRef). The wizard's existing Finish-button handler invokes `composerRef.current.send()` — wrapper does the fetch internally. All side effects of the legacy fetch (state updates, dialog dismissal, parent callbacks) move into `onSent` / `onError` handlers.
+
+      Dependencies: depends on task 055 (Wave 3 smoke pass — proves the canonical pattern works end-to-end) AND task 021 (Wave 1 `SendEmailStep` wrapper produced). Both must be landed before this task starts.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx (PRIMARY — migration target, line 436 inline fetch)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/ (audit for related files)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx (canonical wrapper from Wave 1 task 021)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (`sendCommunication()` + `SendCommunicationError`)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">MUST NOT call `fetch` to `/api/communications/send` directly. MUST use canonical wrapper.</constraint>
+    <constraint source="ADR-019">Error path consumes typed `SendCommunicationError`.</constraint>
+    <constraint source="ADR-021">Wizard step chrome uses Fluent UI v9; canonical wrapper inherits this via NFR-03 `mount='inline'` variant.</constraint>
+    <constraint source="NFR-02">No direct `@spaarke/auth` import in this file; `authenticatedFetch` flows through canonical wrapper props per shared-lib decoupling rule.</constraint>
+    <constraint source="spec FR-15">Post-migration: zero `fetch.*communications/send` references in `SummarizeFilesDialog.tsx`.</constraint>
+    <constraint source="project">Preserve all non-send-related behavior of `SummarizeFilesDialog` — summary generation, file selection, wizard navigation. Only the email-send step changes.</constraint>
+    <constraint source="repo">`npm run build` + `npm run lint` in `@spaarke/ui-components` MUST remain green.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>projects/email-communication-solution-r3/tasks/051-filepreviewdialog-migration.poml</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical wizard-step wrapper" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx">
+        Wave 1 task 021 produces this. Wrapper locks `mount='inline'`, exposes `composerRef`, semantic prop API for wizard step usage.
+      </pattern>
+      <pattern name="Consumer migration template" location="projects/email-communication-solution-r3/tasks/051-filepreviewdialog-migration.poml">
+        Task 051's pattern for replacing inline fetch with canonical wrapper. THIS task uses `<SendEmailStep />` (inline mount) where 051 used `<SendEmailDialog />` (dialog mount) — same pattern, different wrapper.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx` in full. Locate the inline `fetch` at line 436. Identify its surrounding handler function, request-body construction, success/error side effects.</step>
+    <step order="2">Audit the wizard step structure: which step in the multi-step wizard hosts the email-send UX? Identify the file (likely a sibling like `SummarizeSendEmailStep.tsx` if it exists, or inline in `SummarizeFilesDialog.tsx`).</step>
+    <step order="3">Read the canonical wrapper at `EmailComposer/wrappers/SendEmailStep.tsx` (Wave 1 task 021). Confirm prop signature: `composerRef`, `initialTo`, `initialSubject`, `initialBody`, `associations`, `attachmentSources`, `wizardContext`, `onStateChange`.</step>
+    <step order="4">Sketch migration in task notes: which lines/blocks get deleted (inline fetch, inline handler, related request-body code) vs preserved (wizard navigation, file selection, summary text generation as `initialBody`).</step>
+    <step order="5">Apply migration:
+      - Replace the inline-fetch step UI with `<SendEmailStep />` mount
+      - Pass `composerRef`, `initialBody` (the generated summary text), `attachmentSources={['wizard']}` (or appropriate sources), `wizardContext` carrying the files selected earlier in wizard
+      - Wizard's Finish handler: invoke `composerRef.current.send()` instead of the legacy inline fetch
+      - Replace legacy success/error side effects with `onSent` / `onError` handlers per task 051 pattern
+    </step>
+    <step order="6">Remove now-unused inline `fetch` code at line 436 + its handler. Remove dead imports.</step>
+    <step order="7">Grep verify: `fetch.*communications/send` returns zero hits in `SummarizeFilesDialog.tsx`.</step>
+    <step order="8">Run `npm run build` in `src/client/shared/Spaarke.UI.Components/` — verify clean.</step>
+    <step order="9">Run `npm run lint` — verify clean.</step>
+    <step order="10">Quality gate (Step 9.5 per FULL rigor): invoke `/code-review` on the modified file(s). Invoke `/adr-check` to verify no ADR-033 / ADR-019 / ADR-021 violations.</step>
+    <step order="11">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 060 ✅ completed.</step>
+    <step order="12">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (061).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect `SummarizeFilesDialog.tsx` + canonical wrapper</tool>
+    <tool name="grep">Verify inline-fetch removal + sibling-file audit</tool>
+    <tool name="edit">Apply migration in `SummarizeFilesDialog.tsx`</tool>
+    <tool name="bash">Run `npm run build` + `npm run lint`</tool>
+    <tool name="code-review">Quality gate</tool>
+    <tool name="adr-check">Quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx (UPDATED — canonical wrapper consumer; line 436 inline fetch REMOVED)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/ (any colocated send-related files updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero `fetch.*communications/send` references in `SummarizeFilesDialog.tsx` (grep verified — line 436 fix per CLAUDE.md row 6).</criterion>
+    <criterion testable="true">`<SendEmailStep />` consumed in the wizard's email-send step.</criterion>
+    <criterion testable="true">Wizard Finish action invokes `composerRef.current.send()`.</criterion>
+    <criterion testable="true">`onError` handler uses typed `SendCommunicationError`.</criterion>
+    <criterion testable="true">All non-send behaviors preserved: summary generation, file selection, wizard navigation.</criterion>
+    <criterion testable="true">`@spaarke/ui-components` `npm run build` exits 0.</criterion>
+    <criterion testable="true">`@spaarke/ui-components` `npm run lint` exits 0.</criterion>
+    <criterion testable="true">`/adr-check` returns no violations against ADR-033 / ADR-019 / ADR-021.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 060 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Latent duplication context (per CLAUDE.md row 6): SummarizeFilesDialog has inline fetch at line 436 — this is the LATENT DUPLICATION case spec FR-15 calls out. Even though `<SendEmailStep />` (the canonical inline wrapper) ALSO existed (used by other wizards), this dialog bypassed it. The bypass is the bug class R3 closes.
+
+    Distinction from LegalWorkspace fork (task 061): the shared-lib SummarizeFilesDialog.tsx (THIS task) had inline fetch. The LegalWorkspace fork at `src/solutions/LegalWorkspace/src/components/SummarizeFiles/` has 9 files including `SummarizeSendEmailStep.tsx` that uses `sendCommunication()` (NOT inline fetch — but is still a fork to delete per FR-15/25). Two separate problems, two separate tasks.
+
+    Visual / behavioral parity: the canonical `<SendEmailStep />` inline-mount variant (NFR-03) is chrome-less — it fills the wizard step container without internal header/action bar (the wizard owns navigation). If the legacy step had custom chrome (Send button rendered inline), that chrome's behavior moves to the wizard's Finish-button handler invoking `composerRef.current.send()`. Preserve the user-facing flow; just change the call path underneath.
+
+    Smoke testing of the migrated flow happens in task 065, NOT here. This task focuses on the code change + static verification.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>`. Quality gates at Step 9.5 (code-review + adr-check) ARE REQUIRED for FULL rigor.
+    </protocol>
+  </execution>
+</task>

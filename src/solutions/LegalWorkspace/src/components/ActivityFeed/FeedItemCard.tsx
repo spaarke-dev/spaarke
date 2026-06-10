@@ -15,8 +15,6 @@ import {
   Text,
   Button,
   Tooltip,
-  Spinner,
-  mergeClasses,
   makeStyles,
   Menu,
   MenuTrigger,
@@ -31,14 +29,22 @@ import {
   ChatRegular,
   EditRegular,
 } from "@fluentui/react-icons";
-import { MicrosoftToDoIcon } from "../../icons/MicrosoftToDoIcon";
 import { IEvent } from "../../types/entities";
 import { PriorityLevel } from "../../types/enums";
 import { formatRelativeTime } from "../../utils/formatRelativeTime";
 import { getTypeIcon, getTypeIconLabel } from "../../utils/typeIconMap";
-import { useFeedTodoSync } from "../../hooks/useFeedTodoSync";
 import { navigateToEntity, openRecordDialog } from "../../utils/navigation";
 import { RecordCardShell, CardIcon } from "@spaarke/ui-components";
+
+// R3 FR-14 / OS-1 note:
+//   The legacy "Flag as To Do" button on the FeedItemCard wrote
+//   `sprk_event.sprk_todoflag = true` and used FeedTodoSyncContext to debounce
+//   + persist + propagate. R3 removes that column entirely and makes
+//   `sprk_todo` a first-class entity. The previous wiring (isFlagged /
+//   toggleFlag / pending / error reads from useFeedTodoSync) is therefore
+//   removed below. A future task will add a "Create To Do regarding this
+//   event" affordance that opens the CreateTodo wizard with the event
+//   pre-bound as `sprk_regardingevent` — see project plan Phase 4 / FR-16.
 
 // ---------------------------------------------------------------------------
 // Priority / urgency helpers
@@ -154,10 +160,6 @@ const useStyles = makeStyles({
   metaDivider: { color: tokens.colorNeutralForeground4 },
   timestamp: { color: tokens.colorNeutralForeground3, whiteSpace: "nowrap" },
   dueDateOverdue: { color: tokens.colorPaletteRedForeground3, fontWeight: tokens.fontWeightSemibold, whiteSpace: "nowrap" },
-  todoButtonActive: { color: tokens.colorBrandForeground1 },
-  todoButtonWrapper: { position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" },
-  todoPendingSpinner: { position: "absolute", pointerEvents: "none" },
-  todoButtonError: { color: tokens.colorPaletteRedForeground3 },
 });
 
 // ---------------------------------------------------------------------------
@@ -181,11 +183,9 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
   ({ event, onAISummary, onEmail, onTeams, onEdit, hideOverflowMenu }) => {
     const styles = useStyles();
 
-    // Flag state from shared context
-    const { isFlagged, toggleFlag, isPending, getError } = useFeedTodoSync();
-    const flagged = isFlagged(event.sprk_eventid);
-    const pending = isPending(event.sprk_eventid);
-    const flagError = getError(event.sprk_eventid);
+    // R3 FR-14: flag-state reads removed — see file-level note. The feed card
+    // no longer displays per-event flag state; todos are tracked on the
+    // `sprk_todo` entity and surfaced via the SmartToDo block.
 
     const priorityLevel = derivePriorityLevel(event.sprk_priority);
     const TypeIconComponent = getTypeIcon(event.eventTypeName);
@@ -196,10 +196,6 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
     const urgencyTier = deriveUrgencyTier(event.sprk_duedate);
 
     // ── Handlers ──
-
-    const handleFlagToggle = React.useCallback(() => {
-      void toggleFlag(event.sprk_eventid);
-    }, [toggleFlag, event.sprk_eventid]);
 
     const handleAISummary = React.useCallback(() => onAISummary(event.sprk_eventid), [onAISummary, event.sprk_eventid]);
 
@@ -238,36 +234,13 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
       event.sprk_regardingrecordname || "",
       dueDateText || "",
       event.assignedToName ? `Assigned to: ${event.assignedToName}.` : "",
-      flagged ? "Flagged as to-do." : "",
     ].filter(Boolean).join(" ");
 
-    const todoTooltip = flagError ? `Error: ${flagError} — click to retry` : flagged ? "Remove from To Do" : "Add to To Do";
-    const todoButtonClass = flagError ? styles.todoButtonError : flagged ? styles.todoButtonActive : undefined;
-
-    // ── To Do toggle tool ──
-
-    const todoTool = (
-      <Tooltip content={todoTooltip} relationship="label">
-        <div className={styles.todoButtonWrapper}>
-          <Button
-            appearance="subtle"
-            size="medium"
-            icon={<MicrosoftToDoIcon size={20} active={flagged} />}
-            aria-label={todoTooltip}
-            aria-pressed={flagged}
-            aria-busy={pending}
-            className={todoButtonClass}
-            onClick={handleFlagToggle}
-            disabled={pending}
-          />
-          {pending && (
-            <span className={styles.todoPendingSpinner} aria-hidden="true">
-              <Spinner size="extra-tiny" />
-            </span>
-          )}
-        </div>
-      </Tooltip>
-    );
+    // R3 FR-14: the legacy "Add to To Do" flag-toggle tool is removed. The
+    // `tools` slot is left empty; a future task will reintroduce a
+    // "Create To Do regarding this event" affordance once the CreateTodo
+    // wizard is repointed at `sprk_todo` (Phase 4 / FR-16).
+    const todoTool: React.ReactNode = undefined;
 
     // ── Overflow menu ──
 

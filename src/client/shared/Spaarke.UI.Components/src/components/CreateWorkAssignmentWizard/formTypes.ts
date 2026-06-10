@@ -98,7 +98,11 @@ export interface ICreateFollowOnEventState {
   eventFinalDueDate: string;
   assignedToId: string;
   assignedToName: string;
-  addTodo: boolean;
+  // R3 (smart-todo-decoupling-r3, task 031): The `addTodo` flag was removed
+  // here per FR-15 / OS-1. The legacy "Add a To Do" checkbox wrote
+  // `sprk_event.sprk_todoflag=true`; that column is being dropped from the
+  // schema. To Dos are now first-class `sprk_todo` records created via
+  // CreateTodoWizard.
 }
 
 export const EMPTY_FOLLOW_ON_EVENT_STATE: ICreateFollowOnEventState = {
@@ -109,7 +113,6 @@ export const EMPTY_FOLLOW_ON_EVENT_STATE: ICreateFollowOnEventState = {
   eventFinalDueDate: '',
   assignedToId: '',
   assignedToName: '',
-  addTodo: false,
 };
 
 // ---------------------------------------------------------------------------

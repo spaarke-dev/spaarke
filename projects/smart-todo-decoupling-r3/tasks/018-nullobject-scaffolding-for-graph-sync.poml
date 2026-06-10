@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Null-Object scaffolding for Graph sync services (feature-gate `Spaarke:Graph:TodoSync:Enabled`)</title>
+    <phase>Phase 6: Graph Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>061, 062, 063, 065, 066, 067, 068</blocks>
+    <tags>bff-api, api, backend, di, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` in Sprk.Bff.Api/Infrastructure/DI; introduces feature-gate per ADR-032; binding asymmetric-registration anti-pattern guard. FULL rigor with quality gates.</rigor-reason>
+    <parallel-group>P6-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Introduce interfaces + Null-Object implementations for the to-be-built Graph sync services (`ITodoGraphSyncHandler`, `ISpaarkeListProvisioner`, `ITodoSubscriptionManager`, `ITodoSyncBackfiller`). Register them **unconditionally** per [ADR-032](.claude/adr/ADR-032-bff-nullobject-kill-switch.md) — Null-Object impls when `Spaarke:Graph:TodoSync:Enabled=false`; real impls when `true` (real impls are created in Phase 7). Per `bff-extensions.md` §F.1, this is the anti-pattern guard against asymmetric `if (flag) { Register... }` registration.
+  </prompt>
+
+  <role>Spaarke BFF API developer with DI + feature-gate expertise.</role>
+
+  <goal>Four interfaces + four Null-Object classes exist. DI registration is **unconditional** (always registers a binding; the binding resolves to Null-Object or real based on flag). BFF boots cleanly with `Spaarke:Graph:TodoSync:Enabled=false` and no Graph config. Tests verify the flag-off path resolves to Null-Object.</goal>
+
+  <context>
+    <background>Phase 7 will add real implementations for these services. To honor CLAUDE.md §10 + bff-extensions.md §F.1 (no asymmetric registration), the bindings must be registered unconditionally NOW, with Null-Object fallbacks. Real impls swap in via configuration in Phase 7.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Todo/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Todo/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-032">Null-Object Kill-Switch Pattern: always register a binding; resolve to Null-Object when flag off. NEVER use `if (flag) { Register... }` (asymmetric anti-pattern).</constraint>
+    <constraint source="ADR-001">Minimal API pattern for any new endpoints (none in this task).</constraint>
+    <constraint source="bff-extensions.md §F.1">Asymmetric-Registration Tier 1.5 Anti-Pattern is binding; this task is the guard.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation: tests for the flag-off (Null-Object) and flag-on (real) resolution paths.</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish-size verification mandatory.</constraint>
+    <constraint source="FR-26">Graph sync feature-gated via `Spaarke:Graph:TodoSync:Enabled`; flag-off boot succeeds without Graph credentials.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/procedures/test-fixture-contracts.md</file>
+    </files>
+    <patterns>
+      <pattern name="null-object-kill-switch" location=".claude/adr/ADR-032-bff-nullobject-kill-switch.md">P1/P2/P3 sub-mechanism choice per service. Use P1 (simple Null-Object) for sync handler + provisioner; P2 (Null-Object with logging) for subscription manager + backfiller (observability matters).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create `src/server/api/Sprk.Bff.Api/Services/Todo/` directory with subdirectories per service.</step>
+    <step order="2">Define four interfaces: `ITodoGraphSyncHandler`, `ISpaarkeListProvisioner`, `ITodoSubscriptionManager`, `ITodoSyncBackfiller`. Use minimal method signatures per design §6 (handler: `Task SyncAsync(Guid todoId, SyncOp op, CancellationToken)`; provisioner: `Task<string> EnsureListAsync(Guid userId, CancellationToken)`; subscription manager: `Task<string> EnsureSubscriptionAsync(Guid userId, string listId, CancellationToken)`; backfiller: `Task BackfillAsync(Guid userId, CancellationToken)`).</step>
+    <step order="3">Implement Null-Object class for each (no-op; backfiller logs once on flag-off for observability per ADR-032 P2 pattern).</step>
+    <step order="4">Register bindings in `Infrastructure/DI/TodoSyncModule.cs` (new file). Pattern: read `Spaarke:Graph:TodoSync:Enabled` flag; bind interface → Null-Object impl when false, interface → real impl (placeholder TBD by Phase 7) when true. Use `IOptions<TodoSyncOptions>` for config binding.</step>
+    <step order="5">Register `TodoSyncModule` in `Program.cs` (unconditional `builder.Services.AddTodoSync(builder.Configuration)`).</step>
+    <step order="6">Add `Spaarke:Graph:TodoSync:Enabled: false` to `appsettings.json` and `appsettings.Development.json`.</step>
+    <step order="7">Add unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Todo/`: verify (a) flag-off resolves all four to Null-Object types; (b) flag-on resolves to real types (placeholder/stub for Phase 7); (c) BFF boots cleanly with flag-off + no Graph config.</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. Verify clean.</step>
+    <step order="9">Static-scan recipe per bff-extensions.md §F.1: grep `Infrastructure/DI/` for any `if (flag) { ... Register... }` pattern. Confirm zero matches (anti-pattern guard).</step>
+    <step order="10">BFF publish-size check: `dotnet publish -c Release ...`; record delta. Expected: small (a few new interface + class files, no NuGet additions).</step>
+    <step order="11">CVE scan: `dotnet list package --vulnerable --include-transitive`. Zero HIGH-severity.</step>
+    <step order="12">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish, CVE scan</tool>
+    <tool name="grep">Static-scan for asymmetric-registration anti-pattern</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Todo/I{...}.cs` (four interfaces)</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Todo/NullObject/{...}.cs` (four Null-Object impls)</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Infrastructure/DI/TodoSyncModule.cs`</output>
+    <output type="config">`src/server/api/Sprk.Bff.Api/appsettings.json` updated with `Spaarke:Graph:TodoSync:Enabled: false`</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Services/Todo/TodoSyncModuleTests.cs`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Four interfaces + four Null-Object implementations exist.</criterion>
+    <criterion testable="true">DI registration is **unconditional** in `TodoSyncModule.cs` — no `if (flag) { Register... }` pattern.</criterion>
+    <criterion testable="true">Flag-off boot succeeds without Graph credentials present.</criterion>
+    <criterion testable="true">Unit tests: flag-off resolves to Null-Object types; tests pass.</criterion>
+    <criterion testable="true">Static-scan returns zero asymmetric-registration matches.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+5 MB.</criterion>
+    <criterion testable="true">Zero new HIGH-severity CVEs.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is the foundation for the entire feature-gated Graph sync layer. Get the Null-Object pattern right HERE so Phase 7 implementations slot in cleanly. The asymmetric-registration anti-pattern caused R2 task 081 to spend significant effort fixing — don't repeat that mistake.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check (especially ADR-032) + code-review. BFF publish-size + CVE checks mandatory per CLAUDE.md §10.</protocol>
+  </execution>
+</task>

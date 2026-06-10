@@ -1,0 +1,139 @@
+<task id="032" project="email-communication-solution-r3">
+  <metadata>
+    <title>Parse `data=` URL query string parameters in EmailComposer Code Page</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033</blocks>
+    <tags>code-page, react, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>URL-parameter parsing is bounded, validates against a known schema; not auth-sensitive; small surface; unit-testable</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies App.tsx scaffolded by 030 + extended by 031; must run after 031 to avoid merge conflict in App.tsx</parallel-reason>
+    <fr-refs>FR-18</fr-refs>
+  </metadata>
+
+  <prompt>
+    Implement URL query-string parameter parsing for the EmailComposer Code Page. Per FR-18, the Code Page reads a `data=` query parameter (Dataverse-standard convention for custom-page params) whose value is a JSON-encoded or URL-encoded payload carrying:
+    - `mode` (required, 1 of `compose|view|reply|forward|draft`)
+    - `id` (required for `view|reply|forward|draft`)
+    - `to` (optional, recipient prefill)
+    - `cc` (optional)
+    - `subject` (optional)
+    - `body` (optional)
+    - `associatedTo` (optional — entity reference for pre-filled association, e.g., `{entity: 'sprk_matter', id: '...'}`)
+
+    Parse the parameters in `App.tsx` (or a dedicated `useUrlParams` hook), validate against the schema, surface validation errors to the user (invalid mode → error UI), and expose the parsed values as a typed object that task 033 will pass into `<SendEmailPage />` props.
+
+    Two parameter-shape variants must be supported:
+    1. **Dataverse `data=` convention**: `?data=` followed by JSON or URL-encoded payload
+    2. **Direct query parameters**: `?mode=compose&to=foo@bar.com&subject=Test`
+
+    Default to the `data=` convention as canonical; fall back to direct params as a secondary path.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer. Familiar with Dataverse custom page `data=` parameter conventions (see DocumentRelationshipViewer's URL-driven mode) and React hooks pattern.
+  </role>
+
+  <goal>
+    A typed URL-parameter parser (typed `IEmailComposerUrlParams` interface) reachable from `<App />`. When the Code Page loads, parsed parameters are available; invalid `mode` shows an error UI; missing `id` when required (view/reply/forward/draft) shows an error UI; valid params are passed down to the App tree.
+
+    Task 033 wires these parsed values into the `<SendEmailPage />` wrapper props.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-18, the Code Page supports 5 modes via URL. Per FR-19 Surface 1 (ribbon), the ribbon button launches the Code Page with `mode=compose&associatedTo=...` from a related-record subgrid. Per FR-19 Surface 2 (Form Component Control), navigating to a record opens the Code Page with `mode=view&id={recordGuid}`. Surface 3 (embeddable) launches with arbitrary params from other Code Pages via `Xrm.Navigation.navigateTo`.
+
+      DocumentRelationshipViewer likely demonstrates a similar URL-driven launch pattern — reference its App.tsx to confirm the canonical shape.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/EmailComposer/src/App.tsx (UPDATED — read + validate URL params)</file>
+      <file>src/client/code-pages/EmailComposer/src/hooks/useUrlParams.ts (NEW — or inline in App.tsx)</file>
+      <file>src/client/code-pages/EmailComposer/src/types/url.ts (NEW — IEmailComposerUrlParams interface)</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/App.tsx (EXEMPLAR — URL parameter handling pattern)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-18">5 valid modes: `compose|view|reply|forward|draft`. Any other value → error UI</constraint>
+    <constraint source="spec FR-18">`id` is required for `view|reply|forward|draft`; missing → error UI</constraint>
+    <constraint source="spec FR-18">`compose` mode: `id` not required; optional prefill fields (`to`, `cc`, `subject`, `body`, `associatedTo`) honored</constraint>
+    <constraint source="project">Use Dataverse `data=` convention as primary parser; direct `?mode=…` as fallback only</constraint>
+    <constraint source="project">URL decoding must handle JSON-encoded payloads (`data=%7B%22mode%22%3A%22compose%22%7D`) AND straight strings</constraint>
+    <constraint source="project">No raw HTML injection from URL → all params consumed as strings; never `dangerouslySetInnerHTML` of URL content</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/App.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="URL-driven mode dispatch" location="src/client/code-pages/DocumentRelationshipViewer/src/App.tsx">
+        Code Page reads URL params at top-level, validates, then drives child rendering by parsed mode. EmailComposer follows the same shape.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read FR-18 in spec + FR-19 (entry surfaces) to confirm exact param semantics.</step>
+    <step order="2">Read DocumentRelationshipViewer's `App.tsx` to see how it handles URL params (Dataverse `data=` convention or direct).</step>
+    <step order="3">Create `src/types/url.ts` defining `IEmailComposerUrlParams` interface: `{ mode: 'compose'|'view'|'reply'|'forward'|'draft', id?: string, to?: string, cc?: string, subject?: string, body?: string, associatedTo?: { entity: string, id: string } }`.</step>
+    <step order="4">Create `src/hooks/useUrlParams.ts` exporting `useUrlParams(): { params: IEmailComposerUrlParams | null, error: string | null }`. Logic: read `window.location.search`, try `data=` first (parse + URL-decode), fall back to direct params; validate; return typed object or error.</step>
+    <step order="5">Add validation: if `mode` not in allowed set → error "Invalid mode: {value}"; if `mode` requires `id` and `id` missing → error "Missing required `id` for mode {mode}".</step>
+    <step order="6">Update `src/App.tsx` — call `useUrlParams()`; if error, render Fluent v9 `<MessageBar>` error UI; if valid, store params in state for downstream consumers (task 033 wires into wrapper props).</step>
+    <step order="7">Write minimal Vitest/Jest unit tests for `useUrlParams` if test infra is wired in the Code Page scaffold; otherwise document parsing examples as JSDoc on the hook.</step>
+    <step order="8">Run `npm run build`; confirm clean build, no TypeScript errors.</step>
+    <step order="9">Manual smoke: open the Code Page with a few URL variants (e.g., `?data=%7B%22mode%22%3A%22compose%22%7D`, `?mode=view&id=abc`, `?mode=invalid`) and confirm parsing/error behavior.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 032 ✅ completed.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task (033).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read spec FR-18 + exemplar</tool>
+    <tool name="write">Create hooks/useUrlParams.ts + types/url.ts</tool>
+    <tool name="edit">Update App.tsx</tool>
+    <tool name="bash">npm run build + (optional) npm test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/EmailComposer/src/types/url.ts (NEW — IEmailComposerUrlParams)</output>
+    <output type="code">src/client/code-pages/EmailComposer/src/hooks/useUrlParams.ts (NEW)</output>
+    <output type="code">src/client/code-pages/EmailComposer/src/App.tsx (UPDATED — invoke parser + error UI)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IEmailComposerUrlParams` interface exported with the 7 spec-defined fields.</criterion>
+    <criterion testable="true">`useUrlParams` parses both `?data=` (JSON or URL-encoded) and direct `?mode=…` formats.</criterion>
+    <criterion testable="true">Invalid `mode` value triggers error UI (Fluent v9 `<MessageBar intent="error">`).</criterion>
+    <criterion testable="true">Missing `id` for view/reply/forward/draft triggers error UI.</criterion>
+    <criterion testable="true">Valid params are stored in App state and reachable from child components.</criterion>
+    <criterion testable="true">`npm run build` clean; zero TypeScript errors.</criterion>
+    <criterion testable="true">No `dangerouslySetInnerHTML` usage on URL content (security).</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Dataverse `data=` convention typically wraps an opaque string the custom page interprets. Treat it as JSON first; if `JSON.parse` throws, fall back to URL-decoded direct params. Document this dual path in the hook's JSDoc so future maintainers understand.
+
+    The `associatedTo` shape is `{entity, id}` per FR-19 Surface 1 (ribbon launches from a related-record subgrid carry the parent record's entity + id). The Wave 1 `<SendEmailPage />` wrapper accepts an `associations` prop that this parser maps into.
+
+    UQ from spec (none directly addressed here; FR-18 is well-specified).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 are SKIPPED for STANDARD rigor.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,131 @@
+<task id="072" project="email-communication-solution-r3">
+  <metadata>
+    <title>Migrate CreateMatterWizard/SendEmailStep.tsx to canonical &lt;SendEmailStep /&gt; wrapper</title>
+    <phase>Wave 5 — 5-Wizard Migration + DocumentEmailWizard Fix + Forks</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>071</dependencies>
+    <blocks>076</blocks>
+    <tags>react, frontend, refactoring, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a wizard step .tsx file consumed by CreateMatterWizard (production legal-ops surface); communication tag triggers FULL rigor; pattern mirrors task 071 but on a separate physical file</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `CreateMatterWizard/SendEmailStep.tsx` only — different file from tasks 073 (WorkAssignmentWizardDialog), 074 (LegalWorkspace CreateMatter fork delete), 075 (DocumentEmailWizard). All four can run concurrently after task 071 establishes the canonical wrapper pattern.</parallel-reason>
+    <fr-refs>FR-16</fr-refs>
+  </metadata>
+
+  <prompt>
+    Per CLAUDE.md DELTA #12 empirical finding, CreateMatterWizard has its OWN separate `SendEmailStep.tsx` file (at `src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateMatterWizard/SendEmailStep.tsx` — verify exact path via repo scan in step 2). Replace the body of this file with the canonical `<SendEmailStep />` wrapper from `@spaarke/ui-components` (built in Wave 1 task 021).
+
+    This is the only per-wizard step migration in Wave 5 — the other 4 wizards (Project, Event, Todo, WorkAssignment) share the file migrated in task 071.
+
+    The exported component must preserve its current public prop API. Pattern mirrors task 071 but on a separate physical file. Reuse the translation approach established in 071.
+
+    NOTE per Owner Clarification: All Wave 5 changes ship as a single PR (task 076). Do not push as standalone.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer. Familiar with the CreateMatterWizard architecture (the canonical legal-ops create-record flow) and the canonical `<SendEmailStep />` wrapper signature.
+  </role>
+
+  <goal>
+    `CreateMatterWizard/SendEmailStep.tsx` is a thin wrapper around the canonical `<SendEmailStep />` from `@spaarke/ui-components`. CreateMatterWizard builds and the matter-creation send-email step renders without behavior change. No inline composer/validation/fetch logic remains in the file.
+  </goal>
+
+  <context>
+    <background>
+      Per CLAUDE.md DELTA #12, only 2 wizard surfaces have per-wizard `SendEmailStep.tsx` files: the shared one consumed by Project/Event/Todo/WorkAssignment (migrated in task 071) AND CreateMatterWizard's separate file (this task). They diverged historically; R3 brings them both to the canonical wrapper.
+
+      Per CLAUDE.md DELTA #9, LegalWorkspace has ONE email-step fork: `CreateMatter/SendEmailStep.tsx` (deleted in task 074). After 072 + 074, all matter-creation send-email flow runs through the canonical wrapper.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateMatterWizard/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">Use canonical `<SendEmailStep />` wrapper; no direct `<EmailComposer />` usage</constraint>
+    <constraint source="ADR-021">All Fluent v9 styling via canonical wrapper</constraint>
+    <constraint source="ADR-028">No direct `@spaarke/auth` import in shared lib; `authenticatedFetch` injected via props</constraint>
+    <constraint source="spec NFR-03">Inline mount variant for wizard step</constraint>
+    <constraint source="project">Public prop API preserved; CreateMatterWizard caller does not change</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="canonical SendEmailStep wrapper" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx">
+        Wave 1 task 021. Use this exact wrapper; do not re-implement.
+      </pattern>
+      <pattern name="task 071 migration template" location="src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx">
+        Task 071 just migrated the analogous shared file to this canonical wrapper; mirror that translation approach here on the CreateMatter file.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load spec.md FR-16, CLAUDE.md empirical findings (DELTA #9, #12), plan.md Wave 5, ADR-033.</step>
+    <step order="2">Verify exact path of CreateMatter's SendEmailStep file via grep (`CreateMatterWizard/SendEmailStep.tsx`); confirm it is a separate file from the shared step.</step>
+    <step order="3">Read the current CreateMatter SendEmailStep to catalog its exported props and behavior contract.</step>
+    <step order="4">Read the task-071-migrated shared file (now using canonical wrapper) as a structural reference.</step>
+    <step order="5">Rewrite the CreateMatter SendEmailStep body: keep export name + props identical; internally render the canonical `<SendEmailStep />`; translate wizard-context props to the wrapper API. Remove all inline composer/validation/fetch logic.</step>
+    <step order="6">Run `npm run lint` + `npm run build` in `src/client/shared/Spaarke.UI.Components/`.</step>
+    <step order="7">Run unit tests; update assertions if they targeted removed internals.</step>
+    <step order="8">Grep for callers of the CreateMatter SendEmailStep to confirm imports still resolve.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 072 ✅ completed.</step>
+    <step order="10">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify file path + catalog callers</tool>
+    <tool name="read">Inspect current file + task-071 migrated reference</tool>
+    <tool name="edit">Replace file body</tool>
+    <tool name="bash">`npm run lint`, `npm run build`, `npm test` in shared lib</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateMatterWizard/SendEmailStep.tsx (REWRITTEN — thin wrapper over canonical)</output>
+    <output type="test">Unit test updates where applicable</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File body contains no inline composer, validation, or `fetch` logic.</criterion>
+    <criterion testable="true">File renders `<SendEmailStep />` from the canonical wrapper.</criterion>
+    <criterion testable="true">Public prop API preserved; CreateMatterWizard caller compiles without edits.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` succeed.</criterion>
+    <criterion testable="true">Unit tests pass.</criterion>
+    <criterion testable="true">No direct `@spaarke/auth` import.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Single-PR scope (Owner Clarification): consolidated Wave 5 PR (task 076).
+
+    Parallel group K (parallel-safe with 073, 074, 075): different files, no overlap.
+    - 072: `CreateMatterWizard/SendEmailStep.tsx` (this task)
+    - 073: `WorkAssignmentWizardDialog.tsx`
+    - 074: LegalWorkspace `CreateMatter/SendEmailStep.tsx` (delete)
+    - 075: `DocumentEmailWizard/DocumentEmailWizard.tsx`
+
+    Empirical: CLAUDE.md DELTA #12 confirms CreateMatter has its own separate file (not shared with other wizards). The migration approach mirrors task 071 exactly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>`. Apply FULL rigor — code-review + adr-check at Step 9.5 REQUIRED. Verify canonical wrapper consumption, ADR compliance, no inline send logic remains.
+    </protocol>
+  </execution>
+</task>

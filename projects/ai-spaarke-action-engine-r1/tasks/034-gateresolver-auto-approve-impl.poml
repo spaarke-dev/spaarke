@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>`AutoApproveGateResolver` — no-op approval; for low-risk Actions; configurable per-Action</title>
+    <phase>Phase 3: IGateResolver + Approval Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>035</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements `IGateResolver` for the no-op approval path; while behavior is trivial, audit + opt-in semantics are security-relevant (a bug here defeats the human-gate guardrail); modifies `.cs` files in `Sprk.Bff.Api`; tags include bff-api + ai</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group D resolver implementations (031, 032, 033, 034) each touch a separate file under `Services/Ai/ActionEngine/Gates/`; no file overlap; consume contract from task 030 (complete)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement `AutoApproveGateResolver : IGateResolver` at `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/AutoApproveGateResolver.cs`. Returns `GateOutcome` with `GateDecision.Approved` synchronously — used for low-risk Actions that opt-in to auto-approve (e.g., tests, internal-only read-tools, low-stakes templates). MUST audit per ADR-015 with `Reason: "auto-approve per Action.governance.autoApprove=true"`. MUST verify caller opted in (Action Definition's `governance.autoApprove` is `true`); otherwise throw — never silently auto-approve a Action that did not opt in.
+  </prompt>
+
+  <role>
+    Senior Spaarke BFF engineer with a security-first mindset. You write the smallest possible code surface for trivial behaviors, but you treat "auto-approve" as a guardrail bypass that MUST be auditable + opt-in verifiable. You NEVER ship a default-auto-approve resolver.
+  </role>
+
+  <goal>
+    Concrete deliverables:
+    1. **`AutoApproveGateResolver` class** implementing `IGateResolver.ResolveAsync` — returns `GateDecision.Approved` immediately.
+    2. **Opt-in verification** — resolver injects `IActionRegistryService` to look up the Action Definition; verifies `governance.autoApprove == true`. If not, throws `InvalidOperationException("Auto-approve invoked for Action that did not opt in")`. This is a hard fail — the orchestrator's keyed-DI lookup should never route to `AutoApproveGateResolver` for a non-opt-in Action; this throw catches developer error.
+    3. **Audit hook** — `IAuditService.LogGateDecision(...)` with `GateDecision.Approved`, `Reason = "auto-approve per Action.governance.autoApprove=true"`. Tier 2 hash + Tier 3 work history per ADR-015.
+    4. **DI registration** — `AutoApproveGateResolver` is NOT keyed to a `GateType`. Action Definitions explicitly reference it via `governance.gateResolverOverride = "auto-approve"`. The orchestrator's resolver-lookup logic prefers explicit override over keyed-DI default. Register via `services.AddScoped&lt;AutoApproveGateResolver&gt;();` and a `[ResolverName("auto-approve")]` attribute (or static lookup map) so the orchestrator can resolve by name.
+    5. **Tests only — no production usage in MVP Templates** — the three starter Templates (Summarize / Weekly Digest / Find Similar) do NOT use auto-approve. The resolver exists for: (a) test scenarios where mocking the gate is heavyweight, (b) future low-risk Action templates with explicit opt-in.
+
+    Deliverable locations:
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/AutoApproveGateResolver.cs`
+    - Tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/AutoApproveGateResolverTests.cs`
+  </goal>
+
+  <context>
+    <background>
+      Per design §5 + §11 ("Do not bypass the human gate by default"), the auto-approve resolver is the smallest possible code surface — but it is the highest-risk to ship carelessly. Spec FR-17 + the principle "Human-controlled defaults" mandates that side-effect Actions default to `humanGate.required: true`. Auto-approve is the opt-out, gated by:
+      - Action Definition `governance.autoApprove = true` (explicit opt-in)
+      - Action Definition `governance.gateResolverOverride = "auto-approve"` (explicit resolver selection)
+      - Audit on every invocation (so an admin can review which Actions auto-approved over time)
+
+      The resolver itself is trivially small (~50 LoC). The rigor is in the opt-in verification + audit completeness + tests that catch the failure modes (silently auto-approving an opt-out Action).
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/AutoApproveGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/IActionRegistryService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/AutoApproveGateResolverTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization. No new endpoints added by this task — the orchestrator invokes the resolver in-process.</constraint>
+    <constraint source="ADR-010">Feature-module DI. This task adds 1 registration (`AutoApproveGateResolver` as scoped) — well within ADR-010 budget.</constraint>
+    <constraint source="ADR-013">AI Architecture. BFF placement.</constraint>
+    <constraint source="ADR-015">Audit per gate decision: Tier 2 hash + Tier 3 work history. EVERY auto-approve invocation audits — no skips.</constraint>
+    <constraint source="ADR-019">ProblemDetails for any HTTP surface. N/A here (no HTTP).</constraint>
+    <constraint source="ADR-029">Publish-size delta ≤ 5 MB compressed. This task adds ≤100 LoC + tests; expected delta &lt; 0.05 MB.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF; no new packages; publish-size impact verified; ADRs cited.</constraint>
+    <constraint source="project">Default behavior: REJECT auto-approve unless explicit opt-in via Action `governance.autoApprove == true`. Defense-in-depth: even if the orchestrator misroutes, the resolver itself verifies opt-in.</constraint>
+    <constraint source="project">Three MVP starter Templates do NOT use auto-approve. This resolver is for tests + future opt-in templates only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Feature-module DI" location=".claude/patterns/api/service-registration.md">Single registration in `AddGatesFeature()`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: working tree clean, branch `work/ai-spaarke-action-engine-r1`, baseline build passes, task 030 ✅. Load knowledge. Declare RIGOR LEVEL: FULL.</step>
+    <step order="1">Read design §5 "Approval queue" + §11 anti-patterns. Confirm the opt-in semantics: `Action.governance.autoApprove == true` is the gate; this resolver verifies + audits, NEVER silently approves.</step>
+    <step order="2">Create `AutoApproveGateResolver.cs` — ctor injects `IActionRegistryService` (to lookup Action.governance), `IAuditService`, `ILogger`. `ResolveAsync`:
+      (a) load Action via `actionRunId.ActionId`,
+      (b) if `Action.governance.autoApprove != true`, throw `InvalidOperationException("Auto-approve invoked for Action that did not opt in")` with structured log,
+      (c) audit `LogGateDecision(GateDecision.Approved, reason: "auto-approve per Action.governance.autoApprove=true")`,
+      (d) return `new GateOutcome(GateDecision.Approved, DateTime.UtcNow, ResolvedByUserId: null, Reason: "auto-approve", ApprovalRecordId: null)`.</step>
+    <step order="3">Register DI in `AddGatesFeature()`: `services.AddScoped&lt;AutoApproveGateResolver&gt;();` — NOT keyed (since Action Definitions opt-in by name override, not by GateType). Document the orchestrator's by-name resolver lookup in `notes/decisions/034-resolver-name-lookup.md` (this becomes the contract Phase 4 task 042 implements).</step>
+    <step order="4">Write unit tests:
+      (a) `ResolveAsync_OptedIn_ReturnsApproved` — Action with `governance.autoApprove=true` returns Approved + audits.
+      (b) `ResolveAsync_NotOptedIn_Throws` — Action with `governance.autoApprove=false` (or unset) throws `InvalidOperationException`.
+      (c) `ResolveAsync_NoActionFound_Throws` — `IActionRegistryService.GetActionAsync` returns null → throw with descriptive message.
+      (d) `ResolveAsync_Audits_WithExpectedReason` — audit reason exactly matches `"auto-approve per Action.governance.autoApprove=true"`.
+      (e) `ResolveAsync_AuditOrdering_AfterDecision` — audit called exactly once per outcome, AFTER decision computed (no double-audit).</step>
+    <step order="5">Build + run tests: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0; `dotnet test` passes new tests. Measure publish-size delta; expect &lt; 0.05 MB. Record in `notes/measurements/034-publish-size-delta.md`.</step>
+    <step order="6">Verify ADR-010 DI budget across `AddActionEngineModule()` after this task. Total Phase 3 registrations should be roughly: 030 contract (0 concrete), 031 (3 keyed), 032 (3: channel singleton + resolver keyed + endpoint), 033 (3: HttpClient + validator + resolver keyed), 034 (1: scoped) — ≈10 of 15 budget. Document running tally in `notes/measurements/phase3-di-budget.md`.</step>
+    <step order="9.5">Run quality gates: `code-review` (focus: opt-in verification correctness, no silent-approval failure modes, audit-after-decision ordering), `adr-check` (ADR-001/008/010/013/015/029). Mandatory review per CLAUDE.md §6 — this resolver bypasses a security guardrail by design; verify the opt-in path is airtight.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: 034 ✅. Update `current-task.md`. After all of Group D (031–034) ✅, task 035 unblocks.</step>
+    <step order="11">Commit + push. Document any deviations or contract refinements.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size measurement</tool>
+    <tool name="git">Commit and push</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/AutoApproveGateResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (extended)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/AutoApproveGateResolverTests.cs</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/measurements/034-publish-size-delta.md</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/measurements/phase3-di-budget.md</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/decisions/034-resolver-name-lookup.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`AutoApproveGateResolver.cs` exists; implements `IGateResolver`; compiles.</criterion>
+    <criterion testable="true">5 unit tests pass: OptedIn_Approved, NotOptedIn_Throws, NoAction_Throws, AuditWithExpectedReason, AuditOrdering.</criterion>
+    <criterion testable="true">Opt-in check: `governance.autoApprove != true` results in `InvalidOperationException` (NEVER silent approve).</criterion>
+    <criterion testable="true">Audit hook called exactly once per Approved decision with `Reason = "auto-approve per Action.governance.autoApprove=true"`.</criterion>
+    <criterion testable="true">DI registration: `AutoApproveGateResolver` resolves as scoped; NOT keyed to a `GateType`. Resolver-name-lookup contract documented in `notes/decisions/034-resolver-name-lookup.md`.</criterion>
+    <criterion testable="true">ADR-010 DI budget honored: total `AddActionEngineModule()` registrations ≤15 after Phase 3 — running tally in `notes/measurements/phase3-di-budget.md`.</criterion>
+    <criterion testable="true">Publish-size delta &lt; 0.05 MB compressed; recorded.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass at Step 9.5; opt-in verification path reviewed for silent-approval failure modes.</criterion>
+    <criterion testable="true">None of the three MVP starter Templates (Summarize / Weekly Digest / Find Similar) references `AutoApproveGateResolver` — verified by grep against `solutions/` and seed-data JSON.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Tiny class, big responsibility — auto-approve bypasses the human-gate guardrail. The TWO independent checks (orchestrator routes by name + resolver verifies opt-in) form defense-in-depth. Removing either is a regression.
+
+    The `Reason` field on the audit MUST be exactly `"auto-approve per Action.governance.autoApprove=true"` — admins can grep audit logs for this signature to enumerate which Actions auto-approved historically. Changing the string breaks operational forensics.
+
+    R2 consideration: a "soft auto-approve with timeout" variant could exist where the resolver waits N seconds for a human override before approving (e.g., "I'll auto-approve in 10 seconds unless you intervene"). Out of scope here; document as a future enhancement.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

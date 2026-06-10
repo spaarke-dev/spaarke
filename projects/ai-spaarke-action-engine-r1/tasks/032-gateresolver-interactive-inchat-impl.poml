@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>`InteractiveInChatGateResolver` — inline chat card; user approves in conversation</title>
+    <phase>Phase 3: IGateResolver + Approval Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>035</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements `IGateResolver` for in-chat path via existing SSE; modifies `.cs` files in `Sprk.Bff.Api`; tags include bff-api + ai; integrates with `SprkChatAgent` SSE event stream; audit-critical per ADR-015</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group D resolver implementations (031, 032, 033, 034) each touch a separate file under `Services/Ai/ActionEngine/Gates/`; no file overlap; all consume contract from task 030 (complete)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement `InteractiveInChatGateResolver : IGateResolver` at `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/InteractiveInChatGateResolver.cs`. On `ResolveAsync`, emit an SSE event over the existing `SprkChatAgent` event stream that carries the gate-card payload; the client renders `GateApprovalCard` (task 036) and user clicks Approve/Reject. The resolver awaits the user's response via a correlation-id-keyed pending-resolution `TaskCompletionSource` collection, with a 5-min timeout enforced by task 035. Return `GateOutcome` with terminal `Approved` or `Rejected` (or `TimedOut`). Default for `GateType.Manual` and the "Spaarke Assistant — General" playbook's default per design §7.4.
+  </prompt>
+
+  <role>
+    Senior Spaarke BFF engineer comfortable with SSE event streams and conversational UI flows. You write code that fails-safe (timeout = Rejected, not stuck-Pending), idempotent under duplicate user clicks, and audit-first per ADR-015.
+  </role>
+
+  <goal>
+    Concrete deliverables:
+    1. **`InteractiveInChatGateResolver` class** implementing `IGateResolver.ResolveAsync` — emits SSE gate-card event + awaits user response (via `IGateApprovalChannel` abstraction).
+    2. **`IGateApprovalChannel` abstraction** — small interface to decouple this resolver from the SSE plumbing in `SprkChatAgent`. Implementation `SseGateApprovalChannel` writes to the active session's event stream and registers a `TaskCompletionSource` keyed on `(SessionId, CorrelationId)`.
+    3. **Approval endpoint** (Minimal API, endpoint-filter auth per ADR-008) — `POST /api/ai/gates/in-chat/respond` — the client POSTs `{ correlationId, decision, reason? }`; endpoint resolves the pending TCS. Returns 204 No Content; ProblemDetails on errors (ADR-019).
+    4. **Idempotency** — duplicate POSTs for the same `correlationId` MUST be safe (return 204 with no double-resolve).
+    5. **Audit hook** — `IAuditService.LogGateDecision(...)` on every terminal outcome (Approved, Rejected, TimedOut).
+    6. **DI registration** in `AddGatesFeature()` — `GateType.Manual` keyed to `InteractiveInChatGateResolver` (default Assistant gate per design §7.4.3).
+    7. **Memory safety** — pending TCS dictionary uses `ConcurrentDictionary&lt;string, TaskCompletionSource&lt;GateOutcome&gt;&gt;` with explicit removal on resolve/timeout; document the bounded-by-active-sessions invariant.
+
+    Deliverable locations:
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/InteractiveInChatGateResolver.cs`
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateApprovalChannel.cs`
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/SseGateApprovalChannel.cs`
+    - `src/server/api/Sprk.Bff.Api/Api/Ai/GateEndpoints.cs` (new — only the in-chat respond endpoint)
+    - Tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/InteractiveInChatGateResolverTests.cs`
+  </goal>
+
+  <context>
+    <background>
+      Per design §5 + §7.4 and spec FR-17, the in-chat resolver is the DEFAULT for the "Spaarke Assistant — General" playbook — every Action with `humanGate.required: true` AND no Dataverse-queue override routes through this resolver. The user sees an inline card, clicks Approve/Reject, and the conversational flow resumes synchronously (no second round-trip to Dataverse).
+
+      The SSE infrastructure already exists in `SprkChatAgent` (the Function-Invocation streamer). This resolver extends the event vocabulary with `gate.request` events. The `GateApprovalCard` shared component (task 036) renders the card; this resolver does NOT touch UI code.
+
+      The pending-TCS pattern is bounded by active SSE sessions — when a session closes, all pending gates for that session resolve to `Rejected (reason: "session closed")`. Task 035 enforces the 5-min timeout uniformly.
+    </background>
+    <relevant-files>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/plan.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/InteractiveInChatGateResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateApprovalChannel.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/SseGateApprovalChannel.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/GateEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/EndpointMappingExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/InteractiveInChatGateResolverTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. SSE uses Minimal API streamed response (existing in `SprkChatAgent`).</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization on `POST /api/ai/gates/in-chat/respond`. NO global middleware.</constraint>
+    <constraint source="ADR-010">Feature-module DI. ≤15 total non-framework registrations in `AddActionEngineModule()`. This task adds: `IGateApprovalChannel`, its impl, the resolver, and the endpoint registration (4 slots; remaining budget tracked in `AddGatesFeature()`).</constraint>
+    <constraint source="ADR-013">AI Architecture (refined). BFF placement; SSE channel lives inside the AI feature module.</constraint>
+    <constraint source="ADR-015">Audit per gate decision: Tier 2 hash + Tier 3 work history. ALL terminal outcomes (Approved/Rejected/TimedOut) MUST audit.</constraint>
+    <constraint source="ADR-019">ProblemDetails (RFC 7807) for endpoint errors (e.g., unknown correlationId, malformed body).</constraint>
+    <constraint source="ADR-028">Endpoint auth via `useAuth()` / `authenticatedFetch` from client; server outbound MI not applicable (no outbound calls). Audit middleware enriches every request with `oid`, `appid`, `obo`, `tenantId`, `correlationId`.</constraint>
+    <constraint source="ADR-029">Publish-size delta ≤ 5 MB compressed. This task adds ≤400 LoC; expected delta &lt; 0.1 MB.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement = BFF (SSE coupling makes BFF the only valid placement); no new NuGet packages; ADRs cited.</constraint>
+    <constraint source="project">Default for `GateType.Manual` and the Assistant playbook default per design §7.4.3.</constraint>
+    <constraint source="project">Fail-safe semantics: SSE session closure → unresolved gates auto-Rejected with `reason: "session closed"`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-audit-middleware.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint filters" location=".claude/patterns/api/endpoint-filters.md">`MapGateEndpoints()` registered in `EndpointMappingExtensions.cs`; uses `.AddEndpointFilter&lt;AuthorizationEndpointFilter&gt;()`.</pattern>
+      <pattern name="SSE event emission" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">Existing `IAsyncEnumerable&lt;SseEvent&gt;` pattern; extend with `gate.request` event type.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: working tree clean, branch `work/ai-spaarke-action-engine-r1`, baseline build passes, task 030 ✅. Load knowledge. Declare RIGOR LEVEL: FULL.</step>
+    <step order="1">Read task 030 contract + design §5 + §7.4. Trace `SprkChatAgent` SSE event flow to identify the right extension point for `gate.request` events without breaking existing chat consumers.</step>
+    <step order="2">Create `IGateApprovalChannel.cs` — interface with `Task EmitGateRequestAsync(string sessionId, GateRequest request, CancellationToken ct)` and `Task&lt;bool&gt; ResolvePendingAsync(string correlationId, GateDecision decision, string? reason)`.</step>
+    <step order="3">Create `SseGateApprovalChannel.cs` — singleton; ctor injects `ISprkChatSseDispatcher` (existing). Maintains `ConcurrentDictionary&lt;string, TaskCompletionSource&lt;GateOutcome&gt;&gt;` keyed on `correlationId`. `EmitGateRequestAsync` writes the SSE event AND registers TCS. `ResolvePendingAsync` flips the TCS. Add explicit cleanup on TCS resolution (remove from dictionary).</step>
+    <step order="4">Create `InteractiveInChatGateResolver.cs` — ctor injects `IGateApprovalChannel`, `IAuditService`, `ILogger&lt;...&gt;`. `ResolveAsync`: emit SSE → await TCS with `request.TimeoutSeconds` cancellation → on completion, audit + return outcome. On timeout, audit `TimedOut` + return outcome.</step>
+    <step order="5">Create `Api/Ai/GateEndpoints.cs` — `MapGateEndpoints()` registers `POST /api/ai/gates/in-chat/respond`. Body: `{ correlationId: string, decision: "Approved"|"Rejected", reason?: string }`. Endpoint calls `IGateApprovalChannel.ResolvePendingAsync`. Returns 204 on success, ProblemDetails 404 on unknown correlationId. Apply `.AddEndpointFilter&lt;AuthorizationEndpointFilter&gt;()`.</step>
+    <step order="6">Wire endpoint registration via `MapGateEndpoints()` call in `EndpointMappingExtensions.cs` (alongside other AI endpoint maps).</step>
+    <step order="7">Register DI in `AddGatesFeature()` (extending `AddActionEngineModule.cs`): `services.AddSingleton&lt;IGateApprovalChannel, SseGateApprovalChannel&gt;(); services.AddKeyedScoped&lt;IGateResolver, InteractiveInChatGateResolver&gt;(GateType.Manual);` — and any optional `Conditional`/playbook default routing per design §7.4.</step>
+    <step order="8">Write unit tests:
+      (a) `ResolveAsync_HappyPath_Approved` — emits SSE, simulates `ResolvePendingAsync(Approved)`, returns `Approved` outcome + audits.
+      (b) `ResolveAsync_HappyPath_Rejected` — similar, with reason propagated.
+      (c) `ResolveAsync_Timeout_AutoRejects` — TCS never resolves within timeout; outcome = `TimedOut` + audit.
+      (d) `ResolvePendingAsync_DuplicateCall_IsIdempotent` — second call returns false; no double-resolve.
+      (e) `ResolveAsync_AuditOrdering_AfterTerminalDecision` — audit called exactly once per terminal outcome.
+      (f) Endpoint integration test: `POST /api/ai/gates/in-chat/respond` returns 204 for known correlationId; 404 ProblemDetails for unknown.</step>
+    <step order="9">Build + run tests: `dotnet build src/server/api/Sprk.Bff.Api/` exits 0; `dotnet test` passes new tests. Measure publish-size delta; expect &lt; 0.1 MB. Record in `notes/measurements/032-publish-size-delta.md`.</step>
+    <step order="9.5">Run quality gates: `code-review` (TCS lifecycle correctness — no leaks; SSE event vocabulary correctness; audit ordering), `adr-check` (ADR-001/008/010/013/015/019/028/029).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: 032 ✅. Update `current-task.md`.</step>
+    <step order="11">Commit + push. Document SSE event vocabulary additions in `notes/decisions/032-sse-gate-events.md` so task 036 (GateApprovalCard) knows the event shape.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size measurement</tool>
+    <tool name="git">Commit and push</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/InteractiveInChatGateResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/IGateApprovalChannel.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ActionEngine/Gates/SseGateApprovalChannel.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/GateEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AddActionEngineModule.cs (extended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/EndpointMappingExtensions.cs (extended)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionEngine/Gates/InteractiveInChatGateResolverTests.cs</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/measurements/032-publish-size-delta.md</output>
+    <output type="notes">projects/ai-spaarke-action-engine-r1/notes/decisions/032-sse-gate-events.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InteractiveInChatGateResolver.cs` + `IGateApprovalChannel.cs` + `SseGateApprovalChannel.cs` + `GateEndpoints.cs` exist; compile.</criterion>
+    <criterion testable="true">6 unit/integration tests pass (HappyApproved, HappyRejected, Timeout, Idempotent, AuditOrdering, EndpointIntegration).</criterion>
+    <criterion testable="true">Keyed-DI: `GateType.Manual` resolves to `InteractiveInChatGateResolver`. Verified by test.</criterion>
+    <criterion testable="true">Audit hook called exactly once per terminal outcome (Approved/Rejected/TimedOut).</criterion>
+    <criterion testable="true">`POST /api/ai/gates/in-chat/respond` has endpoint-filter authorization (ADR-008); ProblemDetails returned on 4xx (ADR-019).</criterion>
+    <criterion testable="true">SSE event vocabulary documented in `notes/decisions/032-sse-gate-events.md` for task 036 consumers.</criterion>
+    <criterion testable="true">Publish-size delta &lt; 0.1 MB compressed; recorded.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` pass at Step 9.5; ADR-010 DI budget honored.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `IGateApprovalChannel` abstraction is intentional — task 036 (`GateApprovalCard` UI) consumes the SSE event vocabulary; task 035 (timeout sweep) calls `ResolvePendingAsync` with `TimedOut` decision. Both downstream consumers see a stable interface.
+
+    Singleton lifetime for `SseGateApprovalChannel` is required because the pending-TCS dictionary spans requests (the gate request comes from one HTTP call; the resolution arrives on a different HTTP call). Scoped lifetime would lose state.
+
+    Session-close handling: out of scope for this task — the orchestrator (Phase 4) signals session closure; this resolver only needs to cooperate by exposing a `CancelAllForSessionAsync(sessionId)` method on the channel. Stub it now if straightforward; otherwise document a TODO in `notes/decisions/032-sse-gate-events.md`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: FULL with the reason from `&lt;rigor-reason&gt;`. Follow the task-execute skill for mandatory pre-execution checklist, proactive checkpointing every 3 steps, and quality gates at Step 9.5.
+    </protocol>
+  </execution>
+</task>

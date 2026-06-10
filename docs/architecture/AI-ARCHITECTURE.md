@@ -1,10 +1,28 @@
 # Spaarke AI Architecture
 
-> **Last Updated**: May 17, 2026
+> **Last Updated**: 2026-06-05 (audit findings callout added per Migration PR #9)
 > **Last Reviewed**: 2026-05-17
 > **Reviewed By**: ai-platform-unification-r2
 > **Status**: Current
 > **Purpose**: Technical reference for the Spaarke AI platform — scope library, tool framework, execution runtime, and infrastructure.
+
+---
+
+## 🆕 Audit findings — bff-ai-architecture-audit-r1 (2026-06-05)
+
+The Spaarke BFF AI Architecture Audit r1 completed 2026-06-04. Four binding architectural decisions now apply to this doc; full evidence is in [`projects/bff-ai-architecture-audit-r1/notes/canonical-architecture-decisions.md`](../../projects/bff-ai-architecture-audit-r1/notes/canonical-architecture-decisions.md):
+
+| Decision | Where codified | Migration PR |
+|---|---|---|
+| **Spaarke Public-Contracts Facade DI Fascia** — external CRUD code consumes AI only through `PublicContracts/` facades (per refined ADR-013) | [`.claude/patterns/ai/public-contracts-facade.md`](../../.claude/patterns/ai/public-contracts-facade.md) + [DR-003](../../projects/bff-ai-architecture-audit-r1/decisions/DR-003-public-contracts-facade.md) | PR #351 (LATENT BUG #1 fix + 4 Null peers) |
+| **Endpoint↔DI Registration Conditionality Symmetry Rule** — NEW load-bearing rule preventing the LATENT BUG #1 anti-pattern (facade unconditional, transitive deps conditional → 500 instead of 503) | [`.claude/patterns/ai/endpoint-di-symmetry.md`](../../.claude/patterns/ai/endpoint-di-symmetry.md) + [DR-008](../../projects/bff-ai-architecture-audit-r1/decisions/DR-008-di-configuration.md) + [`.claude/constraints/bff-extensions.md` §F.1](../../.claude/constraints/bff-extensions.md) | PR #351 |
+| **BFF Canonical Cache Stack** — `IDistributedCache` + `GetOrCreateAsync<T>` only; `EmbeddingCache` canonical model; `MemoryCache` requires explicit ADR-009 exception XML doc | [DR-002](../../projects/bff-ai-architecture-audit-r1/decisions/DR-002-cache-patterns.md) | Phased PR #5+ (26 sites; per-team) |
+| **3140 LOC of dead AI code removed** — 3 lookup orphans, intent classifier cascade, 5th orphan, 3 Cat 10 tool handlers, PlaybookBuilderSystemPrompt 800-LOC dead bulk | — | PR #353 + PR #357 |
+
+REJECTED options the audit explicitly considered and locked:
+- Generic `IIntentClassifier<TResult>` interface — REJECTED (3 canonicals KEEP, no forced consolidation)
+- 4-substrate search consolidation — REJECTED (each substrate justified by different index; KEEP all 4)
+- Forced DI module consolidation — REJECTED (31 per-concern modules KEEP)
 
 ---
 

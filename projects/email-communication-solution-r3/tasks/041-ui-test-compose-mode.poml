@@ -1,0 +1,166 @@
+<task id="041" project="email-communication-solution-r3">
+  <metadata>
+    <title>UI test — EmailComposer Code Page `mode=compose` end-to-end</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>037</dependencies>
+    <blocks>099</blocks>
+    <tags>ui-test, e2e-test, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Browser-based UI test using the `ui-test` skill; deterministic acceptance per scripted steps; not modifying production code</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel-safe with 042–045 — each UI test mode targets a different URL + scenario; no shared mutation surface (each test sends/saves independent records)</parallel-reason>
+    <fr-refs>FR-18, ADR-021</fr-refs>
+  </metadata>
+
+  <prompt>
+    Execute an end-to-end UI test for the EmailComposer Code Page in `mode=compose`. Use the `ui-test` skill (Chrome integration). Navigate to the deployed Code Page URL, fill the form, attach a local file, send, verify success.
+
+    Capture:
+    - Navigation success (Code Page loads)
+    - Form interaction success (recipient, subject, body fillable)
+    - File attach success (local picker invokes; file appears in attachment list)
+    - Send success (validation passes; BFF call returns 2xx; success state displayed)
+    - Zero console errors throughout
+    - Dark mode toggle compliance check (ADR-021)
+  </prompt>
+
+  <role>
+    Spaarke UI test engineer. Familiar with the `ui-test` skill (Chrome integration), Fluent v9 component selectors, and Dataverse Code Page testing patterns.
+  </role>
+
+  <goal>
+    A documented UI test pass for `mode=compose`. Test results land in `projects/email-communication-solution-r3/notes/research/041-ui-test-compose.md` with pass/fail status, screenshots (if available), console-error inventory (target: zero), and ADR-021 dark mode compliance verification.
+  </goal>
+
+  <context>
+    <background>
+      Wave 2's verification gate: each of the 5 modes (compose/view/reply/forward/draft) gets a UI test (tasks 041–045) + a dark mode compliance test (task 045). Tests must pass before task 099 (project wrap-up) accepts Wave 2.
+
+      Per spec NFR-08, composer cold load < 500 ms (measurable in DevTools Performance tab). Per NFR-09 + ADR-021, full keyboard navigation + screen-reader live region for errors.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/research/041-ui-test-compose.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ui-test skill">Use the skill's Chrome integration; do not hand-roll Selenium/Playwright scripts</constraint>
+    <constraint source="ADR-021">Dark mode compliance — Fluent v9 semantic tokens adapt; no hardcoded colors</constraint>
+    <constraint source="spec FR-18">All compose mode interactions functional</constraint>
+    <constraint source="spec NFR-08">Cold load < 500 ms target</constraint>
+    <constraint source="project">Use `{org}` placeholder in test URLs to support tenant-portability</constraint>
+    <constraint source="project">Dev environment only</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="UI test via ui-test skill" location=".claude/skills/ui-test/SKILL.md">
+        Chrome integration drives the browser; selectors per Fluent v9 component anatomy; screenshots captured per step.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <ui-tests>
+    <test name="Compose mode end-to-end">
+      <navigation>
+        <url>https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22compose%22%7D</url>
+        <description>Open EmailComposer Code Page in compose mode (empty form)</description>
+      </navigation>
+      <steps>
+        <step order="1">Navigate to URL; wait for app mount (max 5s)</step>
+        <step order="2">Verify page heading or composer label visible</step>
+        <step order="3">Verify zero console errors on cold load</step>
+        <step order="4">Fill To field: type `test@example.com`; press semicolon or Enter to commit; verify Fluent Tag appears</step>
+        <step order="5">Fill Subject field: type `R3 UI test — compose mode`</step>
+        <step order="6">Fill Body field (HTML mode): type `Hello — this is an automated test from task 041.`</step>
+        <step order="7">Click "Attach Local File" button; pick a small local file (e.g., a test PDF or text file under 5 KB); verify file appears in attachment list with name + size</step>
+        <step order="8">Click "Send" button; wait for response (max 10s)</step>
+        <step order="9">Verify success state: success toast / message OR navigation to confirmation view; verify `onSent` callback fired</step>
+        <step order="10">Verify zero console errors throughout interaction</step>
+      </steps>
+      <expected-outcomes>
+        <outcome>Code Page loads in compose mode with empty form</outcome>
+        <outcome>To/Cc/Subject/Body fields accept input and render Fluent v9 components</outcome>
+        <outcome>Local file attachment picker functional; file appears in list</outcome>
+        <outcome>Send button validates (To required) and calls BFF; 2xx response triggers success state</outcome>
+        <outcome>Zero console errors throughout test execution</outcome>
+        <outcome>Cold load metric &lt; 500 ms (target per NFR-08)</outcome>
+      </expected-outcomes>
+      <dark-mode-check>
+        <step>Toggle dark mode via D365 user settings (or via DOM theme override if direct settings access unavailable)</step>
+        <step>Reload page; verify all backgrounds, text, borders adapt to dark palette (no white panels in dark mode)</step>
+        <step>Verify all icons use `currentColor` (no fixed-color SVGs)</step>
+        <step>Verify Fluent v9 semantic tokens are in use throughout — no hardcoded hex colors visible</step>
+        <step>This task does a smoke dark-mode check; task 045 does the comprehensive compliance test</step>
+      </dark-mode-check>
+      <console-error-check>
+        <target>0 errors</target>
+        <description>DevTools Console must show zero errors from cold load through Send. Warnings acceptable; errors fail the test.</description>
+      </console-error-check>
+    </test>
+  </ui-tests>
+
+  <constraints-additional>
+    <constraint source="ADR-021">Dark mode toggle must result in adapted UI (no white in dark mode); semantic tokens only</constraint>
+    <constraint source="spec NFR-09">Keyboard navigation across To/Cc/Subject/Body/Attach/Send accessible (test verifies tab order)</constraint>
+  </constraints-additional>
+
+  <steps>
+    <step order="1">Verify task 037 (ribbon) deployed and task 036 (Code Page) accessible at `https://{org}/WebResources/sprk_emailcomposer`.</step>
+    <step order="2">Invoke `ui-test` skill — instantiate Chrome session, log in as test user.</step>
+    <step order="3">Execute the compose-mode test scenario per the `<ui-tests>` block above.</step>
+    <step order="4">Capture screenshots at each step (if skill supports) and console output.</step>
+    <step order="5">If any step fails, file a defect note and block on it.</step>
+    <step order="6">Toggle dark mode and re-run the cold load + render check (smoke; comprehensive in task 045).</step>
+    <step order="7">Document results in `projects/email-communication-solution-r3/notes/research/041-ui-test-compose.md` with pass/fail per step, console-error inventory, dark mode observations, and cold-load metric.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 041 ✅ completed; reference test note.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol: status → completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="ui-test">Skill — Chrome browser automation</tool>
+    <tool name="write">Test results note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/041-ui-test-compose.md (NEW)</output>
+    <output type="test-result">Compose mode test pass/fail logged</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UI test navigates to Code Page compose mode URL successfully.</criterion>
+    <criterion testable="true">All form fields (To, Cc, Subject, Body) accept input.</criterion>
+    <criterion testable="true">Local file attachment picker functional; file appears in attachment list.</criterion>
+    <criterion testable="true">Send button triggers BFF call; 2xx response handled; success state displayed.</criterion>
+    <criterion testable="true">Zero console errors throughout test execution.</criterion>
+    <criterion testable="true">Dark mode toggle smoke-tested — UI adapts per ADR-021.</criterion>
+    <criterion testable="true">Test results documented in research note.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-group I: tasks 041–045 run in parallel after task 036 deploys the Code Page. Each test uses an independent record (compose creates new; view/reply/forward/draft target different existing records) so no contention.
+
+    Test data: a small (< 5 KB) test file should be pre-provisioned in the test runner environment (or generated by the test step). The Spaarke test fixture library may already have one — check before adding.
+
+    If the `ui-test` skill cannot perform the dark mode toggle directly (depends on Dataverse personal settings), the smoke check can apply a DOM-level theme override to verify the rendering adapts.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Invoke `ui-test` skill for browser automation. Document results thoroughly so failure modes are diagnosable post-hoc.
+    </protocol>
+  </execution>
+</task>

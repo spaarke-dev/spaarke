@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Deploy updated Outlook add-in to Azure Static Web Apps + verify in Outlook web + desktop</title>
+    <phase>Phase 8: Outlook Add-in</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>070, 071</dependencies>
+    <blocks>none</blocks>
+    <tags>deploy, azure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task using existing skill. STANDARD rigor.</rigor-reason>
+    <parallel-group>P8-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the updated Outlook add-in to Azure Static Web Apps via SWA CLI using the `office-addins-deploy` skill. Smoke-test the ribbon action + indicator banner in Outlook web and Outlook desktop.
+  </prompt>
+
+  <role>Spaarke Office Add-ins deployment engineer.</role>
+
+  <goal>Add-in deployed; manifest validates; ribbon action + indicator banner work end-to-end in both surfaces.</goal>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build production bundle for the Outlook add-in.</step>
+    <step order="2">Invoke `/office-addins-deploy` skill to deploy to Azure Static Web Apps.</step>
+    <step order="3">Validate manifest via Office Add-in Validator.</step>
+    <step order="4">Smoke test in Outlook web: ribbon action visible, click flow works, banner renders correctly.</step>
+    <step order="5">Smoke test in Outlook desktop: same checks.</step>
+    <step order="6">Document deployment in `projects/smart-todo-decoupling-r3/notes/deployments.md`.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="deploy">Updated Outlook add-in on Azure Static Web Apps</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Add-in deployed; manifest validates.</criterion>
+    <criterion testable="true">Outlook web: ribbon + banner work.</criterion>
+    <criterion testable="true">Outlook desktop: ribbon + banner work.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

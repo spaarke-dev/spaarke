@@ -1,0 +1,133 @@
+<task id="064" project="email-communication-solution-r3">
+  <metadata>
+    <title>Build + deploy LegalWorkspace solution to dev (Wave 4)</title>
+    <phase>Wave 4 — SummarizeFiles Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>061, 062</dependencies>
+    <blocks>065</blocks>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; mechanical build + deploy via `dataverse-deploy` skill. Verifies the SummarizeFiles fork deletion (061) + retarget (062) did not break the LegalWorkspace build. No code changes.</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-15, FR-25</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build and deploy the `LegalWorkspace` solution to the dev environment via the `dataverse-deploy` skill. This deploy verifies that the Wave 4 fork deletion (task 061) + consumer retarget (task 062) did not break LegalWorkspace.
+
+    Pre-deploy: confirm LegalWorkspace `npm run build` is clean (this is the FIRST clean build after the intentional break window between tasks 061 → 062). Confirm `@spaarke/ui-components` resolves to a version containing the canonical wrappers and the Wave 4 SummarizeFiles fix.
+
+    Post-deploy: navigate to a surface in LegalWorkspace that previously used the fork (e.g., the parent component that mounted `SummarizeFiles/SummarizeFilesDialog`). Confirm zero console errors on load. Functional smoke test is task 065.
+
+    Note: this task is `parallel-safe: true` in `parallel-group: J` — runs in parallel with task 063 (SummarizeFilesWizard solution deploy). Different solutions; concurrent platform-level deploys are safe.
+  </prompt>
+
+  <role>
+    Deployment engineer familiar with `dataverse-deploy` skill for LegalWorkspace. Knows the Vite build pipeline + solution-import path + dev environment target. Aware of the Wave 4 fork-deletion → retarget transition.
+  </role>
+
+  <goal>
+    LegalWorkspace solution deployed to dev with Wave 4 fork cleanup shipped. Build clean (the post-061 intentional break is now closed by 062's retargeting). Lint clean. Solution imported successfully. Smoke loading shows zero console errors. Ready for task 065 (functional smoke).
+  </goal>
+
+  <context>
+    <background>
+      The Wave 4 sequence:
+      - Task 060: Shared `SummarizeFilesDialog.tsx` migrated to canonical wrapper
+      - Task 061: LegalWorkspace `SummarizeFiles/` fork (9 files) DELETED — LegalWorkspace build intentionally broken
+      - Task 062: LegalWorkspace consumers retargeted to `@spaarke/ui-components` — LegalWorkspace build repaired
+      - Task 064 (THIS): Verify LegalWorkspace builds + deploys clean post-cleanup
+
+      This task is the second LegalWorkspace deploy in the project (task 054 was the first, post Wave 3). The deploy steps mirror task 054 — same skill, same target, same pipeline.
+
+      Per CLAUDE.md §11, use `npm install --legacy-peer-deps --no-audit --no-fund`.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/ (build root)</file>
+      <file>src/solutions/LegalWorkspace/package.json</file>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/ (DELETED in 061; possibly recreated as 5-line shim in 062 if Approach B)</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/email-communication-solution-r3/tasks/054-build-deploy-legalworkspace-wave-3.poml (analogous deploy procedure)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">Use `npm install --legacy-peer-deps --no-audit --no-fund` for LegalWorkspace.</constraint>
+    <constraint source="project">Deploy targets DEV environment only.</constraint>
+    <constraint source="ADR-033">No code changes during deploy — mechanical packaging only.</constraint>
+    <constraint source="repo">Solution import MUST succeed without errors.</constraint>
+    <constraint source="project">Document deploy result in `notes/wave-4-deploy-legalworkspace.md`.</constraint>
+    <constraint source="spec FR-25">Post-deploy verification: confirm no `SummarizeFiles/` fork code remains in deployed solution (only canonical re-export pattern).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>projects/email-communication-solution-r3/tasks/054-build-deploy-legalworkspace-wave-3.poml</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Pre-deploy: from `src/solutions/LegalWorkspace/`:
+      <code>
+      npm install --legacy-peer-deps --no-audit --no-fund
+      npm run build
+      npm run lint
+      </code>
+      If any step fails: this signals task 062 left the build broken. Escalate to task 062 — do NOT attempt deploy.
+    </step>
+    <step order="2">Verify the SummarizeFiles cleanup landed: grep for `solutions/LegalWorkspace.*SummarizeFiles` in `src/solutions/LegalWorkspace/`. Should return zero hits (Approach A from 062) OR only the 5-line shim (Approach B). NO original fork code.</step>
+    <step order="3">Verify `@spaarke/ui-components` resolves to a Wave 4 version. Inspect `node_modules/@spaarke/ui-components/dist/` for the migrated SummarizeFilesDialog.</step>
+    <step order="4">Invoke `dataverse-deploy` skill: target = dev, solution = LegalWorkspace.</step>
+    <step order="5">Monitor deploy. On success: capture timestamp + dev URL. On failure: capture error, escalate per category (build → task 062; auth → re-authenticate).</step>
+    <step order="6">Post-deploy: load LegalWorkspace in browser DevTools. Confirm zero console errors on page load. Navigate to the parent surface that previously mounted the fork — confirm it still renders (now using canonical).</step>
+    <step order="7">Write deploy summary to `notes/wave-4-deploy-legalworkspace.md`: timestamp, dev URL, console-check result, SummarizeFiles fork-cleanup verification result.</step>
+    <step order="8">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 064 ✅ completed.</step>
+    <step order="9">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (065 if 063 also complete; otherwise wait for 063).</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">Run build + lint locally</tool>
+    <tool name="grep">Verify fork-cleanup landed</tool>
+    <tool name="dataverse-deploy">Solution deploy to dev</tool>
+    <tool name="write">Create `notes/wave-4-deploy-legalworkspace.md` deploy summary</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/email-communication-solution-r3/notes/wave-4-deploy-legalworkspace.md (NEW — deploy summary + fork-cleanup verification)</output>
+    <output type="deploy">LegalWorkspace solution deployed to dev (post Wave 4 cleanup)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">LegalWorkspace `npm run build` exits 0 (post Wave 4 cleanup).</criterion>
+    <criterion testable="true">LegalWorkspace `npm run lint` exits 0.</criterion>
+    <criterion testable="true">Grep for `solutions/LegalWorkspace.*SummarizeFiles` returns zero fork-code hits (only optional 5-line shim).</criterion>
+    <criterion testable="true">`dataverse-deploy` skill reports successful solution import to dev.</criterion>
+    <criterion testable="true">LegalWorkspace surface loads in dev with zero JS console errors.</criterion>
+    <criterion testable="true">`notes/wave-4-deploy-legalworkspace.md` exists with timestamp, dev URL, console + fork-cleanup verification.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 064 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-group J: this task and 063 (SummarizeFilesWizard solution deploy) target different Dataverse solutions; concurrent execution is safe.
+
+    The pre-deploy build check (step 1) is the critical gate. If LegalWorkspace builds clean, both 061 (fork delete) and 062 (consumer retarget) successfully closed the intentional break window. If build fails, root-cause to task 062 — typically a missed consumer or a canonical-barrel export gap.
+
+    The post-deploy console check (step 6) is a SMOKE-LEVEL check that the runtime imports resolve. It does NOT verify the SummarizeFiles wizard behavior — that is task 065.
+
+    Escalation policy: if any step fails, fix upstream FIRST (typically task 062, since 060 is shared-lib and shouldn't affect LegalWorkspace build directly). Re-run THIS task after upstream fix.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 SKIPPED for STANDARD rigor. Invoke `dataverse-deploy` skill for deploy procedure.
+    </protocol>
+  </execution>
+</task>

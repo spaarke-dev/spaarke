@@ -1,0 +1,117 @@
+<task id="074" project="email-communication-solution-r3">
+  <metadata>
+    <title>Delete LegalWorkspace CreateMatter/SendEmailStep.tsx fork (the only true LegalWorkspace email-step fork)</title>
+    <phase>Wave 5 — 5-Wizard Migration + DocumentEmailWizard Fix + Forks</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>072</dependencies>
+    <blocks>076</blocks>
+    <tags>refactoring, cleanup, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>File deletion + caller fix; no new code logic. STANDARD rigor per CLAUDE.md decision tree (cleanup, refactoring tags without architectural impact since canonical replacement is via 072).</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx` (delete) + the caller within `src/solutions/LegalWorkspace/src/components/CreateMatter/` only — different files from 072 (shared lib step), 073 (WorkAssignmentDialog in shared lib), 075 (DocumentEmailWizard in shared lib). All concurrent after 072 (which migrates the shared CreateMatter step the LegalWorkspace will now consume via re-export).</parallel-reason>
+    <fr-refs>FR-25</fr-refs>
+  </metadata>
+
+  <prompt>
+    Delete `src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx` — the ONLY LegalWorkspace email-step fork (per CLAUDE.md DELTA #9 empirical finding). The fork's CreateMatter caller (within `LegalWorkspace/src/components/CreateMatter/`) must now consume the canonical `<SendEmailStep />` from `@spaarke/ui-components` (the same shared-lib path migrated in task 072 for the CreateMatterWizard surface).
+
+    IMPORTANT empirical clarification: per CLAUDE.md DELTA #9, spec FR-25 phrasing "LegalWorkspace forks 5 wizards" overstates the per-file count. LegalWorkspace's CreateProject/CreateEvent/CreateTodo/CreateWorkAssignment directories EXIST but contain NO SendEmailStep file. There are no additional email-step forks in LegalWorkspace beyond the one CreateMatter file deleted here. Wave 5 scope is correspondingly smaller than FR-25 phrasing implied.
+
+    Steps:
+    1. Delete the fork file.
+    2. Find any LegalWorkspace caller(s) that imported the deleted local SendEmailStep and switch them to import the canonical `<SendEmailStep />` from `@spaarke/ui-components`.
+    3. Build LegalWorkspace solution to verify no orphan imports remain.
+
+    NOTE per Owner Clarification: All Wave 5 changes ship as a single PR (task 076). Do not push as standalone.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer. Familiar with the LegalWorkspace solution structure and the shared `@spaarke/ui-components` public surface.
+  </role>
+
+  <goal>
+    `src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx` is deleted. Its caller(s) within LegalWorkspace consume the canonical `<SendEmailStep />` from `@spaarke/ui-components`. LegalWorkspace solution builds. No FR-25-related email-step forks remain in LegalWorkspace.
+  </goal>
+
+  <context>
+    <background>
+      LegalWorkspace historically forked email-step components from the shared library to avoid cross-package dependency. Spec FR-25 directs retirement of these forks. Per CLAUDE.md DELTA #9 (verified at pre-flight 2026-06-05), only the CreateMatter SendEmailStep is a genuine fork; the other 4 wizard dirs in LegalWorkspace exist but contain no SendEmailStep file. This makes Wave 5's LegalWorkspace cleanup a single-file delete rather than the 5-file delete the spec phrasing implied.
+
+      Other LegalWorkspace email-touching forks (SummarizeFilesDialog, FilePreviewDialog) are handled by Waves 3 + 4 — outside this task's scope.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateMatterWizard/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">LegalWorkspace MUST NOT fork email-touching components; re-export from shared lib</constraint>
+    <constraint source="spec FR-25">Retire LegalWorkspace email-touching duplicate component forks</constraint>
+    <constraint source="project">Empirical narrowing: only CreateMatter is a true email-step fork (DELTA #9); do NOT attempt to delete non-existent Project/Event/Todo/WorkAssignment SendEmailStep files</constraint>
+    <constraint source="project">Caller within LegalWorkspace must import from `@spaarke/ui-components` public surface — no relative cross-package source-path import</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load spec.md FR-25, CLAUDE.md empirical findings (DELTA #9), plan.md Wave 5.</step>
+    <step order="2">Re-verify only ONE email-step fork exists in LegalWorkspace via grep: `src/solutions/LegalWorkspace/src/components/**/SendEmailStep.tsx` — confirm only `CreateMatter/SendEmailStep.tsx` is returned.</step>
+    <step order="3">Find callers of the LegalWorkspace local SendEmailStep via grep on `from './SendEmailStep'` and similar relative imports inside `src/solutions/LegalWorkspace/src/components/CreateMatter/`.</step>
+    <step order="4">Update each caller to import `SendEmailStep` from `@spaarke/ui-components` instead.</step>
+    <step order="5">Delete the fork file `src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx`.</step>
+    <step order="6">Run `npm run build` (or solution-specific build) in `src/solutions/LegalWorkspace/` to verify no orphan imports remain.</step>
+    <step order="7">Run any unit tests in LegalWorkspace CreateMatter that reference the deleted file; update or delete obsolete test files.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 074 ✅ completed.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify single-fork scope + find callers</tool>
+    <tool name="edit">Update caller import lines</tool>
+    <tool name="bash">Delete file via `rm`, run LegalWorkspace build + tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx (DELETED)</output>
+    <output type="code">LegalWorkspace CreateMatter caller(s) (UPDATED — import from @spaarke/ui-components)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx` does not exist.</criterion>
+    <criterion testable="true">Caller(s) inside `LegalWorkspace/src/components/CreateMatter/` import `SendEmailStep` from `@spaarke/ui-components` (no relative source-path cross-package import).</criterion>
+    <criterion testable="true">LegalWorkspace solution builds without errors.</criterion>
+    <criterion testable="true">Unit tests in CreateMatter pass (or are appropriately removed if they tested the deleted file's internals).</criterion>
+    <criterion testable="true">Repo-wide grep `src/solutions/LegalWorkspace/src/components/**/SendEmailStep.tsx` returns ZERO results.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Single-PR scope (Owner Clarification): consolidated Wave 5 PR (task 076).
+
+    Parallel group K (with 072, 073, 075).
+
+    Empirical (CLAUDE.md DELTA #9): LegalWorkspace's CreateProject/CreateEvent/CreateTodo/CreateWorkAssignment dirs exist but have NO SendEmailStep file — no deletes needed for those 4. Spec FR-25's "5 wizards" phrasing is narrowed to 1 file by empirical reality. Reflect this delta in the PR description for task 076.
+
+    LegalWorkspace SummarizeFiles fork (Wave 4 task ~061) and FilePreviewDialog migration (Wave 3 task ~051) are OUT OF SCOPE for this task — they are handled in their own waves.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>`. Apply STANDARD rigor per `<rigor-hint>`. Quality gates Step 9.5 SKIPPED for STANDARD. Verify the delete is clean and no orphan imports remain.
+    </protocol>
+  </execution>
+</task>

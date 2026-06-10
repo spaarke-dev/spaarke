@@ -1,0 +1,116 @@
+<task id="073" project="email-communication-solution-r3">
+  <metadata>
+    <title>Resolve WorkAssignmentWizardDialog.tsx cross-package source-path import to @spaarke/ui-components</title>
+    <phase>Wave 5 — 5-Wizard Migration + DocumentEmailWizard Fix + Forks</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>071</dependencies>
+    <blocks>076</blocks>
+    <tags>react, frontend, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Single-line import fix; no new logic; STANDARD rigor sufficient per CLAUDE.md decision tree (file edit + constraints-based, but not architectural)</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `WorkAssignmentWizardDialog.tsx` only — different file from 072 (CreateMatter step), 074 (LegalWorkspace delete), 075 (DocumentEmailWizard). All run concurrently after 071.</parallel-reason>
+    <fr-refs>FR-25</fr-refs>
+  </metadata>
+
+  <prompt>
+    Per CLAUDE.md empirical finding (DELTA #8), `WorkAssignmentWizardDialog.tsx:31` contains a cross-package source-path import:
+
+    ```
+    import { SendEmailStep } from '../CreateRecordWizard/steps/SendEmailStep';
+    ```
+
+    This bypasses the package's public surface and reaches into a sibling source folder by relative path. Now that task 071 has migrated `CreateRecordWizard/steps/SendEmailStep.tsx` to wrap the canonical `<SendEmailStep />` from `@spaarke/ui-components`, replace the relative import with the canonical package import:
+
+    ```
+    import { SendEmailStep } from '@spaarke/ui-components';
+    ```
+
+    Verify line 31 is still the correct location (may have drifted from task 071's edits — re-grep). Confirm the canonical export name matches (`SendEmailStep`); adjust the import if the package surface uses a different name. Do not change any other lines.
+
+    NOTE per Owner Clarification: All Wave 5 changes ship as a single PR (task 076). Do not push as standalone.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer. Familiar with `@spaarke/ui-components` public surface (`src/index.ts` barrel) and the WorkAssignmentWizardDialog component.
+  </role>
+
+  <goal>
+    `WorkAssignmentWizardDialog.tsx` imports `SendEmailStep` from `@spaarke/ui-components` (the public surface), not from a relative source path. The build succeeds; behavior is unchanged.
+  </goal>
+
+  <context>
+    <background>
+      The cross-package source-path import is a fragmentation artifact: prior to R3, the canonical wrapper did not exist, so the dialog reached into a sibling source folder to reuse the wizard step. Now that task 071 makes the shared file consume the canonical wrapper, the dialog should route through the public package surface.
+
+      This is a one-line fix but a meaningful architectural signal — it closes the last cross-package source-path import in the email-send surface (per spec FR-25 fork retirement intent).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkAssignmentWizardDialog/WorkAssignmentWizardDialog.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">Wizard surfaces consume the canonical `<SendEmailStep />` via the public package surface</constraint>
+    <constraint source="project">No cross-package source-path imports in `@spaarke/ui-components` consumers — use the barrel export</constraint>
+    <constraint source="project">Only the import line changes; behavior is unchanged</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load spec.md FR-25, CLAUDE.md empirical findings (DELTA #8), plan.md Wave 5.</step>
+    <step order="2">Re-verify the import location in `WorkAssignmentWizardDialog.tsx` via grep — line number may have drifted from task 071. Expected pattern: `from '../CreateRecordWizard/steps/SendEmailStep'`.</step>
+    <step order="3">Confirm `SendEmailStep` is exported from `@spaarke/ui-components` public surface (`src/index.ts`); if not, note that the barrel may need an addition. The canonical name from task 071 may differ slightly — match exactly.</step>
+    <step order="4">Edit the import statement: replace `'../CreateRecordWizard/steps/SendEmailStep'` (relative) with `'@spaarke/ui-components'` (package). Match the export name to whatever the barrel exposes.</step>
+    <step order="5">Run `npm run lint` + `npm run build` in `src/client/shared/Spaarke.UI.Components/`.</step>
+    <step order="6">Run unit tests for WorkAssignmentWizardDialog.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: mark task 073 ✅ completed.</step>
+    <step order="8">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Re-verify import location + confirm package export name</tool>
+    <tool name="read">Inspect `index.ts` barrel</tool>
+    <tool name="edit">Replace import line</tool>
+    <tool name="bash">`npm run lint`, `npm run build`, `npm test`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkAssignmentWizardDialog/WorkAssignmentWizardDialog.tsx (UPDATED — import line)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Import line uses `@spaarke/ui-components` not a relative path to `../CreateRecordWizard/...`.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` succeed.</criterion>
+    <criterion testable="true">WorkAssignmentWizardDialog unit tests pass.</criterion>
+    <criterion testable="true">No other lines in the file change.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Single-PR scope (Owner Clarification): consolidated Wave 5 PR (task 076).
+
+    Parallel group K (with 072, 074, 075).
+
+    Empirical: CLAUDE.md DELTA #8 confirmed import location at line 31 at pipeline pre-flight (2026-06-05). Task 071's earlier edit on the shared step file does NOT modify this dialog file. If task 071's barrel/exports changed the canonical name, adjust the import in step 4 accordingly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>`. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 SKIPPED for STANDARD. Verify the import edit is minimal and the build is clean.
+    </protocol>
+  </execution>
+</task>

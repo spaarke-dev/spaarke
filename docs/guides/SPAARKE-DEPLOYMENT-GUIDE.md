@@ -725,7 +725,7 @@ Tier 1: SpaarkeCore           (base entities, option sets, security roles)
 Tier 2: SpaarkeWebResources   (JS, icons)
 Tier 3: Feature solutions      (AnalysisBuilder, CalendarSidePane, DocumentUploadWizard,
                                 EventCommands, EventDetailSidePane, EventsPage,
-                                LegalWorkspace, TodoDetailSidePane)
+                                LegalWorkspace)
 ```
 
 ### 7.5 Import Solutions

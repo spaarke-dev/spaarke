@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Define `MicrosoftToDoSync` user-preference schema on `sprk_userpreference`</title>
+    <phase>Phase 6: Graph Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>063, 065, 068</blocks>
+    <tags>dataverse, fields, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema convention work — adds a preference type row + documents its JSON shape. Tags include `dataverse`. STANDARD rigor.</rigor-reason>
+    <parallel-group>P6-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Define and document the `MicrosoftToDoSync` user-preference type on the existing `sprk_userpreference` entity. The preference value JSON stores: `listId` (the Spaarke list created on opt-in), `subscriptionId` (Graph change-notification subscription id), `expiresUtc` (subscription expiry), `initialBackfillCompletedUtc` (initial-backfill checkpoint). One row per opted-in user.
+  </prompt>
+
+  <role>Spaarke Dataverse data developer.</role>
+
+  <goal>`MicrosoftToDoSync` is registered as a valid `sprk_userpreference` type. Schema for the JSON value is documented. No actual rows created in this task — provisioning happens at opt-in time (Phase 6 / 7).</goal>
+
+  <context>
+    <background>Per FR-19, on first opt-in the BFF provisions a "Spaarke" list under `/me/todo/lists/` and persists the list id + subscription metadata on a user-pref row. This task defines the schema; the provisioner service uses it.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_userpreference.md</file>
+      <file>projects/smart-todo-decoupling-r3/notes/todosync-userpref-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-19">User-pref row stores listId + subscriptionId + expiresUtc; reused on subsequent opt-in (no duplicate list).</constraint>
+    <constraint source="FR-20">`initialBackfillCompletedUtc` required for resumability.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect `sprk_userpreference` existing schema. Identify the preference-type field (likely a string/optionset).</step>
+    <step order="2">If preference-type is an optionset, add `MicrosoftToDoSync` as a new option value. If preference-type is a string, document the magic string `"MicrosoftToDoSync"` as the type marker.</step>
+    <step order="3">Author the JSON-value schema documentation in `projects/smart-todo-decoupling-r3/notes/todosync-userpref-schema.md`:</step>
+    <step order="4">JSON shape: `{ "listId": "AAQkADAw...", "subscriptionId": "00000000-...", "expiresUtc": "2026-06-08T10:00:00Z", "initialBackfillCompletedUtc": "2026-06-07T15:30:00Z" }`.</step>
+    <step order="5">If schema requires solution changes (optionset value add), pack + import; verify.</step>
+    <step order="6">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-mcp">Schema describe + (if needed) optionset update</tool>
+    <tool name="pac">Solution pack/import</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">`projects/smart-todo-decoupling-r3/notes/todosync-userpref-schema.md`</output>
+    <output type="schema">`sprk_userpreference` preference-type registration for `MicrosoftToDoSync` (if optionset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`MicrosoftToDoSync` is a valid preference-type value on `sprk_userpreference`.</criterion>
+    <criterion testable="true">JSON-value schema documented with all four fields.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

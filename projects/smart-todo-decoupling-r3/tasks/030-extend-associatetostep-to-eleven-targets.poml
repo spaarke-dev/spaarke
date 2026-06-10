@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Extend `AssociateToStep` to support all eleven regarding-target entity types</title>
+    <phase>Phase 4: CreateTodo Wizard + AssociateToStep Extension</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>002, 010, 012</dependencies>
+    <blocks>022, 031, 032, 040, 070</blocks>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies shared-lib `.tsx`; touches `PolymorphicResolverService` consumer; FULL rigor.</rigor-reason>
+    <parallel-group>P4-W1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocks 022 + 031 + 032 + 040 + 070 — every regarding-aware UI depends on this extension.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `AssociateToStep` shared component to accept a configurable list of eleven entity targets: Matter, Project, Event, Communication, WorkAssignment, Invoice, Budget, Analysis, Organization, Contact (`sprk_contact` OOB), Document. Each target must launch its respective record-lookup dialog; selection returns the entity type + record id + display name to the caller for `PolymorphicResolverService.applyResolverFields`.
+  </prompt>
+
+  <role>Spaarke shared-UI developer with Dataverse lookup picker experience.</role>
+
+  <goal>`AssociateToStep` renders all eleven entity-type options in the picker. Record-lookup dialog launches correctly for each. Selection returns triple `(entityType, recordId, recordName)`. Existing consumers (any) continue to work.</goal>
+
+  <constraints>
+    <constraint source="FR-07">All eleven types selectable; record-lookup dialog launches for each; selection returns correct entity type + record id + display name.</constraint>
+    <constraint source="ADR-024">Component is a pure UI shell; the caller invokes `applyResolverFields` with the returned triple.</constraint>
+    <constraint source="NFR-01">Fluent v9 only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing `AssociateToStep`. Identify the current supported-targets list and the launch-lookup mechanism.</step>
+    <step order="2">Extend the targets list to eleven entries, each with: entity logical name, display label, default view (use OOB default unless specified), icon (optional).</step>
+    <step order="3">Verify the lookup dialog supports each entity (some OOB entities like `sprk_contact` may need different handling — check existing `LookupBuilder` or PCF lookup integration).</step>
+    <step order="4">Add unit tests: render component → all 11 options present; click each → lookup dialog opens with correct entity; selection returns correct triple.</step>
+    <step order="5">Run `npm run build` + `npm test`. Fluent v9 lint pass.</step>
+    <step order="6">Bump `@spaarke/ui-components` version (minor — additive change to existing component).</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx` (extended)</output>
+    <output type="test">Unit tests covering all 11 entity types</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 11 entity-type options render in the picker.</criterion>
+    <criterion testable="true">Lookup dialog launches correctly for each.</criterion>
+    <criterion testable="true">Selection returns `(entityType, recordId, recordName)` triple.</criterion>
+    <criterion testable="true">Fluent v9 lint passes.</criterion>
+    <criterion testable="true">Existing callers (if any) still work.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>
