@@ -249,6 +249,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
+                It.IsAny<float?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmResponse);
 
@@ -297,7 +298,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmResponse);
 
         var handler = CreateHandler();
@@ -336,7 +337,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmResponse);
 
         var handler = CreateHandler();
@@ -375,7 +376,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmResponse);
 
         var handler = CreateHandler();
@@ -426,7 +427,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmResponse);
 
         var handler = CreateHandler();
@@ -470,7 +471,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmResponse);
 
         var handler = CreateHandler();
@@ -514,7 +515,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
                 llmCallCount++;
@@ -561,7 +562,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
                 llmCallCount++;
@@ -595,7 +596,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("{ this is not valid json");
 
         var handler = CreateHandler();
@@ -662,7 +663,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmResponse);
 
         var handler = CreateHandler();
@@ -706,7 +707,7 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
         OpenAiClientMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmResponse);
 
         var handler = CreateHandler();

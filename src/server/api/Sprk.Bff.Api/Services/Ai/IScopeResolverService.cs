@@ -622,6 +622,34 @@ public record AnalysisAction
     /// Original scope ID when created via "Save As".
     /// </summary>
     public Guid? BasedOnId { get; init; }
+
+    /// <summary>
+    /// Per-action temperature override for AI model calls.
+    /// Maps to sprk_analysisaction.sprk_temperature (Decimal, 0.0–2.0).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in Wave B-G9c1 (Hotfix B6) — see
+    /// <c>projects/spaarke-ai-platform-unification-r6/notes/wave-b-g9c-medium-bugs.md</c>
+    /// section B6 for root-cause analysis. Resolves non-determinism where
+    /// <see cref="IOpenAiClient.GetStructuredCompletionRawAsync"/> was using
+    /// the global <c>DocumentIntelligenceOptions.Temperature</c> (default 0.3)
+    /// while its sibling structured methods pin Temperature=0.
+    /// </para>
+    /// <para>
+    /// <strong>Null semantics</strong>: when null (column missing or NULL on the row),
+    /// downstream handlers MUST use a deterministic default of <c>0.0</c>.
+    /// This matches the sibling structured methods'
+    /// (<c>GetStructuredCompletionAsync&lt;T&gt;</c>, <c>StreamStructuredCompletionAsync</c>)
+    /// hardcoded Temperature=0 behavior.
+    /// </para>
+    /// <para>
+    /// <strong>Range</strong>: 0.0 (fully deterministic) to 2.0 (Azure OpenAI valid range
+    /// — though values &gt; 1.0 are rarely useful for structured output).
+    /// Schema enforces RequiredLevel=None (nullable) with Precision=1.
+    /// </para>
+    /// </remarks>
+    public decimal? Temperature { get; init; }
 }
 
 /// <summary>

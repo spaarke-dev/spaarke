@@ -266,6 +266,7 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
             tool,
             context.TenantId,
             invocationId: context.AnalysisId,
+            temperature: (float)context.Temperature,
             cancellationToken);
     }
 
@@ -334,6 +335,7 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
             tool,
             context.TenantId,
             invocationId: context.ChatSessionId,
+            temperature: (float)context.Temperature,
             cancellationToken);
     }
 
@@ -346,6 +348,7 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
         AnalysisTool tool,
         string? tenantId,
         Guid invocationId,
+        float temperature,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -401,6 +404,7 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
                         schemaName: "InvoicePayload",
                         model: resolvedModel,
                         maxOutputTokens: null,
+                        temperature: temperature,
                         cancellationToken: cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)

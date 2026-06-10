@@ -349,7 +349,7 @@ public sealed class InvoiceExtractionToolHandlerTests : TypedToolHandlerTestFixt
         var llmCalls = 0;
         mock.Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => { Interlocked.Increment(ref llmCalls); return payload; });
 
         var cache = CreateCache();
@@ -376,7 +376,7 @@ public sealed class InvoiceExtractionToolHandlerTests : TypedToolHandlerTestFixt
         var mock = new Mock<IOpenAiClient>();
         mock.Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("{ this is not json");
 
         var handler = BuildHandlerWithMock(mock.Object, CreateCache());
@@ -538,7 +538,7 @@ public sealed class InvoiceExtractionToolHandlerTests : TypedToolHandlerTestFixt
         var mock = new Mock<IOpenAiClient>();
         mock.Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmReturnJson);
 
         var handler = BuildHandlerWithMock(mock.Object, CreateCache());

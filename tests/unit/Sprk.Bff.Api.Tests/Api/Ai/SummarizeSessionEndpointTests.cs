@@ -646,7 +646,7 @@ public sealed class StubOpenAiClient : IOpenAiClient
         => throw new NotSupportedException("Not used by endpoint tests.");
     public Task<T> GetStructuredCompletionAsync<T>(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, BinaryData jsonSchema, string schemaName, string deploymentName, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Not used by endpoint tests.");
-    public Task<string> GetStructuredCompletionRawAsync(string prompt, BinaryData jsonSchema, string schemaName, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
+    public Task<string> GetStructuredCompletionRawAsync(string prompt, BinaryData jsonSchema, string schemaName, string? model = null, int? maxOutputTokens = null, float? temperature = null, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Not used by endpoint tests.");
 }
 

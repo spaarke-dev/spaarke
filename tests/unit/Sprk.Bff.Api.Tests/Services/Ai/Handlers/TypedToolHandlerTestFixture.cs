@@ -119,9 +119,10 @@ public abstract class TypedToolHandlerTestFixture
         string? extractedText = null,
         string? tenantId = null,
         string? actionSystemPrompt = null,
-        Guid? documentId = null)
+        Guid? documentId = null,
+        double? temperature = null)
     {
-        return new ToolExecutionContext
+        var ctx = new ToolExecutionContext
         {
             AnalysisId = Guid.NewGuid(),
             TenantId = tenantId ?? DefaultTenantId,
@@ -135,6 +136,11 @@ public abstract class TypedToolHandlerTestFixture
                 ContentType = "application/pdf"
             }
         };
+        // Hotfix B-G9c1 (B6): allow per-test temperature override so handler tests can
+        // assert the value flows through to IOpenAiClient.GetStructuredCompletionRawAsync.
+        return temperature.HasValue
+            ? ctx with { Temperature = temperature.Value }
+            : ctx;
     }
 
     /// <summary>

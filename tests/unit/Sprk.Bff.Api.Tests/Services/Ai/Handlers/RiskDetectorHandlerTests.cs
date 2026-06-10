@@ -599,6 +599,7 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
+                It.IsAny<float?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("{not valid json");
 
@@ -641,6 +642,7 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
+                It.IsAny<float?>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("upstream timeout"));
 
@@ -691,6 +693,7 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
             It.IsAny<string>(),
             It.IsAny<string?>(),
             It.IsAny<int?>(),
+            It.IsAny<float?>(),
             It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -723,6 +726,7 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
             It.IsAny<string>(),
             It.IsAny<string?>(),
             It.IsAny<int?>(),
+            It.IsAny<float?>(),
             It.IsAny<CancellationToken>()),
             Times.Exactly(2));
 
@@ -887,6 +891,7 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
+                It.IsAny<float?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(responseJson);
     }

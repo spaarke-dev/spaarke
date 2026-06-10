@@ -1020,13 +1020,44 @@ public class SprkChatAgentFactory
         //   accessible playbook list rendered into the tool description at request time, so
         //   it can correctly choose the chat-summarize playbook GUID without prior knowledge.
         //
-        // Convergence preserved:
-        //   The chat /summarize path (POST /api/ai/chat/sessions/{id}/summarize) continues
-        //   to flow through SessionSummarizeOrchestrator → IPlaybookExecutionEngine.ExecuteChatSummarizeAsync
-        //   (task 025). The tool-call path now flows through InvokePlaybookHandler →
-        //   IInvokePlaybookAi → IPlaybookOrchestrationService. Both end at the same engine
-        //   methods. The session-files Azure Search filter, Structured Outputs streaming,
-        //   and per-file highlights are preserved unchanged inside the engine.
+        // Engine divergence (documented; intentional post R6 Hotfix Wave B-G9c3):
+        //   The two server-side entry points for chat-driven Summarize use DIFFERENT engine
+        //   methods and produce materially different output:
+        //
+        //   1. Direct endpoint: POST /api/ai/chat/sessions/{id}/summarize →
+        //      SessionSummarizeOrchestrator.SummarizeSessionFilesAsync →
+        //      IPlaybookExecutionEngine.ExecuteChatSummarizeAsync (R6 task 025). Uses
+        //      Temperature=0 (StreamStructuredCompletionAsync, OpenAiClient.cs line 816),
+        //      the SUM-CHAT@v1 sprk_systemprompt loaded from sprk_analysisaction, and the
+        //      DocumentSummary structured-output schema (tldr / summary / keywords /
+        //      entities). Streams token-by-token as FieldDelta AnalysisChunk events. Intended
+        //      for deterministic per-file summarization (e.g. the Document Profile context's
+        //      "Summarize this only" affordance via FilePreviewContextWidget).
+        //
+        //   2. Tool-call path (InvokePlaybookHandler): SprkChatAgent (LLM) calls
+        //      invoke_playbook(playbookId, parameters) → InvokePlaybookHandler.ExecuteChatAsync
+        //      → IInvokePlaybookAi.InvokePlaybookAsync → IPlaybookOrchestrationService.ExecuteAsync
+        //      (NOT ExecuteChatSummarizeAsync). Uses Temperature=0.3 (per-handler
+        //      GetStructuredCompletionRawAsync / NodeExecutionContext default), the
+        //      PromptSchemaRenderer-rendered prompts with template parameters
+        //      (`includeSections`, `usePlainLanguage`, etc.), and per-handler schemas. Non-
+        //      streaming whole-response delivery. Produces a richer, conversational output.
+        //
+        // Slash → NL rewire (R6 Hotfix Wave B-G9c3, 2026-06-10):
+        //   The previous version of this comment claimed "Both end at the same engine methods"
+        //   — that was documentation drift; the engine methods (ExecuteChatSummarizeAsync vs
+        //   ExecuteAsync) and resulting LLM outputs are genuinely different. To make the
+        //   Assistant chat experience consistent, the /summarize slash command in
+        //   ConversationPane.handleBeforeSendMessage is now suppressed from firing
+        //   executeSummarizeIntent (which drives the direct endpoint). Slash now flows purely
+        //   through SprkChatAgent → invoke_playbook → InvokePlaybookHandler →
+        //   IPlaybookOrchestrationService.ExecuteAsync, matching natural-language
+        //   "summarize this document" output. The direct endpoint
+        //   (/api/ai/chat/sessions/{id}/summarize → ExecuteChatSummarizeAsync) is still
+        //   exposed for the Document Profile context's "Summarize this only" per-file
+        //   affordance (FilePreviewContextWidget) and the R5 task 036 deterministic NL pattern
+        //   + button-id dispatches in the chat pane (where the operator-UX contract requires
+        //   the structured streaming widget).
 
         // --- InvokeInsightsQueryTool ---
         // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): replaced by the

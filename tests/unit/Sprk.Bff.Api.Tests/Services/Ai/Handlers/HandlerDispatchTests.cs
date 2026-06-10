@@ -706,6 +706,7 @@ public sealed class HandlerDispatchTests : TypedToolHandlerTestFixture
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
+                It.IsAny<float?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(responseJson);
     }

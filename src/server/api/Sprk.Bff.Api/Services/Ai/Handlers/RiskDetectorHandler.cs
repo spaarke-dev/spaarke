@@ -300,6 +300,7 @@ public sealed class RiskDetectorHandler : IToolHandler
                 tool,
                 config,
                 tenantId: context.TenantId,
+                temperature: (float)context.Temperature,
                 startedAt: startedAt,
                 stopwatch: stopwatch,
                 correlationLogId: context.AnalysisId.ToString(),
@@ -362,6 +363,7 @@ public sealed class RiskDetectorHandler : IToolHandler
                 tool,
                 config,
                 tenantId: context.TenantId,
+                temperature: (float)context.Temperature,
                 startedAt: startedAt,
                 stopwatch: stopwatch,
                 correlationLogId: $"session={context.ChatSessionId},decision={context.DecisionId}",
@@ -401,6 +403,7 @@ public sealed class RiskDetectorHandler : IToolHandler
         AnalysisTool tool,
         RiskDetectorConfig config,
         string tenantId,
+        float temperature,
         DateTimeOffset startedAt,
         Stopwatch stopwatch,
         string correlationLogId,
@@ -458,6 +461,7 @@ public sealed class RiskDetectorHandler : IToolHandler
             SchemaName,
             model: actionModel,
             maxOutputTokens: null,
+            temperature: temperature,
             cancellationToken: cancellationToken);
 
         // Parse LLM response — schema-constrained, but defensively handle parse error

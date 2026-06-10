@@ -97,14 +97,29 @@ public class InvocationContextTests
     }
 
     [Fact]
-    public void ToolExecutionContext_DefaultMaxTokensAndTemperature_MatchPreR6Contract()
+    public void ToolExecutionContext_DefaultMaxTokens_MatchesPreR6Contract()
     {
         // Act
         var ctx = BuildPlaybookContext();
 
-        // Assert — defaults preserved per NFR-08 (playbook semantics unchanged)
+        // Assert — MaxTokens default preserved per NFR-08 (playbook semantics unchanged).
         ctx.MaxTokens.Should().Be(4096);
-        ctx.Temperature.Should().Be(0.3);
+    }
+
+    [Fact]
+    public void ToolExecutionContext_DefaultTemperature_IsZero_PostHotfixBG9c1()
+    {
+        // Act
+        var ctx = BuildPlaybookContext();
+
+        // Assert — Hotfix Wave B-G9c1 (B6) lowered the default Temperature from 0.3 to 0.0
+        // to match sibling structured methods (GetStructuredCompletionAsync<T>,
+        // StreamStructuredCompletionAsync) which hardcode Temperature=0 for deterministic
+        // JSON-shaped output. The per-action override flows through
+        // sprk_analysisaction.sprk_temperature when set. NULL on the column = use this
+        // 0.0 default. See projects/spaarke-ai-platform-unification-r6/notes/wave-b-g9c-medium-bugs.md
+        // section B6.
+        ctx.Temperature.Should().Be(0.0);
     }
 
     // ------------------------------------------------------------------

@@ -238,6 +238,7 @@ public sealed class EntityExtractorHandler : IToolHandler
                 tool,
                 config,
                 tenantId: context.TenantId,
+                temperature: (float)context.Temperature,
                 startedAt: startedAt,
                 stopwatch: stopwatch,
                 correlationLogId: context.AnalysisId.ToString(),
@@ -300,6 +301,7 @@ public sealed class EntityExtractorHandler : IToolHandler
                 tool,
                 config,
                 tenantId: context.TenantId,
+                temperature: (float)context.Temperature,
                 startedAt: startedAt,
                 stopwatch: stopwatch,
                 correlationLogId: $"session={context.ChatSessionId},decision={context.DecisionId}",
@@ -339,6 +341,7 @@ public sealed class EntityExtractorHandler : IToolHandler
         AnalysisTool tool,
         EntityExtractorConfig config,
         string tenantId,
+        float temperature,
         DateTimeOffset startedAt,
         Stopwatch stopwatch,
         string correlationLogId,
@@ -391,6 +394,7 @@ public sealed class EntityExtractorHandler : IToolHandler
             SchemaName,
             model: actionModel,
             maxOutputTokens: null,
+            temperature: temperature,
             cancellationToken: cancellationToken);
 
         // Parse LLM response — schema-constrained, but defensively handle parse error

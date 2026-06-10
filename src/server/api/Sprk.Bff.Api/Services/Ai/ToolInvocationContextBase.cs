@@ -66,10 +66,26 @@ public abstract record ToolInvocationContextBase
     public int MaxTokens { get; init; } = 4096;
 
     /// <summary>
-    /// Temperature setting for AI model calls (0.0 - 1.0).
+    /// Temperature setting for AI model calls (0.0 - 2.0).
     /// Lower values are more deterministic.
     /// </summary>
-    public double Temperature { get; init; } = 0.3;
+    /// <remarks>
+    /// <para>
+    /// Default value changed from 0.3 to 0.0 in Wave B-G9c1 (Hotfix B6) to align with sibling
+    /// structured methods (<c>GetStructuredCompletionAsync&lt;T&gt;</c>,
+    /// <c>StreamStructuredCompletionAsync</c>) which hardcode Temperature=0 for deterministic
+    /// JSON-shaped output. See
+    /// <c>projects/spaarke-ai-platform-unification-r6/notes/wave-b-g9c-medium-bugs.md</c>
+    /// section B6 for root-cause analysis.
+    /// </para>
+    /// <para>
+    /// Per-action overrides flow through the <c>sprk_analysisaction.sprk_temperature</c> column
+    /// (read by <see cref="AnalysisActionService"/>) → <see cref="AnalysisAction.Temperature"/>
+    /// → <see cref="Sprk.Bff.Api.Services.Ai.Nodes.AiAnalysisNodeExecutor"/> which sets
+    /// this property when building <see cref="ToolExecutionContext"/>.
+    /// </para>
+    /// </remarks>
+    public double Temperature { get; init; } = 0.0;
 
     /// <summary>
     /// AI model deployment ID override for this invocation.
