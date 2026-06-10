@@ -264,6 +264,21 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalM),
   },
+  // ai-spaarke-ai-workspace-UI-r1 iter 2 round 8 (2026-06-09):
+  // Override FluentDataGrid's hardcoded `min-width: fit-content` inline style.
+  // The Fluent v9 DataGrid sets that inline on its <div role="grid"> root —
+  // confirmed via DOM inspector — which forces the table to expand to its
+  // column-sum width regardless of parent constraints. Without overriding it,
+  // every min-width:0 fix in the ancestor chain (rounds 6+7) was undone at
+  // the table itself. CSS class with `!important` beats inline style; we use
+  // Griffel's child-selector escape so the class targets the FluentDataGrid
+  // inside our scroll container precisely.
+  gridTableOverride: {
+    '& > [role="grid"]': {
+      minWidth: '0 !important',
+      maxWidth: '100% !important',
+    },
+  },
   emptyState: {
     // Sits inside gridScroll BELOW the (always-rendered) FluentDataGrid header
     // row so the column-header chevron menus (Filter by / Sort) stay reachable
@@ -1190,7 +1205,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
            * row instead.
            */}
 
-          <div className={styles.gridScroll} ref={scrollContainerRef}>
+          <div className={mergeClasses(styles.gridScroll, styles.gridTableOverride)} ref={scrollContainerRef}>
             {/*
              * The FluentDataGrid is ALWAYS rendered (even when there are zero
              * rows) so the column-header row — which hosts the chevron menus
