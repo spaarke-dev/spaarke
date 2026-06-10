@@ -3,7 +3,7 @@
   <metadata>
     <title>PCF v1.1.75: drop bound `searchIndexName`; add `resolveSearchIndexNameAsync` via `context.webAPI`; 5-location version bump</title>
     <phase>G: Lookup-driven multi-index</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3-4</estimated-hours>
     <dependencies>100</dependencies>
     <blocks>107</blocks>

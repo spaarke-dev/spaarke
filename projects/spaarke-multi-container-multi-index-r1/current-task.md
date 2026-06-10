@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-06-08 (active: scope extension — upload-indexing centralization)
+> **Last Updated**: 2026-06-10 (task 102 complete; next: 103 BFF tests + deploy + App Insights verify)
 
 ---
 
@@ -8,10 +8,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Upload-indexing centralization — debugging the FINAL gap: helper not running despite correct deploy |
-| **Active Phase** | DIAGNOSTIC — see [`notes/handoffs/RESTART-helper-not-running-mystery.md`](./notes/handoffs/RESTART-helper-not-running-mystery.md) |
-| **Status** | Mystery — code is correct, deploy is current, but helper invocation between OBO upload success and HTTP 200 response is missing from App Insights traces |
-| **Next Action** | Add diagnostic MARKER-A/B/C/D log lines around the if-block in OBOEndpoints.cs to determine where execution diverges. See restart-point doc Step 2. |
+| **Task** | 103 — BFF tests + publish + deploy; App Insights verification of both lookup-first and text-fallback paths |
+| **Active Phase** | Phase G — Lookup-driven multi-index |
+| **Status** | not-started |
+| **Next Action** | Begin Step 1 of task 103 (POML: `tasks/103-bff-tests-deploy-app-insights.poml` if it exists; otherwise the next 🔲 in TASK-INDEX is the canonical pointer) |
+| **Previous Task** | 102 ✅ complete — placement justification at notes/phase-g/placement-justification-task102.md |
 
 ### Resume protocol (after compaction or new session)
 

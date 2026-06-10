@@ -1,10 +1,11 @@
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
-/// Server-side resolver for the per-record <c>sprk_searchindexname</c> value used by background
+/// Server-side resolver for the per-record AI Search index value used by background
 /// indexing jobs. Mirrors the wizard-side <c>resolveSearchIndexNameForRecord</c> helper from
 /// <c>DocumentUploadWizard/AssociateToStep</c> (FR-WIZ-06) — same 3-step chain, same fall-through
 /// semantics — but runs server-side so the Email-to-Document and Office Add-in routes (which do
@@ -25,14 +26,34 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </para>
 /// <list type="number">
 ///   <item><description>If <paramref name="documentId"/> is provided, look up
-///     <c>sprk_document.sprk_searchindexname</c>. Non-empty wins.</description></item>
+///     <c>sprk_document.sprk_ai_search_index</c> (lookup → <c>sprk_aisearchindex.sprk_searchindexname</c>).
+///     Non-empty wins.</description></item>
 ///   <item><description>If <paramref name="parentEntityType"/> and <paramref name="parentEntityId"/>
-///     are provided, look up the parent record's <c>sprk_searchindexname</c>. Non-empty wins.</description></item>
+///     are provided, look up the parent record's <c>sprk_ai_search_index</c> lookup. Non-empty wins.</description></item>
 ///   <item><description>From the parent's owning Business Unit (<c>_owningbusinessunit_value</c>),
-///     look up <c>businessunit.sprk_searchindexname</c>. Non-empty wins.</description></item>
+///     look up <c>businessunit.sprk_ai_search_index</c>. Non-empty wins.</description></item>
 ///   <item><description>Return <c>null</c> → caller falls through to the BFF tenant-default chain
 ///     (<see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, CancellationToken)"/>).</description></item>
 /// </list>
+/// <para>
+/// Phase G (2026-06-10, task 102): each step now executes a SINGLE FetchXml query with a
+/// <c>link-entity name='sprk_aisearchindex'</c> outer-join projecting
+/// <c>idx.sprk_searchindexname</c>. This replaces the legacy two-step pattern
+/// (read text column → if empty, walk the lookup) with a single round-trip that returns BOTH the
+/// linked-index name AND the deprecated text-column value. The text-column path is RETAINED as a
+/// migration-safety fallback: if the lookup is null/empty but the legacy text column is set, the
+/// resolver returns the text value and logs a structured WARNING (<c>PhaseG.TextFallback</c>) so
+/// App Insights can confirm migration progress (task 110 removes this fallback after a 24–48 hr
+/// soak with zero text-fallback hits).
+/// </para>
+/// <para>
+/// <b>🚨 Lookup column name</b>: the actual schema name on the 7 source entities is
+/// <c>sprk_ai_search_index</c> (derived by Dataverse from the display name "AI Search Index"
+/// + the <c>sprk_</c> publisher prefix + lowercase + underscores). The primary key of the catalog
+/// table <c>sprk_aisearchindex</c> stays as <c>sprk_aisearchindexid</c>. Both are honored in the
+/// FetchXml below (<c>from='sprk_aisearchindexid' to='sprk_ai_search_index'</c>). See Phase G
+/// spec §3.1.
+/// </para>
 /// <para>
 /// Reuses the existing <see cref="IGenericEntityService"/> for Dataverse retrieves (no new
 /// Dataverse client is introduced — ADR-010 DI minimalism). Each step is wrapped in a
@@ -55,7 +76,7 @@ public interface ISearchIndexNameResolver
     /// </param>
     /// <param name="parentEntityId">Optional parent record id (GUID string).</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The resolved <c>sprk_searchindexname</c>, or <c>null</c> when no value is found.</returns>
+    /// <returns>The resolved AI Search index name, or <c>null</c> when no value is found.</returns>
     Task<string?> ResolveAsync(
         string? documentId,
         string? parentEntityType,
@@ -66,8 +87,19 @@ public interface ISearchIndexNameResolver
 /// <inheritdoc cref="ISearchIndexNameResolver"/>
 public sealed class SearchIndexNameResolver : ISearchIndexNameResolver
 {
-    private const string SearchIndexNameAttribute = "sprk_searchindexname";
+    // Source-entity columns
+    private const string LookupColumn = "sprk_ai_search_index";              // lookup on source entities (Matter/Project/Doc/...)
+    private const string LegacyTextColumn = "sprk_searchindexname";          // deprecated text column on source entities
     private const string OwningBusinessUnitAttribute = "owningbusinessunit";
+
+    // Catalog table (target of the lookup)
+    private const string CatalogEntity = "sprk_aisearchindex";
+    private const string CatalogPrimaryKey = "sprk_aisearchindexid";         // PK of catalog table — stays as-is
+    private const string CatalogNameColumn = "sprk_searchindexname";         // physical Azure AI Search index name
+    private const string AliasedIndexNameAttribute = "idx.sprk_searchindexname";
+
+    // Source entities for each step
+    private const string DocumentEntity = "sprk_document";
     private const string BusinessUnitEntity = "businessunit";
 
     private readonly IGenericEntityService _entityService;
@@ -93,13 +125,7 @@ public sealed class SearchIndexNameResolver : ISearchIndexNameResolver
         {
             try
             {
-                var doc = await _entityService.RetrieveAsync(
-                    "sprk_document",
-                    docGuid,
-                    new[] { SearchIndexNameAttribute },
-                    ct);
-
-                var docValue = GetStringAttribute(doc, SearchIndexNameAttribute);
+                var docValue = await ResolveFromEntityAsync(DocumentEntity, docGuid, ct);
                 if (!string.IsNullOrWhiteSpace(docValue))
                 {
                     _logger.LogDebug(
@@ -124,16 +150,12 @@ public sealed class SearchIndexNameResolver : ISearchIndexNameResolver
             && !string.IsNullOrWhiteSpace(parentEntityId)
             && Guid.TryParse(parentEntityId, out var parentGuid))
         {
-            Entity? parent = null;
+            EntityReference? parentBuRef = null;
             try
             {
-                parent = await _entityService.RetrieveAsync(
-                    parentEntityType,
-                    parentGuid,
-                    new[] { SearchIndexNameAttribute, OwningBusinessUnitAttribute },
-                    ct);
+                var (parentValue, owningBuRef) = await ResolveFromEntityWithBuAsync(parentEntityType, parentGuid, ct);
+                parentBuRef = owningBuRef;
 
-                var parentValue = GetStringAttribute(parent, SearchIndexNameAttribute);
                 if (!string.IsNullOrWhiteSpace(parentValue))
                 {
                     _logger.LogDebug(
@@ -151,25 +173,16 @@ public sealed class SearchIndexNameResolver : ISearchIndexNameResolver
             }
 
             // Step 3: walk owning BU from the parent (only attempted when parent fetch succeeded)
-            if (parent is not null
-                && parent.Contains(OwningBusinessUnitAttribute)
-                && parent[OwningBusinessUnitAttribute] is EntityReference buRef
-                && buRef.Id != Guid.Empty)
+            if (parentBuRef is not null && parentBuRef.Id != Guid.Empty)
             {
                 try
                 {
-                    var bu = await _entityService.RetrieveAsync(
-                        BusinessUnitEntity,
-                        buRef.Id,
-                        new[] { SearchIndexNameAttribute },
-                        ct);
-
-                    var buValue = GetStringAttribute(bu, SearchIndexNameAttribute);
+                    var buValue = await ResolveFromEntityAsync(BusinessUnitEntity, parentBuRef.Id, ct);
                     if (!string.IsNullOrWhiteSpace(buValue))
                     {
                         _logger.LogDebug(
                             "SearchIndexNameResolver: resolved from owning BU {BusinessUnitId} = {IndexName}",
-                            buRef.Id, buValue);
+                            parentBuRef.Id, buValue);
                         return buValue;
                     }
                 }
@@ -178,7 +191,7 @@ public sealed class SearchIndexNameResolver : ISearchIndexNameResolver
                     _logger.LogWarning(
                         ex,
                         "SearchIndexNameResolver: businessunit {BusinessUnitId} lookup failed",
-                        buRef.Id);
+                        parentBuRef.Id);
                 }
             }
         }
@@ -190,12 +203,129 @@ public sealed class SearchIndexNameResolver : ISearchIndexNameResolver
         return null;
     }
 
-    private static string? GetStringAttribute(Entity? entity, string attribute)
+    /// <summary>
+    /// Executes a single FetchXml fetch against <paramref name="entityType"/> with a
+    /// <c>link-entity</c> outer-join into <c>sprk_aisearchindex</c> via the
+    /// <c>sprk_ai_search_index</c> lookup. Returns the aliased
+    /// <c>idx.sprk_searchindexname</c> when the lookup resolves; otherwise falls back
+    /// to the legacy <c>sprk_searchindexname</c> text column on the source entity
+    /// (logged as <c>PhaseG.TextFallback</c>).
+    /// </summary>
+    private async Task<string?> ResolveFromEntityAsync(string entityType, Guid id, CancellationToken ct)
     {
-        if (entity is null || !entity.Contains(attribute))
+        var fetchXml = BuildLookupFetchXml(entityType, id, includeOwningBu: false);
+        var row = await RetrieveSingleAsync(fetchXml, ct);
+        if (row is null)
         {
             return null;
         }
-        return entity[attribute] as string;
+
+        return ExtractIndexName(row, entityType, id);
+    }
+
+    /// <summary>
+    /// Same as <see cref="ResolveFromEntityAsync(string, Guid, CancellationToken)"/> but
+    /// also returns the entity's <c>owningbusinessunit</c> reference so the resolver chain
+    /// can cascade to step 3 without a second round-trip.
+    /// </summary>
+    private async Task<(string? IndexName, EntityReference? OwningBu)> ResolveFromEntityWithBuAsync(
+        string entityType,
+        Guid id,
+        CancellationToken ct)
+    {
+        var fetchXml = BuildLookupFetchXml(entityType, id, includeOwningBu: true);
+        var row = await RetrieveSingleAsync(fetchXml, ct);
+        if (row is null)
+        {
+            return (null, null);
+        }
+
+        var indexName = ExtractIndexName(row, entityType, id);
+
+        EntityReference? bu = null;
+        if (row.Contains(OwningBusinessUnitAttribute)
+            && row[OwningBusinessUnitAttribute] is EntityReference buRef
+            && buRef.Id != Guid.Empty)
+        {
+            bu = buRef;
+        }
+
+        return (indexName, bu);
+    }
+
+    /// <summary>
+    /// Builds the FetchXml for a single-record lookup with a <c>link-entity</c> outer-join
+    /// into the <c>sprk_aisearchindex</c> catalog table. The legacy text column is
+    /// projected on the source entity so the migration-safety fallback works in the same
+    /// round-trip.
+    /// </summary>
+    private static string BuildLookupFetchXml(string entityType, Guid id, bool includeOwningBu)
+    {
+        // Choose the entity's PK attribute name. Custom Spaarke entities follow
+        // {entityname}id; standard entities (businessunit) follow the same convention.
+        var pkAttribute = entityType + "id";
+
+        // The legacy text column lives on the SOURCE entity; the new lookup column is
+        // sprk_ai_search_index. The catalog row is joined via link-entity. We project
+        // both so the resolver can fall through atomically.
+        var owningBuAttr = includeOwningBu
+            ? $"<attribute name='{OwningBusinessUnitAttribute}' />"
+            : string.Empty;
+
+        return $@"<fetch top='1'>
+  <entity name='{entityType}'>
+    <attribute name='{LegacyTextColumn}' />
+    {owningBuAttr}
+    <filter>
+      <condition attribute='{pkAttribute}' operator='eq' value='{id:D}' />
+    </filter>
+    <link-entity name='{CatalogEntity}'
+                 from='{CatalogPrimaryKey}'
+                 to='{LookupColumn}'
+                 link-type='outer'
+                 alias='idx'>
+      <attribute name='{CatalogNameColumn}' />
+    </link-entity>
+  </entity>
+</fetch>";
+    }
+
+    /// <summary>
+    /// Executes the FetchXml and returns the first row, or <c>null</c> if no rows match.
+    /// </summary>
+    private async Task<Entity?> RetrieveSingleAsync(string fetchXml, CancellationToken ct)
+    {
+        var fetch = new FetchExpression(fetchXml);
+        var results = await _entityService.RetrieveMultipleAsync(fetch, ct);
+        return results.Entities.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Extracts the index name from the FetchXml result. The lookup path (linked-entity
+    /// aliased value) wins; the legacy text column is the migration-safety fallback.
+    /// </summary>
+    private string? ExtractIndexName(Entity row, string entityType, Guid id)
+    {
+        // Lookup-first: aliased value projected by the link-entity (idx.sprk_searchindexname).
+        if (row.Contains(AliasedIndexNameAttribute)
+            && row[AliasedIndexNameAttribute] is AliasedValue aliased
+            && aliased.Value is string linkedName
+            && !string.IsNullOrWhiteSpace(linkedName))
+        {
+            return linkedName;
+        }
+
+        // Migration-safety fallback: read the legacy text column from the source entity.
+        if (row.Contains(LegacyTextColumn)
+            && row[LegacyTextColumn] is string textValue
+            && !string.IsNullOrWhiteSpace(textValue))
+        {
+            _logger.LogWarning(
+                "PhaseG.TextFallback hit on {EntityType} {EntityId}",
+                entityType, id);
+            return textValue;
+        }
+
+        return null;
     }
 }

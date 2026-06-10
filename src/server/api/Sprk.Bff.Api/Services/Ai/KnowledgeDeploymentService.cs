@@ -30,6 +30,7 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
     private readonly SecretClient? _secretClient;
     private readonly AnalysisOptions _options;
     private readonly AiSearchOptions? _aiSearchOptions;
+    private readonly IAllowedIndexesProvider? _allowedIndexesProvider;
     private readonly ILogger<KnowledgeDeploymentService> _logger;
 
     // In-memory cache for deployment configs (TRACKED: GitHub #229 - Move to Dataverse)
@@ -40,28 +41,39 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
     /// Constructs the resolver.
     /// </summary>
     /// <remarks>
-    /// <para>The <paramref name="aiSearchOptions"/> parameter is OPTIONAL (defaults to <c>null</c>) so
-    /// existing test fixtures that construct <see cref="KnowledgeDeploymentService"/> directly with
-    /// only (<c>SearchIndexClient</c>, <c>IOptions&lt;AnalysisOptions&gt;</c>, <c>ILogger</c>) continue
+    /// <para>The <paramref name="aiSearchOptions"/> and <paramref name="allowedIndexesProvider"/>
+    /// parameters are OPTIONAL (default to <c>null</c>) so existing test fixtures that construct
+    /// <see cref="KnowledgeDeploymentService"/> directly with only
+    /// (<c>SearchIndexClient</c>, <c>IOptions&lt;AnalysisOptions&gt;</c>, <c>ILogger</c>) continue
     /// to compile UNCHANGED — multi-container-multi-index-r1 spec NFR-02 (backward-compat) is the
-    /// binding requirement. In production DI, <c>IOptions&lt;AiSearchOptions&gt;</c> is registered by
-    /// <see cref="Sprk.Bff.Api.Infrastructure.DI.JobProcessingModule"/> (<c>Configure&lt;AiSearchOptions&gt;</c>),
-    /// so this parameter resolves automatically. When <paramref name="aiSearchOptions"/> is <c>null</c>
-    /// AND a non-empty <c>indexName</c> is supplied to
-    /// <see cref="GetSearchClientAsync(string, CancellationToken, string?)"/>, the call MUST fail
-    /// closed (reject) — no allow-list configured means no caller-supplied index is permitted.</para>
+    /// binding requirement.</para>
+    /// <para>In production DI: <c>IOptions&lt;AiSearchOptions&gt;</c> is registered by
+    /// <see cref="Sprk.Bff.Api.Infrastructure.DI.JobProcessingModule"/>; the
+    /// <see cref="IAllowedIndexesProvider"/> is registered by
+    /// <see cref="Sprk.Bff.Api.Infrastructure.DI.AnalysisServicesModule"/> (Phase G task 102) when
+    /// the compound AI gate is ON. Both parameters resolve automatically.</para>
+    /// <para><b>Allow-list resolution order</b> (Phase G):
+    /// (1) when <paramref name="allowedIndexesProvider"/> is non-null, the provider is consulted
+    /// (cached Dataverse query of <c>sprk_aisearchindex</c>; falls back internally to appsettings);
+    /// (2) when the provider is null but <paramref name="aiSearchOptions"/> is non-null, the
+    /// appsettings <see cref="AiSearchOptions.AllowedIndexes"/> array is used directly (legacy path
+    /// retained for tests + AI-OFF DI graph);
+    /// (3) when both are null, the call fails closed (no allow-list → no caller-supplied index
+    /// permitted).</para>
     /// </remarks>
     public KnowledgeDeploymentService(
         SearchIndexClient searchIndexClient,
         IOptions<AnalysisOptions> options,
         ILogger<KnowledgeDeploymentService> logger,
         SecretClient? secretClient = null,
-        IOptions<AiSearchOptions>? aiSearchOptions = null)
+        IOptions<AiSearchOptions>? aiSearchOptions = null,
+        IAllowedIndexesProvider? allowedIndexesProvider = null)
     {
         _searchIndexClient = searchIndexClient;
         _secretClient = secretClient;
         _options = options.Value;
         _aiSearchOptions = aiSearchOptions?.Value;
+        _allowedIndexesProvider = allowedIndexesProvider;
         _logger = logger;
     }
 
@@ -107,12 +119,16 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
         ArgumentException.ThrowIfNullOrEmpty(tenantId);
 
         // Multi-container-multi-index-r1 Phase B (FR-BFF-01..04) — caller-supplied explicit index.
-        // When non-empty, validate against the appsettings allow-list and bind a SearchClient to that
+        // When non-empty, validate against the allow-list and bind a SearchClient to that
         // index name (resolved via the tenant's SearchIndexClient endpoint). When null/whitespace,
         // fall through to the existing 2-tier chain (FR-BFF-04 backward-compat per NFR-02).
+        //
+        // Phase G (task 102): when an IAllowedIndexesProvider is registered, the provider is the
+        // source of truth (cached Dataverse query of sprk_aisearchindex). Otherwise the legacy
+        // appsettings AllowedIndexes array is used directly.
         if (!string.IsNullOrWhiteSpace(indexName))
         {
-            ValidateAllowedIndex(indexName);
+            await ValidateAllowedIndexAsync(indexName, cancellationToken);
             return GetOrCreateExplicitIndexClient(tenantId, indexName);
         }
 
@@ -121,49 +137,85 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
     }
 
     /// <summary>
-    /// Validates a caller-supplied index name against the <see cref="AiSearchOptions.AllowedIndexes"/>
-    /// allow-list. On miss, throws <see cref="SdapProblemException"/> with stable code
-    /// <c>INDEX_NOT_ALLOWED</c> mapping to ProblemDetails 400 per ADR-019 + spec NFR-08.
+    /// Validates a caller-supplied index name against the configured allow-list. On miss,
+    /// throws <see cref="SdapProblemException"/> with stable code <c>INDEX_NOT_ALLOWED</c>
+    /// mapping to ProblemDetails 400 per ADR-019 + spec NFR-08.
     /// </summary>
     /// <remarks>
-    /// FAILS CLOSED when no <c>AiSearchOptions</c> is configured (the optional constructor parameter
-    /// was not supplied) — caller-supplied indexes are rejected outright in that case. Production DI
-    /// always registers <c>IOptions&lt;AiSearchOptions&gt;</c> via <c>JobProcessingModule</c>, so this
-    /// branch is only reachable in test fixtures that explicitly omit it.
+    /// <para>
+    /// Allow-list resolution order (Phase G):
+    /// </para>
+    /// <list type="number">
+    ///   <item><description>When <see cref="IAllowedIndexesProvider"/> is registered, the provider
+    ///     is consulted (cached Dataverse query of <c>sprk_aisearchindex</c>; the provider itself
+    ///     falls back to <see cref="AiSearchOptions.AllowedIndexes"/> on Dataverse failure /
+    ///     empty result per Phase G spec §13 Q4).</description></item>
+    ///   <item><description>Otherwise the legacy appsettings array is used directly. This path is
+    ///     retained for (a) AI-OFF DI graphs that don't register the provider, and (b) test fixtures
+    ///     that construct the service without the optional dependency.</description></item>
+    ///   <item><description>When neither source is available, FAILS CLOSED — caller-supplied indexes
+    ///     are rejected outright.</description></item>
+    /// </list>
+    /// <para>
+    /// Case-insensitive comparison: Azure AI Search index names are documented as case-insensitive
+    /// at the service level, and operator-configured allow-list values should not require
+    /// exact-case matching by callers.
+    /// </para>
     /// </remarks>
-    private void ValidateAllowedIndex(string indexName)
+    private async Task ValidateAllowedIndexAsync(string indexName, CancellationToken ct)
     {
-        var allowedIndexes = _aiSearchOptions?.AllowedIndexes ?? Array.Empty<string>();
+        bool isAllowed;
+        int allowedCount;
+        string allowListSource;
 
-        // Case-insensitive comparison: Azure AI Search index names are documented as case-insensitive
-        // at the service level, and operator-configured allow-list values should not require
-        // exact-case matching by callers.
-        var isAllowed = allowedIndexes.Any(allowed =>
-            string.Equals(allowed, indexName, StringComparison.OrdinalIgnoreCase));
+        if (_allowedIndexesProvider is not null)
+        {
+            // Phase G — Dataverse-backed source of truth (with internal appsettings fallback)
+            isAllowed = await _allowedIndexesProvider.IsAllowedAsync(indexName, ct);
+            // The provider does not expose a count; for diagnostic extension we fall back to the
+            // appsettings count when present (it is the floor — Dataverse-loaded set is always
+            // >= appsettings on the happy path).
+            allowedCount = _aiSearchOptions?.AllowedIndexes?.Length ?? -1;
+            allowListSource = "DataverseAllowedIndexesProvider";
+        }
+        else
+        {
+            // Legacy path — direct appsettings array. Fails closed when no options registered.
+            var allowedIndexes = _aiSearchOptions?.AllowedIndexes ?? Array.Empty<string>();
+            allowedCount = allowedIndexes.Length;
+            isAllowed = allowedIndexes.Any(allowed =>
+                string.Equals(allowed, indexName, StringComparison.OrdinalIgnoreCase));
+            allowListSource = "AiSearchOptions.AllowedIndexes";
+        }
 
         if (!isAllowed)
         {
             _logger.LogWarning(
-                "Rejecting caller-supplied indexName '{RejectedIndexName}' — not present in AiSearch.AllowedIndexes (configured count: {AllowedCount}).",
+                "Rejecting caller-supplied indexName '{RejectedIndexName}' — not present in allow-list (source: {AllowListSource}, knownCount: {AllowedCount}).",
                 indexName,
-                allowedIndexes.Length);
+                allowListSource,
+                allowedCount);
 
             throw new SdapProblemException(
                 code: "INDEX_NOT_ALLOWED",
                 title: "AI Search index not allowed",
-                detail: $"The requested AI Search index '{indexName}' is not in the configured allow-list (AiSearch:AllowedIndexes). Contact your administrator to enable this index.",
+                detail: $"The requested AI Search index '{indexName}' is not in the configured allow-list. Contact your administrator to enable this index.",
                 statusCode: 400,
                 extensions: new Dictionary<string, object>
                 {
                     ["indexName"] = indexName,
-                    ["allowedCount"] = allowedIndexes.Length
+                    // Preserve the wire shape — existing clients (and the test suite at task 010)
+                    // assert on the `allowedCount` extension key. When the provider is the source,
+                    // we use the appsettings count as a best-effort floor (the Dataverse-loaded
+                    // count isn't surfaced by the provider for caching reasons).
+                    ["allowedCount"] = Math.Max(allowedCount, 0)
                 });
         }
 
         _logger.LogDebug(
-            "Caller-supplied indexName '{IndexName}' validated against AiSearch.AllowedIndexes ({AllowedCount} entries).",
+            "Caller-supplied indexName '{IndexName}' validated against {AllowListSource}.",
             indexName,
-            allowedIndexes.Length);
+            allowListSource);
     }
 
     /// <summary>

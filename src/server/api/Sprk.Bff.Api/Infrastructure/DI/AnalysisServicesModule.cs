@@ -37,6 +37,22 @@ public static class AnalysisServicesModule
         // expectations + Dataverse Web API client lifetime).
         services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
 
+        // multi-container-multi-index-r1 Phase G (task 102) — TRULY UNCONDITIONAL.
+        // IAllowedIndexesProvider is consumed by KnowledgeDeploymentService (registered behind
+        // the AI-Search-keys sub-gate in AddRagServices) to validate caller-supplied indexNames
+        // against the sprk_aisearchindex catalog table. Singleton lifetime: the implementation
+        // holds the IMemoryCache key + ttl as process-wide state and uses IServiceProvider.CreateScope
+        // for per-load scoped IGenericEntityService resolution (no captive dependency).
+        //
+        // Registered HERE at the top of the module (above the AI conditionals) for the same reason
+        // ISearchIndexNameResolver is — KnowledgeDeploymentService's optional ctor parameter resolves
+        // on the AI-ON path, but having the registration available on the AI-OFF path keeps the DI
+        // graph uniform and forward-compatible (if any other consumer is wired later).
+        //
+        // No new NuGet packages; IMemoryCache is already registered unconditionally via CacheModule.
+        // AiSearchOptions binding is preserved by JobProcessingModule.
+        services.AddSingleton<IAllowedIndexesProvider, DataverseAllowedIndexesProvider>();
+
         // multi-container-multi-index-r1 upload-indexing-centralization (scope extension) — TRULY UNCONDITIONAL.
         // IPostUploadIndexingEnqueuer is the single seam for post-upload RAG indexing.
         // Phase 3 (2026-06-08) — dispatches sync OBO indexing via IFileIndexingService.IndexFileAsync

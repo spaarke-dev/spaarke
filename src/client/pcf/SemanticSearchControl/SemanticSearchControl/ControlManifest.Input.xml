@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.74"
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.75"
            display-name-key="Semantic Search Control"
-           description-key="PCF control for semantic document search with natural language queries (v1.1.74)"
+           description-key="PCF control for semantic document search with natural language queries (v1.1.75)"
            control-type="virtual">
 
     <external-service-usage enabled="true">
@@ -40,10 +40,6 @@
 
     <!-- Input: Scope ID for scoped search -->
     <property name="scopeId" display-name-key="Scope ID" description-key="ID for scoped search (e.g., Matter ID)"
-              of-type="SingleLine.Text" usage="bound" required="false" />
-
-    <!-- Bound: Azure AI Search index name from scope record (FR-PCF-01, multi-container-multi-index-r1) -->
-    <property name="searchIndexName" display-name-key="Search Index Name" description-key="Azure AI Search index name bound from the scope record sprk_searchindexname field; routes search requests to the correct index"
               of-type="SingleLine.Text" usage="bound" required="false" />
 
     <!-- Input: Show/hide filter panel -->

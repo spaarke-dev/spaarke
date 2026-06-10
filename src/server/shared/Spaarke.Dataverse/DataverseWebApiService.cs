@@ -2223,4 +2223,10 @@ public class DataverseWebApiService : IDataverseService
         throw new NotImplementedException(
             "RetrieveMultipleAsync is implemented in DataverseServiceClientImpl.");
     }
+
+    public Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "RetrieveMultipleAsync(FetchExpression) is implemented in DataverseServiceClientImpl.");
+    }
 }

@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF: lookup-first resolver (FetchXml link-entity) + `DataverseAllowedIndexesProvider` (cached)</title>
     <phase>G: Lookup-driven multi-index</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4-6</estimated-hours>
     <dependencies>100, 101</dependencies>
     <blocks>103, 104</blocks>
@@ -119,9 +119,17 @@
     **Placement Justification** (binding per `.claude/constraints/bff-extensions.md`):
     The resolver and allow-list provider are tightly coupled to the existing `IKnowledgeDeploymentService` chain — both live in `Services/Ai/` per the in-BFF placement criterion. No facade needed (CRUD code does not consume AI internals; AI internals expose a richer source-of-truth). No new NuGet packages. New DI registrations: `IAllowedIndexesProvider` Singleton (`IMemoryCache` is already registered process-wide in `Program.cs`).
 
-    Publish-size impact: zero. Logic is additive within existing assembly.
+    Publish-size impact: ~+0.7 MB delta vs the ~45.65 MB baseline reported at task start (final compressed size 46.32 MB), well under the 5 MB single-task escalation threshold and FAR under the 60 MB hard ceiling. Logic is additive within the existing assembly (zero new packages); the delta tracks normal accumulation since the baseline was captured.
 
     The text-fallback path is intentional during migration soak (task 104's data migration may have gaps; task 110 removes the fallback after a 24–48hr soak with App Insights confirming zero text-fallback hits).
+
+    **Completion summary** (2026-06-10):
+    - 6 source files modified: SearchIndexNameResolver.cs (refactor to FetchXml link-entity with text-fallback), IAllowedIndexesProvider.cs (NEW), DataverseAllowedIndexesProvider.cs (NEW), KnowledgeDeploymentService.cs (provider injection, async validator), AnalysisServicesModule.cs (provider DI registration), IGenericEntityService.cs + 2 impls (FetchExpression overload).
+    - 2 test files: SearchIndexNameResolverTests.cs rewritten (+9 tests covering FetchXml + text-fallback + lookup precedence), DataverseAllowedIndexesProviderTests.cs added (+9 tests covering cache, fallback, edge cases).
+    - Build: pass; full BFF API unit test suite: 6146 passed / 27 failed (all 27 failures are pre-existing in VisualizationServiceTests + SearchFilterBuilderTests, unrelated to Phase G).
+    - Quality gates: code-review clean (1 justified AI-smell suggestion); adr-check clean (9 ADRs compliant, 0 violations); BFF hygiene clean (placement-justification documented at notes/phase-g/placement-justification-task102.md).
+    - Publish size: 46.32 MB compressed (∆+0.67 MB vs ~45.65 MB baseline).
+    - Next: task 103 (BFF tests + deploy + App Insights verification).
   </notes>
 
   <execution>

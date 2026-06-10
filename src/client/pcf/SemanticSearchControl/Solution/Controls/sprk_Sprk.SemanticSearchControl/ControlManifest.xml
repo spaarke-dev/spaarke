@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.74" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries (v1.1.74)" control-type="virtual" api-version="1.3.18">
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.75" display-name-key="Semantic Search Control" description-key="PCF control for semantic document search with natural language queries (v1.1.75)" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
@@ -16,7 +16,6 @@
       <value name="custom" display-name-key="Custom">custom</value>
     </property>
     <property name="scopeId" display-name-key="Scope ID" description-key="ID for scoped search (e.g., Matter ID)" of-type="SingleLine.Text" usage="bound" required="false"/>
-    <property name="searchIndexName" display-name-key="Search Index Name" description-key="Azure AI Search index name bound from the scope record sprk_searchindexname field; routes search requests to the correct index" of-type="SingleLine.Text" usage="bound" required="false"/>
     <property name="showFilters" display-name-key="Show Filters" description-key="Show or hide the filter panel" of-type="TwoOptions" usage="input" required="false"/>
     <property name="resultsLimit" display-name-key="Results Limit" description-key="Number of results per load" of-type="Whole.None" usage="input" required="false"/>
     <property name="placeholder" display-name-key="Placeholder" description-key="Search input placeholder text" of-type="SingleLine.Text" usage="input" required="false"/>
