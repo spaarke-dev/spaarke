@@ -130,6 +130,40 @@ export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseE
     return new XrmDataverseClient();
   }, [xrm]);
 
+  // ai-spaarke-ai-workspace-UI-r1 iter 2 round 9 (2026-06-09):
+  // EventsPage Code Page works because its index.html sets `overflow: hidden`
+  // on html/body/#root, so the FluentDataGrid (which renders at column-sum
+  // width via `min-width: fit-content`) gets clipped at the page boundary.
+  // The embedded workspace path has no such boundary — the section card +
+  // every flex/grid ancestor can grow with the table's content. Round 8 tried
+  // a Griffel !important override on the FluentDataGrid root; it apparently
+  // didn't take effect at the user's browser.
+  //
+  // This round measures the WIDGET's own outer container width via a
+  // ResizeObserver attached to the widget root and applies it as an EXPLICIT
+  // pixel `maxWidth` on the inner DataGrid wrapper. An explicit pixel cap
+  // beats any intrinsic content sizing the inner FluentDataGrid does — the
+  // widget itself becomes the constraint boundary the EventsPage `index.html`
+  // body-level `overflow: hidden` provides for the modal.
+  const widgetRootRef = React.useRef<HTMLDivElement | null>(null);
+  const [widgetWidth, setWidgetWidth] = React.useState<number>(0);
+  React.useLayoutEffect(() => {
+    const el = widgetRootRef.current;
+    if (!el) return;
+    setWidgetWidth(el.clientWidth);
+  }, []);
+  React.useEffect(() => {
+    const el = widgetRootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setWidgetWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   if (!dataverseClient) {
     return (
       <div className={styles.emptyState}>
@@ -147,8 +181,29 @@ export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseE
   }
 
   return (
-    <div className={styles.root}>
-      <DataGrid configId={data.configId} dataverseClient={dataverseClient} />
+    <div ref={widgetRootRef} className={styles.root}>
+      {/*
+        Explicit pixel-cap wrapper. The outer widget root has min-width:0 +
+        width:100% so it follows its parent. We measure THIS root and feed
+        the value to a fixed-width inner div that the DataGrid mounts into —
+        the DataGrid (and its FluentDataGrid descendant) inherit this pixel
+        cap as their containing block. No CSS class hacks; just an inline
+        style on a stable wrapper.
+      */}
+      <div
+        style={{
+          width: widgetWidth > 0 ? `${widgetWidth}px` : '100%',
+          maxWidth: widgetWidth > 0 ? `${widgetWidth}px` : '100%',
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        <DataGrid configId={data.configId} dataverseClient={dataverseClient} />
+      </div>
     </div>
   );
 };
