@@ -20,13 +20,140 @@
 | **Wave B-G5** | ✅ COMMITTED `2934c6bcf`. Task 048 integration test — 6 scenarios programmatically PASS; 8 live-UI items deferred to exit-gate manual walkthrough; 0 regressions vs Wave B-G4 baseline. |
 | **Wave B-G6** | ✅ COMMITTED `dbbeffe56`. Task 049 exit-gate doc. |
 | **Wave B-G7** | ✅ COMMITTED `949ee71ec`. Flag #3 stale GUID + flag #2 ProjectPreFill tests. |
-| **Wave B-G8** | ✅ COMMITTED `a62cccb48`. BingGrounding startup hardening + Spaarke Dev config drift unblock. BFF + SpaarkeAi + LegalWorkspace deployed to Spaarke Dev; BFF stable (200, ~0.3s, 5/5 over 30s). |
-| **Wave C-G1 partial** | ✅ Tasks 050 + 051 + 052 complete (committing now). 050 = WorkspaceTab canonical TS interface (407 LOC, 4-variant discriminated union, 0 TS errors). 051 = IWorkspaceStateService + WorkspaceStateService.cs (Redis hot 24h + Cosmos `memory` container reuse with documentType="workspace-tab" discriminator; +0.31 MB; 14 tests). 052 = GET /api/workspace/state endpoint (5 tests; ZERO Program.cs delta via EndpointMappingExtensions.MapDomainEndpoints). Full sweep 6905/0/109 (+19 vs Wave B-G8 baseline; 0 regressions). |
-| **Task 053 (HELD)** | SprkChatAgentFactory wire-up; held pending UI walkthrough (file overlap risk with B-G4 task 042 dedup directive). After walkthrough sign-off, dispatch 053 to close Wave C-G1. |
-| **Next** | **PAUSE for user walkthrough + sign-off**. After walkthrough: (a) stamp Phase B exit-gate; (b) dispatch task 053; (c) commit Wave C-G1 closeout; (d) begin sub-phases 6b/6c/7/9 (parallel after 6a complete). |
+| **Wave B-G8** | ✅ COMMITTED `a62cccb48`. BingGrounding startup hardening + Spaarke Dev config drift unblock. BFF + SpaarkeAi + LegalWorkspace deployed to Spaarke Dev. |
+| **Wave C-G1 partial** | ✅ COMMITTED `7fed830c8`. Tasks 050 + 051 + 052. |
+| **Wave C-G2** | ✅ COMMITTED `4d272fb88`. Tasks 071 (Pillar 9 visibility contract) + 059 (context.* events) + 060 (workspace.* events). |
+| **🚨 Phase B walkthrough surfaced CRITICAL bugs (2026-06-10)** | **Phase B exit-gate sign-off HELD pending hotfix Wave B-G9**. See "Walkthrough Findings + Hotfix B-G9 Plan" section below. |
+| **Task 053 (HELD)** | Awaiting B-G9 hotfix completion + walkthrough sign-off. |
+| **Next** | **POST-COMPACT: dispatch hotfix B-G9**. See plan below. |
 | **Phase A exit-gate doc** | `projects/spaarke-ai-platform-unification-r6/notes/phase-a-exit-gate.md` |
 | **Wave B-G2 evidence** | `notes/task-032-migration-evidence.md`, `notes/task-033-migration-evidence.md`, `notes/task-034-migration-evidence.md`, `notes/task-035-migration-evidence.md` |
-| **R7 follow-up candidate** | Matter-prefill technical-debt sweep: retire 3-fallback parsing layers in `MatterPreFillService.cs` (lines 460-608: `UnwrapRawResponse`, `HasAnyField`, `ParseAiResponse` entity-extraction-format, `MatchField`). Defensive parsing from pre-Structured-Outputs era; now superfluous. Touches NFR-07 surface → R6-deferred. Also fix stale `DefaultPreFillPlaybookId` GUID in `ProjectPreFillService.cs:37-38` (flagged by 035). |
+| **R7 follow-up candidate** | Matter-prefill technical-debt sweep + R5-era comment cleanup on SUM-CHAT@v1 outputSchema + investigate Output Format field. |
+
+---
+
+## 🚨 Walkthrough Findings + Hotfix Wave B-G9 Plan (2026-06-10)
+
+User performed UI walkthrough on Spaarke Dev. **Phase B exit-gate sign-off HELD** pending these fixes.
+
+### Bug catalog (severity-ordered)
+
+#### CRITICAL (blocks Phase B exit) — Widget schema-aware dispatch broken in production
+
+**Symptoms (Workspace Summary tab)**:
+- `tldr: array of string` renders as BOLD paragraph containing `"A method...","The system uses...","Private transactions..."` (literal array as comma-quoted text, NOT bullets per task 040)
+- `entities: object { organizations[], persons[] }` renders as bullets containing `organizations":[]` / `"persons":[]` (raw JSON syntax fragments, NOT labeled blocks per task 041)
+- Section HEADERS (TL;DR / SUMMARY / KEYWORDS / ENTITIES) ARE present — so widget IS aware of schema
+- Keywords (string per schema) renders as colored badges (custom per-field rendering)
+- Summary (string) renders as paragraph — correct
+
+**Hypothesis**: tasks 040+041 added `classifySchemaField()` + `SchemaAwareArrayRenderer` + `SchemaAwareObjectRenderer`, but the EXISTING hardcoded `tldr`/`entities` path tracking in the widget (lines around 267, 285 of pre-task-040 widget) is taking precedence over the new dispatch. Unit tests passed because they tested the new path directly, but production code flows through legacy path.
+
+**File to investigate**: `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx` (1775 LOC post-041)
+
+**Fix approach**:
+1. Read the widget IN FULL — understand the actual render path under live invocation
+2. Identify why `classifySchemaField()` isn't winning over the hardcoded TL;DR / Entities sections
+3. Verify the `schemaAwareReady` gate fires correctly
+4. Verify `outputSchema` prop is reaching the widget (might be missing from the streaming envelope?)
+5. Check whether tasks 040+041's new components are even reachable from the production render path
+
+#### HIGH — PDF "can't extract" hallucination + duplicate response
+
+**Symptoms**:
+- Upload PDF → chat shows "It appears the attached document does not contain extractable text content for me to summarize directly..." message
+- A few seconds later: structured summary appears
+- `.doc` and `.txt` files DO NOT trigger this — only PDF
+- The summary streams to BOTH Assistant chat AND Workspace Summary tab (duplicate fire)
+
+**Root cause**: Task 042 dedup directive only applies for non-chat destinations. For chat destination, LLM is free to respond conversationally — but it has NO synchronous access to extracted PDF text (extraction is async via Document Intelligence), so it hallucinates "no text" message. For .doc/.txt the text is synchronous so no hallucination.
+
+**Fix**: extend task 042's directive logic in `SprkChatAgentFactory.cs` to ALSO apply single-sentence ack directive to **chat destination** when a playbook is going to render the primary result. NFR-01 preserved (single-sentence ack is still conversational, just terser). Same file task 053 will eventually wire — convenient co-location.
+
+#### HIGH — Browser cache / session corruption (regular browser fails; InPrivate works)
+
+**Symptoms**:
+- Regular Chrome: no Summary tab appears OR appears empty/Waiting; "can't extract" message + delayed summary; closing+reopening tab → hangs at "Waiting"
+- Console error: `"A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received"` (Chrome extension or stale message-channel pattern)
+- InPrivate Chrome: clean behavior; Summary tab appears and renders (with the CRITICAL bug above on TL;DR/Entities content)
+
+**User actions taken**: disabled all extensions, hard cache clear. Still failing in regular browser.
+
+**Likely root cause**: Power Apps client-side web-resource cache serving stale SpaarkeAi version. InPrivate forces fresh resolution.
+
+**User remediation steps to try (in priority order)**:
+1. **DevTools → Application → Storage → "Clear site data"** (clears IndexedDB + SW + localStorage + sessionStorage; more thorough than Ctrl+Shift+Delete)
+2. **Power Apps Maker → Solutions → ⋯ → Publish All Customizations** (invalidates client-side resource cache server-side)
+3. **DevTools → Application → Service Workers → "Unregister"** (if any SW registered)
+4. **Different Chrome profile** (eliminates all profile state)
+5. **Edge or Firefox** (eliminates Chrome-specific issues)
+
+**Code-level fix candidates** (if user remediation insufficient):
+- Add cache-bust query string to SpaarkeAi web resource URL on each deploy
+- Bump web resource version explicitly in registration
+- Investigate sessionStorage cleanup in tab close handler
+
+#### MEDIUM bugs
+
+| # | Finding | Fix approach |
+|---|---|---|
+| B6 | Different summaries for SAME file across runs | Check if SUM-CHAT@v1 action's LLM call sets `temperature: 0`. Investigate `PlaybookExecutionEngine` to find the temperature setting. |
+| B7 | Summary tab appears as DEFAULT tab on workspace (should only appear when summary executes) | Investigate workspace tab init / hardcoded default-tabs config; remove Summary from defaults |
+| B8 | Summary tab REPLACED each run (vs new tab per run) | UX decision — confirm with user. If new-tab-per-run desired, investigate WorkspaceTabManager / executeSummarizeIntent.ts |
+| B9 | `/summarize` slash vs natural-language give different output detail | Investigate CapabilityRouter slash routing vs natural-language routing — same playbook should give same output. Check if context-injection differs between paths. |
+
+#### R7 candidates (deferred)
+
+- **B10a**: Action's outputSchema has R5-era `$comment-property-order` references — load-bearing for streaming order, but R5 task 006 phrasing is confusing now. Clean up.
+- **B10b**: Action's "Output Format" field not set — investigate if it's required or unused.
+- **B10c**: Playbook has only ONE node (just calls the action) — sophistication expansion path (more nodes, scopes, skills, tools, knowledge) is R7+ scope.
+- **NULL-schema action fallback test (B12)**: deferred — no admin UI to invoke arbitrary actions directly; programmatic coverage from task 040 unit tests accepted.
+- **Workspace-summarize entry point (B5/Q5)**: deferred — new workspace playbook from task 033 Option A is wired in Dataverse but has no UI trigger yet; needs Phase C work.
+
+### Hotfix Wave B-G9 dispatch plan (POST-COMPACT)
+
+**Sequence**:
+
+1. **B-G9a (CRITICAL)** — Widget schema-aware dispatch root-cause investigation + fix
+   - Sub-agent reads `StructuredOutputStreamWidget.tsx` IN FULL (1775 LOC post-041)
+   - Identifies why hardcoded TL;DR/Entities legacy rendering wins over `classifySchemaField()` dispatch
+   - Fixes the precedence so 040+041 work in production
+   - Adds an INTEGRATION test (not just unit test) that actually invokes the widget in a live-streaming scenario to prevent regression
+   - 90-min budget
+   - File boundaries: widget file + tests; do NOT touch SprkChatAgentFactory (B-G9b will)
+
+2. **B-G9b (HIGH)** — Extend task 042 dedup directive to chat destination
+   - Modify `SprkChatAgentFactory.cs` directive logic: apply single-sentence ack directive for chat destination too WHEN a playbook will render
+   - Update CapabilityRouterDedupTests to cover chat destination
+   - 30-min budget
+   - File boundaries: SprkChatAgentFactory.cs + dedup tests; do NOT touch widget
+
+3. **B-G9c (MED)** — Other bug fixes (parallel after a + b)
+   - B6 (temperature)
+   - B7 (Summary tab not default)
+   - B8 (decide tab-per-run UX with user OR keep replace behavior)
+   - B9 (slash vs natural-language detail)
+
+4. **Re-deploy + user re-test** — BFF + SpaarkeAi + LegalWorkspace; user walkthrough again
+
+5. **Phase B exit-gate sign-off** → dispatch task 053 → Phase C cascade unblocks
+
+### File state at compaction
+
+- `git status --short`: clean (working tree synced through `4d272fb88`)
+- BFF on Spaarke Dev: `a62cccb48` deployed (Wave B-G8); widget consumers deployed
+- Branch ahead of master by ~38 commits (Phase A + B + C-G1 + C-G2 + Wave B-G7/G8 hotfixes)
+
+### Post-compaction recovery sequence (UPDATED FOR HOTFIX)
+
+1. Read this file's "Walkthrough Findings + Hotfix Wave B-G9 Plan" section
+2. Dispatch B-G9a sub-agent (widget root-cause + fix) FIRST — critical path
+3. After B-G9a lands: dispatch B-G9b (CapabilityRouter chat-destination dedup) — can run in parallel with B-G9c
+4. After all 3 land: deploy BFF + redeploy SpaarkeAi + LegalWorkspace web resources to Spaarke Dev
+5. Surface for user re-walkthrough
+6. Phase B exit-gate sign-off → dispatch task 053 → Phase C cascade
+
+---
 
 ## Phase B overview
 
