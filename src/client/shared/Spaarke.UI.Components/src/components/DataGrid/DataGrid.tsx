@@ -198,6 +198,13 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     width: '100%',
     height: '100%',
+    // min-width: 0 is required on EVERY ancestor of an overflow:auto element
+    // so the flex chain can shrink below its content's intrinsic width. Without
+    // this, a wide FluentDataGrid inside gridScroll forces every ancestor to
+    // grow to fit the columns (operator round 5 feedback: grid is 1548px wide
+    // and the section card grew to 1548px instead of constraining to its tab
+    // width). Same fix applied to innerCard + gridScroll below.
+    minWidth: 0,
     minHeight: 0,
     position: 'relative',
     backgroundColor: tokens.colorNeutralBackground2,
@@ -211,6 +218,7 @@ const useStyles = makeStyles({
   gridScroll: {
     flex: 1,
     minHeight: 0,
+    minWidth: 0,
     overflow: 'auto',
     position: 'relative',
     // Inset the rows away from the inner-card border so per-row bottom borders
@@ -347,6 +355,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     flex: 1,
     minHeight: 0,
+    minWidth: 0,
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke3),
     borderRadius: tokens.borderRadiusMedium,

@@ -64,6 +64,13 @@ const useStyles = makeStyles({
   root: {
     flex: 1,
     minHeight: 0,
+    // min-width: 0 + width: 100% — ensures this widget respects its host
+    // container's width regardless of the inner DataGrid's column-sum width.
+    // Without min-width: 0, the flex chain inflates this widget to fit the
+    // grid (operator round 5: section card grew to 1548px). See matching
+    // fix on DataGrid's root/innerCard/gridScroll for the bottom of the chain.
+    minWidth: 0,
+    width: '100%',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
