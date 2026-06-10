@@ -52,10 +52,7 @@ export const SelectionAwareToolbar: React.FC<SelectionAwareToolbarProps> = ({
   const countText = `${selectedCount} selected`;
 
   return (
-    <Toolbar
-      aria-label="Selection actions"
-      className={mergeClasses(styles.toolbar, className)}
-    >
+    <Toolbar aria-label="Selection actions" className={mergeClasses(styles.toolbar, className)}>
       {showCountLabel && (
         <span
           className={styles.countLabel}

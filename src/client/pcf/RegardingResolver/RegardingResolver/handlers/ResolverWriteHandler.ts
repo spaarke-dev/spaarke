@@ -230,11 +230,7 @@ export async function applyRegardingSelection(
   const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(
-        ctx.hostEntity,
-        (ctx.hostRecordId as string).replace(/[{}]/g, ''),
-        payload
-      );
+      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
     } catch (err) {
       return {
         success: false,
@@ -291,11 +287,7 @@ export async function clearRegarding(
   const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(
-        ctx.hostEntity,
-        (ctx.hostRecordId as string).replace(/[{}]/g, ''),
-        payload
-      );
+      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
     } catch (err) {
       return {
         success: false,

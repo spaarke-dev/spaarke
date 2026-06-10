@@ -45,18 +45,8 @@
  */
 
 import * as React from 'react';
-import {
-  Body1,
-  Button,
-  MessageBar,
-  MessageBarBody,
-  Spinner,
-  Text,
-} from '@fluentui/react-components';
-import {
-  ArrowClockwiseRegular,
-  TaskListAdd24Regular,
-} from '@fluentui/react-icons';
+import { Body1, Button, MessageBar, MessageBarBody, Spinner, Text } from '@fluentui/react-components';
+import { ArrowClockwiseRegular, TaskListAdd24Regular } from '@fluentui/react-icons';
 
 // Cross-package source import — same pattern as Calendar widget importing
 // DataGrid from Spaarke.UI.Components source. PaneHeader is a shared primitive
@@ -66,12 +56,7 @@ import {
 import { PaneHeader } from '../../../../Spaarke.UI.Components/src/components/PaneHeader/PaneHeader';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
-import type {
-  IFeedSyncBridge,
-  IRegardingContext,
-  ITodoRecord,
-  IWebApi,
-} from '../../types/todo';
+import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
 
 // ---------------------------------------------------------------------------
 // Public statuscode constants (R3 task 009 / OS-1)
@@ -253,7 +238,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
 
   // Stable refetch — bumps the fetchKey so the effect re-runs.
   const refetch = React.useCallback(() => {
-    setFetchKey((k) => k + 1);
+    setFetchKey(k => k + 1);
   }, []);
 
   // -------------------------------------------------------------------------
@@ -274,7 +259,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
 
     webApi
       .retrieveMultipleRecords('sprk_todo', query)
-      .then((result) => {
+      .then(result => {
         if (cancelled) return;
         const entities = (result.entities ?? []) as ITodoRecord[];
         setItems(entities);
@@ -318,7 +303,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
       // is showing (or one that just became active), refetch. The widget
       // doesn't try surgical state edits — refetch is fast (single OData) and
       // keeps the local state aligned with Dataverse truth.
-      const inList = items.some((t) => t.sprk_todoid === todoId);
+      const inList = items.some(t => t.sprk_todoid === todoId);
       if (!isActive && inList) {
         refetch();
       } else if (isActive) {
@@ -361,7 +346,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
         role="button"
         tabIndex={0}
         onClick={() => handleCardClick(item.sprk_todoid)}
-        onKeyDown={(e) => {
+        onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             handleCardClick(item.sprk_todoid);
@@ -437,9 +422,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
           </div>
         )}
 
-        {!isLoading && !error && items.length > 0 && (
-          <div className={styles.cardList}>{items.map(renderItem)}</div>
-        )}
+        {!isLoading && !error && items.length > 0 && <div className={styles.cardList}>{items.map(renderItem)}</div>}
       </div>
     </div>
   );

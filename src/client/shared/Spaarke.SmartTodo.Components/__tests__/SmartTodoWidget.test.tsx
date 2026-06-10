@@ -47,10 +47,7 @@ export function runQueryBuilderSmokeTests(): void {
 
   // ── Test 2: statuscode + statecode pinned ─────────────────────────────────
   const decoded1 = decodeURIComponent(q1);
-  assert(
-    decoded1.includes(`statuscode eq ${TODO_STATUSCODE_OPEN}`),
-    'Query must filter statuscode eq Open(1)'
-  );
+  assert(decoded1.includes(`statuscode eq ${TODO_STATUSCODE_OPEN}`), 'Query must filter statuscode eq Open(1)');
   assert(
     decoded1.includes(`statuscode eq ${TODO_STATUSCODE_IN_PROGRESS}`),
     'Query must filter statuscode eq InProgress(659490001)'
@@ -67,18 +64,12 @@ export function runQueryBuilderSmokeTests(): void {
     decoded2.includes('_sprk_regardingmatter_value eq M1'),
     'Query must include regarding-matter filter when context is sprk_matter'
   );
-  assert(
-    !decoded2.includes('_ownerid_value'),
-    'Owner clause must NOT be emitted when regarding context supplied'
-  );
+  assert(!decoded2.includes('_ownerid_value'), 'Owner clause must NOT be emitted when regarding context supplied');
 
   // ── Test 4: owner clause when no regarding context ────────────────────────
   const q3 = buildSmartTodoQuery({ userId: 'u1' });
   const decoded3 = decodeURIComponent(q3);
-  assert(
-    decoded3.includes('_ownerid_value eq u1'),
-    'Owner clause must be emitted when no regarding context'
-  );
+  assert(decoded3.includes('_ownerid_value eq u1'), 'Owner clause must be emitted when no regarding context');
 
   // ── Test 5: scope=all uses business-unit OR ───────────────────────────────
   const q4 = buildSmartTodoQuery({
@@ -87,10 +78,7 @@ export function runQueryBuilderSmokeTests(): void {
     businessUnitId: 'bu1',
   });
   const decoded4 = decodeURIComponent(q4);
-  assert(
-    decoded4.includes('_owningbusinessunit_value eq bu1'),
-    "Scope='all' must include business-unit OR clause"
-  );
+  assert(decoded4.includes('_owningbusinessunit_value eq bu1'), "Scope='all' must include business-unit OR clause");
 
   // ── Test 6: select projection has the required fields ─────────────────────
   assert(q1.includes('sprk_todoid'), 'Select must include sprk_todoid');

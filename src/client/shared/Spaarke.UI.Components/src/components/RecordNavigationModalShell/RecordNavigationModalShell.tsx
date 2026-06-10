@@ -73,9 +73,7 @@ import {
  *   - `window.location.origin` is added at runtime so same-origin iframes
  *     (e.g. Code Page → Code Page embedding) work without configuration.
  */
-const DEFAULT_ALLOWED_ORIGIN_PATTERNS: ReadonlyArray<string> = Object.freeze([
-  'https://*.dynamics.com',
-]);
+const DEFAULT_ALLOWED_ORIGIN_PATTERNS: ReadonlyArray<string> = Object.freeze(['https://*.dynamics.com']);
 
 /**
  * Returns whether `origin` matches any pattern in `allowList`.
@@ -142,9 +140,7 @@ export const RecordNavigationModalShell: React.FC<IRecordNavigationModalShellPro
   // Discard-confirmation dialog state
   // ---------------------------------------------------------------------
 
-  const [pendingDirection, setPendingDirection] = React.useState<RecordNavigationDirection | null>(
-    null
-  );
+  const [pendingDirection, setPendingDirection] = React.useState<RecordNavigationDirection | null>(null);
   const discardDialogOpen = pendingDirection !== null;
 
   // ---------------------------------------------------------------------
@@ -279,10 +275,7 @@ export const RecordNavigationModalShell: React.FC<IRecordNavigationModalShellPro
   // Counter string ("N of M") — defensive when total is 0
   // ---------------------------------------------------------------------
 
-  const counterText =
-    navigationTotal > 0
-      ? `${currentIndex + 1} of ${navigationTotal}`
-      : `0 of 0`;
+  const counterText = navigationTotal > 0 ? `${currentIndex + 1} of ${navigationTotal}` : `0 of 0`;
 
   // ---------------------------------------------------------------------
   // Render
@@ -297,11 +290,7 @@ export const RecordNavigationModalShell: React.FC<IRecordNavigationModalShellPro
         </Text>
 
         <div className={styles.headerActions} aria-label="Record navigation actions">
-          <div
-            className={styles.navGroup}
-            role="group"
-            aria-label="Record navigation"
-          >
+          <div className={styles.navGroup} role="group" aria-label="Record navigation">
             <Tooltip content="Previous record" relationship="label">
               <Button
                 appearance="subtle"
@@ -355,9 +344,7 @@ export const RecordNavigationModalShell: React.FC<IRecordNavigationModalShellPro
           <DialogBody>
             <DialogTitle>Discard unsaved changes?</DialogTitle>
             <DialogContent>
-              <Text>
-                This record has unsaved changes. If you navigate away, those changes will be lost.
-              </Text>
+              <Text>This record has unsaved changes. If you navigate away, those changes will be lost.</Text>
             </DialogContent>
             <DialogActions>
               <Button appearance="secondary" onClick={handleDiscardCancel}>

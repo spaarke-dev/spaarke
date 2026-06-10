@@ -73,9 +73,7 @@ describe('SelectionAwareToolbar', () => {
   // ──────────────────────────────────────────────────────────────────────
 
   it('hides the count label when showCountLabel={false}', () => {
-    renderWithProviders(
-      <SelectionAwareToolbar selectedCount={2} actions={buildActions()} showCountLabel={false} />
-    );
+    renderWithProviders(<SelectionAwareToolbar selectedCount={2} actions={buildActions()} showCountLabel={false} />);
     expect(screen.queryByText('2 selected')).not.toBeInTheDocument();
     expect(screen.getByRole('toolbar')).toBeInTheDocument();
   });

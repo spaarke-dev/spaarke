@@ -17,17 +17,67 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 // Mock @spaarke/ui-components so we control the catalog + applyResolverFields.
 jest.mock('@spaarke/ui-components', () => {
   const TODO_REGARDING_CATALOG = [
-    { entityType: 'sprk_matter', entitySet: 'sprk_matters', lookupAttribute: 'sprk_regardingmatter', navPropHint: 'matter' },
-    { entityType: 'sprk_project', entitySet: 'sprk_projects', lookupAttribute: 'sprk_regardingproject', navPropHint: 'project' },
-    { entityType: 'sprk_event', entitySet: 'sprk_events', lookupAttribute: 'sprk_regardingevent', navPropHint: 'event' },
-    { entityType: 'sprk_communication', entitySet: 'sprk_communications', lookupAttribute: 'sprk_regardingcommunication', navPropHint: 'communication' },
-    { entityType: 'sprk_workassignment', entitySet: 'sprk_workassignments', lookupAttribute: 'sprk_regardingworkassignment', navPropHint: 'workassignment' },
-    { entityType: 'sprk_invoice', entitySet: 'sprk_invoices', lookupAttribute: 'sprk_regardinginvoice', navPropHint: 'invoice' },
-    { entityType: 'sprk_budget', entitySet: 'sprk_budgets', lookupAttribute: 'sprk_regardingbudget', navPropHint: 'budget' },
-    { entityType: 'sprk_analysis', entitySet: 'sprk_analyses', lookupAttribute: 'sprk_regardinganalysis', navPropHint: 'analysis' },
-    { entityType: 'sprk_organization', entitySet: 'sprk_organizations', lookupAttribute: 'sprk_regardingorganization', navPropHint: 'organization' },
+    {
+      entityType: 'sprk_matter',
+      entitySet: 'sprk_matters',
+      lookupAttribute: 'sprk_regardingmatter',
+      navPropHint: 'matter',
+    },
+    {
+      entityType: 'sprk_project',
+      entitySet: 'sprk_projects',
+      lookupAttribute: 'sprk_regardingproject',
+      navPropHint: 'project',
+    },
+    {
+      entityType: 'sprk_event',
+      entitySet: 'sprk_events',
+      lookupAttribute: 'sprk_regardingevent',
+      navPropHint: 'event',
+    },
+    {
+      entityType: 'sprk_communication',
+      entitySet: 'sprk_communications',
+      lookupAttribute: 'sprk_regardingcommunication',
+      navPropHint: 'communication',
+    },
+    {
+      entityType: 'sprk_workassignment',
+      entitySet: 'sprk_workassignments',
+      lookupAttribute: 'sprk_regardingworkassignment',
+      navPropHint: 'workassignment',
+    },
+    {
+      entityType: 'sprk_invoice',
+      entitySet: 'sprk_invoices',
+      lookupAttribute: 'sprk_regardinginvoice',
+      navPropHint: 'invoice',
+    },
+    {
+      entityType: 'sprk_budget',
+      entitySet: 'sprk_budgets',
+      lookupAttribute: 'sprk_regardingbudget',
+      navPropHint: 'budget',
+    },
+    {
+      entityType: 'sprk_analysis',
+      entitySet: 'sprk_analyses',
+      lookupAttribute: 'sprk_regardinganalysis',
+      navPropHint: 'analysis',
+    },
+    {
+      entityType: 'sprk_organization',
+      entitySet: 'sprk_organizations',
+      lookupAttribute: 'sprk_regardingorganization',
+      navPropHint: 'organization',
+    },
     { entityType: 'contact', entitySet: 'contacts', lookupAttribute: 'sprk_regardingcontact', navPropHint: 'contact' },
-    { entityType: 'sprk_document', entitySet: 'sprk_documents', lookupAttribute: 'sprk_regardingdocument', navPropHint: 'document' },
+    {
+      entityType: 'sprk_document',
+      entitySet: 'sprk_documents',
+      lookupAttribute: 'sprk_regardingdocument',
+      navPropHint: 'document',
+    },
   ];
   return {
     TODO_REGARDING_CATALOG,
@@ -55,9 +105,7 @@ function buildContext(overrides?: {
       entity: { raw: overrides?.entity ?? 'sprk_todo' },
       regardingTargets: { raw: overrides?.regardingTargets ?? null },
       readOnly: { raw: overrides?.readOnly ?? false },
-      regardingRecordType: overrides?.boundLookup
-        ? { raw: [overrides.boundLookup] }
-        : { raw: null },
+      regardingRecordType: overrides?.boundLookup ? { raw: [overrides.boundLookup] } : { raw: null },
     },
     mode: {
       isControlDisabled: false,

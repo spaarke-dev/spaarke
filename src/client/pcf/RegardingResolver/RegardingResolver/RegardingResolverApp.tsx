@@ -117,14 +117,16 @@ const useStyles = makeStyles({
  * Walk through window / parent frames to locate Xrm. PCF runs in an iframe,
  * so the form host is exposed via window.parent or window.top.
  */
-function getXrm(): {
-  Utility?: {
-    lookupObjects: (opts: unknown) => Promise<Array<{ id: string; name: string; entityType?: string }>>;
-    getGlobalContext?: () => unknown;
-  };
-  Navigation?: { openForm: (opts: unknown) => void };
-  Page?: Xrm.Page;
-} | undefined {
+function getXrm():
+  | {
+      Utility?: {
+        lookupObjects: (opts: unknown) => Promise<Array<{ id: string; name: string; entityType?: string }>>;
+        getGlobalContext?: () => unknown;
+      };
+      Navigation?: { openForm: (opts: unknown) => void };
+      Page?: Xrm.Page;
+    }
+  | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const w = window as any;
   return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
@@ -201,9 +203,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
     return { id: ref.id, name: ref.name ?? '' };
   })();
 
-  const [selectedEntityType, setSelectedEntityType] = React.useState<string>(
-    () => catalog[0]?.entityType ?? ''
-  );
+  const [selectedEntityType, setSelectedEntityType] = React.useState<string>(() => catalog[0]?.entityType ?? '');
   const [selectedTarget, setSelectedTarget] = React.useState<IRegardingSelection | null>(null);
   const [isLookupPending, setIsLookupPending] = React.useState(false);
   const [isWriting, setIsWriting] = React.useState(false);
@@ -231,10 +231,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
 
   // ---------------- Handlers ----------------
 
-  const handleEntityTypeChange = (
-    _ev: unknown,
-    data: { optionValue?: string }
-  ): void => {
+  const handleEntityTypeChange = (_ev: unknown, data: { optionValue?: string }): void => {
     if (data.optionValue) {
       setSelectedEntityType(data.optionValue);
       setError(null);
@@ -302,9 +299,11 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       // sprk_regardingrecordtype is already propagated via notifyOutputChanged.
       // See projects/smart-todo-r4/notes/d-form-bind-instructions.md.
       if (!writeCtx.hostRecordId) {
-        (window as unknown as {
-          __sprk_regarding_pending__?: Record<string, unknown>;
-        }).__sprk_regarding_pending__ = {
+        (
+          window as unknown as {
+            __sprk_regarding_pending__?: Record<string, unknown>;
+          }
+        ).__sprk_regarding_pending__ = {
           hostEntity: writeCtx.hostEntity,
           entityType: selection.entityType,
           entitySet: result.catalogEntry?.entitySet,
@@ -414,22 +413,14 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
 
       <div className={styles.searchSection}>
         <div className={styles.dropdownWrapper}>
-          <Label
-            id="regarding-resolver-entity-type-label"
-            size="small"
-            weight="semibold"
-          >
+          <Label id="regarding-resolver-entity-type-label" size="small" weight="semibold">
             Record Type
           </Label>
           <Dropdown
             className={styles.dropdown}
             aria-labelledby="regarding-resolver-entity-type-label"
             data-testid="regarding-resolver-entity-type-dropdown"
-            value={
-              catalog.find(c => c.entityType === selectedEntityType)
-                ? selectedEntityType
-                : ''
-            }
+            value={catalog.find(c => c.entityType === selectedEntityType) ? selectedEntityType : ''}
             selectedOptions={selectedEntityType ? [selectedEntityType] : []}
             onOptionSelect={handleEntityTypeChange}
             disabled={isLookupPending || isWriting}
@@ -497,10 +488,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       )}
 
       <div className={styles.footer}>
-        <Text
-          className={styles.versionText}
-          data-testid="regarding-resolver-version"
-        >
+        <Text className={styles.versionText} data-testid="regarding-resolver-version">
           v{version}
           {selectedEntityTypeLabel ? ` • ${selectedEntityTypeLabel}` : ''}
         </Text>

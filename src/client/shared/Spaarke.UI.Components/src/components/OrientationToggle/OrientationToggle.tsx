@@ -61,11 +61,7 @@ const ORIENTATION_LABEL: Record<Orientation, string> = {
   vertical: 'Vertical layout',
 };
 
-export const OrientationToggle: React.FC<OrientationToggleProps> = ({
-  orientation,
-  onChange,
-  className,
-}) => {
+export const OrientationToggle: React.FC<OrientationToggleProps> = ({ orientation, onChange, className }) => {
   const styles = useOrientationToggleStyles();
 
   const handleClick = React.useCallback(() => {

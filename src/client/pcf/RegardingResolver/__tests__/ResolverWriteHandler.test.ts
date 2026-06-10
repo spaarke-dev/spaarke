@@ -27,47 +27,101 @@ import {
 // --- Mock @spaarke/ui-components ---
 jest.mock('@spaarke/ui-components', () => {
   const TODO_REGARDING_CATALOG = [
-    { entityType: 'sprk_matter', entitySet: 'sprk_matters', lookupAttribute: 'sprk_regardingmatter', navPropHint: 'matter' },
-    { entityType: 'sprk_project', entitySet: 'sprk_projects', lookupAttribute: 'sprk_regardingproject', navPropHint: 'project' },
-    { entityType: 'sprk_event', entitySet: 'sprk_events', lookupAttribute: 'sprk_regardingevent', navPropHint: 'event' },
-    { entityType: 'sprk_communication', entitySet: 'sprk_communications', lookupAttribute: 'sprk_regardingcommunication', navPropHint: 'communication' },
-    { entityType: 'sprk_workassignment', entitySet: 'sprk_workassignments', lookupAttribute: 'sprk_regardingworkassignment', navPropHint: 'workassignment' },
-    { entityType: 'sprk_invoice', entitySet: 'sprk_invoices', lookupAttribute: 'sprk_regardinginvoice', navPropHint: 'invoice' },
-    { entityType: 'sprk_budget', entitySet: 'sprk_budgets', lookupAttribute: 'sprk_regardingbudget', navPropHint: 'budget' },
-    { entityType: 'sprk_analysis', entitySet: 'sprk_analyses', lookupAttribute: 'sprk_regardinganalysis', navPropHint: 'analysis' },
-    { entityType: 'sprk_organization', entitySet: 'sprk_organizations', lookupAttribute: 'sprk_regardingorganization', navPropHint: 'organization' },
+    {
+      entityType: 'sprk_matter',
+      entitySet: 'sprk_matters',
+      lookupAttribute: 'sprk_regardingmatter',
+      navPropHint: 'matter',
+    },
+    {
+      entityType: 'sprk_project',
+      entitySet: 'sprk_projects',
+      lookupAttribute: 'sprk_regardingproject',
+      navPropHint: 'project',
+    },
+    {
+      entityType: 'sprk_event',
+      entitySet: 'sprk_events',
+      lookupAttribute: 'sprk_regardingevent',
+      navPropHint: 'event',
+    },
+    {
+      entityType: 'sprk_communication',
+      entitySet: 'sprk_communications',
+      lookupAttribute: 'sprk_regardingcommunication',
+      navPropHint: 'communication',
+    },
+    {
+      entityType: 'sprk_workassignment',
+      entitySet: 'sprk_workassignments',
+      lookupAttribute: 'sprk_regardingworkassignment',
+      navPropHint: 'workassignment',
+    },
+    {
+      entityType: 'sprk_invoice',
+      entitySet: 'sprk_invoices',
+      lookupAttribute: 'sprk_regardinginvoice',
+      navPropHint: 'invoice',
+    },
+    {
+      entityType: 'sprk_budget',
+      entitySet: 'sprk_budgets',
+      lookupAttribute: 'sprk_regardingbudget',
+      navPropHint: 'budget',
+    },
+    {
+      entityType: 'sprk_analysis',
+      entitySet: 'sprk_analyses',
+      lookupAttribute: 'sprk_regardinganalysis',
+      navPropHint: 'analysis',
+    },
+    {
+      entityType: 'sprk_organization',
+      entitySet: 'sprk_organizations',
+      lookupAttribute: 'sprk_regardingorganization',
+      navPropHint: 'organization',
+    },
     { entityType: 'contact', entitySet: 'contacts', lookupAttribute: 'sprk_regardingcontact', navPropHint: 'contact' },
-    { entityType: 'sprk_document', entitySet: 'sprk_documents', lookupAttribute: 'sprk_regardingdocument', navPropHint: 'document' },
+    {
+      entityType: 'sprk_document',
+      entitySet: 'sprk_documents',
+      lookupAttribute: 'sprk_regardingdocument',
+      navPropHint: 'document',
+    },
   ];
   return {
     TODO_REGARDING_CATALOG,
-    applyResolverFields: jest.fn(async (
-      _webApi: unknown,
-      entity: Record<string, unknown>,
-      _navProps: unknown,
-      parentEntityLogicalName: string,
-      parentEntitySet: string,
-      parentRecordId: string,
-      parentRecordName: string,
-      _entityLookupHint?: string
-    ) => {
-      // Mirror the real service's behavior at the payload level: set the
-      // chosen entity-specific @odata.bind + 4 resolver fields.
-      const cleanId = parentRecordId.replace(/[{}]/g, '').toLowerCase();
-      entity[`mock_${parentEntityLogicalName}@odata.bind`] = `/${parentEntitySet}(${cleanId})`;
-      entity['sprk_regardingrecordid'] = cleanId;
-      entity['sprk_regardingrecordname'] = parentRecordName;
-      entity['sprk_regardingrecordurl'] = `https://example.com/${parentEntityLogicalName}/${cleanId}`;
-      entity['mock_recordtype@odata.bind'] = `/sprk_recordtype_refs(rt-${parentEntityLogicalName})`;
-    }),
+    applyResolverFields: jest.fn(
+      async (
+        _webApi: unknown,
+        entity: Record<string, unknown>,
+        _navProps: unknown,
+        parentEntityLogicalName: string,
+        parentEntitySet: string,
+        parentRecordId: string,
+        parentRecordName: string,
+        _entityLookupHint?: string
+      ) => {
+        // Mirror the real service's behavior at the payload level: set the
+        // chosen entity-specific @odata.bind + 4 resolver fields.
+        const cleanId = parentRecordId.replace(/[{}]/g, '').toLowerCase();
+        entity[`mock_${parentEntityLogicalName}@odata.bind`] = `/${parentEntitySet}(${cleanId})`;
+        entity['sprk_regardingrecordid'] = cleanId;
+        entity['sprk_regardingrecordname'] = parentRecordName;
+        entity['sprk_regardingrecordurl'] = `https://example.com/${parentEntityLogicalName}/${cleanId}`;
+        entity['mock_recordtype@odata.bind'] = `/sprk_recordtype_refs(rt-${parentEntityLogicalName})`;
+      }
+    ),
   };
 });
 
 import * as sharedLib from '@spaarke/ui-components';
 
-const applyResolverFieldsMock = (sharedLib as unknown as {
-  applyResolverFields: jest.Mock;
-}).applyResolverFields;
+const applyResolverFieldsMock = (
+  sharedLib as unknown as {
+    applyResolverFields: jest.Mock;
+  }
+).applyResolverFields;
 
 describe('ResolverWriteHandler', () => {
   let mockUpdateRecord: jest.Mock;
@@ -136,10 +190,12 @@ describe('ResolverWriteHandler', () => {
     const [entity, recordId, payload] = mockUpdateRecord.mock.calls[0];
     expect(entity).toBe('sprk_todo');
     expect(recordId).toBe('22222222-2222-2222-2222-222222222222');
-    expect(payload).toEqual(expect.objectContaining({
-      'sprk_regardingrecordid': '33333333-3333-3333-3333-333333333333',
-      'sprk_regardingrecordname': 'X',
-    }));
+    expect(payload).toEqual(
+      expect.objectContaining({
+        sprk_regardingrecordid: '33333333-3333-3333-3333-333333333333',
+        sprk_regardingrecordname: 'X',
+      })
+    );
   });
 
   test('rejects an unknown entity type', async () => {
@@ -291,9 +347,7 @@ describe('ResolverWriteHandler', () => {
     const payload = result.payload as Record<string, unknown>;
 
     // 11 entity-specific lookups + 1 record-type lookup, all @odata.bind = null
-    const nulledBinds = Object.entries(payload).filter(
-      ([k, v]) => k.endsWith('@odata.bind') && v === null
-    );
+    const nulledBinds = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
     expect(nulledBinds.length).toBeGreaterThanOrEqual(12);
 
     // 3 text/URL fields explicitly null

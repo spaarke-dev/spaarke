@@ -4,9 +4,4 @@
  * Host-agnostic types — zero LegalWorkspace coupling.
  */
 
-export type {
-  ITodoRecord,
-  IRegardingContext,
-  IFeedSyncBridge,
-  IWebApi,
-} from './todo';
+export type { ITodoRecord, IRegardingContext, IFeedSyncBridge, IWebApi } from './todo';

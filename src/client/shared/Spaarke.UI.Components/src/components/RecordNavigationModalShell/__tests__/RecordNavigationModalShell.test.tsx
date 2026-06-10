@@ -70,9 +70,7 @@ function getLastCorrelationId(target: MockIframeWindow): string {
   return last.correlationId as string;
 }
 
-function defaultProps(
-  overrides?: Partial<IRecordNavigationModalShellProps>
-): IRecordNavigationModalShellProps {
+function defaultProps(overrides?: Partial<IRecordNavigationModalShellProps>): IRecordNavigationModalShellProps {
   return {
     currentIndex: 1,
     navigationTotal: 5,
@@ -118,9 +116,7 @@ describe('RecordNavigationModalShell', () => {
     });
 
     it('omits the action-bar region (and divider) when actionBar is not supplied', () => {
-      const { container } = renderWithProviders(
-        <RecordNavigationModalShell {...defaultProps()} />
-      );
+      const { container } = renderWithProviders(<RecordNavigationModalShell {...defaultProps()} />);
       // Vertical Divider renders as a presentation-role element with the
       // `aria-orientation=vertical` attribute. Absence is the contract.
       const dividers = container.querySelectorAll('[aria-orientation="vertical"]');
@@ -130,17 +126,13 @@ describe('RecordNavigationModalShell', () => {
 
   describe('disabled-boundary semantics (FR-12)', () => {
     it('disables prev at index 0', () => {
-      renderWithProviders(
-        <RecordNavigationModalShell {...defaultProps({ currentIndex: 0 })} />
-      );
+      renderWithProviders(<RecordNavigationModalShell {...defaultProps({ currentIndex: 0 })} />);
       expect(screen.getByRole('button', { name: 'Previous record' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Next record' })).not.toBeDisabled();
     });
 
     it('disables next at the final index (navigationTotal - 1)', () => {
-      renderWithProviders(
-        <RecordNavigationModalShell {...defaultProps({ currentIndex: 4, navigationTotal: 5 })} />
-      );
+      renderWithProviders(<RecordNavigationModalShell {...defaultProps({ currentIndex: 4, navigationTotal: 5 })} />);
       expect(screen.getByRole('button', { name: 'Next record' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Previous record' })).not.toBeDisabled();
     });
@@ -148,18 +140,12 @@ describe('RecordNavigationModalShell', () => {
 
   describe('counter format', () => {
     it('renders "1 of M" for index 0', () => {
-      renderWithProviders(
-        <RecordNavigationModalShell {...defaultProps({ currentIndex: 0, navigationTotal: 7 })} />
-      );
+      renderWithProviders(<RecordNavigationModalShell {...defaultProps({ currentIndex: 0, navigationTotal: 7 })} />);
       expect(screen.getByText('1 of 7')).toBeInTheDocument();
     });
 
     it('renders "0 of 0" fallback when navigationTotal is 0', () => {
-      renderWithProviders(
-        <RecordNavigationModalShell
-          {...defaultProps({ currentIndex: 0, navigationTotal: 0 })}
-        />
-      );
+      renderWithProviders(<RecordNavigationModalShell {...defaultProps({ currentIndex: 0, navigationTotal: 0 })} />);
       expect(screen.getByText('0 of 0')).toBeInTheDocument();
     });
   });
@@ -168,9 +154,7 @@ describe('RecordNavigationModalShell', () => {
     it('invokes onNavigate("next") immediately when no dirtyCheckTargetWindow is supplied', async () => {
       const onNavigate = jest.fn().mockResolvedValue(undefined);
       const user = userEvent.setup();
-      renderWithProviders(
-        <RecordNavigationModalShell {...defaultProps({ onNavigate })} />
-      );
+      renderWithProviders(<RecordNavigationModalShell {...defaultProps({ onNavigate })} />);
       await user.click(screen.getByRole('button', { name: 'Next record' }));
       await waitFor(() => {
         expect(onNavigate).toHaveBeenCalledTimes(1);
@@ -181,9 +165,7 @@ describe('RecordNavigationModalShell', () => {
     it('invokes onNavigate("prev") immediately when no dirtyCheckTargetWindow is supplied', async () => {
       const onNavigate = jest.fn().mockResolvedValue(undefined);
       const user = userEvent.setup();
-      renderWithProviders(
-        <RecordNavigationModalShell {...defaultProps({ onNavigate })} />
-      );
+      renderWithProviders(<RecordNavigationModalShell {...defaultProps({ onNavigate })} />);
       await user.click(screen.getByRole('button', { name: 'Previous record' }));
       await waitFor(() => {
         expect(onNavigate).toHaveBeenCalledTimes(1);
@@ -280,9 +262,7 @@ describe('RecordNavigationModalShell', () => {
       act(() => {
         postDirtyCheckResponse(correlationId, true);
       });
-      await waitFor(() =>
-        expect(screen.getByText('Discard unsaved changes?')).toBeInTheDocument()
-      );
+      await waitFor(() => expect(screen.getByText('Discard unsaved changes?')).toBeInTheDocument());
 
       await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
@@ -315,9 +295,7 @@ describe('RecordNavigationModalShell', () => {
       act(() => {
         postDirtyCheckResponse(correlationId, true);
       });
-      await waitFor(() =>
-        expect(screen.getByText('Discard unsaved changes?')).toBeInTheDocument()
-      );
+      await waitFor(() => expect(screen.getByText('Discard unsaved changes?')).toBeInTheDocument());
 
       await user.click(screen.getByRole('button', { name: 'Discard and continue' }));
 

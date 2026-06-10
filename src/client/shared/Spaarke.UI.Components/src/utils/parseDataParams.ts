@@ -72,11 +72,7 @@
 export function parseDataParams(search?: string): Record<string, string> {
   try {
     const sourceSearch =
-      typeof search === 'string'
-        ? search
-        : typeof window !== 'undefined'
-          ? window.location.search
-          : '';
+      typeof search === 'string' ? search : typeof window !== 'undefined' ? window.location.search : '';
     const urlParams = new URLSearchParams(sourceSearch);
     const result: Record<string, string> = {};
 
