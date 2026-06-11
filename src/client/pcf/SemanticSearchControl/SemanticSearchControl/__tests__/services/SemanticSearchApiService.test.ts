@@ -273,7 +273,7 @@ describe('SemanticSearchApiService.searchUnion() — FR-PCF-02 forwarding to sub
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
     const [, init] = mockAuthenticatedFetch.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse((init).body as string);
+    const body = JSON.parse(init.body as string);
     expect(body.searchIndexName).toBe('spaarke-file-index');
   });
 });
