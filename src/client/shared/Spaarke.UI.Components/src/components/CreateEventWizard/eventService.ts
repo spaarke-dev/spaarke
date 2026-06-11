@@ -273,6 +273,24 @@ export class EventService {
             '[EventService] User BU has neither sprk_containerid nor sprk_searchindexname — leaving payload fields unset; BFF tenant-default chain will apply.'
           );
         }
+        // Phase G: cascade BU's `sprk_ai_search_index` lookup onto the new Event.
+        if (buDefaults.searchIndexId) {
+          const aiNavProp = _findNavProp(navProps, 'sprk_aisearchindex');
+          if (aiNavProp) {
+            entity[`${aiNavProp}@odata.bind`] = `/sprk_aisearchindexes(${buDefaults.searchIndexId})`;
+            console.info(
+              '[EventService] Cascaded sprk_ai_search_index from user BU:',
+              buDefaults.searchIndexId,
+              '(BU:',
+              buDefaults.businessUnitId,
+              ')'
+            );
+          } else {
+            console.warn(
+              '[EventService] sprk_ai_search_index nav-prop not discovered on sprk_event — lookup cascade skipped.'
+            );
+          }
+        }
       } else {
         console.warn(
           '[EventService] Xrm.Utility.getUserId() unavailable — skipping BU cascade for sprk_containerid / sprk_searchindexname. BFF tenant-default will apply server-side.'
