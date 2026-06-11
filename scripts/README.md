@@ -91,6 +91,38 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ---
 
+### `Create-AiPersonaEntity.ps1`
+**Purpose:** Idempotent deployment of the `sprk_aipersona` Dataverse entity — R6 Pillar 1's 5th scope library entity. Creates entity + 6 attributes (`sprk_name`, `sprk_personacode`, `sprk_description`, `sprk_systemprompt`, `sprk_scopetype` picklist, `sprk_tags`, `sprk_availableadhoc`) + self-lookup relationship (`sprk_aipersona_parentpersona` adding `sprk_parentpersonaid`) for most-specific-wins inheritance per R6 Q1. Mirrors the canonical 4-scope schema pattern (`sprk_analysisaction`/skill/knowledge/tool) verbatim. SYS-/CUST- prefix enforcement is API-side via existing `OwnershipValidator.cs` (NOT entity-level — matches the canonical Spaarke scope pattern).
+**Usage:** 🟡 Occasional — One-time per environment (R6 Phase A); idempotent re-runs safe
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Dataverse connection, PowerShell 7+
+**Owner:** AI Team / R6 spaarke-ai-platform-unification-r6
+**Last Used:** June 2026 (R6 task 001 — D-A-01)
+
+**When to Use:**
+- Bootstrapping a new Dataverse environment for R6 Pillar 1
+- Re-running after a Dataverse environment reset / restore
+- Verifying schema after a manual change
+
+**Command:**
+```powershell
+# Preview without modifying (recommended first run)
+.\scripts\Create-AiPersonaEntity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -DryRun
+
+# Deploy (idempotent)
+.\scripts\Create-AiPersonaEntity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+```
+
+**Pattern source:** `scripts/Deploy-ChartDefinitionEntity.ps1` (canonical exemplar per `dataverse-create-schema` SKILL.md) + `docs/architecture/scope-architecture.md` (scope schema canonical reference).
+
+**Related R6 tasks:**
+- Task 002 — `GET /api/ai/scopes/personas` endpoint (consumes this entity)
+- Task 003 — Persona resolver methods in `IScopeResolverService`
+- Task 004 — Seed default SYS- persona row (separate script — task-004-specific)
+- Task 005 — Wire `SprkChatAgentFactory.CreateAgentAsync` to scope persona
+
+---
+
 ### `Refresh-ScopeModelIndex.ps1`
 **Purpose:** Regenerate `.claude/catalogs/scope-model-index.json` from current Dataverse state — keeps the scope catalog in sync for Claude Code
 **Usage:** 🟡 Occasional - After adding new scopes to Dataverse

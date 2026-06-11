@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
+using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -27,6 +28,40 @@ public static class AnalysisServicesModule
         // entirely. Downstream consumers (tasks 012 / 014 / 015) inject this singleton and call
         // RecordSummarizeInvocation; task 007 cleanup may call RecordSessionFilesIndexSize.
         services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
+
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — TRULY UNCONDITIONAL.
+        // ISearchIndexNameResolver is consumed by RagIndexingJobHandler / BulkRagIndexingJobHandler /
+        // IndexingWorkerHostedService — all 3 are registered unconditionally as scoped IJobHandler / IHostedService.
+        // The resolver delegates to IGenericEntityService (registered unconditionally via GraphModule).
+        // Registered HERE at the top of the module (above the documentIntelligence/analysis conditionals)
+        // so it resolves correctly on BOTH AI-ON and AI-OFF paths. Lifetime: scoped (matches consumer
+        // expectations + Dataverse Web API client lifetime).
+        services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
+
+        // multi-container-multi-index-r1 Phase G (task 102) — TRULY UNCONDITIONAL.
+        // IAllowedIndexesProvider is consumed by KnowledgeDeploymentService (registered behind
+        // the AI-Search-keys sub-gate in AddRagServices) to validate caller-supplied indexNames
+        // against the sprk_aisearchindex catalog table. Singleton lifetime: the implementation
+        // holds the IMemoryCache key + ttl as process-wide state and uses IServiceProvider.CreateScope
+        // for per-load scoped IGenericEntityService resolution (no captive dependency).
+        //
+        // Registered HERE at the top of the module (above the AI conditionals) for the same reason
+        // ISearchIndexNameResolver is — KnowledgeDeploymentService's optional ctor parameter resolves
+        // on the AI-ON path, but having the registration available on the AI-OFF path keeps the DI
+        // graph uniform and forward-compatible (if any other consumer is wired later).
+        //
+        // No new NuGet packages; IMemoryCache is already registered unconditionally via CacheModule.
+        // AiSearchOptions binding is preserved by JobProcessingModule.
+        services.AddSingleton<IAllowedIndexesProvider, DataverseAllowedIndexesProvider>();
+
+        // multi-container-multi-index-r1 upload-indexing-centralization (scope extension) — TRULY UNCONDITIONAL.
+        // IPostUploadIndexingEnqueuer is the single seam for post-upload RAG indexing.
+        // Phase 3 (2026-06-08) — dispatches sync OBO indexing via IFileIndexingService.IndexFileAsync
+        // (Pattern 4 — see sdap-auth-patterns.md). Scoped lifetime because IFileIndexingService is scoped.
+        // See projects/spaarke-multi-container-multi-index-r1/notes/upload-indexing-centralization-design.md.
+        services.Configure<Sprk.Bff.Api.Configuration.PostUploadIndexingOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Configuration.PostUploadIndexingOptions.SectionName));
+        services.AddScoped<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
 
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
@@ -118,6 +153,28 @@ public static class AnalysisServicesModule
         // hosted-service registration itself is still gated above (under the
         // compound AI gate via AddPlaybookServices).
         AddSessionFilesCleanupOptions(services, configuration);
+
+        // R6 Pillar 6a (task 051, D-C-02) — WorkspaceStateService. Q4 hybrid persistence
+        // (Redis hot 24h TTL + Cosmos durable on pin/matter-attach) for canonical
+        // workspace-tab state. Per-tenant Redis key `workspace:{tenantId}:{sessionId}`
+        // is BINDING per ADR-014 + NFR-16.
+        //
+        // §F.1 asymmetric-registration audit: UNCONDITIONAL registration. The consumers
+        // are (a) GET /api/workspace/state endpoint (task 052, unconditional mapping in
+        // R6 Pillar 6a) and (b) SprkChatAgentFactory per-turn snapshot (task 053). The
+        // service has ZERO AI-internal constructor deps (cache + Cosmos + config + logger
+        // only), so the asymmetric-registration anti-pattern does NOT apply — registration
+        // is symmetric with endpoint mapping (both unconditional). No Null peer needed.
+        //
+        // §A.4 ADR-013 placement: workspace-state plumbing, NOT AI capability. Per refined
+        // ADR-013, this service does NOT inject IOpenAiClient / IPlaybookService / any
+        // AI-internal type. Placement-justification record:
+        // `projects/spaarke-ai-platform-unification-r6/notes/task-051-placement-justification.md`.
+        //
+        // Lifetime: Scoped — matches IDistributedCache (Singleton) + CosmosClient
+        // (Singleton) wrap pattern used by SessionPersistenceService + MatterMemoryService.
+        // ZERO new Program.cs lines per ADR-010.
+        services.AddScoped<IWorkspaceStateService, WorkspaceStateService>();
 
         // Unconditional chat-CRUD + notification services (task 011 Phase 1b Tier 1, D-09 §2 B1/B4/B5/L5).
         // These services have ZERO AI dependencies; their previous conditional registration was
@@ -263,6 +320,13 @@ public static class AnalysisServicesModule
         // compound-OFF DI graph remains uniform across all four PublicContracts facades.
         services.AddScoped<IRecordMatchingAi, NullRecordMatchingAi>();
 
+        // L1 — IInvokePlaybookAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
+        // R6 Pillar 3 / Q11 / task 020 — generic playbook-invocation facade for the chat-tool
+        // dispatch path (task 021 InvokePlaybookHandler), the M365 Copilot agent gateway, and
+        // future R7+ consumers. Symmetric registration with the real impl per the
+        // asymmetric-registration anti-pattern guard (CLAUDE.md §10 F.1).
+        services.AddScoped<IInvokePlaybookAi, NullInvokePlaybookAi>();
+
         // L1 — IInsightsAi (P3 Fail-Fast). Real impl (InsightsOrchestrator) registered in
         // AddPublicContractsFacade. Consumed by /api/insights/ask + /api/insights/search +
         // /api/insights/assistant/query endpoints (Zone B) AND by the D-P8 SPE-upload
@@ -299,6 +363,14 @@ public static class AnalysisServicesModule
         //   IndexingWorkerHostedService / RagIndexingJobHandler / BulkRagIndexingJobHandler. Real
         //   impl registered AddRagServices line 422. Lifetime: scoped (matches real FileIndexingService).
         services.AddScoped<IFileIndexingService, NullFileIndexingService>();
+
+        // ⚠ NOTE: ISearchIndexNameResolver was incorrectly placed HERE (inside
+        // AddNullObjectsForCompoundOff) — that method only runs on the AI-OFF path,
+        // so RagIndexingJobHandler / BulkRagIndexingJobHandler / IndexingWorkerHostedService
+        // failed at startup in the AI-ON live env with
+        // "Unable to resolve service for type ISearchIndexNameResolver".
+        // FIXED 2026-06-08: registration moved to the TOP of AddAnalysisServicesModule
+        // (above the documentIntelligence/analysis conditionals) so it's truly unconditional.
 
         // B2 — SprkChatAgentFactory (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B2.
         // Real impl registered unconditionally inside AddAiModule (only invoked on compound-ON path).
@@ -352,6 +424,16 @@ public static class AnalysisServicesModule
         services.AddHttpClient<AnalysisSkillService>();
         services.AddHttpClient<AnalysisKnowledgeService>();
         services.AddHttpClient<AnalysisToolService>();
+        // R6 Pillar 1 (D-A-02) — AnalysisPersonaService registered as typed HttpClient
+        // sibling to the 4 canonical Analysis* services. Registration is INSIDE the compound
+        // `Analysis:Enabled && DocumentIntelligence:Enabled` gate that wraps this method, so
+        // it is symmetric with the consuming ScopeResolverService registration directly below
+        // AND symmetric with the GET /api/ai/scopes/personas endpoint, which is mapped INSIDE
+        // the same compound gate via EndpointMappingExtensions.MapScopeEndpoints. The
+        // asymmetric-registration anti-pattern (CLAUDE.md §10 F.1) is verified compliant —
+        // both the DI registration and the endpoint mapping share the same gate; no new
+        // unconditional consumer of AnalysisPersonaService exists.
+        services.AddHttpClient<AnalysisPersonaService>();
         services.AddHttpClient<IScopeResolverService, ScopeResolverService>();
         services.AddScoped<IScopeManagementService, ScopeManagementService>();
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();
@@ -395,33 +477,21 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
         Console.WriteLine("✓ R5 SessionSummarizeOrchestrator registered (task 012; ADR-010 concrete; chat-session Summarize convergence)");
 
-        // R5 task 024 (D2-14) — InvokeInsightsQueryTool typed HttpClient. Zone B HTTP
-        // consumer of the Insights /api/insights/assistant/query endpoint per refined
-        // ADR-013 §3.5 + R5 CLAUDE.md §3.5 / §10. The endpoint co-locates in the same
-        // BFF process today, but the boundary is binding — same-process HTTP is the
-        // canonical Zone B consumption pattern.
+        // --- InvokeInsightsQueryTool typed HttpClient ---
+        // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): the specialized
+        // InvokeInsightsQueryTool C# bridge class was deleted in favor of the generic
+        // InvokePlaybookHandler (R6 Pillar 3 / task 021). The chat-side path no longer
+        // requires a typed HttpClient — the InsightsIntentClassifier playbook-vs-RAG
+        // routing happens inside the orchestration layer the IInvokePlaybookAi facade
+        // wraps (per FR-24 + docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md).
         //
-        // ZERO new Program.cs lines per R5 CLAUDE.md §3.3. ZERO new feature flags per
-        // R5 CLAUDE.md §3.2 — kill-switch coverage inherits via the parent compound gate
-        // (Analysis:Enabled && DocumentIntelligence:Enabled) AND the Insights endpoint's
-        // own kill-switches (returns 503 ai.insights.disabled / ai.rag.disabled /
-        // ai.intent-classification.disabled).
-        //
-        // Config key Bff:BaseAddress — defaults to https://localhost:7001 for local dev.
-        // In production this is the BFF App Service URL (e.g.,
-        // https://spaarke-bff-dev.azurewebsites.net). When BaseAddress is the SAME process
-        // as the caller, the HTTP request loops through the local listener — slightly
-        // higher latency than in-process invocation but preserves the Zone B boundary.
-        services.AddHttpClient<Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool>(client =>
-        {
-            var bffBaseAddress = configuration["Bff:BaseAddress"]
-                ?? "https://localhost:7001"; // local dev fallback
-            client.BaseAddress = new Uri(bffBaseAddress);
-            client.Timeout = TimeSpan.FromSeconds(60); // Insights p95 ~2s; RAG can spike
-            client.DefaultRequestHeaders.Accept.Add(
-                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-        });
-        Console.WriteLine("✓ R5 InvokeInsightsQueryTool typed HttpClient registered (task 024; Zone B consumer of /api/insights/assistant/query)");
+        // Zone B boundary preservation: the /api/insights/assistant/query endpoint
+        // itself is unchanged and continues to enforce its own kill-switches (503
+        // ai.insights.disabled / ai.rag.disabled / ai.intent-classification.disabled).
+        // Any future chat-side caller that needs to invoke the Insights endpoint directly
+        // can re-add an IHttpClientFactory registration here — the boundary pattern is
+        // documented in the legacy InvokeInsightsQueryTool class (recoverable via
+        // `git show HEAD~1:src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InvokeInsightsQueryTool.cs`).
     }
     private static void AddPlaybookServices(IServiceCollection services)
     {
@@ -515,6 +585,16 @@ public static class AnalysisServicesModule
         services.AddScoped<IInvoiceAi, InvoiceAi>();
         services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
         services.AddScoped<IRecordMatchingAi, RecordMatchingAi>();
+
+        // R6 Pillar 3 / Q11 / task 020 — IInvokePlaybookAi facade. Consumed by task 021
+        // InvokePlaybookHandler (chat-tool dispatch path) + future M365 Copilot agent
+        // gateway + future R7+ consumers. Wraps IPlaybookOrchestrationService — same
+        // pattern + same lifetime as IWorkspacePrefillAi above. ADR-013 facade boundary:
+        // the implementation is the only allowed translation point between the
+        // orchestration-internal PlaybookStreamEvent / NodeOutput / PlaybookRunMetrics
+        // and the domain-shape PlaybookInvocationResult consumed by CRUD-side callers.
+        // Null peer (NullInvokePlaybookAi) registered in AddNullObjectsForCompoundOff.
+        services.AddScoped<IInvokePlaybookAi, InvokePlaybookAi>();
 
         // ── 2026-06-04 audit Migration PR #1 — relocated from InsightsFacadeModule ────────
         // IPlaybookExecutionEngine — Scoped (transitively consumes Scoped

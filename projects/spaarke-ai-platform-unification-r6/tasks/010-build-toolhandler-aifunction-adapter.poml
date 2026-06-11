@@ -1,0 +1,163 @@
+<task id="010" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-10 Build `ToolHandlerToAIFunctionAdapter` (Pillar 2)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <estimated-effort>6 hours</estimated-effort>
+    <completion-notes>
+      ToolHandlerToAIFunctionAdapter built (399 LOC) + 27 unit tests (all pass). Wraps IToolHandler as Microsoft.Extensions.AI.AIFunction. Constructor takes data + delegates (no DI registration — instantiated per-tool by SprkChatAgentFactory.ResolveTools() in task 011). Constructor rejects handlers without InvocationContextKind.Chat (FR-09 guard). JsonSchema well-formedness + object-root + properties-shape validation at construction (FR-08 guards). Semantic JSON Schema validation deferred (would add ~1MB NuGet — JsonSchema.Net — outside R6 budget; runtime validation by handler's ValidateChat per FR-08 separation). ADR-015 telemetry hygiene enforced via dedicated sentinel-string test (InvokeAsync_Telemetry_DoesNotLogArgumentPayload). Build clean. BFF size delta: +0.067 MB. Unblocks task 011.
+    </completion-notes>
+    <dependencies>007, 008, 009</dependencies>
+    <blocks>011</blocks>
+    <tags>bff-api, ai, chat</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF service with critical adapter responsibility; ZERO Microsoft Agent Framework references binding (NFR-04); downstream blocker for tool-list wiring; tags `bff-api`+`ai`+`chat`.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Different file from 011; both consume this task's adapter — sequential dependency.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build `ToolHandlerToAIFunctionAdapter` — wraps an `IToolHandler` instance as a
+    `Microsoft.Extensions.AI.AIFunction` so the chat-agent's LLM call sees a standard
+    function-calling tool. The adapter reads `JsonSchema` from `AnalysisTool` (task 008)
+    for parameter declaration, reads `AvailableInContexts` (task 007) for filtering, and
+    builds the appropriate `ChatInvocationContext` (task 009) when the LLM invokes the
+    tool.
+
+    Critical-path context: this adapter is the structural bridge that lets the chat agent's
+    tool list become data-driven. Tasks 011 (factory wiring) + 012 (10-tool batch migration)
+    both depend on this adapter existing.
+
+    Critical NFR-04 constraint: this task uses Microsoft.Extensions.AI ONLY (already in
+    production for the existing chat-agent path). It MUST NOT introduce any Microsoft
+    Agent Framework dependency or reference. The naming is `AIFunction` — the
+    Microsoft.Extensions.AI primitive — NOT the Agent Framework's `AgentFunction` or any
+    related type. Reviewer MUST verify zero `Microsoft.Agents.*` namespace references
+    introduced by this task.
+
+    ADR-015 binding: when the LLM invokes the wrapped function, the adapter MUST NOT log
+    the user message content. Telemetry includes: tool name + decision + timestamp ONLY.
+    Deterministic IDs (matterId, tenantId, sessionId) are acceptable.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with Microsoft.Extensions.AI function-calling experience. Familiar
+    with the `IToolHandler` interface, `AnalysisTool` DTO, and ADR-015 trace-event hygiene.
+  </role>
+
+  <goal>
+    `ToolHandlerToAIFunctionAdapter` exists in `Services/Ai/Chat/`. Given an
+    `AnalysisTool` row + corresponding `IToolHandler` impl, it produces a
+    `Microsoft.Extensions.AI.AIFunction` the LLM can call. Adapter unit-tested for: valid
+    JSON Schema → valid AIFunction parameter declaration; invocation passes
+    `ChatInvocationContext`; telemetry emits tool name + decision + timestamp only.
+    Build green; publish-size delta reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/IToolHandler.cs</file>
+    <file purpose="dto">src/server/api/Sprk.Bff.Api/Services/Ai/Models/AnalysisTool.cs</file>
+    <file purpose="chat-factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register adapter inside existing `AnalysisServicesModule` per DI minimalism. ZERO new top-level Program.cs lines.</constraint>
+    <constraint source="ADR-013">Adapter is AI-internal; CRUD-side consumers never inject it.</constraint>
+    <constraint source="ADR-015">Adapter MUST NOT log user message content. Telemetry includes tool name + decision + timestamp only. Deterministic IDs acceptable.</constraint>
+    <constraint source="ADR-016">Adapter respects `ai-context` rate-limit policy when adapter executes within chat-agent flow.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget per NFR-02.</constraint>
+    <constraint source="spec NFR-04">ZERO Microsoft Agent Framework references in this task's code. Use Microsoft.Extensions.AI primitives only.</constraint>
+    <constraint source="spec FR-10">Adapter reads `JsonSchema` from `AnalysisTool` for parameter declaration; LLM sees a standard function-calling tool.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/ai-function-adapter</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — new chat-agent adapter + NFR-04 binding + ADR-015 trace hygiene".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 007 ✅ + 008 ✅ + 009 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Capture baseline publish size. Inspect Microsoft.Extensions.AI types currently consumed by the chat-agent path to use the same primitives consistently.
+    </step>
+    <step order="3" name="Design the Adapter">
+      Constructor accepts `AnalysisTool` row + `IToolHandler` instance. Builds `AIFunction` with: name from `AnalysisTool.Name`, description from `AnalysisTool.Description`, parameter schema from `AnalysisTool.JsonSchema`. Invocation: deserializes LLM args per JsonSchema; builds `ChatInvocationContext`; calls `IToolHandler.ExecuteAsync(context, args)`.
+    </step>
+    <step order="4" name="Implement Telemetry per ADR-015">
+      Emit telemetry events: `tool_call_started(toolName, decisionId, timestamp)`, `tool_call_completed(toolName, outcome, durationMs, timestamp)`. NEVER log user message content / arguments containing user message text. Deterministic IDs (tenantId, sessionId, matterId) acceptable.
+    </step>
+    <step order="5" name="Register in DI Module">
+      Register inside `AnalysisServicesModule` (or appropriate existing chat module). Confirm no new Program.cs lines.
+    </step>
+    <step order="6" name="Verify Zero Microsoft Agent Framework References">
+      `grep -r "Microsoft.Agents" src/server/api/Sprk.Bff.Api/` → MUST return 0 results in the adapter code path. Document in task notes.
+    </step>
+    <step order="7" name="Add Unit Tests">
+      Tests: valid JSON Schema → valid AIFunction parameters; invocation builds correct `ChatInvocationContext`; telemetry events emitted with safe fields only (no user message content); invalid JSON Schema raises at construction; rate-limit policy verified if applicable.
+    </step>
+    <step order="8" name="Build + Verify Publish Size">
+      `dotnet build` → 0 errors. `dotnet publish -c Release` → measure delta vs baseline; report ≤+5 MB R6 budget.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk each criterion; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-010 / ADR-013 / ADR-015 / ADR-016 / ADR-029 + NFR-04 + FR-10 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 010 ✅. Reset `current-task.md`. Report. NFR-04 verification recorded.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="git">stage + commit changes</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlerToAIFunctionAdapter.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (modified — registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ToolHandlerToAIFunctionAdapterTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (010 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-010-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ToolHandlerToAIFunctionAdapter` exists and exposes a way to produce `Microsoft.Extensions.AI.AIFunction` from `(AnalysisTool, IToolHandler)`.</criterion>
+    <criterion testable="true">JSON Schema from `AnalysisTool.JsonSchema` becomes the AIFunction parameter declaration (FR-10).</criterion>
+    <criterion testable="true">Invocation builds correct `ChatInvocationContext` and dispatches to `IToolHandler.ExecuteAsync`.</criterion>
+    <criterion testable="true">ZERO `Microsoft.Agents.*` references in the adapter code (NFR-04; grep evidence recorded).</criterion>
+    <criterion testable="true">Telemetry emits tool name + decision + timestamp only; no user message content (ADR-015).</criterion>
+    <criterion testable="true">Registered inside existing `AnalysisServicesModule` per ADR-010; no new Program.cs lines.</criterion>
+    <criterion testable="true">Adapter is AI-internal; not surfaced through PublicContracts facade (ADR-013).</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

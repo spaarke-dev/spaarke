@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Update `SemanticSearchEndpoints.cs` to pass DTO `SearchIndexName` field to resolver</title>
+    <phase>B: BFF resolver extension</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>013, 014, 015</dependencies>
+    <blocks>017</blocks>
+    <tags>bff-api, api, endpoints, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api`; modifies .cs endpoint code at the HTTP boundary. Integration point that wires DTO → service → resolver. ProblemDetails propagation must be correct.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single-file integration point — all upstream thread-through tasks (013/014/015) must complete first.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Wire the DTO `SearchIndexName` field through `SemanticSearchEndpoints.cs` to the service calls (which were updated in tasks 013/014/015). Verify the ProblemDetails 400 from `INDEX_NOT_ALLOWED` propagates correctly through the endpoint layer to the HTTP response (ADR-019). Existing endpoint-filter authorization (ADR-008) is UNCHANGED.
+  </prompt>
+
+  <role>
+    BFF developer familiar with `Sprk.Bff.Api/Api/Ai/` Minimal-API endpoint registrations and the endpoint-filter authz pattern. Read `.claude/constraints/bff-extensions.md` for the binding pre-merge checklist.
+  </role>
+
+  <goal>
+    `SemanticSearchEndpoints.cs` reads `request.SearchIndexName` and passes it to the appropriate service call(s). On bad index, the resolver's `INDEX_NOT_ALLOWED` exception/Result surfaces as a 400 ProblemDetails JSON response. End-to-end trace shows the resolved index name in the issued Azure Search URL.
+  </goal>
+
+  <context>
+    <background>
+      Final integration point of Phase B. Tasks 010-015 delivered the resolver, DTO, appsettings, and three service thread-throughs. This task wires them together at the HTTP boundary so a client request specifying `searchIndexName` routes correctly all the way to Azure Search, and bad values surface as ProblemDetails 400.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BFF-07">Search endpoint MUST thread `SearchIndexName` from request DTO into resolver call. End-to-end acceptance: server log shows resolved index name in the issued Azure Search URL.</constraint>
+    <constraint source="spec.md NFR-02">Existing endpoint tests pass UNMODIFIED.</constraint>
+    <constraint source="spec.md NFR-08">400 INDEX_NOT_ALLOWED returns valid ProblemDetails JSON with extension members (ADR-019).</constraint>
+    <constraint source="ADR-001">Minimal-API endpoint pattern — `MapPost(...).WithName(...)` with request body binding.</constraint>
+    <constraint source="ADR-008">Endpoint-filter authorization — DO NOT change the existing filter; it stays.</constraint>
+    <constraint source="ADR-019">ProblemDetails JSON for all 4xx responses with `type` URI, `title`, `status`, `detail`, plus extension members.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Binding pre-merge checklist for any BFF addition.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-bff-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">
+        Endpoint reads request body via parameter binding; passes the relevant fields explicitly to the service method. No service-layer model coupling beyond the DTO.
+      </pattern>
+      <pattern name="ProblemDetails propagation" location="ADR-019">
+        Service-layer exception (e.g., `IndexNotAllowedException`) is mapped at the endpoint or middleware layer to a 400 ProblemDetails response. The mapping handler should include the rejected value as an extension member.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `SemanticSearchEndpoints.cs` to map current endpoints and how they call the services (`SemanticSearchService`, `RagService`, `RecordSearchService`).</step>
+    <step order="2">For each endpoint that binds one of the three updated DTOs, ensure `request.SearchIndexName` is passed through (either as part of the request object, which already flows, or as an explicit parameter — depending on the existing call signature).</step>
+    <step order="3">Verify the `INDEX_NOT_ALLOWED` exception/Result from the resolver (task 010) surfaces as a 400 ProblemDetails. This may be via an existing exception-mapping middleware or via an explicit `try/catch` at the endpoint. If neither exists yet, add a minimal exception filter or mapping at the endpoint level that produces ProblemDetails with `type`, `title`, `status: 400`, `detail`, and an extension member naming the rejected index.</step>
+    <step order="4">Confirm the existing endpoint-filter authz (ADR-008) is unchanged — no new filters, no removed filters.</step>
+    <step order="5">Local run: send a POST with `searchIndexName: "spaarke-file-index"` and verify a BFF log line shows the resolved index name. Capture the log snippet to task notes.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`; verify existing endpoint tests pass unmodified.</step>
+    <step order="7">Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing endpoint registration</tool>
+    <tool name="Edit">Wire DTO field to service calls; add ProblemDetails mapping if needed</tool>
+    <tool name="Bash">Build + local-run smoke test to capture trace</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</output>
+    <output type="notes" ephemeral="true">BFF log snippet showing resolved Azure Search URL</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BFF-07 (final wiring): End-to-end — client sends `searchIndexName`, server log shows the resolved index name in the issued Azure Search URL.</criterion>
+    <criterion testable="true">NFR-08: 400 INDEX_NOT_ALLOWED returns valid ProblemDetails JSON with extension members.</criterion>
+    <criterion testable="true">NFR-02: Existing endpoint tests pass UNMODIFIED.</criterion>
+    <criterion testable="true">ADR-008: Endpoint-filter authz unchanged (verified by code review).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task closes the Phase B implementation loop. Task 017 follows with comprehensive unit + integration tests; task 018 deploys.
+
+    If the existing BFF doesn't have a global ProblemDetails exception-mapping middleware, prefer adding the mapping at the endpoint level (smaller blast radius) rather than introducing new middleware in this scope.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute Step 0 (rigor declaration: FULL) before any code change.
+    </protocol>
+  </execution>
+</task>

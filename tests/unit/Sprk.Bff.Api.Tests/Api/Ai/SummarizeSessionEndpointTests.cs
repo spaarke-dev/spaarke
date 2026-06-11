@@ -239,10 +239,12 @@ public class SummarizeSessionEndpointTests : IClassFixture<SummarizeSessionEndpo
         // Force the orchestrator's first downstream call (entity service) to throw
         // FeatureDisabledException so the endpoint's "FIRST per ADR-032 P3" catch fires.
         _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
+        // R6 task 025 (D-A-17) — engine path uses RetrieveAsync (FK-resolved ID), not
+        // RetrieveByAlternateKeyAsync. Wire the FeatureDisabledException onto the new path.
         _fx.EntityServiceMock
-            .Setup(e => e.RetrieveByAlternateKeyAsync(
-                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(),
-                It.IsAny<string[]?>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.RetrieveAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(),
+                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FeatureDisabledException("ai.analysis.disabled",
                 "Analysis feature is disabled for this environment."));
 
@@ -379,7 +381,16 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
     public Mock<IRagService> RagServiceMock { get; } = new();
     public StubOpenAiClient OpenAi { get; } = new();
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
+    public Mock<INodeService> NodeServiceMock { get; } = new();
     public R5SummarizeTelemetry Telemetry { get; } = new();
+
+    // R6 task 025 (D-A-17) — the chat-summarize streaming pipeline moved from
+    // SessionSummarizeOrchestrator into PlaybookExecutionEngine. The orchestrator now requires
+    // an IPlaybookExecutionEngine; we register the REAL engine here (so the in-process
+    // WebApplication exercises the real moved code) and wire INodeService + IGenericEntityService
+    // FK-chain stubs so the engine resolves the action via the FK path (not alternate key).
+    internal static readonly Guid ChatSummarizePlaybookId = Guid.Parse("44285d15-1360-f111-ab0b-70a8a59455f4");
+    internal static readonly Guid ChatSummarizeActionId = Guid.Parse("eeb05bfd-1260-f111-ab0b-70a8a59455f4");
 
     private WebApplication? _app;
 
@@ -426,14 +437,25 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         var authMock = new Mock<IAiAuthorizationService>();
         builder.Services.AddSingleton(authMock.Object);
 
-        // Orchestrator dependencies — test doubles.
+        // Orchestrator + engine dependencies — test doubles.
         builder.Services.AddSingleton<ChatSessionManager>(Sessions);
         builder.Services.AddSingleton(RagServiceMock.Object);
         builder.Services.AddSingleton<IOpenAiClient>(OpenAi);
         builder.Services.AddSingleton(EntityServiceMock.Object);
+        builder.Services.AddSingleton(NodeServiceMock.Object);
         builder.Services.AddSingleton(Telemetry);
 
-        // Orchestrator itself — concrete sealed (ADR-010); registered Scoped to mirror prod.
+        // R6 task 025 (D-A-17) — IPlaybookExecutionEngine is the orchestrator's new dep. We
+        // register the REAL PlaybookExecutionEngine (so the in-process WebApplication exercises
+        // the real moved chat-summarize pipeline) wired against the test-double dependencies
+        // above. The engine's non-chat-summarize deps (builder, orchestration, http context) are
+        // stubbed minimally — they're not exercised by the chat /summarize endpoint.
+        builder.Services.AddSingleton(Mock.Of<IAiPlaybookBuilderService>());
+        builder.Services.AddSingleton(Mock.Of<IPlaybookOrchestrationService>());
+        builder.Services.AddSingleton(Mock.Of<Microsoft.AspNetCore.Http.IHttpContextAccessor>());
+        builder.Services.AddScoped<IPlaybookExecutionEngine, PlaybookExecutionEngine>();
+
+        // Orchestrator itself — concrete (ADR-010); registered Scoped to mirror prod.
         builder.Services.AddScoped<SessionSummarizeOrchestrator>();
 
         // Switch server to TestServer so we get an HttpClient that talks to this in-process app.
@@ -469,6 +491,7 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         OpenAi.ThrowMidStream = false;
         RagServiceMock.Reset();
         EntityServiceMock.Reset();
+        NodeServiceMock.Reset();
         ConfigureDefaults();
     }
 
@@ -486,12 +509,24 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
                 }
             });
 
-        // Default action seed: valid system prompt + minimal valid Structured-Outputs schema.
+        // R6 task 025 (D-A-17) — FK chain stubs for the post-R6 engine path.
+        // INodeService.GetNodesAsync returns a single node with FK-resolved ActionId.
+        NodeServiceMock
+            .Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new Sprk.Bff.Api.Models.Ai.PlaybookNodeDto
+            {
+                Id = Guid.NewGuid(),
+                PlaybookId = ChatSummarizePlaybookId,
+                ActionId = ChatSummarizeActionId
+            }});
+
+        // Default action seed loaded by FK (NOT alternate key) — engine calls
+        // IGenericEntityService.RetrieveAsync(logicalName, id, columns, ct).
         EntityServiceMock
-            .Setup(e => e.RetrieveByAlternateKeyAsync(
+            .Setup(e => e.RetrieveAsync(
                 "sprk_analysisaction",
-                It.IsAny<KeyAttributeCollection>(),
-                It.IsAny<string[]?>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string[]>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildActionEntity(
                 systemPrompt: "You are the R5 Summarize-for-Chat assistant.",
@@ -500,10 +535,10 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
 
     private static Entity BuildActionEntity(string systemPrompt, string outputSchemaJson)
     {
-        var e = new Entity("sprk_analysisaction", Guid.NewGuid());
+        var e = new Entity("sprk_analysisaction", ChatSummarizeActionId);
         e["sprk_analysisactionid"] = e.Id;
         e["sprk_name"] = "Summarize Document for Chat";
-        e["sprk_actioncode"] = SessionSummarizeOrchestrator.SummarizeActionCode;
+        e["sprk_actioncode"] = "SUM-CHAT@v1";
         e["sprk_systemprompt"] = systemPrompt;
         e["sprk_outputschemajson"] = outputSchemaJson;
         return e;
@@ -611,7 +646,7 @@ public sealed class StubOpenAiClient : IOpenAiClient
         => throw new NotSupportedException("Not used by endpoint tests.");
     public Task<T> GetStructuredCompletionAsync<T>(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, BinaryData jsonSchema, string schemaName, string deploymentName, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Not used by endpoint tests.");
-    public Task<string> GetStructuredCompletionRawAsync(string prompt, BinaryData jsonSchema, string schemaName, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
+    public Task<string> GetStructuredCompletionRawAsync(string prompt, BinaryData jsonSchema, string schemaName, string? model = null, int? maxOutputTokens = null, float? temperature = null, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Not used by endpoint tests.");
 }
 

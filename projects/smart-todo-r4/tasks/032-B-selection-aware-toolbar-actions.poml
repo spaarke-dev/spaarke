@@ -1,0 +1,112 @@
+<task id="R4-032" project="smart-todo-r4">
+  <metadata>
+    <title>B — Selection-aware toolbar actions (Open / Delete / Email / Pin)</title>
+    <phase>Phase 2: Wave 2a</phase>
+    <workstream>B</workstream>
+    <status>not-started</status>
+    <estimated-effort>1-1.5 days</estimated-effort>
+    <tags>code-page, smart-todo, ui, fluent-v9, toolbar, dataverse</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-012, R4-030</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/components/Header/ (modified)</file>
+      <file>src/solutions/SmartTodo/src/components/Toolbar/ (new)</file>
+      <file>src/solutions/SmartTodo/src/services/ (or hooks for action handlers)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Wire the 4 selection-aware toolbar actions (Open / Delete / Email / Pin) consumed via task 012's `<SelectionAwareToolbar>`. Open delegates to task 040's modal launch (stub if 040 not yet complete; finalize via 040 wire-up). Delete uses `Xrm.WebApi.deleteRecord`. Email composes via mailto: with selected record metadata. Pin toggles `sprk_todopinned` via `Xrm.WebApi.updateRecord`.
+  </prompt>
+
+  <role>React + Dataverse Web API engineer for SmartTodo Code Page.</role>
+
+  <goal>Toolbar appears at ≥1 card selected; hides at 0. All 4 actions functional. Pin is mutually exclusive with statuscode (verify constraint via business rules if applicable).</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="shared-toolbar">src/client/shared/Spaarke.UI.Components/src/components/SelectionAwareToolbar/</file>
+    <file purpose="target">src/solutions/SmartTodo/src/App.tsx (and Header)</file>
+    <file purpose="standards">docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel</constraint>
+    <constraint source="ADR-012">Consume `<SelectionAwareToolbar>` from `@spaarke/ui-components`; don't redefine inline</constraint>
+    <constraint source="spec FR-08">Actions: Open / Delete / Email / Pin (toggles `sprk_todopinned`)</constraint>
+    <constraint source="spec FR-08">Toolbar hides when 0 cards selected</constraint>
+    <constraint source="standards/DATA-ACCESS-DECISION-CRITERIA">Use `Xrm.WebApi` for Dataverse writes from Code Page host (no BFF needed)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/toolbar-actions</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>R3 had no selection-aware toolbar — actions were per-card only. R4 introduces multi-select bulk actions to match `SemanticSearchControl` UX.</background>
+    <dependencies>
+      <dependency task="R4-012" status="must-complete">SelectionAwareToolbar primitive hoisted</dependency>
+      <dependency task="R4-030" status="must-complete">4-row layout in place (toolbar slot ready)</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 040: Open action's modal launch finalized when 040 lands; until then, Open dispatches a stub event.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm &lt; 70%.</step>
+    <step order="1" name="Wire SelectionAwareToolbar in App.tsx">Pass `selected` count + `actions` array.</step>
+    <step order="2" name="Implement Open handler">For now, dispatch event with selected record ids; task 040 will wire to `<RecordNavigationModalShell>`.</step>
+    <step order="3" name="Implement Delete handler">`Xrm.WebApi.deleteRecord('sprk_todo', id)` per selected record; confirm dialog before; refresh list after.</step>
+    <step order="4" name="Implement Email handler">Compose `mailto:?subject=...&body=...` with selected record summaries.</step>
+    <step order="5" name="Implement Pin handler">`Xrm.WebApi.updateRecord('sprk_todo', id, { sprk_todopinned: true | false })` toggle per selection state.</step>
+    <step order="6" name="Build + test">`npm run build:prod`; unit tests for each action handler (mock `Xrm.WebApi`).</step>
+    <step order="7" name="Smoke test in spaarkedev1">Select 1, 2, N cards; verify toolbar visibility + each action functional.</step>
+    <step order="8" name="Quality gates">code-review + adr-check.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="ui-test">Smoke test in spaarkedev1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/App.tsx (modified)</output>
+    <output type="code">src/solutions/SmartTodo/src/components/Toolbar/ToolbarActions.ts (new)</output>
+    <output type="test">Unit tests for each action handler</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Toolbar hides at 0 selection, appears at ≥1">
+      <steps>
+        <step>Open SmartTodo Code Page in spaarkedev1</step>
+        <step>Verify toolbar row is hidden initially</step>
+        <step>Select 1 card; verify toolbar appears</step>
+        <step>Deselect; verify toolbar hides</step>
+      </steps>
+      <expected>Toolbar visibility tracks selection count correctly</expected>
+    </test>
+    <test name="Pin toggle round-trip">
+      <steps>
+        <step>Select a card; click Pin</step>
+        <step>Refresh page</step>
+        <step>Verify `sprk_todopinned` persisted (card shows pinned marker)</step>
+      </steps>
+      <expected>Pin state persists in Dataverse</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Toolbar hidden at 0 selection; visible at ≥1</criterion>
+    <criterion testable="true">Delete action removes records + refreshes list</criterion>
+    <criterion testable="true">Email action opens mailto with correct content</criterion>
+    <criterion testable="true">Pin action toggles `sprk_todopinned` field; round-trips in Dataverse</criterion>
+    <criterion testable="true">Open action dispatches modal-launch event (finalized by task 040)</criterion>
+    <criterion testable="true">Unit tests pass for each handler</criterion>
+  </acceptance-criteria>
+</task>

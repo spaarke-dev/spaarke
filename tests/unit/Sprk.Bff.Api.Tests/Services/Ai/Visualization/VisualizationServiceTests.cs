@@ -820,7 +820,7 @@ public class VisualizationServiceTests
             .ReturnsAsync(responseMock);
 
         _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
     }
 
@@ -850,7 +850,7 @@ public class VisualizationServiceTests
             });
 
         _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
 
         return searchClientMock;
@@ -880,7 +880,7 @@ public class VisualizationServiceTests
             });
 
         _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
     }
 
@@ -908,7 +908,7 @@ public class VisualizationServiceTests
             });
 
         _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
     }
 
@@ -937,7 +937,7 @@ public class VisualizationServiceTests
             });
 
         _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
     }
 
@@ -1111,7 +1111,7 @@ public class VisualizationServiceTests
             });
 
         _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
 
         return searchClientMock;
@@ -1141,7 +1141,7 @@ public class VisualizationServiceTests
             });
 
         _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
     }
 
@@ -1169,7 +1169,7 @@ public class VisualizationServiceTests
             });
 
         _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
     }
 
@@ -1197,7 +1197,7 @@ public class VisualizationServiceTests
             });
 
         _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchClientMock.Object);
     }
 

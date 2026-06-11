@@ -1,0 +1,148 @@
+<task id="023" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-15 Remove `InvokeSummarizePlaybookTool` + `InvokeInsightsQueryTool` Specialized Bridges (Pillar 3)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>022</dependencies>
+    <blocks>028</blocks>
+    <tags>bff-api, ai, refactoring, chat</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deletes production chat-tool classes; refactors callers to route through generic `invoke_playbook`; high blast-radius (similar to Q9 batch but scoped); tags `bff-api`+`ai`+`refactoring`.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent file deletions/refactors; gates 028 integration test.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Remove `InvokeSummarizePlaybookTool` and `InvokeInsightsQueryTool` specialized C# bridge
+    classes. Route all existing callers through the generic `invoke_playbook` chat tool
+    (tasks 021 + 022). For the Insights case, `InsightsIntentClassifier` continues to handle
+    playbook-vs-RAG routing internally — the generic tool dispatches to whichever execution
+    path the playbook's metadata indicates per FR-24.
+
+    Critical-path context: this task closes Pillar 3. After it lands, the chat-side has one
+    canonical tool for invoking playbooks (`invoke_playbook`) — eliminating the specialized
+    bridge proliferation that R5 closed with as a known limitation.
+
+    Risk: any caller still referencing the removed classes will break. Use Grep extensively
+    to find all references; update each to call `invoke_playbook` via the data-driven tool
+    path. Regression tests for /summarize chat path + insights query chat path MUST pass
+    after the refactor — these are the user-visible flows that depend on the bridge being
+    cleanly replaced.
+
+    Rollback plan (light): `git revert` of this PR restores the bridge classes; document
+    in task notes.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with chat-architecture + InsightsIntentClassifier familiarity.
+    Comfortable with cross-cutting refactor + Grep-driven dependency tracking.
+  </role>
+
+  <goal>
+    `InvokeSummarizePlaybookTool.cs` + `InvokeInsightsQueryTool.cs` deleted. All callers
+    updated to use generic `invoke_playbook` tool path. Regression tests for /summarize
+    chat path + insights query chat path pass. Build green; publish-size delta reported
+    (net negative expected).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="generic-handler">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/InvokePlaybookHandler.cs</file>
+    <file purpose="insights-routing-guide">docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">No new top-level Program.cs lines; remove the deleted classes' DI registrations from existing module.</constraint>
+    <constraint source="ADR-013">Generic facade is the canonical path; specialized bridges deleted.</constraint>
+    <constraint source="ADR-015">Telemetry preserved on the generic path; no user content logged.</constraint>
+    <constraint source="ADR-018">No new feature flags.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; net negative expected; ≤+5 MB R6 budget.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline middleware chain unchanged.</constraint>
+    <constraint source="spec FR-24">Specialized bridges removed; callers routed through generic tool; `InsightsIntentClassifier` retains playbook-vs-RAG routing internally.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/refactoring</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — production class deletion + cross-cutting refactor".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 022 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources + Inventory References">
+      Read inputs + knowledge. Grep ALL references to `InvokeSummarizePlaybookTool` + `InvokeInsightsQueryTool` (production + test code). Capture baseline publish size.
+    </step>
+    <step order="3" name="Refactor Callers">
+      For each reference, update to use generic `invoke_playbook` tool path. For the insights path, dispatch goes through `InsightsIntentClassifier` first (unchanged); when classifier returns "playbook" route, invoke `invoke_playbook` with the appropriate playbookId.
+    </step>
+    <step order="4" name="Delete Bridge Classes">
+      Delete `InvokeSummarizePlaybookTool.cs` + `InvokeInsightsQueryTool.cs`. Remove their DI registrations from `AnalysisServicesModule`.
+    </step>
+    <step order="5" name="Update Tests">
+      Update unit tests that referenced deleted classes; replace with tests for generic-path dispatch.
+    </step>
+    <step order="6" name="Regression Test /summarize + Insights Query">
+      Run regression tests for /summarize chat path + insights query chat path. Both MUST pass.
+    </step>
+    <step order="7" name="Build + Verify Publish Size + Acceptance Criteria">
+      `dotnet build` → 0 errors. `dotnet publish -c Release` → delta vs baseline (net negative expected). Walk each criterion.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-010 / ADR-013 / ADR-015 / ADR-018 / ADR-029 + NFR-13 + FR-24 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 023 ✅. Reset `current-task.md`. Report. Pillar 3 closeout note.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="git">stage + commit (incl. file deletions)</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">[DELETED] src/server/api/Sprk.Bff.Api/{path}/InvokeSummarizePlaybookTool.cs</output>
+    <output type="code">[DELETED] src/server/api/Sprk.Bff.Api/{path}/InvokeInsightsQueryTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (modified — removed registrations)</output>
+    <output type="code">{callers} (modified — routed through generic path)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/{paths} (modified — updated for generic dispatch)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (023 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-023-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InvokeSummarizePlaybookTool.cs` + `InvokeInsightsQueryTool.cs` deleted.</criterion>
+    <criterion testable="true">All callers updated to use generic `invoke_playbook` path.</criterion>
+    <criterion testable="true">/summarize chat path regression test passes.</criterion>
+    <criterion testable="true">Insights query chat path regression test passes; `InsightsIntentClassifier` still routes playbook-vs-RAG internally per FR-24.</criterion>
+    <criterion testable="true">DI registrations for deleted classes removed from `AnalysisServicesModule`.</criterion>
+    <criterion testable="true">Safety pipeline middleware chain unchanged (NFR-13).</criterion>
+    <criterion testable="true">BFF publish-size delta reported (net negative expected); ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+    <criterion testable="true">Pillar 3 complete: one generic invoke_playbook chat tool exists; specialized bridges removed.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,80 @@
+<task id="R4-084" project="smart-todo-r4">
+  <metadata>
+    <title>G — Add Visual Host "Upcoming To Dos" to WorkAssignment main form</title>
+    <phase>Phase 2: Wave 2c</phase>
+    <workstream>G</workstream>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>dataverse, form-designer, visual-host, deploy, workassignment</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-051, R4-080</dependencies>
+    <relevant-files>
+      <file>Dataverse sprk_workassignment main form (form-designer change)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>Same pattern as task 081 — add Visual Host to sprk_workassignment main form bound to WorkAssignment chart def.</prompt>
+
+  <role>Dataverse form-designer.</role>
+
+  <goal>Open a WorkAssignment record in spaarkedev1; "Upcoming To Dos" section renders; drill-through opens SmartTodo Code Page modal with `?regardingType=sprk_workassignment&regardingId=<currentId>` pre-filter.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="reference-task">projects/smart-todo-r4/tasks/081-G-visualhost-on-matter-form.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-36">Visual Host added to WorkAssignment main form</constraint>
+    <constraint source="spec FR-34">Drill-through opens SmartTodo modal</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/form-designer</topic>
+    <files>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R4-080" status="must-complete">WorkAssignment chart def exists</dependency>
+      <dependency task="R4-051" status="must-complete">Resolver pattern in place</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Add section + Visual Host">Per task 081 flow.</step>
+    <step order="2" name="Publish + commit + deploy">Same.</step>
+    <step order="3" name="Smoke test">Open WorkAssignment record; verify card + drill-through.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-deploy">Solution operations</tool>
+    <tool name="ui-test">Card + drill-through</tool>
+  </tools>
+
+  <outputs>
+    <output type="form-update">sprk_workassignment main form modified</output>
+    <output type="solution-xml">Committed</output>
+    <output type="deploy">spaarkedev1</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Card + drill-through on WorkAssignment form">
+      <steps>
+        <step>Open WorkAssignment record</step>
+        <step>Verify "Upcoming To Dos" + Visual Host card</step>
+        <step>Click → modal pre-filtered to WorkAssignment</step>
+      </steps>
+      <expected>Functional</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Section visible on sprk_workassignment main form</criterion>
+    <criterion testable="true">Visual Host card renders</criterion>
+    <criterion testable="true">Drill-through opens SmartTodo modal pre-filtered to WorkAssignment id</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,145 @@
+<task id="022" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-14 Dynamic Playbook List in `invoke_playbook` Tool Description at Chat-Agent Build Time (Pillar 3)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>021</dependencies>
+    <blocks>023</blocks>
+    <tags>bff-api, ai, chat</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies chat-agent build path; dynamic description generation; tenant + capability filtering; tags `bff-api`+`ai`+`chat`.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent file modification; gates 023.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    At chat-agent build time, dynamically populate the `invoke_playbook` tool's description
+    with the list of playbooks accessible to the calling tenant (filtered by tenant scope +
+    capability gates). The description includes each playbook's name + short description,
+    so the LLM can decide which `playbookId` to pass.
+
+    Critical-path context: this turns the generic `invoke_playbook` tool from "the LLM
+    must know the IDs" into "the LLM sees the menu of available playbooks at request time."
+    Task 023 (specialized bridge removal) becomes safe ONLY after this lands — without
+    dynamic discovery, the LLM wouldn't know which playbookId to pass for, e.g., a
+    summarize request.
+
+    Implementation: extend `SprkChatAgentFactory.ResolveTools()` (task 011) to, after
+    constructing the `invoke_playbook` AIFunction, mutate or rebuild its description
+    string with the dynamic playbook list. Description budget: respect NFR-10 8K system
+    prompt budget — if list is long, page or summarize. Cache the description per
+    `tenantId` (ADR-014) to avoid re-fetching playbook list on every chat request.
+
+    ADR-015: telemetry from description generation emits playbook-count + tenantId + timestamp
+    only; no playbook content / names logged.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with chat-agent factory build-path expertise and NFR-10 token
+    budget awareness.
+  </role>
+
+  <goal>
+    `invoke_playbook` tool's description string is populated dynamically with the tenant's
+    accessible playbooks at chat-agent build time. List respects token budget per NFR-10.
+    Cache keyed by `tenantId` per ADR-014. Unit tests cover: empty list (no playbooks) →
+    description states "no playbooks available"; long list → paged / truncated within
+    budget; tenant isolation. Build green; publish-size delta reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="handler">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/InvokePlaybookHandler.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">No new top-level Program.cs lines.</constraint>
+    <constraint source="ADR-013">Description generation uses the same facade path; no AI-internal exposure.</constraint>
+    <constraint source="ADR-014">Cache key includes `tenantId` per ADR-014.</constraint>
+    <constraint source="ADR-015">Telemetry emits playbook-count + tenantId + timestamp; no playbook content logged.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget.</constraint>
+    <constraint source="spec NFR-10">8K system prompt budget preserved; tool description must fit within budget allocation.</constraint>
+    <constraint source="spec NFR-14">SYS-/CUST- enforcement; only tenant-visible playbooks appear in description.</constraint>
+    <constraint source="spec FR-23">Description includes name + description of each accessible playbook; filtered by tenant + capability gates.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/chat-agent-build</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — chat-agent build-path modification + NFR-10 token budget".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 021 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Capture baseline publish size.
+    </step>
+    <step order="3" name="Implement Dynamic Description">
+      Extend `SprkChatAgentFactory.ResolveTools()` (or a helper). After building the `invoke_playbook` AIFunction, fetch tenant-accessible playbooks via existing playbook visibility service. Format description: "Available playbooks: 1. {name} - {desc}, 2. {name} - {desc}, ...". Truncate / page if exceeding token budget allotment.
+    </step>
+    <step order="4" name="Implement Caching">
+      Cache description per `tenantId` (Redis key `chat:invoke_playbook_desc:{tenantId}`); short TTL (5 min). Invalidate on playbook CRUD via existing cache invalidation pattern.
+    </step>
+    <step order="5" name="Add Unit Tests">
+      Tests: empty list → "no playbooks available"; small list → full description; long list → truncated within budget; tenant isolation (tenant A's description ≠ tenant B's).
+    </step>
+    <step order="6" name="Build + Verify Publish Size + Acceptance Criteria">
+      `dotnet build` → 0 errors. `dotnet publish -c Release` → delta. Walk each criterion.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-010 / ADR-013 / ADR-014 / ADR-015 / ADR-029 + NFR-10 / NFR-14 + FR-23 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 022 ✅. Reset `current-task.md`. Report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="git">stage + commit</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (modified — dynamic description)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/InvokePlaybookDescriptionTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (022 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-022-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`invoke_playbook` tool description populated dynamically at chat-agent build time.</criterion>
+    <criterion testable="true">Description includes name + description of each accessible playbook (FR-23).</criterion>
+    <criterion testable="true">Description respects NFR-10 token budget (truncation or paging if needed).</criterion>
+    <criterion testable="true">Cache keyed per `tenantId` per ADR-014.</criterion>
+    <criterion testable="true">Tenant isolation verified; cross-tenant playbooks not visible (NFR-14).</criterion>
+    <criterion testable="true">Telemetry payload ADR-015-compliant; no playbook content logged.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

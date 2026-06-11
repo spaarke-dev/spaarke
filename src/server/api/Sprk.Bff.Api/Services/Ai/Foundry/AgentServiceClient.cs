@@ -389,6 +389,25 @@ public sealed class AgentServiceClient : IDisposable
     /// </summary>
     private AgentsClient CreateAgentsClient()
     {
+        // R6 Wave B-G11 (2026-06-10) — use-site validation for AgentServiceOptions.
+        // The [Required] attributes on Endpoint + AgentId were removed (mirror of
+        // B-G8 BingGroundingOptions hardening) so DI startup doesn't crash in tests
+        // or in Spaarke Dev when Foundry isn't configured. Validation moved here
+        // because this method only runs on the FIRST actual use (Lazy<AgentsClient>);
+        // GuardEnabled() upstream already prevents reaching here when Enabled=false.
+        if (_options.Endpoint is null)
+        {
+            throw new InvalidOperationException(
+                "AgentService:Endpoint must be set in configuration when " +
+                "AgentService:Enabled=true. See AgentServiceOptions.Endpoint XML doc.");
+        }
+        if (string.IsNullOrWhiteSpace(_options.AgentId))
+        {
+            throw new InvalidOperationException(
+                "AgentService:AgentId must be set in configuration when " +
+                "AgentService:Enabled=true. See AgentServiceOptions.AgentId XML doc.");
+        }
+
         _logger.LogInformation(
             "Initialising AgentsClient: endpoint={Endpoint}",
             _options.Endpoint);

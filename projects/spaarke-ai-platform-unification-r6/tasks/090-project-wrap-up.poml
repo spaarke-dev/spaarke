@@ -1,0 +1,227 @@
+<task id="090" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>Project Wrap-up — Quality Gates, Repo Cleanup, Documentation, Lessons-Learned, R7 Backlog</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>089</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, project-mgmt, cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Per task-create Step 3.7 — mandatory wrap-up task ALWAYS at FULL rigor. Runs final quality gates (`code-review` + `adr-check`) on all R6 code; runs `repo-cleanup`; updates README + plan + creates lessons-learned + R7 backlog. Final integrity gate before project close.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final sequential task aggregating quality gates, cleanup, and project-close artifacts.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run the mandatory R6 project wrap-up per task-create skill Step 3.7. This is the final
+    integrity gate: it runs full-project quality gates, cleans up the repo, updates README +
+    plan to "Complete", creates lessons-learned, and stages an R7 backlog from carry-forward
+    items.
+
+    Per Step 3.7 the wrap-up MUST execute, in order:
+
+    1. **Quality Gates**: Run `/code-review` against all R6 code paths (BFF
+       `src/server/api/Sprk.Bff.Api/Services/Ai/*` + `Workspace/*` + `Memory/*`; frontend
+       `src/solutions/SpaarkeAi/src/components/conversation/*` + `Spaarke.AI.Widgets/src/widgets/*`).
+       Run `/adr-check` against same. Fix any CRITICAL issues before proceeding. NON-CRITICAL
+       issues documented in notes for R7 follow-up.
+
+    2. **Repo Cleanup**: Run `/repo-cleanup projects/spaarke-ai-platform-unification-r6` —
+       audits ephemeral files, archives handoffs (notes/handoffs/ → .archive/ if any),
+       reviews + removes notes/debug/, notes/spikes/, notes/drafts/. Approve removals.
+
+    3. **README.md Update**: Set Status → "Complete"; Last Updated → today; Phase → "Complete";
+       Progress → "100%"; Completed Date → today. Check ALL Graduation Criteria boxes. Add
+       Changelog entry: "R6 closed [date] — 9 architectural pillars converged; vertical-slice
+       validated; lessons-learned + R7 backlog filed."
+
+    4. **plan.md Update**: Set Status → "Complete"; all milestone statuses → ✅. Add a
+       retrospective note to "Open Items / Risks" reflecting actual vs predicted risks.
+
+    5. **Lessons-Learned**: Create `projects/spaarke-ai-platform-unification-r6/notes/lessons-learned.md`
+       with the following sections (per R5 precedent + Step 3.7 + this project's binding context):
+       - **4 gap families addressed** (Gap A/B/C/D per R5 carry-forward — for each, document
+         the R6 pillar that closed it + residual gap if any)
+       - **7 carry-forward patterns evolved** (per R5 carry-forward list — for each, document
+         whether retained / evolved / superseded in R6 + new shape if evolved)
+       - **New patterns from R6** that should become carry-forward (e.g., command-router
+         architecture, data-driven persona resolution via scope library, schema-aware widget
+         rendering, tri-directional workspace state, pinned-memory UI)
+       - **Process learnings** (Q-batch migration outcomes, Q7 Memory UI scope expansion fit,
+         Q9 batch tool migration risk realization, Pillar 6 split-by-6a/6b/6c effectiveness)
+       - **R7 backlog** (items deferred per Q3, Q7-residual, Q10 full eval harness, additional
+         ActionType node executors, plus any CRITICAL+NON-CRITICAL items code-review surfaced)
+
+    6. **Update plan.md "Open Items / Risks"** with retrospective notes — for each R1–R8 risk,
+       note actual realization (e.g., "R1 Q9 batch tool migration: completed in 1 day with
+       comprehensive regression test gate; no rollback triggered" or similar).
+
+    7. **Final verification**: Walk TASK-INDEX.md — confirm tasks 001 through 089 all ✅.
+       Confirm no critical code-review issues remain. Confirm repo cleanup done. Confirm
+       README + plan reflect completion.
+
+    8. **Update TASK-INDEX.md**: 090 status → ✅.
+
+    9. **Update current-task.md**: Set to "Project complete" per root CLAUDE.md §7 task
+       completion + transition pattern.
+
+    BFF-touching context: this task does NOT modify BFF code itself; quality gates only
+    inspect existing code. Verify final BFF publish-size baseline + confirm cumulative R6
+    delta is within ≤+5 MB ceiling per NFR-02. Report in wrap-up notes.
+  </prompt>
+
+  <role>
+    Senior project-management + documentation engineer with full Spaarke convention familiarity
+    (R5 wrap-up precedent, task-create Step 3.7 binding requirements, repo-cleanup + code-review +
+    adr-check skill workflows). Comfortable producing canonical lessons-learned + R7 backlog
+    artifacts that the next project will load as carry-forward.
+  </role>
+
+  <goal>
+    R6 is formally closed: quality gates clean (no CRITICAL issues outstanding); repo cleaned;
+    README + plan say "Complete"; lessons-learned authored with 4 gap families addressed +
+    carry-forward patterns evolved + new patterns + process learnings + R7 backlog; current-task.md
+    set to "Project complete". Future projects can load R6's lessons-learned as their R5-style
+    carry-forward.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="project-readme">projects/spaarke-ai-platform-unification-r6/README.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md</file>
+    <file purpose="current-task">projects/spaarke-ai-platform-unification-r6/current-task.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="testing-procedure">docs/procedures/testing-and-code-quality.md</file>
+    <file purpose="r5-lessons-learned">projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="task-create Step 3.7">Wrap-up task MUST run quality gates + repo cleanup + README/plan updates + lessons-learned + final verification, in that order. FULL rigor mandatory.</constraint>
+    <constraint source="root CLAUDE.md §7">Task Completion + Transition — reset current-task.md to "Project complete" per documented pattern.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF Hygiene">Final BFF publish-size verification; cumulative R6 delta ≤+5 MB per spec NFR-02; hard ceiling 60 MB per ADR-029.</constraint>
+    <constraint source="spec §Cross-cutting">All FULL-rigor tasks pass `code-review` + `adr-check`; verify across all R6 tasks 001–089.</constraint>
+    <constraint source="ADR-015">Lessons-learned + R7 backlog MUST NOT include any user message text from production telemetry; synthesize generic examples.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-mgmt/wrap-up</topic>
+    <files>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="R5 lessons-learned shape" location="projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md">
+        Follow the R5 structure: 4 gap families, 7 carry-forward patterns, 3 process learnings, deferred items list. R6 evolves this shape into: 4 gap families addressed (closing R5), 7 patterns evolved, new R6 patterns, R6 process learnings, R7 backlog.
+      </pattern>
+      <pattern name="Wrap-up checklist sign-off" location="task-create Step 3.7">
+        Sequential 9-step execution: quality gates → repo cleanup → README → plan → lessons-learned → plan risk retrospective → final verification → TASK-INDEX update → current-task reset.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context. Output: "🔒 RIGOR LEVEL: FULL — Mandatory wrap-up per task-create Step 3.7; quality gates + cleanup + documentation + lessons-learned binding". If context &gt; 60%, run `/checkpoint` first.
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 090 status is 🔲, dep 089 ✅. Confirm ALL prior tasks 001–089 are ✅. Update `current-task.md` to 090.
+    </step>
+    <step order="2" name="Run /code-review on All Project Code">
+      Invoke `code-review` skill scoped to R6-touched files: BFF `src/server/api/Sprk.Bff.Api/Services/Ai/*` + `Workspace/*` + `Memory/*`; frontend `src/solutions/SpaarkeAi/src/components/conversation/*` + `Spaarke.AI.Widgets/src/widgets/*`. Categorize findings: CRITICAL / NON-CRITICAL. Capture report.
+    </step>
+    <step order="3" name="Run /adr-check on All Project Code">
+      Invoke `adr-check` skill against same scope. Categorize findings. Capture report. Verify ADR-013, ADR-014, ADR-015, ADR-029, ADR-030, ADR-031, NFR-04 (zero Agent Framework), NFR-07 (pre-fill preserved), NFR-08 (node executors preserved).
+    </step>
+    <step order="4" name="Fix Critical Issues (if any)">
+      If CRITICAL issues surfaced in steps 2/3: pause + escalate to user per root CLAUDE.md §6 Human Escalation Triggers. Fix critical issues; re-run gates; only proceed when gates green.
+    </step>
+    <step order="5" name="Run /repo-cleanup">
+      Invoke `repo-cleanup` skill scoped to `projects/spaarke-ai-platform-unification-r6`. Review cleanup report; approve removals (notes/debug/, notes/spikes/, notes/drafts/); archive notes/handoffs/ to .archive/ if any.
+    </step>
+    <step order="6" name="Update README.md">
+      Modify `projects/spaarke-ai-platform-unification-r6/README.md`:
+      - Status → "Complete"
+      - Last Updated → today (2026-06-07 or later)
+      - Phase → "Complete"
+      - Progress → "100%"
+      - Completed Date → today
+      - All Graduation Criteria checkboxes → ✅
+      - Changelog → add entry: "R6 closed [date] — 9 architectural pillars converged; vertical-slice validated; lessons-learned + R7 backlog filed."
+    </step>
+    <step order="7" name="Update plan.md">
+      Modify `projects/spaarke-ai-platform-unification-r6/plan.md`:
+      - Set top-level Status → "Complete"
+      - §3 Phase Structure: all milestones ✅
+      - §10 Next Steps section: replace with "Project complete; see lessons-learned.md"
+    </step>
+    <step order="8" name="Create lessons-learned.md">
+      Author `projects/spaarke-ai-platform-unification-r6/notes/lessons-learned.md` with:
+      - **§ 4 gap families addressed**: Gap A (two upload paths) — closed by Pillar 5 (path as intent property + dedup at CapabilityRouter); Gap B (chat persona hardcoded + tool registry ignored + playbook FK bypassed) — closed by Pillars 1, 2, 4 (data-driven scope + IToolHandler registry + FK fix); Gap C (schema-aware rendering implicit) — closed by Pillar 5 (outputSchema on action + schema-aware widget); Gap D (workspace ↔ Assistant one-way) — closed by Pillar 6 (tri-directional state model + workspace tools + execution-trace widget).
+      - **§ 7 carry-forward patterns evolved**: for each of [Cross-package File-ref forwarding / FileList is live / Wire-stream contract assertions / Diagnostic logs one-shot / SprkChat.onBeforeSendMessage informational-only / Two-wrapper widget architecture / Path A vs Path B parallelism smell], document retained / evolved / superseded in R6.
+      - **§ New patterns from R6**: Command-router architecture (Pillar 8); data-driven persona resolution via scope library (Pillar 1); schema-aware widget rendering with outputSchema-on-action (Pillar 5); tri-directional workspace state with per-turn snapshot in agent prompt (Pillar 6); pinned-memory CRUD UI in Context pane (Pillar 7 Q7 expansion); generic invoke_playbook facade replacing specialized bridges (Pillar 3); widget visibility contract with getAgentVisibleState (Pillar 9).
+      - **§ Process learnings**: Q9 batch tool migration outcome (faster + risky but landed clean with regression gate); Q7 Memory UI scope expansion fit (added 1–2 weeks as predicted); Q5 re-shaping mid-spec (action-vs-node split was right call); Pillar 6 split-by-6a/6b/6c effectiveness (6a-first gating prevented contract drift); BFF publish-size NFR-02 cumulative tracking via TASK-INDEX (worked); confirmation triggers for ADR/DI/Dataverse-schema changes (used N times; prevented Y mistakes).
+      - **§ R7 backlog**: scope admin UI (Q3-deferred); full eval harness with metrics + CI integration (Q10-deferred); additional ActionType node executors (RuleEngine / Calculation / DataTransform / CallWebhook / SendTeamsMessage / Parallel / Wait per spec Out-of-Scope §43); plus any NON-CRITICAL items code-review surfaced.
+    </step>
+    <step order="9" name="Update plan.md Open Items / Risks Retrospective">
+      Add a "Risk Retrospective" section to plan.md §8 Risk Register noting actual realization per R1–R8. Example: "R1 Q9 batch tool migration: completed in [N] days; regression gate caught [Y] issues; no rollback triggered."
+    </step>
+    <step order="10" name="Final BFF Publish-Size Verification">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed size. Compare vs pre-R6 baseline (~45.65 MB per project CLAUDE.md). Confirm cumulative delta ≤+5 MB per NFR-02. Record in lessons-learned § R6 metrics + in wrap-up notes.
+    </step>
+    <step order="11" name="Final Verification">
+      Walk TASK-INDEX.md — confirm tasks 001 through 089 ALL ✅. Confirm no CRITICAL code-review issues remain. Confirm repo cleanup done. Confirm README + plan reflect completion. Confirm lessons-learned authored. Confirm R7 backlog filed.
+    </step>
+    <step order="12" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below.
+    </step>
+    <step order="13" name="Update TASK-INDEX + current-task.md">
+      Update TASK-INDEX.md: 090 🔲 → ✅. Update `current-task.md` to "Project complete" per root CLAUDE.md §7 task completion + transition pattern.
+    </step>
+    <step order="14" name="Report Project Closure">
+      Report R6 closure with summary: pillars delivered, lessons-learned filed, R7 backlog filed, BFF publish-size cumulative delta. The user can now merge R6 worktree to master per `worktree-sync` + `merge-to-master` skills.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="code-review">Skill — quality gate against R6-touched code</tool>
+    <tool name="adr-check">Skill — ADR compliance gate against R6-touched code</tool>
+    <tool name="repo-cleanup">Skill — repo hygiene audit + ephemeral cleanup</tool>
+    <tool name="dotnet">BFF publish-size measurement</tool>
+    <tool name="git">Stage + commit wrap-up artifacts (lessons-learned, README, plan, TASK-INDEX, current-task)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/notes/lessons-learned.md (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/README.md (MODIFIED — Status Complete, Progress 100%, Completed Date, Graduation Criteria checked, Changelog entry)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/plan.md (MODIFIED — Status Complete, all milestones ✅, Risk Retrospective added)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 090 🔲 → ✅; final tally)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (set to "Project complete")</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-090-wrapup-evidence.md (code-review summary, adr-check summary, repo-cleanup report, BFF publish-size cumulative delta)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/code-review` run against all R6 code; CRITICAL issues = 0; NON-CRITICAL issues documented for R7.</criterion>
+    <criterion testable="true">`/adr-check` run against all R6 code; ADR-013/014/015/029/030/031 + NFR-04/07/08 all compliant.</criterion>
+    <criterion testable="true">`/repo-cleanup projects/spaarke-ai-platform-unification-r6` executed; cleanup report reviewed; removals approved.</criterion>
+    <criterion testable="true">README.md: Status = "Complete"; Phase = "Complete"; Progress = "100%"; Completed Date set; all Graduation Criteria checkboxes ✅; Changelog entry added.</criterion>
+    <criterion testable="true">plan.md: Status = "Complete"; all milestones ✅; Risk Retrospective added.</criterion>
+    <criterion testable="true">`lessons-learned.md` exists with 5 sections: 4 gap families addressed, 7 carry-forward patterns evolved, new R6 patterns, process learnings, R7 backlog.</criterion>
+    <criterion testable="true">R7 backlog includes: scope admin UI (Q3), full eval harness (Q10), additional ActionType node executors, NON-CRITICAL code-review items.</criterion>
+    <criterion testable="true">Final BFF publish-size: cumulative R6 delta ≤+5 MB per NFR-02; hard ceiling 60 MB per ADR-029; recorded in wrap-up notes.</criterion>
+    <criterion testable="true">TASK-INDEX.md: tasks 001 through 090 all ✅.</criterion>
+    <criterion testable="true">`current-task.md` set to "Project complete" per root CLAUDE.md §7.</criterion>
+    <criterion testable="true">Project closure reported to user; user can merge R6 worktree to master via `worktree-sync` + `merge-to-master` skills.</criterion>
+  </acceptance-criteria>
+</task>

@@ -664,17 +664,46 @@ public static class ChatEndpoints
 
             if (!actionChipsEmitted)
             {
-                // Generate follow-up suggestions via a focused LLM call (~100 tokens).
-                // Runs after the main response completes so it doesn't delay perceived response time.
-                // Bounded by a 2-second timeout — if generation fails or exceeds the timeout,
-                // suggestions are silently skipped (ADR-019: suggestions are optional, no error emitted).
+                // R6 Hotfix Wave B-G10d (2026-06-10) — Skip suggestion generation when the
+                // assistant response is very short (<150 chars). This happens when the CapabilityRouter
+                // dedup directive (R6 task 042 + B-G9b/B-G10a) constrains the chat-side LLM to a
+                // single-sentence acknowledgment because a playbook will render the primary result
+                // in the workspace tab. The suggestion-LLM call would have no substantive content
+                // to work with (just the ack phrase) — generated suggestions would be useless or
+                // empty. Better to show nothing than to show generic / meta suggestions.
                 //
-                // FR-07 (task 050): intentionally pass request.Message (NOT effectiveMessage)
-                // here — suggestions are follow-up prompts generated against the user's
-                // conceptual question, not the augmented attachment blob. Including 5 MB of
-                // attachment text would balloon this ~100-token suggestion call.
-                await GenerateAndEmitSuggestionsAsync(
-                    chatClient, response, request.Message, fullResponse.ToString(), logger, sessionId, cancellationToken);
+                // R7 ARCHITECTURAL HOME for proper followups (per user feedback 2026-06-10):
+                //   1. Add `sprk_followups` JSON column on `sprk_analysisaction` declaring the
+                //      action's natural followup affordances. Each entry: {label, playbookId,
+                //      parameterMapping}.
+                //   2. The DeliverOutput node executor emits a `followups` SSE event alongside
+                //      the widget. SprkChat already has the chip-rendering infrastructure.
+                //   3. Followup click → invoke_playbook(playbookId, parameters) via existing
+                //      Pillar 3 dispatch. Click becomes a proper orchestrated playbook execution,
+                //      not a generic LLM chat turn. Aligns with Pillar 8 "card-as-intent".
+                //
+                // Pre-existing chat turns (no playbook fired) still get the LLM-generated
+                // suggestions exactly as before — the threshold only suppresses the dedup-ack case.
+                if (fullResponse.Length >= 150)
+                {
+                    // Generate follow-up suggestions via a focused LLM call (~100 tokens).
+                    // Runs after the main response completes so it doesn't delay perceived response time.
+                    // Bounded by a 2-second timeout — if generation fails or exceeds the timeout,
+                    // suggestions are silently skipped (ADR-019: suggestions are optional, no error emitted).
+                    //
+                    // FR-07 (task 050): intentionally pass request.Message (NOT effectiveMessage)
+                    // here — suggestions are follow-up prompts generated against the user's
+                    // conceptual question, not the augmented attachment blob. Including 5 MB of
+                    // attachment text would balloon this ~100-token suggestion call.
+                    await GenerateAndEmitSuggestionsAsync(
+                        chatClient, response, request.Message, fullResponse.ToString(), logger, sessionId, cancellationToken);
+                }
+                else
+                {
+                    logger.LogDebug(
+                        "B-G10d: skipping suggestion generation — response length {Length} below dedup-ack threshold (likely playbook ack); R7 backlog: playbook-driven followups",
+                        fullResponse.Length);
+                }
             }
 
             // Write done event

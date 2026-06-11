@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Update shared `EntityCreationService.ts` for `sprk_searchindexname` cascade</title>
+    <phase>A: Wizards (5 parent + DocumentUploadWizard)</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>018</dependencies>
+    <blocks>021, 022, 023, 024, 025, 026, 027, 029</blocks>
+    <tags>shared-library, react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a shared library (`@spaarke/ui-components`) that is the contract for 6 downstream wizard tasks; touches `.ts` files; carries ADR-012 / ADR-021 / ADR-022 / ADR-028 obligations; INV-5 enforcement lives here.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocking foundation — shared-lib changes must compile + publish before any per-wizard task can reliably consume the new contract.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend the shared `EntityCreationService.ts` in `@spaarke/ui-components` so per-wizard services can cascade `sprk_searchindexname` (and continue to cascade `sprk_containerid`) onto the create payload using the same INV-5-safe pattern established at `matterService.ts:216`. Build the shared lib green before any consumer task picks it up.
+  </prompt>
+
+  <role>
+    Shared-library maintainer (Spaarke.UI.Components). React 18 + Fluent v9 + TypeScript. Familiar with ADR-012 (shared lib is the contract) and the INV-5 "don't overwrite explicit values" rule from design.md.
+  </role>
+
+  <goal>
+    `EntityCreationService.ts` exposes a payload-helper path that lets the 5 parent-record wizards + DocumentUploadWizard write `sprk_searchindexname` (and `sprk_containerid` where applicable) without each wizard duplicating the INV-5 check. Shared lib compiles cleanly via `npm run build`; downstream wizard tasks 021–027 can take a dependency on the new contract.
+  </goal>
+
+  <context>
+    <background>
+      Phase A extends 5 parent-record wizards (Matter, Project, Invoice, WorkAssignment, Event) plus DocumentUploadWizard to set `sprk_searchindexname` on the create payload, cascading from the user's owning Business Unit's `businessunit.sprk_searchindexname`. The canonical pattern is at `matterService.ts:216`: `entity['sprk_containerid'] = this._containerId;`. The shared `EntityCreationService.ts` is the contract those per-wizard services use; extending it once here keeps the 5 parent wizards (and Document wizard) DRY.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">All wizard-side changes live in `@spaarke/ui-components` — do not bypass the shared lib by editing code-page sources directly.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 only. No `@fluentui/react` v8 imports introduced here.</constraint>
+    <constraint source="ADR-022">Shared lib must stay React-version-portable (code page is React 18; PCF is React 16). No React-18-only APIs.</constraint>
+    <constraint source="ADR-028">Any BFF calls (none expected in this service) use `authenticatedFetch` from `@spaarke/auth`. No new auth wiring.</constraint>
+    <constraint source="design.md INV-5">If the create payload already has a non-empty value for `sprk_searchindexname` (or `sprk_containerid`), the helper MUST NOT overwrite it. Explicit overrides are sacred.</constraint>
+    <constraint source="spec.md §Existing Patterns">Follow `matterService.ts:216` verbatim for the assignment pattern; new helper should be a parallel addition, not a rewrite.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-ui-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Wizard sets container on create payload" location="src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts">
+        Line 216: `entity['sprk_containerid'] = this._containerId;` — canonical assignment pattern. Mirror this shape for `sprk_searchindexname` (guarded by INV-5).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate `EntityCreationService.ts` under `src/client/shared/Spaarke.UI.Components/src/services/` and read its current public surface; identify where create-payload composition happens and where per-wizard services hook in.</step>
+    <step order="2">Cross-reference `matterService.ts:216` to confirm the existing `sprk_containerid` assignment shape (`entity['sprk_containerid'] = this._containerId`) and decide whether the new field is set at the same call-site or routed through `EntityCreationService.ts`.</step>
+    <step order="3">Add a parallel code path for `sprk_searchindexname` — either a new helper exported from `EntityCreationService.ts` (e.g. `applyDefaultIndexName(entity, indexName)`) or an extension of the existing helper if one is already there. Mirror INV-5 semantics: only assign if `entity['sprk_searchindexname']` is currently null/undefined/empty.</step>
+    <step order="4">Add INV-5 guards in the helper itself (single source of truth) so the per-wizard tasks 021–025 don't each re-implement the check. Document the contract in a JSDoc comment that cites design.md INV-5.</step>
+    <step order="5">Export the new helper from the package barrel if needed; ensure no breaking change to existing callers (additive only — per spec §Implementation Notes "Backward compatibility throughout").</step>
+    <step order="6">Run the shared-lib build: `npm run build` in `src/client/shared/Spaarke.UI.Components`. Confirm clean compile (TypeScript, no ESLint errors). Capture the build summary in `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/020-shared-lib-build.md` for downstream tasks.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read EntityCreationService.ts and matterService.ts</tool>
+    <tool name="Edit">Add the new INV-5-guarded helper to EntityCreationService.ts</tool>
+    <tool name="Bash">Run `npm run build` in Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts (extended)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/020-shared-lib-build.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`EntityCreationService.ts` exposes a payload-helper path that sets `sprk_searchindexname` while honoring INV-5 (does not overwrite a pre-existing non-empty value).</criterion>
+    <criterion testable="true">`npm run build` in `Spaarke.UI.Components` completes cleanly (no TypeScript errors, no breaking-change warnings to existing exports).</criterion>
+    <criterion testable="true">Existing `sprk_containerid` cascade behavior remains unchanged — additive change only.</criterion>
+    <criterion testable="true">Build summary captured in `notes/handoffs/020-shared-lib-build.md` so downstream tasks know which `dist/` artifact they are consuming.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the foundation task for Phase A. Tasks 021–025 (5 parent-record wizards) consume the new helper; task 027 (DocumentUploadWizard payload) consumes the same shape via a slightly different path (`buildRecordPayload`). Keep the helper INV-5-aware here so the 6 downstream tasks don't each duplicate the guard.
+
+    If the existing `EntityCreationService.ts` doesn't currently centralize this kind of cascade and per-wizard services do it inline (as `matterService.ts:216` does), then it's acceptable to keep the helper local to each wizard service in tasks 021–025 — but only after this task has verified that the shared-lib path is truly redundant. Document the decision either way in the handoff file.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-012 / ADR-021 / ADR-022 / ADR-028 + .claude/constraints/pcf.md before Step 1. Declare rigor (FULL) per task-execute Step 0. Run code-review + adr-check at Step 9.5 (mandatory for FULL — modifies shared-lib `.ts`).
+    </protocol>
+  </execution>
+</task>

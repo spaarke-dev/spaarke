@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Backfill — `Backfill-MultiContainerMultiIndex-Documents.ps1` (FR-BF-02)</title>
+    <phase>F: PowerShell Backfill</phase>
+    <status>not-started</status>
+    <estimated-hours>3-5</estimated-hours>
+    <dependencies>029, 044</dependencies>
+    <blocks>053</blocks>
+    <tags>backfill, powershell, dataverse, mcp, operations</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates a new script that mutates Document records. INV-5 enforcement + halt-loud on unmapped containers. Simpler than the parent backfill (per-record evidence is direct) but same data-correctness stakes.</rigor-reason>
+    <parallel-group>F1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint with tasks 050 (parent backfill) and 052 (drift audit) — separate script file under `scripts/backfill-multi-container-multi-index/`.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create `scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-Documents.ps1` per spec.md FR-BF-02 and design.md §5.3. For each `sprk_document` with empty `sprk_searchindexname`, read its `sprk_graphdriveid`, map via design.md §5.1 to an index name, and fill `sprk_searchindexname`. Log + skip orphans (Documents with no `sprk_graphdriveid` — out of scope per spec.md round-3 resolution). HALT LOUD on any unmapped container. NEVER overwrite existing non-null values (INV-5). Idempotent + resumable + paged.
+  </prompt>
+
+  <role>
+    Spaarke operations developer with PowerShell + Dataverse Web API familiarity. Follows the patterns established by task 050 (parent backfill) for paging, checkpointing, and audit logging.
+  </role>
+
+  <goal>
+    New PowerShell script exists at `scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-Documents.ps1`. When invoked, it fills empty `sprk_searchindexname` on Documents using the §5.1 map, honors INV-5, halts loudly on unmapped containers, logs + skips orphans, paginates safely, checkpoints for resumability, and emits a per-record audit log.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §5.3, Document backfill is simpler than parent-record backfill: each Document already holds its own canonical container reference in `sprk_graphdriveid`, so the mapping is a direct lookup — no aggregation across children. The §5.1 hardcoded table is the same source of truth used by the parent-record script (task 050). Orphan Documents (no `sprk_graphdriveid`) are explicitly out of scope per spec.md §9 round-3 — log + skip.
+    </background>
+    <relevant-files>
+      <file>scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-Documents.ps1 (new)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BF-02">For each `sprk_document` with empty `sprk_searchindexname`: read `sprk_graphdriveid`; map via §5.1 to fill `sprk_searchindexname`; log + skip orphans (no `sprk_graphdriveid`); halt on unmapped container.</constraint>
+    <constraint source="spec.md FR-BF-04">Idempotent (re-run produces same end-state); resumable (checkpoint per N records, default 100); paged (default batch 500); never overwrite existing non-null values (INV-5).</constraint>
+    <constraint source="design.md INV-5">Never overwrite an existing non-null value.</constraint>
+    <constraint source="design.md §5.1">Container &#8594; index map is hardcoded; unknown container =&gt; halt + surface error.</constraint>
+    <constraint source="design.md §5.3">Document container reference is `sprk_graphdriveid` (canonical); do NOT touch `sprk_containerid` on Document (intentionally blank per Spaarke convention).</constraint>
+    <constraint source="spec.md §9 round-3">Orphan Documents are out of scope — log + skip; do not error.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Hardcoded container map (shared with task 050)" location="design.md §5.1">
+        Same `$ContainerIndexMap` hashtable as the parent-record backfill. Consider extracting to a shared `_ContainerIndexMap.ps1` dot-sourced module if both scripts live in the same folder — optional R1, but reduces drift risk.
+      </pattern>
+      <pattern name="Orphan handling" location="spec.md §9 round-3">
+        Skip without erroring; emit an audit line classifying the record as `orphan` so the operator can see the count.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create the script file `scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-Documents.ps1` with header comments referencing FR-BF-02, design.md §5.3, INV-5.</step>
+    <step order="2">Declare script parameters mirroring task 050: `-EnvironmentUrl`, `-BatchSize 500`, `-CheckpointEvery 100`, `-DryRun`, `-AuditLogPath`. Embed (or dot-source) the §5.1 `$ContainerIndexMap`.</step>
+    <step order="3">Query `sprk_document` records where `sprk_searchindexname` is empty (`$filter=sprk_searchindexname eq null`). Page via `$top=500` + paging cookie.</step>
+    <step order="4">For each Document: if `sprk_graphdriveid` is empty/null, emit audit line `orphan` and skip; else look up `$ContainerIndexMap[$graphDriveId]`; if found, fill `sprk_searchindexname` via PATCH (skip if non-null per INV-5 — though the query filter already excludes those, defensive check); if NOT found, halt loud with surfaceable error.</step>
+    <step order="5">Emit per-record audit line: `recordId, sprk_graphdriveid, mapped_index, action (filled|skipped|orphan|halt)`. Checkpoint every `$CheckpointEvery` records.</step>
+    <step order="6">In `-DryRun` mode: compute + audit but issue no writes. Verify idempotency by running real then dry; second run should show zero `filled` actions.</step>
+    <step order="7">Test against a test environment with at least one Document referencing a known container, one orphan, and (injected) one referencing a synthetic unmapped container. Capture audit log to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/051-document-backfill-test.md`. Update TASK-INDEX + current-task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create the new PowerShell script</tool>
+    <tool name="Read">Read design.md §5.1, §5.3 + spec.md FR-BF-02</tool>
+    <tool name="Bash">Test-run with -DryRun</tool>
+    <tool name="mcp__dataverse__read_query">Verify pre/post state during testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-Documents.ps1</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/051-document-backfill-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BF-02: dry-run audit log shows correct filling for known-container Documents + orphans logged + halt-on-unmapped behavior verified with synthetic input.</criterion>
+    <criterion testable="true">FR-BF-04: idempotent + resumable + paged at default 500.</criterion>
+    <criterion testable="true">INV-5: zero overwrites of existing non-null `sprk_searchindexname` values.</criterion>
+    <criterion testable="true">Audit log columns present (recordId, graphDriveId, mapped_index, action).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with tasks 050 and 052. Consider extracting the §5.1 `$ContainerIndexMap` to a shared `_ContainerIndexMap.ps1` to avoid drift between scripts 050/051/052 — pragmatic for R1 since the map has only 2 entries today.
+
+    Document.sprk_containerid is intentionally untouched (canonical Document container reference is `sprk_graphdriveid` per design.md §4.1 / §10.2 / Spaarke convention).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load design.md §5.1, §5.3, INV-5 and spec.md FR-BF-02, FR-BF-04 before starting. Follow task-execute Step 0 (FULL rigor) before writing any code. Step 9.5 quality gates mandatory at task completion.
+    </protocol>
+  </execution>
+</task>

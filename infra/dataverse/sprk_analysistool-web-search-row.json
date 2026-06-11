@@ -1,0 +1,43 @@
+{
+  "_comment_top": "R6 Wave 8 — seed row for the WebSearchHandler typed handler. Replaces the legacy hardcoded WebSearchTools class (removed from SprkChatAgentFactory.ResolveTools lines ~1023-1064 by main session after this handler lands).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'WebSearchHandler' (= nameof handler class). Auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010).",
+  "_comment_security": "sprk_requiredcapability = 'web_search' (= PlaybookCapabilities.WebSearch literal — verified 2026-06-08) gates this tool to playbooks whose capability set includes 'web_search'. Standalone chat (no playbook, capabilities = CoreCapabilities) does NOT include 'web_search', so this handler is unreachable from standalone chat — preserving the pre-Wave-8 governance boundary (ADR-015: external content governance — many playbooks deal with confidential internal documents and should not reach out to the public internet). Per R6 Wave 7b infrastructure (commit 66da08ca), SprkChatAgentFactory.ResolveTools applies IsCapabilityGateSatisfied at session start and silently withholds rows whose RequiredCapability is not in the current playbook's capability set.",
+  "_comment_chat_only": "sprk_availableincontexts = 100000001 (Chat only). Web search has no playbook use case — the legacy hardcoded registration was wired only into the chat agent factory; playbook orchestration does not invoke this handler. The handler's SupportedInvocationContexts = InvocationContextKind.Chat reflects this; ExecuteAsync (playbook path) returns ValidationFailed if accidentally invoked.",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool. The exact phrasing below is preserved verbatim from the legacy hardcoded AIFunctionFactory.Create description so the LLM's tool-selection behavior is unchanged after migration.",
+  "_comment_scope_guidance": "Scope-guided search (FR-10): when ChatInvocationContext.KnowledgeScope.ScopeSearchGuidance is non-empty, the handler prepends it to the raw query as a free-text qualifier (e.g., 'Westlaw LexisNexis' for legal scopes) so Bing biases results toward authoritative domain sources. No row-level config knob — the scope is forwarded from the active playbook/scope.",
+  "_comment_resilience": "Resilience contract preserved verbatim: no Bing API key → graceful mock fallback; Bing concurrency limit (max 2 static SemaphoreSlim, ADR-016) → mock fallback with degradation note; 5s HTTP timeout / HTTP failure / JSON parse failure → empty results with degradation note. Never throws to the caller.",
+  "_comment_citations": "Per R6 Wave 7b infrastructure, the handler emits ToolResult.Metadata['citations'] (ToolResultCitation array, SourceType='web') and the ToolHandlerToAIFunctionAdapter accumulates into the per-turn CitationContext. Frontend renders globe icon + [External Source] badge from SourceType='web' (ADR-015).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter; UPSERTs. Main session adds this file to the $RowFiles array after Wave 8 lands.",
+  "sprk_name": "SYS-Web Search",
+  "sprk_toolcode": "WEB-SEARCH",
+  "sprk_description": "Search the web for information relevant to the user's query. Use when the question cannot be answered from internal documents alone.",
+  "sprk_handlerclass": "WebSearchHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only. Web search has no playbook use case (legacy registration was chat-only).",
+  "sprk_requiredcapability": "web_search",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "WebSearchHandler Request",
+    "description": "Argument shape for chat-driven invocation of WebSearchHandler. 'query' is the web search query; optional 'maxResults' caps the number of results returned (default 5, clamped to [1, 10]).",
+    "type": "object",
+    "required": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Web search query."
+      },
+      "maxResults": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10,
+        "description": "Maximum number of results to return. Defaults to 5; clamped to [1, 10]."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "No row-level configuration. The handler reads BingSearch:ApiKey, BingSearch:Endpoint, and BingSearch:MaxResults from IConfiguration (App Service settings / Key Vault). Scope-guided search hint is forwarded from ChatInvocationContext.KnowledgeScope.ScopeSearchGuidance on each invocation — no row knob."
+  },
+  "_comment_configuration": "Empty by design — Bing API key/endpoint live in App Service config (preserves legacy WebSearchTools behavior). Scope guidance is per-session, not per-row."
+}

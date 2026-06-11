@@ -1,0 +1,36 @@
+{
+  "_comment_top": "R6 Wave 8 — seed row for the LegalResearchHandler 'LookupCase' method. Replaces the second of the two legacy hardcoded LLM functions previously registered on LegalResearchTools (removed from SprkChatAgentFactory.ResolveTools lines ~1107-1165).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'LegalResearchHandler'. The handler reads sprk_configuration.method = 'LookupCase' to dispatch to the citation-anchored Bing Grounding path (search query is wrapped with site: filters for law.justia.com, courtlistener.com, scholar.google.com).",
+  "_comment_method_dispatch": "Two rows (LEGAL-RESEARCH / LEGAL-CASE-LOOKUP) share one handler class — same pattern as TextRefinementHandler (Wave 7 Q9) and KnowledgeRetrievalHandler (Wave 7c). Each row's sprk_configuration.method discriminator selects the internal method.",
+  "_comment_security": "sprk_requiredcapability = 'legal_research' (= PlaybookCapabilities.LegalResearch, Dataverse option set integer 100000007) gates this tool to playbooks whose capability set includes 'legal_research'. Standalone chat (capabilities = CoreCapabilities; 'legal_research' NOT included) cannot reach this handler — preserving the pre-Wave-8 security boundary.",
+  "_comment_adr_015": "ADR-015 binding: case citations may carry surrounding PII (e.g., 'My client's case: 123 F.3d 456'). The handler invokes QuerySanitizer.Sanitize() BEFORE every Bing Grounding call — the case citation itself is preserved (it IS the search target) but client-name prefixes and matter references are stripped. Telemetry logs citation LENGTH + result COUNT + duration only.",
+  "_comment_adr_018": "ADR-018 binding: kill switch via BingGroundingOptions.Enabled is checked BEFORE any network call. When disabled, the handler returns a successful ToolResult with a user-readable degradation message directing the user to Westlaw / LexisNexis.",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool. The exact phrasing below is preserved verbatim from the legacy hardcoded registration so the LLM's tool-selection behavior is unchanged after migration.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode + sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Legal Case Lookup",
+  "sprk_toolcode": "LEGAL-CASE-LOOKUP",
+  "sprk_description": "Look up a specific legal case by its standard citation (e.g., 123 F.3d 456 (9th Cir. 2020)). Returns the case holding and a source URL from an authoritative legal database.",
+  "sprk_handlerclass": "LegalResearchHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat. Chat-only matches the pre-R6 hardcoded registration; no playbook node executor exists for legal_research per NFR-08.",
+  "sprk_requiredcapability": "legal_research",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "LegalResearchHandler.LookupCase Request",
+    "description": "Argument shape for chat-driven invocation of the LookupCase method. The 'citation' is a specific legal case citation; the handler sanitizes surrounding PII, anchors the query to authoritative legal databases, and returns the case holding plus a source URL.",
+    "type": "object",
+    "required": ["citation"],
+    "properties": {
+      "citation": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Case citation in standard legal format (e.g., '123 F.3d 456 (9th Cir. 2020)' or 'Roe v. Wade, 410 U.S. 113 (1973)'). Case names are acceptable as they are public record; client-name prefixes and matter references are stripped by the sanitizer before the query is forwarded to Bing."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "method = 'LookupCase' is the dispatch discriminator. This row exposes only the citation-anchored Bing Grounding method.",
+    "method": "LookupCase"
+  }
+}

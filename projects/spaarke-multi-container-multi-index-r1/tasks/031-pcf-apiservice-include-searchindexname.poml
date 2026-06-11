@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>PCF — `SemanticSearchApiService.search()` includes `searchIndexName` in BFF request (FR-PCF-02)</title>
+    <phase>D: PCF v1.1.74</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033</blocks>
+    <tags>pcf, react, typescript, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies PCF service `.ts` code; touches BFF request shape; carries ADR-006 / ADR-022 / ADR-028 obligations; must enforce `authenticatedFetch` and INV-5-style "omit when empty" semantics.</rigor-reason>
+    <parallel-group>D1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint from task 032 (NavigationService.ts). Both can run after 030 in parallel.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `SemanticSearchApiService.search()` to include `searchIndexName` in the BFF request body when non-empty (omit when empty). Use the `searchIndexName` value from the manifest-bound property (read via `context.parameters.searchIndexName.raw` upstream). Continue using `authenticatedFetch` from `@spaarke/auth` (ADR-028) — no `Bearer ${token}` literals, no `new PublicClientApplication`. Unit test the resulting request body shape (with + without the field).
+  </prompt>
+
+  <role>
+    PCF developer with deep familiarity with `src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts`, ADR-006 (PCF over webresources), ADR-022 (PCF stays React 16), ADR-028 (Spaarke Auth v2 — `authenticatedFetch` is the only BFF call path).
+  </role>
+
+  <goal>
+    `SemanticSearchApiService.search()` accepts and forwards `searchIndexName` in the BFF request body when non-empty. The request body field is omitted entirely when the value is null/empty. `authenticatedFetch` continues to be the call mechanism (no new auth wiring). Unit tests verify both the present-with-value and the omitted-when-empty cases.
+  </goal>
+
+  <context>
+    <background>
+      Task 030 added the bound `searchIndexName` manifest property. This task plumbs the property through `SemanticSearchApiService.search()` into the BFF `/api/ai/search` request body. Phase B (tasks 010-018) ensures the BFF accepts the field and validates it against the allow-list, so this client-side change is safe.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-PCF-02">`SemanticSearchApiService.search()` MUST include `searchIndexName` in the request body when non-empty (omit when empty).</constraint>
+    <constraint source="ADR-006">PCF only — no webresource shim path; all BFF calls happen from the PCF service.</constraint>
+    <constraint source="ADR-022">PCF stays React 16-safe. No React 18-only APIs.</constraint>
+    <constraint source="ADR-028">All BFF calls use `authenticatedFetch` from `@spaarke/auth`. No `Bearer ${token}` literals. No `new PublicClientApplication`. No `accessToken` prop drilling.</constraint>
+    <constraint source="spec.md NFR-09">Code review confirms no `Bearer ${token}` literals; no `new PublicClientApplication`; all BFF calls use `authenticatedFetch`.</constraint>
+    <constraint source="project">Omit the field entirely from the JSON body when empty/null — do not send empty string. BFF treats absence as "fall through to existing tenant chain" (FR-BFF-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke Auth v2 binding" location=".claude/patterns/auth/spaarke-sso-binding.md">
+        `authenticatedFetch` is the only sanctioned BFF call mechanism in PCF + code-page surfaces. It transparently injects the OBO token. Never use raw `fetch` with a `Bearer ${token}` header.
+      </pattern>
+      <pattern name="Omit-when-empty body composition" location="spec.md FR-BFF-04">
+        BFF treats absence of `searchIndexName` as "use the 2-tier tenant default chain". Therefore the client MUST omit the field entirely when value is null/empty/whitespace — not send empty string.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `SemanticSearchApiService.search()` to locate the request-body composition site. Identify the current shape of the JSON body sent to `/api/ai/search`.</step>
+    <step order="2">Extend the `search()` method signature to accept `searchIndexName?: string` (or read it from the existing options/context-derived object — match the existing convention).</step>
+    <step order="3">In the body-composition site, conditionally add `searchIndexName` when value is non-empty (trim + check). When empty/null/whitespace, omit the field entirely.</step>
+    <step order="4">Verify the call still goes through `authenticatedFetch` from `@spaarke/auth` (no Bearer literals introduced). Confirm no `accessToken` prop drilling.</step>
+    <step order="5">Add unit tests for the request body shape: (a) with `searchIndexName="spaarke-file-index"` → body includes the field with that value; (b) with `searchIndexName=""` → body does NOT include the field; (c) with `searchIndexName` omitted → body does NOT include the field. Mock the `authenticatedFetch` to inspect the body argument.</step>
+    <step order="6">Run code-review + adr-check skills at Step 9.5 (FULL rigor requirement). Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md` to reflect completion and advance to next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read SemanticSearchApiService.ts</tool>
+    <tool name="Edit">Add the conditional body field</tool>
+    <tool name="Bash">Run unit tests via `npm run test`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts (request body shape)</output>
+    <output type="tests">Unit tests for request-body shape (present + omitted cases)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-PCF-02: `SemanticSearchApiService.search()` includes `searchIndexName` in the JSON body when non-empty. Verified by unit test inspecting the `authenticatedFetch` body argument.</criterion>
+    <criterion testable="true">When `searchIndexName` is null/empty/whitespace, the field is omitted entirely from the JSON body (not sent as empty string). Verified by unit test.</criterion>
+    <criterion testable="true">NFR-09: No new `Bearer ${token}` literals; no `new PublicClientApplication`; the call still uses `authenticatedFetch` from `@spaarke/auth`. Verified by code review.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="PCF search sends searchIndexName">
+      <description>Verify that the PCF, when bound to a record with `sprk_searchindexname` populated, includes the value in the live BFF request body.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn={entity}&amp;id={record-id}</url>
+      <steps>
+        <step>Open a model-driven form hosting SemanticSearchControl, on a record whose `sprk_searchindexname` is set (e.g. a Protected Matter with `spaarke-file-index`).</step>
+        <step>Open browser DevTools → Network tab → filter `/api/ai/search`.</step>
+        <step>Trigger a search via the PCF input.</step>
+        <step>Inspect the request body of the POST.</step>
+      </steps>
+      <expected>Request body JSON contains `"searchIndexName": "spaarke-file-index"`. When the record has no `sprk_searchindexname` set, the field is absent from the body.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Parallel-safe with task 032 (NavigationService.ts). The two files are independent; both can run after task 030 in the same wave.
+
+    The manifest property added in task 030 is read via `context.parameters.searchIndexName.raw` upstream of this service (likely in `SemanticSearchControl.tsx` or wherever the API service is instantiated). This task only updates the API service contract — the call-site wiring may already exist or may be added incidentally; if a new context plumb is needed, keep it minimal.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-006 / ADR-022 / ADR-028 + .claude/constraints/pcf.md + .claude/constraints/auth.md before Step 1. Declare rigor (FULL) per task-execute Step 0. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

@@ -23,7 +23,11 @@ import type { IUploadedFile } from './wizardTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { EntityCreationService } from '../../services/EntityCreationService';
-import type { IUploadProgress, AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type {
+  IUploadProgress,
+  AuthenticatedFetchFn,
+  IUserBuCascadeDefaults,
+} from '../../services/EntityCreationService';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by AssignCounselStep search results)
@@ -150,13 +154,22 @@ function _resolveNavProp(navPropMap: Record<string, string>, columnLogical: stri
 export class MatterService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
+  private readonly _tenantId: string;
 
   constructor(
     dataService: IDataService,
     authenticatedFetch: AuthenticatedFetchFn,
     bffBaseUrl: string,
-    private readonly _containerId?: string
+    private readonly _containerId?: string,
+    /**
+     * AAD tenant ID. Required to trigger post-upload RAG indexing via
+     * `EntityCreationService.indexUploadedFiles()`. When omitted or empty,
+     * the file upload still succeeds but indexing is skipped with a warning.
+     * Provided by the host solution (e.g. `config.tenantId` in main.tsx).
+     */
+    tenantId?: string
   ) {
+    this._tenantId = tenantId ?? '';
     this._dataService = dataService;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
@@ -183,17 +196,38 @@ export class MatterService {
 
   /**
    * Full matter creation flow:
-   *   1. Create sprk_matter record
+   *   1. Create sprk_matter record (with BU cascade applied if defaults provided)
    *   2. Upload files to SPE via BFF (using EntityCreationService)
    *   3. Create sprk_document records linking files to the matter
    *   4. Execute selected follow-on actions
    *
    * Returns ICreateMatterResult -- never throws.
+   *
+   * BU cascade (FR-WIZ-01): when `cascadeDefaults` is provided, applies
+   * `sprk_containerid` AND `sprk_searchindexname` from the user's owning Business
+   * Unit via {@link EntityCreationService.applyUserBuDefaults}. INV-5 enforced
+   * per-field — explicit values pre-existing on the payload are preserved.
+   *
+   * Aligned with the proven CreateProjectWizard pattern: the caller (typically
+   * `CreateMatterWizard.tsx` via `resolveUserBuDefaults` prop) resolves defaults
+   * using the host's `Xrm.Utility.getGlobalContext().userSettings.userId`. This
+   * replaces a prior broken inline implementation that called the non-existent
+   * `Xrm.Utility.getUserId()` API and silently skipped the cascade in the
+   * Code Page iframe runtime.
+   *
+   * @param form Form state captured by the wizard.
+   * @param uploadedFiles Files to upload to SPE after the matter is created.
+   * @param followOnActions Optional follow-on workflow steps (assign counsel, etc.).
+   * @param cascadeDefaults Optional BU-derived defaults (containerId, searchIndexName).
+   *   When omitted/undefined the cascade step is a no-op (legacy behavior preserved
+   *   for tests that omit it). Wizard call sites pass the resolved value.
+   * @param onUploadProgress Optional callback fired during SPE file uploads.
    */
   async createMatter(
     form: ICreateMatterFormState,
     uploadedFiles: IUploadedFile[],
     followOnActions: IFollowOnActions,
+    cascadeDefaults?: IUserBuCascadeDefaults,
     onUploadProgress?: (progress: IUploadProgress) => void
   ): Promise<ICreateMatterResult> {
     const warnings: string[] = [];
@@ -214,6 +248,20 @@ export class MatterService {
     // Store the SPE container ID on the matter record
     if (this._containerId) {
       entity['sprk_containerid'] = this._containerId;
+    }
+
+    // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): cascade `sprk_containerid`
+    // AND `sprk_searchindexname` from the current user's owning Business Unit.
+    // INV-5 enforced per-field by applyUserBuDefaults — the host-injected
+    // this._containerId set above is preserved if already present on the payload.
+    //
+    // Defaults are resolved upstream by the wizard component (using the host's
+    // Xrm.Utility.getGlobalContext().userSettings.userId) and passed in via the
+    // `cascadeDefaults` parameter. Same dependency-injection pattern as
+    // CreateProjectWizard.tsx (verified working).
+    if (cascadeDefaults) {
+      const applied = EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults);
+      console.info('[MatterService] BU cascade applied:', applied, '(BU:', cascadeDefaults.businessUnitId, ')');
     }
 
     // Generate matter number: {matterTypeCode}-{random 6 digits}
@@ -306,6 +354,24 @@ export class MatterService {
         );
         if (linkResult.warnings.length > 0) {
           warnings.push(...linkResult.warnings);
+        }
+
+        // -- Step 2b: Trigger RAG indexing for uploaded files --
+        // Uses the canonical sync-OBO path via `@spaarke/sdap-client.SdapApiClient.indexFile()`.
+        // Non-fatal — failures are surfaced as warnings; the matter + documents are already saved.
+        const indexingWarnings = await this._entityService.indexUploadedFiles(
+          uploadResult.uploadedFiles,
+          this._tenantId,
+          {
+            entityType: 'sprk_matter',
+            entityId: matterId,
+            entityName: form.matterName.trim(),
+          },
+          linkResult.createdDocumentIds,
+          cascadeDefaults?.searchIndexName
+        );
+        if (indexingWarnings.length > 0) {
+          warnings.push(...indexingWarnings);
         }
       }
 

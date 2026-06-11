@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="106" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>PCF v1.1.75: drop bound `searchIndexName`; add `resolveSearchIndexNameAsync` via `context.webAPI`; 5-location version bump</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>completed</status>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>100</dependencies>
+    <blocks>107</blocks>
+    <tags>pcf, frontend, manifest</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `pcf`; modifies `.tsx` manifest + main control file; manifest contract change (bound property removed). 5-location version bump must be exact. Code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>G3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client-side; disjoint from BFF resolver work in 102. Both consume the lookup column from task 100.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update `SemanticSearchControl` PCF to v1.1.75. (1) Remove `searchIndexName` `&lt;property&gt;` element from `ControlManifest.Input.xml` (it's no longer a bound property). (2) Add `resolveSearchIndexNameAsync(context)` method that uses `context.webAPI.retrieveRecord(entityType, entityId, '?$select=_sprk_aisearchindexid_value&amp;$expand=sprk_aisearchindexid($select=sprk_searchindexname)')` to read the host record's lookup expansion. (3) Wire the resolved value into the existing `boundSearchIndexName` consumption sites (search hook + URL envelope builder) — downstream is unchanged. (4) Version bump in 5 locations per `.claude/skills/pcf-deploy/SKILL.md`.
+  </prompt>
+
+  <role>
+    PCF developer familiar with `src/client/pcf/SemanticSearchControl/`, Spaarke Auth v2 (`@spaarke/auth`), ADR-022 (PCF stays React 16, no React 18 APIs), and the canonical 5-location PCF version-bump pattern.
+  </role>
+
+  <goal>
+    PCF v1.1.75 manifest has no `searchIndexName` bound property; the control resolves the index name itself via `context.webAPI` lookup expansion on init. All downstream consumption (URL envelope + search calls) reads the resolved value identically to v1.1.74. Backward compatible with the BFF (string wire format unchanged).
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/NavigationService.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/hooks/useSemanticSearch.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/Solution/solution.xml</file>
+      <file>src/client/pcf/SemanticSearchControl/Solution/Controls/sprk_Sprk.SemanticSearchControl/ControlManifest.xml</file>
+      <file>src/client/pcf/SemanticSearchControl/Solution/pack.ps1</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md §5">Drop `searchIndexName` bound property from manifest. PCF resolves via `context.webAPI` with `$expand=sprk_aisearchindexid($select=sprk_searchindexname)`. Wire format (string) downstream unchanged.</constraint>
+    <constraint source=".claude/skills/pcf-deploy/SKILL.md">5-location version bump REQUIRED: ControlManifest.Input.xml, main .tsx (footer string), Solution/solution.xml, Solution/Controls/.../ControlManifest.xml, Solution/pack.ps1.</constraint>
+    <constraint source="ADR-022">PCF stays React 16. Do NOT use React 18-only APIs (createRoot, useTransition, etc.).</constraint>
+    <constraint source="ADR-028">All BFF calls via `authenticatedFetch` from `@spaarke/auth` — unchanged.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 tokens for any new UI (this task has no new UI; pure logic change).</constraint>
+    <constraint source="NFR-10">PCF clean-rebuild required before pack — `npm run build:prod` (NOT `npm run build`) per FAILURE-MODES.md#AP-1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `SemanticSearchControl.tsx` lines ~510-525 (where `boundSearchIndexName` is currently set from `context.parameters.searchIndexName?.raw`). Note the consumption sites: `useSemanticSearch(apiService, searchScope, scopeId, boundSearchIndexName)` and the `boundSearchIndexName` pass to NavigationService at ~line 779.</step>
+    <step order="2">Add private async method `resolveSearchIndexNameAsync(context: ComponentFramework.Context&lt;IInputs&gt;): Promise&lt;string | null&gt;` per spec §5 pseudocode. Wraps the Xrm.WebApi call in try/catch returning null on failure.</step>
+    <step order="3">In `init()` or wherever `boundSearchIndexName` is currently derived, change from synchronous read of bound property to async resolution. Store in component state (`React.useState&lt;string | null&gt;`). Re-render dependent components when resolution completes. Since this is React 16, use a state-setter pattern (not React 18 transitions).</step>
+    <step order="4">Remove `&lt;property name="searchIndexName" ...&gt;` element from `ControlManifest.Input.xml`. Verify all references to `context.parameters.searchIndexName` are removed (manifest types will need regen — `npm run refreshTypes`).</step>
+    <step order="5">5-location version bump 1.1.74 → 1.1.75: (a) `ControlManifest.Input.xml` `version` attribute + description `(v1.1.75)`; (b) main component footer string in `SemanticSearchControl.tsx`; (c) `Solution/solution.xml` `&lt;Version&gt;`; (d) `Solution/Controls/.../ControlManifest.xml` `version` + description; (e) `Solution/pack.ps1` `$version`.</step>
+    <step order="6">Update unit tests in `__tests__/`: tests that mock `context.parameters.searchIndexName` are obsolete; replace with tests that mock `context.webAPI.retrieveRecord` returning the expanded record shape. Update `NavigationService.test.ts` if it tested with PCF-bound input.</step>
+    <step order="7">`npm run build:prod` (NOT `npm run build`). Verify bundle size &lt; 1 MB (per pcf-deploy skill expectations).</step>
+    <step order="8">Run code-review + adr-check at Step 9.5 (FULL rigor). Update `TASK-INDEX.md`: 106 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing PCF source files</tool>
+    <tool name="Edit">Manifest delta, main .tsx, version-bump 5 locations, unit test updates</tool>
+    <tool name="Bash">`npm run build:prod` + bundle size verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml (bound property removed; version bumped)</output>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx (resolveSearchIndexNameAsync added; consumption rewired)</output>
+    <output type="code">5-location version bump completed</output>
+    <output type="tests">Unit tests updated to mock context.webAPI rather than context.parameters.searchIndexName</output>
+    <output type="artifact">out/controls/SemanticSearchControl/bundle.js (~440-550 KB)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ControlManifest.Input.xml` contains NO `&lt;property name="searchIndexName"&gt;` element.</criterion>
+    <criterion testable="true">`context.parameters.searchIndexName` appears NOWHERE in the PCF source (grep returns 0).</criterion>
+    <criterion testable="true">`context.webAPI.retrieveRecord` is called once on init with the correct `$expand=sprk_aisearchindexid($select=sprk_searchindexname)` clause.</criterion>
+    <criterion testable="true">Bundle size after `build:prod` is &lt; 1 MB (expect ~440-550 KB).</criterion>
+    <criterion testable="true">Version 1.1.75 appears in all 5 required locations.</criterion>
+    <criterion testable="true">Unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <deploy-skill>.claude/skills/pcf-deploy/SKILL.md</deploy-skill>
+  </execution>
+</task>

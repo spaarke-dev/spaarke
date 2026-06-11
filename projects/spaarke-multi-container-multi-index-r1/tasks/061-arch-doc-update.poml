@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Docs — update `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` (FR-DOC-02)</title>
+    <phase>G: Operator Runbook + Docs</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>090</blocks>
+    <tags>docs, architecture</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Pure documentation edit on an existing architecture doc. No code, no tests. Brief addition + cross-link to runbook (task 060).</rigor-reason>
+    <parallel-group>G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint with task 060 (different doc file). No dependencies; can run anytime.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` per spec.md FR-DOC-02 and design.md §6 / §11. Add (or update) a section describing per-BU container/index routing as a deployed capability. Cross-link to the operator runbook (task 060). Brief edit only — does not rewrite the architecture doc.
+  </prompt>
+
+  <role>
+    Spaarke technical writer extending an existing architecture document with a new section reflecting a newly-deployed capability.
+  </role>
+
+  <goal>
+    `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` has a section (new or appended) describing per-BU container/index routing: that records carry `sprk_containerid` + `sprk_searchindexname` from their owning BU at create time, with explicit override support, and that the BFF resolver consumes the record's index at search time. Cross-link to the operator runbook for procedural detail.
+  </goal>
+
+  <context>
+    <background>
+      `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` is the canonical end-to-end pipeline architecture document (per CLAUDE.md §16 pointer table). It must reflect the per-BU routing model as a deployed capability — without restating the runbook content.
+
+      Keep the edit BRIEF — this is not a redesign of the architecture doc, just an addition reflecting a now-deployed capability.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md (update existing)</file>
+      <file>docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md (cross-link target — task 060)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-DOC-02">Architecture doc has a section / paragraph describing the routing model.</constraint>
+    <constraint source="design.md INV-1..INV-8">Architecture doc edit must NOT contradict any invariant; reference them rather than restate.</constraint>
+    <constraint source="project">Brief edit only — do not rewrite the architecture doc. Add a focused section (~150-300 words) + cross-link to the operator runbook for procedural detail.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the existing `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`. Identify whether a routing-model section already exists OR where a new section best fits (likely near the existing search / BFF / data-routing section).</step>
+    <step order="2">Draft the new section: "Per-BU Container + Index Routing" — describe (1) records carry their own `sprk_containerid` + `sprk_searchindexname` populated by the Spaarke create wizards at create time from owning BU defaults; (2) explicit per-record override is supported (Protected Matter pattern); (3) BFF resolver accepts the index name from the client at search time + validates against an allow-list; (4) old records keep their original routing on BU value changes (INV-3 coexistence).</step>
+    <step order="3">Add a cross-link to `docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` (task 060) for procedural detail.</step>
+    <step order="4">Apply the edit. Run a quick scan to confirm: (a) section reads naturally in context; (b) no contradiction with existing invariants; (c) the cross-link is correct. Update TASK-INDEX + current-task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read the existing arch doc to locate insertion point</tool>
+    <tool name="Edit">Apply the focused section addition</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md (section added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-DOC-02: architecture doc has a section describing per-BU container/index routing as a deployed capability.</criterion>
+    <criterion testable="true">Cross-link to operator runbook (task 060) present.</criterion>
+    <criterion testable="true">Edit is brief (~150-300 words); no rewrite of existing content.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 060 — different files. The cross-link to the runbook means task 060 should be done first OR concurrently (the cross-link can be added even if the runbook file isn't fully drafted — both files merge together at PR time).
+
+    If the arch doc already has a routing-model section, EXTEND it rather than adding a duplicate section. Idempotent edits are preferred.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Read the existing arch doc first; identify insertion point. Follow task-execute Step 0 (MINIMAL rigor — docs edit only).
+    </protocol>
+  </execution>
+</task>

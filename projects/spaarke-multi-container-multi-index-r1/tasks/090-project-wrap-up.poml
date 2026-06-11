@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Project wrap-up — code-review + adr-check + repo-cleanup + lessons-learned</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2-4</estimated-hours>
+    <dependencies>053, 060, 061, 073, 074</dependencies>
+    <blocks>none</blocks>
+    <tags>wrap-up, code-review, docs</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Mandatory project wrap-up per task-create §3.7. Runs all final quality gates (code-review + adr-check + repo-cleanup) on the entire project's output. Step 9.5 quality gates are inherent — this IS the quality gate task.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task — every prior task must be complete. Runs sequential quality gates.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Project wrap-up per task-create §3.7. Execute the 9-step wrap-up structure: run `/code-review` on all project code; run `/adr-check` on all project code; run `/repo-cleanup` on the project folder; update `README.md` (Status=Complete, Phase=Complete, 100%, completed date, graduation criteria checked, changelog entry); update `plan.md` (Status=Complete, milestones ✅); update `current-task.md` (Status=none); update `tasks/TASK-INDEX.md` (confirm all 43 tasks ✅); create `notes/lessons-learned.md`; archive `notes/handoffs/` to `notes/.archive/` if any. Zero critical issues in code-review + adr-check is the acceptance bar.
+  </prompt>
+
+  <role>
+    Spaarke project lead closing out a completed project. Runs final quality gates, updates project metadata to reflect completion, captures lessons for future projects.
+  </role>
+
+  <goal>
+    All quality gates pass with zero critical issues. README + plan + current-task all reflect "Complete". TASK-INDEX shows all 43 tasks ✅. `notes/lessons-learned.md` exists with insights from each phase. `notes/handoffs/` archived. Repo cleanup audit completed.
+  </goal>
+
+  <context>
+    <background>
+      Per task-create §3.7, every Spaarke project ends with a wrap-up task that runs all final quality gates + updates project metadata + captures lessons. This is not optional — it's the structural bookend that turns a completed implementation into a closed project.
+
+      Quality gates: `/code-review` (judgment-layer code quality + ADR-aware review) + `/adr-check` (mechanical ADR compliance scan) + `/repo-cleanup` (structure compliance + ephemeral-file cleanup). Each is a Spaarke skill with its own protocol.
+
+      Lessons-learned MUST capture phase-specific insights — especially PR #363 sequencing decisions, INV-5 enforcement learnings during backfill, and NFR-10/11 clean-rebuild pain points (these are the high-risk items from TASK-INDEX.md).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-multi-container-multi-index-r1/README.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/plan.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/current-task.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/lessons-learned.md (new)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/handoffs/ (archive source)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task-create §3.7">Wrap-up MUST follow the 9-step structure. Every step is required.</constraint>
+    <constraint source="project">Zero critical issues in code-review + adr-check is the acceptance bar. Critical issues block the wrap-up until resolved.</constraint>
+    <constraint source="project">All 43 tasks in TASK-INDEX.md must show ✅ before this task can be marked complete.</constraint>
+    <constraint source="CLAUDE.md §7">After task completion, reset `current-task.md` to reflect "Status: none" since project is complete (next action: close project).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke `/code-review` on all project code (BFF resolver + DTO + endpoints; shared service updates; 5 wizards + DocumentUploadWizard; PCF v1.1.74; Code Page; 3 backfill scripts). Address any critical issues by filing remediation tasks OR fixing inline. Re-run until zero critical issues.</step>
+    <step order="2">Invoke `/adr-check` on all project code. Verify compliance with ADR-001 (Minimal API), ADR-012 (shared library), ADR-013 (AI architecture), ADR-019 (ProblemDetails), ADR-021 (Fluent v9), ADR-022 (React boundaries), ADR-026 (Code Page standard), ADR-028 (Spaarke Auth v2), ADR-029 (BFF publish hygiene). Address any violations.</step>
+    <step order="3">Invoke `/repo-cleanup projects/spaarke-multi-container-multi-index-r1`. Audit + clean any ephemeral files left behind by earlier tasks (e.g., temp audit logs that should be archived, scratch notes, broken cross-links).</step>
+    <step order="4">Update `projects/spaarke-multi-container-multi-index-r1/README.md`: Status=Complete; Phase=Complete; Progress=100%; Completed Date=today; check ALL Graduation Criteria boxes; add a Changelog entry summarizing what shipped (Phase A wizards extended, Phase B BFF resolver extended, Phase D PCF v1.1.74, Phase E code page, Phase F backfill scripts, Phase G docs).</step>
+    <step order="5">Update `projects/spaarke-multi-container-multi-index-r1/plan.md`: Status=Complete; mark every phase milestone ✅.</step>
+    <step order="6">Update `projects/spaarke-multi-container-multi-index-r1/current-task.md`: Status=none; Next Action=close project (already ran `/repo-cleanup`); record final completion timestamp.</step>
+    <step order="7">Verify `projects/spaarke-multi-container-multi-index-r1/tasks/TASK-INDEX.md` shows all 43 tasks ✅. If any are not ✅, the wrap-up cannot complete — re-check those tasks and resolve.</step>
+    <step order="8">Create `projects/spaarke-multi-container-multi-index-r1/notes/lessons-learned.md` capturing insights from each phase. MUST cover: (a) PR #363 sequencing — how the v1.1.73 / v1.1.74 PCF interleave was managed; (b) INV-5 enforcement during backfill — surprises or near-misses on overwrites; (c) NFR-10/11 clean-rebuild pain points — what went wrong with stale `dist/` if anything, what the recovery looked like; (d) Phase A.5 prerequisite handling — did operator-driven BU value setup catch any teams off-guard; (e) backfill halt-loud behavior — did any unmapped containers appear in real test data; (f) anything that would change how the next similar project is decomposed.</step>
+    <step order="9">If `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/` contains files, archive them to `notes/.archive/2026-MM-DD/` (today's date). Keep `notes/lessons-learned.md` at the top level (it's a final deliverable, not ephemeral). Final TASK-INDEX update: 🔲 &#8594; ✅ for task 090.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">code-review · adr-check · repo-cleanup</tool>
+    <tool name="Edit">Update README, plan, current-task, TASK-INDEX</tool>
+    <tool name="Write">Create lessons-learned.md</tool>
+    <tool name="Bash">Move handoffs to archive</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-multi-container-multi-index-r1/README.md (Status: Complete)</output>
+    <output type="docs">projects/spaarke-multi-container-multi-index-r1/plan.md (Status: Complete)</output>
+    <output type="state">projects/spaarke-multi-container-multi-index-r1/current-task.md (Status: none)</output>
+    <output type="state">projects/spaarke-multi-container-multi-index-r1/tasks/TASK-INDEX.md (all 43 tasks ✅)</output>
+    <output type="docs">projects/spaarke-multi-container-multi-index-r1/notes/lessons-learned.md (new)</output>
+    <output type="archive">projects/spaarke-multi-container-multi-index-r1/notes/.archive/2026-MM-DD/ (handoffs moved)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/code-review` produces zero critical issues on project code.</criterion>
+    <criterion testable="true">`/adr-check` produces zero violations on project code.</criterion>
+    <criterion testable="true">`/repo-cleanup` audit completes; no ephemeral files left in project folder.</criterion>
+    <criterion testable="true">README Status=Complete, Phase=Complete, Progress=100%, all Graduation Criteria ✅, Changelog entry present.</criterion>
+    <criterion testable="true">plan.md Status=Complete; all phase milestones ✅.</criterion>
+    <criterion testable="true">current-task.md Status=none (project complete).</criterion>
+    <criterion testable="true">TASK-INDEX shows all 43 tasks ✅.</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists with required phase-specific insights (PR #363, INV-5, NFR-10/11, A.5, halt-loud).</criterion>
+    <criterion testable="true">notes/handoffs/ contents archived under notes/.archive/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Final task. Cannot start until all of (053, 060, 061, 073, 074) are ✅. Critical issues found by code-review or adr-check require remediation tasks (file them, fix them, re-run the gate) BEFORE this task completes.
+
+    Lessons-learned is not a checkbox — write it as a real artifact future projects will read. Be honest about what went badly, not just what went well. The high-risk items in TASK-INDEX.md (PR #363 sequencing, stale dist/, halt-loud) are the prompts for this — what actually happened?
+
+    After this task is ✅, the project is closed. The next reasonable action is `/merge-to-master` or PR creation if not already done.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load task-create §3.7 (wrap-up structure) + the 3 quality-gate skill SKILL.md files before starting. Follow task-execute Step 0 (FULL rigor — this IS the project's final quality gate). Step 9.5 code-review + adr-check are inherent to this task's steps 1+2.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>PCF manifest — add `searchIndexName` bound property (FR-PCF-01)</title>
+    <phase>D: PCF SemanticSearchControl v1.1.74</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>018</dependencies>
+    <blocks>031, 032, 033</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies PCF manifest (the maker-facing contract for downstream PCF tasks); carries ADR-006 / ADR-011 / ADR-012 / ADR-021 / ADR-022 obligations; manifest typing regeneration affects 031 + 032 consumers.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Manifest is the contract for downstream PCF code consumers (tasks 031, 032). Must complete first.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a new bound property `searchIndexName` (SingleLine.Text, bound, not required) to `ControlManifest.Input.xml` representing the scope record's `sprk_searchindexname` field. Regenerate manifest types if needed so downstream code can read the property via `context.parameters.searchIndexName.raw`. Verify the PCF rebuilds and the maker can wire the field on a form (FR-PCF-01).
+  </prompt>
+
+  <role>
+    PCF developer with deep familiarity with `src/client/pcf/SemanticSearchControl/`, ADR-006 (PCF over webresources), ADR-011 (PCF conventions), ADR-012 (shared lib), ADR-021 (Fluent v9 + dark mode + tokens), ADR-022 (PCF stays React 16). Bound-property authoring is routine in PCF; mirror the shape of existing bound properties in the manifest.
+  </role>
+
+  <goal>
+    `ControlManifest.Input.xml` declares a new bound `searchIndexName` property; PCF rebuilds via `npm run build` (validation only — production build is in task 035); maker portal lists the new property as bindable on a form. Downstream code (tasks 031 + 032) can read it via the regenerated manifest types.
+  </goal>
+
+  <context>
+    <background>
+      The multi-container-multi-index project routes search requests to the correct Azure AI Search index per record (FR-PCF-02 + FR-PCF-03 downstream). The PCF needs a manifest-level bound property so makers can wire the scope record's `sprk_searchindexname` field on the form. This task adds the manifest declaration only — the consumer code (API service + NavigationService) lands in tasks 031 + 032.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/index.ts</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-PCF-01">PCF manifest MUST add a new bound property `searchIndexName` (SingleLine.Text, bound) representing the scope record's `sprk_searchindexname` field.</constraint>
+    <constraint source="ADR-006">PCF over web-resources — manifest authoring stays in `ControlManifest.Input.xml`; no parallel webresource wiring.</constraint>
+    <constraint source="ADR-011">PCF conventions — follow the existing bound-property attribute set used by the other properties in this manifest (do not introduce a different shape).</constraint>
+    <constraint source="ADR-012">PCF code consuming the shared lib remains untouched here — this task is manifest-only.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + tokens.* only when this property's value renders. Manifest itself has no styling; downstream UI must comply.</constraint>
+    <constraint source="ADR-022">PCF stays React 16-safe. Manifest additions never introduce React 18-only APIs.</constraint>
+    <constraint source="project">No version bump in this task — version stays at 1.1.73 until task 033. This task is additive manifest only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-011-pcf-conventions.md</file>
+      <file>.claude/adr/ADR-012-shared-ui-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Bound property declaration" location="src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml">
+        Existing bound properties in this manifest define the canonical attribute set (name, display-name-key, description-key, of-type, usage="bound", required="false"). Mirror that exact shape.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `ControlManifest.Input.xml` to identify the existing bound-property attribute set (display-name-key, description-key, of-type, usage, required). Note any `resx`/localization keys that mirror the pattern.</step>
+    <step order="2">Add a new `&lt;property&gt;` element: `name="searchIndexName"`, `display-name-key="searchIndexName_Display_Key"`, `description-key="searchIndexName_Desc_Key"`, `of-type="SingleLine.Text"`, `usage="bound"`, `required="false"`. Place near other bound properties for readability.</step>
+    <step order="3">If localization resx files exist for this control, add the matching display-name + description entries. If no resx exists (inline display names used), use the inline `display-name-key` attribute directly per the existing convention.</step>
+    <step order="4">Run `npm run build` (NOT prod — that's task 035) in `src/client/pcf/SemanticSearchControl/` to regenerate manifest types and verify TypeScript compiles. Confirm `context.parameters.searchIndexName` is type-safe in downstream code (smoke check `index.ts` if needed).</step>
+    <step order="5">Verify the PCF still compiles cleanly with no new TypeScript or PCF tooling warnings. Capture the build summary in `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/030-pcf-manifest-build.md`.</step>
+    <step order="6">Run code-review + adr-check skills at Step 9.5 (FULL rigor requirement). Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md` to reflect completion and advance to next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read ControlManifest.Input.xml and index.ts</tool>
+    <tool name="Edit">Add the new bound property declaration</tool>
+    <tool name="Bash">Run `npm run build` to regenerate manifest types</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml (new bound property)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/030-pcf-manifest-build.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-PCF-01: `ControlManifest.Input.xml` contains a `&lt;property name="searchIndexName" of-type="SingleLine.Text" usage="bound" required="false" /&gt;` declaration with the existing attribute set.</criterion>
+    <criterion testable="true">PCF rebuild via `npm run build` succeeds with no TypeScript errors; regenerated manifest types expose `context.parameters.searchIndexName`.</criterion>
+    <criterion testable="true">Maker portal lists `searchIndexName` as a bindable property on the control (UI test below).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="PCF manifest property visible to maker">
+      <description>Verify the new bound property is discoverable in the maker portal control configuration.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control</url>
+      <steps>
+        <step>Open maker portal and navigate to a model-driven form that hosts SemanticSearchControl.</step>
+        <step>Click the SemanticSearchControl on the form to open the control configuration pane.</step>
+        <step>Inspect the list of bindable properties.</step>
+      </steps>
+      <expected>Property `searchIndexName` is listed alongside existing bound properties; maker can map it to a Dataverse column.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This task is manifest-only. Consumer code (the actual request body + navigateTo envelope additions) lands in tasks 031 + 032. The version bump to 1.1.74 lands in task 033 — do NOT bump here.
+
+    If the manifest uses inline `display-name-key` values rather than resx (check the existing properties first), follow that convention for the new property. Localization is not in scope for this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-006 / ADR-011 / ADR-012 / ADR-021 / ADR-022 + .claude/constraints/pcf.md before Step 1. Declare rigor (FULL) per task-execute Step 0. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

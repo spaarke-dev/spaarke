@@ -1,0 +1,84 @@
+<task id="072" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-27 — Extend `WorkspaceWidgetRegistry` with optional `getVisibleState?: () =&gt; unknown` field</title>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>Phase C — Widget Visibility Contract (Pillar 9)</phase>
+    <wave>C-G2 (sequential after 071)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>071 (getAgentVisibleState interface)</dependencies>
+    <tags>frontend, typescript, ai-widgets</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Type extension only; existing widget registrations continue to work; opt-in field.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Extend `WorkspaceWidgetRegistry` registration metadata with optional `getVisibleState?:
+    () =&gt; SerializedWidgetState | null` field. Existing widget registrations MUST
+    continue to work unchanged (opt-in only — visibility is NOT retrofitted
+    automatically). Type-narrowing pattern: when `getVisibleState` is defined, agent
+    prompt builder (task 074) calls it; when absent, widget contributes nothing to agent
+    prompt visibility.
+  </prompt>
+
+  <role>
+    Senior TypeScript engineer familiar with the `WorkspaceWidgetRegistry`
+    registration pattern + opt-in metadata extension.
+  </role>
+
+  <goal>
+    Registry type extended; existing registrations continue to compile + work; per-widget
+    implementations (task 073) can register their `getVisibleState`.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="dashboard-widget-model">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="widget-registry">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+    <file purpose="serialized-state-iface">src/client/shared/Spaarke.AI.Widgets/src/types/SerializedWidgetState.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared lib.</constraint>
+    <constraint source="ADR-015">Opt-in (privacy default).</constraint>
+    <constraint source="spec FR-56">Existing widget registrations continue to work; visibility opt-in not retrofitted automatically.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/widget-registry</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: STANDARD — Type extension; opt-in field."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 071 complete.</step>
+    <step order="2" name="Gather Resources">Read existing WorkspaceWidgetRegistry.</step>
+    <step order="3" name="Extend Type">Add optional `getVisibleState?` field.</step>
+    <step order="4" name="Type-Check">tsc --noEmit; verify all existing registrations still compile.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 072 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">tsc + lint</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts (modified)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`getVisibleState?` field added as optional to registry metadata.</criterion>
+    <criterion testable="true">All existing widget registrations continue to compile without modification.</criterion>
+    <criterion testable="true">tsc --noEmit passes.</criterion>
+  </acceptance-criteria>
+</task>

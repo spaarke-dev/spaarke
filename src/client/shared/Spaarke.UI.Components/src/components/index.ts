@@ -140,3 +140,16 @@ export * from './DataGrid';
 // Kanban - Generic Kanban primitives (board + slot-based card + column types)
 // Hoisted from SmartTodo-local per smart-todo-decoupling-r3 task 010 (NFR-02 + FR-08).
 export * from './Kanban';
+
+// RecordNavigationModalShell - Universal modal shell for cross-record navigation
+// + cross-frame dirty-check protocol (smart-todo-r4 task 010, FR-12/FR-14)
+export * from './RecordNavigationModalShell';
+
+// SelectionAwareToolbar - Slot-based action toolbar visible only when ≥1 item selected (R4 task 012 / B FR-08)
+export * from './SelectionAwareToolbar';
+
+// ViewToggle - List/Card segmented control matching SemanticSearchControl icon set (R4 task 012 / B FR-09)
+export * from './ViewToggle';
+
+// OrientationToggle - Horizontal ↔ vertical layout toggle icon button (R4 task 012 / F FR-28)
+export * from './OrientationToggle';

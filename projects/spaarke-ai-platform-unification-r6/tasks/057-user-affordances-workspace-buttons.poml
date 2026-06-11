@@ -1,0 +1,124 @@
+<task id="057" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-08 + D-C-09 + D-C-10 — User affordances: "Send to Workspace" + "Add to Assistant" + "Pin to Matter"</title>
+    <status>pending</status>
+    <estimated-effort>1.5 days</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6b)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>054, 055, 056 (chat tools that affordances invoke)</dependencies>
+    <tags>frontend, react, fluent-ui, ai-widgets, workspace</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Three new affordances modifying workspace state; spans multiple SpaarkeAi components; UX-critical (visible to end user).</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build three user affordances per spec FR-39:
+    1. **"Send to Workspace" button** on chat assistant messages — promotes chat message
+       content to a new workspace tab via direct workspace state API call (or via chat
+       tool invocation if simpler); default `visibleToAssistant: false` (user-initiated).
+    2. **"Add to Assistant" toggle** on user-created tabs — flips `visibleToAssistant`
+       from false → true; updates tab via `WorkspaceStateService` directly (this is a
+       user action, not a chat tool).
+    3. **"Pin to Matter" affordance** — calls `WorkspaceStateService.PinTabAsync(matterId)`
+       which promotes the tab to Cosmos durable storage attached to matter record.
+    All components use Fluent v9 per ADR-012. Components live in
+    `@spaarke/ai-widgets` shared library; consumed by SpaarkeAi shell. Dark-mode parity
+    verified per ADR-021. Each affordance emits the appropriate `workspace.*` PaneEventBus
+    event so other panes (e.g., trace widget from task 061) observe the change.
+  </prompt>
+
+  <role>
+    Senior React/Fluent-v9 engineer with deep familiarity with SpaarkeAi shell + workspace
+    tab manager + PaneEventBus contract.
+  </role>
+
+  <goal>
+    All three affordances visible + functional in SpaarkeAi shell. Persistence verified
+    via reload (pinned tabs reappear from Cosmos). PaneEventBus events emitted. Dark-mode
+    parity verified. Fluent v9 component conventions followed.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="workspace-arch">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="dashboard-widget-model">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="workspace-tab">src/client/shared/Spaarke.AI.Widgets/src/types/WorkspaceTab.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Fluent v9 component patterns; shared lib `@spaarke/ai-widgets`.</constraint>
+    <constraint source="ADR-021">Dark-mode parity verified for every new component.</constraint>
+    <constraint source="ADR-030">PaneEventBus 4 channels; additive event types only on `workspace` channel.</constraint>
+    <constraint source="spec FR-39">All three affordances functional + persisted via state service.</constraint>
+    <constraint source="project R6 Pillar 6b">"Add to Assistant" is the user override that flips `visibleToAssistant: true` for tabs that default false (user-created).</constraint>
+    <constraint source="project R6">No new PCF; consume existing SpaarkeAi shell + workspace tab manager. Components live in shared lib per ADR-012.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/fluent-v9-affordances</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — 3 affordances; UX-critical; Fluent v9 + dark-mode + persistence."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 054/055/056 complete; chat tools available.</step>
+    <step order="2" name="Gather Resources">Read SpaarkeAi shell + chat message component + workspace tab manager + Fluent v9 author pattern.</step>
+    <step order="3" name="Build SendToWorkspaceButton">In `@spaarke/ai-widgets`; appears on chat assistant messages; clicking creates tab; user-initiated → `visibleToAssistant: false`.</step>
+    <step order="4" name="Build AddToAssistantToggle">In `@spaarke/ai-widgets`; toggle in tab header; flips visibility flag; calls state service.</step>
+    <step order="5" name="Build PinToMatterAffordance">In `@spaarke/ai-widgets`; calls `WorkspaceStateService.PinTabAsync(matterId)` via BFF; promotes to Cosmos.</step>
+    <step order="6" name="Integrate into Shell">Wire into SpaarkeAi shell; verify rendering order + dark-mode parity.</step>
+    <step order="7" name="Persistence Test">Reload session; verify pinned tabs reappear from Cosmos; non-pinned tabs cleared from Redis after 24h TTL.</step>
+    <step order="8" name="UI Tests">Per ui-test skill: render each component in light + dark; click handlers fire correct events.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-012/021/030).</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 057 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + type-check + lint</tool>
+    <tool name="git">Stage + commit</tool>
+    <tool name="fluent-v9-component">Skill for Fluent v9 component authoring conventions</tool>
+    <tool name="ui-test">Skill for browser-based UI verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/affordances/SendToWorkspaceButton.tsx (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/affordances/AddToAssistantToggle.tsx (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/affordances/PinToMatterButton.tsx (NEW)</output>
+    <output type="code">SpaarkeAi shell integration points (chat message, tab header)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Send to Workspace" button visible on chat assistant messages; click creates tab with `visibleToAssistant: false`.</criterion>
+    <criterion testable="true">"Add to Assistant" toggle visible on user-created tabs; toggle flips `visibleToAssistant`.</criterion>
+    <criterion testable="true">"Pin to Matter" affordance pins tab + promotes to Cosmos durable.</criterion>
+    <criterion testable="true">Reload session: pinned tabs reappear; non-pinned cleared after TTL.</criterion>
+    <criterion testable="true">Dark-mode parity verified per ADR-021.</criterion>
+    <criterion testable="true">All affordances emit appropriate `workspace.*` events on existing channel (no 5th channel).</criterion>
+    <criterion testable="true">Fluent v9 conventions followed per ADR-012.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test>Render SendToWorkspaceButton in light + dark themes; verify ADR-021 token usage.</test>
+    <test>Click SendToWorkspaceButton; verify tab appears in workspace strip with `visibleToAssistant: false`.</test>
+    <test>Toggle AddToAssistant on a tab; verify `visibleToAssistant` flips; verify event emitted.</test>
+    <test>Click PinToMatter; reload page; verify tab persists.</test>
+  </ui-tests>
+</task>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>UAT — Wizards smoke (MCP-verify both fields on each entity create)</title>
+    <phase>H: Deploy + UAT</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>029, 070</dependencies>
+    <blocks>074, 090</blocks>
+    <tags>testing, e2e-test, dataverse, mcp</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end test exercising all 6 deployed wizards in a real environment + MCP verification. Testing-only, but spans every wizard FR (FR-WIZ-01..07).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential UAT step; creates real records in a test environment; later UAT tasks (074) depend on the records this task creates.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Smoke-test the 6 deployed wizards per spec.md FR-WIZ-01..07 acceptance criteria. Create one record via each wizard (sourced from Spaarke Demo BU) and MCP-verify that both `sprk_containerid` and `sprk_searchindexname` are populated with the expected values. Upload a Document under one of the matters via DocumentUploadWizard and MCP-verify the resulting `sprk_document` has `sprk_searchindexname` populated, `sprk_containerid` still NULL (Spaarke convention), and `sprk_graphdriveid` populated as today.
+  </prompt>
+
+  <role>
+    Spaarke QA / operator exercising the deployed wizards in a model-driven app + verifying via MCP query.
+  </role>
+
+  <goal>
+    All 6 wizards produce records with the correct field values: parent records have both `sprk_containerid` + `sprk_searchindexname` matching BU defaults; Documents have `sprk_searchindexname` populated + `sprk_graphdriveid` populated + `sprk_containerid` NULL (per Spaarke convention). All MCP-verified.
+  </goal>
+
+  <context>
+    <background>
+      Phase A deployed the 6 extended wizards (CreateMatterWizard, CreateProjectWizard, CreateInvoiceWizard, CreateWorkAssignmentWizard, CreateEventWizard, DocumentUploadWizard). This task exercises each one end-to-end in a test environment and uses MCP queries as the verification gate. The verification is what proves FR-WIZ-01..07 acceptance.
+
+      Run user-side (as a user, not via raw API) — that's the path the wizards intercept.
+    </background>
+    <relevant-files>
+      <file>(testing only)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-WIZ-01..05 acceptance">Create one record via each parent wizard from Spaarke Demo BU; MCP query confirms both `sprk_containerid` + `sprk_searchindexname` populated with expected values.</constraint>
+    <constraint source="spec.md FR-WIZ-06..07 acceptance">Upload a Document via DocumentUploadWizard; MCP query confirms `sprk_searchindexname` populated; `sprk_containerid` still NULL (Spaarke convention); `sprk_graphdriveid` populated.</constraint>
+    <constraint source="spec.md FR-WIZ-08 acceptance">Verify INV-5 — when a record's field is explicitly set in the form/wizard before resolution, the explicit value persists.</constraint>
+    <constraint source="design.md INV-5">Explicit override values are sacred — never overwritten.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm Spaarke Demo BU has `sprk_searchindexname = "spaarke-knowledge-index-v2"` and `sprk_containerid = "b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"` via MCP query (Phase A.5 should have set this; task 001 verified).</step>
+    <step order="2">Create a Matter via CreateMatterWizard (sourced from Spaarke Demo BU). MCP query the new Matter: `SELECT sprk_matterid, sprk_containerid, sprk_searchindexname FROM sprk_matter WHERE sprk_matterid = '&lt;new-id&gt;'`. Verify both fields populated with BU defaults.</step>
+    <step order="3">Same for Project, Invoice, WorkAssignment, Event via their respective wizards. MCP-query each new record and verify both fields. (FR-WIZ-02..05 acceptance.)</step>
+    <step order="4">Upload a document under the Matter created in Step 2 via DocumentUploadWizard. MCP query the new sprk_document: verify `sprk_searchindexname` populated (matches the Matter's index); `sprk_containerid` still NULL (Spaarke convention per INV-6 / design.md §4.1); `sprk_graphdriveid` populated as today. (FR-WIZ-06..07 acceptance.)</step>
+    <step order="5">INV-5 override test: in CreateMatterWizard, set `sprk_searchindexname` to an explicit value (e.g., `spaarke-file-index`) before completing the wizard. Submit. MCP-verify the Matter has the explicit value, NOT the BU default. (FR-WIZ-08 acceptance.)</step>
+    <step order="6">Capture MCP query outputs (one per record) to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/071-wizards-smoke.md`. Note any wizard that failed or produced unexpected values. Update TASK-INDEX + current-task.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__read_query">Verify pre/post state for each wizard</tool>
+    <tool name="Write">Capture verification notes</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/071-wizards-smoke.md (MCP query outputs for each of 6 wizards + INV-5 override test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-WIZ-01 (Matter): new Matter has both fields populated with Spaarke Demo BU defaults.</criterion>
+    <criterion testable="true">FR-WIZ-02 (Project — fix G2): new Project has both fields populated.</criterion>
+    <criterion testable="true">FR-WIZ-03 (Invoice): new Invoice has both fields populated.</criterion>
+    <criterion testable="true">FR-WIZ-04 (WorkAssignment): new Work Assignment has both fields populated.</criterion>
+    <criterion testable="true">FR-WIZ-05 (Event): new Event has both fields populated.</criterion>
+    <criterion testable="true">FR-WIZ-06..07 (Document): new Document has `sprk_searchindexname` populated; `sprk_containerid` NULL; `sprk_graphdriveid` populated.</criterion>
+    <criterion testable="true">FR-WIZ-08 (INV-5): explicit override in CreateMatterWizard persists; BU default does not overwrite it.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequential — depends on wizards deployed (029) and BFF smoke passed (070). Blocks 074 (which needs the records from this task) and 090 (wrap-up).
+
+    If any wizard FAILS verification, file an immediate remediation task in the corresponding Phase A task (021-027) and pause UAT until fixed. Wizards are the canonical create path — a failure here is a critical defect.
+
+    The Document upload test (Step 4) is the load-bearing FR-WIZ-06/07 verification — be especially careful to capture all three field values (`sprk_searchindexname`, `sprk_containerid`, `sprk_graphdriveid`) and confirm `sprk_containerid` is NULL per Spaarke convention. A populated `sprk_containerid` on the Document would be a defect.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load spec.md FR-WIZ-01..08 + design.md INV-5, INV-6 before starting. Follow task-execute Step 0 (STANDARD rigor) before any test run.
+    </protocol>
+  </execution>
+</task>

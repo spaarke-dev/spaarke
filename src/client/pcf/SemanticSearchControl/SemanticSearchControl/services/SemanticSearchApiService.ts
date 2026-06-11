@@ -84,7 +84,7 @@ export class SemanticSearchApiService {
    * scope = 'all'/'custom' the union is meaningless (no parent FK) so we
    * skip it.
    */
-  async searchUnion(request: SearchRequest): Promise<SearchResponse> {
+  async searchUnion(request: SearchRequest, searchIndexName?: string | null): Promise<SearchResponse> {
     const isEntityScope = ['matter', 'project', 'invoice', 'account', 'contact', 'document', 'entity'].includes(
       request.scope
     );
@@ -92,7 +92,7 @@ export class SemanticSearchApiService {
 
     // Not eligible for union — fall back to plain search.
     if (!isEntityScope || associatedOnly) {
-      return this.search(request);
+      return this.search(request, searchIndexName);
     }
 
     // Build the associatedOnly=true variant. We reuse the request shape but
@@ -116,9 +116,12 @@ export class SemanticSearchApiService {
 
     // Fire both in parallel. If either fails, we still want partial coverage
     // — wrap in `Promise.allSettled` and fall back to whichever resolved.
+    // FR-PCF-02 — propagate `searchIndexName` to both sub-paths so the
+    // semantic call routes to the per-scope index and the associated path
+    // (which ignores it server-side) stays consistent.
     const [semanticOutcome, associatedOutcome] = await Promise.allSettled([
-      this.search(request),
-      this.search(associatedRequest),
+      this.search(request, searchIndexName),
+      this.search(associatedRequest, searchIndexName),
     ]);
 
     const semantic = semanticOutcome.status === 'fulfilled' ? semanticOutcome.value : null;
@@ -167,7 +170,7 @@ export class SemanticSearchApiService {
       for (const r of semantic.results) {
         if (!r.documentId) continue;
         const prior = byId.get(r.documentId);
-        if (prior && prior.relationship === 'associated') {
+        if (prior?.relationship === 'associated') {
           // Conflict: tag 'both' so the UI shows "Same Matter" pill AND
           // the semantic similarity %. Adopt the semantic record's
           // combinedScore + metadata (it carries the meaningful score).
@@ -203,10 +206,19 @@ export class SemanticSearchApiService {
   /**
    * Execute a semantic search
    * @param request - Search request parameters
+   * @param searchIndexName - Optional Azure AI Search index name to route the request to
+   *        (FR-PCF-02 — sourced from the manifest-bound `searchIndexName` property,
+   *        which itself binds to the scope record's `sprk_searchindexname` Dataverse
+   *        field). When non-empty, the value is forwarded in the BFF request body so
+   *        the server resolves the request against that index. When null / undefined
+   *        / empty / whitespace-only, the field is OMITTED entirely from the body and
+   *        the BFF falls through to its existing tenant default index chain
+   *        (FR-BFF-04). Empty string MUST NOT be sent — absence is the protocol
+   *        signal for "use server default".
    * @returns Search response with results
    * @throws SearchError on failure
    */
-  async search(request: SearchRequest): Promise<SearchResponse> {
+  async search(request: SearchRequest, searchIndexName?: string | null): Promise<SearchResponse> {
     const endpoint = `${this.apiBaseUrl}/api/ai/search`;
     // v1.1.50 — tag each result with its relationship origin so the list
     // view's Relationship + Similarity pills render correctly (Items 3 + 5).
@@ -219,7 +231,7 @@ export class SemanticSearchApiService {
 
     try {
       // Transform PCF request format to API format
-      const apiRequest = this.transformRequest(request);
+      const apiRequest = this.transformRequest(request, searchIndexName);
 
       // DEBUG: Log the API request
       console.log('[SemanticSearchApiService] API request:', {
@@ -501,7 +513,7 @@ export class SemanticSearchApiService {
    * - PCF "custom" → Would need documentIds (not implemented)
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private transformRequest(request: SearchRequest): Record<string, any> {
+  private transformRequest(request: SearchRequest, searchIndexName?: string | null): Record<string, any> {
     // Map PCF scope to API scope
     let apiScope: string;
     let entityType: string | undefined;
@@ -542,6 +554,17 @@ export class SemanticSearchApiService {
         ? Math.min(1, Math.max(0, request.filters.threshold / 100))
         : 0;
 
+    // FR-PCF-02 — Conditionally include `searchIndexName` in the body.
+    //   - Non-empty trimmed string → forward as-is (BFF validates against the
+    //     `appsettings.AiSearch.AllowedIndexes` allow-list; on miss returns
+    //     400 INDEX_NOT_ALLOWED per Phase B tasks 010-018).
+    //   - null / undefined / empty string / whitespace-only → OMIT the key
+    //     entirely so the BFF falls through to its existing tenant default
+    //     index chain (FR-BFF-04). Sending `""` is incorrect — absence is
+    //     the protocol signal for "use server default".
+    const trimmedIndex = typeof searchIndexName === 'string' ? searchIndexName.trim() : '';
+    const indexField = trimmedIndex.length > 0 ? { searchIndexName: trimmedIndex } : {};
+
     // Build API request
     return {
       query: request.query,
@@ -551,6 +574,7 @@ export class SemanticSearchApiService {
       // Pass associatedOnly to the BFF so it can branch to the Dataverse-direct path.
       // The BFF requires scope=entity + entityType + entityId when this is true.
       associatedOnly: request.filters?.associatedOnly ?? false,
+      ...indexField,
       filters: request.filters
         ? {
             documentTypes: request.filters.documentTypes,

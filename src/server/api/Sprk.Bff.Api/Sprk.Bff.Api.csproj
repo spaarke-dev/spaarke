@@ -38,6 +38,13 @@
     <!-- OpenAI pinned to 2.8.0: required by Microsoft.Extensions.AI.OpenAI 10.3.0 IChatClient bridge -->
     <PackageReference Include="OpenAI" Version="2.8.0" />
 
+    <!-- JsonSchema.Net 7.3.4: Draft 2020-12 meta-schema validation for sprk_analysistool
+         JSON Schemas (R6 audit item 1, 2026-06-07). Used by ToolHandlerToAIFunctionAdapter
+         constructor + AnalysisToolService.MapJsonSchema to refuse malformed schemas before
+         the LLM sees them. Sole transitive dep: Json.More.Net. +300 KB compressed delta
+         (well within R6 NFR-02 budget of +5 MB). -->
+    <PackageReference Include="JsonSchema.Net" Version="7.3.4" />
+
     <!-- Azure packages -->
     <!-- Cosmos DB SDK v3 — AI persistence (AIPU2-030: SessionPersistenceService, AIPU2-033: AuditLogService) -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />

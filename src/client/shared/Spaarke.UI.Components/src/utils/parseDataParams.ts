@@ -19,13 +19,16 @@
 // ============================================================================
 
 /**
- * Parse Code Page data parameters from the current URL.
+ * Parse Code Page data parameters from the current URL (or a supplied search string).
  *
  * Handles both the Xrm `data` envelope format and raw URL query parameters.
  * When a `data` param is present, its decoded contents take priority. Any
  * additional top-level query params (excluding `data` itself) are merged in,
  * with `data` contents winning on key conflicts.
  *
+ * @param search - Optional search string to parse (e.g., `'?key=val'`). When
+ *   omitted, reads `window.location.search`. Supplying this argument is
+ *   primarily for unit-test injection — production callers typically omit it.
  * @returns A flat key-value map of all parsed parameters
  *
  * @example
@@ -58,10 +61,19 @@
  * const documentId = params.documentId ?? '';
  * const matterId = params.matterId ?? '';
  * ```
+ *
+ * @example
+ * ```typescript
+ * // Unit-test injection (no DOM required):
+ * const params = parseDataParams('?data=key%3Dval');
+ * // { key: "val" }
+ * ```
  */
-export function parseDataParams(): Record<string, string> {
+export function parseDataParams(search?: string): Record<string, string> {
   try {
-    const urlParams = new URLSearchParams(window.location.search);
+    const sourceSearch =
+      typeof search === 'string' ? search : typeof window !== 'undefined' ? window.location.search : '';
+    const urlParams = new URLSearchParams(sourceSearch);
     const result: Record<string, string> = {};
 
     // Collect all top-level params (except 'data' itself)

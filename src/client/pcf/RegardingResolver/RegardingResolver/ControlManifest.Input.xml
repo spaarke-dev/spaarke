@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="RegardingResolver" version="1.0.0" display-name-key="Regarding Resolver" description-key="Virtual PCF: 11-entity regarding picker bound to sprk_regardingrecordtype; wraps applyResolverFields (ADR-024) — reusable for sprk_todo and sprk_communication (FR-22)" control-type="virtual">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+    <!-- Bound lookup property — the resolver's "discriminator" field on the host entity (sprk_regardingrecordtype) -->
+    <property name="regardingRecordType" display-name-key="Regarding Record Type" description-key="Lookup to sprk_recordtype_ref — the resolver discriminator. Bind to the host entity's sprk_regardingrecordtype hidden lookup field." of-type="Lookup.Simple" usage="bound" required="true" />
+    <!-- Host entity logical name (FR-22 — the only entity-specific configuration; no code branching) -->
+    <property name="entity" display-name-key="Host Entity" description-key="Dataverse logical name of the host entity (e.g., 'sprk_todo' or 'sprk_communication'). FR-22 reusability lever — set once per form, no entity-specific code branches in the PCF." of-type="SingleLine.Text" usage="input" required="true" />
+    <!-- Optional override list of allowed regarding target entity types (comma-separated logical names). Defaults to the 11-entity TODO_REGARDING_TARGETS catalog. -->
+    <property name="regardingTargets" display-name-key="Regarding Targets" description-key="Optional comma-separated list of allowed parent entity logical names. Defaults to: sprk_matter,sprk_project,sprk_event,sprk_communication,sprk_workassignment,sprk_invoice,sprk_budget,sprk_analysis,sprk_organization,contact,sprk_document" of-type="SingleLine.Text" usage="input" required="false" />
+    <!-- Optional explicit read-only override (FR-24). Otherwise derived from context.mode.isControlDisabled. -->
+    <property name="readOnly" display-name-key="Read Only" description-key="When true, renders selected target as read-only link without edit affordances (FR-24). Auto-detected from form-disabled state when omitted." of-type="TwoOptions" usage="input" required="false" />
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle (ADR-022) -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

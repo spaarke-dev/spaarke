@@ -1,0 +1,128 @@
+<task id="R4-041" project="smart-todo-r4">
+  <metadata>
+    <title>C — Cross-frame dirty-check messaging protocol (parent + iframe form-side)</title>
+    <phase>Phase 2: Wave 2b</phase>
+    <workstream>C</workstream>
+    <status>not-started</status>
+    <estimated-effort>1-1.5 days</estimated-effort>
+    <tags>code-page, smart-todo, cross-frame-messaging, postmessage, dataverse-form, react</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-010, R4-040</dependencies>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/ (parent side from task 010)</file>
+      <file>src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx (parent side wiring)</file>
+      <file>JavaScript Web Resource on To Do form (new — iframe-side listener)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Implement the iframe-side of the dirty-check messaging protocol established in task 010. The parent `<RecordNavigationModalShell>` posts `request-dirty-check`; the iframe-side JS Web Resource on the To Do main form listens, computes dirty state via `Xrm.Page.data.entity.getIsDirty()`, and posts back `dirty-check-result`. If dirty, parent prompts user before swapping iframe src. **Spike upfront** to verify MDA security headers don't block postMessage.
+  </prompt>
+
+  <role>Dataverse form-script developer + React engineer.</role>
+
+  <goal>
+1. Spike confirms postMessage works under spaarkedev1 MDA frame-ancestors / X-Frame-Options config (or documents fallback).
+2. New JS Web Resource on To Do main form registers `message` listener; responds to `request-dirty-check` with `{dirty: Xrm.Page.data.entity.getIsDirty()}`.
+3. Parent shell prompts user before navigating when dirty=true; clean user navigates without prompt.
+4. Origin checks restrict messaging to Spaarke domains only.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="shell">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/</file>
+    <file purpose="parent">src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx</file>
+    <file purpose="form-target">Dataverse To Do main form `eca59df4-1364-f111-ab0c-7ced8ddc4cc6`</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-14">Protocol: parent posts `request-dirty-check`; iframe responds `dirty-check-result` ({dirty: bool}); on dirty, parent prompts</constraint>
+    <constraint source="spec FR-14">Dirty-check protocol documented in `@spaarke/ui-components` API docs</constraint>
+    <constraint source="spec NFR-07">Dirty-check prompt accessible (WCAG 2.1 AA)</constraint>
+    <constraint source="security">Origin allow-list: Spaarke domains only (`*.dynamics.com`, `*.spaarke.com`); reject all others in message handler</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>cross-frame/postmessage</topic>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="postMessage origin allow-list" location="MDN postMessage docs">
+        Always check `event.origin` against an allow-list; never use `*` as targetOrigin in production.
+      </pattern>
+      <pattern name="Xrm.Page.data.entity.getIsDirty" location="Microsoft Learn — Client API reference">
+        Returns true when any field on the form has unsaved changes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Risk R1 (cross-frame messaging blocked under MDA security headers) is the highest-priority technical risk. Spike upfront before committing to the dirty-check user experience.</background>
+    <dependencies>
+      <dependency task="R4-010" status="must-complete">Parent shell with protocol API in place</dependency>
+      <dependency task="R4-040" status="must-complete">SmartTodo modal wired to consume shell</dependency>
+    </dependencies>
+    <related-work>
+      <item>If postMessage fails: fallback to query-string dirty signal documented in shell README.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Spike postMessage in MDA">In spaarkedev1, open a To Do main form via the modal; from parent console, post a test message; verify iframe receives it (or document blockage).</step>
+    <step order="2" name="If spike fails, document fallback">Edit shell README + plan.md to reflect fallback strategy (query-string signal, sessionStorage, etc.).</step>
+    <step order="3" name="Implement iframe-side JS Web Resource">Author `sprk_todo_dirty_check.js`; registers `message` listener; checks origin against allow-list; on `request-dirty-check` posts `dirty-check-result` with `{dirty: Xrm.Page.data.entity.getIsDirty()}`.</step>
+    <step order="4" name="Register Web Resource on To Do form">Add to form's OnLoad event via Form designer; deploy.</step>
+    <step order="5" name="Wire parent prompt">In SmartTodoModal or shell, when `dirty-check-result.dirty=true` fires, show Fluent v9 `<Dialog>` confirming nav loss; user OK → navigate; user Cancel → stay.</step>
+    <step order="6" name="Unit tests">Mock postMessage round-trip; verify origin check rejects untrusted origins.</step>
+    <step order="7" name="Smoke test in spaarkedev1">Edit field in iframe; click `>`; verify prompt; verify Cancel keeps changes; OK navigates and discards.</step>
+    <step order="8" name="A11y verify">Prompt is keyboard + screen-reader accessible.</step>
+    <step order="9" name="Update shell README">Document final protocol shape, allow-list, and fallback (if any).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="dataverse-deploy">Deploy JS Web Resource + form change</tool>
+    <tool name="ui-test">postMessage flow + dirty prompt</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx (modified — prompt wiring)</output>
+    <output type="code">src/webresources/sprk_todo_dirty_check.js (new)</output>
+    <output type="form-update">To Do main form OnLoad registers new web resource</output>
+    <output type="docs">RecordNavigationModalShell README (final protocol shape + allow-list + fallback)</output>
+    <output type="test">postMessage round-trip + origin-check unit tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Dirty prompt fires on nav with unsaved changes">
+      <steps>
+        <step>Open SmartTodo modal on a card</step>
+        <step>Edit a field in the iframe (don't save)</step>
+        <step>Click `>` to navigate to next card</step>
+        <step>Verify dirty-check prompt appears</step>
+        <step>Click Cancel; verify modal stays on current card with edits intact</step>
+        <step>Click `>` again; click OK in prompt; verify navigation proceeds (edits discarded)</step>
+      </steps>
+      <expected>Dirty prompt appears only when dirty; Cancel preserves edits; OK navigates</expected>
+    </test>
+    <test name="Clean nav has no prompt">
+      <steps>
+        <step>Open SmartTodo modal on a card; don't edit</step>
+        <step>Click `>` repeatedly</step>
+        <step>Verify nav is silent — no prompts</step>
+      </steps>
+      <expected>Clean nav: no dirty-check prompt</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">postMessage round-trip works in spaarkedev1 (or fallback documented)</criterion>
+    <criterion testable="true">Origin allow-list rejects untrusted origins (unit-tested)</criterion>
+    <criterion testable="true">Dirty user is prompted before nav; clean user is not</criterion>
+    <criterion testable="true">JS Web Resource registered on To Do main form OnLoad</criterion>
+    <criterion testable="true">Prompt accessible via keyboard + screen reader</criterion>
+    <criterion testable="true">Shell README documents final protocol shape</criterion>
+  </acceptance-criteria>
+</task>

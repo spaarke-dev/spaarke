@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -86,12 +87,19 @@ public class AnalysisOrchestrationServiceTests
             exportRegistry,
             new Mock<ILogger<AnalysisResultPersistence>>().Object);
 
+        // Post DI-cycle-break (2026-06-08): AnalysisOrchestrationService takes
+        // IServiceProvider; IToolHandlerRegistry is resolved lazily. Build a minimal
+        // provider that exposes only the registry mock for the orchestrator's use.
+        var serviceProvider = new ServiceCollection()
+            .AddSingleton(_toolHandlerRegistryMock.Object)
+            .BuildServiceProvider();
+
         _service = new AnalysisOrchestrationService(
             _openAiClientMock.Object,
             _scopeResolverMock.Object,
             _contextBuilderMock.Object,
             _playbookServiceMock.Object,
-            _toolHandlerRegistryMock.Object,
+            serviceProvider,
             _nodeServiceMock.Object,
             documentLoader,
             ragProcessor,

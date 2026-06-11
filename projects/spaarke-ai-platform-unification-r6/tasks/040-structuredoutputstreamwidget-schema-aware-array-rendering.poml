@@ -1,0 +1,318 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B-07 `StructuredOutputStreamWidget` schema-aware — array-typed fields render as bulleted list (fixes R5 TL;DR bug)</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>completed</status>
+    <outcome-note>Task 040 closed 2026-06-09 — schema-aware ARRAY dispatch added to StructuredOutputStreamWidget; R5 SC-18 TL;DR bug structurally fixed. Widget LOC delta: 1117→1385 (+268). New test file: 494 LOC; 13 tests all pass. BFF publish-size delta: 0 MB (frontend-only). Task 041 extension point documented at classifySchemaField() + dispatch site. NFR-11 back-compat preserved (test b verifies). ADR-021 dark-mode tested via DOM hex/rgb scan. Evidence: notes/task-040-widget-array-rendering-evidence.md.</outcome-note>
+    <estimated-effort>4-5 hours</estimated-effort>
+    <dependencies>032, 033</dependencies>
+    <blocks>041, 042, 048</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Frontend code implementation in `StructuredOutputStreamWidget.tsx`; modifies a shared workspace widget consumed across SpaarkeAi surfaces; fixes a R5-surfaced rendering bug (Gap C); 6+ steps; FULL rigor mandatory per CLAUDE.md §8 (code-review + adr-check at Step 9.5).</rigor-reason>
+    <parallel-group>B-G3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `StructuredOutputStreamWidget.tsx` which task 041 ALSO modifies. Task 040 lands FIRST (array rendering); task 041 lands SECOND (object rendering). They cannot run truly in parallel — set 041 dependency to 040.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update `StructuredOutputStreamWidget.tsx` to be schema-aware: at render time, READ
+    the action's `outputSchema` (populated by tasks 032 + 033) and dispatch on field
+    type. THIS TASK ships ARRAY-TYPED field rendering: when `outputSchema` declares a
+    field as `array` of `string` (e.g., `tldr: string[]` from
+    `summarize-document-for-workspace@v1`), accumulate streaming token deltas until
+    `streaming_complete`, JSON.parse the accumulated chunk, and render the resulting
+    array as a Fluent v9 bulleted list. This structurally fixes the R5 SC-18 bug where
+    `tldr` rendered as raw streaming JSON tokens (Gap C in R5 lessons-learned).
+
+    Object-typed field rendering is task 041 (sibling; same file; lands AFTER this). The
+    two tasks share the same file but they share the core "accumulate tokens until
+    streaming_complete → JSON.parse → dispatch by type" plumbing — task 040 establishes
+    the plumbing + array case; task 041 extends the dispatch with the object case.
+
+    The widget MUST: (a) gracefully fall back to today's string rendering when
+    `outputSchema` is absent (backward compatibility for actions not yet migrated); (b)
+    handle malformed JSON in accumulated chunks (parse failure → emit error state, log,
+    do NOT crash); (c) respect Fluent UI v9 theming + dark mode (ADR-021); (d) keep the
+    streaming-display "in-progress" indicator until `streaming_complete` fires.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Senior React + Fluent UI v9 developer with deep
+    familiarity with the SpaarkeAi widget framework, the `StructuredOutputStreamWidget`,
+    the streaming chat completion delta protocol, and the existing widget registry. Comfortable
+    with ADR-012 (shared components) + ADR-021 (Fluent v9 dark-mode compliance) +
+    ADR-030 (PaneEventBus 4-channel closed).
+  </role>
+
+  <goal>
+    `StructuredOutputStreamWidget.tsx` is updated to read the action's `outputSchema`
+    prop at mount time, accumulate streaming token deltas internally, dispatch on
+    schema-declared field type when `streaming_complete` fires, and render fields typed
+    `array: string` as a Fluent v9 bulleted list (`<ul><li>...</li></ul>` styled with
+    `tokens` from `@fluentui/react-components`). The fix is verified by SC-18-style
+    end-to-end test (invoke `summarize-document-for-workspace@v1`; observe `tldr` field
+    renders as bullets — NOT raw streaming JSON tokens). Backward compatibility: actions
+    without `outputSchema` continue to render as strings (current behavior). All unit
+    tests pass; UI tests pass; dark-mode compliance verified per ADR-021.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="widget">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="component-skill">.claude/skills/fluent-v9-component/SKILL.md</file>
+    <file purpose="r5-lessons">projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components — `StructuredOutputStreamWidget` lives in `@spaarke/ai-widgets` (or equivalent shared library); changes here propagate to all consumers. Use Fluent UI v9 components + tokens; do NOT introduce v8 or custom-CSS color values.</constraint>
+    <constraint source="ADR-021">Fluent v9 dark-mode compliance — every color, background, and border MUST use Fluent UI v9 semantic tokens (`tokens.colorNeutralForeground1`, etc.); NO hard-coded hex values; NO white-in-dark / black-in-light. Dark-mode UI test mandatory.</constraint>
+    <constraint source="ADR-030">PaneEventBus — no new channels; widget MAY emit additive event types on existing channels but this task does not require any new events.</constraint>
+    <constraint source="spec NFR-05">PaneEventBus 4-channel preserved; no 5th channel.</constraint>
+    <constraint source="spec NFR-11">Backward compatibility — actions without `outputSchema` MUST render as today (string formatting). Fallback path is the legacy behavior.</constraint>
+    <constraint source="spec FR-28">Array-typed field rendering: accumulate token deltas; JSON.parse on `streaming_complete`; render as bulleted list. Fixes R5 TL;DR bug.</constraint>
+    <constraint source="project">Verify BFF publish-size; report delta vs prior baseline; ≤+5 MB R6 total budget per NFR-02. Frontend code changes typically do NOT affect BFF publish size; confirm in task notes (expect 0 MB delta on BFF side; frontend bundle delta acceptable if &lt;+50 KB).</constraint>
+    <constraint source="project">Malformed JSON in accumulated chunk MUST be handled gracefully — emit error state to UI, log error to telemetry, do NOT crash the widget or other tabs.</constraint>
+    <constraint source="project">Widget MUST keep the streaming-display "in-progress" indicator until `streaming_complete` fires; do NOT prematurely flip to rendered state.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 token-styled bulleted list" location=".claude/patterns/ui/fluent-v9-theming.md">
+        Use `makeStyles` or `tokens.colorNeutralForeground1`/`tokens.spacingHorizontalM`
+        from `@fluentui/react-components`. Styled-`ul` with consistent vertical rhythm
+        matches the workspace tab visual language.
+      </pattern>
+      <pattern name="Streaming token-delta accumulation" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx">
+        Inspect existing widget for the current streaming protocol — likely a `useEffect`
+        subscribed to PaneEventBus delta events. Accumulate in component state as raw
+        string until a `streaming_complete` marker arrives; then JSON.parse; then
+        dispatch.
+      </pattern>
+      <pattern name="R5 lessons-learned Gap C" location="projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md">
+        Schema-aware rendering implicit — fixed structurally by this task. The widget
+        rendered streaming JSON token deltas as if they were the final string. Solution:
+        accumulate-then-parse-then-dispatch.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 SC-18 walkthrough surfaced that `tldr: string[]` rendered in the workspace tab
+      as raw JSON fragments ("[\"first bullet point\", \"se...") because the
+      widget treated the streaming delta as a string token to display, not as a
+      JSON-array-being-streamed. The widget had no way to know the field type — that
+      knowledge lives on the action's `outputSchema`. With tasks 030, 032, and 033
+      shipping the action-side schema declaration, this task plumbs the widget to
+      consume it.
+
+      Fix design: at mount, read `outputSchema` from props (or from a workspace-tab
+      hydration call). Accumulate token deltas in component state as raw string.
+      When `streaming_complete` arrives, JSON.parse the accumulated value (with
+      try/catch). Inspect the schema's `properties` map. For each top-level field
+      typed `{ type: "array", items: { type: "string" } }`, render the value as a
+      Fluent v9 bulleted `<ul>`. Object-typed dispatch comes in task 041.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx (MODIFIED — main implementation file)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.test.tsx (NEW or MODIFIED — unit tests covering schema-aware array dispatch + fallback path)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-040-widget-implementation-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Task 041 EXTENDS this widget with object-typed field rendering — depends on 040 first.</item>
+      <item>Task 042 CapabilityRouter dedup depends on this widget being the canonical render path (eliminates duplicate-fire).</item>
+      <item>Task 048 Phase B integration test exercises this widget end-to-end.</item>
+      <item>Tasks 032 + 033 supply the data foundation (action `outputSchema` populated).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend code implementation in shared widget; fixes R5 Gap C rendering
+                 bug; 6+ steps; ADR-012 + ADR-021 binding (Fluent v9 + dark-mode)
+      📖 PROTOCOL STEPS: all 12 steps below INCLUDING Step 9.5 quality gates + ui-tests
+                         (Step 9.7)
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 040 status 🔲; deps (032, 033) complete. Verify the
+      action `outputSchema` data is populated on Spaarke Dev (smoke query).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Read the existing
+      `StructuredOutputStreamWidget.tsx` IN FULL. Read SPAARKEAI-COMPONENT-MODEL.md and
+      SPAARKEAI-WORKSPACE-ARCHITECTURE.md for the widget contract surface. Read R5
+      lessons-learned Gap C.
+    </step>
+    <step order="3" name="Design Schema-Aware Plumbing">
+      Sketch: how does the widget receive `outputSchema`? Options: (a) prop drilled from
+      tab manager; (b) hydration call to BFF at mount; (c) workspace state model
+      (Pillar 6a — not yet shipped in Phase B). Choose (a) prop-drilled for Phase B —
+      simpler, no Phase C dependency. Tab manager passes `outputSchema` when installing
+      the widget. Document the decision.
+    </step>
+    <step order="4" name="Implement Accumulate-Parse-Dispatch Plumbing">
+      In `StructuredOutputStreamWidget.tsx`: add `outputSchema?: JsonSchema` prop. Add
+      `accumulatedText: string` state. On each streaming delta event, append to state.
+      On `streaming_complete`: try-parse accumulated text; on success, hold the parsed
+      object in state; on failure, set error state + log.
+    </step>
+    <step order="5" name="Implement Array Dispatch (THIS TASK)">
+      For each top-level field in the parsed object: lookup field type from
+      `outputSchema.properties[fieldName].type`. If `array` of `string`: render
+      `<ul>{value.map(v =&gt; &lt;li&gt;{v}&lt;/li&gt;)}</ul>` styled with Fluent v9 tokens
+      (`makeStyles({ list: { marginInlineStart: tokens.spacingHorizontalM, color:
+      tokens.colorNeutralForeground1, ... } })`). Use `<li>` semantics; do NOT use bullet
+      Unicode characters. Object dispatch is OUT of scope for this task (lands task 041);
+      for now object-typed fields use the legacy string-rendering fallback.
+    </step>
+    <step order="6" name="Implement Backward-Compatible Fallback">
+      If `outputSchema` prop is absent OR JSON parse fails: render accumulated text as a
+      string (current behavior). This preserves existing actions that haven't been
+      migrated.
+    </step>
+    <step order="7" name="Author Unit Tests">
+      Add `StructuredOutputStreamWidget.test.tsx` cases:
+      (a) schema-aware: array-typed `tldr` renders as `<ul>` with N `<li>` elements;
+      (b) backward-compat: no `outputSchema` → renders as string (legacy);
+      (c) malformed JSON: error state rendered, no crash;
+      (d) streaming-in-progress indicator until `streaming_complete`;
+      (e) ADR-021: no hard-coded colors (snapshot inspect `makeStyles` tokens used).
+    </step>
+    <step order="8" name="Build + Verify BFF Publish-Size">
+      Run `npm run build` for the widget library. Confirm build succeeds. Confirm BFF
+      publish-size delta is 0 MB (frontend change does NOT affect BFF binary; verify per
+      CLAUDE.md §10 bullet 4: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o
+      deploy/api-publish/`). Report delta vs prior baseline.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below. Record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` against the widget + test changes. Run `adr-check`; verify
+      ADR-012 (shared components / Fluent v9), ADR-021 (dark-mode tokens), ADR-029
+      (publish-size delta = 0 BFF-side), ADR-030 (PaneEventBus channels unchanged).
+      Both gates MUST pass.
+    </step>
+    <step order="9.7" name="UI Tests (per ui-tests section)">
+      Run UI tests defined below via ui-test skill (Chrome integration). Verify rendered
+      output + dark-mode compliance.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update TASK-INDEX.md: 040 🔲 → ✅. Reset `current-task.md`. Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build the widget library; run unit tests</tool>
+    <tool name="dotnet">Build + publish BFF for publish-size verification</tool>
+    <tool name="git">Stage + commit on R6 worktree branch</tool>
+    <tool name="ui-test">Run UI tests via Chrome integration</tool>
+    <tool name="code-review">Quality gate (Step 9.5)</tool>
+    <tool name="adr-check">ADR compliance gate (Step 9.5)</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Array-Typed Field Renders as Bulleted List (fixes R5 TL;DR bug)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=spaarke-ai-workspace</url>
+      <steps>
+        <step>Open SpaarkeAi workspace shell against a test matter</step>
+        <step>Trigger `summarize-document-for-workspace@v1` against a test document via the workspace path</step>
+        <step>Wait for `streaming_complete` event to fire</step>
+        <step>Inspect the rendered output for the `tldr` field</step>
+        <step>Verify rendered DOM uses semantic `<ul>` with multiple `<li>` children</step>
+        <step>Verify NO raw streaming JSON token fragments (e.g., `[\"first`) appear in the visible text</step>
+        <step>Check browser console for JavaScript errors — none expected</step>
+      </steps>
+      <expected>`tldr` field renders as a Fluent v9 bulleted list with one `<li>` per array element; no raw JSON visible; no console errors</expected>
+    </test>
+
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Reload the workspace shell</step>
+        <step>Trigger the same workspace summarization</step>
+        <step>Verify bulleted-list text color adapts to dark theme (uses `tokens.colorNeutralForeground1`)</step>
+        <step>Verify list-item bullet markers adapt</step>
+        <step>Verify spacing tokens (`tokens.spacingHorizontalM`) are unaffected by theme</step>
+        <step>Toggle back to light mode; verify reverse adaptation</step>
+      </steps>
+      <expected>All colors adapt via Fluent UI v9 semantic tokens; no hard-coded white-in-dark or black-in-light</expected>
+    </test>
+
+    <test name="Backward Compatibility (Actions Without outputSchema)">
+      <steps>
+        <step>Open SpaarkeAi workspace shell</step>
+        <step>Trigger an action whose row has NULL `sprk_outputschemajson` (e.g., a not-yet-migrated action)</step>
+        <step>Wait for streaming_complete</step>
+        <step>Verify widget renders accumulated text as a string (current behavior)</step>
+        <step>Check console — no errors expected (legacy path still works)</step>
+      </steps>
+      <expected>Widget falls back to string rendering when outputSchema is absent; no regression on non-migrated actions</expected>
+    </test>
+
+    <test name="Streaming In-Progress Indicator">
+      <steps>
+        <step>Trigger workspace summarization</step>
+        <step>Observe widget DURING streaming (before streaming_complete fires)</step>
+        <step>Verify an "in-progress" / "loading" indicator is visible</step>
+        <step>Verify rendered list does NOT appear until streaming_complete</step>
+      </steps>
+      <expected>Streaming indicator visible until streaming_complete; rendered list appears atomically after parse</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx (MODIFIED)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.test.tsx (NEW or MODIFIED)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-040-widget-implementation-evidence.md (design decisions, build output, BFF size delta, UI test results)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 040 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="report">Task completion report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`StructuredOutputStreamWidget.tsx` accepts an `outputSchema?: JsonSchema` prop and accumulates streaming token deltas internally.</criterion>
+    <criterion testable="true">On `streaming_complete`, the widget parses the accumulated string and dispatches per top-level field type from the schema.</criterion>
+    <criterion testable="true">Array-typed fields (`{ type: "array", items: { type: "string" } }`) render as Fluent v9 styled `<ul>` with one `<li>` per array element — fixes R5 SC-18 TL;DR rendering bug.</criterion>
+    <criterion testable="true">Object-typed fields fall back to legacy string rendering in this task (task 041 ships the object dispatch).</criterion>
+    <criterion testable="true">Backward compatibility: actions without `outputSchema` render as today (string formatting) with NO regression on non-migrated actions.</criterion>
+    <criterion testable="true">Malformed JSON in accumulated chunk is handled — error state emitted to UI; widget does NOT crash; error logged to telemetry.</criterion>
+    <criterion testable="true">Streaming "in-progress" indicator persists until `streaming_complete` fires.</criterion>
+    <criterion testable="true">ADR-021 dark-mode compliance: zero hard-coded colors; all colors use Fluent UI v9 semantic tokens (verified by code review + dark-mode UI test).</criterion>
+    <criterion testable="true">ADR-030 PaneEventBus: no new channels added (verified by inspection); widget consumes existing `workspace.*` channel events only.</criterion>
+    <criterion testable="true">Unit tests cover: array dispatch happy path; backward-compat fallback; malformed JSON; streaming indicator. All pass.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (frontend change does not affect BFF binary; confirmed in task notes).</criterion>
+    <criterion testable="true">UI tests (4 defined above) pass via ui-test skill; SC-18 scenario verified end-to-end.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (040 🔲 → ✅) and `current-task.md` reset.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,19 @@
+{
+  "_comment_top": "R6 task 030 (D-B-01) — metadata-of-record for the existing sprk_outputschemajson Memo column on sprk_analysisaction. Captured 2026-06-08 during task 030 discovery on Spaarke Dev (https://spaarkedev1.crm.dynamics.com).",
+  "_comment_intent": "Documents the pre-existing column discovered during R6 task 030. NOT used for deployment (the column already exists with these exact properties on Spaarke Dev). Used as a metadata-of-record reference for downstream tasks 032/033/034/035 (data population), 040/041 (widget consumer), 042 (CapabilityRouter dedup), and 048 (Phase B integration test).",
+  "_comment_naming": "Logical name is sprk_outputschemajson (note trailing 'json'); R6 task POMLs 030-048 were authored referring to 'sprk_outputschema' as a placeholder. Main session will batch-rename POML references to the actual logical name before dispatching Wave B-G2.",
+  "_comment_decision": "Option A applied per task 030 stop-and-surface: reuse existing column rather than adding a parallel one. Decision basis: (1) structurally identical to planned column; (2) MaxLength 1 MB exceeds planned 100 KB cap; (3) already in production-active use by PlaybookExecutionEngine.cs:474-500; (4) duplicating would be a clear anti-pattern (two columns for one concept); (5) renaming would require drop/create + data copy + BFF consumer code change for cosmetic gain. Recorded in projects/spaarke-ai-platform-unification-r6/notes/task-030-schema-deployment-evidence.md.",
+  "_comment_consumer": "Read by src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs ResolveActionConfigViaFkChainAsync (lines 474-500). The string value is fed to _openAiClient.StreamStructuredCompletionAsync(messages, BinaryData.FromString(outputSchema), ...) for Azure OpenAI Structured Outputs streaming.",
+  "EntityLogicalName": "sprk_analysisaction",
+  "LogicalName": "sprk_outputschemajson",
+  "SchemaName": "sprk_outputschemajson",
+  "AttributeType": "Memo",
+  "AttributeTypeName": "MemoType",
+  "MaxLength": 1048576,
+  "RequiredLevel": "None",
+  "IsCustomAttribute": true,
+  "DisplayName": "Output Schema",
+  "Description": "JSON schema for action output",
+  "_comment_population_at_discovery": "SUM-CHAT@v1 row populated with a draft-07 JSON Schema (tldr/summary/keywords/entities). All other rows NULL. Tasks 032/033/034/035 populate the migration-scope rows: SUM-CHAT@v1 (already populated; task 032 verifies + does NOT overwrite), summarize-document-for-workspace@v1 (task 033), matter-prefill (task 034), project-prefill (task 035).",
+  "_comment_verification_script": "scripts/Verify-OutputSchemaField.ps1 — read-only, idempotent verification script. Run: .\\scripts\\Verify-OutputSchemaField.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com"
+}

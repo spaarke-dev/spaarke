@@ -1,0 +1,93 @@
+<task id="R4-004" project="smart-todo-r4">
+  <metadata>
+    <title>Decide useLaunchContext hook: implement new or repurpose existing</title>
+    <phase>Phase 0: Foundation</phase>
+    <workstream>cross-cutting (G + B)</workstream>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>audit, smart-todo, hook, launch-context, code-page</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <relevant-files>
+      <file>projects/smart-todo-r4/notes/launch-context-decision.md (new)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+The spec cites `src/solutions/SmartTodo/src/hooks/useLaunchContext.ts` (R3 task 070b) as the URL-param parser for Visual Host drill-through (FR-34). Discovery confirmed this file does NOT exist. Existing hooks in `src/solutions/SmartTodo/src/hooks/`: `useFeedTodoSync`, `useKanbanColumns`, `useTodoItems`, `useTodoScoring`, `useUserPreferences`. Decide: implement new, or repurpose existing.
+  </prompt>
+
+  <role>
+React + Code Page engineer who maintains existing SmartTodo hooks.
+  </role>
+
+  <goal>
+A written decision at `projects/smart-todo-r4/notes/launch-context-decision.md` that:
+1. Confirms (with file listing) which hooks exist in `src/solutions/SmartTodo/src/hooks/`.
+2. Reviews each existing hook for URL-param consumption logic.
+3. Recommends: implement new `useLaunchContext` (preferred if no existing hook does it) OR repurpose / rename existing.
+4. Provides interface signature: `useLaunchContext() → { regardingType?: string, regardingId?: string, ...other params }`.
+5. Updates task 020/030/060/081-084 with the decision so they reference the correct hook name.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="hooks-dir">src/solutions/SmartTodo/src/hooks/</file>
+    <file purpose="app">src/solutions/SmartTodo/src/App.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-34">Drill-through opens SmartTodo modal with `?regardingType=<entity>&regardingId=<id>` — URL-param parsing required somewhere</constraint>
+    <constraint source="spec NFR-03">No hardcoded environment-specific values</constraint>
+    <constraint source="ADR-026">Code Page React 19 + Vite — hook must follow Code Page boundaries</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/url-params</topic>
+    <files>
+      <file>.claude/adr/ADR-026-code-page-build-standard.md</file>
+      <file>.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+    </files>
+    <patterns>
+      <pattern name="window.location.search parsing" location="React hook standard">
+        Typed wrapper over `URLSearchParams(window.location.search)` returning a `{key: value}` map. Pattern is trivial; the audit is about WHERE it should live and what it should be named.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R3 task 070b was supposed to introduce this hook but never did (or the path drifted). Spec assumes it exists; we need to clarify before tasks consuming it begin.</background>
+    <related-work>
+      <item>Tasks 081-084 consume the hook for drill-through context.</item>
+      <item>Task 003 (G spike) independently verifies the navigation contract from the caller side.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%. Load task + spec.</step>
+    <step order="1" name="Enumerate existing hooks">List all files in `src/solutions/SmartTodo/src/hooks/`. Read each briefly to confirm purpose.</step>
+    <step order="2" name="Check for URL-param logic elsewhere">grep for `URLSearchParams|window.location.search|new URL(` in `src/solutions/SmartTodo/src/`. Where is launch context already consumed, if anywhere?</step>
+    <step order="3" name="Decide">If no existing hook handles URL params for the SmartTodo Code Page modal context: recommend NEW `useLaunchContext` hook. If existing hook does it under a different name: recommend rename or repurpose.</step>
+    <step order="4" name="Specify interface">Signature: `useLaunchContext() → { regardingType?: string; regardingId?: string; mode?: "modal" | "fullpage"; }` (extend as audit surfaces additional params).</step>
+    <step order="5" name="Write decision doc">Author `notes/launch-context-decision.md` with: hook inventory, evidence for/against repurpose vs new, recommended path, interface signature, list of downstream tasks affected.</step>
+    <step order="6" name="Update downstream task POML">If decision affects task 020/030/060/081-084 wording, add a one-line note pointing to this decision doc.</step>
+  </steps>
+
+  <tools>
+    <tool name="Glob">List hooks directory contents</tool>
+    <tool name="Grep">Search for URL-param patterns</tool>
+    <tool name="Read">Existing hooks for context</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/smart-todo-r4/notes/launch-context-decision.md</output>
+    <output type="report">Task completion report — chosen path + interface signature</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/launch-context-decision.md` lists every hook currently in `src/solutions/SmartTodo/src/hooks/` with its purpose</criterion>
+    <criterion testable="true">Decision (new vs repurpose) has stated rationale</criterion>
+    <criterion testable="true">Recommended interface signature is documented</criterion>
+    <criterion testable="true">Downstream tasks (081-084 minimum) are clear which hook to call by name</criterion>
+  </acceptance-criteria>
+</task>

@@ -579,8 +579,14 @@ public class SearchFilterBuilderTests
     [Fact]
     public void BuildEntityScopeFilter_GeneratesCorrectFormat()
     {
+        // multi-container-multi-index-r1 UAT 2026-06-09 (SearchFilterBuilder.cs:117-128):
+        // BuildEntityScopeFilter accepts BOTH the canonical un-prefixed entityType
+        // (`matter`) AND the Dataverse logical-name prefixed form (`sprk_matter`).
+        // Different upload paths historically wrote different forms; this OR clause
+        // makes both forms findable so existing chunks remain searchable without a
+        // backfill pass. Test was updated 2026-06-10 to assert the new format.
         var result = SearchFilterBuilder.BuildEntityScopeFilter("matter", "guid-123");
-        Assert.Equal("parentEntityType eq 'matter' and parentEntityId eq 'guid-123'", result);
+        Assert.Equal("(parentEntityType eq 'matter' or parentEntityType eq 'sprk_matter') and parentEntityId eq 'guid-123'", result);
     }
 
     [Fact]

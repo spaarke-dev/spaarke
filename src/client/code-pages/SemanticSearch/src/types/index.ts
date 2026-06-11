@@ -484,7 +484,26 @@ export interface AppProps {
   isDark: boolean;
 }
 
-/** Parsed URL parameters supported by the code page */
+/**
+ * Envelope `searchMode` literal — emitted by the PCF NavigationService and
+ * consumed by the code page. Distinct from the API-level `HybridMode` (`rrf`
+ * is the request-body literal; `hybrid` is the UI/envelope literal). The
+ * code page maps `hybrid` → `rrf` when constructing API request bodies.
+ *
+ * @see FR-PARITY-01 — envelope contract
+ * @see PCF SemanticSearchControl/types/search.ts — source of the literal
+ */
+export type EnvelopeSearchMode = 'hybrid' | 'vectorOnly' | 'keywordOnly';
+
+/**
+ * Parsed URL parameters supported by the code page.
+ *
+ * Maps to the data envelope emitted by `NavigationService.openSemanticSearchPage()`
+ * (PCF) — see FR-PCF-03 + FR-PARITY-01 + FR-CP-01 in
+ * `projects/spaarke-multi-container-multi-index-r1/spec.md`. All keys are
+ * OPTIONAL so the code page renders without error for URLs that omit any
+ * subset of envelope keys (backwards-compat invariant).
+ */
 export interface AppUrlParams {
   /** Theme override: "light", "dark", or "high-contrast". */
   theme?: string;
@@ -498,6 +517,25 @@ export interface AppUrlParams {
   entityId?: string;
   /** Saved search ID to load on startup. */
   savedSearchId?: string;
+  /** Azure AI Search index name override (multi-index support per FR-PCF-03). */
+  searchIndexName?: string;
+  /**
+   * Similarity threshold (0–100). Values outside this range parse to
+   * `undefined` rather than throwing.
+   */
+  threshold?: number;
+  /** Hybrid search mode as encoded in the envelope (PCF literal, not API literal). */
+  searchMode?: EnvelopeSearchMode;
+  /** File-type filters parsed from CSV (e.g. `pdf,docx` → `['pdf','docx']`). */
+  fileTypes?: string[];
+  /** Inclusive start of date range (ISO 8601 string). */
+  dateFrom?: string;
+  /** Inclusive end of date range (ISO 8601 string). */
+  dateTo?: string;
+  /** Tag filters parsed from CSV. */
+  tags?: string[];
+  /** When true, restrict search to documents associated with the scoped entity. */
+  associatedOnly?: boolean;
 }
 
 /**

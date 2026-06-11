@@ -781,7 +781,14 @@ public class DataverseWebApiService : IDataverseService
             // AI-generated summaries (populated by RAG pipeline)
             // Dataverse fields: sprk_filesummary and sprk_filetldr (matching write operations)
             Summary = GetStringValue(data, "sprk_filesummary"),
-            Tldr = GetStringValue(data, "sprk_filetldr")
+            Tldr = GetStringValue(data, "sprk_filetldr"),
+
+            // Search index tracking (multi-container-multi-index-r1)
+            // Populated by RagEndpoints.IndexFile after successful AI Search write.
+            // VisualizationService reads SearchIndexName to bind the correct SearchClient.
+            SearchIndexed = GetNullableBoolValue(data, "sprk_searchindexed"),
+            SearchIndexName = GetStringValue(data, "sprk_searchindexname"),
+            SearchIndexedOn = GetDateTimeValue(data, "sprk_searchindexedon")
         };
     }
 
@@ -2215,5 +2222,11 @@ public class DataverseWebApiService : IDataverseService
     {
         throw new NotImplementedException(
             "RetrieveMultipleAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "RetrieveMultipleAsync(FetchExpression) is implemented in DataverseServiceClientImpl.");
     }
 }

@@ -27,6 +27,7 @@ public class RagIndexingJobHandlerTests
     private readonly Mock<IFileIndexingService> _fileIndexingServiceMock;
     private readonly Mock<IIdempotencyService> _idempotencyServiceMock;
     private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<ISearchIndexNameResolver> _searchIndexNameResolverMock;
     private readonly Mock<ILogger<RagIndexingJobHandler>> _loggerMock;
     private readonly RagIndexingJobHandler _handler;
 
@@ -41,12 +42,24 @@ public class RagIndexingJobHandlerTests
         _fileIndexingServiceMock = new Mock<IFileIndexingService>();
         _idempotencyServiceMock = new Mock<IIdempotencyService>();
         _dataverseServiceMock = new Mock<IDataverseService>();
+        _searchIndexNameResolverMock = new Mock<ISearchIndexNameResolver>();
         _loggerMock = new Mock<ILogger<RagIndexingJobHandler>>();
 
         var analysisOptions = Options.Create(new AnalysisOptions
         {
             SharedIndexName = "spaarke-knowledge-index-v2"
         });
+
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — default the resolver to
+        // return null (tenant-default fall-through) so existing tests behave UNCHANGED. Tests
+        // exercising explicit-routing branches override this Setup.
+        _searchIndexNameResolverMock
+            .Setup(x => x.ResolveAsync(
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
 
         // RagTelemetry is a concrete class — create a real instance.
         // Its methods are not virtual so cannot be mocked; telemetry
@@ -58,6 +71,7 @@ public class RagIndexingJobHandlerTests
             _fileIndexingServiceMock.Object,
             _idempotencyServiceMock.Object,
             _dataverseServiceMock.Object,
+            _searchIndexNameResolverMock.Object,
             analysisOptions,
             telemetry,
             _loggerMock.Object);
@@ -411,6 +425,157 @@ public class RagIndexingJobHandlerTests
         _idempotencyServiceMock.Verify(
             x => x.ReleaseProcessingLockAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    #endregion
+
+    #region SearchIndexName Threading (multi-container-multi-index-r1 indexer-routing-fix Tier 3)
+
+    private static JobContract CreateJobContractWithSearchIndexName(string? searchIndexName)
+    {
+        var payload = new RagIndexingJobPayload
+        {
+            TenantId = TestTenantId,
+            DriveId = TestDriveId,
+            ItemId = TestItemId,
+            FileName = TestFileName,
+            DocumentId = TestDocumentId,
+            Source = "UnitTest",
+            EnqueuedAt = DateTimeOffset.UtcNow,
+            SearchIndexName = searchIndexName
+        };
+
+        return new JobContract
+        {
+            JobId = Guid.NewGuid(),
+            JobType = RagIndexingJobHandler.JobTypeName,
+            SubjectId = TestDocumentId,
+            CorrelationId = Guid.NewGuid().ToString(),
+            IdempotencyKey = string.Empty,
+            Attempt = 1,
+            MaxAttempts = 3,
+            Payload = JsonDocument.Parse(JsonSerializer.Serialize(payload))
+        };
+    }
+
+    [Fact]
+    public async Task ProcessAsync_PayloadSearchIndexNameSet_ThreadsToFileIndexRequest()
+    {
+        // Arrange — payload carries an explicit SearchIndexName (enqueueing site set it).
+        // The handler MUST pass it through to FileIndexRequest verbatim WITHOUT calling
+        // the resolver (the resolver is a fall-back only).
+        var job = CreateJobContractWithSearchIndexName("spaarke-file-index");
+        SetupSuccessfulIdempotencyFlow();
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 3, duration: TimeSpan.FromSeconds(1)));
+
+        // Act
+        await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — FileIndexRequest.SearchIndexName carries the payload value
+        _fileIndexingServiceMock.Verify(
+            x => x.IndexFileAppOnlyAsync(
+                It.Is<FileIndexRequest>(r => r.SearchIndexName == "spaarke-file-index"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        // Resolver MUST NOT be invoked when payload value is present
+        _searchIndexNameResolverMock.Verify(
+            x => x.ResolveAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_PayloadSearchIndexNameNull_InvokesResolverAsFallback()
+    {
+        // Arrange — payload.SearchIndexName is null. Handler MUST call the resolver and
+        // pass the result to FileIndexRequest.
+        var job = CreateJobContractWithSearchIndexName(searchIndexName: null);
+        SetupSuccessfulIdempotencyFlow();
+
+        _searchIndexNameResolverMock
+            .Setup(x => x.ResolveAsync(
+                TestDocumentId, It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync("spaarke-knowledge-index-v2");
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 3, duration: TimeSpan.FromSeconds(1)));
+
+        // Act
+        await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — resolver consulted, FileIndexRequest carries resolver result
+        _searchIndexNameResolverMock.Verify(
+            x => x.ResolveAsync(
+                TestDocumentId, It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        _fileIndexingServiceMock.Verify(
+            x => x.IndexFileAppOnlyAsync(
+                It.Is<FileIndexRequest>(r => r.SearchIndexName == "spaarke-knowledge-index-v2"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_IndexNotAllowed_FallsBackToTenantDefaultAndRetries()
+    {
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — user-confirmed
+        // decision: background jobs default-fall-back on INDEX_NOT_ALLOWED. Handler MUST
+        // catch the exception, log WARN, and retry IndexFileAppOnlyAsync with
+        // SearchIndexName=null so the batch still lands in the tenant default.
+
+        // Arrange — payload has a stale searchIndexName that the allow-list rejects.
+        var job = CreateJobContractWithSearchIndexName("stale-index-name");
+        SetupSuccessfulIdempotencyFlow();
+
+        var callCount = 0;
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<FileIndexRequest, CancellationToken>((req, ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    // First call: throw INDEX_NOT_ALLOWED (simulating allow-list rejection).
+                    throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                        code: "INDEX_NOT_ALLOWED",
+                        title: "AI Search index not allowed",
+                        detail: $"The requested AI Search index '{req.SearchIndexName}' is not in the allow-list.",
+                        statusCode: 400);
+                }
+                // Second call: retried with SearchIndexName=null → succeeds.
+                return Task.FromResult(FileIndexingResult.Succeeded(chunksIndexed: 3, duration: TimeSpan.FromSeconds(1)));
+            });
+
+        // Act
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — job ultimately succeeds (default-fall-back retry succeeded)
+        result.Status.Should().Be(JobStatus.Completed);
+
+        // First call had the rejected index name, second call had null
+        _fileIndexingServiceMock.Verify(
+            x => x.IndexFileAppOnlyAsync(
+                It.Is<FileIndexRequest>(r => r.SearchIndexName == "stale-index-name"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        _fileIndexingServiceMock.Verify(
+            x => x.IndexFileAppOnlyAsync(
+                It.Is<FileIndexRequest>(r => r.SearchIndexName == null),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

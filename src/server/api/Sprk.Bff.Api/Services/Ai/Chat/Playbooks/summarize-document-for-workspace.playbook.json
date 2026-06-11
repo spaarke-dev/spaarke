@@ -1,0 +1,100 @@
+{
+  "$comment": "Spaarke AI Platform Unification R6 (Phase B Wave B-G2 task 033, D-B-04) — Workspace-destination Summarize playbook. CREATE-not-migrate path chosen 2026-06-09 after prior 033 sub-agent surfaced that summarize-document-for-workspace@v1 did NOT exist on Spaarke Dev (full discovery in projects/spaarke-ai-platform-unification-r6/notes/task-033-migration-evidence.md). Per Q5 RE-SHAPED principle (project CLAUDE.md): outputSchema is INTRINSIC to the action; destination + widgetType are PER-PLAYBOOK NODE routing config. This playbook REUSES the existing SUM-CHAT@v1 action (GUID eeb05bfd-1260-f111-ab0b-70a8a59455f4) — same model, same JPS prompt, same output shape (tldr/summary/keywords/entities) — and adds workspace-destination routing on the node. Same shape, two destinations: chat sibling (summarize-document-for-chat@v1) routes to inline chat; this playbook routes to a workspace tab via the schema-aware StructuredOutputStreamWidget (R6 tasks 040/041). The CapabilityRouter dedup (R6 task 042 / FR-30) ensures one user intent fires ONE playbook, eliminating the R5 SC-18 duplicate-fire path that surfaced the rendering bugs.",
+  "$comment-publication": "Published as: (1) ZERO new sprk_analysisaction rows — references existing SUM-CHAT@v1 by actionCode FK; (2) one sprk_analysisplaybook row (name=summarize-document-for-workspace@v1, isSystemPlaybook=true, sprk_playbooktype=0); (3) one sprk_playbooknode row (single AiAnalysis node, FK to existing SUM-CHAT@v1, sprk_configjson carries destination=workspace + widgetType=structured-output-stream per task 031 NodeRoutingConfig contract).",
+  "$comment-design": "Option A (shared action, new playbook) chosen over Option B (new action with workspace-tuned prompt). Rationale: the SUM-CHAT@v1 outputSchema (tldr: string[]; summary: string; keywords: string; entities: { organizations: string[]; persons: string[] }) is EXACTLY what StructuredOutputStreamWidget.SUMMARIZE_SCHEMA consumes (verified in src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx lines 264-300). The model produces the same content regardless of render surface; the surface choice is a routing concern, not a content concern. This aligns with project CLAUDE.md Pillar 5 'Q5 RE-SHAPED' binding rule: 'outputSchema on the ACTION (intrinsic shape); destination + widgetType on the NODE config (per-playbook routing); a single action can be referenced by multiple playbooks.' Authoring debt is also lower: 0 new actions vs 1.",
+  "$comment-widgetType-wire": "widgetType value 'structured-output-stream' is the kebab-case registry key from src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts line 30 (STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE = 'structured-output-stream' as const). This is the wire-format string the WorkspaceWidgetRegistry resolves at render time. The C# NodeRoutingConfig.WidgetType field is intentionally a free-form string (Models/Ai/NodeRoutingConfig.cs:148) to allow extension without recompile. The JSON Schema (Models/Ai/node-routing-config.schema.json) example uses 'Summary' as an illustration only; the actual valid value is the registry key the host registers under, which is 'structured-output-stream' for R5/R6 streaming structured-output rendering.",
+
+  "actions": [],
+  "$comment-actions-empty": "Intentionally empty. This playbook does NOT seed a new action — it REFERENCES the existing SUM-CHAT@v1 action (seeded by summarize-document-for-chat.playbook.json in R5). The Deploy-Playbook.ps1 harness collects all node-level actionCodes into allActionCodes at line 361 and resolves them against sprk_analysisactions via the SUM-CHAT@v1 alternate key (line 396-405). If SUM-CHAT@v1 is missing on the target environment, the pre-flight check fails loudly at line 446-510 BEFORE creating the playbook row — no orphaned rows on failure.",
+
+  "playbook": {
+    "name": "summarize-document-for-workspace@v1",
+    "description": "Workspace-destination Summarize playbook (R6 task 033 / D-B-04). Single AiAnalysis node executes the EXISTING SUM-CHAT@v1 action against 1-N session-scoped files; emits the SAME structured DocumentAnalysisResult-shaped output (tldr, summary, keywords, entities) as the chat sibling — but routes via destination=workspace + widgetType=structured-output-stream to a workspace tab rendered by the schema-aware StructuredOutputStreamWidget (R6 tasks 040 + 041). Pairs with summarize-document-for-chat@v1 (chat sibling, same action, destination=chat). One model output, two render surfaces; routing dedup at CapabilityRouter level (R6 task 042 / FR-30).",
+    "isPublic": false,
+    "isSystemPlaybook": true,
+    "sprk_playbooktype": 0,
+    "$comment-type": "sprk_playbooktype=0 (AiAnalysis) — matches summarize-document-for-chat@v1 + universal-ingest@v1 + predict-matter-cost@v1 convention. System-owned (isSystemPlaybook=true), not user-authored.",
+    "sprk_configjson": {
+      "mode": "workspace-summarize",
+      "tier": "inference",
+      "cacheTtlSeconds": 0,
+      "$comment-cacheTtl": "Cache TTL = 0 — same rationale as chat sibling: per-session and per-file-set; the file set changes mid-session as users upload/remove files. Idempotency comes from session-files index isolation + per-invocation file-set targeting.",
+      "parameterSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["sessionId", "tenantId"],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Chat session GUID. Scopes retrieval to the spaarke-session-files index slice for this session. Required for tenant + session isolation per ADR-014."
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "Tenant ID for multi-tenant isolation per ADR-014. Required on every spaarke-session-files index query."
+          },
+          "fileIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "OPTIONAL — subset of session-uploaded files to summarize. When absent, all files in ChatSession.UploadedFiles are summarized as a combined-summary."
+          },
+          "style": {
+            "type": "string",
+            "description": "OPTIONAL — natural-language style hint passed through to the action's system prompt (e.g., 'executive', 'detailed'). The action's JPS prompt interprets this; absent style defaults to the prompt's default rendering."
+          },
+          "workspaceTabId": {
+            "type": "string",
+            "description": "OPTIONAL — pre-existing workspace tab id to stream into. When absent, the workspace shell opens a new tab via allowMultiple=true per FR-06 (each Summarize invocation gets its own tab so users can compare side-by-side)."
+          }
+        }
+      }
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "$comment-scopes": "Scopes left empty intentionally — matches summarize-document-for-chat@v1 + universal-ingest@v1 + predict-matter-cost@v1 convention. The single node's executor (AiAnalysisNodeExecutor for actionType=0) is auto-discovered by NodeExecutorRegistry; per-node scope binding via actionCode FK is sufficient. The node-level actionCode='SUM-CHAT@v1' below is collected into allActionCodes by Deploy-Playbook.ps1 line 361 and resolves against the EXISTING SUM-CHAT@v1 row (no new action seeded by this file)."
+  },
+
+  "nodes": [
+    {
+      "name": "summarize",
+      "nodeType": "AIAnalysis",
+      "actionCode": "SUM-CHAT@v1",
+      "$comment-actionCode": "Resolved by Deploy-Playbook.ps1 line 396-405 against sprk_analysisactions filtered by sprk_actioncode='SUM-CHAT@v1'. This file's actions[] array is EMPTY — the action is expected to ALREADY exist (seeded by summarize-document-for-chat.playbook.json in R5). The deploy harness sets sprk_playbooknode.sprk_actionid to the resolved GUID (line 737-740). Pre-flight check at line 446-510 will fail loudly if SUM-CHAT@v1 is missing.",
+      "actionType": 0,
+      "$comment-actionType": "ActionType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing platform executor — no new node executor needed per R6 NFR-08). The SUM-CHAT@v1 action carries sprk_systemprompt with the JPS-formatted Summarize prompt + the structured-outputs JSON Schema (declaration order: tldr → summary → keywords → entities).",
+      "outputVariable": "summary",
+      "positionX": 400, "positionY": 200,
+      "configJson": {
+        "sessionIdFrom": "parameters.sessionId",
+        "tenantIdFrom": "parameters.tenantId",
+        "fileIdsFrom": "parameters.fileIds",
+        "styleFrom": "parameters.style",
+        "workspaceTabIdFrom": "parameters.workspaceTabId",
+        "destination": "workspace",
+        "widgetType": "structured-output-stream",
+        "$comment-routing": "destination + widgetType implement R6 Pillar 5 / FR-27 (Q5 RE-SHAPED). 'destination=workspace' (kebab-case per Models/Ai/NodeRoutingConfig.cs NodeDestinationJsonConverter) routes this node's output to the workspace surface. 'widgetType=structured-output-stream' (kebab-case wire format = STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE constant from src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts:30) tells the workspace shell which widget to mount the stream into. The schema-aware widget (R6 tasks 040 + 041) will read the SUM-CHAT@v1 action's outputSchema and render array-typed tldr as bullets + object-typed entities as labeled key-value blocks (fixes R5 SC-18 Gap C raw-JSON rendering).",
+        "$comment-executor": "AiAnalysisNodeExecutor receives session + tenant + file scope via parameters. The actual document text retrieval is performed by the orchestrator (R6 task 025 PlaybookExecutionEngine path via SessionSummarizeOrchestrator) using the spaarke-session-files index slice before invoking this playbook. Structured Outputs mode + IncrementalJsonParser emit progressive FieldDelta SSE events as the model streams (tldr first, then summary, keywords, entities — declaration order per R5 task 006 spike); StructuredOutputStreamWidget renders the deltas in the workspace tab."
+      }
+    }
+  ],
+
+  "dependsOnGraph": {
+    "$comment": "Single-node playbook — no edges. Mirrors the structural shape of multi-node playbooks for tooling consistency.",
+    "edges": []
+  },
+
+  "acceptanceCriteria": {
+    "$comment": "Mirrors R6 task 033 POML <acceptance-criteria> (revised for CREATE path 2026-06-09).",
+    "criteria": [
+      "Playbook publishes successfully — sprk_analysisplaybook row + 1 sprk_playbooknode row in Dataverse, name='summarize-document-for-workspace@v1', isSystemPlaybook=true, sprk_playbooktype=0",
+      "Node references EXISTING SUM-CHAT@v1 action — sprk_playbooknode._sprk_actionid_value = eeb05bfd-1260-f111-ab0b-70a8a59455f4 (resolved by deploy harness from actionCode='SUM-CHAT@v1' against sprk_actioncode alternate key)",
+      "Node sprk_configjson includes destination='workspace' (kebab-case per NodeRoutingConfig contract) and widgetType='structured-output-stream' (kebab-case registry key)",
+      "outputSchema reuse — this playbook does NOT seed a new sprk_analysisaction row; it references SUM-CHAT@v1 whose sprk_outputschemajson was populated by R6 task 032 (Migrate-SumChatActionOutputSchema.ps1)",
+      "Re-running Deploy-Playbook.ps1 without -Force is idempotent (skip-by-name; no new rows created)",
+      "BFF publish-size delta = 0 MB (data-only authoring; no .cs/.csproj/.NuGet change)"
+    ]
+  }
+}

@@ -1,0 +1,200 @@
+<task id="081" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-D-02 Hard Slashes — `/clear`, `/new-session`, `/help`, `/export`, `/save-to-matter`, `/pin` (deterministic, bypass LLM, &lt;100ms)</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <dependencies>080</dependencies>
+    <blocks>084, 085</blocks>
+    <tags>frontend, react, ai-widgets, fluent-ui, command-router</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>User-visible Pillar 8 commands that bypass the LLM entirely; latency budget &lt;100ms; spec FR-49 + Phase D exit criterion 2 binding; touches session lifecycle (clear/new-session) and persistence (save-to-matter/pin).</rigor-reason>
+    <parallel-group>D-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Hard-slash executor module is isolated to its own file alongside CommandRouter.ts; 082 + 083 work in disjoint files in the same group.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the 6 hard-slash commands per spec FR-49 + Q6: `/clear`, `/new-session`,
+    `/help`, `/export`, `/save-to-matter [matterId]`, `/pin`. Each one MUST be deterministic
+    (no LLM call), execute in &lt;100ms (Phase D exit criterion 2), and bypass the chat
+    agent entirely.
+
+    Build `HardSlashExecutor.ts` alongside `CommandRouter.ts`. When `CommandRouter.parse()` returns
+    `isHardSlash: true`, route to this executor before reaching `CapabilityRouter`.
+
+    Per-command semantics:
+    - `/clear`: clear current session conversation history (frontend state + signal backend to drop
+      session cache). Bypass LLM entirely.
+    - `/new-session`: end current session, start new session ID, reset PaneEventBus state.
+    - `/help`: render in-place help panel via Fluent v9 (no LLM); discoverability surface
+      for task 085 (`/help` UI affordance).
+    - `/export`: download current conversation as markdown/JSON (client-side blob).
+    - `/save-to-matter [matterId]`: invoke existing BFF endpoint that persists conversation to
+      matter record (reuses Pillar 6 persistence; no new BFF endpoint).
+    - `/pin`: pin currently-focused workspace tab via Pillar 6a `WorkspaceStateService` (reuses
+      existing `update_workspace_tab` chat-tool wire; no LLM).
+
+    NFR-01 binding: hard slashes are explicit shortcuts; natural-language equivalents still work
+    via `CapabilityRouter`. NFR-11 binding: do not break the existing send path.
+    Frontend-only task; BFF publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Senior frontend engineer with Fluent v9 + Spaarke AI Widgets + SpaarkeAi shell familiarity.
+    Comfortable with session-state machinery, PaneEventBus signaling, and Fluent v9 modal/panel
+    composition for `/help`.
+  </role>
+
+  <goal>
+    Six hard-slash commands work end-to-end with &lt;100ms latency target. `HardSlashExecutor.ts`
+    dispatches each command via deterministic logic. `/help` opens a Fluent v9 panel showing
+    available commands (used by task 085 for chat-input-bar affordance). `/save-to-matter` and
+    `/pin` route through existing Pillar 6 endpoints (no new BFF surface). Tests verify each
+    command executes &lt;100ms and makes ZERO Azure OpenAI requests.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="command-router">src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="workspace-architecture">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-49">Hard slashes execute deterministically, bypass LLM, instant response (&lt;100ms latency).</constraint>
+    <constraint source="spec Phase D exit criterion 2">`/clear` and other hard slashes MUST make ZERO Azure OpenAI requests; verifiable via telemetry / network inspection.</constraint>
+    <constraint source="spec NFR-01">Conversational primacy preserved — hard slashes are shortcuts, not replacements; natural language still works via CapabilityRouter.</constraint>
+    <constraint source="spec NFR-11">Backward compat — natural-language send path unchanged for non-slash input.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB (frontend-only; reuses existing Pillar 6 endpoints).</constraint>
+    <constraint source="ADR-030">No new PaneEventBus channel. Reuse existing `workspace.*` / `conversation.*` events; additive event types acceptable.</constraint>
+    <constraint source="ADR-031">No new shell stage. Hard slashes operate within existing 4-stage lifecycle.</constraint>
+    <constraint source="ADR-018">No new feature flags.</constraint>
+    <constraint source="project Pillar 8">Q6 vocabulary closed at exactly 6 hard slashes — do NOT add new ones.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/hard-slash-executor</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Hard-slash executor shape" location="src/solutions/SpaarkeAi/src/components/conversation/HardSlashExecutor.ts (new)">
+        Export `executeHardSlash(intent: Intent, ctx: ExecutorContext): Promise&lt;ExecutorResult&gt;`.
+        Dispatch table maps command → executor function. Each executor returns immediately for UI commands (`/help`, `/clear`, `/new-session`, `/export`) or awaits a single short BFF call for persistence commands (`/save-to-matter`, `/pin`).
+      </pattern>
+      <pattern name="Help panel Fluent v9 composition" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Use Fluent v9 `Dialog` or `Drawer` for the `/help` panel. Semantic tokens only per ADR-021. Avoid hardcoded colors.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. Output: "🔒 RIGOR LEVEL: FULL — 6 user-visible Pillar 8 commands bypassing LLM; latency-budget binding; spec FR-49 + Phase D exit criterion 2".
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 081 status is 🔲, dep 080 is ✅. Update `current-task.md` to 081.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read CommandRouter.ts (task 080 output). Read SPAARKEAI-COMPONENT-MODEL.md + WORKSPACE-ARCHITECTURE.md. Identify the existing Pillar 6 endpoints used by `/save-to-matter` and `/pin` (workspace state + pinned-context endpoints from tasks 050s-060s).
+    </step>
+    <step order="3" name="Author HardSlashExecutor">
+      Create `src/solutions/SpaarkeAi/src/components/conversation/HardSlashExecutor.ts`. Dispatch table for 6 commands. Each executor function pure + deterministic (or single short BFF call for persistence). Telemetry: emit one event per command (per ADR-015 — command name + decision + timestamp ONLY, no user message text).
+    </step>
+    <step order="4" name="Implement Each Command">
+      `/clear`: clear conversation state in `SessionState`; signal backend via existing session-clear endpoint (no LLM).
+      `/new-session`: end current session + start new session ID + reset PaneEventBus state.
+      `/help`: open Fluent v9 Drawer/Dialog with command reference (used by task 085).
+      `/export`: serialize conversation history to markdown blob; trigger download.
+      `/save-to-matter [matterId]`: call existing `WorkspaceStateService` pin endpoint with `attachToMatterId=matterId`.
+      `/pin`: call existing pin endpoint with focused tab.
+    </step>
+    <step order="5" name="Wire into ConversationPane">
+      In `ConversationPane.tsx`, when `intent.isHardSlash === true`, route to `executeHardSlash(intent, ctx)` and SKIP the regular send-message path. For all other intents (soft slash + natural language), pass through unchanged.
+    </step>
+    <step order="6" name="Latency Verification">
+      Add unit test using `performance.now()` brackets to confirm each hard-slash UI executor returns within &lt;100ms p99 (mocked BFF for `/save-to-matter` + `/pin`). Confirm ZERO calls to chat-completion endpoint via fetch mock instrumentation.
+    </step>
+    <step order="7" name="Build + Test">
+      Run `npm install --legacy-peer-deps --no-audit --no-fund` + `npm run build` + test suite. Confirm zero TypeScript errors. Confirm tests green.
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below. Confirm each is testable + green.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill on HardSlashExecutor.ts + ConversationPane.tsx changes. Run `adr-check`; verify ADR-021 (dark mode), ADR-029 (size 0 MB), ADR-030 (no 5th channel), ADR-031 (no new stage), ADR-015 (no user message text in telemetry), NFR-01 + NFR-11 (conversational primacy + backward compat). Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update TASK-INDEX.md: 081 🔲 → ✅. Reset `current-task.md` to next pending task. Note BFF publish-size delta = 0 MB. Report completion + downstream unblock (084, 085).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Frontend build + test runner</tool>
+    <tool name="git">Stage + commit HardSlashExecutor.ts + ConversationPane changes</tool>
+    <tool name="fluent-v9-component">Skill for `/help` panel</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/HardSlashExecutor.ts (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/HardSlashExecutor.test.ts (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (MODIFIED — branch on isHardSlash)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/CommandHelpPanel.tsx (NEW — Fluent v9 drawer for `/help`)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 081 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset to next task)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 hard slashes (`/clear`, `/new-session`, `/help`, `/export`, `/save-to-matter`, `/pin`) implemented in HardSlashExecutor.ts.</criterion>
+    <criterion testable="true">Each hard slash executes in &lt;100ms p99 (verified via `performance.now()` brackets in tests).</criterion>
+    <criterion testable="true">Zero Azure OpenAI requests made when a hard slash is invoked (verified via fetch mock instrumentation; phase D exit criterion 2 met).</criterion>
+    <criterion testable="true">`/help` opens a Fluent v9 panel listing all available commands; semantic tokens used per ADR-021 (dark-mode safe).</criterion>
+    <criterion testable="true">`/save-to-matter [matterId]` + `/pin` reuse existing Pillar 6 endpoints (no new BFF surface; confirmed via code review).</criterion>
+    <criterion testable="true">Telemetry per ADR-015 — command name + decision + timestamp only; no user message text logged.</criterion>
+    <criterion testable="true">NFR-11 backward compat: non-slash input continues unchanged through CapabilityRouter.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (no .cs files modified).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Hard Slashes Execute Without LLM">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control&amp;controlName=spaarke_SpaarkeAi</url>
+      <steps>
+        <step>Open conversation pane in active session</step>
+        <step>Type `/clear` and submit; observe conversation history cleared instantly</step>
+        <step>Type `/help` and submit; observe help drawer opens with command list</step>
+        <step>Type `/new-session`; observe new session ID</step>
+        <step>Verify Network tab shows no chat-completion request for any hard slash</step>
+      </steps>
+      <expected>All hard slashes execute instantly; no Azure OpenAI requests; help drawer accessible</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Type `/help`; verify help drawer adapts (no white background in dark mode)</step>
+        <step>Verify text + icons use Fluent semantic tokens</step>
+      </steps>
+      <expected>Help drawer uses Fluent v9 semantic tokens per ADR-021; no hardcoded colors</expected>
+    </test>
+    <test name="`/save-to-matter` Persists via Existing Endpoint">
+      <steps>
+        <step>Open a workspace tab</step>
+        <step>Type `/save-to-matter 00000000-0000-0000-0000-000000000001` and submit</step>
+        <step>Observe Network tab call to existing Pillar 6 pin endpoint</step>
+        <step>Reload session; verify tab persists attached to matter</step>
+      </steps>
+      <expected>Save persists via existing endpoint; reload confirms attachment</expected>
+    </test>
+  </ui-tests>
+</task>

@@ -1,6 +1,8 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using Json.Schema;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -63,7 +65,10 @@ public class AnalysisToolService : DataverseHttpServiceBase
             HandlerClass = handlerClass,
             Configuration = entity.Configuration,
             OwnerType = ScopeOwnerType.System,
-            IsImmutable = false
+            IsImmutable = false,
+            AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts),
+            JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger),
+            RequiredCapability = MapRequiredCapability(entity.RequiredCapability)
         };
 
         var mappingSource = !string.IsNullOrEmpty(entity.HandlerClass) ? "HandlerClass" : "GenericAnalysisHandler (fallback)";
@@ -93,7 +98,7 @@ public class AnalysisToolService : DataverseHttpServiceBase
 
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration",
+            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration,sprk_availableincontexts,sprk_jsonschema,sprk_requiredcapability",
             expandClause: "sprk_ToolTypeId($select=sprk_name)",
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
@@ -133,7 +138,10 @@ public class AnalysisToolService : DataverseHttpServiceBase
                 HandlerClass = entity.HandlerClass,
                 Configuration = entity.Configuration,
                 OwnerType = ScopeOwnerType.System,
-                IsImmutable = false
+                IsImmutable = false,
+                AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts),
+                JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger),
+                RequiredCapability = MapRequiredCapability(entity.RequiredCapability)
             };
         }).ToArray();
 
@@ -202,7 +210,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
             HandlerClass = entity.HandlerClass ?? request.HandlerClass,
             Configuration = entity.Configuration ?? request.Configuration,
             OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false
+            IsImmutable = false,
+            AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts)
         };
 
         Logger.LogInformation("[CREATE TOOL] Created tool '{ToolName}' with ID {ToolId}", tool.Name, tool.Id);
@@ -393,6 +402,172 @@ public class AnalysisToolService : DataverseHttpServiceBase
         };
     }
 
+    /// <summary>
+    /// Map nullable raw Dataverse option-set value (100000000/100000001/100000002) to
+    /// <see cref="ToolAvailabilityContext"/>. Returns <c>null</c> for unset/unknown values
+    /// — callers treat <c>null</c> as <see cref="ToolAvailabilityContext.Playbook"/> for
+    /// backward-compat per FR-07 (D-A-07). Unknown values are logged as warnings via
+    /// caller log context but do not throw.
+    /// </summary>
+    internal static ToolAvailabilityContext? MapAvailableInContexts(int? rawValue)
+    {
+        return rawValue switch
+        {
+            (int)ToolAvailabilityContext.Playbook => ToolAvailabilityContext.Playbook,
+            (int)ToolAvailabilityContext.Chat => ToolAvailabilityContext.Chat,
+            (int)ToolAvailabilityContext.Both => ToolAvailabilityContext.Both,
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Map nullable raw Dataverse <c>sprk_jsonschema</c> Memo value to the DTO's
+    /// <see cref="AnalysisTool.JsonSchema"/> string. Validates that the value parses
+    /// as JSON (the DTO contract per FR-08 / task D-A-08) — malformed JSON is logged
+    /// and stored as <c>null</c> rather than silently passed to the LLM downstream
+    /// via <c>ToolHandlerToAIFunctionAdapter</c> (task D-A-10).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// FR-08 contract: nullable on the DTO (backward-compat with pre-R6 playbook-only
+    /// rows whose column is unpopulated). Required for chat-available tools — but
+    /// that requirement is enforced by the chat-side resolver (task 011), NOT by this
+    /// mapper, because the mapper must continue to work for playbook-only rows.
+    /// </para>
+    /// <para>
+    /// Validation scope (R6 audit item 1 — strengthened 2026-06-07): this method now performs
+    /// TWO layers of validation:
+    /// </para>
+    /// <list type="number">
+    /// <item><b>JSON well-formedness</b> — parsable by
+    /// <see cref="System.Text.Json.JsonDocument.Parse(string, System.Text.Json.JsonDocumentOptions)"/>.</item>
+    /// <item><b>Semantic JSON Schema validity</b> — the value validates against the JSON
+    /// Schema Draft 2020-12 meta-schema via <c>JsonSchema.Net</c>. This catches rows where
+    /// an admin authored well-formed JSON that is not a legal schema (e.g., a properties
+    /// member whose value is a primitive). Malformed schemas log a warning and map to null
+    /// so the chat resolver (task 011) refuses to expose the tool to the LLM.</item>
+    /// </list>
+    /// <para>
+    /// This double-layer validation (write-time at the mapper + chat-session-start at the
+    /// <c>ToolHandlerToAIFunctionAdapter</c>) is intentional: admins editing
+    /// <c>sprk_analysistool</c> rows in Power Apps see warnings in BFF logs as soon as the
+    /// tool is loaded, and the adapter throws a clear exception if a malformed schema ever
+    /// reaches function-calling registration.
+    /// </para>
+    /// <para>
+    /// Empty / whitespace-only strings are treated as null (no schema set on this row).
+    /// </para>
+    /// </remarks>
+    internal static string? MapJsonSchema(string? rawValue, Guid toolId, ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return null;
+        }
+
+        // Layer 1: well-formedness.
+        try
+        {
+            using var _ = JsonDocument.Parse(rawValue);
+        }
+        catch (JsonException ex)
+        {
+            // FR-08: never silently pass malformed JSON to the LLM via the adapter.
+            // Map to null and log so the chat resolver (task 011) can refuse to expose
+            // the tool with a clear diagnostic trail.
+            logger.LogWarning(
+                ex,
+                "[FR-08] sprk_jsonschema for tool {ToolId} is not valid JSON; mapping to null. " +
+                "Schema length={Length}",
+                toolId,
+                rawValue.Length);
+            return null;
+        }
+
+        // Layer 2: semantic JSON Schema validity (R6 audit item 1).
+        try
+        {
+            var node = JsonNode.Parse(rawValue);
+            if (node is null)
+            {
+                logger.LogWarning(
+                    "[R6-audit-1] sprk_jsonschema for tool {ToolId} parsed to null JsonNode; " +
+                    "mapping to null. Admins should set the column to a JSON object document.",
+                    toolId);
+                return null;
+            }
+
+            var metaResults = MetaSchemas.Draft202012.Evaluate(
+                node,
+                new EvaluationOptions
+                {
+                    OutputFormat = OutputFormat.List,
+                    ValidateAgainstMetaSchema = false  // we ARE the meta-schema evaluation
+                });
+
+            if (!metaResults.IsValid)
+            {
+                var firstErrors = metaResults.Details
+                    .Where(d => d.HasErrors && d.Errors is not null)
+                    .SelectMany(d => d.Errors!.Select(kv => $"{d.InstanceLocation}: {kv.Value}"))
+                    .Take(3)
+                    .ToArray();
+
+                logger.LogWarning(
+                    "[R6-audit-1] sprk_jsonschema for tool {ToolId} is well-formed JSON but is " +
+                    "not a valid JSON Schema (Draft 2020-12); mapping to null. " +
+                    "Schema length={Length}, errors={Errors}",
+                    toolId,
+                    rawValue.Length,
+                    firstErrors.Length > 0 ? string.Join("; ", firstErrors) : "(no detailed errors)");
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            // JsonSchema.Net can throw on some pathological inputs (e.g., $ref cycles).
+            // Map to null and log — same UX as malformed JSON: chat resolver refuses to
+            // expose the tool, admin sees a clear log entry.
+            logger.LogWarning(
+                ex,
+                "[R6-audit-1] sprk_jsonschema for tool {ToolId} failed semantic JSON Schema " +
+                "validation with an unexpected error; mapping to null. Schema length={Length}",
+                toolId,
+                rawValue.Length);
+            return null;
+        }
+
+        return rawValue;
+    }
+
+    /// <summary>
+    /// Map nullable raw Dataverse <c>sprk_requiredcapability</c> single-line text value to
+    /// the DTO's <see cref="AnalysisTool.RequiredCapability"/> string. Wave 7b — per-playbook
+    /// capability filter infrastructure.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Treats empty / whitespace-only strings as null (no capability gate). The chat-side
+    /// resolver in <c>SprkChatAgentFactory.ResolveTools()</c> uses case-insensitive matching,
+    /// so this mapper does NOT canonicalize the casing — admins editing the column in the
+    /// maker UI may type any casing variant and the filter still applies correctly.
+    /// </para>
+    /// <para>
+    /// Trims surrounding whitespace to defend against admin input like <c>"verify_citations "</c>
+    /// — the comparator would otherwise miss the canonical value. NEVER throws; null / empty
+    /// rows simply skip the capability gate (always-available, matching pre-Wave-7b behavior).
+    /// </para>
+    /// </remarks>
+    internal static string? MapRequiredCapability(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return null;
+        }
+
+        return rawValue.Trim();
+    }
+
     #endregion
 
     #region Private DTOs
@@ -416,6 +591,36 @@ public class AnalysisToolService : DataverseHttpServiceBase
 
         [JsonPropertyName("sprk_configuration")]
         public string? Configuration { get; set; }
+
+        /// <summary>
+        /// Option-set discriminator for invocation context — R6 Pillar 2 (FR-07; D-A-07).
+        /// Nullable in flight for backward-compat with pre-R6 rows whose column wasn't yet
+        /// populated; callers treat null as <see cref="ToolAvailabilityContext.Playbook"/>.
+        /// 100000000=Playbook, 100000001=Chat, 100000002=Both.
+        /// </summary>
+        [JsonPropertyName("sprk_availableincontexts")]
+        public int? AvailableInContexts { get; set; }
+
+        /// <summary>
+        /// JSON Schema document describing the tool's parameter shape for LLM
+        /// function-calling — R6 Pillar 2 (FR-08; D-A-08). Backed by the
+        /// <c>sprk_jsonschema</c> Memo (multi-line text, ~100 KB) attribute. Nullable
+        /// in flight for backward-compat with pre-R6 playbook-only rows; required for
+        /// chat-available tools (enforced at chat-side resolver per FR-08).
+        /// Validated as well-formed JSON by
+        /// <see cref="MapJsonSchema(string?, Guid, ILogger)"/> before reaching the DTO.
+        /// </summary>
+        [JsonPropertyName("sprk_jsonschema")]
+        public string? JsonSchema { get; set; }
+
+        /// <summary>
+        /// Canonical playbook capability constant for the per-playbook capability filter
+        /// added in Wave 7b. Backed by the <c>sprk_requiredcapability</c> single-line
+        /// text (NVARCHAR(100)) attribute. Nullable — null means "always available"
+        /// (no capability gate), which is the default for existing tool rows.
+        /// </summary>
+        [JsonPropertyName("sprk_requiredcapability")]
+        public string? RequiredCapability { get; set; }
     }
 
     internal class ToolTypeReference

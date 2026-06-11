@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Code page — UI tests + parameter parsing tests</title>
+    <phase>E: SemanticSearch Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>3-5</estimated-hours>
+    <dependencies>041, 042</dependencies>
+    <blocks>044</blocks>
+    <tags>testing, unit-test, e2e-test, react, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test creation task. `testing` tag. New test files. Carries ADR-021 (dark-mode) + ADR-022 (React 18) constraints. Not source-code logic.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Must follow 041 + 042 (both code-page changes complete) and precede 044 (deploy depends on tests green).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Verify the existing unit tests from tasks 040 + 042 are complete (parseUrlParams per parameter; hook request-body shape per hook). Add an App.tsx integration test for "filter state seeded from URL params". Add UI tests via the `ui-test` skill for: First Search Uses Seeded Filters (FR-CP-03 + FR-PARITY-02 prep), Dark Mode Compliance (ADR-021), and Filter Parity vs PCF (FR-PARITY-02). All tests must be green before task 044 deploy.
+  </prompt>
+
+  <role>
+    Code-page developer with familiarity with Jest/Vitest unit tests + the `ui-test` skill for browser-based code-page verification. ADR-021 dark-mode compliance is a hard gate.
+  </role>
+
+  <goal>
+    Unit-test gap closed (40 + 42 verified complete). App.tsx integration test confirms filter state seeded. UI tests pass for: (1) First Search Uses Seeded Filters, (2) Dark Mode Compliance, (3) Filter Parity vs PCF. Test artifacts (screenshots, console output) captured in handoff notes for the project record.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 040 + 041 + 042 implemented the parser, App.tsx wiring, and hook request-body extensions. This task is the test gate before deploy in task 044. The Filter Parity vs PCF UI test is the load-bearing acceptance for FR-PARITY-02 (PCF and code-page must show identical result sets for the same time-point).
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/App.tsx</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-CP-01..04">All Phase E FRs covered by tests added in 040 + 041 + 042 + this task.</constraint>
+    <constraint source="spec.md FR-PARITY-02">Filter parity UI test compares PCF result set with code-page result set after Open in Semantic Search. Expected: identical doc IDs + count.</constraint>
+    <constraint source="ADR-021">Dark-mode compliance via Fluent v9 semantic tokens. No hex / no `var(--…)` / no rgb literals.</constraint>
+    <constraint source="ADR-022">Code Page uses React 18. Tests must work with React 18 testing utilities.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dark-mode token verification" location="ADR-021">
+        Toggle browser/OS dark mode; verify computed styles for color-bearing surfaces use Fluent v9 tokens (resolve to dark-mode values); confirm icons use `currentColor` so they inherit text color.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify unit tests from task 040 (`parseUrlParams` per parameter) are present and passing. If any gap, fill it. Verify unit tests from task 042 (`useSemanticSearch` + `useRecordSearch` body shape with + without `searchIndexName`) are present and passing.</step>
+    <step order="2">Add an App.tsx integration test (using React Testing Library or equivalent): mount `&lt;App /&gt;` with mocked URL params and `authenticatedFetch`; assert the first POST body matches the URL-derived shape (filters + scope + entityId + searchIndexName). This is the FR-CP-03 net-test.</step>
+    <step order="3">Add UI tests via the `ui-test` skill for the 3 scenarios in &lt;ui-tests&gt; below: First Search Uses Seeded Filters, Dark Mode Compliance (ADR-021), Filter Parity vs PCF.</step>
+    <step order="4">Run `npm run test` to confirm all unit + integration tests pass.</step>
+    <step order="5">Capture UI-test artifacts (screenshots, console output, network traces for Filter Parity) in `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/043-code-page-tests.md`.</step>
+    <step order="6">If any test fails, fix the implementation (not the test). Re-run until all green.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing tests + source files</tool>
+    <tool name="Edit">Add the App.tsx integration test + any missing unit tests</tool>
+    <tool name="Bash">Run `npm run test`</tool>
+    <tool name="Skill">Invoke `ui-test` skill for browser-based code-page verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="tests">App.tsx integration test for filter-state-seeded flow</output>
+    <output type="tests">UI tests: First Search Uses Seeded Filters, Dark Mode, Filter Parity vs PCF</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/043-code-page-tests.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All unit tests pass: parseUrlParams (task 040) + hook body shape (task 042) + App.tsx integration.</criterion>
+    <criterion testable="true">UI test "First Search Uses Seeded Filters" passes — first network POST uses URL-derived filters.</criterion>
+    <criterion testable="true">UI test "Dark Mode Compliance (ADR-021)" passes — colors adapt via Fluent v9 semantic tokens.</criterion>
+    <criterion testable="true">UI test "Filter Parity vs PCF" passes — PCF result set matches code-page result set (same doc IDs, same count) after Open in Semantic Search. FR-PARITY-02 acceptance.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="First Search Uses Seeded Filters">
+      <description>Verify that when the code page is opened with filter params in the URL envelope, the very first network POST uses those filters (not the defaults).</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_semanticsearch&amp;data=query%3Dtest%26threshold%3D50%26searchMode%3Dhybrid%26associatedOnly%3Dtrue</url>
+      <steps>
+        <step>Navigate to the SemanticSearch code page via a URL with `threshold=50&amp;searchMode=hybrid&amp;associatedOnly=true` in the data envelope.</step>
+        <step>Open browser DevTools → Network tab → filter `/api/ai/search` BEFORE the page mounts (clear and start fresh).</step>
+        <step>Allow the page to mount and trigger the auto-search.</step>
+        <step>Inspect the FIRST POST request body.</step>
+      </steps>
+      <expected>The first (and only) POST body contains `threshold: 50`, `searchMode: "hybrid"`, `associatedOnly: true`. NO earlier POST with default values.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <description>Verify code page adapts to dark mode via Fluent v9 semantic tokens.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_semanticsearch</url>
+      <steps>
+        <step>Open the SemanticSearch code page in default (light) mode.</step>
+        <step>Toggle browser/OS to dark mode (or toggle the host app's theme).</step>
+        <step>Reload the page; observe rendering.</step>
+        <step>Inspect computed styles via DevTools for primary surfaces and icons.</step>
+      </steps>
+      <expected>Background, text, borders, and icons all adapt to dark mode via Fluent v9 semantic tokens (`tokens.colorNeutralBackground1`, etc.). No hex/rgb literals visible in computed styles for color-bearing surfaces.</expected>
+    </test>
+    <test name="Filter Parity vs PCF">
+      <description>FR-PARITY-02 acceptance — PCF result set and code-page result set are identical for the same query + filters + scope + index, at the same time-point.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn={entity}&amp;id={record-id}</url>
+      <steps>
+        <step>Open a model-driven form hosting SemanticSearchControl on a Protected Matter.</step>
+        <step>In the PCF, set Threshold=50%, Mode=Hybrid, Associated Only=true, File Types=pdf,docx.</step>
+        <step>Execute a search to populate PCF results. Capture the document IDs + count.</step>
+        <step>Click "Open in Semantic Search".</step>
+        <step>In the launched modal/page, capture the document IDs + count from the first search.</step>
+      </steps>
+      <expected>Code-page document list (IDs + count + order) is IDENTICAL to the PCF's. searchIndexName routes both to `spaarke-file-index`.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Filter Parity vs PCF is the load-bearing acceptance gate for the entire Phase D.1 + Phase E scope. Capture screenshots side-by-side in the handoff notes.
+
+    For the Dark Mode test, the canonical pattern (per `.claude/patterns/pcf/theme-management.md` though authored for PCF — same principles apply to code pages) is to verify computed background/text colors change between light and dark modes and that no hex/rgb literals leak into the computed style for color-bearing elements.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-021 / ADR-022 + .claude/constraints/testing.md + .claude/skills/ui-test/SKILL.md before Step 1. Declare rigor (STANDARD) per task-execute Step 0.
+    </protocol>
+  </execution>
+</task>

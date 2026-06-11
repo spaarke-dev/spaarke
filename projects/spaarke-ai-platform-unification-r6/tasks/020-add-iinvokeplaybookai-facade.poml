@@ -1,0 +1,165 @@
+<task id="020" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-12 Add New `IInvokePlaybookAi` Facade in `Services/Ai/PublicContracts/` (Pillar 3, Q11)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>011</dependencies>
+    <blocks>021</blocks>
+    <tags>bff-api, ai, facade</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New PublicContracts facade (ADR-013 bound; Confirmation Trigger per project CLAUDE.md); downstream blocker for invoke_playbook tool; tags `bff-api`+`ai`+`facade`.</rigor-reason>
+    <parallel-group>A-G3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent file from 024 (Dataverse FK fix); both parallel after 011.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a new `IInvokePlaybookAi` facade interface in
+    `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/` per Q11 binding decision
+    (cleaner than extending `IWorkspacePrefillAi`). The facade wraps
+    `IPlaybookOrchestrationService` so CRUD-side callers (chat tool in task 021;
+    M365 Copilot agent gateway; future R7+ consumers) never inject the orchestration
+    service directly — preserving the ADR-013 facade boundary.
+
+    Critical-path context: ADR-013 binding rule from project CLAUDE.md "MUST NOT inject
+    `IOpenAiClient`, `IPlaybookService`, `IPlaybookOrchestrationService`, or other
+    AI-internal types directly into CRUD-side code." This facade is the canonical way
+    chat-tool code (task 021) reaches the playbook execution engine.
+
+    Confirmation Trigger: per project CLAUDE.md §Confirmation Triggers — "Any task
+    modifies a public contract surface in `Services/Ai/PublicContracts/`" — PAUSE for
+    user confirmation before merging.
+
+    Interface shape: `Task&lt;PlaybookInvocationResult&gt; InvokePlaybookAsync(string playbookId, IDictionary&lt;string, object&gt; parameters, InvocationContext context, CancellationToken ct)`.
+    Implementation delegates to the existing orchestration service; this task ships the
+    interface + implementation skeleton + DI registration. Task 021 builds the actual
+    chat tool that consumes the facade.
+
+    Reuse patterns from existing facades in `PublicContracts/`: `IWorkspacePrefillAi`,
+    `IInsightsAi`, `IInvoiceAi`, `IBriefingAi`.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with deep `Services/Ai/PublicContracts/` familiarity and ADR-013
+    facade-boundary discipline.
+  </role>
+
+  <goal>
+    `IInvokePlaybookAi` facade interface + thin implementation exists in
+    `Services/Ai/PublicContracts/`. Implementation delegates to
+    `IPlaybookOrchestrationService` (AI-internal). DI registered inside existing
+    `AnalysisServicesModule`. Unit tests cover: facade exposes only safe surface; CRUD-side
+    cannot inject orchestration internals through it. Build green; publish-size delta
+    reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="existing-facade-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IWorkspacePrefillAi.cs</file>
+    <file purpose="orchestration-service">src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/IPlaybookOrchestrationService.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register inside existing `AnalysisServicesModule` per DI minimalism. ZERO new top-level Program.cs lines.</constraint>
+    <constraint source="ADR-013">Facade is the ONLY way CRUD-side callers reach playbook execution. Implementation MUST NOT expose `IPlaybookOrchestrationService` or other AI internals through its surface. Facade boundary preserved per ADR-013.</constraint>
+    <constraint source="ADR-015">Telemetry from facade emits playbookId + decision + timestamp only; no user content.</constraint>
+    <constraint source="ADR-016">Apply `ai-context` rate-limit policy if facade is exposed via endpoint.</constraint>
+    <constraint source="ADR-018">No new feature flags.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget per NFR-02.</constraint>
+    <constraint source="spec FR-21">New `IInvokePlaybookAi` facade in `Services/Ai/PublicContracts/` per ADR-013 (Q11). Wraps `IPlaybookOrchestrationService`; CRUD-side callers never inject orchestration directly.</constraint>
+    <constraint source="Confirmation Trigger">PublicContracts surface change — pause for user confirmation per project CLAUDE.md §Confirmation Triggers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/public-contracts-facade</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing PublicContracts facade" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IWorkspacePrefillAi.cs">
+        Clone the interface + implementation pattern: interface in PublicContracts, impl as internal class delegating to orchestration. Same DI registration pattern.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — new PublicContracts surface + ADR-013 binding + Confirmation Trigger".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 011 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Inspect `IWorkspacePrefillAi` + impl as canonical reference. Capture baseline publish size.
+    </step>
+    <step order="3" name="Author Facade Interface">
+      Create `IInvokePlaybookAi.cs` in `PublicContracts/`. Methods: `InvokePlaybookAsync(playbookId, parameters, context, ct) → PlaybookInvocationResult`. Add accompanying DTOs (`PlaybookInvocationResult`, etc.). Document XML.
+    </step>
+    <step order="4" name="Author Thin Implementation">
+      `InvokePlaybookAi.cs` internal class: injects `IPlaybookOrchestrationService`; delegates with safe surface contract; emits telemetry (playbookId + decision + timestamp only; no user content).
+    </step>
+    <step order="5" name="Register in DI Module">
+      Add registration to `AnalysisServicesModule`. Confirm no new Program.cs lines.
+    </step>
+    <step order="6" name="🛑 Confirmation Gate — Public Contract Surface">
+      PAUSE per project CLAUDE.md §Confirmation Triggers. Present interface + DTOs; request approval.
+    </step>
+    <step order="7" name="Add Unit Tests">
+      Tests: facade exposes only the safe surface; implementation delegates correctly; telemetry payload is ADR-015-compliant.
+    </step>
+    <step order="8" name="Build + Verify Publish Size">
+      `dotnet build` → 0 errors. `dotnet publish -c Release` → delta vs baseline.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk each criterion; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-010 / ADR-013 / ADR-015 / ADR-018 / ADR-029 + FR-21 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 020 ✅. Reset `current-task.md`. Report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="git">stage + commit changes</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/PlaybookInvocationResult.cs (NEW DTO)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/InvokePlaybookAi.cs (NEW implementation)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (modified — DI)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PublicContracts/InvokePlaybookAiTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (020 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-020-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IInvokePlaybookAi.cs` exists in `Services/Ai/PublicContracts/` with `InvokePlaybookAsync` method.</criterion>
+    <criterion testable="true">Implementation delegates to `IPlaybookOrchestrationService` without exposing AI internals through facade surface (ADR-013).</criterion>
+    <criterion testable="true">Registered inside `AnalysisServicesModule`; ZERO new Program.cs lines (ADR-010).</criterion>
+    <criterion testable="true">Telemetry: playbookId + decision + timestamp only; no user content (ADR-015).</criterion>
+    <criterion testable="true">User confirmation recorded for public contract surface change.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

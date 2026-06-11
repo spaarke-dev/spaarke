@@ -39,14 +39,13 @@ import {
   useAiSession,
 } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widgets";
-// R5 task 038 — Summary tab schema + widget-type symbol. The schema must
-// match the SessionSummarizeOrchestrator's output (TL;DR / Summary / Keywords
-// / Entities) so streamed `field_delta` events render in the right fields.
-import {
-  STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE,
-  SUMMARIZE_SCHEMA,
-} from "@spaarke/ai-widgets";
-import type { StructuredOutputStreamWidgetData } from "@spaarke/ai-widgets";
+// R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
+// auto-install (R5 task 038) was removed. Each summarize invocation now
+// dispatches its own `workspace.widget_load` carrying the structured-
+// output-stream widget type + SUMMARIZE_SCHEMA + a per-run correlationId.
+// Those symbols are no longer needed at this site; consumers
+// (executeSummarizeIntent.ts + FilePreviewContextWidget.dispatchSummarizeOnly)
+// own them now.
 import { buildBffApiUrl } from "@spaarke/auth";
 import { usePaneCollapseContext } from "../shell/ThreePaneShell";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
@@ -556,173 +555,71 @@ export function WorkspacePane(): React.JSX.Element {
   }, [isAuthenticated, layouts]);
 
   // ---------------------------------------------------------------------------
-  // Auto-install Summary tab — R5 task 038 (2026-06-05)
+  // R6 Hotfix Wave B-G9c2 (B7 + B8) — DEFERRED Summary-tab install + per-run
+  // tab (2026-06-10).
   //
-  // Operator feedback from SC-18 cycle 4: the structured Summarize output
-  // (TL;DR / Summary / Keywords / Entities) streamed into the chat pane
-  // instead of into the Workspace pane. Root cause: the existing
-  // `StructuredOutputStreamWidget` (R5 task 017) subscribes to
-  // `workspace.streaming_*` events but was never registered as a workspace-
-  // pane tab in SpaarkeAi.
+  // Previously (R5 task 038): a single "Summary" tab was eagerly prepended on
+  // WorkspacePane mount as a persistent event sink for `workspace.streaming_*`
+  // events tagged with `streamId === chatSessionId`. This caused two bugs
+  // surfaced during the Phase B walkthrough:
   //
-  // This effect installs a "Summary" tab as the FIRST (leftmost) workspace
-  // tab using the new `prependTab` method on `WorkspaceTabManager`. The tab
-  // hosts the existing widget with `mode: 'streaming'` + `SUMMARIZE_SCHEMA`
-  // + `correlationId` set to the active chat sessionId so it consumes only
-  // events for the current session (FR-06 isolation per the widget's existing
-  // correlation gate). The tab is the default-active tab on mount.
+  //   B7: An empty Summary tab appeared (and was default-active) BEFORE any
+  //       summarize had run — confusing the user.
   //
-  // Bypasses the `dispatch('workspace', widget_load, ...)` round-trip so the
-  // tab lands at the FIRST position rather than appended. The dispatch path
-  // would append (per `addTab` semantics) — we want leftmost.
+  //   B8: Every subsequent `/summarize` run REPLACED the prior tab's content
+  //       because all runs shared `streamId = chatSessionId`. File A's summary
+  //       was lost when file B was summarized.
   //
-  // Run-once guard via ref so re-renders / auth refresh don't re-stack the
-  // tab. The chat sessionId is read at effect time; if the session ID is not
-  // available yet the widget mounts with `correlationId: undefined` and
-  // refines its filter on the first `streaming_started` event (the
-  // ConversationPane passes `streamId = chatSessionId` so this matches once
-  // a session exists).
+  // The fix shifts BOTH responsibilities to `executeSummarizeIntent` (in
+  // ConversationPane's summarize-intent dispatcher):
   //
-  // Auto-focus + manual-override tracking (rules below) is implemented in a
-  // separate `usePaneEvent('workspace', ...)` subscription further down so
-  // the install effect doesn't have to know about the streaming lifecycle.
+  //   - Each run generates a UNIQUE `streamId` (no reuse of `chatSessionId`).
+  //   - The run synchronously emits `workspace.widget_load` with the structured-
+  //     output-stream widget + `correlationId = streamId` + tab title
+  //     `Summary: <fileName>` BEFORE the SSE stream opens. The existing
+  //     `widget_load` handler below (~line 720+) installs a NEW tab via
+  //     `addTab`, which honors `MAX_WORKSPACE_TABS` FIFO eviction.
+  //   - The subsequent `streaming_started` event flows to the same tab via
+  //     the widget's `correlationId === streamId` gate.
+  //
+  // Race handling: PaneEventBus dispatch is SYNCHRONOUS, so the `widget_load`
+  // event installs the tab BEFORE any `streaming_started` event from the
+  // same call site. The widget itself mounts asynchronously
+  // (resolveWorkspaceWidget()), but the tab carries the `widgetData` payload
+  // including correlationId from the moment it's installed; the widget's
+  // initial effect picks up the early events via its own subscription.
   // ---------------------------------------------------------------------------
 
+  // Retained as a no-op ref so `handleTabChange` (manual override semantics)
+  // can continue to compare against the current Summary tab id when one is
+  // present. With the deferred-install model, this is `null` until a
+  // summarize run dispatches a `widget_load` AND we narrow the dispatched
+  // tab into this ref. For the current B-G9c2 implementation we no longer
+  // need the manual-override behavior to be Summary-specific (each run gets
+  // its own tab; the user can freely click between tabs without affecting
+  // future runs), so this ref stays `null` permanently. Removing the ref
+  // entirely would force a wider refactor of `handleTabChange` — keeping
+  // the variable as a benign null sentinel keeps the diff small.
   const summaryTabIdRef = React.useRef<string | null>(null);
-  const installedSummaryTabRef = React.useRef<boolean>(false);
-
-  React.useEffect(() => {
-    if (installedSummaryTabRef.current) return; // run once per mount
-    installedSummaryTabRef.current = true;
-
-    const manager = managerRef.current;
-    const widgetData: StructuredOutputStreamWidgetData = {
-      mode: "streaming",
-      schema: SUMMARIZE_SCHEMA,
-      // correlationId is the active chat sessionId; the ConversationPane
-      // executes Summarize with `streamId = chatSessionId` so events tagged
-      // with this id flow to this widget instance. May be null/undefined at
-      // first mount — `executeSummarizeIntent` only fires after a session
-      // exists, so by then the chat-pane caller will pass the right streamId.
-      ...(chatSessionId ? { correlationId: chatSessionId } : {}),
-      title: "Summary",
-    };
-
-    const tabId = manager.prependTab(
-      STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE,
-      widgetData,
-      "Summary",
-    );
-    summaryTabIdRef.current = tabId;
-
-    // Activate Summary IMMEDIATELY (sync, before any render flushes) so the
-    // first render of `WorkspaceTabManagerComponent` has `activeTabId === tabId`
-    // and the Fluent v9 `TabList`'s internal `useControllableState` enters
-    // controlled mode on its very first render. If we deferred activation to
-    // the resolveWorkspaceWidget .then() callback, the first render would have
-    // `selectedValue === undefined`, locking TabList into uncontrolled mode
-    // for the rest of its lifetime (Fluent's `useIsControlled` is a snapshot,
-    // not a watcher).
-    manager.setActiveTab(tabId);
-
-    // Resolve the widget component lazily — same pattern as the
-    // dispatch('widget_load') path below.
-    void resolveWorkspaceWidget(STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE).then(
-      (Component) => {
-        manager.resolveTabComponent(tabId, Component, "Summary");
-        syncState();
-
-        // Notify ShellStageManager about the new tab count.
-        dispatch("workspace", {
-          type: "tab_count_change",
-          tabCount: manager.getSnapshot().tabs.length,
-        });
-      },
-    );
-    syncState();
-    // Run ONCE per mount — the chatSessionId dep is intentionally not in
-    // the deps array; widgetData.correlationId is read at install time and
-    // the install is idempotent via the ref guard above. If a future task
-    // requires re-targeting the correlationId on session change, lift to
-    // an explicit update via `updateTab`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Keep the Summary tab's correlationId in sync if the session changes
-  // after the tab is installed. This handles the case where the user signs
-  // in (or switches sessions) AFTER the Summary tab mounted with no session.
-  React.useEffect(() => {
-    const tabId = summaryTabIdRef.current;
-    if (!tabId) return;
-    if (!chatSessionId) return;
-
-    const widgetData: StructuredOutputStreamWidgetData = {
-      mode: "streaming",
-      schema: SUMMARIZE_SCHEMA,
-      correlationId: chatSessionId,
-      title: "Summary",
-    };
-    managerRef.current.updateTab(tabId, widgetData);
-    syncState();
-  }, [chatSessionId, syncState]);
 
   // ---------------------------------------------------------------------------
-  // Summary-tab auto-focus on `workspace.streaming_started` — R5 task 038
+  // R6 Hotfix Wave B-G9c2 — auto-focus is now NATURAL via `addTab`
   //
-  // Rules (per task spec):
-  //   - Auto-focus the Summary tab when a `streaming_started` event fires for
-  //     the active chat session (event.streamId === chatSessionId).
-  //   - Do NOT auto-focus on `field_delta` or `streaming_complete` — those
-  //     flow into the already-active tab (or get dropped if Summary isn't
-  //     active because the user clicked away).
-  //   - Respect manual override: if the user clicks a different tab during an
-  //     active stream, set `streamFocusOverrideRef = true` so subsequent
-  //     events (within the same stream cycle) do NOT pull focus back.
-  //   - Reset the override on `streaming_complete` so the next stream can
-  //     again auto-focus.
-  //   - Correlation isolation: streaming_started events with mismatched
-  //     streamId (i.e. NOT for the active session) do NOT trigger auto-focus.
+  // The R5 task 038 streaming-started auto-focus block (removed here) is
+  // unnecessary in the deferred-install model: each summarize run dispatches
+  // a `workspace.widget_load`, the existing `widget_load` handler below
+  // calls `manager.addTab(...)` which AUTO-ACTIVATES the new tab (see
+  // WorkspaceTabManager.addTab line 378), so the new Summary tab is focused
+  // as soon as the run starts — no separate `streaming_started` focus
+  // handler required.
+  //
+  // The `streamFocusOverrideRef` is retained as a no-op sentinel so the
+  // existing manual-override checks in `handleTabChange` don't have to
+  // change. With each run owning its own tab, the override semantic is now
+  // mostly vestigial — kept for compatibility with downstream consumers.
   // ---------------------------------------------------------------------------
 
   const streamFocusOverrideRef = React.useRef<boolean>(false);
-
-  usePaneEvent("workspace", (event: WorkspacePaneEvent): void => {
-    if (event.type === "streaming_started") {
-      // Correlation isolation — only auto-focus when the stream belongs to
-      // the active chat session. When `chatSessionId` is null/undefined we
-      // tolerate (cold-load convenience) but still require a streamId to be
-      // present on the event so unknown / probe events don't pull focus.
-      if (chatSessionId && event.streamId && event.streamId !== chatSessionId) {
-        return;
-      }
-
-      // Respect user override from a PRIOR session/stream cycle that has not
-      // yet completed. If the override is set, do not pull focus. The
-      // override clears on `streaming_complete` (below) so the NEXT
-      // `streaming_started` can again auto-focus.
-      if (streamFocusOverrideRef.current) {
-        return;
-      }
-
-      const summaryTabId = summaryTabIdRef.current;
-      if (!summaryTabId) return;
-
-      // Switch to Summary unless we're already there.
-      const manager = managerRef.current;
-      if (manager.getSnapshot().activeTabId !== summaryTabId) {
-        manager.setActiveTab(summaryTabId);
-        syncState();
-        // Note: setActiveTab fires onActiveTabChange which dispatches the
-        // `active_widget_changed` signal (Round 4 Fix 4 infrastructure).
-      }
-    } else if (event.type === "streaming_complete") {
-      // Reset override so the NEXT streaming_started can again auto-focus.
-      streamFocusOverrideRef.current = false;
-    }
-    // `field_delta` is intentionally not handled here — those events flow
-    // into the widget through its own subscription; auto-focus must NOT
-    // fire on field_delta (per task spec).
-  });
 
   // ---------------------------------------------------------------------------
   // PaneEventBus subscription — 'workspace' channel

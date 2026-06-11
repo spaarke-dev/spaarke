@@ -1,0 +1,113 @@
+<task id="064" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-17 — Summarization compression service (sliding window; LLM summary for oldest M turns)</title>
+    <status>pending</status>
+    <estimated-effort>1 day</estimated-effort>
+    <phase>Phase C — Cross-Conversation Memory (Pillar 7)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>053 (workspace state wired)</dependencies>
+    <tags>bff-api, ai, services, memory</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New service in AI services tree; LLM-backed; consumed by memory composition + chat prompt assembly; budget interaction critical.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build summarization compression service that compresses the oldest M turns when the
+    chat conversation history exceeds a configured sliding-window budget. Place in
+    `src/server/api/Sprk.Bff.Api/Services/Ai/Memory/`. Public API:
+    `Task&lt;string&gt; CompressTurnsAsync(IEnumerable&lt;ChatTurn&gt; turns, CancellationToken ct)`
+    which returns an LLM-generated `[Conversation summary: ...]` block. Persists the
+    summary as a memory entry in Cosmos `sessions` container so subsequent turns reuse
+    rather than re-summarize. Uses the GPT-4o-mini deployment (cheap path) per
+    `chat-architecture.md`. Respects the 8K system prompt budget per NFR-10 — the
+    summary itself is budget-aware (caps at ~500 tokens). Wire into the existing
+    `PlaybookChatContextProvider` lifecycle without modifying its public signature.
+  </prompt>
+
+  <role>
+    Senior AI platform engineer with familiarity with Cosmos `sessions` container +
+    GPT-4o-mini cost-tier patterns + `PlaybookChatContextProvider`.
+  </role>
+
+  <goal>
+    Service implemented + registered; compresses oldest M turns into a summary block;
+    persists summary to Cosmos; reuses on subsequent invocations; budget caps respected.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="ai-arch">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="chat-arch">docs/architecture/chat-architecture.md</file>
+    <file purpose="ctx-provider">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register in existing module (`AnalysisServicesModule`).</constraint>
+    <constraint source="ADR-013">BFF-side AI service; CRUD-side consumers via facade pattern (not applicable here — internal to chat).</constraint>
+    <constraint source="ADR-014">Persistence uses Cosmos `sessions` container per existing write-through pattern; per-tenant isolation enforced.</constraint>
+    <constraint source="ADR-015">Compression summary is stored content; treat per existing chat history data-governance contract (Cosmos `sessions` already governed).</constraint>
+    <constraint source="ADR-029">Publish-size delta verified; expect &lt;1 MB.</constraint>
+    <constraint source="spec FR-41">Sliding-window compression; replace oldest M turns with summary; appends `[Conversation summary: ...]` at history top.</constraint>
+    <constraint source="spec NFR-10">8K system prompt budget preserved; summary caps at ~500 tokens.</constraint>
+    <constraint source="project R6 Pillar 7">Pillar 7 infrastructure for memory composition; consumed by task 067 hierarchical composition.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-memory</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — New AI memory service; LLM-backed; budget-critical."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 053 complete.</step>
+    <step order="2" name="Gather Resources">Read PlaybookChatContextProvider + chat-architecture + AI-ARCHITECTURE memory sections.</step>
+    <step order="3" name="Author Interface + Implementation">Create `ISummarizationCompressionService` + `SummarizationCompressionService` in `Services/Ai/Memory/`.</step>
+    <step order="4" name="Implement Compression Logic">Sliding window detection; oldest M turns → GPT-4o-mini call → compressed summary; persist to Cosmos `sessions` container.</step>
+    <step order="5" name="Wire into Provider">Wire into `PlaybookChatContextProvider` at the budget-management point; do NOT modify its public signature.</step>
+    <step order="6" name="Register in Module">ADR-010 module pattern.</step>
+    <step order="7" name="Tests">Unit tests: compression triggers at threshold; summary persisted; reuse on subsequent invocation; budget cap enforced.</step>
+    <step order="8" name="Publish-Size + CVE">dotnet publish + vulnerable check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-010/013/014/015/029).</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 064 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish + vulnerable-package check</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/ISummarizationCompressionService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/SummarizationCompressionService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs (modified — wires service without signature change)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (registration)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/SummarizationCompressionServiceTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Service registered + reachable from PlaybookChatContextProvider.</criterion>
+    <criterion testable="true">Compression triggers when sliding window exceeds budget threshold.</criterion>
+    <criterion testable="true">Summary persisted to Cosmos `sessions` container.</criterion>
+    <criterion testable="true">Summary reused on subsequent invocations (not regenerated).</criterion>
+    <criterion testable="true">Summary token budget capped at ~500 tokens; system prompt total ≤8K (NFR-10).</criterion>
+    <criterion testable="true">PlaybookChatContextProvider public signature unchanged.</criterion>
+    <criterion testable="true">ZERO new Program.cs lines.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,112 @@
+<task id="055" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-06 — `update_workspace_tab` chat tool (Q8 conflict resolution: checks `lastUserEditAt`)</title>
+    <status>pending</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6b)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>053 (workspace state wired into factory)</dependencies>
+    <tags>bff-api, ai, chat, workspace, tool-handler</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Conflict resolution semantic (Q8) is critical; race-condition handling between agent + user edits must be bulletproof.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build the `update_workspace_tab(tabId, changes, expectedLastUserEditAt?)` chat tool as
+    an `IToolHandler`. Per Q8 conflict resolution: USER WINS. On invocation: agent passes
+    its observed `expectedLastUserEditAt` (the timestamp it saw when the tab was last
+    read into the prompt). Handler fetches current tab via `WorkspaceStateService`; if
+    current `lastUserEditAt` is newer than `expectedLastUserEditAt`, REFUSES the write
+    with a polite "stale read" response telling the agent to re-read the tab before
+    re-attempting. If timestamps match (or `expectedLastUserEditAt` is null indicating
+    agent-just-created tab), applies the changes via `UpsertTabAsync`. Emits
+    `workspace.tab_edited` event with deterministic IDs (tabId, sessionId, matterId)
+    only. ADR-015 binding: NEVER log `changes` body in telemetry — only tool name +
+    decision (`applied` | `refused_stale_read`) + timestamp. Conflict-detection logic is
+    bulletproof — race conditions covered in unit tests.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with concurrency-control expertise + familiarity with optimistic
+    concurrency via timestamp comparison.
+  </role>
+
+  <goal>
+    `update_workspace_tab` tool installed; LLM can update tabs. Stale writes refused
+    cleanly with a re-read instruction. Race condition tests pass. Telemetry
+    governance-compliant per ADR-015.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="chat-arch">docs/architecture/chat-architecture.md</file>
+    <file purpose="workspace-svc">src/server/api/Sprk.Bff.Api/Services/Workspace/IWorkspaceStateService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register via auto-discovery in existing module; ZERO new Program.cs lines.</constraint>
+    <constraint source="ADR-013">BFF-internal tool; consumes `IWorkspaceStateService` directly.</constraint>
+    <constraint source="ADR-015">Telemetry emits tool name + decision (`applied` | `refused_stale_read`) + timestamp ONLY. NEVER the `changes` body. Deterministic IDs OK.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="ADR-030">Publish `workspace.tab_edited` on existing `workspace` channel. Additive event type only.</constraint>
+    <constraint source="spec FR-35">Modifies existing tab; registered as `sprk_analysistool` row.</constraint>
+    <constraint source="spec FR-40">Conflict resolution per Q8 — USER WINS. Agent checks timestamp; refuses on stale write with re-read prompt. No OT/CRDT.</constraint>
+    <constraint source="project Q8 binding">Refusal message is a structured response the LLM can re-act on. Format: `{ status: "stale_read", currentTimestamp, message: "Tab edited by user since your last read; please re-read before re-attempting." }`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-chat-tools-concurrency</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Conflict resolution semantic; race conditions must be bulletproof."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 053 complete.</step>
+    <step order="2" name="Gather Resources">Map workspace state service contract for timestamp read + write-with-precondition.</step>
+    <step order="3" name="Author Handler">Create `Services/Ai/Handlers/UpdateWorkspaceTabHandler.cs` implementing `IToolHandler`.</step>
+    <step order="4" name="Implement Conflict Check">Fetch current tab; compare `lastUserEditAt` against `expectedLastUserEditAt`; if newer, return structured `stale_read` response WITHOUT mutating; emit telemetry with decision `refused_stale_read`.</step>
+    <step order="5" name="Apply Update">If clean, apply `changes` to tab; bump `updatedAt`; persist via `UpsertTabAsync`; emit `workspace.tab_edited` event with deterministic IDs only.</step>
+    <step order="6" name="Seed Dataverse Row">`sprk_analysistool` row for update_workspace_tab with proper JsonSchema.</step>
+    <step order="7" name="Tests">Race tests: (a) clean update succeeds; (b) stale `expectedLastUserEditAt` refused with structured response; (c) null `expectedLastUserEditAt` permitted for agent-just-created tab. ADR-015 audit: `changes` body NEVER in telemetry.</step>
+    <step order="8" name="Publish-Size + CVE Verification">dotnet publish; vulnerable-package check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-010/013/015/029/030). Explicit ADR-015 audit.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 055 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="pac">Seed `sprk_analysistool` row</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/UpdateWorkspaceTabHandler.cs (NEW)</output>
+    <output type="data">Dataverse row: `sprk_analysistool` for update_workspace_tab</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/UpdateWorkspaceTabHandlerTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler refuses stale write with structured `stale_read` response (does NOT mutate).</criterion>
+    <criterion testable="true">Clean write applies changes + bumps `updatedAt` + emits `workspace.tab_edited`.</criterion>
+    <criterion testable="true">Null `expectedLastUserEditAt` permitted for fresh tabs (no preceding user edits).</criterion>
+    <criterion testable="true">Telemetry contains tool name + decision (`applied` | `refused_stale_read`) + timestamp + deterministic IDs ONLY; NEVER `changes` body.</criterion>
+    <criterion testable="true">Race condition tests cover all three paths (clean / stale / null-expected).</criterion>
+    <criterion testable="true">ZERO new Program.cs lines; ADR-030 4-channel preserved.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

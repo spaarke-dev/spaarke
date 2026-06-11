@@ -1,0 +1,98 @@
+<task id="R4-092" project="smart-todo-r4">
+  <metadata>
+    <title>Phase 3 — Build + deploy all affected solutions to spaarkedev1</title>
+    <phase>Phase 3: Deployment</phase>
+    <workstream>cross-cutting</workstream>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>deploy, dataverse, smoke-test, build, solutions</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>R4-020, R4-030, R4-031, R4-032, R4-033, R4-040, R4-041, R4-042, R4-050, R4-051, R4-052, R4-060, R4-070, R4-071, R4-080, R4-081, R4-082, R4-083, R4-084</dependencies>
+    <relevant-files>
+      <file>solution build outputs across all affected R4 surfaces</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Build + deploy every affected solution to spaarkedev1. Confirm zero `sprk_todoflag` legacy references in deployed bundles. Smoke test the golden path end-to-end (open workspace → see widget → open SmartTodo → click card → modal → save → drill-through from a parent form).
+  </prompt>
+
+  <role>Spaarke deployment engineer.</role>
+
+  <goal>
+1. All affected solutions deployed: SmartTodo Code Page, LegalWorkspace (if A targets it), `@spaarke/ui-components` consumers, RegardingResolver (per audit), VisualHost solution carrying form changes.
+2. `grep -i sprk_todoflag` in deployed bundles returns 0 functional hits.
+3. Golden path smoke test passes.
+4. PR description identifies all deployed surfaces.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="project-plan">projects/smart-todo-r4/plan.md</file>
+    <file purpose="all-prior-tasks">projects/smart-todo-r4/tasks/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-09">PR description identifies deployed surface(s) + confirms rebuild + redeploy</constraint>
+    <constraint source="CLAUDE.md AP-1">PCF prod build = `npm run build:prod`, NOT `npm run build`</constraint>
+    <constraint source="spec graduation criterion 12">`grep -i sprk_todoflag src/**/*.{ts,tsx,cs}` returns 0 functional hits</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deploy/multi-solution</topic>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>R4 changes span shared lib, solutions, PCF, Code Pages, and chart def records. This task is the single consolidated deployment.</background>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Inventory affected surfaces">List every solution touched by R4 tasks 020 through 084.</step>
+    <step order="2" name="Run grep verification">`grep -ri sprk_todoflag src/` — must be 0 functional hits before deploy.</step>
+    <step order="3" name="Build each surface">PCF: `npm run build:prod`; Code Pages: `npm run build`; shared lib: `npm run build`; solution packs.</step>
+    <step order="4" name="Deploy in order">Shared lib first (consumed by others); then PCF + Code Pages; then solution-level form changes + chart defs.</step>
+    <step order="5" name="Verify bundles">Inspect at least one deployed bundle for `sprk_todoflag` — confirm 0 hits.</step>
+    <step order="6" name="Golden-path smoke test">SpaarkeAi workspace → SmartTodo widget → standalone Code Page → toolbar actions → modal → save → Matter form → Visual Host card → drill-through.</step>
+    <step order="7" name="Document deployed surfaces in PR description">List each solution + version + smoke-test result.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">All builds</tool>
+    <tool name="dataverse-deploy">Solution + chart def deploys</tool>
+    <tool name="code-page-deploy">Code Page deploys</tool>
+    <tool name="pcf-deploy">PCF deploys (if any in R4)</tool>
+    <tool name="ui-test">Golden-path smoke test</tool>
+    <tool name="Grep">Final sprk_todoflag check</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">All affected solutions deployed to spaarkedev1</output>
+    <output type="docs">PR description with deployed-surface inventory</output>
+    <output type="report">Smoke test report (pass/fail per scenario)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Golden path end-to-end">
+      <steps>
+        <step>Open SpaarkeAi workspace; verify SmartToDo widget mounts</step>
+        <step>Open standalone SmartTodo Code Page; verify 4-row layout</step>
+        <step>Click Open on a card; modal opens with iframe</step>
+        <step>Edit + save in iframe; verify persistence</step>
+        <step>Open a Matter record; verify "Upcoming To Dos" Visual Host card; drill through; verify pre-filtered modal</step>
+      </steps>
+      <expected>Every step works; no console errors; no OData errors</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">All affected solutions deployed to spaarkedev1</criterion>
+    <criterion testable="true">`grep -i sprk_todoflag` in src AND deployed bundles returns 0 functional hits</criterion>
+    <criterion testable="true">Golden-path smoke test passes</criterion>
+    <criterion testable="true">PR description lists all deployed surfaces + smoke-test result</criterion>
+  </acceptance-criteria>
+</task>

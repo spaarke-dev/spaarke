@@ -1,0 +1,218 @@
+<task id="087" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-D-08 Vertical-Slice Integration Test — Summarize Playbook End-to-End Exercises Every Pillar</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>10 hours</estimated-effort>
+    <dependencies>029, 049, 079, 084, 085, 086</dependencies>
+    <blocks>088</blocks>
+    <tags>integration-test, e2e-test, bff-api, frontend, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end validation per spec §6 Vertical-Slice Validation Target — exercises every pillar. STANDARD rigor (validation-only; no new architectural code) but high-stakes due to coverage breadth. Test failures here surface cross-pillar contract drift that must be fixed before wrap-up.</rigor-reason>
+    <parallel-group>D-G2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>This single test exercises BOTH BFF + frontend in an integrated chain; runs serially after all Phase A/B/C/D component tasks complete; cannot be parallelized.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the vertical-slice integration test per spec §6 "Vertical-Slice Validation Target" +
+    design.md §6. This is the binding end-to-end verification that R6 architecture convergence
+    actually delivered: executing a Summarize playbook via `/summarize #file.docx` exercises
+    EVERY pillar end-to-end.
+
+    The test SHALL cover, as ONE coherent scenario, all of:
+
+    **Pillar 1 (persona data-driven)** — Persona resolved from `sprk_aipersona` Dataverse entity
+    via `IScopeResolverService.ResolveAsync()`. Verifiable via test assertion that
+    `SprkChatAgentFactory.CreateAgentAsync` does NOT call legacy `BuildDefaultSystemPrompt()`.
+
+    **Pillar 2 (data-driven tool registry)** — Tool list assembled from `sprk_analysistool` rows
+    with `AvailableInContexts ∋ "Chat"`; chat agent receives the data-driven list via
+    `ToolHandlerToAIFunctionAdapter`. Verifiable via test that no hardcoded tool-class
+    instantiation occurs in `ResolveTools()`.
+
+    **Pillar 3 (generic invoke_playbook)** — `/summarize` triggers `invoke_playbook("summarize-document-for-chat@v1", ...)`
+    via `IInvokePlaybookAi` facade. Verifiable via test that `InvokeSummarizePlaybookTool` C#
+    file no longer exists + LLM sees single generic tool.
+
+    **Pillar 4 (PlaybookExecutionEngine routing with FK chain)** — `SessionSummarizeOrchestrator`
+    routes via `PlaybookExecutionEngine.ExecuteAsync(playbookId)`; FK chain
+    (playbook → node → action) traverses to `SUM-CHAT@v1`. Verifiable via test that no
+    `GetByCodeAsync("SUM-CHAT@v1")` alternate-key lookup remains in chat path.
+
+    **Pillar 5 (output schema + schema-aware rendering + CapabilityRouter dedup)** —
+    `sprk_analysisaction.outputSchema` is populated for SUM-CHAT; node config has
+    `destination: "chat"`; widget renders array (`tldr` as bullets) + object (`entities` as
+    labeled key-value blocks); ONE user intent → ONE render (no duplicate fire). Verifiable via
+    snapshot test on rendered output.
+
+    **Pillar 6 (workspace state in prompt + tab updates + execution trace)** — Workspace state
+    snapshot included in agent system prompt at turn time (Pillar 6a); user can click
+    "Send to Workspace" + "Make it shorter" + `/clear` work (Pillar 6b); Context pane shows
+    live execution trace via additive `context.*` events (Pillar 6c). Verifiable via
+    PaneEventBus event capture + telemetry assertions.
+
+    **Pillar 7 (memory composition)** — Recent verbatim + compressed mid + pinned + retrieved
+    old all present in prompt assembly (`MatterMemoryService` wired). Verifiable via
+    system-prompt snapshot showing memory block.
+
+    **Pillar 8 (command router)** — `/summarize #file.docx` parses to `Intent {command:'summarize',
+    references:[{type:'file',...}]}`; SoftSlashRouter decorates payload; ReferenceResolver
+    resolves; CapabilityRouter Layer 1 pre-selects SUM-CHAT route.
+
+    **Pillar 9 (widget visibility contract)** — Per-turn agent prompt builder gathers
+    `getAgentVisibleState()` from each Assistant-visible tab; respects `visibleToAssistant: true`
+    filter. Verifiable via prompt snapshot showing only visible widget state.
+
+    **Conversational refinement** — After playbook output, user types "make it shorter"; agent
+    responds conversationally with NO tool call (NFR-01 preserved).
+
+    BFF-touching task: VERIFY publish-size baseline per NFR-02 (≤+5 MB total across R6;
+    cumulative tracking from prior tasks). Report delta vs prior baseline in task notes.
+  </prompt>
+
+  <role>
+    Senior integration-test engineer with deep familiarity with the Spaarke AI platform across
+    BFF + frontend + Dataverse. Comfortable with end-to-end test design that exercises 9
+    architectural pillars in a single coherent scenario.
+  </role>
+
+  <goal>
+    Vertical-slice integration test exists at `tests/integration/Sprk.Bff.Api.IntegrationTests/`
+    (BFF) + a paired frontend e2e test at `src/solutions/SpaarkeAi/tests/e2e/`. Test exercises
+    every pillar in one coherent Summarize scenario. All 11 pillar acceptance checks green.
+    Conversational refinement after playbook output verified. BFF publish-size delta recorded.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="phase-a-exit">projects/spaarke-ai-platform-unification-r6/tasks/029-phase-a-exit-gate.poml</file>
+    <file purpose="phase-b-exit">projects/spaarke-ai-platform-unification-r6/tasks/049-phase-b-exit-gate.poml</file>
+    <file purpose="phase-c-exit">projects/spaarke-ai-platform-unification-r6/tasks/079-phase-c-exit-gate.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec §6 Vertical-Slice Validation Target">Full walkthrough must complete with 11 pillar acceptance checks: persona, tools, workspace state in prompt, memory composition, `/summarize` triggers `invoke_playbook`, routes via engine, output renders schema-aware, Context pane trace, Send to Workspace + Make it shorter + `/clear`, conversational refinement.</constraint>
+    <constraint source="spec Phase D exit criterion 5">All R6 changes have integration test coverage — vertical-slice is the binding artifact.</constraint>
+    <constraint source="spec NFR-02">BFF publish-size ≤+5 MB total across R6; per-task verification required for BFF-touching tasks. This test may add BFF test fixtures — measure publish-size delta.</constraint>
+    <constraint source="spec NFR-01">Conversational refinement after playbook output must work; agent stays conversational.</constraint>
+    <constraint source="ADR-013">Existing PublicContracts facades used; no new facade for testing.</constraint>
+    <constraint source="ADR-015">Trace event capture must show: tool name + decision + timestamp only; no user message text.</constraint>
+    <constraint source="ADR-029">Verify publish-size compressed; report delta in task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>integration-test/vertical-slice</topic>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Vertical-slice scenario shape" location="tests/integration/Sprk.Bff.Api.IntegrationTests/VerticalSlice/SummarizeVerticalSliceTests.cs (new)">
+        Arrange: seed sprk_aipersona row + sprk_analysistool rows + sprk_analysisaction with outputSchema + sprk_analysisplaybook with node FK. Act: invoke `/summarize #file.docx` via BFF chat endpoint. Assert: per-pillar checks (11 acceptance criteria from spec §6).
+      </pattern>
+      <pattern name="Frontend e2e shape" location="src/solutions/SpaarkeAi/tests/e2e/summarize-vertical-slice.e2e.test.ts (new)">
+        Drive conversation pane via Playwright/UI-test skill. Capture PaneEventBus events. Assert workspace tab created + trace widget populated + refinement works.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context. Output: "🔒 RIGOR LEVEL: STANDARD — Vertical-slice integration test; validation-only; high-stakes coverage breadth". Read project CLAUDE.md + spec §6.
+    </step>
+    <step order="1" name="Review Progress + Dependency Verification">
+      Read TASK-INDEX.md; confirm 087 status is 🔲, deps 029/049/079/084/085/086 ALL ✅. Verify ALL prior Phase A/B/C/D component tasks completed before starting. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read spec §6 Vertical-Slice Validation Target verbatim (11 acceptance bullets). Read AI-ARCHITECTURE.md + chat-architecture.md + playbook-architecture.md for end-to-end flow. Identify the BFF integration-test project + the frontend e2e test framework.
+    </step>
+    <step order="3" name="Build BFF Integration Test">
+      Create `tests/integration/Sprk.Bff.Api.IntegrationTests/VerticalSlice/SummarizeVerticalSliceTests.cs`. Seed Dataverse rows (persona + tools + action + playbook FK). Invoke BFF chat endpoint with `/summarize #file.docx` payload. Capture telemetry + assert per-pillar checks (1-7, 9): persona, tools, invoke_playbook, engine FK, output schema, workspace state in prompt, memory composition, widget visibility filter.
+    </step>
+    <step order="4" name="Build Frontend e2e Test">
+      Create `src/solutions/SpaarkeAi/tests/e2e/summarize-vertical-slice.e2e.test.ts`. Drive UI via Playwright or ui-test skill. Verify: (a) `/summarize #file.docx` parses correctly (Pillar 8); (b) workspace tab created with bulleted tldr + labeled entities (Pillar 5); (c) Context pane shows execution trace (Pillar 6c); (d) "Send to Workspace" button works (Pillar 6b); (e) "Make it shorter" refinement gets conversational response (NFR-01); (f) `/clear` resets session without LLM call (Pillar 8 hard slash).
+    </step>
+    <step order="5" name="Run Full Suite + Verify 11 Pillar Checks">
+      Run BFF test: `dotnet test --filter "FullyQualifiedName~SummarizeVerticalSlice"`. Run frontend e2e: `npm run test:e2e`. Walk through each of the 11 spec §6 acceptance bullets; mark each green. Capture trace event log + verify ADR-015 hygiene (no user message text).
+    </step>
+    <step order="6" name="BFF Publish-Size Verification (NFR-02)">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed size. Report delta vs prior baseline (Phase C exit task 079). Confirm cumulative R6 delta ≤ +5 MB per NFR-02. Hard ceiling 60 MB per ADR-029.
+    </step>
+    <step order="7" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below. Confirm each is testable + green.
+    </step>
+    <step order="8" name="Document + Complete">
+      Update task POML status. Update TASK-INDEX.md: 087 🔲 → ✅. Reset `current-task.md`. Record BFF publish-size delta in task notes. Report completion + downstream unblock (088).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">BFF build + integration test runner + publish-size measurement</tool>
+    <tool name="npm">Frontend build + e2e test runner</tool>
+    <tool name="ui-test">Skill for browser-based UI tests if Chrome integration enabled</tool>
+    <tool name="git">Stage + commit integration + e2e test files</tool>
+    <tool name="mcp__dataverse__create_record">Seed test data via Dataverse MCP if available</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/VerticalSlice/SummarizeVerticalSliceTests.cs (NEW)</output>
+    <output type="test">src/solutions/SpaarkeAi/tests/e2e/summarize-vertical-slice.e2e.test.ts (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 087 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-087-vertical-slice-evidence.md (per-pillar acceptance evidence + BFF publish-size delta)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">**Pillar 1**: Persona resolved from `sprk_aipersona` Dataverse entity; no hardcoded `BuildDefaultSystemPrompt()` call (assertion in BFF test).</criterion>
+    <criterion testable="true">**Pillar 2**: Tools assembled from `sprk_analysistool` rows; no hardcoded tool-class instantiation (assertion).</criterion>
+    <criterion testable="true">**Pillar 3**: `/summarize` triggers `invoke_playbook` via `IInvokePlaybookAi` facade; specialized bridges removed.</criterion>
+    <criterion testable="true">**Pillar 4**: `SessionSummarizeOrchestrator` routes via `PlaybookExecutionEngine.ExecuteAsync(playbookId)`; FK chain traversed; no alternate-key lookup.</criterion>
+    <criterion testable="true">**Pillar 5**: Output renders schema-aware — tldr as bullets, entities as labeled key-value blocks; ONE render per user intent (no duplicate-fire).</criterion>
+    <criterion testable="true">**Pillar 6a**: Workspace state snapshot included in agent system prompt at turn time (prompt snapshot assertion).</criterion>
+    <criterion testable="true">**Pillar 6b**: "Send to Workspace" + "Make it shorter" + `/clear` all work end-to-end.</criterion>
+    <criterion testable="true">**Pillar 6c**: Context pane shows live execution trace; additive `context.*` events emitted; ADR-015 hygiene verified (no user message text in events).</criterion>
+    <criterion testable="true">**Pillar 7**: Memory composition includes recent verbatim + compressed mid + pinned + retrieved old; verifiable via prompt snapshot.</criterion>
+    <criterion testable="true">**Pillar 8**: `/summarize #file.docx` parses + decorates + resolves + routes via CapabilityRouter Layer 1 strong-intent path.</criterion>
+    <criterion testable="true">**Pillar 9**: Per-turn prompt builder respects `visibleToAssistant: true` filter; widgets opt-in via `getAgentVisibleState()`.</criterion>
+    <criterion testable="true">**Conversational refinement (NFR-01)**: After playbook output, "make it shorter" gets conversational response with NO tool call.</criterion>
+    <criterion testable="true">BFF publish-size delta vs Phase C exit baseline reported; cumulative R6 delta ≤+5 MB (NFR-02); hard ceiling 60 MB respected (ADR-029).</criterion>
+    <criterion testable="true">All 11 pillar acceptance checks green; vertical-slice scenario passes end-to-end.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Vertical-Slice End-to-End">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control&amp;controlName=spaarke_SpaarkeAi</url>
+      <steps>
+        <step>Upload a test document (engagement-letter.docx) as session file</step>
+        <step>Open conversation pane in matter context</step>
+        <step>Type `/summarize #engagement-letter.docx` and submit</step>
+        <step>Verify workspace tab appears with bulleted tldr + labeled entities</step>
+        <step>Verify Context pane shows execution trace timeline</step>
+        <step>Click "Send to Workspace" on chat assistant message; verify tab created</step>
+        <step>Type "make it shorter" as refinement; verify conversational response (no tool call)</step>
+        <step>Type `/clear`; verify session resets without LLM call</step>
+      </steps>
+      <expected>End-to-end scenario completes; all visible affordances functional</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Run the vertical-slice scenario</step>
+        <step>Verify all surfaces (workspace widget, context trace, help drawer) adapt</step>
+      </steps>
+      <expected>All R6 UI surfaces use Fluent v9 semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+</task>

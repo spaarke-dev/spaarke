@@ -1,0 +1,115 @@
+<task id="068" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-21 + D-C-22 — Activate `MatterMemoryService` into chat-agent prompt assembly + shared token budget tracker</title>
+    <status>pending</status>
+    <estimated-effort>1 day</estimated-effort>
+    <phase>Phase C — Cross-Conversation Memory (Pillar 7)</phase>
+    <wave>C-G2 (sequential after 067)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>067 (hierarchical composition)</dependencies>
+    <tags>bff-api, ai, chat, memory</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Wires existing production service + adds shared budget tracker; modifies chat agent factory hot path.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Two-part task:
+    1. **D-C-21 Activate `MatterMemoryService`**: the service exists in production
+       (`src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs`) but is
+       not wired into the chat-agent system prompt assembly. Wire it in via
+       `PlaybookChatContextProvider` so cross-session same-matter conversations are
+       coherent. **NOTE**: this task does NOT modify the service implementation — only
+       activates it. Per spec FR-45.
+    2. **D-C-22 Shared token budget tracker**: introduce
+       `IPromptBudgetTracker` (or similar) that the factory + document context +
+       knowledge retrieval + memory composition (task 067) all consume to share the 8K
+       budget per NFR-10. Currently each subsystem consumes the budget independently —
+       this tracker centralizes the accounting + emits telemetry on truncation events.
+  </prompt>
+
+  <role>
+    Senior AI platform engineer with familiarity with `MatterMemoryService` production
+    code + `PlaybookChatContextProvider` prompt assembly.
+  </role>
+
+  <goal>
+    `MatterMemoryService` activated; cross-session matter memory visible in agent
+    prompts. Shared budget tracker introduced + consumed by all 4 subsystems; truncation
+    telemetry emitted; 8K total budget enforced.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="ai-arch">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="matter-memory">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs</file>
+    <file purpose="ctx-provider">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register tracker in existing module; ZERO Program.cs lines.</constraint>
+    <constraint source="ADR-013">BFF-side AI plumbing.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="spec FR-45">Activate `MatterMemoryService` (already exists in production); R6 wires into chat-agent system prompt assembly.</constraint>
+    <constraint source="spec FR-46">Shared budget tracker; factory + document context + knowledge + memory share 8K total per NFR-10.</constraint>
+    <constraint source="spec NFR-10">8K total preserved.</constraint>
+    <constraint source="project R6 Pillar 7 NOTE">Task does NOT modify MatterMemoryService implementation — activation + budget wiring only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-memory-budget</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Chat factory hot path; budget orchestration; NFR-10 binding."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 067 complete.</step>
+    <step order="2" name="Gather Resources">Read MatterMemoryService + PlaybookChatContextProvider in full. Map existing budget tracking sites.</step>
+    <step order="3" name="Activate MatterMemoryService">Wire into `PlaybookChatContextProvider` memory composition step (alongside MemoryCompositionService from task 067). Do NOT modify the service.</step>
+    <step order="4" name="Author Budget Tracker">`IPromptBudgetTracker` interface; in-flight accounting + emission of truncation telemetry.</step>
+    <step order="5" name="Wire 4 Subsystems">Factory + document context + knowledge retrieval + memory composition consume the tracker.</step>
+    <step order="6" name="Register in Module">Per ADR-010.</step>
+    <step order="7" name="Tests">Unit tests: MatterMemoryService activation visible in prompt; budget tracker prevents over-budget; truncation telemetry emitted.</step>
+    <step order="8" name="Publish-Size + CVE">dotnet publish + vulnerable check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 068 ✅. Note: MatterMemoryService NOT modified.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IPromptBudgetTracker.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/PromptBudgetTracker.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs (modified — MatterMemoryService activation + tracker wiring)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/PromptBudgetTrackerTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`MatterMemoryService` activated; cross-session matter memory visible in agent prompts.</criterion>
+    <criterion testable="true">`MatterMemoryService.cs` implementation file UNCHANGED (verified by diff).</criterion>
+    <criterion testable="true">`IPromptBudgetTracker` introduced + consumed by 4 subsystems (factory + document context + knowledge + memory).</criterion>
+    <criterion testable="true">Total system prompt budget enforced at 8K (NFR-10).</criterion>
+    <criterion testable="true">Truncation telemetry emitted on over-budget.</criterion>
+    <criterion testable="true">ZERO new Program.cs lines.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note>D-C-21: `MatterMemoryService` already exists in production. This task ACTIVATES it (wires into prompt assembly); does NOT modify the service.</note>
+  </notes>
+</task>

@@ -1,0 +1,34 @@
+{
+  "_comment_top": "R6 Wave 7c — seed row for the VerifyCitationsHandler typed handler. Replaces the legacy hardcoded VerifyCitationsTool class (removed from SprkChatAgentFactory.ResolveTools lines ~1187-1230).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'VerifyCitationsHandler' (= nameof handler class). Auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010).",
+  "_comment_security": "sprk_requiredcapability = 'verify_citations' (= PlaybookCapabilities.VerifyCitations) gates this tool to playbooks whose capability set includes 'verify_citations'. Standalone chat (no playbook, capabilities = CoreCapabilities) does NOT include 'verify_citations', so this handler is unreachable from standalone chat — preserving the pre-Wave-7c security boundary that the hardcoded `if (capabilities.Contains(PlaybookCapabilities.VerifyCitations))` block enforced. Per R6 Wave 7b infrastructure (commit 66da08ca), SprkChatAgentFactory.ResolveTools applies IsCapabilityGateSatisfied at session start and silently withholds rows whose RequiredCapability is not in the current playbook's capability set.",
+  "_comment_nfr13": "NFR-13 binding: this explicit-verification path is one of two citation safety mechanisms. The other — CitationSafetyCheck middleware in AiSafetyModule + SafetyPipelineMiddleware — runs UNCONDITIONALLY after every LLM response regardless of whether this tool is registered. Removing the hardcoded gate on the explicit verification tool does NOT weaken NFR-13 — the unconditional post-LLM check remains in the safety pipeline.",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool. The exact phrasing below is preserved verbatim from the legacy hardcoded registration so the LLM's tool-selection behavior is unchanged after migration.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass with sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Citation Verification",
+  "sprk_toolcode": "CITATION-VERIFY",
+  "sprk_description": "Verifies legal citations found in the provided text against authoritative sources. Returns verification status, confidence, and source URLs for each citation. Use when the user asks to verify references, check case validity, or confirm regulatory citations.",
+  "sprk_handlerclass": "VerifyCitationsHandler",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). Chat is the primary call site (matches the legacy hardcoded registration); playbook context is exposed so playbook-orchestrated review steps can verify citations against an Action-supplied passage of text.",
+  "sprk_requiredcapability": "verify_citations",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "VerifyCitationsHandler Request",
+    "description": "Argument shape for chat-driven invocation of VerifyCitationsHandler. 'text' is the passage to scan for legal citations; the handler returns per-citation verification results.",
+    "type": "object",
+    "required": ["text"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The text passage containing legal citations to extract and verify. Supports case law (e.g., '542 U.S. 296'), statutes (e.g., '35 U.S.C. § 101'), patents, SEC filings (e.g., 'Form 10-K'), and federal regulations (e.g., '47 C.F.R. § 73.3999')."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "Default configuration. VerifyCitationsHandler does not require any configuration parameters; the 'text' input arrives via chat-tool arguments (or, in playbook context, via sprk_configuration.text or DocumentContext.ExtractedText fallback)."
+  },
+  "_comment_configuration": "No handler-side configuration today. Reserved for future per-row defaults (e.g., provider allow-list, citation-type filter)."
+}
