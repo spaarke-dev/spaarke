@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-11 00:35 (by context-handoff before /compact)
+> **Last Updated**: 2026-06-11 (post-Wave-A, all 6 tasks landed on `work/smart-todo-r4-wave2`)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,19 +10,20 @@
 | Field | Value |
 |-------|-------|
 | **Project** | smart-todo-r4 — 7 workstreams (A-G), 31 tasks total |
-| **Status** | **13 of 31 tasks ✅** (42% by count; foundation + first implementation wave complete) |
-| **PR #377** | ✅ MERGED to master as squash `eed39e40a` (2026-06-11T00:18:47Z) |
-| **Worktree branch** | `work/smart-todo-r4-wave2` @ `254302259` (= origin/master tip); old `work/smart-todo-r4` branch + remote deleted post-merge; main repo free to checkout master |
-| **Active task** | none — between waves; ready to dispatch next |
-| **Working tree** | only this current-task.md modified (resume point); ready for /compact |
-| **Next Action** | Dispatch Wave A (6 parallel agents): 031 (B-filter) + 032 (B-actions) + 033 (B-view) + 040 (C-modal) + 070 (F-orient) + 081 (G-Matter form) |
-| **Suggested next wave** | 6 parallel agents: 031 (B-filter) + 032 (B-actions) + 033 (B-view) + 040 (C-modal) + 070 (F-orient) + 081 (G-Matter form) |
+| **Status** | **19 of 31 tasks ✅** (61% by count; foundation + Wave 2a + Wave 2a-followups + Wave A all complete) |
+| **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
+| **Worktree branch** | `work/smart-todo-r4-wave2` @ `54fb0d541` (Wave A: +6 tasks) — pushed to origin |
+| **Active task** | none — between waves; ready to dispatch Wave B |
+| **Working tree** | clean |
+| **Next Action** | Dispatch Wave B (up to 8 parallel agents — see "Wave proposal B" table below) |
+| **PR for Wave A** | Not yet opened — recommended NEXT: open PR for `work/smart-todo-r4-wave2` → master so Wave B can rebase off a clean post-merge master. OR continue Wave B on same branch and open one combined PR. **User decision required.** |
 
 ### Critical context for resume
 
-- All R4 client surfaces from Phases 0 + 1 + Wave 2a + Wave 2a-followups are **live on master**: `<RecordNavigationModalShell>`, 3 toolbar primitives, RichFilePreviewDialog refactor, useLaunchContext extension, RegardingResolver virtual PCF + CREATE-mode bridge, SmartTodo 4-row Header, `@spaarke/smart-todo-components` peer package + LW shim, pre-save JS web resource, 4 chart def JSONs + deploy script.
+- All R4 client surfaces from Phases 0 + 1 + Wave 2a + Wave 2a-followups are **live on master** via PR #377. Wave A surfaces are **on `work/smart-todo-r4-wave2` only** (commit `54fb0d541`) — NOT yet on master.
 - **spaarkedev1 deploys are master-only** (durable memory saved at `~/.claude/projects/c--code-files-spaarke-wt-smart-todo-r4/memory/feedback_spaarkedev1-deploy-discipline.md`). Whoever lands LAST among in-flight PRs touching SpaarkeAi / SmartTodo / shared Code Page surfaces does ONE final master-side redeploy. Do NOT propose branch-based deploys.
 - Master also includes PR #375 (R6 platform unification phases A+B+partial C) and PR #369 (multi-container-multi-index project scaffolding) — landed concurrently with R4 in same deploy window.
+- **Known pre-existing condition from PR #369**: `@spaarke/sdap-client` rootDir cascade in `Spaarke.UI.Components/EntityCreationService.ts` breaks Vite builds of every code-page consuming `@spaarke/ui-components`. Workaround = vite alias to source. NOW APPLIED to: SmartTodo (Wave A task 040), LegalWorkspace (Wave A main-session reconciliation), CreateMatter/Project/Event/WorkAssignmentWizard (prior). Project-wide fix (tsconfig refs) deferred to task 092/098.
 
 ---
 
@@ -34,40 +35,30 @@
 | **G1+2a hoists/PCF/hook/charts** | 010, 012, 034, 050, 080 | Shared lib hoists (RecordNavigationModalShell + 3 toolbar primitives), RegardingResolver virtual PCF (20/20 tests, 1.56 MiB bundle), useLaunchContext extension (235→471 LOC, 22 tests), 4 chart def JSONs + idempotent PS deploy script. |
 | **G1+2a-followups** | 011, 020, 030, 051 | RichFilePreviewDialog refactor (regression-safety pass), SmartToDo widget rebuild via new `@spaarke/smart-todo-components` peer package (Pattern D; FeedTodoSyncContext lifted to LW shim per user decision; agent hit timeout but produced clean buildable work; main session did closeout), SmartTodo 4-row Header layout, form-binding JS Web Resource + 9-section instructions doc. |
 | **R4-051 follow-up fix** | (no new task) | PCF CREATE-mode bridge: `RegardingResolverApp.tsx` populates `window.__sprk_regarding_pending__` on CREATE so OnSave handler stages all 5 fields in INSERT transaction. Closes the HIGH-priority follow-up before any deploy. |
+| **Wave A (post-/compact)** | 031, 032, 033, 040, 070, 081 | 6 parallel agents on `work/smart-todo-r4-wave2`. All returned clean with builds green. 031 "Assigned to Me" filter + MyTasksFilter deletion; 032 selection-aware toolbar (Open/Delete/Email/Pin); 033 List/Card view toggle + persistence; 040 SmartTodo modal wire-up (`<RecordNavigationModalShell>` + iframe OOB form); 070 vertical Kanban orientation (CSS flex-direction); 081 Matter form Visual Host instructions doc. Main-session reconciliation: deduped `OPEN_TODOS_EVENT` between 032 + 040 (032 canonical); added `@spaarke/sdap-client` vite alias to LegalWorkspace (PR #369 cascade unblock). Commit `54fb0d541`. |
 
 ---
 
-## Remaining Work — 18 tasks (suggested grouping for next waves)
+## Remaining Work — 12 tasks (suggested grouping for next waves)
 
-### Wave proposal A (6 parallel, dispatch FIRST after compact)
+### Wave proposal B (dispatch NEXT — up to 8 parallel)
 
-| Task | Touches | Dependencies (all ✅) | Estimated |
-|---|---|---|---|
-| **031** B "Assigned to Me" filter (drop "My Tasks") | `SmartTodo/src/hooks/useTodoItems.ts` + Header | 030 ✅ | 0.5d |
-| **032** B selection-aware toolbar actions (Open/Delete/Email/Pin — replaces 030's 4 stubs) | `SmartTodo/src/SmartTodoApp.tsx:115-139` + `Toolbar/ToolbarActions.ts` | 012 ✅, 030 ✅ | 1-1.5d |
-| **033** B List/Card view toggle + persistence | `useUserPreferences.ts` (extend) + `ListView/` (new) + Header | 012 ✅, 030 ✅ | 1d |
-| **040** C wire SmartTodo card-open path to `<RecordNavigationModalShell>` with To Do main form iframe | `SmartTodo/src/components/Modal/SmartTodoModal.tsx` (new) | 010 ✅, 030 ✅ | 2d |
-| **070** F vertical Kanban orientation toggle (CSS transform-only) | `SmartTodo/src/components/KanbanBoard.tsx` | 012 ✅, 030 ✅ | 1-1.5d |
-| **081** G Visual Host "Upcoming To Dos" on Matter form (instructions doc + JS + form designer steps for user) | Matter main form (form-designer change) + solution XML | 051 ✅, 080 ✅, 034 ✅ | 0.5d |
+| Task | Touches | Dependencies (all ✅) | Estimated | Parallel risk |
+|---|---|---|---|---|
+| **041** C cross-frame dirty-check messaging | iframe `postMessage` protocol + `<RecordNavigationModalShell>` wiring | 040 ✅ | 1d | Low — separate concern |
+| **042** C retire `TodoDetailPanel` side-pane (FR-18) | `SmartTodoApp.tsx` cleanup + `TodoDetailPanel/` removal | 040 ✅ | 0.5d | **HIGH on `SmartTodoApp.tsx`** — should land BEFORE 041 to simplify diff, or serialize against it |
+| **060** E card affordances: Open icon + double-click + selection checkbox | `SmartTodo/src/components/SmartToDoCard.tsx` + `KanbanBoard.tsx` | 012 ✅, 030 ✅, 040 ✅ | 1d | Medium — touches card subtree |
+| **052** D read-only mode for view-only roles | `RegardingResolver` PCF + pre-save handler gate | 050 ✅, 051 ✅ | 0.5-1d | Low — PCF is separate |
+| **071** F orientation persistence via `sprk_userpreference` | `useUserPreferences.ts` (extend further) + `SmartToDo.tsx` | 070 ✅, 033 ✅ | 0.5d | **HIGH overlap with 033's useUserPreferences viewMode field — read 033's final hook shape before extending** |
+| **082** G Visual Host on Project form (clone 081 doc) | new instructions doc | 051 ✅, 080 ✅, 034 ✅ | 0.25d | None |
+| **083** G Visual Host on Invoice form (clone 081 doc) | new instructions doc | 051 ✅, 080 ✅, 034 ✅ | 0.25d | None |
+| **084** G Visual Host on WorkAssignment form (clone 081 doc) | new instructions doc | 051 ✅, 080 ✅, 034 ✅ | 0.25d | None |
 
-**File-ownership care**: 031, 032, 033, 040, 070 all live in `src/solutions/SmartTodo/src/`. R4-030's Header exposes `selectedIds` Set at `SmartTodoLayout:~109` (with `_setSelectedIds` setter ready) and `facets` prop API. 031 wires facets; 032 replaces the 4 stub `onClick` handlers at `SmartTodoApp.tsx:115-139`; 033 mounts `<ViewToggle>` in Header Row 3 trailing edge; 040 wires the Open action's modal launch; 070 modifies `KanbanBoard.tsx` (separate file, lowest conflict risk). If sub-agents conflict on `SmartTodoApp.tsx`, serialize the latter three.
+**Dispatch recommendation**: 042 + 041 should be serialized (042 first, then 041 — both touch the modal subtree). 071 should be serialized against any other useUserPreferences-touching work. The four G-tasks (082/083/084 plus optionally 081 redo if needed) are zero-conflict and fully parallel-safe. Suggested wave: dispatch 6 parallel = 042 + 060 + 052 + 082 + 083 + 084, then 041 + 071 in a small follow-up wave.
 
-### Wave proposal B (after Wave A lands — up to 6 parallel)
+### Phase 3 + 4 (final 4 tasks — after Wave B)
 
-- **041** C cross-frame dirty-check messaging (depends on 040)
-- **042** C retire `TodoDetailPanel` side-pane (depends on 040)
-- **060** E card affordances: Open icon + double-click + selection checkbox (depends on 012 ✅, 030 ✅, 040)
-- **052** D read-only mode for view-only roles (depends on 050 ✅, 051 ✅)
-- **071** F orientation persistence via `sprk_userpreference` (depends on 070)
-- **082** G Visual Host on Project form (parallel-safe; depends on 051 + 080 + 034 — all ✅)
-- **083** G Visual Host on Invoice form (parallel-safe)
-- **084** G Visual Host on WorkAssignment form (parallel-safe)
-
-Can dispatch up to 6 — pick: 041, 042, 052, 060, 082, 083 (or any 6 from the list).
-
-### Phase 3 + 4 (final 4 tasks — after Wave A + B)
-
-- **092** Deploy all affected solutions (per project-pipeline deploy convention now: **deploy from master**, not from feature branch)
+- **092** Deploy all affected solutions (per project-pipeline deploy convention now: **deploy from master**, not from feature branch) — also fold in project-wide tsconfig refs fix for `@spaarke/sdap-client` cascade
 - **093** UI test suite (NFR-05 modal nav latency, NFR-07 a11y, NFR-08 orientation switch)
 - **094** Final `grep -ri sprk_todoflag src/` → 0 functional hits (graduation criterion 12)
 - **098** Wrap-up: lessons-learned + README status → Complete + repo-cleanup + final PR
@@ -80,32 +71,38 @@ See [`tasks/TASK-INDEX.md` Follow-ups Surfaced section](tasks/TASK-INDEX.md#foll
 
 1. **MEDIUM** — LW Kanban rich-feature hoist into `@spaarke/smart-todo-components` (13-file subtree deferred from R4-020)
 2. **LOW** — Shell `chromeMode?` or `RichFilePreview` `suppressTitleBar?` API tweak (R4-011 finding)
-3. **LOW** — SmartTodo vitest/jest test runner wiring (pre-existing; 22 useLaunchContext tests are executable-spec shims)
-4. **MONITOR** — PR #376 `WidgetErrorBoundary` rewrite landed clean (no follow-up needed; verified via rebase)
+3. **LOW** — SmartTodo vitest/jest test runner wiring (pre-existing; 22 useLaunchContext tests + 12+ Toolbar tests + 12+ Modal tests are executable-spec shims)
+4. **MEDIUM (NEW from Wave A)** — Project-wide `@spaarke/sdap-client` rootDir fix: tsconfig `composite` + `references` so consumers don't need per-config vite alias workarounds. Currently aliased in 5 code-pages (4 wizards + SmartTodo + LegalWorkspace). Belongs in task 092 or 098.
+5. **MONITOR** — PR #376 `WidgetErrorBoundary` rewrite landed clean (no follow-up needed; verified via rebase)
 
 ---
 
-## Files Modified This Session (post-merge state)
+## Files Modified This Session (post-Wave-A state)
 
-**All committed + merged to master via PR #377 squash commit `eed39e40a`. No uncommitted changes.**
+**Phases 0 + 1 + Wave 2a + Wave 2a-followups all merged to master via PR #377 squash `eed39e40a`. Wave A is on `work/smart-todo-r4-wave2` (commit `54fb0d541`) and pushed to origin but NOT yet merged.**
 
-Major new files:
-- `src/client/pcf/RegardingResolver/` (entire PCF, ~20 files)
-- `src/client/shared/Spaarke.SmartTodo.Components/` (new peer package, ~12 files including node_modules)
-- `src/client/shared/Spaarke.UI.Components/src/components/{RecordNavigationModalShell,SelectionAwareToolbar,ViewToggle,OrientationToggle}/` (4 new shared components)
-- `src/client/webresources/js/sprk_todo_regarding_presave.js` (form pre-save handler)
-- `src/solutions/SmartTodo/src/components/Header/` (4-row layout)
-- `infrastructure/dataverse/charts/upcoming-todos-*.json` (4 chart def JSONs)
-- `scripts/Create-UpcomingTodosChartDefinitions.ps1`
-- `projects/smart-todo-r4/notes/{widget-surface-audit,regarding-resolver-audit,drill-through-spike,launch-context-decision,g-chart-def-deploy-notes,d-form-bind-instructions}.md`
+### Wave A new files (commit `54fb0d541`)
 
-Modified existing files:
-- `src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx` (CREATE-mode bridge)
-- `src/client/shared/Spaarke.UI.Components/src/components/{FilePreview/RichFilePreviewDialog.tsx,utils/parseDataParams.ts,index.ts}`
-- `src/solutions/SmartTodo/src/{SmartTodoApp.tsx,hooks/useLaunchContext.ts,hooks/__tests__/useLaunchContext.test.ts}`
-- `src/solutions/LegalWorkspace/src/sections/todo.registration.ts` (Pattern D shim)
-- `src/solutions/LegalWorkspace/package.json` (workspace dep on smart-todo-components)
-- All R4 task POMLs marked complete; TASK-INDEX + plan.md + CLAUDE.md updated through 3 wave outcomes
+- `src/solutions/SmartTodo/src/components/Toolbar/{ToolbarActions.ts,index.ts,__tests__/ToolbarActions.test.ts}` — Open/Delete/Email/Pin action factory + tests (task 032)
+- `src/solutions/SmartTodo/src/components/Modal/{SmartTodoModal.tsx,buildTodoIframeUrl.ts,index.ts,__tests__/buildTodoIframeUrl.test.ts}` — `<RecordNavigationModalShell>` + iframe wrapper + URL builder + tests (task 040)
+- `src/solutions/SmartTodo/src/components/ListView/{ListView.tsx,ListView.styles.ts,index.ts}` — dense Fluent v9 table view (task 033)
+- `projects/smart-todo-r4/notes/g-matter-form-visualhost-instructions.md` — 10-section maker doc (task 081)
+
+### Wave A modified files (commit `54fb0d541`)
+
+- `src/client/shared/Spaarke.UI.Components/src/components/Kanban/{KanbanBoard.tsx,types.ts,index.ts,__tests__/KanbanBoard.test.tsx}` — orientation prop + Griffel vertical rules + 3 tests (task 070)
+- `src/solutions/SmartTodo/src/SmartTodoApp.tsx` — App-level wiring for all 4 SmartTodoApp-touching tasks (031 filter, 032 toolbar, 033 view mode + ListView mount, 040 modal subscriber); OPEN_TODOS_EVENT reconciled to import from `./components/Toolbar`
+- `src/solutions/SmartTodo/src/hooks/useUserPreferences.ts` — viewMode field added (033); MyTasksFilterMode removed (031)
+- `src/solutions/SmartTodo/src/hooks/useTodoItems.ts` + `services/queryHelpers.ts` + `services/DataverseService.ts` — single-arg `getActiveTodos(userId)`; filter baked in unconditionally (031)
+- `src/solutions/SmartTodo/src/components/{Header/Header.tsx,SmartToDo.tsx,KanbanHeader.tsx,index.ts,ThresholdSettings.tsx}` — Header view-mode toggle (033) + orientation toggle slot (070); MyTasksFilter prop/render purge (031)
+- `src/solutions/SmartTodo/src/components/MyTasksFilter.tsx` — DELETED (031)
+- `src/solutions/SmartTodo/vite.config.ts` — `@spaarke/sdap-client` alias (040)
+- `src/solutions/LegalWorkspace/vite.config.ts` — `@spaarke/sdap-client` alias (main-session reconciliation; PR #369 cascade unblock)
+- All 6 Wave A POMLs flipped to `complete`; TASK-INDEX updated to 19/31
+
+### Cumulative project state (master + branch)
+
+Refer to `git log master..work/smart-todo-r4-wave2` for the precise Wave A delta. Master tip carries everything from Phases 0 + 1 + Wave 2a + followups.
 
 ---
 
@@ -133,13 +130,13 @@ Modified existing files:
 - CLAUDE.md: project AI context (binding decisions + parallel branch coord)
 - TASK-INDEX: 31 tasks with statuses + 5 follow-ups documented
 
-### To resume
-1. Quick read: this file's Quick Recovery + Suggested Wave A
-2. Verify branch + master sync: `git status` clean (only this file may be ahead), `git fetch origin --prune`, `git rev-list --count HEAD..origin/master` should be 0
-3. **If master moved**: `git rebase origin/master` first (no need to delete branch — it was created clean from master tip)
-4. Dispatch Wave A (6 parallel agents): 031 + 032 + 033 + 040 + 070 + 081 — use `task-execute` skill per task POML
-5. After Wave A returns: build verify (Spaarke.UI.Components + SmartTodo Code Page + LegalWorkspace + RegardingResolver PCF), batch-merge any shared-lib index.ts exports, commit + push, open PR
-6. **Do NOT deploy from the branch.** Open PR → coordinate with Ralph → merge → master deploy happens last.
+### To resume (post-Wave-A)
+1. Quick read: this file's Quick Recovery + "Wave proposal B" table
+2. Verify branch + master sync: `git status` clean, `git fetch origin --prune`, `git rev-list --count HEAD..origin/master` (≥0 is OK — Wave A is ahead of master by 1 commit; if behind, rebase)
+3. **Decision point**: open PR for Wave A now (decouples Wave B from any rebase work), OR continue Wave B on same branch and open one combined PR. Ask user before assuming.
+4. Dispatch Wave B (recommended 6 parallel): 042 + 060 + 052 + 082 + 083 + 084. Then a follow-up wave for 041 + 071 (serialized against 042/033 respectively). Use the **Agent tool** with `general-purpose` subagent — Skill tool just loads the protocol into main context; Agent tool spawns concurrent sub-agents.
+5. After Wave B returns: same reconciliation pattern as Wave A — main session does merges, dedupes, build-verify across all 4 packages, commit + push.
+6. **Do NOT deploy from the branch.** Master-only deploy discipline holds.
 
 ### Commands for resume
 ```bash
@@ -148,7 +145,8 @@ git branch --show-current   # expect: work/smart-todo-r4-wave2
 
 # 2. Master sync check
 git fetch origin --prune
-git rev-list --count HEAD..origin/master  # expect 0; rebase if non-zero
+git rev-list --count HEAD..origin/master  # expect 0 unless master moved; rebase if non-zero
+git rev-list --count origin/master..HEAD  # expect 1 (Wave A commit 54fb0d541)
 
 # 3. Open project task index
 # View projects/smart-todo-r4/tasks/TASK-INDEX.md for task list (look for 🔲 markers)
