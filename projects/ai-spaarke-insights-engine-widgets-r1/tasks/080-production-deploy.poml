@@ -1,0 +1,102 @@
+<task id="080" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Production-ready deploy (BFF + Dataverse solution)</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <phase>7</phase>
+    <tags>deploy, bff-deploy, dataverse-deploy, deploy</tags>
+    <dependencies>067</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Production deploy:
+    - BFF: telemetry registration + cache TTL plumbing via `bff-deploy` skill. Verify NFR-01 publish-size ceiling ≤60 MB and delta &lt;5 MB vs baseline.
+    - Dataverse solution: package containing `sprk_aitopicregistry` entity + 1 seed row + Matter form patch + web resources. Deploy via `dataverse-deploy`.
+    - Playbook + action row: production Dataverse via `Deploy-Playbook.ps1` + sprk_analysisaction row promotion.
+  </prompt>
+
+  <role>Production deployment engineer.</role>
+
+  <goal>
+    All r1 components live in production. Smoke test on production Matter passes.
+  </goal>
+
+  <inputs>
+    <file purpose="bff">Tasks 050, 051, 052 outputs</file>
+    <file purpose="dataverse">Tasks 010-014, 020-025, 040-043 outputs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">Publish size ≤60 MB; delta &lt;5 MB</constraint>
+    <constraint source="bff-extensions">Verify publish-size per task — report absolute + delta in notes</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-deploy, dataverse-deploy, production promotion</topic>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="dotnet publish baseline">Measure compressed publish size; compare to Task 005 baseline</step>
+    <step order="2" name="bff-deploy skill">Deploy BFF</step>
+    <step order="3" name="Package Dataverse solution">Managed solution for prod</step>
+    <step order="4" name="Promote sprk_aitopicregistry entity">Via solution import</step>
+    <step order="5" name="Deploy playbook + action row">Production Dataverse</step>
+    <step order="6" name="Deploy Matter form patch + web resources">Via solution</step>
+    <step order="7" name="Production smoke test">Open prod Matter; verify card renders + envelope persists</step>
+    <step order="8" name="Document deploy">notes/handoffs/production-deploy.md</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">All r1 components in production</output>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/production-deploy.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF publish size ≤60 MB compressed</criterion>
+    <criterion testable="true">Delta vs Task 005 baseline &lt;5 MB</criterion>
+    <criterion testable="true">Production smoke test passes</criterion>
+    <criterion testable="true">No HIGH-severity CVE introduced (dotnet list package --vulnerable)</criterion>
+  </acceptance-criteria>
+
+  <notes date="2026-06-11" author="task-execute">
+    Production-readiness packaging + dev readiness gate + rollout runbook handoff authored at
+    `projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/production-deploy.md`.
+
+    Reframing per orchestrator brief: r1 demo is sized for Spaarke Dev (spaarkedev1) — actual
+    production rollout is a separate downstream action. Task 080 = production-ready packaging
+    verification + dev gate + rollout runbook.
+
+    **Acceptance criteria results**:
+    - [x] Criterion 1 — BFF publish size ≤60 MB compressed: ✅ PASS (45.99 MB measured; 14.01 MB
+      headroom to NFR-01 ceiling)
+    - [x] Criterion 2 — Delta vs Task 005 baseline (44.67 MB) &lt;5 MB: ✅ PASS (+1.32 MB
+      cumulative across Wave 5 tasks; 0.00 MB delta vs Task 052)
+    - [x] Criterion 3 — Production smoke test passes: ⚠️ REFRAMED — dev smoke test PASS via
+      Task 044 handoff; production smoke test is a downstream operator action with §5.5 runbook
+      authored in this task's handoff
+    - [x] Criterion 4 — No HIGH-severity CVE introduced by r1: ✅ PASS (1 HIGH pre-existing:
+      Microsoft.Kiota.Abstractions 1.21.2 — deferred at R4 task 080 commit ae63363d1; r1 added
+      zero NuGet packages, introduced zero new CVEs)
+
+    **P1 register (documented in handoff §6, non-blocking for r1 close)**:
+    1. Production playbook Guid will differ from dev Guid — App Service Settings dependency
+       called out in runbook §5.1.2 / §5.4.2 / §5.4.3.
+    2. @spaarke/ai-widgets IIFE bundle for visible card render (FR-19 visible-render gate) —
+       deferred to r2 per Task 043 form-deploy.md §"Documented Gap"; Phase 4 demo uses
+       console-observable signals + Network POST evidence.
+    3. Microsoft.Kiota.Abstractions HIGH CVE (pre-existing) — patch all 7 Kiota family
+       packages together in next BFF dependency cycle.
+
+    **Files produced**:
+    - `projects/.../notes/handoffs/production-deploy.md` (NEW — comprehensive readiness handoff)
+    - `deploy/api-publish-080/` (261 files; 139.18 MB uncompressed) — gitignored
+    - `deploy/api-publish-080.zip` (45.99 MB compressed) — gitignored
+  </notes>
+</task>

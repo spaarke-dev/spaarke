@@ -1,0 +1,56 @@
+<task id="037" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>ADR-021 dark mode verification (semantic tokens)</title>
+    <status>completed</status>
+    <estimated-effort>1.5h</estimated-effort>
+    <phase>3</phase>
+    <tags>ui, fluent-ui, dark-mode, adr-021</tags>
+    <dependencies>035</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Per ADR-021 + NFR-05: verify all colors use Fluent v9 semantic tokens (no hex codes, no rgba literals, no Spaarke palette overrides). Light + dark theme variants render correctly across all stories. Apply `.claude/patterns/ui/fluent-v9-theming.md`.
+  </prompt>
+
+  <role>Fluent v9 theming auditor.</role>
+
+  <goal>
+    Grep across new component files for hex codes / rgba / colorPalette overrides — zero hits. Visual verification on all stories in both themes.
+  </goal>
+
+  <inputs>
+    <file purpose="component">All Phase 3 component files</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Semantic tokens only — no hex, no rgba literals</constraint>
+    <constraint source="NFR-05">Light + dark verified</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent v9 theming, semantic tokens, dark mode</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Grep for hex codes">`#[0-9a-fA-F]{3,8}` in InsightSummaryCard files</step>
+    <step order="2" name="Grep for rgba">rgba\( in InsightSummaryCard files</step>
+    <step order="3" name="Visual verify all stories">Light + dark</step>
+    <step order="4" name="Run ui-test skill">Per dark mode tests defined in Task 030/031 POMLs</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/dark-mode-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero hex codes in InsightSummaryCard files</criterion>
+    <criterion testable="true">Zero rgba literals</criterion>
+    <criterion testable="true">All stories pass dark mode visual check</criterion>
+  </acceptance-criteria>
+</task>
