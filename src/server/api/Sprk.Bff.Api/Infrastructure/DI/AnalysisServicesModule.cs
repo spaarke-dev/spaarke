@@ -477,6 +477,58 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
         Console.WriteLine("✓ R5 SessionSummarizeOrchestrator registered (task 012; ADR-010 concrete; chat-session Summarize convergence)");
 
+        // R6 Pillar 7 (task 064, D-C-17) — SummarizationCompressionService. Sliding-window
+        // compression primitive: folds the oldest M chat turns into a single System-role
+        // summary message when the conversation exceeds the NFR-10 8K system-prompt budget.
+        // Foundation for task 067 (hierarchical memory composition); task 068 wires it into
+        // SprkChatAgentFactory's per-turn prompt-assembly path.
+        //
+        // §F.1 asymmetric-registration audit: this registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate. The only consumer in R6
+        // is task 068's SprkChatAgentFactory wiring, which is itself inside the same
+        // compound gate via the unconditional NullSprkChatAgentFactory peer (B2 pattern).
+        // The Null-Object kill-switch posture is intrinsic to the service: it returns null
+        // (P2 Quiet) when SummarizationCompression:Enabled=false or the OpenAI circuit is
+        // broken, so the caller short-circuits to the raw window. No separate Null peer
+        // needed at the DI layer.
+        //
+        // Options binding uses BindConfiguration; the B-G11 hardening pattern means the
+        // options class does NOT decorate use-site-conditional fields with [Required], so
+        // an app start with no SummarizationCompression section in appsettings is allowed
+        // (defaults take over, kill switch defaults to true).
+        //
+        // Lifetime: Scoped — matches IOpenAiClient (Singleton) wrap pattern used elsewhere
+        // in this module (Scoped is the safe lifetime that respects the wrapped singleton).
+        services.AddOptions<Sprk.Bff.Api.Services.Ai.Memory.SummarizationCompressionOptions>()
+            .BindConfiguration(Sprk.Bff.Api.Services.Ai.Memory.SummarizationCompressionOptions.SectionName);
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.ISummarizationCompressionService,
+                           Sprk.Bff.Api.Services.Ai.Memory.SummarizationCompressionService>();
+        Console.WriteLine("✓ R6 Pillar 7 SummarizationCompressionService registered (task 064, D-C-17; sliding-window compression foundation)");
+
+        // R6 Pillar 7 (task 065, D-C-18) — PinnedContextRepository. Cosmos-backed repository
+        // for the user-curated PinnedContextItem "memory anchor" entity (spec FR-42:
+        // pinned items NEVER drop from system-prompt assembly). Cosmos container `memory`
+        // is reused (same partition key `/tenantId` as MatterMemoryService + workspace-tab
+        // durable rows); document discriminator `documentType = "pinned-context"` +
+        // id prefix `pinned-context_` co-exist with the other documentTypes on the same
+        // partition without id collision.
+        //
+        // §F.1 asymmetric-registration audit: this registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate matching the surrounding
+        // Memory services. Consumers (task 067 hierarchical memory composition; task 070
+        // Q7 Pinned Memory UI) are themselves inside the same compound gate.
+        //
+        // Placement (CLAUDE.md §10 / ADR-013): memory plumbing only. The repository injects
+        // CosmosClient + IConfiguration only — no AI-internal collaborators
+        // (IOpenAiClient, IPlaybookService, etc.). AI-internal callers consume this
+        // repository directly per the 2026-05-20 refined ADR-013 boundary.
+        //
+        // Lifetime: Scoped — matches the WorkspaceStateService precedent (R6 Pillar 6a).
+        // CosmosClient itself is Singleton (injected); the scoped wrapper is stateless.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IPinnedContextRepository,
+                           Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRepository>();
+        Console.WriteLine("✓ R6 Pillar 7 PinnedContextRepository registered (task 065, D-C-18; user-curated memory anchors foundation)");
+
         // --- InvokeInsightsQueryTool typed HttpClient ---
         // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): the specialized
         // InvokeInsightsQueryTool C# bridge class was deleted in favor of the generic
