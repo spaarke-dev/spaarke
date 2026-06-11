@@ -110,6 +110,16 @@ public static class SemanticSearchEndpoints
 
             return Results.Ok(response);
         }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
+        {
+            // multi-container-multi-index-r1 FR-BFF-07 (task 016) — rethrow so the
+            // global `UseExceptionHandler` middleware (MiddlewarePipelineExtensions)
+            // renders the canonical ProblemDetails JSON per ADR-019. Without this,
+            // the generic `catch (Exception)` below would convert
+            // `INDEX_NOT_ALLOWED` (statusCode 400) into a 500 response — breaking
+            // NFR-08 (rejected index name MUST surface as ProblemDetails 400).
+            throw;
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Semantic search failed for tenant {TenantId}", tenantId);
@@ -169,6 +179,13 @@ public static class SemanticSearchEndpoints
                 tenantId, response.Count);
 
             return Results.Ok(response);
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
+        {
+            // multi-container-multi-index-r1 FR-BFF-07 (task 016) — rethrow so the
+            // global `UseExceptionHandler` middleware renders the canonical
+            // ProblemDetails JSON per ADR-019 (e.g., 400 INDEX_NOT_ALLOWED).
+            throw;
         }
         catch (Exception ex)
         {

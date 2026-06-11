@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
+
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
 /// <summary>
@@ -14,6 +17,27 @@ public static class StartupDiagnostics
         var startupLogger = startupScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
         startupLogger.LogInformation("\ud83d\udd0d Testing critical service dependencies...");
+
+        // multi-container-multi-index-r1 (FR-BFF-06, task 012): emit the AiSearch allow-list
+        // at INFO level so operators can verify the deployed per-environment config without
+        // inspecting source. Empty allow-list is logged as "(none)" to make misconfiguration
+        // visible. The resolver consumes this list to reject unknown indexName values with
+        // INDEX_NOT_ALLOWED (ADR-019 + NFR-08).
+        try
+        {
+            var aiSearchOptions = startupScope.ServiceProvider.GetRequiredService<IOptions<AiSearchOptions>>().Value;
+            var allowed = aiSearchOptions.AllowedIndexes;
+            startupLogger.LogInformation(
+                "AiSearch allow-list: {Count} indexes \u2014 {Indexes}",
+                allowed?.Length ?? 0,
+                allowed is { Length: > 0 } a ? string.Join(", ", a) : "(none)");
+        }
+        catch (Exception ex)
+        {
+            startupLogger.LogError(ex,
+                "Failed to resolve AiSearchOptions for allow-list startup log: {Error}",
+                ex.Message);
+        }
 
         // Test IToolHandlerRegistry
         try

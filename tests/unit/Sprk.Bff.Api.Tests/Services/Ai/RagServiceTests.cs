@@ -240,6 +240,102 @@ public class RagServiceTests
             Times.Once);
     }
 
+    // ── multi-container-multi-index-r1 FR-BFF-07 (task 014) ──────────────────────────────
+    // The three tests below cover the SearchIndexName thread-through:
+    //   (a) regression — SearchIndexName absent leaves the call site on the 2-arg overload
+    //       (preserves NFR-02 / FR-BFF-04 fall-through to the existing 2-tier chain);
+    //   (b) thread-through — SearchIndexName non-empty routes via the 3-arg overload with
+    //       the value passed through verbatim (FR-BFF-03);
+    //   (c) whitespace — SearchIndexName whitespace-only is treated as absent (FR-BFF-04).
+
+    [Fact]
+    public async Task SearchAsync_WhenSearchIndexNameAbsent_UsesTwoArgResolverOverload()
+    {
+        // Regression: existing callers (no SearchIndexName) MUST continue to invoke the
+        // original 2-arg GetSearchClientAsync overload. The 3-arg overload MUST NOT be hit.
+        // Spec NFR-02 backward-compat (per task 010 two-overload design rationale).
+
+        // Arrange
+        var service = CreateService();
+        var options = new RagSearchOptions { TenantId = "tenant-123" }; // SearchIndexName not set
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        await service.SearchAsync("test query", options);
+
+        // Assert — 2-arg overload invoked exactly once; 3-arg overload NOT touched.
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync("tenant-123", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenSearchIndexNameProvided_ThreadsThroughToThreeArgResolverOverload()
+    {
+        // FR-BFF-07 thread-through: when RagSearchRequest.SearchIndexName flows into
+        // RagSearchOptions.SearchIndexName (endpoint wiring done in task 016), RagService
+        // MUST pass the value verbatim into the 3-arg resolver overload, which applies
+        // allow-list validation in KnowledgeDeploymentService (FR-BFF-02 / NFR-08).
+
+        // Arrange
+        var service = CreateService();
+        var explicitIndex = "spaarke-file-index";
+        var options = new RagSearchOptions
+        {
+            TenantId = "tenant-123",
+            SearchIndexName = explicitIndex
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClientWithExplicitIndex();
+
+        // Act
+        await service.SearchAsync("test query", options);
+
+        // Assert — 3-arg overload invoked with the explicit index name; 2-arg overload NOT touched.
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync("tenant-123", explicitIndex, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenSearchIndexNameWhitespace_UsesTwoArgResolverOverload()
+    {
+        // FR-BFF-04 — whitespace-only SearchIndexName MUST be treated identically to null
+        // (fall through to the existing 2-tier chain). Defense-in-depth against accidental
+        // " " values flowing in from upstream URL params or DTO defaulting.
+
+        // Arrange
+        var service = CreateService();
+        var options = new RagSearchOptions
+        {
+            TenantId = "tenant-123",
+            SearchIndexName = "   "
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        await service.SearchAsync("test query", options);
+
+        // Assert — 2-arg overload invoked; 3-arg overload NOT touched.
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync("tenant-123", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Fact]
     public async Task SearchAsync_ReturnsSearchDurationMetrics()
     {
@@ -993,6 +1089,99 @@ public class RagServiceTests
         documents[0].DocumentVector.ToArray().Should().BeEquivalentTo(documents[1].DocumentVector.ToArray());
     }
 
+    // ── multi-container-multi-index-r1 indexer-routing-fix (Tier 3) ──────────────────────
+    // The three tests below cover the IndexDocumentsBatchAsync 3-arg overload thread-through:
+    //   (a) regression — 2-arg overload (no searchIndexName) continues to invoke the 2-arg
+    //       GetSearchClientAsync resolver (NFR-02 backward-compat);
+    //   (b) thread-through — 3-arg overload with explicit searchIndexName routes via the
+    //       3-arg GetSearchClientAsync overload (FR-BFF-03);
+    //   (c) whitespace-only searchIndexName is treated as absent (FR-BFF-04).
+
+    [Fact]
+    public async Task IndexDocumentsBatchAsync_TwoArgOverload_UsesTwoArgResolver()
+    {
+        // Regression: existing callers using the 2-arg overload MUST continue to invoke the
+        // 2-arg GetSearchClientAsync resolver. NFR-02 backward-compat.
+
+        // Arrange
+        var service = CreateService();
+        var documents = new[]
+        {
+            new KnowledgeDocument { Id = "doc-1", TenantId = "tenant-1", SpeFileId = "file-1", Content = "Content 1" }
+        };
+
+        SetupMockBatchEmbeddings(1);
+        SetupMockSearchClientForIndexing();
+
+        // Act — call the 2-arg overload explicitly
+        await service.IndexDocumentsBatchAsync(documents, CancellationToken.None);
+
+        // Assert — 2-arg resolver overload invoked; 3-arg overload NOT touched.
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync("tenant-1", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task IndexDocumentsBatchAsync_ThreeArgOverload_WithExplicitIndex_UsesThreeArgResolver()
+    {
+        // FR-BFF-07 thread-through (write path): the 3-arg IndexDocumentsBatchAsync overload
+        // routes via the 3-arg GetSearchClientAsync overload. Allow-list validation
+        // happens inside KnowledgeDeploymentService.GetSearchClientAsync (FR-BFF-02 / NFR-08).
+
+        // Arrange
+        var service = CreateService();
+        var documents = new[]
+        {
+            new KnowledgeDocument { Id = "doc-1", TenantId = "tenant-1", SpeFileId = "file-1", Content = "Content 1" }
+        };
+
+        SetupMockBatchEmbeddings(1);
+        SetupMockSearchClientForIndexingWithExplicitIndex();
+
+        // Act
+        await service.IndexDocumentsBatchAsync(documents, "spaarke-file-index", CancellationToken.None);
+
+        // Assert — 3-arg resolver overload invoked with the explicit index name verbatim
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync("tenant-1", "spaarke-file-index", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task IndexDocumentsBatchAsync_ThreeArgOverload_WhitespaceIndex_FallsThroughToTwoArgResolver()
+    {
+        // FR-BFF-04: whitespace-only searchIndexName treated as absent (resolver falls through
+        // to the 2-tier tenant chain). Same semantics as null.
+
+        // Arrange
+        var service = CreateService();
+        var documents = new[]
+        {
+            new KnowledgeDocument { Id = "doc-1", TenantId = "tenant-1", SpeFileId = "file-1", Content = "Content 1" }
+        };
+
+        SetupMockBatchEmbeddings(1);
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        await service.IndexDocumentsBatchAsync(documents, "   ", CancellationToken.None);
+
+        // Assert — 2-arg overload invoked (whitespace → tenant default); 3-arg NOT touched.
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync("tenant-1", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     #endregion
 
     #region DeleteDocumentAsync Tests
@@ -1327,6 +1516,37 @@ public class RagServiceTests
             .ReturnsAsync(searchClientMock.Object);
     }
 
+    /// <summary>
+    /// multi-container-multi-index-r1 FR-BFF-07 (task 014) — mock the 3-arg
+    /// <c>GetSearchClientAsync(tenantId, indexName, ct)</c> overload (separate from the 2-arg
+    /// overload mocked by <see cref="SetupMockSearchClient"/>) so tests can verify the
+    /// thread-through is correctly routed to the explicit-index overload.
+    /// </summary>
+    private void SetupMockSearchClientWithExplicitIndex()
+    {
+        var searchClientMock = new Mock<SearchClient>();
+
+        var searchResults = SearchModelFactory.SearchResults<KnowledgeDocument>(
+            values: new List<SearchResult<KnowledgeDocument>>(),
+            totalCount: 0,
+            facets: null,
+            coverage: null,
+            rawResponse: null!);
+
+        var responseMock = Response.FromValue(searchResults, null!);
+
+        searchClientMock
+            .Setup(x => x.SearchAsync<KnowledgeDocument>(
+                It.IsAny<string>(),
+                It.IsAny<SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(responseMock);
+
+        _deploymentServiceMock
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(searchClientMock.Object);
+    }
+
     private void SetupMockSearchClientByDeployment()
     {
         var searchClientMock = new Mock<SearchClient>();
@@ -1428,6 +1648,51 @@ public class RagServiceTests
         // RagService.IndexDocumentsBatchAsync also resolves a KnowledgeDeploymentConfig
         // for observability logging (Model, IndexName, Endpoint, BatchSize). Provide a
         // minimal Shared-model config so the observability log call does not NRE.
+        _deploymentServiceMock
+            .Setup(x => x.GetDeploymentConfigAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new KnowledgeDeploymentConfig
+            {
+                TenantId = "tenant-1",
+                Name = "test-deployment",
+                Model = RagDeploymentModel.Shared,
+                IndexName = "spaarke-knowledge-index-v2",
+                IsActive = true
+            });
+    }
+
+    /// <summary>
+    /// multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — mock the 3-arg
+    /// <c>GetSearchClientAsync(tenantId, indexName, ct)</c> overload (separate from the 2-arg
+    /// overload mocked by <see cref="SetupMockSearchClientForIndexing"/>) so tests can verify the
+    /// write-path thread-through is correctly routed to the explicit-index overload.
+    /// </summary>
+    private void SetupMockSearchClientForIndexingWithExplicitIndex()
+    {
+        var searchClientMock = new Mock<SearchClient>();
+
+        var indexResult = SearchModelFactory.IndexDocumentsResult(
+            new List<AzureSdkIndexingResult>
+            {
+                SearchModelFactory.IndexingResult("doc-1", null, true, 201)
+            });
+
+        var responseMock = Response.FromValue(indexResult, null!);
+
+        searchClientMock
+            .Setup(x => x.MergeOrUploadDocumentsAsync(
+                It.IsAny<IEnumerable<KnowledgeDocument>>(),
+                It.IsAny<IndexDocumentsOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(responseMock);
+
+        searchClientMock
+            .SetupGet(x => x.Endpoint)
+            .Returns(new Uri("https://test-search.search.windows.net"));
+
+        _deploymentServiceMock
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(searchClientMock.Object);
+
         _deploymentServiceMock
             .Setup(x => x.GetDeploymentConfigAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new KnowledgeDeploymentConfig

@@ -3,7 +3,7 @@
     <title>B — Selection-aware toolbar actions (Open / Delete / Email / Pin)</title>
     <phase>Phase 2: Wave 2a</phase>
     <workstream>B</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1-1.5 days</estimated-effort>
     <tags>code-page, smart-todo, ui, fluent-v9, toolbar, dataverse</tags>
     <parallel-safe>true</parallel-safe>

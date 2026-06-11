@@ -732,6 +732,11 @@ public static class ChatDocumentEndpoints
                     detail: "Failed to upload document to SharePoint Embedded storage.");
             }
 
+            // Post-upload RAG indexing for chat-persisted documents is triggered client-side
+            // via `@spaarke/sdap-client.SdapApiClient.indexFile()` — see project
+            // `sdap-client-shared-library-fix-r1`. Re-wiring inline indexing here is tracked
+            // as future work once the SprkChat surface adopts `@spaarke/sdap-client`.
+
             // 8. Build response and store idempotency marker
             var speResponse = new SpeFilePersistResponse(
                 SpeFileId: uploadResult.Id,

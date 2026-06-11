@@ -3,6 +3,7 @@ using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
@@ -46,6 +47,19 @@ public sealed class RecordSearchService : IRecordSearchService
     private readonly IDistributedCache _distributedCache;
     private readonly DocumentIntelligenceOptions _docIntelOptions;
     private readonly ILogger<RecordSearchService> _logger;
+    // multi-container-multi-index-r1 FR-BFF-07 (part 3) — resolver routing for caller-supplied
+    // explicit index. Allow-list validation lives inside KnowledgeDeploymentService (task 010);
+    // RecordSearchService never replicates that logic locally (single-source-of-truth invariant).
+    // Required for the explicit-index path; the existing direct path never touches this field
+    // (NFR-02 backward-compat).
+    private readonly IKnowledgeDeploymentService _deploymentService;
+    // Consumed ONLY on the explicit-index path to derive tenantId for the resolver's cache key.
+    // The records-index does NOT have a tenantId field (per the class-level remarks above), so
+    // tenant isolation continues to be enforced at the Dataverse layer; tenantId here is purely
+    // a resolver cache-key isolator per (tenant, indexName) — see KnowledgeDeploymentService
+    // GetOrCreateExplicitIndexClient. Optional so existing direct-path tests need not stand up
+    // an HttpContext mock.
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
     // Index name for record search
     private const string RecordsIndexName = "spaarke-records-index";
@@ -75,13 +89,33 @@ public sealed class RecordSearchService : IRecordSearchService
     /// <summary>
     /// Initializes a new instance of the <see cref="RecordSearchService"/> class.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// multi-container-multi-index-r1 FR-BFF-07 (part 3): adds <paramref name="deploymentService"/>
+    /// as the 7th constructor parameter so a caller-supplied
+    /// <see cref="RecordSearchRequest.SearchIndexName"/> is routed through the resolver
+    /// where allow-list validation (FR-BFF-02 / NFR-08) lives. <paramref name="httpContextAccessor"/>
+    /// is the 8th parameter and is consumed ONLY when <c>SearchIndexName</c> is non-empty,
+    /// to derive the tenantId required by
+    /// <see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, string?, CancellationToken)"/>
+    /// for per-(tenant, index) cache-key isolation. The records-index itself has no tenantId
+    /// field; tenant isolation is enforced at the Dataverse layer, not at the search layer.
+    /// </para>
+    /// <para>
+    /// NFR-02 backward-compat: the existing direct path (when <c>SearchIndexName</c> is null
+    /// or whitespace) is preserved verbatim — it never touches the resolver. Test fixtures
+    /// updated to construct the 8-arg ctor exercise the same direct-path assertions as before.
+    /// </para>
+    /// </remarks>
     public RecordSearchService(
         SearchIndexClient searchIndexClient,
         IOpenAiClient openAiClient,
         IEmbeddingCache embeddingCache,
         IDistributedCache distributedCache,
         IOptions<DocumentIntelligenceOptions> docIntelOptions,
-        ILogger<RecordSearchService> logger)
+        ILogger<RecordSearchService> logger,
+        IKnowledgeDeploymentService deploymentService,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _searchIndexClient = searchIndexClient;
         _openAiClient = openAiClient;
@@ -89,6 +123,8 @@ public sealed class RecordSearchService : IRecordSearchService
         _distributedCache = distributedCache;
         _docIntelOptions = docIntelOptions.Value;
         _logger = logger;
+        _deploymentService = deploymentService ?? throw new ArgumentNullException(nameof(deploymentService));
+        _httpContextAccessor = httpContextAccessor;
     }
 
     /// <inheritdoc />
@@ -141,13 +177,41 @@ public sealed class RecordSearchService : IRecordSearchService
                 embeddingStopwatch.Stop();
             }
 
-            // Step 3: Get SearchClient for the records index
-            var indexName = _docIntelOptions.AiSearchIndexName;
-            if (string.IsNullOrWhiteSpace(indexName))
+            // Step 3: Get SearchClient for the records index.
+            //
+            // multi-container-multi-index-r1 FR-BFF-07 (part 3): when the caller supplied an
+            // explicit SearchIndexName on the request DTO, route via the 3-arg resolver
+            // overload. That overload validates the index against AiSearchOptions.AllowedIndexes
+            // (FR-BFF-02 / NFR-08) — RecordSearchService MUST NOT replicate that logic locally.
+            // On rejection, the resolver throws SdapProblemException(INDEX_NOT_ALLOWED, 400)
+            // which propagates up to the endpoint where the ProblemDetails middleware renders it.
+            //
+            // When SearchIndexName is null/whitespace, preserve the original direct
+            // SearchIndexClient.GetSearchClient(indexName) path verbatim — every existing test
+            // assertion (UsesConfiguredIndexName, FallsBackToDefaultIndexName_WhenConfigEmpty,
+            // etc.) continues to pass UNCHANGED per NFR-02 (backward-compat).
+            SearchClient searchClient;
+            if (!string.IsNullOrWhiteSpace(request.SearchIndexName))
             {
-                indexName = RecordsIndexName;
+                // Derive tenantId from the current HttpContext for resolver cache-key isolation.
+                // The records-index has no tenantId field; this string is NEVER applied as an
+                // OData filter — it is consumed only by KnowledgeDeploymentService for its
+                // {tenantId}:explicit:{indexName} cache key.
+                var tenantId = _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
+                    ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+                    ?? "anonymous";
+                searchClient = await _deploymentService.GetSearchClientAsync(
+                    tenantId, request.SearchIndexName, cancellationToken);
             }
-            var searchClient = _searchIndexClient.GetSearchClient(indexName);
+            else
+            {
+                var indexName = _docIntelOptions.AiSearchIndexName;
+                if (string.IsNullOrWhiteSpace(indexName))
+                {
+                    indexName = RecordsIndexName;
+                }
+                searchClient = _searchIndexClient.GetSearchClient(indexName);
+            }
 
             // Step 4: Build OData filter
             var filter = BuildRecordFilter(request);

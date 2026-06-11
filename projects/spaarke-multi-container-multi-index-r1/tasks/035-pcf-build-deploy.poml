@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>PCF build + deploy via `/pcf-deploy` (NFR-10 clean-rebuild)</title>
+    <phase>D: PCF v1.1.74 (Deploy)</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>040, 072</blocks>
+    <tags>pcf, deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Mechanical deploy task following `/pcf-deploy` skill verbatim. Explicit NFR-10 + saved-lesson constraint. No source-code logic; not vague docs.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate — must follow tests-green (034) and precede Phase E start (040 depends on PCF deployed first).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy PCF v1.1.74 via the `/pcf-deploy` skill. CRITICAL pre-step: clean-rebuild `@spaarke/auth` and `@spaarke/ui-components` `dist/` BEFORE the PCF build (NFR-10 — per saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle`). Then `npm run build:prod`, pack solution via `pack.ps1`, import ZIP via PAC. Verify deployed PCF footer shows v1.1.74 and the deploy log includes the clean-rebuild evidence.
+  </prompt>
+
+  <role>
+    PCF deployer with familiarity with the `/pcf-deploy` skill verbatim. The clean-rebuild step is non-negotiable: stale shared-lib `dist/` has been observed to poison PCF + code-page bundles, causing subtle runtime bugs (saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle`).
+  </role>
+
+  <goal>
+    Deployed PCF on the test environment shows footer `v1.1.74`; deploy log shows the clean-rebuild of `@spaarke/auth` + `@spaarke/ui-components` happened BEFORE the PCF build; solution ZIP imports cleanly with no Dataverse warnings. Downstream Phase E (tasks 040+) can take a dependency on the PCF being live.
+  </goal>
+
+  <context>
+    <background>
+      `/pcf-deploy` is the canonical skill for PCF deploys; it embeds the 5-location version check (already done in 033), the production-mode build, the clean-rebuild of shared libs (NFR-10), and the PAC solution import. Saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle` documents the failure mode the clean-rebuild prevents.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/spaarke-auth/</file>
+      <file>src/client/shared/Spaarke.UI.Components/</file>
+      <file>src/client/pcf/SemanticSearchControl/</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-10">PCF deploy MUST follow `/pcf-deploy` skill exactly — including 5-location version bump (done in 033), production-mode build, and clean-rebuild of `@spaarke/auth` + `@spaarke/ui-components` `dist/` BEFORE the PCF build.</constraint>
+    <constraint source="saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle`">Mandatory clean rebuild of `@spaarke/auth` + `@spaarke/ui-components` `dist/` before PCF build. Stale `dist/` has been observed to cause subtle runtime bugs.</constraint>
+    <constraint source="saved lesson `feedback_deploy-asks-follow-skill-no-openended-questions`">Invoke the deploy skill verbatim; hand over file paths; no open-ended questions.</constraint>
+    <constraint source=".claude/skills/pcf-deploy/SKILL.md">Use `npm run build:prod` (production mode); pack via `pack.ps1`; import via PAC.</constraint>
+    <constraint source="spec.md NFR-03">Production bundle ≤ 1 MB (already verified in 033; revalidate).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pre-PCF-build clean-rebuild of shared libs" location="saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle`">
+        Before `npm run build:prod` in the PCF, run `npm run build` (clean) in `@spaarke/auth` and `@spaarke/ui-components` to refresh their `dist/`. The PCF bundle consumes the `dist/` artifacts; stale `dist/` produces stale bundles.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Clean + rebuild `@spaarke/auth` `dist/`: in `src/client/shared/spaarke-auth/` (or the canonical path per the workspace), delete the existing `dist/` and run `npm run build`. Verify the output is fresh.</step>
+    <step order="2">Clean + rebuild `@spaarke/ui-components` `dist/`: in `src/client/shared/Spaarke.UI.Components/`, delete the existing `dist/` and run `npm run build`. Verify the output is fresh.</step>
+    <step order="3">In `src/client/pcf/SemanticSearchControl/`, run `npm run build:prod`. Verify production bundle is ≤ 1 MB (NFR-03 re-check).</step>
+    <step order="4">Pack the PCF solution via `Solution/pack.ps1` — produces `bin/Release/Sprk_SemanticSearchControl_1_1_74.zip` (or equivalent).</step>
+    <step order="5">Import the solution ZIP via PAC CLI: `pac solution import --path {zip}`. Capture import log.</step>
+    <step order="6">Verify the deployed PCF on the test environment: open a model-driven form hosting SemanticSearchControl; confirm footer shows `v1.1.74 • Built YYYY-MM-DD`.</step>
+    <step order="7">Capture the full deploy log (clean-rebuild evidence + build output + import result + footer screenshot) in `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/035-pcf-deploy.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run npm + pack + PAC commands</tool>
+    <tool name="Read">Read deploy logs + verify version files</tool>
+    <tool name="Skill">Invoke `pcf-deploy` skill for the full deploy sequence</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">PCF solution ZIP (v1.1.74) imported to test environment</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/035-pcf-deploy.md (deploy log evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NFR-10: Deploy log shows clean-rebuild of `@spaarke/auth` + `@spaarke/ui-components` `dist/` happened BEFORE the PCF build. Verified by handoff notes.</criterion>
+    <criterion testable="true">PCF solution ZIP imports cleanly via PAC — no Dataverse warnings or errors.</criterion>
+    <criterion testable="true">Deployed PCF footer shows `v1.1.74 • Built YYYY-MM-DD` on the test environment.</criterion>
+    <criterion testable="true">NFR-03: Production bundle measured ≤ 1 MB. Re-verified in this task.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Deployed PCF version visible">
+      <description>Smoke check that the deployed PCF on the test environment is the v1.1.74 build.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn={entity}&amp;id={record-id}</url>
+      <steps>
+        <step>Open a model-driven form hosting SemanticSearchControl on the test environment.</step>
+        <step>Locate the footer of the PCF control.</step>
+        <step>Open browser DevTools → Console to check for any load errors.</step>
+      </steps>
+      <expected>Footer reads `v1.1.74 • Built YYYY-MM-DD`. No console errors. Control mounts and renders interactively.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The clean-rebuild step is the single most important guardrail in this task. Skipping it has caused production bugs in past deploys (saved lesson). Even if `dist/` "looks fresh", rebuild it.
+
+    If the PCF import fails, the most common root causes are (a) version mismatch across the 5 locations from task 033 — recheck; (b) Dataverse environment cache — try `pac solution import --force-overwrite` per the skill docs; (c) shared-lib `dist/` not actually refreshed — verify file mtimes.
+
+    Downstream task 040 (code-page types extension) starts AFTER this deploy completes successfully. Phase H deploy ordering: A.5 → B → A → D (this) → E → F.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load .claude/skills/pcf-deploy/SKILL.md verbatim. Declare rigor (STANDARD) per task-execute Step 0. Invoke `pcf-deploy` skill for the deploy steps.
+    </protocol>
+  </execution>
+</task>

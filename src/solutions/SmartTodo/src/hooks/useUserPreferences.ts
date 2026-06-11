@@ -32,30 +32,49 @@ export const DEFAULT_TOMORROW_THRESHOLD = 30;
 export const PREFERENCE_TYPE_TODO_KANBAN = 100000000;
 
 /**
- * MyTasksFilter mode values (R3 FR-12 / A-6).
+ * SmartTodo view-mode values (R4 FR-09 — task 033).
  *
- * MyTasks      = owner OR assignee = current user (+ team-member clause per
- *                A-6, deferred to v2 — see queryHelpers.buildTodoItemsQuery
- *                for the team-clause TODO)
- * AssignedToMe = assignee = current user
- * All          = no ownership filter (statecode/statuscode still applied)
+ * card = card-grid render (default on first visit per FR-09 acceptance)
+ * list = dense list render
  *
- * Persisted as a string in the same JSON payload as the kanban thresholds
+ * Persisted in the same JSON payload as the kanban thresholds
  * (preference-type 100000000) to avoid adding a new optionset value.
+ * The conceptual "SmartTodoView" preference referenced in spec FR-09 is
+ * round-tripped via the `viewMode` field in the shared JSON envelope.
  */
-export type MyTasksFilterMode = 'MyTasks' | 'AssignedToMe' | 'All';
+export type SmartTodoViewMode = 'card' | 'list';
 
-/** Default filter mode shown on first load (FR-12). */
-export const DEFAULT_MY_TASKS_FILTER_MODE: MyTasksFilterMode = 'MyTasks';
+/** Default view mode shown on first visit (FR-09). */
+export const DEFAULT_SMART_TODO_VIEW_MODE: SmartTodoViewMode = 'card';
 
-const VALID_FILTER_MODES: ReadonlyArray<MyTasksFilterMode> = [
-  'MyTasks',
-  'AssignedToMe',
-  'All',
-];
+const VALID_VIEW_MODES: ReadonlyArray<SmartTodoViewMode> = ['card', 'list'];
 
-function isValidFilterMode(value: unknown): value is MyTasksFilterMode {
-  return typeof value === 'string' && (VALID_FILTER_MODES as readonly string[]).includes(value);
+function isValidViewMode(value: unknown): value is SmartTodoViewMode {
+  return typeof value === 'string' && (VALID_VIEW_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * SmartTodo Kanban orientation values (R4 FR-28 / FR-29 / NFR-08 — task 071).
+ *
+ * horizontal = columns laid out side-by-side (default on first visit)
+ * vertical   = columns stacked top-to-bottom
+ *
+ * Mirrors `KanbanOrientation` from `@spaarke/ui-components/Kanban` and
+ * `Orientation` from `@spaarke/ui-components/OrientationToggle`. Persisted
+ * in the SAME JSON payload as the kanban thresholds + viewMode
+ * (preference-type 100000000) — the spec FR-30 "SmartTodoOrientation"
+ * preference is round-tripped via the `orientation` field in this
+ * envelope, NOT via a new preferencetype optionset value.
+ */
+export type SmartTodoOrientation = 'horizontal' | 'vertical';
+
+/** Default orientation shown on first visit (FR-28). */
+export const DEFAULT_SMART_TODO_ORIENTATION: SmartTodoOrientation = 'horizontal';
+
+const VALID_ORIENTATIONS: ReadonlyArray<SmartTodoOrientation> = ['horizontal', 'vertical'];
+
+function isValidOrientation(value: unknown): value is SmartTodoOrientation {
+  return typeof value === 'string' && (VALID_ORIENTATIONS as readonly string[]).includes(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -65,16 +84,26 @@ function isValidFilterMode(value: unknown): value is MyTasksFilterMode {
 /**
  * Kanban threshold preferences shape (stored as JSON in sprk_preferencevalue).
  *
- * R3 task 021 extended this JSON with an optional `myTasksFilterMode` field so
- * the My Tasks filter persists alongside the column thresholds without
- * requiring a new sprk_preferencetype optionset value. When the field is
- * absent on read, the hook substitutes DEFAULT_MY_TASKS_FILTER_MODE.
+ * R4 task 031 / FR-07 / OD-2 — the R3 `myTasksFilterMode` field is removed
+ * because "Assigned to Me" is now the SOLE filter mode (no user selection
+ * to persist). The R3 JSON payload remains backwards-compatible on read: if
+ * an older record still contains `myTasksFilterMode`, the parser ignores it.
  */
 export interface ITodoKanbanPreferences {
   todayThreshold: number;
   tomorrowThreshold: number;
-  /** R3 FR-12 — persisted My Tasks filter selection. Defaults to "MyTasks". */
-  myTasksFilterMode: MyTasksFilterMode;
+  /**
+   * R4 FR-09 (task 033) — persisted list/card view selection for the
+   * SmartTodo Code Page. Defaults to "card" on first visit.
+   */
+  viewMode: SmartTodoViewMode;
+  /**
+   * R4 FR-28 / FR-29 / FR-30 (task 071) — persisted Kanban board
+   * orientation. Defaults to "horizontal" on first visit. Round-tripped
+   * via this shared envelope (same preferencetype as thresholds +
+   * viewMode) rather than a separate preferencetype optionset value.
+   */
+  orientation: SmartTodoOrientation;
 }
 
 export interface IUseUserPreferencesOptions {
@@ -100,7 +129,8 @@ export interface IUseUserPreferencesResult {
 const DEFAULT_PREFERENCES: ITodoKanbanPreferences = {
   todayThreshold: DEFAULT_TODAY_THRESHOLD,
   tomorrowThreshold: DEFAULT_TOMORROW_THRESHOLD,
-  myTasksFilterMode: DEFAULT_MY_TASKS_FILTER_MODE,
+  viewMode: DEFAULT_SMART_TODO_VIEW_MODE,
+  orientation: DEFAULT_SMART_TODO_ORIENTATION,
 };
 
 // ---------------------------------------------------------------------------
@@ -148,6 +178,8 @@ export function useUserPreferences(
 
           // Parse JSON value with fallback to defaults
           try {
+            // Older records may still carry a legacy `myTasksFilterMode` key
+            // (R3 FR-12). It is silently ignored on read per R4 OD-2.
             const parsed = JSON.parse(record.sprk_preferencevalue) as Partial<ITodoKanbanPreferences>;
             setPreferences({
               todayThreshold: typeof parsed.todayThreshold === 'number'
@@ -156,9 +188,12 @@ export function useUserPreferences(
               tomorrowThreshold: typeof parsed.tomorrowThreshold === 'number'
                 ? parsed.tomorrowThreshold
                 : DEFAULT_TOMORROW_THRESHOLD,
-              myTasksFilterMode: isValidFilterMode(parsed.myTasksFilterMode)
-                ? parsed.myTasksFilterMode
-                : DEFAULT_MY_TASKS_FILTER_MODE,
+              viewMode: isValidViewMode(parsed.viewMode)
+                ? parsed.viewMode
+                : DEFAULT_SMART_TODO_VIEW_MODE,
+              orientation: isValidOrientation(parsed.orientation)
+                ? parsed.orientation
+                : DEFAULT_SMART_TODO_ORIENTATION,
             });
           } catch {
             console.warn('[useUserPreferences] Failed to parse preference JSON, using defaults');

@@ -75,6 +75,7 @@
  *
  * # Version
  *
+ * v1.1.0 — R4-052: read-only / disabled form-type defensive skip (2026-06-11)
  * v1.0.0 — initial implementation (smart-todo-r4 task R4-051, 2026-06-10)
  *
  * @namespace Spaarke.SmartTodo.RegardingPreSave
@@ -93,7 +94,7 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
     // -----------------------------------------------------------------------
 
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.0.0";
+    ns.VERSION = "1.1.0";
 
     /**
      * Resolver text/url fields written verbatim from the pending payload.
@@ -157,7 +158,20 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
 
             // FormType 1 = Create. Other values: 2=Update, 3=Read-Only, 4=Disabled,
             // 6=Bulk Edit, 0=Undefined. Pre-save staging is only meaningful on Create.
+            //
+            // FR-24 / R4-052 — Defensive read-only gate: explicitly skip when the
+            // form is in Read-Only (3) or Disabled (4) state. The PCF will not have
+            // populated `__sprk_regarding_pending__` in either case (its UI is
+            // disabled and its write handlers short-circuit per R4-052), but this
+            // belt-and-suspenders check prevents any stale-global edge case from
+            // staging field writes onto a read-only form.
             var formType = (formContext.ui && formContext.ui.getFormType) ? formContext.ui.getFormType() : null;
+            if (formType === 3 || formType === 4) {
+                // Defensive: clear any stale pending payload so a subsequent
+                // edit-mode load does not pick it up.
+                try { delete window[PENDING_GLOBAL]; } catch (_) { window[PENDING_GLOBAL] = undefined; }
+                return;
+            }
             if (formType !== 1) {
                 return;
             }

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Code page — extend `types/index.ts` `AppUrlParams` + `parseUrlParams.ts` (FR-CP-01)</title>
+    <phase>E: SemanticSearch Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>3-5</estimated-hours>
+    <dependencies>035</dependencies>
+    <blocks>041, 042</blocks>
+    <tags>react, typescript, frontend, code-page</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies code-page `.ts` types + parser; defines the contract consumed by tasks 041 + 042; carries ADR-022 (React 18) / ADR-026 / ADR-028 obligations.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Other Phase E tasks (041, 042) depend on this types update — must complete first.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `src/client/code-pages/SemanticSearch/src/types/index.ts` `AppUrlParams` interface to include all envelope keys: `theme`, `query`, `domain`, `scope`, `entityId`, `savedSearchId`, `searchIndexName`, `threshold`, `searchMode`, `fileTypes`, `dateFrom`, `dateTo`, `tags`, `associatedOnly`. Extend `src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts` with type-safe parsers per type: number for `threshold`, ISO date validation for `dateFrom`/`dateTo`, CSV split for `fileTypes`/`tags`, boolean for `associatedOnly`. Unit-test each parameter (present / absent / malformed).
+  </prompt>
+
+  <role>
+    Code-page developer with familiarity with `src/client/code-pages/SemanticSearch/src/` (React 18 + Vite + Fluent v9). ADR-026 governs the full-page code-page contract; ADR-022 confirms React 18 is the code-page target (PCF stays React 16).
+  </role>
+
+  <goal>
+    `AppUrlParams` interface declares every envelope key with the correct type. `parseUrlParams` reads each key from the navigateTo data envelope with strict per-type parsing (numbers, booleans, ISO dates, CSV arrays). Unit tests cover present / absent / malformed cases per parameter. Downstream tasks 041 (App.tsx wiring) + 042 (hooks) can consume the typed shape.
+  </goal>
+
+  <context>
+    <background>
+      Task 032 finalized the PCF envelope shape. This task is the symmetric code-page parser. The envelope is passed in via `data` from `Xrm.Navigation.navigateTo({pageType:"webresource", data:envelope})`. Today's `parseUrlParams` reads a subset; Phase E (this task + 041 + 042) closes the gap so the code page can reconstruct the PCF's filter state exactly (FR-PARITY-02 acceptance).
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/SemanticSearch/src/types/index.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts</file>
+      <file>src/client/code-pages/SemanticSearch/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-CP-01">`parseUrlParams` MUST read all envelope parameters: `theme`, `query`, `domain`, `scope`, `entityId`, `savedSearchId`, `searchIndexName`, `threshold`, `searchMode`, `fileTypes`, `dateFrom`, `dateTo`, `tags`, `associatedOnly`. Return shape extends `AppUrlParams`.</constraint>
+    <constraint source="ADR-022">Code Page uses React 18. Type-safe parsing must use React-18-compatible idioms.</constraint>
+    <constraint source="ADR-026">Full-page Code Page standard — `sprk_semanticsearch` is the canonical page; envelope is passed in via `data` parameter.</constraint>
+    <constraint source="ADR-028">No new auth wiring — types module has no BFF dependency. Hooks (task 042) will use `authenticatedFetch`.</constraint>
+    <constraint source="project">Malformed inputs MUST be handled gracefully — invalid numbers/dates/booleans become `undefined` (not throw); the type signature reflects optionality.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-026-fullpage-codepage-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Envelope parameter parsing" location="src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts">
+        Today's parser reads via `URLSearchParams` (or equivalent decoder). Extend with per-type parsers: `parseNumber(str): number | undefined`, `parseIsoDate(str): string | undefined` (validate via `new Date(str)` + `isFinite`), `parseCsv(str): string[]` (split + trim + filter empty), `parseBoolean(str): boolean | undefined`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/client/code-pages/SemanticSearch/src/types/index.ts` and `src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts` to identify the current `AppUrlParams` shape and parser logic.</step>
+    <step order="2">Extend `AppUrlParams` interface to add: `theme?: string`, `searchIndexName?: string`, `threshold?: number`, `searchMode?: 'hybrid'|'vectorOnly'|'keywordOnly'`, `fileTypes?: string[]`, `dateFrom?: string` (ISO), `dateTo?: string` (ISO), `tags?: string[]`, `associatedOnly?: boolean`. Verify existing keys (`query`, `domain`, `scope`, `entityId`, `savedSearchId`) remain present.</step>
+    <step order="3">Extend `parseUrlParams` with per-type parsers. Add helper utilities: `parseNumber`, `parseIsoDate`, `parseCsv`, `parseBoolean`, `parseSearchMode`. Each helper handles malformed input by returning `undefined`/`[]`/`false` (per the type) rather than throwing.</step>
+    <step order="4">Wire each new key in `parseUrlParams` to the appropriate helper. Confirm the return value satisfies the updated `AppUrlParams` interface.</step>
+    <step order="5">Add unit tests per parameter (in `*.test.ts`): for each of `theme`, `searchIndexName`, `threshold`, `searchMode`, `fileTypes`, `dateFrom`, `dateTo`, `tags`, `associatedOnly`: (a) present with valid value → parses correctly; (b) absent → returns `undefined`/`[]`/`false`; (c) malformed (e.g. `threshold=abc`, `dateFrom=notadate`, `associatedOnly=maybe`) → returns `undefined`/`[]`/`false`.</step>
+    <step order="6">Run `npm run test` (or equivalent for the code-page workspace) to confirm all parser tests pass. Confirm TypeScript compiles via `npm run build` (validation only — production deploy is task 044).</step>
+    <step order="7">Run code-review + adr-check skills at Step 9.5 (FULL rigor requirement). Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md` to reflect completion and advance to next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read types/index.ts and parseUrlParams.ts</tool>
+    <tool name="Edit">Add the new types and parser logic</tool>
+    <tool name="Bash">Run `npm run test` and `npm run build`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/types/index.ts (extended AppUrlParams)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts (extended parser)</output>
+    <output type="tests">Unit tests for parseUrlParams per parameter</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-CP-01: `AppUrlParams` declares all envelope keys with correct types. Verified by file inspection + TypeScript compile.</criterion>
+    <criterion testable="true">FR-CP-01: `parseUrlParams` returns the typed shape for every key. Verified by unit test.</criterion>
+    <criterion testable="true">Malformed inputs (e.g. `threshold=abc`) parse to `undefined` (or type-appropriate default) without throwing. Verified by unit test.</criterion>
+    <criterion testable="true">Absent parameters parse to `undefined`/`[]`/`false`. Verified by unit test.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The exact format conventions used by task 032's envelope encoder must match this parser's expectations — keep them aligned:
+    - `threshold` is a number-as-string (e.g. `50`)
+    - `searchMode` is one of three string literals
+    - `fileTypes` and `tags` are CSV strings (e.g. `pdf,docx`)
+    - `dateFrom`/`dateTo` are ISO 8601 strings (e.g. `2026-06-01T00:00:00Z`)
+    - `associatedOnly` is `true` or `false` as string
+
+    If the existing `parseUrlParams` uses `URLSearchParams.get()`, that returns `null` for missing keys; map `null` → `undefined` in the typed parser. The malformed-input handling (Step 5c) is the load-bearing acceptance criterion — do not let bad input crash the page.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-022 / ADR-026 / ADR-028 + .claude/constraints/auth.md before Step 1. Declare rigor (FULL) per task-execute Step 0. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

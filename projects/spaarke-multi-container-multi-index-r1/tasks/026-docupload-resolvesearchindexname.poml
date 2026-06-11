@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>DocumentUploadWizard — `resolveSearchIndexNameForRecord` chain (FR-WIZ-06)</title>
+    <phase>A: Wizards</phase>
+    <status>not-started</status>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>027</blocks>
+    <tags>react, typescript, frontend, fluent-ui, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx`/`.ts` wizard implementation; carries ADR-012 / ADR-021 / ADR-022 / ADR-028 obligations; introduces a new resolver chain (parent → BU → empty) with explicit unit-test coverage required.</rigor-reason>
+    <parallel-group>A2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Task 027 (DocumentRecordService payload extension) directly consumes the resolver added here. 026 and 027 serial in same code-page area.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement `resolveSearchIndexNameForRecord(xrm, entityLogicalName, recordId)` in `DocumentUploadWizard`'s `AssociateToStep.tsx`, mirroring the existing `resolveContainerIdForRecord` pattern at lines 147–163. Chain: parent record's `sprk_searchindexname` first, then parent's owning BU's `sprk_searchindexname`, then empty string (server tenant default takes over). Cover all three chain steps with unit tests. Expose the resolver for consumers (task 027 will call it).
+  </prompt>
+
+  <role>
+    Spaarke.UI.Components wizard implementer. React 18 + Fluent v9 + TypeScript. Familiar with the existing `resolveContainerIdForRecord` pattern in `AssociateToStep.tsx`.
+  </role>
+
+  <goal>
+    `AssociateToStep.tsx` exposes a new function `resolveSearchIndexNameForRecord(xrm, entityLogicalName, recordId)` that returns the effective `sprk_searchindexname` via the documented 3-step chain. Unit tests prove each chain step independently. Task 027 wires this into the Document create payload.
+  </goal>
+
+  <context>
+    <background>
+      `DocumentUploadWizard/AssociateToStep.tsx:147-163` already has `resolveContainerIdForRecord(xrm, entityLogicalName, recordId)` that walks: parent record's `sprk_containerid` → owning BU's `sprk_containerid` → empty. This task adds the symmetric resolver for `sprk_searchindexname` (different fallback semantics: empty string → server-side tenant default applies, not error).
+    </background>
+    <relevant-files>
+      <file>src/solutions/DocumentUploadWizard/src/components/AssociateToStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/document-upload/DocumentRecordService.ts</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Resolver logic belongs to the wizard / shared lib; do not put it in the code-page directly.</constraint>
+    <constraint source="ADR-021">Fluent v9 + `tokens.*` if any UI surface touched.</constraint>
+    <constraint source="ADR-022">Code page React 18; shared lib portable.</constraint>
+    <constraint source="ADR-028">Xrm.WebApi for Dataverse reads is fine; no BFF call needed here (resolver is client-side Dataverse-only).</constraint>
+    <constraint source="spec.md FR-WIZ-06">3-step chain: parent → parent's owning BU → empty.</constraint>
+    <constraint source="design.md INV-5">Resolver is read-only; INV-5 enforcement happens at the payload assembly step (task 027). This task just supplies the value.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-ui-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Container resolution chain (parent → user-BU fallback)" location="src/solutions/DocumentUploadWizard/src/components/AssociateToStep.tsx">
+        Lines 147–163: `resolveContainerIdForRecord` — copy this shape, change field to `sprk_searchindexname`, change empty-fallback semantics to empty string (not error).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `AssociateToStep.tsx` lines 147–163 to understand `resolveContainerIdForRecord` precisely — note function signature, Xrm.WebApi calls, fallback semantics, error handling.</step>
+    <step order="2">Implement `resolveSearchIndexNameForRecord(xrm, entityLogicalName, recordId)` mirroring the structure: (a) `xrm.WebApi.retrieveRecord(entityLogicalName, recordId, '?$select=sprk_searchindexname')`; if non-empty, return; (b) load parent's owning BU id then `xrm.WebApi.retrieveRecord('businessunit', buId, '?$select=sprk_searchindexname')`; if non-empty, return; (c) return empty string (server tenant default takes over).</step>
+    <step order="3">Where possible, share BU-read with `resolveContainerIdForRecord` (extend the existing $select to include both fields in one roundtrip) — or keep separate if existing chain is too brittle to touch; document the choice.</step>
+    <step order="4">Write unit tests covering each of the 3 chain steps independently: (a) parent has non-empty value → returned; (b) parent empty, BU non-empty → BU value returned; (c) both empty → empty string returned.</step>
+    <step order="5">Export the resolver so `DocumentRecordService.buildRecordPayload` (task 027) can call it. Update the barrel exports if applicable.</step>
+    <step order="6">Run shared-lib build + DocumentUploadWizard build; confirm clean compile.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read AssociateToStep.tsx + DocumentRecordService.ts</tool>
+    <tool name="Edit">Add `resolveSearchIndexNameForRecord` to AssociateToStep.tsx</tool>
+    <tool name="Write">Add/extend unit-test file for resolver</tool>
+    <tool name="Bash">Run shared-lib build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/DocumentUploadWizard/src/components/AssociateToStep.tsx (resolver added)</output>
+    <output type="code">DocumentUploadWizard resolver unit-test file (new or extended)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/026-docupload-resolver.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-WIZ-06: `resolveSearchIndexNameForRecord(xrm, entityLogicalName, recordId)` exists and is exported.</criterion>
+    <criterion testable="true">Unit tests cover all 3 chain steps (parent has value, parent empty + BU has value, both empty).</criterion>
+    <criterion testable="true">Existing `resolveContainerIdForRecord` behavior unchanged (regression test passes).</criterion>
+    <criterion testable="true">Build clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 027 immediately consumes this resolver. The 3-step chain's fallback semantics differ from `sprk_containerid` (which currently has different fallback behavior — container is REQUIRED so its chain may error; `sprk_searchindexname` empty is OK because server tenant default kicks in). Document this asymmetry in code comments + the handoff file.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-012/021/022/028 + .claude/constraints/auth.md before Step 1. Declare rigor (FULL). Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

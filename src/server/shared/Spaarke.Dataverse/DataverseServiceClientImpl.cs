@@ -116,7 +116,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                     "sprk_emailsubject", "sprk_emailfrom", "sprk_emailto", "sprk_emailcc",
                     "sprk_emaildate", "sprk_emailbody", "sprk_isemailarchive", "sprk_parentdocument",
                     // Lookup fields (MapToDocumentEntityWithLookups)
-                    "sprk_matter", "sprk_project", "sprk_invoice", "sprk_emailconversationindex"),
+                    "sprk_matter", "sprk_project", "sprk_invoice", "sprk_emailconversationindex",
+                    // Search index tracking (multi-container-multi-index-r1) — required by
+                    // VisualizationService to bind the correct SearchClient for Find Similar.
+                    "sprk_searchindexed", "sprk_searchindexname", "sprk_searchindexedon"),
                 ct);
 
             if (entity == null)
@@ -317,6 +320,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         _logger.LogDebug("[DATAVERSE] RetrieveMultiple on {EntityName} returned {Count} records",
             query.EntityName, results.Entities.Count);
+        return results;
+    }
+
+    /// <inheritdoc />
+    public async Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fetch);
+        var results = await _serviceClient.RetrieveMultipleAsync(fetch, ct);
+        _logger.LogDebug("[DATAVERSE] RetrieveMultiple(FetchXml) returned {Count} records", results.Entities.Count);
         return results;
     }
 
@@ -1077,7 +1089,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             GraphDriveId = entity.GetAttributeValue<string>("sprk_graphdriveid"),
             Status = (DocumentStatus)(entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 1),
             CreatedOn = entity.GetAttributeValue<DateTime>("createdon"),
-            ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon")
+            ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon"),
+
+            // Search index tracking (multi-container-multi-index-r1) — used by VisualizationService
+            // to bind the correct SearchClient for Find Similar against multi-index environments.
+            SearchIndexed = entity.Contains("sprk_searchindexed") ? entity.GetAttributeValue<bool>("sprk_searchindexed") : null,
+            SearchIndexName = entity.GetAttributeValue<string>("sprk_searchindexname"),
+            SearchIndexedOn = entity.Contains("sprk_searchindexedon") ? entity.GetAttributeValue<DateTime>("sprk_searchindexedon") : null
         };
     }
 

@@ -197,7 +197,7 @@ public sealed partial class ReferenceRetrievalService
                     Domain = result.Document.DocumentType,
                     Score = effectiveScore,
                     SemanticScore = semanticScore,
-                    ChunkIndex = result.Document.ChunkIndex,
+                    ChunkIndex = result.Document.ChunkIndex ?? 0,
                     ChunkCount = result.Document.ChunkCount,
                     Highlights = GetHighlights(result)
                 });

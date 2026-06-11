@@ -37,6 +37,40 @@ public static class AnalysisServicesModule
         // invocation path and calls RecordInvocation with bounded tags {topic, mode, outcome, cacheHit, tenantId}.
         services.AddSingleton<Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry>();
 
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — TRULY UNCONDITIONAL.
+        // ISearchIndexNameResolver is consumed by RagIndexingJobHandler / BulkRagIndexingJobHandler /
+        // IndexingWorkerHostedService — all 3 are registered unconditionally as scoped IJobHandler / IHostedService.
+        // The resolver delegates to IGenericEntityService (registered unconditionally via GraphModule).
+        // Registered HERE at the top of the module (above the documentIntelligence/analysis conditionals)
+        // so it resolves correctly on BOTH AI-ON and AI-OFF paths. Lifetime: scoped (matches consumer
+        // expectations + Dataverse Web API client lifetime).
+        services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
+
+        // multi-container-multi-index-r1 Phase G (task 102) — TRULY UNCONDITIONAL.
+        // IAllowedIndexesProvider is consumed by KnowledgeDeploymentService (registered behind
+        // the AI-Search-keys sub-gate in AddRagServices) to validate caller-supplied indexNames
+        // against the sprk_aisearchindex catalog table. Singleton lifetime: the implementation
+        // holds the IMemoryCache key + ttl as process-wide state and uses IServiceProvider.CreateScope
+        // for per-load scoped IGenericEntityService resolution (no captive dependency).
+        //
+        // Registered HERE at the top of the module (above the AI conditionals) for the same reason
+        // ISearchIndexNameResolver is — KnowledgeDeploymentService's optional ctor parameter resolves
+        // on the AI-ON path, but having the registration available on the AI-OFF path keeps the DI
+        // graph uniform and forward-compatible (if any other consumer is wired later).
+        //
+        // No new NuGet packages; IMemoryCache is already registered unconditionally via CacheModule.
+        // AiSearchOptions binding is preserved by JobProcessingModule.
+        services.AddSingleton<IAllowedIndexesProvider, DataverseAllowedIndexesProvider>();
+
+        // multi-container-multi-index-r1 upload-indexing-centralization (scope extension) — TRULY UNCONDITIONAL.
+        // IPostUploadIndexingEnqueuer is the single seam for post-upload RAG indexing.
+        // Phase 3 (2026-06-08) — dispatches sync OBO indexing via IFileIndexingService.IndexFileAsync
+        // (Pattern 4 — see sdap-auth-patterns.md). Scoped lifetime because IFileIndexingService is scoped.
+        // See projects/spaarke-multi-container-multi-index-r1/notes/upload-indexing-centralization-design.md.
+        services.Configure<Sprk.Bff.Api.Configuration.PostUploadIndexingOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Configuration.PostUploadIndexingOptions.SectionName));
+        services.AddScoped<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
+
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
@@ -337,6 +371,14 @@ public static class AnalysisServicesModule
         //   IndexingWorkerHostedService / RagIndexingJobHandler / BulkRagIndexingJobHandler. Real
         //   impl registered AddRagServices line 422. Lifetime: scoped (matches real FileIndexingService).
         services.AddScoped<IFileIndexingService, NullFileIndexingService>();
+
+        // ⚠ NOTE: ISearchIndexNameResolver was incorrectly placed HERE (inside
+        // AddNullObjectsForCompoundOff) — that method only runs on the AI-OFF path,
+        // so RagIndexingJobHandler / BulkRagIndexingJobHandler / IndexingWorkerHostedService
+        // failed at startup in the AI-ON live env with
+        // "Unable to resolve service for type ISearchIndexNameResolver".
+        // FIXED 2026-06-08: registration moved to the TOP of AddAnalysisServicesModule
+        // (above the documentIntelligence/analysis conditionals) so it's truly unconditional.
 
         // B2 — SprkChatAgentFactory (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B2.
         // Real impl registered unconditionally inside AddAiModule (only invoked on compound-ON path).

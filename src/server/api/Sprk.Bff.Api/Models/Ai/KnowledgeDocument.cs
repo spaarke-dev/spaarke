@@ -128,9 +128,16 @@ public class KnowledgeDocument
     /// <summary>
     /// Zero-based index of this chunk within the document.
     /// </summary>
+    /// <remarks>
+    /// Made nullable 2026-06-10 (Phase G UAT hot-fix). Some indexes
+    /// (notably <c>spaarke-knowledge-index-v2</c>) contain chunks where this
+    /// field is null/missing, breaking deserialization to <c>int</c> with
+    /// "JSON value could not be converted to System.Int32" at $.chunkIndex.
+    /// Read sites coalesce with <c>?? 0</c> when arithmetic is required.
+    /// </remarks>
     [SimpleField(IsSortable = true)]
     [JsonPropertyName("chunkIndex")]
-    public int ChunkIndex { get; set; }
+    public int? ChunkIndex { get; set; }
 
     /// <summary>
     /// Total number of chunks for this document.

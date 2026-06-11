@@ -47,6 +47,19 @@ export type KanbanColumn<T> = IKanbanColumn<T>;
 // IKanbanBoardProps — props for the generic KanbanBoard component
 // ---------------------------------------------------------------------------
 
+/**
+ * Board layout orientation.
+ *
+ * - `horizontal` (default) — columns flow side-by-side (classic Kanban).
+ * - `vertical`             — columns stack top-to-bottom as collapsible
+ *                            sections; cards stack within each section.
+ *
+ * Implemented as a CSS-only swap (`flex-direction: row` ↔ `column`) — no
+ * React tree re-creation, so cards keep their state across an orientation
+ * change (smart-todo-r4 spec NFR-08: <300ms switch, no jank).
+ */
+export type KanbanOrientation = 'horizontal' | 'vertical';
+
 /** Props for the generic KanbanBoard component. */
 export interface IKanbanBoardProps<T> {
   /** Column definitions with their items. */
@@ -63,6 +76,14 @@ export interface IKanbanBoardProps<T> {
   collapsedColumns?: ReadonlySet<string>;
   /** Called when a column header is clicked to toggle collapse. */
   onToggleCollapse?: (columnId: string) => void;
+  /**
+   * Board flow direction. Defaults to `'horizontal'` (backwards-compatible).
+   * Setting this to `'vertical'` swaps the CSS layout only — same React
+   * tree, no card-state loss. See {@link KanbanOrientation}.
+   *
+   * smart-todo-r4 spec FR-28 / FR-29 / NFR-08.
+   */
+  orientation?: KanbanOrientation;
 }
 
 // ---------------------------------------------------------------------------

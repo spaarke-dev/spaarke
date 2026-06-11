@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>CreateMatterWizard — set `sprk_searchindexname` from user BU (FR-WIZ-01)</title>
+    <phase>A: Wizards</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>028</blocks>
+    <tags>react, typescript, frontend, fluent-ui, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx`/`.ts` wizard implementation; carries ADR-012 / ADR-021 / ADR-022 / ADR-028 obligations; INV-5 enforcement; user-visible behavior change.</rigor-reason>
+    <parallel-group>A1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches an independent wizard service file (CreateMatterWizard); file-disjoint from sibling wizard tasks 022–025. All depend only on 020's shared-lib build.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `CreateMatterWizard` so that, when creating a new Matter, the wizard reads the current user's owning Business Unit's `sprk_searchindexname` field and adds it to the create payload alongside the existing `sprk_containerid` cascade. Use the INV-5-safe helper landed by task 020 (or the equivalent pattern from `matterService.ts:216`). Verify via MCP after a real create.
+  </prompt>
+
+  <role>
+    Spaarke.UI.Components wizard implementer. React 18 + Fluent v9 + TypeScript. Familiar with the existing CreateMatterWizard service-layer pattern and Xrm.WebApi calls.
+  </role>
+
+  <goal>
+    Creating a Matter via `CreateMatterWizard` produces a `sprk_matter` record where `sprk_searchindexname` is populated from the current user's BU (e.g. `spaarke-knowledge-index-v2` for Spaarke Demo BU). Existing `sprk_containerid` behavior is unchanged. INV-5 honored: an explicit override set on the create payload (e.g. by a form field default) persists.
+  </goal>
+
+  <context>
+    <background>
+      `CreateMatterWizard/matterService.ts:216` is the canonical pattern for setting `sprk_containerid` from the user's BU at create time. This task adds a parallel assignment for `sprk_searchindexname` sourced from `businessunit.sprk_searchindexname` (Phase A.5 / task 001 populated those BU values).
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/CreateMatterWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Wizard logic lives in `@spaarke/ui-components` (matterService.ts). Code-page src consumes the shared lib; do not duplicate logic in the code-page.</constraint>
+    <constraint source="ADR-021">Fluent v9 + `tokens.*` for any UI surface touched. No `@fluentui/react` v8, no hex / `var(--…)` / rgb literals.</constraint>
+    <constraint source="ADR-022">Code page is React 18; shared lib must remain version-portable.</constraint>
+    <constraint source="ADR-028">If any BFF call is added (none expected), use `authenticatedFetch` from `@spaarke/auth`.</constraint>
+    <constraint source="spec.md FR-WIZ-01">MCP query after create returns `spaarke-knowledge-index-v2` when wizard is run from Spaarke Demo BU.</constraint>
+    <constraint source="design.md INV-5">If the create payload already has a non-empty `sprk_searchindexname`, do NOT overwrite.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-ui-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Wizard sets BU-derived field on create payload" location="src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts">
+        Line 216: `entity['sprk_containerid'] = this._containerId;` — the canonical assignment shape. Add `entity['sprk_searchindexname'] = this._searchIndexName;` next to it, guarded by INV-5.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `matterService.ts` to locate where the user's BU is loaded (existing `sprk_containerid` source). Note how `this._containerId` is populated from the BU.</step>
+    <step order="2">Add a parallel load of `businessunit.sprk_searchindexname` via Xrm.WebApi (same BU read as `sprk_containerid` — extend the existing $select; do not issue a second roundtrip).</step>
+    <step order="3">Add `sprk_searchindexname` to the create payload alongside `sprk_containerid` at the line-216 pattern. Guard with INV-5: only assign if the payload value is currently null/empty (use the helper from task 020 if available).</step>
+    <step order="4">Run the shared-lib build (`npm run build` in `Spaarke.UI.Components`); confirm clean compile.</step>
+    <step order="5">Manual MCP verification handoff: after a future code-page deploy (task 029), running the wizard from Spaarke Demo BU must produce a Matter with `sprk_searchindexname = "spaarke-knowledge-index-v2"`. Note this expectation in the handoff file for task 029.</step>
+    <step order="6">Write/extend a unit test for `matterService` verifying: (a) BU value cascades to payload when payload field is empty; (b) explicit payload value is preserved when present (INV-5). Hand the INV-5 cross-wizard test suite to task 028.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read matterService.ts and CreateMatterWizard code-page</tool>
+    <tool name="Edit">Add sprk_searchindexname cascade to matterService.ts</tool>
+    <tool name="Bash">Run `npm run build` in Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts (extended)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/021-matter-wizard-extension.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-WIZ-01: Matter created via wizard from Spaarke Demo BU has `sprk_searchindexname = "spaarke-knowledge-index-v2"` (MCP-verified post-deploy in task 029 / task 071 UAT).</criterion>
+    <criterion testable="true">INV-5: A unit test confirms that if `sprk_searchindexname` is pre-set on the payload, the cascade does not overwrite it.</criterion>
+    <criterion testable="true">Existing `sprk_containerid` cascade behavior unchanged (regression test passes).</criterion>
+    <criterion testable="true">`npm run build` in `Spaarke.UI.Components` is clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    CreateMatterWizard is the simplest of the 5 parent wizards because `sprk_containerid` is already wired (matterService.ts:216 is the canonical reference). This task is the template for tasks 022–025; tasks 022/023/024/025 have an additional "verify and fix latent G2 gap" step because their wizards may not yet set `sprk_containerid` at all.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-012/021/022/028 + .claude/constraints/auth.md before Step 1. Declare rigor (FULL) per task-execute Step 0. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

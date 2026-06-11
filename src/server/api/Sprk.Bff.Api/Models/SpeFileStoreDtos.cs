@@ -9,7 +9,13 @@ public record FileHandleDto(
     DateTimeOffset LastModifiedDateTime,
     string? ETag,
     bool IsFolder,
-    string? WebUrl);
+    string? WebUrl,
+    // multi-container-multi-index-r1 indexer-routing-fix: SPE drive ID resolved during upload.
+    // Carried in the response so post-upload pipelines (RAG indexing via /api/ai/rag/index-file)
+    // do not need a second round-trip to GET /api/obo/containers/{containerId}/drive. Required
+    // by `IFileIndexingService.IndexFileAsync`. Optional for backwards compatibility with
+    // pre-existing consumers that ignore it.
+    string? DriveId = null);
 
 public record UploadSessionDto(
     string UploadUrl,

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="111" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Phase G wrap-up: lessons learned, runbook update, Find Similar UAT, `semantic-vs-relational-views.md` pattern doc</title>
+    <phase>G: Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>110</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, lessons-learned</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation + UAT verification. No new production code.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential — final task of the phase.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Close out Phase G. (1) Write `notes/phase-g/lessons-learned.md` capturing the journey from text-field to lookup-driven design, the migration approach, what went well, what would do differently. (2) Update `docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` (created in task 060) to reflect Phase G changes — operators now manage indexes via the `sprk_aisearchindex` table, not App Service config. (3) Find Similar UAT — verify the existing VisualizationService Find Similar feature works across the multi-index setup (relationships traversal works when source doc and target doc are in different indexes — should be denied with a clear message, or work intra-index per existing spec). (4) Create `.claude/patterns/ai/semantic-vs-relational-views.md` — 25-line pattern pointer codifying the "files = AI Search index; documents = Dataverse views; no mixing" principle from the project's design conversations.
+  </prompt>
+
+  <role>
+    Project owner doing final docs + UAT pass. Familiar with the project's lessons-learned + pattern-doc conventions.
+  </role>
+
+  <goal>
+    Phase G fully closed: lessons captured; operator runbook updated; Find Similar UAT'd; pattern doc landed.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/VisualizationService.cs</file>
+      <file>.claude/patterns/</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/lessons-learned.md (existing from 090; append Phase G section)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md repo conventions">Pattern files are 25-line pointer-to-code; don't bloat. Lessons-learned is narrative + structured; capture WHY decisions were made.</constraint>
+    <constraint source="spec.md §13 Q4">Operator runbook documents the empty-table fallback behavior + the warning log location for ops triage.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+      <file>docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md</file>
+      <file>.claude/patterns/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Write `projects/spaarke-multi-container-multi-index-r1/notes/phase-g/lessons-learned.md`. Sections: Why Phase G (text→lookup pivot); What worked (lookup-first + text-fallback during soak); What surprised us (form-binding-as-throwaway issue; the user's clear architectural call on "no formula fields"); What we'd do differently (consider lookup design earlier in R1 spec).</step>
+    <step order="2">Update `docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md`. Add a section "Managing indexes via sprk_aisearchindex" describing: adding/removing index rows; the `sprk_isdefault` flag; relationship to BU `sprk_aisearchindexid` lookup cascade. Update the troubleshooting section: empty-table behavior + warning log location (App Insights, "DataverseAllowedIndexesProvider empty result").</step>
+    <step order="3">Find Similar UAT: open a doc with `sprk_aisearchindexid` set to a specific row; trigger Find Similar in the PCF; verify it returns documents from the SAME index (intra-index by design). If a doc is moved across indexes (rare), Find Similar should return empty rather than fail — verify graceful degradation.</step>
+    <step order="4">Create `.claude/patterns/ai/semantic-vs-relational-views.md`. 25-line pointer file with the core principle: "Files = AI Search semantic index; Documents = Dataverse OOB views; no mixing." Point to spec §6 + the BFF `SemanticSearchService.AssociatedOnly` path as the canonical examples.</step>
+    <step order="5">Update `TASK-INDEX.md`: 111 🔲 → ✅. Mark Phase G complete in the project README.</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">New lessons-learned + pattern doc</tool>
+    <tool name="Edit">Operator runbook + project README + TASK-INDEX</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-multi-container-multi-index-r1/notes/phase-g/lessons-learned.md</output>
+    <output type="docs">docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md (updated)</output>
+    <output type="docs">.claude/patterns/ai/semantic-vs-relational-views.md (new)</output>
+    <output type="verification">Find Similar UAT result documented in lessons-learned</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">lessons-learned.md exists with sections for Why/What worked/What surprised/What we'd do differently.</criterion>
+    <criterion testable="true">Operator runbook updated with sprk_aisearchindex management section.</criterion>
+    <criterion testable="true">Find Similar UAT passes (returns intra-index results; graceful degradation on cross-index).</criterion>
+    <criterion testable="true">semantic-vs-relational-views.md exists in .claude/patterns/ai/ at ~25 lines.</criterion>
+    <criterion testable="true">Project README marks Phase G complete; TASK-INDEX shows all G tasks ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Extend `IKnowledgeDeploymentService` interface + impl with allow-list validation</title>
+    <phase>B: BFF resolver extension</phase>
+    <status>not-started</status>
+    <estimated-hours>3-5</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011, 012, 013, 014, 015, 016, 017</blocks>
+    <tags>bff-api, api, services, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api`; modifies .cs code in core resolver path; has 6+ steps; foundational interface change that blocks all subsequent Phase B work. Code-review + adr-check at Step 9.5 required.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Interface signature change is the contract — all downstream Phase B work consumes it. Must complete first.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `IKnowledgeDeploymentService.GetSearchClientAsync` to accept an optional `string? indexName = null` parameter. When non-empty, validate it against `IOptions&lt;AiSearchOptions&gt;.AllowedIndexes`; on miss, return ProblemDetails 400 with type code `INDEX_NOT_ALLOWED`. When validated, bind the `SearchClient` to that index. When null/empty, fall through to the existing 2-tier chain (`sprk_aiknowledgedeployment` Dataverse entity → `appsettings.AiSearch.KnowledgeIndexName`). All existing callers (without the param) MUST continue to work unchanged (NFR-02 — existing test suite passes unmodified).
+  </prompt>
+
+  <role>
+    BFF developer with deep familiarity with `Sprk.Bff.Api/Services/Ai/`, ADR-001 (Minimal API), ADR-010 (DI minimalism), ADR-013 (AI architecture), and ADR-019 (ProblemDetails). Read `.claude/constraints/bff-extensions.md` before designing — this is a binding pre-merge checklist for any BFF addition.
+  </role>
+
+  <goal>
+    `IKnowledgeDeploymentService.GetSearchClientAsync(string? indexName = null)` exists with: (1) allow-list validation surfacing `400 INDEX_NOT_ALLOWED` ProblemDetails on miss; (2) `SearchClient` bound to the validated index name on hit; (3) full backward-compat fall-through to the existing 2-tier chain when `indexName` is null/empty. Existing BFF test suite passes unmodified.
+  </goal>
+
+  <context>
+    <background>
+      Today's resolver routes per tenant via a 2-tier chain (`sprk_aiknowledgedeployment` → `appsettings.AiSearch.KnowledgeIndexName`). The multi-container-multi-index project needs record-scoped routing — an explicit `searchIndexName` from the request DTO (Phase B downstream tasks) lets the BFF target a specific index per record. This task adds the validation + binding logic in a fully backward-compatible way.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BFF-01">`GetSearchClientAsync` extends signature with `string? indexName = null`; existing callers unchanged.</constraint>
+    <constraint source="spec.md FR-BFF-02">Non-empty `indexName` MUST validate against `appsettings.AiSearch.AllowedIndexes`; bad value returns ProblemDetails 400 with type code `INDEX_NOT_ALLOWED`.</constraint>
+    <constraint source="spec.md FR-BFF-03">Validated `indexName` MUST return `SearchClient` bound to that index name (resolved via tenant Search endpoint).</constraint>
+    <constraint source="spec.md FR-BFF-04">Null/empty `indexName` MUST fall through to existing 2-tier chain (`sprk_aiknowledgedeployment` → `appsettings.AiSearch.KnowledgeIndexName`).</constraint>
+    <constraint source="spec.md NFR-02">Backward-compat: entire existing BFF test suite passes UNMODIFIED.</constraint>
+    <constraint source="spec.md NFR-08">ProblemDetails JSON for 400 INDEX_NOT_ALLOWED follows ADR-019 with extension members.</constraint>
+    <constraint source="design.md INV-5">Existing tenant default chain MUST remain functional — this change is additive only.</constraint>
+    <constraint source="ADR-001">Minimal-API pattern; service registration in `*Module.cs` if any new DI; no controller-style additions.</constraint>
+    <constraint source="ADR-010">DI minimalism — no new DI registrations unless strictly needed (this task should require none; existing resolver is already registered).</constraint>
+    <constraint source="ADR-013">AI architecture — resolver stays within `Services/Ai/`; no facade extraction needed (see notes/Placement Justification).</constraint>
+    <constraint source="ADR-019">ProblemDetails on all 400 errors; valid JSON with `type`, `title`, `status`, `detail`, plus extension member for the rejected index name.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Binding pre-merge checklist for any BFF addition — load + apply before designing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-bff-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Optional parameter extension" location="ADR-001">
+        Add the optional parameter with a safe default (`= null`); branch only when non-empty; fall through to existing logic otherwise. This is the minimal-impact extension pattern.
+      </pattern>
+      <pattern name="ProblemDetails 400 shape" location="ADR-019">
+        Return `400` with `type` URI fragment encoding the code (`INDEX_NOT_ALLOWED`), `title` short, `detail` actionable, `status: 400`, and extension members for the rejected value.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing `IKnowledgeDeploymentService.cs` + `KnowledgeDeploymentService.cs` to map the current 2-tier chain (note where `SearchClient` is constructed today).</step>
+    <step order="2">Add `string? indexName = null` to `GetSearchClientAsync` signature in `IKnowledgeDeploymentService.cs`. Verify all existing callers compile without changes (this is FR-BFF-01 acceptance).</step>
+    <step order="3">In `KnowledgeDeploymentService.cs`: when `indexName` is non-empty, fetch `IOptions&lt;AiSearchOptions&gt;.AllowedIndexes` and validate. On miss, throw a specific exception (or return a Result type) that the endpoint layer surfaces as ProblemDetails 400 with type code `INDEX_NOT_ALLOWED` (FR-BFF-02, NFR-08). Include the rejected value in ProblemDetails extension members.</step>
+    <step order="4">On validation hit, construct `SearchClient` bound to the validated `indexName` (using the tenant's Search endpoint + the supplied index name). Return it (FR-BFF-03).</step>
+    <step order="5">When `indexName` is null/empty, fall through to the existing 2-tier chain unchanged (FR-BFF-04 — backward-compat).</step>
+    <step order="6">Run the existing BFF test suite (`dotnet test tests/unit/Sprk.Bff.Api.Tests/`) and verify ALL tests pass UNMODIFIED (NFR-02). If any test fails because of this change, the implementation has broken backward compat — fix the implementation, not the test.</step>
+    <step order="7">Document the new behavior in an XML doc comment on the interface method (params + exception conditions + return shape).</step>
+    <step order="8">Run code-review + adr-check skills at Step 9.5 (FULL rigor requirement). Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md` to reflect completion and advance to next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing service + interface files</tool>
+    <tool name="Edit">Apply interface + implementation changes</tool>
+    <tool name="Bash">Run `dotnet build` and `dotnet test` to verify backward-compat</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs (extended signature)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs (validation + binding logic)</output>
+    <output type="docs" ephemeral="true">Inline XML doc comment on the interface method</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BFF-01: `GetSearchClientAsync(string? indexName = null)` compiles; all existing callers (no `indexName` arg) work unchanged. Verified by `dotnet build` + existing test suite green.</criterion>
+    <criterion testable="true">FR-BFF-02: `POST /api/ai/search` with `searchIndexName: "not-a-real-index"` returns 400 ProblemDetails with `type` encoding `INDEX_NOT_ALLOWED` and extension member naming the rejected index. (Endpoint-side test deferred to task 017; this task delivers the service-side behavior + exception/Result.)</criterion>
+    <criterion testable="true">FR-BFF-03: When `indexName` is validated, returned `SearchClient` is bound to that index name. Verified by unit test inspecting the constructed client's IndexName property (task 017).</criterion>
+    <criterion testable="true">FR-BFF-04: When `indexName` is null/empty, the resolver falls through to the existing 2-tier chain. Verified by existing test suite passing unmodified.</criterion>
+    <criterion testable="true">NFR-02: Existing BFF test suite passes UNMODIFIED — `dotnet test` shows the same pass count as pre-change baseline.</criterion>
+    <criterion testable="true">NFR-08: 400 response is valid ProblemDetails JSON (schema-validated in task 017).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **Placement Justification (binding per `.claude/constraints/bff-extensions.md` + plan.md §Phase B):**
+    This is a CRUD-resolver extension to existing AI search code. **In-BFF placement is correct** per the decision criteria — it is tightly coupled to the existing `IKnowledgeDeploymentService` tenant-routing chain (an internal AI orchestration concern) and does not introduce new cross-cutting concerns. **No facade needed** (CRUD code does not consume AI internals here; AI internals expose a richer resolver to consumers within the BFF). No new NuGet packages; no new DI registrations (existing `KnowledgeDeploymentService` registration covers the extended signature).
+
+    Publish-size impact is expected to be zero (additive logic to existing service; no new dependencies). Final publish-size check is task 018.
+
+    The endpoint-layer ProblemDetails wiring (translating the service exception/Result into the HTTP response) lives in task 016 (`SemanticSearchEndpoints.cs`). This task delivers the service-side behavior cleanly so 016 can simply propagate.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute Step 0 (rigor declaration: FULL) before any code change.
+    </protocol>
+  </execution>
+</task>

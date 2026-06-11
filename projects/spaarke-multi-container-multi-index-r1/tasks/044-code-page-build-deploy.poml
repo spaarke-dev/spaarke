@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Code page — build + deploy via `/code-page-deploy` (NFR-11 clean-rebuild)</title>
+    <phase>E: SemanticSearch Code Page (Deploy)</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>043</dependencies>
+    <blocks>050, 051, 052, 053, 073</blocks>
+    <tags>deploy, dataverse, code-page, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Mechanical deploy task following `/code-page-deploy` skill verbatim. Explicit NFR-11 + saved-lesson constraint. No source-code logic; not vague docs.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate — must follow tests-green (043) and precede Phase F start (050+ depend on code-page deployed).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the SemanticSearch code page via the `/code-page-deploy` skill. CRITICAL pre-steps: clean-rebuild `@spaarke/auth` and `@spaarke/ui-components` `dist/` BEFORE the code-page build, AND clear the Vite cache for SemanticSearch (NFR-11 — per saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle`). Then build, inline-deploy via the skill, smoke check the deployed page, capture the deploy log evidence.
+  </prompt>
+
+  <role>
+    Code-page deployer with familiarity with the `/code-page-deploy` skill verbatim. The clean-rebuild + Vite cache clear is non-negotiable: stale shared-lib `dist/` and stale Vite cache have both been observed to poison code-page bundles (saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle`).
+  </role>
+
+  <goal>
+    Deployed code page renders on the test environment without console errors; deploy log shows the clean-rebuild of `@spaarke/auth` + `@spaarke/ui-components` AND the Vite cache clear happened BEFORE the code-page build. Phase F (backfill scripts) can take a dependency on the full client surface being live.
+  </goal>
+
+  <context>
+    <background>
+      `/code-page-deploy` is the canonical skill for code-page deploys; it embeds the Vite production build + Dataverse inline upload. Saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle` documents the failure mode the clean-rebuild + Vite cache clear prevents.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/spaarke-auth/</file>
+      <file>src/client/shared/Spaarke.UI.Components/</file>
+      <file>src/client/code-pages/SemanticSearch/</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-11">Code page deploy MUST follow `/code-page-deploy` skill exactly — including clean-rebuild of shared libs and Vite cache clear before each build.</constraint>
+    <constraint source="saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle`">Mandatory clean rebuild of `@spaarke/auth` + `@spaarke/ui-components` `dist/` before code-page build. PLUS Vite cache clear (`rm -rf node_modules/.vite` or equivalent).</constraint>
+    <constraint source="saved lesson `feedback_deploy-asks-follow-skill-no-openended-questions`">Invoke the deploy skill verbatim; hand over file paths; no open-ended questions.</constraint>
+    <constraint source=".claude/skills/code-page-deploy/SKILL.md">Use production-mode Vite build; deploy inline via the skill's Dataverse upload path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/code-pages/SemanticSearch/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pre-build clean-rebuild + Vite cache clear" location="saved lesson `feedback_stale-shared-lib-dist-poisons-codepage-bundle`">
+        Before `npm run build` in the code page: (1) clean `dist/` and rebuild `@spaarke/auth`; (2) clean `dist/` and rebuild `@spaarke/ui-components`; (3) clear `node_modules/.vite` in the code page. The Vite cache can hold stale module graph artifacts that survive a build.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Clean + rebuild `@spaarke/auth` `dist/`: in `src/client/shared/spaarke-auth/` (or the canonical path per the workspace), delete the existing `dist/` and run `npm run build`. Verify the output is fresh.</step>
+    <step order="2">Clean + rebuild `@spaarke/ui-components` `dist/`: in `src/client/shared/Spaarke.UI.Components/`, delete the existing `dist/` and run `npm run build`. Verify the output is fresh.</step>
+    <step order="3">Clear the Vite cache in the code page: `rm -rf src/client/code-pages/SemanticSearch/node_modules/.vite` (or the equivalent path).</step>
+    <step order="4">Build the code page in production mode: in `src/client/code-pages/SemanticSearch/`, run `npm run build`. Verify the build artifact is fresh.</step>
+    <step order="5">Inline-deploy via the `/code-page-deploy` skill: the skill uploads the built artifact to Dataverse as a code site for `sprk_semanticsearch`. Capture upload log.</step>
+    <step order="6">Smoke check the deployed code page: open `sprk_semanticsearch` on the test environment; verify no console errors; verify the page renders interactively.</step>
+    <step order="7">Capture the full deploy log (clean-rebuild evidence + Vite cache clear + build output + upload result + smoke screenshot) in `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/044-code-page-deploy.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run npm + Vite cache clear commands</tool>
+    <tool name="Read">Read deploy logs</tool>
+    <tool name="Skill">Invoke `code-page-deploy` skill for the full deploy sequence</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">SemanticSearch code page deployed to test environment</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/044-code-page-deploy.md (deploy log evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NFR-11: Deploy log shows clean-rebuild of `@spaarke/auth` + `@spaarke/ui-components` `dist/` AND Vite cache clear happened BEFORE the code-page build. Verified by handoff notes.</criterion>
+    <criterion testable="true">Code page deploys without errors via `/code-page-deploy` skill.</criterion>
+    <criterion testable="true">Deployed code page renders on the test environment with no console errors.</criterion>
+    <criterion testable="true">Filter Parity vs PCF (FR-PARITY-02) re-verified on the deployed artifact — same result set as the PCF.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Deployed code page smoke">
+      <description>Smoke check that the deployed code page on the test environment loads and renders without errors.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_semanticsearch</url>
+      <steps>
+        <step>Navigate to the SemanticSearch code page directly via URL.</step>
+        <step>Open browser DevTools → Console to check for any load errors.</step>
+        <step>Verify the page mounts and renders interactively.</step>
+      </steps>
+      <expected>Page renders; no console errors; auth handshake completes; search input + filters visible.</expected>
+    </test>
+    <test name="End-to-end Filter Parity (deployed artifact)">
+      <description>Re-run FR-PARITY-02 on the deployed code page after Phase D + E both ship.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn={entity}&amp;id={record-id}</url>
+      <steps>
+        <step>Open a model-driven form hosting SemanticSearchControl on a Protected Matter.</step>
+        <step>In the PCF, set Threshold=50%, Mode=Hybrid, Associated Only=true; execute search.</step>
+        <step>Click "Open in Semantic Search".</step>
+        <step>Compare PCF result set to code-page result set.</step>
+      </steps>
+      <expected>Identical document IDs, count, and order. searchIndexName routes both to the same index. End-to-end multi-index routing works.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The Vite cache clear is the often-forgotten step. Even a clean shared-lib `dist/` will not help if `node_modules/.vite` has stale dependency-graph artifacts. The saved lesson documents this exact failure mode.
+
+    If the code page deploy fails, the most common root causes are (a) shared-lib `dist/` not actually refreshed — verify file mtimes; (b) Vite cache not cleared — verify the cache directory is empty; (c) the `/code-page-deploy` skill's upload step encountered a Dataverse session timeout — re-auth via PAC and retry.
+
+    Phase H deploy ordering: A.5 → B → A → D → E (this) → F. Backfill scripts (Phase F) start after this deploy completes.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load .claude/skills/code-page-deploy/SKILL.md verbatim. Declare rigor (STANDARD) per task-execute Step 0. Invoke `code-page-deploy` skill for the deploy steps.
+    </protocol>
+  </execution>
+</task>

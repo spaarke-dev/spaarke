@@ -90,6 +90,53 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
 // are imported from the shared PolymorphicResolverService.
 
 /**
+ * Resolve the current Dataverse user ID from the host Xrm global.
+ *
+ * Walks `window` → `window.parent` → `window.top` to find an `Xrm.Utility.getGlobalContext()`
+ * (Code Page hosted in a Power App iframe) or `Xrm.Utility.getUserId()` (PCF / direct host).
+ * Returns `''` (empty) when no Xrm context is reachable — caller treats that as "skip cascade".
+ *
+ * Kept module-private (not exported) so consumers cannot pass an arbitrary user ID; this
+ * preserves the "current user" semantics of FR-WIZ-04.
+ */
+function _getCurrentUserId(): string {
+  const frames: Window[] = [window];
+  try {
+    if (window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window) frames.push(window.top);
+  } catch {
+    /* cross-origin */
+  }
+
+  for (const frame of frames) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (frame as any).Xrm;
+      if (xrm?.Utility?.getGlobalContext) {
+        const ctx = xrm.Utility.getGlobalContext();
+        const userId = ctx?.userSettings?.userId;
+        if (typeof userId === 'string' && userId.trim() !== '') {
+          return userId.replace(/^\{|\}$/g, '').toLowerCase();
+        }
+      }
+      if (typeof xrm?.Utility?.getUserId === 'function') {
+        const userId = xrm.Utility.getUserId();
+        if (typeof userId === 'string' && userId.trim() !== '') {
+          return userId.replace(/^\{|\}$/g, '').toLowerCase();
+        }
+      }
+    } catch {
+      /* cross-origin */
+    }
+  }
+  return '';
+}
+
+/**
  * Resolve navigation property name for a document lookup by referenced entity.
  * Used when creating sprk_document records linked to a parent entity.
  */
@@ -110,13 +157,20 @@ function _resolveDocNavProp(entries: INavPropEntry[], referencedEntity: string):
 export class WorkAssignmentService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
+  private readonly _tenantId: string;
 
   constructor(
     dataService: IDataService,
     authenticatedFetch: AuthenticatedFetchFn,
     bffBaseUrl: string,
-    private readonly _containerId?: string
+    private readonly _containerId?: string,
+    /**
+     * AAD tenant ID for post-upload RAG indexing routing. When omitted,
+     * indexing is skipped (files still upload to SPE successfully).
+     */
+    tenantId?: string
   ) {
+    this._tenantId = tenantId ?? '';
     this._dataService = dataService;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
@@ -399,7 +453,8 @@ export class WorkAssignmentService {
       entity['sprk_responseduedate'] = form.responseDueDate;
     }
 
-    // Store the SPE container ID on the work assignment record (enables Documents tab)
+    // Store the host-resolved SPE container ID on the work assignment record (enables Documents tab).
+    // Applied FIRST so it acts as an explicit override during the subsequent BU cascade (INV-5).
     if (this._containerId) {
       entity['sprk_containerid'] = this._containerId;
     }
@@ -415,6 +470,27 @@ export class WorkAssignmentService {
         );
       }
     };
+
+    // FR-WIZ-04: Cascade `sprk_containerid` + `sprk_searchindexname` + Phase G `sprk_ai_search_index`
+    // lookup from the current user's owning Business Unit. INV-5 guards each scalar field
+    // independently. If the user's BU has any field unset, the corresponding payload field is
+    // left untouched and the BFF tenant-default chain takes over server-side.
+    try {
+      const currentUserId = _getCurrentUserId();
+      if (currentUserId) {
+        // IDataService is a structural superset of IWebApiLike (retrieveRecord, retrieveMultipleRecords).
+        const defaults = await EntityCreationService.resolveUserBuDefaults(this._dataService, currentUserId);
+        EntityCreationService.applyUserBuDefaults(entity, defaults);
+        if (defaults.searchIndexId) {
+          bindLookup('sprk_aisearchindex', 'sprk_aisearchindexes', defaults.searchIndexId);
+        }
+      } else {
+        console.warn('[WorkAssignmentService] BU cascade skipped: current user ID could not be resolved.');
+      }
+    } catch (err) {
+      // Non-fatal: log and continue. BFF tenant-default chain handles routing if all fields are unset.
+      console.warn('[WorkAssignmentService] BU cascade failed (non-fatal):', err);
+    }
 
     // Related record (matter, project, invoice, event)
     // Uses the shared Polymorphic Resolver pattern (ADR-024):
@@ -510,6 +586,22 @@ export class WorkAssignmentService {
           );
           if (createResult.warnings.length > 0) {
             warnings.push(...createResult.warnings);
+          }
+
+          // Trigger RAG indexing per file (canonical sync OBO path via
+          // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal.
+          const indexingWarnings = await this._entityService.indexUploadedFiles(
+            uploadResult.uploadedFiles,
+            this._tenantId,
+            {
+              entityType: 'sprk_workassignment',
+              entityId: workAssignmentId,
+              entityName: form.name.trim(),
+            },
+            createResult.createdDocumentIds
+          );
+          if (indexingWarnings.length > 0) {
+            warnings.push(...indexingWarnings);
           }
         } catch (err) {
           console.warn('[WorkAssignmentService] Document record creation failed:', err);

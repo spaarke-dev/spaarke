@@ -62,6 +62,10 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 - **MUST** use the ADR-004 Job Contract pattern (`IJobHandler<T>`) for new async work — not a free-form `IHostedService`
 - **MUST** keep AI-coupled job handlers in `Services/Ai/Jobs/` (post-Outcome E reorganization) — NOT in `Services/Jobs/Handlers/`
 - **MUST NOT** add new direct LLM/Azure-OpenAI calls outside `Services/Ai/`
+- **MUST** if the background work reads an SPE file, verify the SPE writer-identity rule (Pattern 4):
+  - **File written by USER (OBO upload)** → dispatch SYNC INLINE in the OBO request scope via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, httpContext, ct)` (or directly call `IFileIndexingService.IndexFileAsync(request, httpContext, ct)`). A Service Bus job that runs later under MI will 403.
+  - **File written by MI** (Office Add-in finalize, Email-to-Document, post-analysis re-index) → dispatch via `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct)` (Service Bus + `RagIndexingJobHandler` under MI). MI is on its own writes' ACLs.
+  - See [`.claude/patterns/auth/spe-writer-identity-matching.md`](../patterns/auth/spe-writer-identity-matching.md) for the decision matrix and the 2026-06-08 Phase 3a UAT incident that motivated this rule.
 
 ### E. AI Feature Additions
 

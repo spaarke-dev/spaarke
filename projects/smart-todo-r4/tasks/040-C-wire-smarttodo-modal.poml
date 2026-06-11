@@ -3,7 +3,7 @@
     <title>C — Wire SmartTodo card-open path to &lt;RecordNavigationModalShell&gt; with To Do main form iframe</title>
     <phase>Phase 2: Wave 2b</phase>
     <workstream>C</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2 days</estimated-effort>
     <tags>code-page, smart-todo, modal, iframe, cross-frame-messaging, react, fluent-v9</tags>
     <parallel-safe>true</parallel-safe>

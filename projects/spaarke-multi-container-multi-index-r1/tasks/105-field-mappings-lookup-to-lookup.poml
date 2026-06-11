@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="105" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Field mappings: add lookup→lookup 1:N mappings on BU→Matter/Project/Invoice/Event/WorkAssignment, Matter→Document chains</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>104</dependencies>
+    <blocks>110</blocks>
+    <tags>dataverse, schema, field-mapping</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration-only via Power Apps maker. No code. Reversible (delete the mapping).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after migration — keeping text-to-text mappings active while migration is in progress avoids data conflict; lookup-to-lookup goes live after data is consistent.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    For each 1:N relationship in the project (BU → Matter, BU → Project, BU → Invoice, BU → Event, BU → WorkAssignment, Matter → Document, plus equivalents for Project → Document etc.), add a lookup-to-lookup field mapping: `parent.sprk_aisearchindexid → child.sprk_aisearchindexid`. Keep existing `sprk_searchindexname` text-to-text mappings intact (they're removed in task 110 post-soak).
+  </prompt>
+
+  <role>
+    Dataverse maker familiar with 1:N relationship field mappings in Power Apps.
+  </role>
+
+  <goal>
+    All 1:N relationships in the project that previously mapped `sprk_searchindexname` text-to-text now ALSO map `sprk_aisearchindexid` lookup-to-lookup. New records created with the cascade pattern (e.g., new Matter from a BU) inherit BOTH columns until task 110 removes the text mapping.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md §8">Add lookup→lookup mappings; KEEP text→text mappings during migration soak.</constraint>
+    <constraint source="design.md INV-5">Field mappings populate on CREATE only — existing records are unaffected (those were covered by task 104).</constraint>
+    <constraint source="CLAUDE.md MUST NOT">No plugins or Power Automate; only Dataverse standard field mappings.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">For each parent → child relationship currently mapping `sprk_searchindexname` (text), open the relationship in Power Apps maker → Mappings → New.</step>
+    <step order="2">Add mapping: source = `parent.sprk_aisearchindexid`, target = `child.sprk_aisearchindexid`. Save.</step>
+    <step order="3">Repeat for all relationships in scope (BU → 5 child entities; parent record → Document for each parent type).</step>
+    <step order="4">Smoke test: create a new test Matter from a BU that has `sprk_aisearchindexid` set. Verify the new Matter inherits both the text value (existing mapping) AND the lookup (new mapping). Delete the test record.</step>
+    <step order="5">Document the list of new mappings in `notes/phase-g/field-mappings-added.md` for the task 110 removal step.</step>
+    <step order="6">Update `TASK-INDEX.md`: 105 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Document mappings list in notes</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">~10-12 new lookup→lookup field mappings configured</output>
+    <output type="docs">notes/phase-g/field-mappings-added.md (inventory for task 110)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Smoke test creating a child record from a parent inherits `sprk_aisearchindexid` lookup correctly.</criterion>
+    <criterion testable="true">Existing text-to-text mappings still work (verified by same smoke test inheriting the text value too).</criterion>
+    <criterion testable="true">Inventory document lists every new mapping (source entity, target entity, source/target column names) so task 110 can remove the old ones precisely.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

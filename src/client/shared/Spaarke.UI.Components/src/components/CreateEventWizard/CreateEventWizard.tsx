@@ -110,6 +110,14 @@ export interface ICreateEventWizardProps {
    * Called when the wizard opens. If not provided, file uploads will be skipped.
    */
   resolveSpeContainerId?: () => Promise<string>;
+  /**
+   * AAD tenant ID. Forwarded to `EntityCreationService.indexUploadedFiles()` so
+   * post-upload RAG indexing via `@spaarke/sdap-client` can route to the
+   * correct multi-tenant index. When omitted, indexing is skipped (files still
+   * upload to SPE successfully). Typically sourced from solution
+   * `config.tenantId` in `main.tsx`.
+   */
+  tenantId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +152,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   authenticatedFetch: authFetch,
   bffBaseUrl,
   resolveSpeContainerId,
+  tenantId,
 }) => {
   // -- Entity-specific form state --------------------------------------------
   const [formValid, setFormValid] = React.useState(false);
@@ -255,6 +264,22 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
 
               if (docResult.warnings.length > 0) {
                 warnings.push(...docResult.warnings);
+              }
+
+              // Trigger RAG indexing per file (canonical sync OBO path via
+              // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal.
+              const indexingWarnings = await entityService.indexUploadedFiles(
+                uploadResult.uploadedFiles,
+                tenantId ?? '',
+                {
+                  entityType: 'sprk_event',
+                  entityId: eventId,
+                  entityName: eventName,
+                },
+                docResult.createdDocumentIds
+              );
+              if (indexingWarnings.length > 0) {
+                warnings.push(...indexingWarnings);
               }
             }
           } catch (err) {

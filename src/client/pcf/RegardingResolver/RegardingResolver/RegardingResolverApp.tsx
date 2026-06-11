@@ -240,6 +240,14 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   };
 
   const handleSelectRecord = async (): Promise<void> => {
+    // FR-24 — Defensive write-gate: in read-only mode the edit UI is not
+    // rendered, but if a race or programmatic invocation reaches this handler
+    // (e.g. transition during prop change), refuse to write anything.
+    // This is belt-and-suspenders alongside the early read-only render branch.
+    if (readOnly) {
+      console.warn('[RegardingResolver] handleSelectRecord invoked in read-only mode — write skipped (FR-24).');
+      return;
+    }
     if (!selectedEntityType) {
       setError('Please select an entity type first.');
       return;
@@ -336,6 +344,12 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   };
 
   const handleClear = async (): Promise<void> => {
+    // FR-24 — Defensive write-gate: read-only mode renders no Clear button, but
+    // if a race or programmatic invocation reaches this handler, refuse to write.
+    if (readOnly) {
+      console.warn('[RegardingResolver] handleClear invoked in read-only mode — write skipped (FR-24).');
+      return;
+    }
     if (!hostEntity) {
       setError("Host entity is not configured (manifest 'entity' input property is empty).");
       return;

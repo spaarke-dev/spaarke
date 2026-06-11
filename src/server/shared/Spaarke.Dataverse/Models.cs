@@ -274,6 +274,28 @@ public class DocumentEntity
 
     /// <summary>Invoice display name. Maps to _sprk_invoice_value@OData.Community.Display.V1.FormattedValue.</summary>
     public string? InvoiceName { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Search Index Tracking (multi-container-multi-index-r1)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Whether the document has been indexed for semantic search. Maps to sprk_searchindexed.
+    /// Set to true by `RagEndpoints.IndexFile` after successful AI Search write.
+    /// </summary>
+    public bool? SearchIndexed { get; set; }
+
+    /// <summary>
+    /// Name of the AI Search index where the document is stored. Maps to sprk_searchindexname.
+    /// Required for multi-index aware consumers (e.g., `VisualizationService` / Find Similar)
+    /// to bind the right SearchClient. Cascaded from the BU on wizard create.
+    /// </summary>
+    public string? SearchIndexName { get; set; }
+
+    /// <summary>
+    /// Timestamp when document was last indexed. Maps to sprk_searchindexedon.
+    /// </summary>
+    public DateTime? SearchIndexedOn { get; set; }
 }
 
 /// <summary>

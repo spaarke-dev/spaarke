@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>DocumentUploadWizard — `DocumentRecordService.buildRecordPayload` includes `sprk_searchindexname` (FR-WIZ-07)</title>
+    <phase>A: Wizards</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>026</dependencies>
+    <blocks>028</blocks>
+    <tags>react, typescript, shared-library, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.ts` payload-assembly code; carries ADR-012 / ADR-022 / ADR-028 obligations; INV-5 enforcement; carries a critical "do NOT add `sprk_containerid` on Document" constraint per design INV.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on the resolver added in task 026. Same code-page area, serial execution.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `DocumentRecordService.buildRecordPayload` (`src/client/shared/Spaarke.UI.Components/src/services/document-upload/DocumentRecordService.ts` lines 268–293) to include `sprk_searchindexname` alongside the existing `sprk_graphdriveid`. The value comes from task 026's `resolveSearchIndexNameForRecord`. **CRITICAL**: Do NOT add `sprk_containerid` to the Document payload — per design INV, the canonical Document container field is `sprk_graphdriveid`; `sprk_containerid` must stay NULL on `sprk_document`.
+  </prompt>
+
+  <role>
+    Spaarke.UI.Components shared-lib maintainer. React 18 + Fluent v9 + TypeScript. Familiar with the existing `buildRecordPayload` shape and the design invariant that `sprk_document` has no `sprk_containerid` (only `sprk_graphdriveid`).
+  </role>
+
+  <goal>
+    A new `sprk_document` created via DocumentUploadWizard has `sprk_searchindexname` populated by the 3-step chain (parent → BU → empty), `sprk_graphdriveid` populated as today, and `sprk_containerid` still NULL. INV-5 honored (explicit override on payload preserved).
+  </goal>
+
+  <context>
+    <background>
+      `DocumentRecordService.buildRecordPayload` (lines 268–293) currently assembles the Document create payload including `sprk_graphdriveid`. This task adds `sprk_searchindexname`. The canonical Document container field is `sprk_graphdriveid` (not `sprk_containerid`) per design.md INV — adding `sprk_containerid` here would violate the invariant and break Phase F backfill assumptions.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/document-upload/DocumentRecordService.ts</file>
+      <file>src/solutions/DocumentUploadWizard/src/components/AssociateToStep.tsx</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Logic in `@spaarke/ui-components` (DocumentRecordService.ts).</constraint>
+    <constraint source="ADR-022">Code page React 18; shared lib portable.</constraint>
+    <constraint source="ADR-028">No new auth wiring; Xrm.WebApi for Dataverse reads.</constraint>
+    <constraint source="design.md INV (Document container field)">Canonical Document container field is `sprk_graphdriveid`. `sprk_containerid` MUST stay NULL on `sprk_document`. Do NOT add `sprk_containerid` to the Document payload under any circumstances.</constraint>
+    <constraint source="spec.md FR-WIZ-07">Document payload includes `sprk_searchindexname` (resolved via task 026's chain) alongside existing `sprk_graphdriveid`.</constraint>
+    <constraint source="design.md INV-5">If payload already has a non-empty `sprk_searchindexname`, do NOT overwrite.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-ui-component-library.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Document create payload" location="src/client/shared/Spaarke.UI.Components/src/services/document-upload/DocumentRecordService.ts">
+        Lines 268–293: `buildRecordPayload` — adds `sprk_graphdriveid` and other Document-specific fields. Add `sprk_searchindexname` here, guarded by INV-5. Do NOT add `sprk_containerid`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `DocumentRecordService.ts` lines 268–293 to confirm the existing `buildRecordPayload` shape and verify the absence of any `sprk_containerid` reference today.</step>
+    <step order="2">Wire in task 026's `resolveSearchIndexNameForRecord` — either call it at payload-assembly time, or accept a pre-resolved value from the caller (`AssociateToStep`). Choose the path that minimizes coupling.</step>
+    <step order="3">Add `sprk_searchindexname` to the payload alongside `sprk_graphdriveid`. INV-5 guard: only assign if payload value is currently null/empty.</step>
+    <step order="4">**CRITICAL VERIFICATION**: Confirm `sprk_containerid` is NOT added by this change. Add a code comment explicitly citing the design invariant ("Canonical Document container field is sprk_graphdriveid; sprk_containerid stays NULL on sprk_document").</step>
+    <step order="5">Run shared-lib build (`npm run build` in `Spaarke.UI.Components`); confirm clean compile.</step>
+    <step order="6">Unit tests: (a) Document payload includes `sprk_searchindexname` from resolver; (b) `sprk_graphdriveid` continues to be set as today; (c) `sprk_containerid` is NOT in the payload; (d) INV-5 — pre-set `sprk_searchindexname` preserved.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read DocumentRecordService.ts and AssociateToStep.tsx</tool>
+    <tool name="Edit">Extend `buildRecordPayload`</tool>
+    <tool name="Bash">Run `npm run build` in Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/document-upload/DocumentRecordService.ts (extended)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/027-docupload-payload.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-WIZ-07: After deploy + UAT (task 071), a Document uploaded under a Matter has: `sprk_searchindexname` populated; `sprk_containerid` NULL; `sprk_graphdriveid` populated (MCP-verified).</criterion>
+    <criterion testable="true">Unit test confirms `sprk_containerid` is NOT in the payload (design INV honored).</criterion>
+    <criterion testable="true">Unit test confirms `sprk_searchindexname` cascades from resolver (parent → BU → empty).</criterion>
+    <criterion testable="true">INV-5 unit test passes — pre-set value preserved.</criterion>
+    <criterion testable="true">`npm run build` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **DESIGN INVARIANT CRITICAL NOTE**: The line `// Canonical Document container field is sprk_graphdriveid; sprk_containerid stays NULL on sprk_document (design.md INV)` MUST be present in the modified code. Phase F backfill depends on `sprk_document.sprk_containerid` being NULL universally — adding it here would corrupt the backfill audit downstream.
+
+    Task 028 will cover INV-5 unit tests across all 6 wizards including DocumentUploadWizard — keep the test added here aligned with that suite's shape.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-012/022/028 + .claude/constraints/auth.md + design.md INV section before Step 1. Declare rigor (FULL). Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>
