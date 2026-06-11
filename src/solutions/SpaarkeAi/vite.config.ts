@@ -35,6 +35,9 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // standalone EventsPage code page AND the Calendar workspace widget
     // (task 115). Wiring done here so task 115 can immediately import.
     path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+    // R4 task 020 (2026-06-10): @spaarke/smart-todo-components hoist for the
+    // LegalWorkspace todo section + future SpaarkeAi Direct widget (Pattern D).
+    path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
     // Round 4 Fix 4 (2026-05-21): @spaarke/legal-workspace is aliased to the
     // LegalWorkspace solution source so SpaarkeAi can embed the full
     // workspace experience as a tab widget without copying section factories.
@@ -102,6 +105,9 @@ export default defineConfig({
         // @spaarke/events-components alias (Calendar widget — task 115).
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.ts"),
+        // R4 task 020 (2026-06-10): transpile Spaarke.SmartTodo.Components source.
+        path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.ts"),
         // Round 4 Fix 4 (2026-05-21): transpile LegalWorkspace source so
         // SpaarkeAi can embed LegalWorkspaceApp via the @spaarke/legal-workspace alias.
         path.resolve(__dirname, "../LegalWorkspace/src/**/*.tsx"),
@@ -136,6 +142,10 @@ export default defineConfig({
       // immediately without further vite/tsconfig plumbing.
       "@spaarke/events-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
       "@spaarke/events-components": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+      // R4 task 020 (2026-06-10): @spaarke/smart-todo-components consumed by the
+      // LegalWorkspace todo section (Pattern D dual-use).
+      "@spaarke/smart-todo-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
+      "@spaarke/smart-todo-components": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
       // Round 4 Fix 4 (2026-05-21): alias the LegalWorkspace solution source as
       // a "package" so SpaarkeAi can embed the full workspace experience inside
       // a workspace pane tab via `import { LegalWorkspaceApp } from "@spaarke/legal-workspace"`.
