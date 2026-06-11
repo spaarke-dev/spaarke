@@ -1,30 +1,27 @@
 /**
  * SmartTodoApp — Main layout component for the SmartTodo Code Page.
  *
- * Integrates the Kanban board (left panel) with a collapsible TodoDetailPanel
- * (right panel) separated by a draggable PanelSplitter. The detail panel
- * automatically opens when a to-do item is selected and closes when deselected.
+ * Renders the Kanban board (or List view, per R4 task 033 / FR-09) as the
+ * primary surface. To-do detail editing is handled by the hybrid
+ * `<SmartTodoModal>` (R4 task 040) which embeds the OOB MDA main form in an
+ * iframe — see `./components/Modal`. The legacy R3 `TodoDetailPanel` side-pane
+ * is retired per R4 FR-18 / task 042 (UAT OD-4: no save + Completed broken
+ * were inherent to the side-pane pattern).
  *
  * Layout:
  *   TodoProvider (shared state)
- *     ├── Left panel  — SmartToDo (Kanban board)
- *     ├── PanelSplitter (draggable, keyboard-accessible)
- *     └── Right panel — TodoDetailPanel (collapsible)
+ *     ├── Header (4-row, R4 task 030)
+ *     └── SmartToDo (Kanban) OR ListView (toggled via header view-mode, FR-09)
  *
- * Panel behaviour:
- *   - Default detail width: 400px (persisted via localStorage)
- *   - Panel open/close animation < 200ms (NFR-01)
- *   - Splitter supports mouse drag, keyboard (Arrow keys), and double-click reset
- *   - Panel state persisted to localStorage under 'smarttodo-panel-layout'
+ * Modal:
+ *   <SmartTodoModal> mounts only when `modalTodoId !== null`. Open is driven
+ *   by the `OPEN_TODOS_EVENT` window event (toolbar Open + card double-click).
  *
- * @see ADR-012 - PanelSplitter and useTwoPanelLayout from @spaarke/ui-components
  * @see ADR-021 - Fluent UI v9 design system (makeStyles + tokens only)
  */
 
 import * as React from "react";
-import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
-import { PanelSplitter } from "@spaarke/ui-components/PanelSplitter";
-import { useTwoPanelLayout } from "@spaarke/ui-components/hooks";
+import { makeStyles, tokens } from "@fluentui/react-components";
 import { CreateTodoWizard } from "@spaarke/ui-components";
 import type { ToolbarAction } from "@spaarke/ui-components";
 import {
@@ -41,7 +38,6 @@ import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/aut
 import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
 import { ListView } from "./components/ListView";
-import { TodoDetailPanel } from "./components/TodoDetailPanel";
 import { Header } from "./components/Header";
 import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
 import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
@@ -57,8 +53,12 @@ import type { SmartTodoViewMode } from "./hooks/useUserPreferences";
 
 const useStyles = makeStyles({
   /**
-   * Outer page frame — vertical stack: 4-row Header on top, two-pane
-   * (kanban + detail) `container` below. New in R4 task 030 (FR-06).
+   * Outer page frame — vertical stack: 4-row Header on top, primary surface
+   * (kanban / list) below. R4 task 030 (FR-06).
+   *
+   * R4 task 042 (FR-18): the R3 two-pane (kanban + TodoDetailPanel) layout is
+   * retired. The hybrid `<SmartTodoModal>` (task 040) replaces the side-pane,
+   * so this frame now hosts a single primary surface beneath the Header.
    */
   page: {
     display: "flex",
@@ -67,34 +67,12 @@ const useStyles = makeStyles({
     overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  /** Two-pane row — fills remaining height under the header. */
-  container: {
-    display: "flex",
+  /** Primary surface row — fills remaining height under the header. */
+  primaryPanel: {
     flexGrow: 1,
     minHeight: 0,
     overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1,
-  },
-  primaryPanel: {
-    overflow: "hidden",
-    minWidth: 0,
-    height: "100%",
-  },
-  detailPanel: {
-    overflow: "hidden",
-    minWidth: 0,
-    display: "flex",
-    flexDirection: "column",
-  },
-  /** Smooth collapse/expand animation for panel toggle transitions.
-   *  Applied only when NOT dragging to avoid janky animation during resize. */
-  detailPanelAnimated: {
-    transitionProperty: "width",
-    transitionDuration: "150ms", // NFR-01: < 200ms
-    transitionTimingFunction: tokens.curveEasyEase,
-    "@media (prefers-reduced-motion: reduce)": {
-      transitionDuration: "0ms",
-    },
   },
 });
 
@@ -130,7 +108,8 @@ function SmartTodoLayout(): React.ReactElement {
   // `searchQuery` is owned here so future tasks (031 facets, 033 list view)
   // can read it. `selectedIds` is the **multi-select** set driving Row 4 of
   // the header (card affordances — task 060). It is INDEPENDENT of
-  // `selectedEventId` (which drives the detail panel, task 060+).
+  // `selectedEventId` from TodoContext (which, post-R4 task 042, drives only
+  // the ListView highlight — the side-pane is retired per FR-18).
   //
   // For task 030 `selectedIds` is initialized empty; the toolbar renders
   // `null` (zero selection). Task 060 will populate the Set as the user
@@ -169,10 +148,10 @@ function SmartTodoLayout(): React.ReactElement {
   // ── R4 task 040 — Subscribe to OPEN_TODOS_EVENT ──────────────────────────
   // Task 032's `createToolbarActions` Open handler dispatches a window
   // `CustomEvent` with shape `{selectedIds: string[], firstId: string}`
-  // whenever the user clicks the toolbar Open. Task 060 will additionally
-  // dispatch the same event from card double-click + the per-card Open icon.
-  // Subscribing here makes the modal the SINGLE consumer of the event — any
-  // future launcher just dispatches.
+  // whenever the user clicks the toolbar Open. Task 060 ALSO dispatches the
+  // same event from card double-click + the per-card Open icon. Subscribing
+  // here makes the modal the SINGLE consumer of the event — any launcher
+  // just dispatches.
   React.useEffect(() => {
     const handler = (ev: Event): void => {
       const detail = (ev as CustomEvent<OpenTodosEventDetail>).detail;
@@ -184,6 +163,41 @@ function SmartTodoLayout(): React.ReactElement {
     return () => {
       window.removeEventListener(OPEN_TODOS_EVENT, handler);
     };
+  }, []);
+
+  // ── R4 task 060 — Per-card open callback (Open icon + double-click) ──────
+  //
+  // Dispatches the canonical `OPEN_TODOS_EVENT` exported from
+  // `./components/Toolbar` (Wave A task 032) so the modal subscriber above
+  // routes uniformly regardless of the launcher (toolbar / card / future
+  // keyboard shortcut). We dispatch on `window` so the listener above
+  // (registered in this same component) receives it.
+  const handleCardOpen = React.useCallback((todoId: string) => {
+    const detail: OpenTodosEventDetail = {
+      selectedIds: [todoId],
+      firstId: todoId,
+    };
+    window.dispatchEvent(
+      new CustomEvent<OpenTodosEventDetail>(OPEN_TODOS_EVENT, { detail }),
+    );
+  }, []);
+
+  // ── R4 task 060 — Per-card selection toggle ──────────────────────────────
+  //
+  // Reads/writes the `selectedIds` Set lifted to this layout (above). The Set
+  // is the source of truth driving Header Row 4's selection-aware toolbar
+  // (Wave A task 032 + 030); toggling here causes the toolbar to appear /
+  // update its count without any extra plumbing.
+  const handleToggleSelect = React.useCallback((todoId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(todoId)) {
+        next.delete(todoId);
+      } else {
+        next.add(todoId);
+      }
+      return next;
+    });
   }, []);
 
   // ── R4 task 032 — Selection-aware toolbar actions (Open / Delete / Email /
@@ -297,37 +311,12 @@ function SmartTodoLayout(): React.ReactElement {
     console.log("[SmartTodo] + New clicked — wired by task 040");
   }, []);
 
-  const {
-    primaryWidth,
-    detailWidth,
-    isDetailVisible,
-    showDetail,
-    hideDetail,
-    splitterHandlers,
-    isDragging,
-    containerRef,
-    currentRatio,
-  } = useTwoPanelLayout({
-    defaultDetailWidth: 400,
-    storageKey: "smarttodo-panel-layout",
-  });
-
-  // Wire selectedEventId to panel visibility:
-  // open when an item is selected, close when deselected.
-  // Use refs to avoid infinite loop — showDetail/hideDetail change refs
-  // when isDetailVisible changes, which would re-trigger this effect.
-  const showDetailRef = React.useRef(showDetail);
-  const hideDetailRef = React.useRef(hideDetail);
-  showDetailRef.current = showDetail;
-  hideDetailRef.current = hideDetail;
-
-  React.useEffect(() => {
-    if (selectedEventId !== null) {
-      showDetailRef.current();
-    } else {
-      hideDetailRef.current();
-    }
-  }, [selectedEventId]);
+  // ── R4 task 042 (FR-18) — TodoDetailPanel side-pane retired ──────────────
+  // The R3 two-pane layout (kanban + collapsible TodoDetailPanel separated by
+  // a draggable PanelSplitter) is gone. To-do detail editing is handled by
+  // the hybrid `<SmartTodoModal>` mounted below (R4 task 040). The single
+  // remaining primary surface — Kanban or List view — fills the page below
+  // the Header.
 
   return (
     <div className={styles.page}>
@@ -343,41 +332,23 @@ function SmartTodoLayout(): React.ReactElement {
         onViewModeChange={handleViewModeChange}
       />
 
-      {/* ── Two-pane content — kanban/list + (optional) detail panel ────── */}
-      <div ref={containerRef} className={styles.container}>
-        {/* Left panel — Kanban Board (default) OR List View (R4 task 033 / FR-09) */}
-        <div className={styles.primaryPanel} style={{ width: primaryWidth }}>
-          {viewMode === "list" ? (
-            <ListView
-              items={items}
-              onItemClick={selectItem}
-              selectedTodoId={selectedEventId}
-            />
-          ) : (
-            <SmartToDo webApi={getWebApi()} userId={getUserId()} />
-          )}
-        </div>
-
-        {/* Splitter + Detail Panel (only when visible) */}
-        {isDetailVisible && (
-          <>
-            <PanelSplitter
-              onMouseDown={splitterHandlers.onMouseDown}
-              onKeyDown={splitterHandlers.onKeyDown}
-              onDoubleClick={splitterHandlers.onDoubleClick}
-              isDragging={isDragging}
-              currentRatio={currentRatio}
-            />
-            <div
-              className={mergeClasses(
-                styles.detailPanel,
-                !isDragging && styles.detailPanelAnimated,
-              )}
-              style={{ width: detailWidth }}
-            >
-              <TodoDetailPanel />
-            </div>
-          </>
+      {/* ── Primary surface — Kanban Board (default) OR List View (R4 task 033 / FR-09) ── */}
+      <div className={styles.primaryPanel}>
+        {viewMode === "list" ? (
+          <ListView
+            items={items}
+            onItemClick={selectItem}
+            selectedTodoId={selectedEventId}
+          />
+        ) : (
+          <SmartToDo
+            webApi={getWebApi()}
+            userId={getUserId()}
+            // R4 task 060 — Card affordances plumbing (FR-25/26/27)
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onOpenTodo={handleCardOpen}
+          />
         )}
       </div>
 

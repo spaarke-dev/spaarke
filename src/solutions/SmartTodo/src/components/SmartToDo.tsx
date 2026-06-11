@@ -247,6 +247,29 @@ export interface ISmartToDoProps {
   onRefetchReady?: (refetch: () => void) => void;
   /** Called when "Show more" is clicked. */
   onShowMore?: () => void;
+  /**
+   * Multi-select set lifted to the host (R4 task 060 / spec FR-27).
+   * When provided, each KanbanCard renders a selection checkbox bound to this
+   * Set + the `onToggleSelect` callback. The same Set drives the
+   * selection-aware toolbar in `<Header>` (FR-08).
+   *
+   * Omit (both `selectedIds` and `onToggleSelect`) for embedded surfaces that
+   * don't yet plumb multi-select — checkboxes are hidden + the toolbar Row 4
+   * is not affected.
+   */
+  selectedIds?: ReadonlySet<string>;
+  /** Called when the user toggles a card's selection checkbox. */
+  onToggleSelect?: (todoId: string) => void;
+  /**
+   * Called when the user requests to OPEN a card (per-card Open icon or
+   * double-click — R4 task 060 / spec FR-25 + FR-26). The callback is expected
+   * to dispatch the canonical `OPEN_TODOS_EVENT` so the existing modal
+   * subscriber (in `<SmartTodoLayout>`, Wave A task 040) handles routing.
+   *
+   * When omitted, the Open icon button is not rendered and double-click is a
+   * no-op — back-compat for embedded surfaces (LegalWorkspace dashboard).
+   */
+  onOpenTodo?: (todoId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +284,9 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onCountChange,
   onRefetchReady,
   onShowMore,
+  selectedIds,
+  onToggleSelect,
+  onOpenTodo,
 }) => {
   const styles = useStyles();
 
@@ -627,10 +653,25 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
           onClick={handleCardClick}
           accentColor={col?.accentColor}
           isSelected={item.sprk_todoid === selectedEventId}
+          // R4 task 060 — Card affordances (FR-25 / FR-26 / FR-27).
+          // Per-card props plumbed only when the host provides the wiring;
+          // omitting `onOpenTodo` / `onToggleSelect` keeps the card
+          // backwards-compatible for embedded LW surfaces.
+          onOpen={onOpenTodo}
+          isMultiSelected={selectedIds?.has(item.sprk_todoid) ?? false}
+          onToggleSelect={onToggleSelect}
         />
       );
     },
-    [columns, handlePinToggle, handleCardClick, selectedEventId]
+    [
+      columns,
+      handlePinToggle,
+      handleCardClick,
+      selectedEventId,
+      onOpenTodo,
+      selectedIds,
+      onToggleSelect,
+    ]
   );
 
   const getItemId = React.useCallback(

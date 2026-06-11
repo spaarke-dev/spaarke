@@ -6,8 +6,10 @@
  *
  * Per R3 task 020 / OS-1, the legacy single-row `TodoItem` and the standalone
  * `TodoDetailPane` (R1 list-view detail) were removed when the kanban path
- * repointed at `sprk_todo`. The active detail surface is `TodoDetailPanel.tsx`
- * which wraps the shared `@spaarke/ui-components` `TodoDetail`.
+ * repointed at `sprk_todo`. Per R4 task 042 / FR-18, the R3 `TodoDetailPanel`
+ * side-pane is also retired; to-do detail editing is handled by the hybrid
+ * `<SmartTodoModal>` (R4 task 040 — see `./Modal/`) which embeds the OOB MDA
+ * main form in an iframe.
  */
 
 export { SmartToDo } from './SmartToDo';

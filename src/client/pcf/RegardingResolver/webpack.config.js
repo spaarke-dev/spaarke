@@ -48,6 +48,14 @@ module.exports = {
     alias: {
       'react/jsx-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
       'react/jsx-dev-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
+      // PR #369 cascade workaround (project-wide fix tracked in task 092):
+      // `@spaarke/ui-components/dist/services/index.js` re-exports
+      // `EntityCreationService` which imports `@spaarke/sdap-client`. The
+      // RegardingResolver PCF doesn't actually use EntityCreationService —
+      // it only imports `TODO_REGARDING_CATALOG`, `applyResolverFields`, and
+      // `buildRecordUrl`. Stub the unused package so webpack tree-shakes the
+      // dead import path.
+      '@spaarke/sdap-client$': false,
     },
   },
   module: {

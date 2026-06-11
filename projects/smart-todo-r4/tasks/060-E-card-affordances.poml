@@ -3,7 +3,7 @@
     <title>E — Card affordances (Open icon, double-click, selection checkbox)</title>
     <phase>Phase 2: Wave 2b</phase>
     <workstream>E</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>smart-todo, ui, fluent-v9, card, selection, react</tags>
     <parallel-safe>true</parallel-safe>

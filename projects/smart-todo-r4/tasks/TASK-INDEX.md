@@ -109,7 +109,7 @@
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
 | ✅ | [051](051-D-add-to-todo-main-form.poml) | D — JS Web Resource `sprk_todo_regarding_presave.js` (347 LOC) + 9-section form-bind instructions doc. Live form-designer steps deferred to user. **PCF enhancement follow-up flagged** (see Wave outcomes below) | dataverse, form-designer, deploy | ❌ (after 050 ✅) | 050 ✅ | 081-084 |
-| 🔲 | [052](052-D-read-only-mode.poml) | D — Read-only mode for view-only roles | regarding, security | ❌ (after 051) | 050, 051 | — |
+| ✅ | [052](052-D-read-only-mode.poml) | D — Read-only mode verified + hardened. RegardingResolverHost already detects `context.mode.isControlDisabled` (lines 38-44); added defensive write-gates in `handleSelectRecord` + `handleClear` (early-return if `readOnly`); pre-save handler skips `formType === 3/4`; +3 unit tests (23 passing); PCF v1.0.0 → v1.1.0; webpack alias stubs `@spaarke/sdap-client` (PR #369 cascade workaround). Prod bundle 1.57 MiB (+10 KiB vs 050) | regarding, security | ❌ (after 051) | 050, 051 | — |
 
 ---
 
@@ -120,7 +120,7 @@
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
 | ✅ | [040](040-C-wire-smarttodo-modal.poml) | C — Wire SmartTodo card-open to `<RecordNavigationModalShell>` with iframe | modal, iframe, smart-todo | ⚠️ | 010, 030 | 041, 042 |
-| 🔲 | [060](060-E-card-affordances.poml) | E — Card affordances (Open icon, double-click, selection checkbox) | smart-todo, ui | ⚠️ | 012, 030, 040 | — |
+| ✅ | [060](060-E-card-affordances.poml) | E — Card affordances (Open icon, double-click, selection checkbox) | smart-todo, ui | ⚠️ | 012, 030, 040 | — |
 | ✅ | [070](070-F-vertical-kanban-orientation.poml) | F — Vertical Kanban orientation toggle (CSS transform-only, no DOM reflow) | smart-todo, ui, layout | ⚠️ | 012, 030 | 071 |
 
 #### Sub-tasks (serial after parents)
@@ -128,7 +128,7 @@
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
 | 🔲 | [041](041-C-dirty-check-cross-frame-messaging.poml) | C — Cross-frame dirty-check postMessage protocol | cross-frame-messaging, dataverse-form | ❌ | 010, 040 | — |
-| 🔲 | [042](042-C-retire-TodoDetailPanel.poml) | C — Retire TodoDetailPanel side-pane | cleanup | ❌ | 040 | — |
+| ✅ | [042](042-C-retire-TodoDetailPanel.poml) | C — Retire TodoDetailPanel side-pane | cleanup | ❌ | 040 | — |
 | 🔲 | [071](071-F-orientation-persistence.poml) | F — Persist orientation via sprk_userpreference | user-preference | ❌ | 070 | — |
 
 ---
@@ -138,9 +138,9 @@
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
 | 🔲 | [081](081-G-visualhost-on-matter-form.poml) | G — Visual Host on Matter main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
-| 🔲 | [082](082-G-visualhost-on-project-form.poml) | G — Visual Host on Project main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
-| 🔲 | [083](083-G-visualhost-on-invoice-form.poml) | G — Visual Host on Invoice main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
-| 🔲 | [084](084-G-visualhost-on-workassignment-form.poml) | G — Visual Host on WorkAssignment main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [082](082-G-visualhost-on-project-form.poml) | G — Visual Host on Project main form (instructions doc — Wave B parallel) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [083](083-G-visualhost-on-invoice-form.poml) | G — Visual Host on Invoice main form → 10-section maker doc cloned from 081 template with Invoice substitutions | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [084](084-G-visualhost-on-workassignment-form.poml) | G — Visual Host on WorkAssignment main form (instructions doc — Wave B parallel) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
 
 ---
 

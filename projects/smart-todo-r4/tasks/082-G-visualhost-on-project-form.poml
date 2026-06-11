@@ -3,7 +3,7 @@
     <title>G — Add Visual Host "Upcoming To Dos" to Project main form</title>
     <phase>Phase 2: Wave 2c</phase>
     <workstream>G</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>0.5 day</estimated-effort>
     <tags>dataverse, form-designer, visual-host, deploy, project</tags>
     <parallel-safe>true</parallel-safe>
@@ -81,4 +81,30 @@ Add Visual Host control bound to the Project chart def (`Upcoming To Dos — Pro
     <criterion testable="true">Drill-through opens SmartTodo modal</criterion>
     <criterion testable="true">Pre-filter to current Project id works</criterion>
   </acceptance-criteria>
+
+  <notes>
+**Completion (2026-06-10, Wave B parallel execution)**
+
+Deliverable: `projects/smart-todo-r4/notes/g-project-form-visualhost-instructions.md` (form-designer instructions doc for `sprk_project` main form Visual Host mount).
+
+Cloned from the Matter template `projects/smart-todo-r4/notes/g-matter-form-visualhost-instructions.md` (R4-081 deliverable) with the four substitutions from the Matter doc §10:
+
+- Entity: `sprk_matter` → `sprk_project`
+- Chart def name: `Upcoming To Dos — Matter` → `Upcoming To Dos — Project`
+- `contextFieldName` input: `sprk_matterid` → `sprk_projectid`
+- Owning solution (verify in env): `Spaarke.Matter` → `Spaarke.Project`
+- Section title kept as `Upcoming To Dos` (universal across all 4 parent forms per FR-36)
+
+Additional Project-specific adjustments beyond the §10 mechanical substitutions:
+
+- §0 prereq table: legacy chart-visual-instance row reworded ("if any" — Matter is the canonical legacy host; Project may not have a legacy `UPCOMING TASKS` visual)
+- §1 reference note: legacy-removal step in §6 noted as conditional
+- §6: full section reworded to "if present" — Project form may not have the legacy visual at all
+- §9 drill-through isolation: added Project-specific symptom hint (Kanban filtered by wrong parent type → suspect `contextFieldName` is not `sprk_projectid`)
+- §10: Project doc explicitly noted as the worked substitution result for tasks 083 + 084 to use as reference alongside the Matter template
+
+Live form-designer execution deferred to user (per spec NFR-09 deploy convention). R4-082 ✅ when this doc is committed; live deploy + solution XML capture happens in R4-092.
+
+**Source code unchanged.** No `.cs` / `.ts` / `.tsx` files modified. Zero file conflict with parallel-wave tasks 042, 060, 052, 083, 084.
+  </notes>
 </task>

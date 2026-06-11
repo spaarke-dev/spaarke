@@ -29,8 +29,13 @@ import {
   tokens,
   Text,
   Button,
+  Checkbox,
 } from "@fluentui/react-components";
-import { PinRegular, PinFilled } from "@fluentui/react-icons";
+import {
+  PinRegular,
+  PinFilled,
+  Open20Regular,
+} from "@fluentui/react-icons";
 import { ITodo } from "../types/entities";
 import { computeDueLabel, parseDueDate, DueUrgency } from "../utils/dueLabelUtils";
 import { computeTodoScore } from "../utils/todoScoreUtils";
@@ -195,6 +200,19 @@ const useStyles = makeStyles({
     flexDirection: "column",
     alignItems: "flex-end",
     flexShrink: 0,
+    gap: tokens.spacingVerticalXXS,
+  },
+
+  /**
+   * Selection checkbox column — leading edge (upper-left per FR-27).
+   * Always rendered to keep layout stable; visually hidden until hover or
+   * when `isMultiSelected` is true (R4 task 060).
+   */
+  selectionColumn: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "flex-start",
+    paddingTop: "2px",
   },
 });
 
@@ -221,12 +239,43 @@ export interface IKanbanCardProps {
   todo: ITodo;
   /** Called when pin button is clicked. */
   onPinToggle?: (todoId: string) => void;
-  /** Called when card body is clicked (not pin). Opens detail pane. */
+  /** Called when card body is clicked (not pin / open / checkbox). Opens detail pane. */
   onClick?: (todoId: string) => void;
   /** Left border accent colour from parent column. */
   accentColor?: string;
   /** Whether this card is currently selected (detail panel open). */
   isSelected?: boolean;
+  /**
+   * Called when the user requests to OPEN the card in the modal
+   * (R4 task 060 / spec FR-25, FR-26).
+   *
+   * Fires from:
+   *   - Single click on the trailing-edge Open icon button
+   *   - Double-click anywhere on the card body (except checkbox / open / pin)
+   *   - Enter key while the Open icon button has focus (browser default)
+   *
+   * The callback is expected to dispatch the canonical
+   * `OPEN_TODOS_EVENT` (sprk-smarttodo:open-todos) on `window` with
+   * `{ selectedIds: [todoId], firstId: todoId }`. The single subscriber is
+   * `<SmartTodoLayout>` (App.tsx) which routes to `<SmartTodoModal>` — see
+   * Wave A task 040.
+   */
+  onOpen?: (todoId: string) => void;
+  /**
+   * Whether the card is in the multi-select set (R4 task 060 / spec FR-27).
+   * Independent of `isSelected` (which tracks the single detail-pane focus).
+   * Drives the checkbox state + ARIA labelling.
+   */
+  isMultiSelected?: boolean;
+  /**
+   * Called when the user toggles the per-card selection checkbox. Parent
+   * mutates a `Set<string>` lifted in `SmartTodoLayout` (Wave A R4-030);
+   * the same Set drives the selection-aware toolbar (FR-08).
+   *
+   * If undefined, the checkbox is NOT rendered (back-compat for surfaces
+   * that don't yet plumb selection state).
+   */
+  onToggleSelect?: (todoId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +283,16 @@ export interface IKanbanCardProps {
 // ---------------------------------------------------------------------------
 
 export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
-  ({ todo, onPinToggle, onClick, accentColor, isSelected = false }) => {
+  ({
+    todo,
+    onPinToggle,
+    onClick,
+    accentColor,
+    isSelected = false,
+    onOpen,
+    isMultiSelected = false,
+    onToggleSelect,
+  }) => {
     const styles = useStyles();
 
     // Derived display values
@@ -278,6 +336,64 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
       [handleCardClick]
     );
 
+    // R4 task 060 — Open icon click (trailing edge, single click opens modal).
+    // Stops propagation so the card body's onClick does NOT also fire (which
+    // would otherwise open the detail panel concurrently).
+    const handleOpenClick = React.useCallback(
+      (ev: React.MouseEvent<HTMLButtonElement>) => {
+        ev.stopPropagation();
+        if (onOpen) {
+          onOpen(todo.sprk_todoid);
+        }
+      },
+      [onOpen, todo.sprk_todoid]
+    );
+
+    // R4 task 060 — Double-click on card body opens the modal (FR-26).
+    // The single-click semantics (detail panel) are preserved by the existing
+    // onClick handler; the platform fires onClick *and* onDoubleClick for a
+    // double-click, but since they have different targets (modal vs panel),
+    // both firing is the correct UX behaviour: detail panel opens on first
+    // click as preview, modal opens on confirmation double-click.
+    const handleCardDoubleClick = React.useCallback(
+      (ev: React.MouseEvent<HTMLDivElement>) => {
+        // Defensive: ignore double-clicks that originate on interactive
+        // children (checkbox / pin / open icon) — they handle their own
+        // semantics and shouldn't double as modal openers.
+        const target = ev.target as HTMLElement | null;
+        if (target?.closest('input[type="checkbox"], button')) {
+          return;
+        }
+        if (onOpen) {
+          onOpen(todo.sprk_todoid);
+        }
+      },
+      [onOpen, todo.sprk_todoid]
+    );
+
+    // R4 task 060 — Selection checkbox toggle (FR-27).
+    // Stops propagation so the click on the checkbox does NOT bubble to the
+    // card body click handler (which would open the detail panel).
+    const handleSelectChange = React.useCallback(
+      (ev: React.SyntheticEvent<HTMLInputElement>) => {
+        ev.stopPropagation();
+        if (onToggleSelect) {
+          onToggleSelect(todo.sprk_todoid);
+        }
+      },
+      [onToggleSelect, todo.sprk_todoid]
+    );
+
+    // Prevent click on the checkbox container from bubbling to the card body
+    // click handler (Fluent v9 Checkbox wraps its input in a label; the click
+    // event from the label still bubbles).
+    const handleSelectContainerClick = React.useCallback(
+      (ev: React.MouseEvent<HTMLDivElement>) => {
+        ev.stopPropagation();
+      },
+      []
+    );
+
     // -----------------------------------------------------------------------
     // Accessible label
     // -----------------------------------------------------------------------
@@ -285,6 +401,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
     const cardAriaLabel = [
       todo.sprk_name,
       isSelected ? "Selected." : "",
+      isMultiSelected ? "In multi-select." : "",
       isCompleted ? "Completed." : "Open.",
       isPinned ? "Pinned." : "",
       dueDateFormatted ? `Due: ${dueDateFormatted}.` : "",
@@ -339,8 +456,29 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
         aria-label={cardAriaLabel}
         aria-selected={isSelected}
         onClick={handleCardClick}
+        onDoubleClick={handleCardDoubleClick}
         onKeyDown={handleCardKeyDown}
       >
+        {/* R4 task 060 — Selection checkbox (upper-left, FR-27). Only rendered
+            when the parent plumbs an `onToggleSelect` callback so legacy /
+            embedded surfaces without selection wiring stay unchanged. */}
+        {onToggleSelect && (
+          <div
+            className={styles.selectionColumn}
+            onClick={handleSelectContainerClick}
+          >
+            <Checkbox
+              checked={isMultiSelected}
+              onChange={handleSelectChange}
+              aria-label={
+                isMultiSelected
+                  ? `Deselect "${todo.sprk_name}"`
+                  : `Select "${todo.sprk_name}"`
+              }
+            />
+          </div>
+        )}
+
         {/* Score circle — prominent left visual anchor */}
         <div
           className={styles.scoreCircle}
@@ -394,8 +532,21 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
           )}
         </div>
 
-        {/* Actions column: pin button */}
+        {/* Actions column: open + pin buttons */}
         <div className={styles.actionsColumn}>
+          {/* R4 task 060 — Open icon (upper-right, FR-25). Single click
+              dispatches OPEN_TODOS_EVENT (parent wires this). Enter / Space
+              activation comes for free from the underlying <button>. */}
+          {onOpen && (
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Open20Regular />}
+              onClick={handleOpenClick}
+              aria-label={`Open "${todo.sprk_name}" in modal`}
+              title="Open in modal"
+            />
+          )}
           <Button
             appearance="subtle"
             size="small"

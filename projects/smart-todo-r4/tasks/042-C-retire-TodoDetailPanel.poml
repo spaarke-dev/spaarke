@@ -3,7 +3,7 @@
     <title>C — Retire TodoDetailPanel side-pane</title>
     <phase>Phase 2: Wave 2b</phase>
     <workstream>C</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>0.5 day</estimated-effort>
     <tags>code-page, smart-todo, cleanup, side-pane, retire</tags>
     <parallel-safe>false</parallel-safe>
