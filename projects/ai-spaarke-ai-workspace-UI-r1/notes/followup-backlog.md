@@ -170,7 +170,7 @@ event at worst.
 
 ---
 
-## 4. CreateTodoWizard — placement / discoverability — MEDIUM
+## 4. CreateTodoWizard — placement / discoverability — DONE (Quick Start card)
 
 **Operator question**: *"this doesn't launch from command bar — where do I
 launch this? Also the wizard should be added to the Quick Start spaarke.ai
@@ -204,9 +204,12 @@ Estimated 30-45 min including a SpaarkeAi rebuild + deploy.
 
 ### Recommended owner
 
-- Quick Start card addition: this project (small fast-follow PR) or
-  smart-todo-r4 if it makes sense to bundle with other SmartTodo work.
-- Ribbon publish verification: operator.
+- Quick Start card addition: **DONE** in `feature/ai-workspace-ui-r1-followups`
+  (commit `dbcd94c8e`, 2026-06-10). Added action card at position 4 in
+  `getStartedConfig.ts` calling `ctx.onOpenWizard("sprk_createtodowizard")`;
+  bumped `maxVisible` 4→5 in `getStarted.registration.ts` so the new card
+  stays in the default visible set. Deployed to SpaarkeAi (3704 KB).
+- Ribbon publish verification: operator (still pending).
 
 ---
 
@@ -268,7 +271,7 @@ deploy scripts when convenient.
 
 ---
 
-## 7. CalendarSidePane — orphaned build (pre-existing) — LOW
+## 7. CalendarSidePane — orphaned build (pre-existing) — DONE
 
 **Surfaced**: 2026-06-10 during Wave 3 deploy attempts.
 
@@ -293,13 +296,19 @@ CalendarSection's exported API matches the destructure, rebuild, redeploy.
 Estimated 15 minutes if the exports line up; longer if the API changed in
 the hoist.
 
+**Status**: ✅ **DONE** in `feature/ai-workspace-ui-r1-followups`
+(commit `3baf44e48`, 2026-06-10). Hoisted exports from
+`@spaarke/events-components` matched the prior local API exactly — one-line
+import swap. Build clean (1213 KB), deployed to spaarkedev1
+`sprk_calendarsidepane.html` (1185 KB).
+
 **Recommended owner**: whichever project owns CalendarSidePane long-term.
 If it's truly orphaned (no consumer), candidate for retirement in a future
 solutions audit.
 
 ---
 
-## Cross-cutting follow-up — CI gate adoption
+## Cross-cutting follow-up — CI gate adoption — DONE (Option A)
 
 The new `scripts/check-html-css-reset.mjs` is currently invoked from 3
 surface `package.json` build scripts. For maximum prevention:
@@ -311,4 +320,19 @@ surface `package.json` build scripts. For maximum prevention:
 - **Option B** — extend each surface's `package.json` `build` script as we
   touch them. Slow burn, but doesn't add CI complexity.
 
-Either is fine. Operator preference TBD.
+**Shipped**: ✅ Option A. New workflow
+[`.github/workflows/css-reset-gate.yml`](../../../.github/workflows/css-reset-gate.yml)
+runs `node scripts/check-html-css-reset.mjs --all` on every PR + master
+push that touches a Code Page `index.html` or the check script itself.
+The script grew an `--all` mode that auto-discovers all Code Page hosts
+(`src/solutions/*/index.html` + `src/client/code-pages/*/index.html`) so the
+gate adapts when new surfaces are added without any workflow edit.
+
+The discovery scan also surfaced 5 hosts that already had the reset but
+with sibling resets (`margin: 0; padding: 0;`) inside the same rule block,
+which the original strict regex rejected. The regex was loosened to accept
+sibling properties (`[^{}]*` around `box-sizing: border-box`) while still
+requiring the universal `*` selector. Verified clean against all 26
+discovered hosts.
+
+Committed in `feature/ai-workspace-ui-r1-followups` (2026-06-10).

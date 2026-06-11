@@ -30,7 +30,7 @@ import {
 import {
   CalendarSection,
   type CalendarFilterOutput,
-} from "./components";
+} from "@spaarke/events-components";
 
 // Pane id MUST match the host EventsPage's sidePaneFilter.paneId
 // (see src/solutions/EventsPage/src/config/eventConfig.ts → CALENDAR_PANE_ID).

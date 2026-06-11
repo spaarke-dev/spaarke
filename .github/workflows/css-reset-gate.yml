@@ -1,0 +1,52 @@
+name: CSS Reset Gate
+
+# Repository-wide enforcement of the universal box-sizing reset in every
+# Code Page host index.html (Vite + Webpack). Prevents regressions of the
+# class of bug that the ai-spaarke-ai-workspace-UI-r1 iter-2 round 11 fix
+# resolved: missing reset → DataGrid cells render +24px wider than declared
+# → horizontal overflow.
+#
+# Reference: docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md §2
+# Origin: projects/ai-spaarke-ai-workspace-UI-r1/notes/followup-backlog.md §8
+#
+# Lightweight check (sub-second runtime), runs on every PR + master push
+# that touches any Code Page index.html or the check script itself.
+
+on:
+  pull_request:
+    paths:
+      - 'src/solutions/**/index.html'
+      - 'src/client/code-pages/**/index.html'
+      - 'scripts/check-html-css-reset.mjs'
+      - '.github/workflows/css-reset-gate.yml'
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/solutions/**/index.html'
+      - 'src/client/code-pages/**/index.html'
+      - 'scripts/check-html-css-reset.mjs'
+      - '.github/workflows/css-reset-gate.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: css-reset-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-reset:
+    name: Verify box-sizing reset on all Code Page hosts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Run repo-wide reset gate
+        run: node scripts/check-html-css-reset.mjs --all

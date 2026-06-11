@@ -15,6 +15,9 @@ coverage/
 # Generated files
 *.min.js
 *_generated.*
+# PCF manifest types and other tool-emitted `generated/` directories.
+# Hand-formatting these is wasted work — the PCF tooling overwrites them.
+**/generated/
 
 # C# files (handled by dotnet format + .editorconfig)
 *.cs
