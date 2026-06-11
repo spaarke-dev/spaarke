@@ -193,7 +193,7 @@ function makeMockFetch(state: IStateMatrixRow['key']): FetchFn | undefined {
       return async () => {
         throw new InsightDeclineError(
           'Insufficient data is available to provide Insights Analysis',
-          'Add more assessments or expand the date range to enable analysis.',
+          'Add more assessments or expand the date range to enable analysis.'
         );
       };
 
@@ -360,8 +360,7 @@ const PROPS_DOC: readonly IPropDocRow[] = [
   {
     name: 'onFetchRegistry',
     type: '(topic, mode) => Promise<InsightRegistryEntry | null>',
-    description:
-      'Optional FR-05 mount-check. Resolves to null when no registry row matches; the card renders nothing.',
+    description: 'Optional FR-05 mount-check. Resolves to null when no registry row matches; the card renders nothing.',
   },
   {
     name: 'onRegistryResolved',
@@ -465,13 +464,7 @@ interface ISandboxBodyProps {
   onCitationClick: (citation: Citation) => void;
 }
 
-const SandboxBody: React.FC<ISandboxBodyProps> = ({
-  isDark,
-  onToggleDark,
-  theme,
-  mocks,
-  onCitationClick,
-}) => {
+const SandboxBody: React.FC<ISandboxBodyProps> = ({ isDark, onToggleDark, theme, mocks, onCitationClick }) => {
   const styles = useSandboxStyles();
 
   return (
@@ -480,10 +473,9 @@ const SandboxBody: React.FC<ISandboxBodyProps> = ({
       <header className={styles.header}>
         <Text className={styles.title}>InsightSummaryCard — Dev Sandbox</Text>
         <Text className={styles.subtitle}>
-          Storybook-equivalent surface per SC-01. Click each card&apos;s &quot;View Insight&quot;
-          trigger to drive the state machine to its labelled state. Toggle the theme to
-          verify ADR-021 dark-mode parity (the cards re-wrap their Popover + Dialog portals,
-          so dark mode propagates through both surfaces).
+          Storybook-equivalent surface per SC-01. Click each card&apos;s &quot;View Insight&quot; trigger to drive the
+          state machine to its labelled state. Toggle the theme to verify ADR-021 dark-mode parity (the cards re-wrap
+          their Popover + Dialog portals, so dark mode propagates through both surfaces).
         </Text>
       </header>
 
@@ -495,12 +487,7 @@ const SandboxBody: React.FC<ISandboxBodyProps> = ({
           label={isDark ? 'Dark theme' : 'Light theme'}
           data-testid="sandbox-theme-toggle"
         />
-        <Button
-          appearance="subtle"
-          size="small"
-          onClick={() => window.location.reload()}
-          data-testid="sandbox-reset"
-        >
+        <Button appearance="subtle" size="small" onClick={() => window.location.reload()} data-testid="sandbox-reset">
           Reset all states
         </Button>
       </div>
@@ -535,8 +522,8 @@ const SandboxBody: React.FC<ISandboxBodyProps> = ({
         <div className={styles.propsTable}>
           <Text className={styles.title}>InsightSummaryCardProps</Text>
           <Text className={styles.subtitle}>
-            Mirror of <code>InsightSummaryCard.types.ts</code>. Update in lockstep when the
-            contract changes. Full JSDoc lives on the interface itself.
+            Mirror of <code>InsightSummaryCard.types.ts</code>. Update in lockstep when the contract changes. Full JSDoc
+            lives on the interface itself.
           </Text>
 
           <div className={`${styles.propsRow} ${styles.propsRowHeader}`}>
