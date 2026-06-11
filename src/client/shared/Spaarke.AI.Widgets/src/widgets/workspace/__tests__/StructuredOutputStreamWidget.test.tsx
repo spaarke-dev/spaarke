@@ -135,11 +135,7 @@ describe('StructuredOutputStreamWidget — schema-aware array dispatch (R6 task 
     };
     const { bus } = renderWidget(data);
 
-    streamFieldComplete(
-      bus,
-      'tldr',
-      JSON.stringify(['First key point', 'Second key point', 'Third key point'])
-    );
+    streamFieldComplete(bus, 'tldr', JSON.stringify(['First key point', 'Second key point', 'Third key point']));
 
     // The tldr field block exists with the schema-aware render hint.
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
@@ -417,11 +413,7 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
     };
     const { bus } = renderWidget(data);
 
-    streamFieldComplete(
-      bus,
-      'entities',
-      JSON.stringify({ organizations: ['Acme Corp'], persons: ['Jane Doe'] })
-    );
+    streamFieldComplete(bus, 'entities', JSON.stringify({ organizations: ['Acme Corp'], persons: ['Jane Doe'] }));
 
     const entitiesBlock = document.querySelector('[data-field-path="entities"]');
     expect(entitiesBlock).not.toBeNull();
@@ -497,11 +489,7 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
     };
     const { bus } = renderWidget(data);
 
-    streamFieldComplete(
-      bus,
-      'entities',
-      JSON.stringify({ organizations: ['Acme'], persons: ['Alice'] })
-    );
+    streamFieldComplete(bus, 'entities', JSON.stringify({ organizations: ['Acme'], persons: ['Alice'] }));
 
     const entitiesBlock = document.querySelector('[data-field-path="entities"]');
     const visibleText = entitiesBlock!.textContent ?? '';
@@ -657,9 +645,7 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
 
     // tldr — task 040 array path.
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
-    const tldrList = tldrBlock!.querySelector(
-      'ul[data-display-hint="schema-array"][data-field-path="tldr"]'
-    );
+    const tldrList = tldrBlock!.querySelector('ul[data-display-hint="schema-array"][data-field-path="tldr"]');
     expect(tldrList).not.toBeNull();
     expect(tldrList!.querySelectorAll('li')).toHaveLength(2);
 
@@ -685,7 +671,9 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
         },
       },
     };
-    const synthDisplaySchema = { fields: [{ path: 'contactPersons', label: 'Contacts', displayHint: 'list' as const, order: 10 }] };
+    const synthDisplaySchema = {
+      fields: [{ path: 'contactPersons', label: 'Contacts', displayHint: 'list' as const, order: 10 }],
+    };
     const data: StructuredOutputStreamWidgetData = {
       mode: 'static',
       schema: synthDisplaySchema,
@@ -732,7 +720,9 @@ describe('StructuredOutputStreamWidget — depth guard (Phase B constraint)', ()
         },
       },
     };
-    const synthDisplaySchema = { fields: [{ path: 'metadata', label: 'Metadata', displayHint: 'list' as const, order: 10 }] };
+    const synthDisplaySchema = {
+      fields: [{ path: 'metadata', label: 'Metadata', displayHint: 'list' as const, order: 10 }],
+    };
     const data: StructuredOutputStreamWidgetData = {
       mode: 'static',
       schema: synthDisplaySchema,
@@ -747,9 +737,7 @@ describe('StructuredOutputStreamWidget — depth guard (Phase B constraint)', ()
     expect(block).not.toBeNull();
 
     // depth-1 object container renders normally for metadata.
-    const outerContainer = block!.querySelector(
-      'div[data-display-hint="schema-object"][data-field-path="metadata"]'
-    );
+    const outerContainer = block!.querySelector('div[data-display-hint="schema-object"][data-field-path="metadata"]');
     expect(outerContainer).not.toBeNull();
 
     // depth-2 inner `author` falls back to compact JSON via the

@@ -88,11 +88,7 @@
  * @see FR-31 — interface contract (widgetType + widgetData typed)
  * @see CLAUDE.md project file §9 "Pillar 9 (Widget Visibility Contract)" for per-variant prompt shapes
  */
-export type WorkspaceTabWidgetType =
-  | 'Summary'
-  | 'DocumentViewer'
-  | 'Dashboard'
-  | 'Table';
+export type WorkspaceTabWidgetType = 'Summary' | 'DocumentViewer' | 'Dashboard' | 'Table';
 
 // ---------------------------------------------------------------------------
 // Per-variant widgetData shapes (discriminated union narrowed by widgetType)

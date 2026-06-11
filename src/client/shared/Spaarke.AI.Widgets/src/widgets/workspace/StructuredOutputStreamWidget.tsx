@@ -1130,7 +1130,9 @@ const SchemaAwareArrayRenderer: React.FC<SchemaAwareArrayRendererProps> = ({
   if (items === null || items.length === 0) {
     // Empty array — render an empty <ul> so structure is consistent (assertive
     // for tests / accessibility tools) but no <li> children appear.
-    return <ul className={styles.list} data-display-hint="schema-array" data-field-path={fieldPath} data-empty="true" />;
+    return (
+      <ul className={styles.list} data-display-hint="schema-array" data-field-path={fieldPath} data-empty="true" />
+    );
   }
   return (
     <ul className={styles.list} data-display-hint="schema-array" data-field-path={fieldPath}>
@@ -1268,7 +1270,11 @@ function renderObjectValue(
 ): React.ReactNode {
   // Defensive: missing value (schema declares key but parsed object lacks it).
   if (value === undefined) {
-    return <span className={styles.schemaObjectEmptyHint} data-empty="true">—</span>;
+    return (
+      <span className={styles.schemaObjectEmptyHint} data-empty="true">
+        —
+      </span>
+    );
   }
 
   const propType = schema?.type;
@@ -1422,11 +1428,7 @@ const SchemaAwareObjectRenderer: React.FC<SchemaAwareObjectRendererProps> = ({
   }
   const parsed: Record<string, unknown> = value ?? {};
   return (
-    <div
-      className={styles.schemaObjectContainer}
-      data-display-hint="schema-object"
-      data-field-path={fieldPath}
-    >
+    <div className={styles.schemaObjectContainer} data-display-hint="schema-object" data-field-path={fieldPath}>
       {Object.entries(properties).map(([propKey, propSchema]) => (
         <div
           key={propKey}

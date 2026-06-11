@@ -209,10 +209,7 @@ describe('Hotfix Wave B-G9a — dispatchSummarizeOnly source contract', () => {
     // The text-level assertion is sufficient: the constant import + payload
     // assignment is a load-bearing line of production code; removing it
     // re-introduces the bug.
-    const dispatcherPath = path.resolve(
-      __dirname,
-      '../../context/FilePreviewContextWidget.tsx'
-    );
+    const dispatcherPath = path.resolve(__dirname, '../../context/FilePreviewContextWidget.tsx');
     const source = fs.readFileSync(dispatcherPath, 'utf-8');
 
     // Contract 1: import of SUM_CHAT_OUTPUT_SCHEMA from the widget module.

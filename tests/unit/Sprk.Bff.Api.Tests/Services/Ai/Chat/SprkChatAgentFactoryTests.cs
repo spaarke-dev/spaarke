@@ -50,9 +50,11 @@ public class SprkChatAgentFactoryTests
         var agent = await factory.CreateAgentAsync(
             TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId);
 
-        // Assert
+        // Assert — base prompt preserved at the start; SprkChatAgentFactory may
+        // append additive directives (e.g. R6 Wave B-G10b compact-formatting
+        // directive) so we assert StartWith rather than exact equality.
         agent.Should().NotBeNull();
-        agent.Context.SystemPrompt.Should().Be(expectedSystemPrompt);
+        agent.Context.SystemPrompt.Should().StartWith(expectedSystemPrompt);
         agent.Context.DocumentSummary.Should().Be("This is an NDA.");
         agent.Context.PlaybookId.Should().Be(TestPlaybookId);
     }
@@ -129,9 +131,10 @@ public class SprkChatAgentFactoryTests
         var agentDoc1 = await factory.CreateAgentAsync(TestSessionId, doc1, TestPlaybookId, TestTenantId);
         var agentDoc2 = await factory.CreateAgentAsync(TestSessionId, doc2, TestPlaybookId, TestTenantId);
 
-        // Assert
-        agentDoc1.Context.SystemPrompt.Should().Be(prompt1);
-        agentDoc2.Context.SystemPrompt.Should().Be(prompt2);
+        // Assert — base prompt preserved at the start; additive directives
+        // (e.g. R6 Wave B-G10b compact-formatting) may follow.
+        agentDoc1.Context.SystemPrompt.Should().StartWith(prompt1);
+        agentDoc2.Context.SystemPrompt.Should().StartWith(prompt2);
     }
 
     // ── AIPU2-061: Per-turn tool injection tests ──────────────────────────────
@@ -444,9 +447,13 @@ public class SprkChatAgentFactoryTests
             TestPlaybookId,
             TestTenantId);
 
-        // Assert — base prompt preserved; no suffix injected.
-        agent.Context.SystemPrompt.Should().Be(basePrompt,
-            because: "no manifest = no suffix appended (backward-compatible behavior)");
+        // Assert — base prompt preserved at the start; no Session Files suffix.
+        // (R6 Wave B-G10b appends a compact-formatting directive regardless of
+        // file presence — the backward-compat contract this test owns is
+        // specifically about the Session Files manifest, asserted via the
+        // NotContain checks below.)
+        agent.Context.SystemPrompt.Should().StartWith(basePrompt,
+            because: "the original base prompt must be preserved at the start (any additive directives follow it)");
         agent.Context.SystemPrompt.Should().NotContain("Session Files:");
         // Post-task-023: the legacy `invoke_summarize_playbook` tool name was deleted; the
         // generic `invoke_playbook` is now the canonical name. With no uploaded files, the

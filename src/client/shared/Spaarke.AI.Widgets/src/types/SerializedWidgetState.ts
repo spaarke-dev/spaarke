@@ -422,9 +422,8 @@ export function assertNeverSerializedState(state: never): never {
  * @see FR-55, WorkspaceTab.ts `WorkspaceTabWidgetType`
  * @internal — type-level only; not used at runtime
  */
-export type _DiscriminatorAlignment =
-  SerializedWidgetState['widgetType'] extends WorkspaceTabWidgetType
-    ? WorkspaceTabWidgetType extends SerializedWidgetState['widgetType']
-      ? true
-      : never
-    : never;
+export type _DiscriminatorAlignment = SerializedWidgetState['widgetType'] extends WorkspaceTabWidgetType
+  ? WorkspaceTabWidgetType extends SerializedWidgetState['widgetType']
+    ? true
+    : never
+  : never;
