@@ -61,6 +61,54 @@ export type {
 // Required by WorkspaceWidgetRegistry.registerWorkspaceWidget().
 export type { WidgetMetadata } from './types/shared';
 
+// ---------------------------------------------------------------------------
+// Types — Canonical WorkspaceTab (R6 Pillar 6a gate; FR-31)
+//
+// Shared contract for Pillars 6a (state model), 6b (chat tools that mutate
+// tabs), 6c (workspace events), 7 (memory composition), and 9 (visibility
+// contract). See `./types/WorkspaceTab.ts` for the full design rationale.
+// ---------------------------------------------------------------------------
+
+export type {
+  WorkspaceTab,
+  WorkspaceTabWidgetType,
+  WorkspaceTabWidgetData,
+  SummaryTabWidgetData,
+  DocumentViewerTabWidgetData,
+  DashboardTabWidgetData,
+  TableTabWidgetData,
+  WorkspaceTabSourceProvenance,
+  WorkspaceTabMatterContext,
+} from './types/WorkspaceTab';
+
+// ---------------------------------------------------------------------------
+// Types — Pillar 9 Widget Visibility Contract (R6 task 071; FR-55)
+//
+// Discriminated union (4 variants — Summary, DocumentViewer, Dashboard, Table)
+// describing the agent-visible state each widget MAY opt into exposing to
+// Pillar 9's prompt builder. Consumed by:
+//   - task 072 (WorkspaceWidgetRegistry getVisibleState extension)
+//   - task 073 (per-widget implementations)
+//   - task 074 (Pillar 9 prompt builder — per-turn system-prompt snippet)
+//
+// Privacy default per ADR-015: widgets that don't implement
+// `getAgentVisibleState()` contribute nothing to the prompt. Opt-in is
+// explicit. See `./types/SerializedWidgetState.ts` for full per-variant
+// rationale.
+// ---------------------------------------------------------------------------
+
+export type {
+  SerializedWidgetState,
+  SerializedSummaryState,
+  SerializedDocumentViewerState,
+  SerializedDashboardState,
+  SerializedTableState,
+  GetAgentVisibleState,
+  _DiscriminatorAlignment,
+} from './types/SerializedWidgetState';
+
+export { assertNeverSerializedState } from './types/SerializedWidgetState';
+
 export * from './types/event-types';
 
 // ---------------------------------------------------------------------------
@@ -154,7 +202,11 @@ export type {
   StructuredOutputField,
   StructuredOutputDisplayHint,
 } from './widgets/workspace/StructuredOutputStreamWidget';
-export { SUMMARIZE_SCHEMA, INSIGHTS_PLAYBOOK_SCHEMA } from './widgets/workspace/StructuredOutputStreamWidget';
+export {
+  SUMMARIZE_SCHEMA,
+  INSIGHTS_PLAYBOOK_SCHEMA,
+  SUM_CHAT_OUTPUT_SCHEMA,
+} from './widgets/workspace/StructuredOutputStreamWidget';
 export { STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE } from './widgets/workspace/register-structured-output-stream-widget';
 
 // ---------------------------------------------------------------------------

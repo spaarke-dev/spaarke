@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B-02 Extend playbook node config schema with `destination` enum + `widgetType`</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>completed</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>029</dependencies>
+    <blocks>032, 033, 034, 035, 042</blocks>
+    <tags>dataverse, schema, playbook</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production playbook canvas data model change; consumed by `DeliverOutput` node executor (NFR-08-protected — executor itself unmodified); gates 4 downstream data migrations + CapabilityRouter dedup.</rigor-reason>
+    <parallel-group>B-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches playbook node config schema (separate surface from `sprk_analysisaction` outputSchema in task 030); independent file targets.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend the playbook canvas node-config schema with two new fields: `destination`
+    (enum: `chat` | `workspace` | `form-prefill` | `side-effect`) and `widgetType`
+    (string; required when `destination = workspace`). These fields are PER-NODE
+    (per-playbook routing) — they are the Q5-re-shape counterpart to action-level
+    `outputSchema` (task 030). The existing `DeliverOutput` node executor reads these
+    fields at runtime and routes the action's output accordingly. The executor itself is
+    NOT modified (NFR-08 binding: 11 production node executors preserved).
+
+    Determine the concrete storage surface from `playbook-architecture.md`. Playbook nodes
+    are typically stored as JSON in `sprk_analysisplaybook.sprk_nodesjson` (or sibling
+    column). If the canvas schema is a JSON contract validated at write time, extend the
+    contract (TypeScript / JSON Schema interface definition) and apply optional defaults
+    for backward compatibility — existing nodes without the fields default to `chat`
+    destination (current behavior). If the canvas schema is a separate Dataverse entity
+    (e.g., `sprk_analysisplaybooknode`), add two columns following the existing pattern.
+    Document which surface applies in task notes.
+
+    Schema change to a production-shape data contract is a CLAUDE.md Confirmation Trigger.
+    The agent MUST pause and confirm the surface + the migration approach with the user
+    before proceeding. Migration MUST be idempotent + backward-compatible (existing
+    playbooks continue to work). BFF publish-size impact: schema-only addition; expect
+    near-zero delta (verify if any TypeScript contracts ship in BFF binaries).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Senior platform engineer with deep familiarity with the
+    playbook canvas data model, `DeliverOutput` node executor, and the existing scope /
+    playbook entity schema. Comfortable applying schema changes via the
+    `dataverse-create-schema` skill OR by extending JSON Schema contract definitions in
+    BFF + frontend, depending on which surface applies.
+  </role>
+
+  <goal>
+    Playbook node config schema is extended with `destination` (enum) + `widgetType`
+    (string, conditionally required) fields. The extension is committed to the repo; if
+    Dataverse-backed, migration is idempotent + deployed to Spaarke Dev; if
+    JSON-Schema-backed, the contract is updated in source + validated by existing tests.
+    Existing playbooks continue to work — nodes without the fields behave as today
+    (default destination = `chat`). Downstream tasks 032-035 set `destination` per node
+    for the 4 migrated actions; task 042 (CapabilityRouter dedup) relies on this surface.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+    <file purpose="deliver-output-node">src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/Nodes/DeliverOutputNodeExecutor.cs</file>
+    <file purpose="dataverse-schema-skill">.claude/skills/dataverse-create-schema/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">**Schema change escalation gate per CLAUDE.md Confirmation Triggers; user confirmation required at start of task.** The playbook node config surface is the canonical canvas data contract — agent MUST pause and confirm the surface + migration approach with the user before deployment.</constraint>
+    <constraint source="spec NFR-08">11 production node executors UNMODIFIED. `DeliverOutput` reads the new fields at runtime; executor code is NOT modified. If the existing reader logic already supports unknown JSON properties (additive-safe), this is satisfied automatically. If not, this is an escalation — STOP and confirm with user.</constraint>
+    <constraint source="spec FR-27">Q5 RE-SHAPED: `destination` + `widgetType` are PER-NODE (per-playbook routing). Not on action (action-level shape is `outputSchema` per task 030).</constraint>
+    <constraint source="spec FR-30">CapabilityRouter dedup (task 042) requires one canonical route surface — this task ships that surface.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size; report delta vs prior baseline; ≤+5 MB R6 total budget per NFR-02. Expect near-zero delta (contracts/JSON only).</constraint>
+    <constraint source="ADR-010">DI minimalism — no new top-level DI registrations. If a TypeScript/C# JSON Schema validator service is touched, confirm registration goes inside an existing module.</constraint>
+    <constraint source="project">Backward compatibility — nodes WITHOUT `destination` MUST default to `chat` (current behavior). Migration of existing playbook node JSON to add explicit defaults is OPTIONAL; existing nodes work unchanged.</constraint>
+    <constraint source="project">`widgetType` is conditionally required: required when `destination = workspace`; ignored otherwise. Document this rule in the schema contract.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Playbook node config storage" location="docs/architecture/playbook-architecture.md">
+        Inspect playbook-architecture.md for the authoritative description of how
+        playbook nodes are stored. If JSON-blob storage (most likely): node config is a
+        JSON object inside the playbook's nodes array; extending the contract is a
+        TypeScript / JSON Schema change with no Dataverse column add. If separate
+        Dataverse entity: follow `entity-operations.md` for column add via Web API.
+      </pattern>
+      <pattern name="DeliverOutput node executor as consumer" location="src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/Nodes/DeliverOutputNodeExecutor.cs">
+        DeliverOutput is the consumer. Inspect this file to confirm: (a) where it reads
+        node config; (b) whether it already tolerates unknown properties; (c) the
+        existing default-routing behavior. If the executor needs to be aware of the new
+        fields BEYOND a deserialization-additive sense, that is a NFR-08 violation and
+        an escalation gate.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Q5 re-shape this session split output routing cleanly: action OUTPUT shape (intrinsic;
+      task 030) is independent of playbook-canvas ROUTING decisions (per-playbook;
+      this task). A playbook author can compose the same Summarize action into two
+      different playbooks — one routing to chat, one routing to a workspace tab — without
+      changing the action. The `StructuredOutputStreamWidget` (tasks 040, 041) becomes
+      schema-aware by reading the action's `outputSchema` AND respecting the node's
+      `widgetType`. `DeliverOutput` reads `destination` to pick the surface.
+
+      The CapabilityRouter dedup (task 042) needs a canonical "where does this output go"
+      surface to enforce one-route-per-intent. Putting that surface on the node config
+      (this task) cleanly separates routing from intrinsic shape.
+    </background>
+    <relevant-files>
+      <file>(TBD per Step 3 surface determination) src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/PlaybookNodeConfig.cs OR scripts/Add-DestinationAndWidgetTypeToNodeConfig.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/Nodes/DeliverOutputNodeExecutor.cs (CONSUMER — read-only)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-031-node-config-extension-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Sibling task 030 (B-G1) adds `outputSchema` to `sprk_analysisaction` — independent surface; parallel.</item>
+      <item>Downstream tasks 032-035 set node-level `destination` per migrated action.</item>
+      <item>Task 042 CapabilityRouter dedup consumes this surface to enforce one-route-per-intent.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context usage. If &gt;70%, run `context-handoff` then request `/compact`.
+      Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Production playbook canvas data model change; NFR-08 sensitivity
+                 (DeliverOutput is an 11-executor protected class); CLAUDE.md Confirmation
+                 Trigger
+      📖 PROTOCOL STEPS TO EXECUTE: all 12 steps below including Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+
+      **PAUSE and confirm with user**: (a) approved to extend node config with
+      `destination` + `widgetType`; (b) confirm the storage surface (JSON-blob vs
+      separate entity) discovered in Step 3 before applying the change.
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`; confirm task 031 status is 🔲; dependencies (029) is
+      complete. Read `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Read
+      `playbook-architecture.md` in full. Read `DeliverOutputNodeExecutor.cs` to
+      understand the current routing-default behavior.
+    </step>
+    <step order="3" name="Determine the Storage Surface (CRITICAL)">
+      Inspect repo for how playbook nodes are stored:
+      (a) JSON-blob in `sprk_analysisplaybook.sprk_nodesjson` (or similar column)?
+      (b) Separate Dataverse entity (e.g., `sprk_analysisplaybooknode`)?
+      (c) Both (Dataverse parent + JSON child)?
+
+      Document which surface applies in task notes. **Confirm surface with user before
+      proceeding with the migration.**
+    </step>
+    <step order="4" name="Verify DeliverOutput is Additive-Safe">
+      Read `DeliverOutputNodeExecutor.cs` and confirm it tolerates additional properties
+      on node config without code change. If `JsonSerializerOptions` use
+      `IgnoreReadOnlyProperties` / `UnknownTypeHandling` permissive defaults, additive is
+      safe. If the executor strictly fails on unknown properties, ESCALATE — that
+      conflicts with NFR-08.
+    </step>
+    <step order="5" name="Author Schema / Migration">
+      EITHER:
+      - **JSON-blob path**: extend TypeScript/C# node-config type definitions to include
+        optional `destination?: 'chat' | 'workspace' | 'form-prefill' | 'side-effect'` and
+        optional `widgetType?: string`; update JSON Schema validator (if any) to allow
+        these properties; document conditional-required rule for `widgetType`.
+      - **Dataverse-entity path**: author `scripts/Add-DestinationFieldsToNodeConfig.ps1`
+        following the dataverse-create-schema pattern — Option Set column for
+        `destination` + Memo/String column for `widgetType`; idempotent.
+    </step>
+    <step order="6" name="Apply to Spaarke Dev (Dataverse Path)">
+      If Dataverse-entity path: run the migration script; capture deployment output.
+      If JSON-blob path: deploy via BFF build/publish (verify size delta in step 8) and
+      confirm validator changes are in source.
+    </step>
+    <step order="7" name="Verify Idempotency / Backward Compatibility">
+      Re-run script (if applicable). Issue a verification query / parse a sample playbook
+      node JSON without the new fields — confirm it defaults to `chat` destination (or
+      whatever the current behavior is) without error.
+    </step>
+    <step order="8" name="Verify BFF Publish-Size">
+      Per CLAUDE.md §10 bullet 4: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/
+      -o deploy/api-publish/`; measure compressed output; report delta vs prior baseline
+      (~45.65 MB pre-Phase-A; check current per most recent Phase A task notes). Record
+      in task notes. Expect near-zero; flag if &gt;+1 MB.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` against the schema change + migration script. Run `adr-check`;
+      verify ADR-029 (publish-size delta), ADR-010 (no new top-level DI), NFR-08
+      (DeliverOutput unmodified). Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 031 🔲 → ✅. Reset
+      `current-task.md`. Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI — environment selection, optional metadata export</tool>
+    <tool name="pwsh">PowerShell 7+ — runs migration script if Dataverse-entity path</tool>
+    <tool name="dotnet">Build + publish BFF for publish-size verification</tool>
+    <tool name="git">Stage + commit changes on R6 worktree branch</tool>
+    <tool name="dataverse-create-schema">Skill for Web API + PowerShell schema mutations (Dataverse path)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code-or-script">EITHER scripts/Add-DestinationFieldsToNodeConfig.ps1 (NEW; Dataverse path) OR src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/PlaybookNodeConfig.cs (MODIFIED; JSON-blob path)</output>
+    <output type="schema">src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/node-config.schema.json (NEW or MODIFIED — JSON Schema contract, if applicable)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-031-node-config-extension-evidence.md (storage surface decision, deployment/validation output, backward-compatibility evidence, BFF size delta)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 031 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="report">Task completion report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">User confirmed (per CLAUDE.md Confirmation Triggers) approval to extend node config with `destination` + `widgetType` BEFORE deployment; storage surface (JSON-blob vs Dataverse entity) explicitly confirmed.</criterion>
+    <criterion testable="true">Node config schema accepts `destination` (enum: `chat` | `workspace` | `form-prefill` | `side-effect`) and `widgetType` (string; conditionally required when `destination = workspace`).</criterion>
+    <criterion testable="true">`DeliverOutputNodeExecutor.cs` is UNMODIFIED (NFR-08 binding) and tolerates the new fields additively — verified by reading the file and confirming JSON deserialization tolerance.</criterion>
+    <criterion testable="true">Existing playbook nodes WITHOUT the new fields default to `chat` destination (current behavior) and continue to execute without error.</criterion>
+    <criterion testable="true">If Dataverse-entity path: migration script is idempotent; re-run succeeds with no destructive effect.</criterion>
+    <criterion testable="true">BFF publish-size delta reported in task notes; ≤+5 MB R6 budget; flag for explicit justification if any single-task delta ≥+5 MB.</criterion>
+    <criterion testable="true">Task notes record: storage-surface decision rationale; backward-compatibility evidence; `widgetType` conditional-required rule definition.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (031 🔲 → ✅) and `current-task.md` reset.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-06-08</completion-date>
+    <storage-surface>JSON-blob path — destination + widgetType added INSIDE sprk_playbooknode.sprk_configjson; no new Dataverse column. Surface decision rationale + line-cited evidence in notes/task-031-node-config-extension-evidence.md §1.</storage-surface>
+    <nfr-08-verification>DeliverOutputNodeExecutor.cs UNMODIFIED (binary-identical). Additive-safety verified at lines 32, 271-286, 427-438 (System.Text.Json default UnmappedMemberHandling.Skip — unknown properties silently ignored). 21 existing DeliverOutputNodeExecutor tests still pass.</nfr-08-verification>
+    <backward-compatibility>27 NodeRoutingConfig tests cover null / empty / malformed / unknown-value / mixed-with-existing-fields / empty-object inputs. All default to destination=chat per FR-27. No data migration of existing playbooks required.</backward-compatibility>
+    <bff-publish-size>45.90 MB → 45.95 MB compressed (+0.05 MB; 100× below the +5 MB NFR-02 single-task threshold).</bff-publish-size>
+    <files-added>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/NodeRoutingConfig.cs (250 LOC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/node-routing-config.schema.json (55 LOC)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Models/Ai/NodeRoutingConfigTests.cs (315 LOC, 27 tests)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-031-node-config-extension-evidence.md</file>
+    </files-added>
+    <files-unmodified-nfr-08>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverOutputNodeExecutor.cs</file>
+      <file>(All 10 other production node executors under Services/Ai/Nodes/)</file>
+    </files-unmodified-nfr-08>
+    <unblocks>032-035 (action migrations populate destination per node); 040/041 (StructuredOutputStreamWidget schema-aware); 042 (CapabilityRouter dedup — single canonical route surface).</unblocks>
+    <quality-gates>
+      <code-review>PASS (self-audit; no critical issues; 27 tests cover 100% surface)</code-review>
+      <adr-check>PASS (ADR-029 publish-size +0.05 MB; ADR-010 zero new DI; ADR-013 facade boundary respected; NFR-08 verified)</adr-check>
+    </quality-gates>
+  </notes>
+</task>

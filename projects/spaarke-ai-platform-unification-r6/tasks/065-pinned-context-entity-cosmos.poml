@@ -1,0 +1,101 @@
+<task id="065" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-18 — Pinned-context entity in Cosmos `memory` container (pinType: user-preference / system-rule / matter-fact)</title>
+    <status>pending</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>Phase C — Cross-Conversation Memory (Pillar 7)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>053 (workspace state wired)</dependencies>
+    <tags>bff-api, ai, services, dataverse, memory</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New entity persisted across sessions; consumed by user-facing memory UI + agent prompt assembly; data shape gates Q7 expansion (070).</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build the pinned-context entity in the existing Cosmos `memory` container. Entity
+    shape: `{ id, tenantId, userId, pinType: "user-preference" | "system-rule" |
+    "matter-fact", title: string, content: string, matterId?: string, createdAt, updatedAt,
+    createdBy: string }`. Public service: `IPinnedContextService` with `GetAsync(tenantId,
+    userId, ct)`, `CreateAsync(...)`, `UpdateAsync(...)`, `DeleteAsync(...)` methods.
+    Per-tenant + per-user partition key per ADR-014. The shape is the contract consumed
+    by Q7 Pinned Memory UI (task 070); drift here breaks 070. Pinned items never drop
+    from prompt assembly per spec FR-42 — they're always included in the memory
+    composition (task 067).
+  </prompt>
+
+  <role>
+    Senior BFF engineer with familiarity with Cosmos `memory` container existing patterns
+    + per-tenant partitioning + scope ownership models.
+  </role>
+
+  <goal>
+    Pinned-context entity persisted in Cosmos; CRUD service + DI registered; partition
+    key tenant + user; shape stable for Q7 UI consumption.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="ai-arch">docs/architecture/AI-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register in existing module.</constraint>
+    <constraint source="ADR-013">BFF-side AI service.</constraint>
+    <constraint source="ADR-014">Cosmos write-through; per-tenant partition.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="spec FR-42">Pinned items never drop from prompt; pinType enum constrained to 3 values.</constraint>
+    <constraint source="project R6 Pillar 7">Shape gates Q7 expansion (070 Pinned Memory UI). Contract sign-off required if shape changes mid-Phase-C.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-memory</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — New entity + service; gates Q7 expansion."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 053 complete.</step>
+    <step order="2" name="Gather Resources">Read existing Cosmos `memory` container client patterns.</step>
+    <step order="3" name="Author Entity Model">`PinnedContextItem` record with required fields + JSON serialization attributes.</step>
+    <step order="4" name="Author Service Interface + Impl">`IPinnedContextService` + `PinnedContextService` in `Services/Ai/Memory/`.</step>
+    <step order="5" name="Register in Module">Per ADR-010.</step>
+    <step order="6" name="Tests">Unit tests for each CRUD method + per-tenant isolation.</step>
+    <step order="7" name="Publish-Size + CVE">dotnet publish + vulnerable check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 065 ✅. Note: shape stable for Q7 UI; sign-off required if changed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Memory/PinnedContextItem.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IPinnedContextService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/PinnedContextService.cs (NEW)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/PinnedContextServiceTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`PinnedContextItem` entity with required fields; `pinType` enum constrained to 3 values.</criterion>
+    <criterion testable="true">Service supports Get/Create/Update/Delete with per-tenant + per-user partition key.</criterion>
+    <criterion testable="true">Unit tests for tenant isolation + each CRUD method.</criterion>
+    <criterion testable="true">Service registered in existing module; ZERO new Program.cs lines.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

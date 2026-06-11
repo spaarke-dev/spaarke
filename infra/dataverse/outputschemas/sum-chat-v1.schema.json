@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/sum-chat-v1.schema.json",
+  "title": "Summarize Document for Chat — Output Schema (SUM-CHAT@v1)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='SUM-CHAT@v1'. R6 task 032 (D-B-03) — populates sprk_outputschemajson on the existing action row. The schema MIRRORS VERBATIM the schema baked into src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/summarize-document-for-chat.playbook.json (R5 D2-01 author surface) and the value currently stored on sprk_analysisaction id eeb05bfd-1260-f111-ab0b-70a8a59455f4 in Spaarke Dev. Property declaration order is LOAD-BEARING — Azure OpenAI Structured Outputs streams properties in declaration order (verified by R5 task 006 spike). tldr → summary → keywords → entities must remain in this exact order so the StructuredOutputStreamWidget can render the TL;DR section within ~300-500ms of stream start (spec FR-02 / R5 UX requirement).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tldr", "summary", "keywords", "entities"],
+  "$comment-property-order": "DECLARATION ORDER IS LOAD-BEARING — see file-level $comment-schema-order. tldr first to satisfy R5 UX FR-02 TL;DR-first streaming requirement. Per task 006 spike, Azure OpenAI streams properties in this declaration order.",
+  "properties": {
+    "tldr": {
+      "type": "array",
+      "description": "1-3 concise bullet takeaways, each ≤140 chars. Emitted FIRST in the stream so the Workspace pane can populate the TL;DR section within ~300-500ms of stream start (spec FR-02).",
+      "items": { "type": "string", "maxLength": 140 },
+      "minItems": 1,
+      "maxItems": 3
+    },
+    "summary": {
+      "type": "string",
+      "description": "Multi-sentence narrative summary (≤2 paragraphs, ≤2000 chars). Emitted SECOND. References file names when distinguishing multi-file content.",
+      "maxLength": 2000
+    },
+    "keywords": {
+      "type": "string",
+      "description": "Comma-separated keywords (5-15 terms) for search indexing + categorization. Emitted THIRD. NOTE: this is a STRING (not array) to match DocumentAnalysisResult.Keywords. Prefer concrete terms (party names, amounts, dates, contract types) over generic terms."
+    },
+    "entities": {
+      "type": "object",
+      "description": "Named entities. Emitted LAST. organizations + persons arrays may be empty when none are present.",
+      "additionalProperties": false,
+      "required": ["organizations", "persons"],
+      "properties": {
+        "organizations": {
+          "type": "array",
+          "description": "Distinct organizations mentioned in the documents (deduplicated, canonical form).",
+          "items": { "type": "string" }
+        },
+        "persons": {
+          "type": "array",
+          "description": "Distinct persons mentioned in the documents (deduplicated, canonical form).",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,101 @@
+<task id="056" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-07 — `close_workspace_tab` chat tool</title>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6b)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>053 (workspace state wired into factory)</dependencies>
+    <tags>bff-api, ai, chat, workspace, tool-handler</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Destructive operation (closes a tab); must respect user pin state + emit governance-compliant telemetry.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build the `close_workspace_tab(tabId)` chat tool as an `IToolHandler`. On invocation:
+    fetches tab; if `isPinned: true`, REFUSES with a polite response ("pinned tab; user
+    must unpin first"); if not pinned, calls `WorkspaceStateService.CloseTabAsync` (which
+    removes from Redis hot tier but does NOT delete Cosmos durable rows for previously
+    pinned data — durable state preserved per spec FR-32). Emits `workspace.tab_closed`
+    event with deterministic IDs only. Register as `sprk_analysistool` row with
+    `AvailableInContexts = "Chat"`. ADR-015 binding: telemetry emits tool name + decision
+    (`closed` | `refused_pinned`) + timestamp + tabId only.
+  </prompt>
+
+  <role>
+    Senior BFF engineer familiar with the workspace state model + tool handler pattern.
+  </role>
+
+  <goal>
+    `close_workspace_tab` tool installed; respects pin state; emits event; telemetry
+    governance-compliant.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="workspace-svc">src/server/api/Sprk.Bff.Api/Services/Workspace/IWorkspaceStateService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Auto-discovery in existing module; ZERO new Program.cs lines.</constraint>
+    <constraint source="ADR-013">BFF-internal tool.</constraint>
+    <constraint source="ADR-015">Tool name + decision + timestamp + tabId only in telemetry. NEVER tab content.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="ADR-030">Publish `workspace.tab_closed` on existing `workspace` channel; additive event only.</constraint>
+    <constraint source="spec FR-35">Tool closes tab; registered as `sprk_analysistool` row.</constraint>
+    <constraint source="project R6 Pillar 6b">Pinned tabs refused; user explicitly unpins first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-chat-tools</topic>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Destructive workspace operation; pin guard critical."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX.</step>
+    <step order="2" name="Gather Resources">WorkspaceStateService.CloseTabAsync semantics.</step>
+    <step order="3" name="Author Handler">Create `CloseWorkspaceTabHandler.cs`.</step>
+    <step order="4" name="Implement Pin Guard">Fetch tab; if pinned, return refusal response without mutation.</step>
+    <step order="5" name="Implement Close">Call CloseTabAsync; emit `workspace.tab_closed` event.</step>
+    <step order="6" name="Seed Dataverse Row">`sprk_analysistool` row.</step>
+    <step order="7" name="Tests">Pin guard test; close path test; ADR-015 audit (no tab content in telemetry).</step>
+    <step order="8" name="Publish-Size">dotnet publish + measure.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 056 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="pac">Seed `sprk_analysistool` row</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/CloseWorkspaceTabHandler.cs (NEW)</output>
+    <output type="data">Dataverse row: `sprk_analysistool` for close_workspace_tab</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/CloseWorkspaceTabHandlerTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Pinned tab close refused with structured response (no mutation).</criterion>
+    <criterion testable="true">Unpinned tab close removes from Redis + emits `workspace.tab_closed`.</criterion>
+    <criterion testable="true">Cosmos durable rows preserved for previously pinned data.</criterion>
+    <criterion testable="true">Telemetry contains tool name + decision + timestamp + tabId; NEVER tab content.</criterion>
+    <criterion testable="true">ZERO new Program.cs lines; ADR-030 4-channel preserved.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,161 @@
+<task id="021" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-13 Build Generic `invoke_playbook` Chat Tool (Pillar 3)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>bff-api, ai, chat</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New chat-tool handler using PublicContracts facade; ADR-013 + ADR-015 binding; touches authorization (tenant playbook visibility); tags `bff-api`+`ai`+`chat`.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent file; gates 022 and 023.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the generic `invoke_playbook(playbookId, parameters)` chat tool as an
+    `IToolHandler` implementation. The handler calls `IInvokePlaybookAi.InvokePlaybookAsync`
+    (task 020) — preserving the ADR-013 facade boundary by never injecting the
+    orchestration service directly. The handler validates `playbookId` against
+    `sprk_analysisplaybook` rows accessible to the tenant + validates parameters against
+    the playbook's parameter schema before dispatching.
+
+    Critical-path context: this generic tool replaces the specialized
+    `InvokeSummarizePlaybookTool` + `InvokeInsightsQueryTool` bridges (removed in task 023).
+    Task 022 dynamically lists the active playbooks in the tool's description.
+
+    Tool registration: seed a `sprk_analysistool` row with name "invoke_playbook",
+    `AvailableInContexts = Chat`, valid `JsonSchema` (parameters: `playbookId: string`,
+    `parameters: object`). The handler binds via the standard chat-tool resolution path
+    established in task 011.
+
+    Insights playbook-vs-RAG routing: per FR-24, the `InsightsIntentClassifier` continues
+    to handle that routing internally — the generic tool dispatches to whichever execution
+    path the playbook's metadata indicates.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with `IToolHandler` + chat-tool + playbook orchestration experience.
+    Familiar with tenant-scoped playbook visibility + `InsightsIntentClassifier`.
+  </role>
+
+  <goal>
+    `InvokePlaybookHandler : IToolHandler` exists. `sprk_analysistool` row seeded.
+    Handler validates playbookId + parameters, dispatches via `IInvokePlaybookAi` facade.
+    Unit tests cover happy path + validation failures + tenant-isolation enforcement.
+    Build green; publish-size delta reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/IToolHandler.cs</file>
+    <file purpose="insights-routing-guide">docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register handler inside existing module; no new Program.cs lines.</constraint>
+    <constraint source="ADR-013">Handler uses `IInvokePlaybookAi` facade ONLY; never injects `IPlaybookOrchestrationService` or other AI internals directly. Facade boundary preserved.</constraint>
+    <constraint source="ADR-014">Cache playbook-visibility lookups per `tenantId`.</constraint>
+    <constraint source="ADR-015">Telemetry: tool name + playbookId + decision + timestamp; no parameters content; no user message text.</constraint>
+    <constraint source="ADR-018">No new feature flags.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget.</constraint>
+    <constraint source="spec NFR-14">Tenant SYS-/CUST- enforcement on playbookId resolution.</constraint>
+    <constraint source="spec FR-22">Handler validates `playbookId` against `sprk_analysisplaybook` rows accessible to tenant; validates parameters against playbook's parameter schema.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/chat-tool-handler</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — chat-tool handler + ADR-013 facade discipline".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 020 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Capture baseline publish size.
+    </step>
+    <step order="3" name="Implement `InvokePlaybookHandler`">
+      `IToolHandler` impl injecting `IInvokePlaybookAi` (facade) + `ITenantPlaybookVisibilityService` (or equivalent). Validate playbookId against tenant-accessible rows; validate parameters against playbook's parameter schema; dispatch via facade.
+    </step>
+    <step order="4" name="Seed `sprk_analysistool` Row">
+      Add row: name="invoke_playbook", AvailableInContexts=Chat, description="Invoke any registered playbook by ID with parameters. Use this when the user requests an analysis already configured as a playbook.", JsonSchema={playbookId: string, parameters: object}. Handler-class binding to the new handler. Idempotent seed script.
+    </step>
+    <step order="5" name="Register Handler in DI Module">
+      Add to `AnalysisServicesModule`. No new Program.cs lines.
+    </step>
+    <step order="6" name="🛑 Confirmation Gate — Data Seed Deployment">
+      PAUSE for confirmation before seeding `sprk_analysistool` row to production Dataverse.
+    </step>
+    <step order="7" name="Deploy Row + Verify">
+      Deploy via `dataverse-deploy`. Verify row visible; verify factory query (task 011) includes the new tool.
+    </step>
+    <step order="8" name="Add Unit + Integration Tests">
+      Tests: happy path (valid playbookId, valid params → dispatched); validation failures (invalid id, schema mismatch); tenant isolation (cross-tenant id rejected); telemetry payload ADR-015-compliant.
+    </step>
+    <step order="9" name="Build + Verify Publish Size + Acceptance Criteria">
+      `dotnet build` → 0 errors. `dotnet publish -c Release` → delta vs baseline. Walk each criterion.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-010 / ADR-013 / ADR-014 / ADR-015 / ADR-018 / ADR-029 + FR-22 + NFR-14 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 021 ✅. Reset `current-task.md`. Report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="pac">Dataverse row deployment + verification</tool>
+    <tool name="dataverse-deploy">Skill for data seed</tool>
+    <tool name="mcp__dataverse__create_record">MCP — seed `sprk_analysistool` row</tool>
+    <tool name="git">stage + commit changes</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/InvokePlaybookHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (modified)</output>
+    <output type="schema">scripts/Seed-InvokePlaybookToolRow.ps1 (NEW, idempotent)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/InvokePlaybookHandlerTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (021 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-021-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InvokePlaybookHandler` implements `IToolHandler`; injects `IInvokePlaybookAi` facade only (no `IPlaybookOrchestrationService` direct injection per ADR-013).</criterion>
+    <criterion testable="true">`sprk_analysistool` row seeded with name "invoke_playbook", AvailableInContexts=Chat, valid JsonSchema.</criterion>
+    <criterion testable="true">Handler validates playbookId against tenant-accessible `sprk_analysisplaybook` rows.</criterion>
+    <criterion testable="true">Handler validates parameters against playbook's parameter schema.</criterion>
+    <criterion testable="true">Tenant isolation enforced; cross-tenant id rejected.</criterion>
+    <criterion testable="true">Telemetry payload ADR-015-compliant; no user message content.</criterion>
+    <criterion testable="true">Handler registered inside existing module per ADR-010.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

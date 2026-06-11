@@ -1,0 +1,86 @@
+<task id="062" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-15 — Register trace widget with `ContextWidgetRegistry`</title>
+    <status>pending</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6c)</phase>
+    <wave>C-G2 (sequential after 061)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>061 (ExecutionTraceWidget)</dependencies>
+    <tags>frontend, react, ai-widgets, context-pane</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Registration only; widget implementation already passed quality gates in 061.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Register `ExecutionTraceWidget` with `ContextWidgetRegistry` in `@spaarke/ai-widgets`
+    so the SpaarkeAi shell automatically mounts it in the Context pane. Default position:
+    primary Context pane widget. Configurable per-tenant if registration pattern supports
+    overrides. Verify mount in shell; widget appears at default position; subscribes to
+    `context.*` events out of the box.
+  </prompt>
+
+  <role>
+    Senior React engineer familiar with `ContextWidgetRegistry` + SpaarkeAi shell mount
+    semantics.
+  </role>
+
+  <goal>
+    Widget registered + mounted in Context pane; visible end-to-end in SpaarkeAi shell.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="dashboard-widget-model">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="trace-widget">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/ExecutionTraceWidget.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared lib registration; do NOT register in code-page.</constraint>
+    <constraint source="ADR-030">Context pane; existing channel.</constraint>
+    <constraint source="spec FR-36">Registered with `ContextWidgetRegistry`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/widget-registry</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: STANDARD — Registration only; widget already passed FULL gates."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 061 complete.</step>
+    <step order="2" name="Locate Registry">Find `ContextWidgetRegistry` registration site in `@spaarke/ai-widgets`.</step>
+    <step order="3" name="Register Widget">Add registration entry; default position primary; subscribed events: all `context.*`.</step>
+    <step order="4" name="Verify Mount">Run shell smoke test; widget appears in Context pane.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 062 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + smoke test</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/ContextWidgetRegistry.ts (modified)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ExecutionTraceWidget` registered in `ContextWidgetRegistry`.</criterion>
+    <criterion testable="true">Widget mounts at default position in Context pane on shell load.</criterion>
+    <criterion testable="true">Subscribed to all `context.*` events.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test>Load SpaarkeAi shell; verify trace widget visible in Context pane at default position.</test>
+  </ui-tests>
+</task>

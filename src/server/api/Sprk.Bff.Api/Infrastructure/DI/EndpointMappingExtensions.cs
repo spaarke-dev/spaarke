@@ -191,6 +191,10 @@ public static class EndpointMappingExtensions
         app.MapWorkspaceMatterEndpoints();
         app.MapWorkspaceProjectEndpoints();
         app.MapWorkspaceFileEndpoints();
+        // R6 Pillar 6a / D-C-03 / FR-33 (task 052) — GET /api/workspace/state.
+        // Consumes IWorkspaceStateService registered in AnalysisServicesModule (task 051).
+        // ai-context rate-limit + tid-claim tenant scope per InsightEndpoints precedent.
+        app.MapWorkspaceStateEndpoints();
 
         app.MapDailyBriefingEndpoints();
 

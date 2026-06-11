@@ -1,0 +1,110 @@
+<task id="052" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-03 — `GET /api/workspace/state` BFF endpoint (tenant + session scoped)</title>
+    <status>completed</status>
+    <outcome-note>2026-06-09: ✅ COMPLETE. Endpoint `GET /api/workspace/state?sessionId={sessionId}` ships at `Api/Workspace/WorkspaceStateEndpoints.cs` with `RequireAuthorization()` + `ai-context` rate limit + `tid`-claim tenant scope (canonical InsightEndpoints precedent). `WorkspaceStateResponse(Tabs, ActiveTabId, UserSelection)` record; activeTabId/userSelection null in C-G1 (reserved for C-G2/C-G6 extension points). Empty session returns 200 + empty list. Wired in ONE line in `EndpointMappingExtensions.MapDomainEndpoints` (ZERO Program.cs delta per ADR-010). 5/5 endpoint tests PASS. "403 tenant mismatch" reinterpreted as 401-missing-tid (structurally impossible by design — no query-param tenant override). Publish 44.62 MB compressed (-1.34 MB vs post-051 baseline; within R6 budget). Evidence: `notes/task-052-workspace-state-endpoint-evidence.md`. ADR compliance walkthrough: 008/010/013/014/015/016/019/029.</outcome-note>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6a)</phase>
+    <wave>C-G1 (sequential)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>051 (WorkspaceStateService)</dependencies>
+    <tags>bff-api, endpoints, ai, workspace</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New endpoint; auth filter + rate limit + per-tenant scoping; consumed by frontend workspace shell + Pillar 9 visibility builder.</rigor-reason>
+    <parallel-group>C-G1</parallel-group>
+  </metadata>
+
+  <prompt>
+    Add `GET /api/workspace/state` endpoint that returns current open tabs + active tab +
+    user selection state for a tenant + session. Endpoint MUST respect Pillar 9's
+    `getAgentVisibleState()` filter when called from the agent prompt builder (task 074),
+    but the raw endpoint returns the FULL state — the prompt builder applies the filter
+    per-tab. Per ADR-008 endpoint filter pattern for authorization. Per ADR-016 inherits
+    `ai-context` rate limit policy. Register in `WorkspaceStateEndpoints.cs` (new file
+    in `src/server/api/Sprk.Bff.Api/Api/Workspace/`); wire from existing endpoint
+    registration in `Program.cs` via the established module pattern (per ADR-010 — module
+    file registers the endpoint; ZERO new lines in `Program.cs` beyond the existing
+    module call).
+  </prompt>
+
+  <role>
+    Senior BFF API engineer with familiarity with Minimal API endpoint definition,
+    Spaarke endpoint filter authorization, and rate-limit policy registration.
+  </role>
+
+  <goal>
+    `GET /api/workspace/state?sessionId={sessionId}` returns `WorkspaceStateResponse`
+    containing `tabs: WorkspaceTab[]`, `activeTabId: string?`, `userSelection: object?`.
+    Returns 401 if unauthenticated, 403 if tenant mismatch, 429 if rate-limited, 200 on
+    success. Empty session returns `{ tabs: [], activeTabId: null, userSelection: null }`.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-extensions">.claude/constraints/bff-extensions.md</file>
+    <file purpose="scope-endpoints">src/server/api/Sprk.Bff.Api/Api/Ai/ScopeEndpoints.cs</file>
+    <file purpose="workspace-svc">src/server/api/Sprk.Bff.Api/Services/Workspace/IWorkspaceStateService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Endpoint filter for authorization (tenant resolution, claims check). Apply existing `ai-context` filter pattern.</constraint>
+    <constraint source="ADR-010">Module pattern; ZERO new Program.cs lines beyond existing module call.</constraint>
+    <constraint source="ADR-013">Workspace state plumbing in BFF (not separate microservice); service consumed via interface.</constraint>
+    <constraint source="ADR-014">Per-tenant cache key isolation enforced by service.</constraint>
+    <constraint source="ADR-016">`ai-context` rate limit policy applied.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="spec FR-33">Endpoint MUST be tenant-scoped + session-scoped + honor per-widget `getAgentVisibleState()` when consumed by prompt builder (filter logic lives in prompt builder per task 074, NOT in endpoint).</constraint>
+    <constraint source="project R6">Use canonical `WorkspaceTab` interface from task 050; do NOT redefine the shape.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/endpoints</topic>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — New endpoint with auth + rate limit + cross-pillar consumption."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX.md; confirm 051 complete + service registered.</step>
+    <step order="2" name="Gather Resources">Read ScopeEndpoints.cs as canonical endpoint pattern + endpoint-filters.md.</step>
+    <step order="3" name="Author Endpoint">Create `Api/Workspace/WorkspaceStateEndpoints.cs` with `MapWorkspaceStateEndpoints(this IEndpointRouteBuilder)` static method. Apply `ai-context` rate limit policy + tenant-resolution endpoint filter.</step>
+    <step order="4" name="Wire from Program.cs (via module)">Add the existing module call pattern; ZERO new top-level lines in Program.cs.</step>
+    <step order="5" name="Author Response DTO">`WorkspaceStateResponse` record with `tabs`, `activeTabId`, `userSelection`.</step>
+    <step order="6" name="Tests">Add endpoint integration test in `tests/unit/Sprk.Bff.Api.Tests/Api/Workspace/`: 401 unauth, 403 tenant mismatch, 200 happy path with tabs, 200 empty.</step>
+    <step order="7" name="Publish-Size Verification">dotnet publish; record delta.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-008/010/013/014/016/029).</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 052 ✅; current-task → 053.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceStateEndpoints.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Workspace/WorkspaceStateResponse.cs (NEW)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Api/Workspace/WorkspaceStateEndpointsTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GET /api/workspace/state?sessionId={sessionId}` registered with `ai-context` rate limit + tenant-resolution endpoint filter.</criterion>
+    <criterion testable="true">Returns 401 on unauth, 403 on tenant mismatch, 200 on success.</criterion>
+    <criterion testable="true">Response shape: `{ tabs: WorkspaceTab[], activeTabId: string?, userSelection: object? }`.</criterion>
+    <criterion testable="true">Empty session returns `{ tabs: [], activeTabId: null, userSelection: null }`.</criterion>
+    <criterion testable="true">ZERO new top-level Program.cs lines (per ADR-010); module-pattern registration only.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

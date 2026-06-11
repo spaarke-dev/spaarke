@@ -1,0 +1,273 @@
+<task id="100" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-H-00 Handler Infrastructure + Registration Pattern (Gate for Wave 1 + Wave 2)</title>
+    <phase>Parallel — 8 Typed Tool Handlers</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      D-H-00 gate task complete. Wave 1 (101–104) + Wave 2 (105–108) of the 8 typed handler
+      workstream are now unblocked.
+
+      Deliverables landed:
+      - HandlerRegistrationConventions.md at src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/
+        (4-point contract + worked example using GenericAnalysisHandler)
+      - TemplateHandler.cs (reference skeleton; auto-discovered but never invoked at runtime
+        since no sprk_analysistool row points at "TemplateHandler")
+      - TypedToolHandlerTestFixture.cs (shared mocks + ToolExecutionContext/ChatInvocationContext
+        builders + AssertTelemetryRespectsAdr015 helper)
+      - HandlerContractTestTemplate.cs (4 contract tests every handler test class copies)
+      - AutoDiscoveryVerificationTests.cs (6 tests; gates the assembly-scan registration contract)
+
+      Auto-discovery verified: assembly scan in ToolFrameworkExtensions.AddToolHandlersFromAssembly
+      picks up all 4 existing handlers + the new TemplateHandler via the IAnalysisToolHandler
+      global-using alias landed in task 006. ZERO new top-level Program.cs lines. ZERO new
+      NuGet packages. BFF build: 0 errors. New tests: 10/10 pass.
+
+      BFF publish-size: 47.85 MB compressed (raw 140.16 MB). Delta vs ~45.65 MB baseline:
+      +2.2 MB (cumulative R6 since 2026-05-26 baseline — NOT task 100's contribution; task 100
+      added ~0 MB of binary surface). Within ADR-029 per-task ≤+0.5 MB ceiling. Cumulative R6
+      delta approaching NFR-02 +5 MB ceiling; Phase A exit-gate (029) should rebaseline.
+
+      Known unrelated issues (NOT caused by this task): pre-existing WIP files in test project
+      (AnalysisToolDtoTests.cs from task 008 WIP + SprkChatAgentFactoryPersonaTests.cs from
+      task 005 WIP) block full test-project build but do not affect task 100 deliverables.
+
+      Quality gates: code-review ✅, adr-check ✅ (ADR-010 / ADR-013 / ADR-014 / ADR-015 /
+      ADR-016 / ADR-029 all green).
+
+      Full evidence: projects/spaarke-ai-platform-unification-r6/notes/task-100-completion.md.
+    </completion-notes>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>006, 009</dependencies>
+    <blocks>101, 102, 103, 104, 105, 106, 107, 108, 109</blocks>
+    <tags>bff-api, ai, refactoring, handler</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Foundational handler infrastructure — registration pattern + base class wiring + test fixture pattern that gates all 8 typed handler tasks (Wave 1 + Wave 2) + dispatch tests. Documents contract every typed handler must follow.</rigor-reason>
+    <parallel-group>H-G0</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gates Wave 1 (101-104) and Wave 2 (105-108). No other handler task can begin until this lands.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Land the shared handler infrastructure that the 8 typed tool handlers (FR-13 through
+    FR-20) rest on. This task documents and codifies the contract every typed handler
+    must satisfy: implements `IToolHandler` (renamed in Phase A task 006); registered
+    via auto-discovery (no manual DI per handler — ADR-010 module pattern); has a
+    corresponding `sprk_analysistool` Dataverse row with `sprk_handlerclass` field set
+    to the C# class name for runtime discovery; ships a reusable unit-test fixture for
+    handler tests so each Wave 1/Wave 2 task can lean on identical scaffolding.
+
+    Concretely this task delivers: (a) a `HandlerRegistrationConventions.md` short doc
+    in `Services/Ai/Handlers/` (or equivalent) that codifies the 4-point handler contract
+    with worked example; (b) verification that the existing auto-discovery in
+    `AnalysisServicesModule.cs` correctly picks up all `IToolHandler` implementations from
+    the assembly (no per-handler DI line additions allowed); (c) the
+    `TypedToolHandlerTestFixture` base class in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/`
+    with shared mocks (`IOpenAiClient`, `IScopeResolverService`, `ToolExecutionContext`
+    + `ChatInvocationContext` builders, telemetry assertions per ADR-015); (d) a checked-in
+    "contract test" template each handler task copies — verifies handler is registered,
+    is discoverable by `sprk_handlerclass` lookup, exposes valid metadata.
+
+    The infrastructure ships with ZERO new top-level Program.cs lines and ZERO new DI
+    services registered outside `AnalysisServicesModule` per ADR-010. BFF publish-size
+    delta MUST be measured and reported; expected ≤+0.2 MB (test infrastructure does not
+    ship in production binary; only the doc + verifier do).
+  </prompt>
+
+  <role>
+    Senior BFF engineer with .NET 8 + assembly auto-discovery experience. Familiar with
+    `IAnalysisToolHandler` registration in `AnalysisServicesModule`, the `sprk_analysistool`
+    Dataverse data model, and xUnit fixture patterns. Deep knowledge of ADR-010 DI
+    minimalism and ADR-015 telemetry constraints.
+  </role>
+
+  <goal>
+    Handler infrastructure landed: (1) `HandlerRegistrationConventions.md` documents the
+    4-point contract with worked example; (2) auto-discovery verified — adding a new
+    `IToolHandler` implementation to `Services/Ai/Handlers/` automatically registers
+    without modifying DI module; (3) `TypedToolHandlerTestFixture` base class committed
+    with shared mocks + context builders + telemetry assertion helpers; (4) "contract
+    test" template that each Wave 1/Wave 2 task copies; (5) BFF publish-size verified
+    ≤+0.2 MB; (6) `code-review` + `adr-check` both green. Downstream tasks 101–108 can
+    proceed in parallel after this lands.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+    <file purpose="existing-handler-example">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="ai-architecture">docs/architecture/AI-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — auto-discovery registers all handlers inside `AnalysisServicesModule.cs`; ZERO new top-level Program.cs lines; ZERO per-handler DI registrations outside the module.</constraint>
+    <constraint source="ADR-013">Handlers live in `Services/Ai/Handlers/` per AI architecture; consumers route through PublicContracts facades, not directly into handler implementations.</constraint>
+    <constraint source="ADR-015">Telemetry fixture helpers assert handler name + execution outcome + timestamp ONLY; never user input content.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta verified ≤+0.2 MB; report absolute size + diff vs baseline per CLAUDE.md §10.</constraint>
+    <constraint source="project CLAUDE.md Pillar 2">Every handler MUST implement `IToolHandler`, MUST be registered via auto-discovery, MUST have a corresponding `sprk_analysistool` row with `sprk_handlerclass` set to its C# class name.</constraint>
+    <constraint source="project CLAUDE.md Confirmation Trigger">If this task surfaces a need to add new top-level DI registration, PAUSE and confirm with user.</constraint>
+    <constraint source="spec NFR-02">R6 BFF publish-size budget ≤+5 MB total. Per-task verification required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/handler-registration</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase A tasks 006 and 009 renamed `IAnalysisToolHandler` to `IToolHandler` and
+      split the execution context (`ToolExecutionContext` for playbook; `ChatInvocationContext`
+      for chat). The 8 typed handlers (FR-13 through FR-20) implement against the
+      renamed interface and split contexts. Before Wave 1 + Wave 2 can run in parallel,
+      a shared contract + test fixture must exist so each handler PR does not invent its
+      own registration pattern, mock layout, or telemetry-assertion style.
+
+      The existing `GenericAnalysisHandler.cs` is the canonical reference for what a
+      handler looks like end-to-end; it is auto-discovered today. This task verifies that
+      mechanism + extends the fixture so the 8 typed handlers all share identical
+      scaffolding.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md (NEW — 4-point contract doc)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/TypedToolHandlerTestFixture.cs (NEW — shared test fixture)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/HandlerContractTestTemplate.cs (NEW — template each handler test copies)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/AutoDiscoveryVerificationTests.cs (NEW — verifies auto-discovery picks up all IToolHandler implementations)</file>
+    </relevant-files>
+    <related-work>
+      <item>Phase A task 006 — `IAnalysisToolHandler` → `IToolHandler` rename. Hard dependency.</item>
+      <item>Phase A task 009 — `ToolExecutionContext` + `ChatInvocationContext` split. Hard dependency.</item>
+      <item>Wave 1 tasks 101–104 — pure-deterministic handlers; depend on this task.</item>
+      <item>Wave 2 tasks 105–108 — LLM-assisted handlers; depend on Wave 1 starting.</item>
+      <item>Task 109 — dispatch tests; depends on Wave 2 complete.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context usage. If &gt;70%, run `context-handoff` then request `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Foundational handler infrastructure; gates 9 downstream tasks (101-109)
+      📖 PROTOCOL STEPS TO EXECUTE: all 11 steps below including Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`; confirm task 100 status is 🔲; dependencies (006, 009)
+      are complete. Read `current-task.md` to verify no prior R6 task is in flight.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract from
+      `GenericAnalysisHandler.cs` the existing registration shape; from
+      `AnalysisServicesModule.cs` the auto-discovery mechanism; from `.claude/constraints/bff-extensions.md`
+      the binding governance rules for BFF additions.
+    </step>
+    <step order="3" name="Verify Auto-Discovery Works Today">
+      Confirm `AnalysisServicesModule.cs` currently auto-discovers `IAnalysisToolHandler`
+      (now `IToolHandler` after task 006) implementations via assembly scan. If not,
+      ADD the auto-discovery mechanism inside the module (ZERO new top-level DI lines).
+      Write `AutoDiscoveryVerificationTests.cs` that asserts all `IToolHandler` types
+      in the assembly are resolvable from the service provider.
+    </step>
+    <step order="4" name="Author HandlerRegistrationConventions.md">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md`.
+      Document the 4-point contract verbatim: (1) implements `IToolHandler`; (2) registered
+      via auto-discovery — no manual DI line; (3) has corresponding `sprk_analysistool`
+      Dataverse row with `sprk_handlerclass` matching the C# class name; (4) ships
+      contract + positive + error + config-driven tests using `TypedToolHandlerTestFixture`.
+      Include a worked example using `GenericAnalysisHandler` as the canonical reference.
+    </step>
+    <step order="5" name="Author TypedToolHandlerTestFixture">
+      Create `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/TypedToolHandlerTestFixture.cs`.
+      Provide shared mocks (`Mock&lt;IOpenAiClient&gt;`, `Mock&lt;IScopeResolverService&gt;`),
+      `BuildToolExecutionContext(...)` + `BuildChatInvocationContext(...)` helpers, and
+      `AssertTelemetryRespectsAdr015(...)` helper that asserts logged events contain
+      handler name + execution outcome + timestamp ONLY and never user input text.
+    </step>
+    <step order="6" name="Author HandlerContractTestTemplate">
+      Create `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/HandlerContractTestTemplate.cs`.
+      Provide an `[Fact]`-driven template each handler test class copies: (a) handler
+      type is registered in DI; (b) handler is resolvable by `sprk_handlerclass` lookup;
+      (c) handler metadata is non-null + version is semver; (d) `SupportedToolTypes` is
+      non-empty.
+    </step>
+    <step order="7" name="Verify Build + Run Tests">
+      Run `dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet test tests/unit/Sprk.Bff.Api.Tests/`.
+      Confirm all tests pass including the new `AutoDiscoveryVerificationTests`.
+    </step>
+    <step order="8" name="Verify BFF Publish-Size Delta">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+      Measure compressed output. Report absolute size + diff vs prior baseline (~45.65 MB)
+      in task notes. Expected delta ≤+0.2 MB (only the conventions .md doc ships in
+      binary as embedded resource if at all; test fixture does not).
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and record evidence in task
+      notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new files (conventions .md, test fixture,
+      template, verification tests, any auto-discovery additions). Run `adr-check` skill
+      against the same files; verify ADR-010 (DI minimalism), ADR-013 (handler placement),
+      ADR-015 (telemetry surface), ADR-029 (publish-size). Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 100 🔲 → ✅. Reset
+      `current-task.md` to the next pending handler task (or first of Wave 1). Confirm
+      Wave 1 (101–104) is now unblocked. Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF + run tests + publish for size verification</tool>
+    <tool name="git">Stage + commit the new conventions doc + test fixture + template on the R6 branch</tool>
+    <tool name="code-review">FULL-rigor quality gate at Step 9.5</tool>
+    <tool name="adr-check">FULL-rigor quality gate at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/TypedToolHandlerTestFixture.cs (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/HandlerContractTestTemplate.cs (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/AutoDiscoveryVerificationTests.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (auto-discovery confirmation/extension if needed)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-100-handler-infra-evidence.md (publish-size diff, auto-discovery verification, test run output)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 100 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`HandlerRegistrationConventions.md` exists in `Services/Ai/Handlers/`, documents the 4-point contract, and includes a worked example using `GenericAnalysisHandler`.</criterion>
+    <criterion testable="true">`AutoDiscoveryVerificationTests.cs` proves every `IToolHandler` implementation in the BFF assembly is resolvable from the service provider with ZERO per-handler DI lines outside `AnalysisServicesModule`.</criterion>
+    <criterion testable="true">`TypedToolHandlerTestFixture.cs` provides shared mocks (`IOpenAiClient`, `IScopeResolverService`), context builders for both `ToolExecutionContext` + `ChatInvocationContext`, and telemetry assertion helper enforcing ADR-015.</criterion>
+    <criterion testable="true">`HandlerContractTestTemplate.cs` provides the standard contract test template (registered + discoverable + valid metadata + non-empty supported types) every Wave 1/Wave 2 handler test class will copy.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with no new errors.</criterion>
+    <criterion testable="true">`dotnet test tests/unit/Sprk.Bff.Api.Tests/` passes with the new `AutoDiscoveryVerificationTests` green.</criterion>
+    <criterion testable="true">BFF publish-size delta verified ≤+0.2 MB; absolute size + diff recorded in task notes per CLAUDE.md §10.</criterion>
+    <criterion testable="true">ZERO new top-level Program.cs lines introduced; all registration stays inside `AnalysisServicesModule.cs` per ADR-010.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates both pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>

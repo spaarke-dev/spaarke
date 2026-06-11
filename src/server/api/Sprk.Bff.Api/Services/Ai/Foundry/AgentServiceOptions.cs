@@ -29,18 +29,19 @@ public sealed class AgentServiceOptions
     /// Azure AI Foundry project endpoint URI.
     /// Format: <c>https://&lt;hub-name&gt;.services.ai.azure.com/api/projects/&lt;project-name&gt;</c>
     /// or the AI Foundry project connection string (endpoint format accepted by <see cref="Azure.AI.Projects.AgentsClient"/>).
-    /// Required when <see cref="Enabled"/> is <c>true</c>.
+    /// Required when <see cref="Enabled"/> is <c>true</c>; validated at use-site
+    /// (<c>AgentServiceClient.CreateAgentsClient</c>) NOT at startup, so DI containers
+    /// in tests + Spaarke Dev environments without Foundry configured can still build.
+    /// Mirrors the BingGroundingOptions hardening pattern (R6 Wave B-G8).
     /// </summary>
-    [Required]
-    public Uri Endpoint { get; init; } = null!;
+    public Uri? Endpoint { get; init; }
 
     /// <summary>
     /// Azure AI Foundry Agent ID (the pre-provisioned agent to attach threads/runs to).
     /// Retrieve from the AI Foundry Studio or via the Azure AI Projects SDK.
-    /// Required when <see cref="Enabled"/> is <c>true</c>.
+    /// Required when <see cref="Enabled"/> is <c>true</c>; validated at use-site
+    /// (<c>AgentServiceClient.CreateAgentsClient</c>) NOT at startup. See <see cref="Endpoint"/>.
     /// </summary>
-    [Required]
-    [MinLength(1)]
     public string AgentId { get; init; } = string.Empty;
 
     /// <summary>

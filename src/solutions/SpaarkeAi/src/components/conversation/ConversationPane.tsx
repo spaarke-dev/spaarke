@@ -1085,7 +1085,40 @@ export function ConversationPane(): React.JSX.Element {
       // tasks 037 + 038; this task is the publisher (PaneEventBus events).
       const readyChips = attachmentChips.filter(c => c.status === "ready");
       const intent = matchIntent(messageText, readyChips.length > 0, undefined);
-      if (intent && intent.id === "summarize-session" && chatSessionId !== null) {
+      // R6 Hotfix Wave B-G9c3 (B9) — slash-to-NL rewire (2026-06-10):
+      //
+      // When the intent matched via the `/summarize` SLASH command (as opposed
+      // to a natural-language pattern or button-id), DO NOT fire the
+      // deterministic `executeSummarizeIntent` orchestrator. Let the message
+      // flow through the SprkChat default send funnel only — the LLM agent
+      // (SprkChatAgent) sees the literal "/summarize" text and routes it
+      // through the natural-language path (CapabilityRouter → invoke_playbook
+      // tool → InvokePlaybookHandler → IPlaybookOrchestrationService.ExecuteAsync).
+      //
+      // This satisfies the user's B9 decision: "/summarize in the Assistant
+      // chat should produce the SAME output as 'summarize this document'."
+      // Both now route through the SAME NL primitives (richer
+      // PromptSchemaRenderer templates, conversational LLM-driven output)
+      // instead of the JPS-template streaming path
+      // (PlaybookExecutionEngine.ExecuteChatSummarizeAsync) used by the
+      // direct endpoint.
+      //
+      // NL pattern matches ("summarize…", "please summarize…") and button-id
+      // matches (`action:summarize`) STILL fire executeSummarizeIntent — they
+      // preserve the R5 task 036 / P2-CLOSEOUT-05 "deterministic intent
+      // dispatch" operator-UX contract. The slash command is the only path
+      // that bypasses the orchestrator entry — it's purely a typing-affordance
+      // synonym for natural language.
+      //
+      // The Document Profile context's SummarizeFilesWizard
+      // (`/api/workspace/files/summarize` via summarizeService.ts) is a
+      // SEPARATE endpoint and is UNAFFECTED by this change.
+      if (
+        intent &&
+        intent.id === "summarize-session" &&
+        intent.via !== "slash" &&
+        chatSessionId !== null
+      ) {
         // Build the HeldFile list from the ready chips. The File-equivalents
         // were captured in handleAttachmentReady (keyed by filename). Chips
         // without a captured File fall through — the orchestrator will throw
@@ -1124,14 +1157,16 @@ export function ConversationPane(): React.JSX.Element {
                 authenticatedFetch,
                 getAccessToken,
                 publishPaneEvent: dispatch,
-                // R5 task 038: pass the chat sessionId as the streamId so
-                // every `workspace.streaming_*` event carries `streamId ===
-                // chatSessionId`. The Summary tab in WorkspacePane registers
-                // `correlationId = chatSessionId` on the
-                // StructuredOutputStreamWidget and gates auto-focus on the
-                // same id, so this propagation is required for session
-                // isolation (FR-06 acceptance).
-                streamId: chatSessionId,
+                // R6 Hotfix Wave B-G9c2 (B8): each summarize invocation gets
+                // its own unique streamId so the workspace.widget_load +
+                // workspace.streaming_* events flow into a NEW Summary tab
+                // (FR-06 restoration; tab title includes the source filename).
+                // R5 task 038's reuse of `chatSessionId` as the streamId
+                // caused all subsequent runs to overwrite the original
+                // Summary tab — that behavior is reverted here. Defaulting
+                // to `undefined` lets executeSummarizeIntent generate a
+                // unique id via generateStreamId().
+                streamId: undefined,
               });
               // Flip Held → Indexed badges on the promoted chip ids.
               setPromotedChipIds(prev => {

@@ -1,0 +1,238 @@
+<task id="101" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-H-01 `DateExtractorHandler` (FR-17, Wave 1 — Pure Deterministic)</title>
+    <phase>Parallel — 8 Typed Tool Handlers</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      DateExtractorHandler (R6 Pillar 2, FR-17, Wave 1) landed: pure-deterministic; 0 LLM/Azure OpenAI deps;
+      auto-discovered via assembly scan (no manual DI line per ADR-010); ADR-015-compliant telemetry
+      (handler name + IDs + outcome counts only, never input text). Supports BOTH playbook + chat
+      invocation contexts (FR-17 acceptance). 35 unit tests pass in 98 ms (sub-millisecond per-test).
+      sprk_analysistool row deployed to Spaarke Dev (sprk_analysistoolid b76a58b2-b862-f111-ab0c-000d3a4d8152
+      with sprk_handlerclass="DateExtractorHandler", sprk_availableincontexts=100000002/Both, sprk_toolcode=DATEXTR@v1).
+      BFF publish-size delta +0.02 MB compressed (44.20 → 44.22 MB), well under +0.5 MB target.
+      code-review + adr-check (ADRs 010/013/014/015/016/029): all GREEN.
+      Full evidence: projects/spaarke-ai-platform-unification-r6/notes/task-101-completion.md.
+    </completion-notes>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>100</dependencies>
+    <blocks>105, 106, 107, 108, 109</blocks>
+    <tags>bff-api, ai, handler</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF handler implementation; integrates with auto-discovery + scope-driven dispatch; FULL quality gates required for production handler code.</rigor-reason>
+    <parallel-group>H-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave 1 pure-deterministic handler; independent of 102/103/104; each Wave 1 handler touches distinct files in `Services/Ai/Handlers/` and its own test file. No shared mutable state.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build `DateExtractorHandler` — a pure-deterministic `IToolHandler` implementation per
+    FR-17 that performs date normalization + relative-date resolution from raw text.
+    Examples: "next quarter" → ISO 8601 date (start of next calendar quarter); "Q4 2026"
+    → 2026-10-01; "March 15" → 2026-03-15 (current year inferred); "2026-03-15" → passthrough.
+    NO LLM call. NO Azure OpenAI dependency. Pure C# regex + `DateTime` arithmetic +
+    optional `Microsoft.Recognizers.Text.DateTime` (justify if added; size delta tracked).
+
+    Handler registers via auto-discovery per task 100's contract — implements `IToolHandler`;
+    `HandlerId = "DateExtractorHandler"`; lives in `Services/Ai/Handlers/DateExtractorHandler.cs`;
+    no manual DI line. Requires a corresponding `sprk_analysistool` Dataverse row with
+    `sprk_handlerclass = "DateExtractorHandler"` + `sprk_configuration` JSON specifying
+    optional `referenceDate`, `defaultTimezone`, `outputFormat` (ISO 8601 default).
+
+    Configurable behavior per FR-17 acceptance: handler accepts optional
+    `sprk_configuration` JSON from the tool row; deterministic with the same input +
+    same config → same output every time. Telemetry per ADR-015 logs handler name,
+    execution outcome, timestamp only.
+
+    Tests: contract test (registered, discoverable, metadata valid) + positive cases
+    (relative-date phrases + ISO passthrough + Q-notation) + error cases (malformed
+    input, ambiguous-without-reference-date) + config-driven test (referenceDate change
+    shifts "next quarter" output).
+  </prompt>
+
+  <role>
+    Senior BFF engineer with .NET 8 + deterministic algorithm experience. Familiar with
+    `DateTime` arithmetic, regex, ISO 8601, calendar quarter math, timezone handling.
+    Comfortable writing handlers that produce identical output for identical input.
+  </role>
+
+  <goal>
+    `DateExtractorHandler.cs` implemented in `Services/Ai/Handlers/`; auto-discovered;
+    `sprk_analysistool` row exists with `sprk_handlerclass = "DateExtractorHandler"` +
+    `AvailableInContexts` set per usage intent (Playbook by default); unit tests pass
+    covering positive + error + config-driven cases; ZERO LLM/Azure-OpenAI dependencies
+    in handler code; BFF publish-size delta ≤+0.5 MB; `code-review` + `adr-check` green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+    <file purpose="existing-handler-example">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    <file purpose="handler-conventions">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — handler picked up via auto-discovery; ZERO manual DI line outside `AnalysisServicesModule`.</constraint>
+    <constraint source="ADR-013">Handler lives in `Services/Ai/Handlers/`; no CRUD code injects this handler directly — playbooks dispatch via `sprk_handlerclass` lookup.</constraint>
+    <constraint source="ADR-015">Telemetry logs handler name + execution outcome + timestamp ONLY; never user input content.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta measured + reported; per-task ≤+0.5 MB target; CLAUDE.md §10 binding rule.</constraint>
+    <constraint source="spec FR-17">Handler MUST be pure deterministic — NO LLM call, NO Azure OpenAI dependency; testable with deterministic inputs producing identical outputs across runs.</constraint>
+    <constraint source="spec NFR-02">R6 BFF publish-size budget ≤+5 MB total; this handler's delta counts against the budget.</constraint>
+    <constraint source="project CLAUDE.md Pillar 2">Implements `IToolHandler`; registered via auto-discovery; corresponding `sprk_analysistool` row required with `sprk_handlerclass = "DateExtractorHandler"`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/typed-handler-deterministic</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `DateExtractorHandler` is one of 8 typed handlers the R6 platform data model
+      anticipates but only stubs in code today. It is pure-deterministic — relative-date
+      phrase ("next quarter", "EOQ", "in 30 days") + reference date → canonical ISO 8601
+      output. No LLM needed, so latency is sub-millisecond and unit tests are stable.
+
+      Use case: legal calendaring (deadlines), invoice due-date normalization, contract
+      term expiry calc. Configurable `referenceDate` lets playbooks anchor relative dates
+      to a non-"now" baseline (e.g., contract execution date).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DateExtractorHandler.cs (NEW)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/DateExtractorHandlerTests.cs (NEW)</file>
+      <file>infra/dataverse/sprk_analysistool-date-extractor-row.json (NEW — seed row payload)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-101-deployment-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Task 100 — handler infrastructure (registration + test fixture). Hard dependency.</item>
+      <item>Sibling Wave 1 tasks 102, 103, 104 — parallel-safe; each writes its own files.</item>
+      <item>Task 109 — dispatch test exercises this handler from playbook context.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. If &gt;70%, run `context-handoff` then request `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: New BFF handler code (production); Pillar 2 binding rule; FR-17 acceptance
+      📖 PROTOCOL STEPS TO EXECUTE: all 11 steps below including Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`; confirm task 101 status is 🔲; dependency (100) is
+      complete. Read `current-task.md` to verify state.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract from
+      `HandlerRegistrationConventions.md` the 4-point contract; from `GenericAnalysisHandler.cs`
+      the implementation shape; from `TypedToolHandlerTestFixture` (created by task 100)
+      the shared mocks + helpers.
+    </step>
+    <step order="3" name="Design Handler Surface">
+      Define: `HandlerId = "DateExtractorHandler"`; `Metadata` with semver version,
+      description "Pure-deterministic date normalization + relative-date resolution";
+      `SupportedToolTypes` includes appropriate enum; `ConfigSchema` JSON-Schema Draft 07
+      with `referenceDate`, `defaultTimezone`, `outputFormat` fields. NO `IOpenAiClient`
+      dependency in the constructor.
+    </step>
+    <step order="4" name="Implement Handler">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DateExtractorHandler.cs`.
+      Implement `Validate(...)` (validates config + input text non-empty). Implement
+      `ExecuteAsync(...)`: parses input text for date patterns (regex for ISO/US/EU
+      formats + relative phrases); resolves relative dates against `referenceDate` (or
+      `DateTimeOffset.UtcNow` default); emits structured `ToolResult` with extracted dates.
+      Telemetry per ADR-015.
+    </step>
+    <step order="5" name="Author Unit Tests">
+      Create `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/DateExtractorHandlerTests.cs`
+      using `TypedToolHandlerTestFixture` from task 100. Cover: (a) contract test (copy
+      `HandlerContractTestTemplate`); (b) positive cases — "next quarter", "Q4 2026",
+      "March 15", "2026-03-15", "in 30 days"; (c) error cases — empty input, unparseable
+      input; (d) config-driven test — same input with different `referenceDate` produces
+      different output deterministically; (e) telemetry test — `AssertTelemetryRespectsAdr015`.
+    </step>
+    <step order="6" name="Seed sprk_analysistool Row">
+      Create `infra/dataverse/sprk_analysistool-date-extractor-row.json` with
+      `sprk_handlerclass = "DateExtractorHandler"`, `sprk_toolcode = "DATE-EXTRACT@v1"`,
+      `sprk_configuration` JSON, `AvailableInContexts = "Playbook"` (default). Deploy
+      row to Spaarke Dev via `dataverse-deploy` skill. Capture deployment evidence.
+    </step>
+    <step order="7" name="Verify Build + Tests">
+      Run `dotnet build src/server/api/Sprk.Bff.Api/` and
+      `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "DateExtractorHandler"`. Both
+      must pass. Auto-discovery verification test must show `DateExtractorHandler`
+      registered.
+    </step>
+    <step order="8" name="Verify BFF Publish-Size Delta">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+      Measure compressed output. Report absolute size + diff vs prior baseline in task
+      notes. Per-task target ≤+0.5 MB.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and record evidence in task
+      notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new handler + tests + seed row. Run `adr-check`
+      against the same; verify ADR-010 (auto-discovery only), ADR-013 (handler placement),
+      ADR-015 (telemetry surface), ADR-029 (publish-size). Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 101 🔲 → ✅. Reset
+      `current-task.md`. Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF + run handler tests + publish for size verification</tool>
+    <tool name="pac">Deploy `sprk_analysistool` seed row to Spaarke Dev</tool>
+    <tool name="git">Commit handler + tests + seed row payload</tool>
+    <tool name="dataverse-deploy">Deploy seed row</tool>
+    <tool name="code-review">FULL-rigor quality gate</tool>
+    <tool name="adr-check">FULL-rigor quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DateExtractorHandler.cs (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/DateExtractorHandlerTests.cs (NEW)</output>
+    <output type="infrastructure">infra/dataverse/sprk_analysistool-date-extractor-row.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-101-deployment-evidence.md (publish-size diff, test results, Dataverse row deployment)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 101 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`DateExtractorHandler.cs` exists in `Services/Ai/Handlers/`, implements `IToolHandler`, contains ZERO references to `IOpenAiClient` or Azure OpenAI types.</criterion>
+    <criterion testable="true">Handler is auto-discovered — `AutoDiscoveryVerificationTests` (from task 100) shows `DateExtractorHandler` registered without any manual DI line.</criterion>
+    <criterion testable="true">`sprk_analysistool` row deployed to Spaarke Dev with `sprk_handlerclass = "DateExtractorHandler"`; queryable via Web API.</criterion>
+    <criterion testable="true">Unit tests pass: contract test, positive cases (relative + ISO + Q-notation), error cases (empty + unparseable), config-driven test (referenceDate shift), telemetry test (ADR-015 compliance).</criterion>
+    <criterion testable="true">Deterministic property verified — identical input + identical config → identical output across 100+ test runs.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+0.5 MB; absolute size + diff recorded.</criterion>
+    <criterion testable="true">ZERO new top-level Program.cs lines.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates both pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>

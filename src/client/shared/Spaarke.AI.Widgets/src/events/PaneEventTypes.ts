@@ -141,6 +141,50 @@ export interface WorkspacePaneEvent {
    *                              and `completionStatus` (`'complete' | 'declined' | 'empty'`) so
    *                              the widget can finalise its rendering or show a terminal state
    *                              (R5 D2-06 / spec NFR-09).
+   *
+   * ── R6 Pillar 6c reverse-flow events (FR-38 / D-C-13 / task 060) ──────────
+   *
+   * The four discriminants below complete the Pillar 6c tri-directional model:
+   * the workspace pane dispatches them on user-driven tab state changes so the
+   * assistant + context pane can observe and react. They are the reverse-flow
+   * counterpart to the six `context.*` execution-trace events added by task 059.
+   *
+   * ADR-015 BINDING (CRITICAL): with ONE INTENTIONAL EXCEPTION
+   * (`user_selection.selectionText`), every field on these four discriminants
+   * is a deterministic identifier, ISO-8601 timestamp, or enumerated string.
+   * The `selectionText` field carries user-visible-by-design content (the
+   * text the user explicitly selected to share with the agent) — it is
+   * user-content but it is ALLOWED here under FR-38 + Pillar 9 visibility
+   * contract because users opt in by selecting. Telemetry events
+   * (`context.*` trace channel) MUST NOT log this field's value.
+   *
+   * - `user_selection`          — the user changed their text selection in a
+   *                               workspace widget; carries `tabId`,
+   *                               `sessionId`, optional `selectionText` (≤200
+   *                               chars, user-visible-by-design), `timestamp`.
+   *                               Consumers: assistant (for selection-aware
+   *                               prompts), context pane (for "what is the
+   *                               user looking at?" cues).
+   * - `tab_edited`               — the user edited fields in a workspace tab;
+   *                               carries `tabId`, `sessionId`, `editedFields`
+   *                               (FIELD NAMES, NOT values), `timestamp`.
+   *                               Consumers: assistant (stale-write conflict
+   *                               detection per Pillar 6b Q8), context pane
+   *                               (mark provenance "user-edited").
+   * - `tab_focused`              — the user focused (clicked/keyed into) a
+   *                               workspace tab; carries `tabId`, `sessionId`,
+   *                               `timestamp`. Consumers: assistant (adapt
+   *                               agent context to the currently-focused
+   *                               tab), context pane (sync detail card).
+   * - `tab_provenance_clicked`   — the user clicked a provenance affordance
+   *                               on a workspace tab to navigate back to its
+   *                               originator; carries `tabId`, `sessionId`,
+   *                               `provenanceType`
+   *                               (`'chat-message' | 'playbook-node'`),
+   *                               `provenanceId`, `timestamp`. Consumers:
+   *                               assistant (scroll to chat message), context
+   *                               pane (highlight playbook-node in trace
+   *                               widget).
    */
   type:
     | 'widget_load'
@@ -156,7 +200,11 @@ export interface WorkspacePaneEvent {
     | 'active_widget_changed'
     | 'streaming_started'
     | 'field_delta'
-    | 'streaming_complete';
+    | 'streaming_complete'
+    | 'user_selection'
+    | 'tab_edited'
+    | 'tab_focused'
+    | 'tab_provenance_clicked';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;
@@ -314,6 +362,168 @@ export interface WorkspacePaneEvent {
    * Required when `type === 'streaming_complete'`.
    */
   completionStatus?: 'complete' | 'declined' | 'empty';
+
+  // ── R6 Pillar 6c reverse-flow fields ──────────────────────────────────────
+  //
+  // Four discriminants share this field block (`user_selection`, `tab_edited`,
+  // `tab_focused`, `tab_provenance_clicked`), partitioned by required
+  // membership (see the `type` JSDoc above for the per-discriminant required
+  // field list). All fields are optional on the base type so existing
+  // subscribers (which never touch them) remain type-safe. Subscribers that
+  // handle these events MUST narrow on `event.type` before accessing.
+  //
+  // Added by R6 task 060 (D-C-13) per spec FR-38 + ADR-030 additive-types
+  // rule (4 channels preserved — no 5th channel introduced) + ADR-015
+  // BINDING. The reverse-flow set completes Pillar 6c's tri-directional model
+  // alongside task 059's `context.*` execution-trace events.
+  //
+  // ADR-015 GOVERNANCE NOTE: with ONE intentional exception
+  // (`selectionText` — user-visible-by-design per FR-38), every field below
+  // is a deterministic identifier (GUID/ULID string), ISO-8601 timestamp
+  // string, enumerated short string, or array of field NAMES (NOT values).
+  // The `selectionText` field is the only user-content surface on the entire
+  // workspace channel — see its JSDoc for the privacy distinction.
+
+  // NOTE: `tabId`, `displayName`, and `targetWidgetId` field declarations
+  // already exist higher in this interface and are reused by the four
+  // reverse-flow discriminants — no re-declaration needed.
+
+  /**
+   * Stable session identifier correlating all events emitted within a single
+   * chat session. Required on all four R6 reverse-flow discriminants
+   * (`user_selection`, `tab_edited`, `tab_focused`,
+   * `tab_provenance_clicked`).
+   *
+   * Format: GUID/ULID-like opaque string (e.g. `'session-abcd1234-...'`).
+   * Matches `ChatSession.SessionId`. Subscribers (assistant + context pane)
+   * filter to the active session only.
+   *
+   * ADR-015 binding: session ID is a deterministic identifier (Tier 1 safe).
+   * NOT a user-content surface.
+   */
+  sessionId?: string;
+
+  /**
+   * ISO-8601 UTC timestamp at which the user-driven event occurred (client
+   * clock — workspace pane is the dispatcher). Required on all four R6
+   * reverse-flow discriminants.
+   *
+   * Format: `YYYY-MM-DDTHH:mm:ss.sssZ`. Subscribers may use for ordering
+   * (e.g. last-write-wins in conflict resolution per Pillar 6b Q8).
+   *
+   * ADR-015 binding: timestamps are metadata (Tier 1 safe).
+   */
+  timestamp?: string;
+
+  /**
+   * The text the user has selected inside a workspace widget. Optional when
+   * `type === 'user_selection'` (absent / undefined = selection cleared).
+   *
+   * **CAP: ≤200 characters.** Dispatchers MUST truncate at the source; if
+   * the raw selection exceeds 200 chars, dispatchers MUST clip to 200 chars
+   * (subscribers SHOULD assert and discard oversized payloads as a
+   * defense-in-depth check).
+   *
+   * ── PRIVACY SEMANTICS (BINDING — DIFFERENT FROM ADR-015 TELEMETRY) ──
+   *
+   * This field is **user-visible-by-design** per FR-38 + Pillar 9 visibility
+   * contract. Users explicitly select text in a workspace widget intending
+   * the assistant to act on that selection ("summarize this"; "translate
+   * this clause"). The selected text IS the payload the user is sharing —
+   * carrying it on this event is the entire reason the event exists.
+   *
+   * This DIFFERS from ADR-015 telemetry-prohibited content: the `context.*`
+   * trace channel (task 059 — `tool_call_started`, `decision_made`, etc.)
+   * MUST NOT log this field's value, because trace events feed Tier 1 app
+   * logs / metrics dashboards. The workspace-channel `user_selection` event
+   * feeds Tier 3 work-history (in-memory + opt-in chat memory) where user
+   * content is explicitly allowed under ADR-015 Amendment 2026-05-17.
+   *
+   * Subscribers that bridge this event to telemetry MUST strip this field
+   * before logging. Subscribers that bridge to LLM prompts MAY include it
+   * (that is the design intent). Sister field `selectedText` on the legacy
+   * `selection_changed` discriminant is functionally identical but
+   * semantically narrower (drives ConversationPane chip preview only);
+   * `selectionText` is the canonical FR-38 reverse-flow field consumed by
+   * assistant + context pane.
+   *
+   * @see FR-38 — additive `workspace.*` reverse-flow event types
+   * @see Pillar 9 — `SerializedDocumentViewerState.selectionText` (same
+   *      privacy model: double-gated by parent tab visibility; ~200 char
+   *      cap; user-visible-by-design)
+   * @see ADR-015 Amendment 2026-05-17 — Tier 3 work-history allowed content
+   */
+  selectionText?: string;
+
+  /**
+   * Array of FIELD NAMES that the user edited in a workspace tab. Required
+   * when `type === 'tab_edited'`.
+   *
+   * Format: string array of stable field keys (e.g.
+   * `['matterName', 'practiceArea']`, `['summary', 'tldr']`). Subscribers
+   * cross-reference these names against the widget's known field set to
+   * decide what changed.
+   *
+   * **CRITICAL: this field carries field NAMES, NOT field VALUES.** A
+   * dispatcher that puts the user's new value here violates ADR-015. The
+   * field-name constraint is load-bearing — reviewers should flag any
+   * `editedFields` entry that:
+   *   - contains spaces or punctuation beyond `.` / `[]` (path separators)
+   *   - exceeds ~64 characters (likely a value, not a key)
+   *   - is rendered to the user verbatim (should resolve to a label first)
+   *
+   * Pillar 6b stale-write conflict resolution (Q8) consumes this: the
+   * assistant reads `lastUserEditAt` + the set of `editedFields` to decide
+   * whether a pending agent write conflicts with user intent.
+   *
+   * ADR-015 binding: field NAMES are configuration identifiers (Tier 1
+   * safe). Field VALUES are user content (Tier 3 only) — NOT carried here.
+   */
+  editedFields?: string[];
+
+  /**
+   * Type of provenance the user clicked to navigate back. Required when
+   * `type === 'tab_provenance_clicked'`.
+   *
+   * - `'chat-message'`   — user clicked a provenance affordance whose
+   *                        originator was a chat message (e.g. "the message
+   *                        that asked the agent to open this document").
+   *                        Consumer: assistant pane scrolls to + flashes
+   *                        the originating chat turn.
+   * - `'playbook-node'`  — user clicked a provenance affordance whose
+   *                        originator was a playbook-node execution (e.g.
+   *                        "the DeliverOutput node that opened this
+   *                        workspace tab"). Consumer: context pane's
+   *                        execution-trace widget (task 061) scrolls to +
+   *                        highlights the corresponding trace entry.
+   *
+   * ADR-015 binding: provenance type is an enumerated identifier (Tier 1
+   * safe). The originating content is NOT carried — subscribers resolve
+   * `provenanceId` against their own state to surface the originator.
+   */
+  provenanceType?: 'chat-message' | 'playbook-node';
+
+  /**
+   * Stable identifier of the provenance originator. Required when
+   * `type === 'tab_provenance_clicked'`.
+   *
+   * Format:
+   *   - When `provenanceType === 'chat-message'`: the chat message's
+   *     `messageId` (matches `ChatMessage.MessageId` in conversation
+   *     history; GUID/ULID format).
+   *   - When `provenanceType === 'playbook-node'`: the playbook-node
+   *     execution's `nodeExecutionId` (matches the `correlationId` on the
+   *     corresponding `context.playbook_node_executing` / `..._completed`
+   *     trace event from task 059).
+   *
+   * Subscribers cross-reference this ID against their own state to navigate
+   * to the originator. The originator's content (message text, node
+   * output) is NOT carried here — subscribers resolve it locally.
+   *
+   * ADR-015 binding: originator IDs are deterministic identifiers (Tier 1
+   * safe). NOT a user-content surface.
+   */
+  provenanceId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -375,8 +585,66 @@ export interface ContextPaneEvent {
    *                         affordance, R5 task 021 / D2-12); carries `selectedFileId`.
    *                         Subscribed by FilePreviewContextWidget to switch its preview
    *                         to the chosen file (R5 D2-06 / spec NFR-09).
+   *
+   * ── R6 Pillar 6c execution-trace events (FR-37 / D-C-12 / task 059) ───────
+   *
+   * The six discriminants below feed the Pillar 6c execution-trace widget in
+   * the Context pane (task 061), a Claude-Code-like ordered timeline of the
+   * agent's deterministic activity (tool calls, knowledge retrievals,
+   * playbook-node execution, decisions). They are dispatched by the emission
+   * sites wired in task 063 (BFF SSE → PaneEventBus).
+   *
+   * ADR-015 BINDING (CRITICAL): trace events log tool name + decision +
+   * timestamp ONLY. They MUST NOT carry user message text, document content,
+   * extracted text, or retrieved knowledge bodies. Payload typing is
+   * structurally constrained to deterministic IDs, numeric metrics, booleans,
+   * enum-like short strings, and ISO-8601 timestamps. The type system makes
+   * user-content smuggling IMPOSSIBLE by construction — there is no
+   * `unknown` / `any` / `object` field on any new discriminant. See
+   * `notes/task-059-context-pane-events-evidence.md` for the audit trace.
+   *
+   * - `tool_call_started`        — chat agent has invoked a registered tool;
+   *                                carries `toolName`, `timestamp`,
+   *                                `sessionId`, and optional `correlationId`.
+   * - `tool_call_completed`      — tool invocation has returned; carries
+   *                                `toolName`, `durationMs`, `success`,
+   *                                `timestamp`, `sessionId`,
+   *                                `correlationId?`. NO result body.
+   * - `knowledge_retrieved`      — knowledge retrieval (e.g. RAG hit) has
+   *                                produced one result; carries
+   *                                `knowledgeSourceId`, `relevanceScore`,
+   *                                `timestamp`, `sessionId`,
+   *                                `correlationId?`. NO retrieved content
+   *                                body — the source ID is enough for the
+   *                                trace widget to render a link.
+   * - `playbook_node_executing`  — a playbook node has started executing;
+   *                                carries `playbookId`, `nodeId`,
+   *                                `timestamp`, `sessionId`,
+   *                                `correlationId?`.
+   * - `playbook_node_completed`  — a playbook node has finished; carries
+   *                                `playbookId`, `nodeId`, `durationMs`,
+   *                                `success`, `timestamp`, `sessionId`,
+   *                                `correlationId?`.
+   * - `decision_made`            — the agent made an enumerated decision
+   *                                (e.g. `'route:summarize'`,
+   *                                `'safety-block'`); carries `decision`
+   *                                (short enum-like string), optional
+   *                                `decisionReason` (machine summary, NOT
+   *                                user text), `timestamp`, `sessionId`,
+   *                                `correlationId?`.
    */
-  type: 'context_update' | 'context_highlight' | 'stage_change' | 'files_staged' | 'file_selected';
+  type:
+    | 'context_update'
+    | 'context_highlight'
+    | 'stage_change'
+    | 'files_staged'
+    | 'file_selected'
+    | 'tool_call_started'
+    | 'tool_call_completed'
+    | 'knowledge_retrieved'
+    | 'playbook_node_executing'
+    | 'playbook_node_completed'
+    | 'decision_made';
 
   /** Classifies the context payload (e.g. `"document"`, `"email"`, `"clause"`). */
   contextType?: string;
@@ -438,6 +706,193 @@ export interface ContextPaneEvent {
    * behaviour when absent).
    */
   selectionSource?: 'chip' | 'context-card' | 'preview';
+
+  // ── R6 Pillar 6c execution-trace fields ──────────────────────────────────
+  //
+  // Six discriminants share this field block, partitioned by required
+  // membership (see the `type` JSDoc above for the per-discriminant required
+  // field list). All fields are optional on the base type so existing
+  // subscribers (which never touch them) remain type-safe. Subscribers that
+  // handle these events MUST narrow on `event.type` before accessing.
+  //
+  // Added by R6 task 059 (D-C-12) per spec FR-37 + ADR-030 additive-types
+  // rule + ADR-015 BINDING governance. Consumed by task 061 (execution-trace
+  // widget in Context pane). Emitted by task 063 (BFF SSE → PaneEventBus
+  // dispatch wiring).
+  //
+  // ADR-015 GOVERNANCE NOTE: No field below admits user-content payload.
+  // All fields are: deterministic IDs (string), numeric metrics (number),
+  // booleans, enum-like short strings, or ISO-8601 timestamp strings. There
+  // is intentionally NO `unknown` / `any` / `object` / `Record<...>` field.
+
+  /**
+   * ISO-8601 UTC timestamp at which the traced event occurred (server clock
+   * preferred). Required on all six R6 trace discriminants
+   * (`tool_call_started`, `tool_call_completed`, `knowledge_retrieved`,
+   * `playbook_node_executing`, `playbook_node_completed`, `decision_made`).
+   *
+   * Format: `YYYY-MM-DDTHH:mm:ss.sssZ`. Always present so the trace widget
+   * can render an ordered timeline. Subscribers ignore on legacy
+   * (non-trace) discriminants.
+   *
+   * ADR-015 binding: timestamps are metadata (Tier 1 safe).
+   */
+  timestamp?: string;
+
+  /**
+   * Stable session identifier correlating all events emitted within a
+   * single chat session. Required on all six R6 trace discriminants.
+   *
+   * Format: GUID/ULID-like opaque string (e.g.
+   * `'session-abcd1234-...'`). Matches `ChatSession.SessionId`. Subscribers
+   * use this to filter the trace widget to the active session only.
+   *
+   * ADR-015 binding: session ID is a deterministic identifier (Tier 1
+   * safe). NOT a user-content surface.
+   */
+  sessionId?: string;
+
+  /**
+   * Optional cross-system correlation identifier (e.g. the BFF's
+   * `HttpContext.TraceIdentifier`) for linking the trace event back to the
+   * originating HTTP / playbook execution / Service Bus job. Optional on
+   * all six R6 trace discriminants — emitters include when available;
+   * subscribers tolerate absence.
+   *
+   * ADR-015 binding: correlation IDs are metadata (Tier 1 safe).
+   */
+  correlationId?: string;
+
+  /**
+   * Name of the tool that was invoked. Required when
+   * `type === 'tool_call_started'` or `type === 'tool_call_completed'`.
+   *
+   * Format: the registered tool's `Name` field from `sprk_analysistool`
+   * (e.g. `'DocumentSearch'`, `'invoke_playbook'`). Short, enumerated
+   * identifier — NOT a free-form description, NOT the user's prompt that
+   * triggered the call.
+   *
+   * ADR-015 binding: tool names are configuration identifiers (Tier 1
+   * safe). The 2026-05-17 amendment explicitly lists "tool names" as
+   * acceptable Tier 2 audit content; they are equally safe in Tier 1
+   * trace events.
+   */
+  toolName?: string;
+
+  /**
+   * Wall-clock duration of the completed operation in milliseconds.
+   * Required when `type === 'tool_call_completed'` or
+   * `type === 'playbook_node_completed'`.
+   *
+   * Integer ≥ 0. Trace widget renders as e.g. "12 ms" / "1.2 s".
+   *
+   * ADR-015 binding: timings are explicitly allowed in logs ("sizes and
+   * counts, error codes and timings").
+   */
+  durationMs?: number;
+
+  /**
+   * Outcome flag of the completed operation. Required when
+   * `type === 'tool_call_completed'` or `type === 'playbook_node_completed'`.
+   *
+   * `true` = succeeded; `false` = failed (no error detail field — the
+   * trace widget can fetch detail from `correlationId` via the audit log
+   * if needed).
+   *
+   * ADR-015 binding: outcome booleans are metadata (Tier 1 safe).
+   */
+  success?: boolean;
+
+  /**
+   * Identifier of the knowledge source that produced a retrieval hit.
+   * Required when `type === 'knowledge_retrieved'`.
+   *
+   * Format: the registered source's stable ID from `sprk_knowledgesource`
+   * (e.g. `'kb-corp-policy-en'`, `'azure-search:legal-precedents'`). NOT
+   * the retrieved content, NOT the retrieval query, NOT the user prompt.
+   *
+   * ADR-015 binding: source identifiers are configuration metadata (Tier 1
+   * safe). The trace widget can link to the source by ID; the retrieved
+   * content body is intentionally not carried on this event.
+   */
+  knowledgeSourceId?: string;
+
+  /**
+   * Relevance / similarity score for a knowledge retrieval hit. Required
+   * when `type === 'knowledge_retrieved'`.
+   *
+   * Range: [0.0, 1.0] (normalized cosine similarity / re-ranker score).
+   * Trace widget renders as e.g. "0.87" or a filled bar.
+   *
+   * ADR-015 binding: scores are numeric metrics (Tier 1 safe). Does not
+   * leak content.
+   */
+  relevanceScore?: number;
+
+  /**
+   * Identifier of the playbook the executing node belongs to. Required
+   * when `type === 'playbook_node_executing'` or
+   * `type === 'playbook_node_completed'`.
+   *
+   * Format: stable ID from `sprk_aiplaybook` (e.g.
+   * `'summarize-document-for-chat@v1'`).
+   *
+   * ADR-015 binding: playbook IDs are configuration metadata (Tier 1
+   * safe).
+   */
+  playbookId?: string;
+
+  /**
+   * Identifier of the playbook node being executed. Required when
+   * `type === 'playbook_node_executing'` or
+   * `type === 'playbook_node_completed'`.
+   *
+   * Format: stable node key from the playbook definition (e.g.
+   * `'extract-entities'`, `'deliver-output'`). NOT the node's output, NOT
+   * the input.
+   *
+   * ADR-015 binding: node IDs are configuration metadata (Tier 1 safe).
+   */
+  nodeId?: string;
+
+  /**
+   * Short enum-like identifier of the agent decision. Required when
+   * `type === 'decision_made'`.
+   *
+   * MUST be a stable, machine-enumerated value (e.g.
+   * `'route:summarize'`, `'route:invoke_playbook'`, `'safety-block'`,
+   * `'guardrail-redirect'`). MUST NOT be a free-form natural-language
+   * sentence. The trace widget enumerates known values and renders them
+   * with intent-aware icons.
+   *
+   * ADR-015 binding: decision codes are enumerated identifiers (Tier 1
+   * safe). The "short enum-like" wording is load-bearing — emitters that
+   * pass a paragraph of user prompt text here are violating ADR-015.
+   * Reviewers should flag any `decision` value > ~64 characters or
+   * containing spaces beyond a colon separator as suspect.
+   */
+  decision?: string;
+
+  /**
+   * Optional MACHINE summary of WHY the decision was made (e.g.
+   * `'capability-router:summarize-intent-matched'`,
+   * `'safety-pipeline:groundedness<0.5'`). Optional when
+   * `type === 'decision_made'`.
+   *
+   * NOT user message text. NOT a verbatim quote of any chat input. NOT a
+   * formatted natural-language sentence intended for end-user display.
+   * The trace widget exposes this to the user as a debug-style annotation;
+   * the field is intentionally constrained to deterministic emitter-side
+   * formatting so reviewers can audit emission sites for ADR-015
+   * compliance.
+   *
+   * ADR-015 binding: this is the ONLY new field on the entire trace
+   * surface whose name suggests a possible free-text vector. The JSDoc
+   * contract above + the "no `unknown` / `any` / `object`" rule on the
+   * base type together constrain its emitter responsibility. Emitters
+   * MUST NOT pass user text here.
+   */
+  decisionReason?: string;
 }
 
 // ---------------------------------------------------------------------------

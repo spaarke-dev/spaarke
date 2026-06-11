@@ -188,6 +188,15 @@ public sealed class CapabilityRouter : ICapabilityRouter
                 activity?.SetTag("capability_name", result.SelectedCapabilities[0]);
             }
 
+            // R6 task 042 (FR-30): emit the resolved playbook GUID when unambiguous, so
+            // downstream observability can correlate a routing decision with the playbook
+            // that drove the render destination. ADR-015 compliant — a deterministic ID,
+            // not user content. Null-safe: only set when a single playbook was resolved.
+            if (result.SelectedPlaybookId.HasValue)
+            {
+                activity?.SetTag("selected_playbook_id", result.SelectedPlaybookId.Value.ToString("D"));
+            }
+
             // Emit metrics.
             Layer1LatencyHistogram.Record(sw.Elapsed.TotalMilliseconds);
             if (result.IsConfident)
@@ -288,7 +297,17 @@ public sealed class CapabilityRouter : ICapabilityRouter
         {
             // Collect all capabilities with the same top score (ties are included).
             var selected = CollectTopCapabilities(scores, topScore);
-            return CapabilityRoutingResult.Confident(selected, confidence, layer: 1, latencyMs: 0);
+
+            // R6 task 042 (FR-30): When the resolution is UNAMBIGUOUS (exactly one
+            // top-scoring capability) and the winning entry has a PlaybookId, propagate
+            // it so the consumer (SprkChatAgentFactory) can dedup the render destination
+            // by consulting the playbook's terminal node config. Ambiguous ties (multiple
+            // capabilities at the top score) leave SelectedPlaybookId null — the
+            // chat-agent falls through to conversational primacy (NFR-01 preserved).
+            var selectedPlaybookId = selected.Length == 1 ? scores[0].Entry.PlaybookId : null;
+
+            return CapabilityRoutingResult.Confident(
+                selected, confidence, layer: 1, latencyMs: 0, selectedPlaybookId: selectedPlaybookId);
         }
 
         return CapabilityRoutingResult.Uncertain(confidence, layer: 1, latencyMs: 0);
@@ -607,9 +626,27 @@ public sealed class CapabilityRouter : ICapabilityRouter
                 "CapabilityRouter.Layer2: classified as {Name} with confidence {Confidence:F4}, latency {LatencyMs}ms.",
                 top.Name, top.Confidence, latencyMs);
 
+            // R6 task 042 (FR-30): Layer 2 always returns a SINGLE top capability
+            // (there is no tie semantics in the JSON-mode response), so propagate the
+            // winning entry's PlaybookId when present. The lookup uses the candidate
+            // list already snapshotted above so it stays O(N) over the small candidate
+            // set and avoids re-touching the manifest.
+            var topEntry = candidates.FirstOrDefault(
+                c => string.Equals(c.CapabilityName, top.Name, StringComparison.Ordinal));
+            var selectedPlaybookId = topEntry?.PlaybookId;
+
             RecordLayer2Otel(activity, latencyMs, matched: true, capabilityName: top.Name,
                 promptTokens: response.Usage?.InputTokenCount,
                 completionTokens: response.Usage?.OutputTokenCount);
+
+            // R6 task 042 (FR-30): emit the resolved playbook GUID when present so
+            // observability spans correlate with the playbook driving render destination
+            // (ADR-015 compliant — deterministic ID, no user content).
+            if (selectedPlaybookId.HasValue)
+            {
+                activity?.SetTag("selected_playbook_id", selectedPlaybookId.Value.ToString("D"));
+            }
+
             Layer2LatencyHistogram.Record(latencyMs);
             Layer2HitCounter.Add(1);
 
@@ -617,7 +654,8 @@ public sealed class CapabilityRouter : ICapabilityRouter
                 [top.Name],
                 top.Confidence,
                 layer: 2,
-                latencyMs: latencyMs);
+                latencyMs: latencyMs,
+                selectedPlaybookId: selectedPlaybookId);
         }
         catch (OperationCanceledException) when (!callerCt.IsCancellationRequested)
         {

@@ -1,0 +1,316 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B-08 `StructuredOutputStreamWidget` schema-aware — object-typed fields render as labeled key-value blocks (fixes R5 Entities bug)</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>completed</status>
+    <outcome-note>
+      Closed 2026-06-09 by sub-agent. Task 040's extension-point handoff worked
+      cleanly — flipped `classifySchemaField()` object branch (one-line change),
+      added `else if (classification === 'object')` branch at dispatch site,
+      authored `parseObject()` helper + `prettyName()` humanizer + new
+      `<SchemaAwareObjectRenderer />` component + `renderObjectValue()`
+      recursive helper. Nested array properties REUSE task 040's
+      `<SchemaAwareArrayRenderer />` directly (verified by test asserting
+      `data-display-hint="schema-array"` on nested lists) — no duplicate
+      implementation per Q5 architectural decision. Depth guard bails to
+      compact JSON.stringify with TODO marker for depth-≥-2 (Phase B
+      constraint). 23 tests pass (12 task 040 baseline + 11 new for task 041).
+      Widget grew 1385 → 1775 LOC; test file grew 494 → 846 LOC. BFF publish-
+      size delta = 0 MB (frontend-only). ADR-012 / ADR-021 / ADR-029 / ADR-030
+      compliance verified via self-audit + new DOM-scan dark-mode test on
+      object renderer subtree. Did NOT refactor task 040's top-level array
+      dispatch into a generic helper (acceptance criterion #1 said "if needed";
+      kept stable to minimize regression surface — the reuse happens at the
+      component level via direct `<SchemaAwareArrayRenderer />` mounting from
+      `renderObjectValue`). Live D365 UI walkthrough deferred to main session
+      at Phase B exit gate. Evidence note:
+      `projects/spaarke-ai-platform-unification-r6/notes/task-041-widget-object-rendering-evidence.md`.
+    </outcome-note>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>040</dependencies>
+    <blocks>042, 048</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Frontend code implementation in `StructuredOutputStreamWidget.tsx`; extends shared widget; fixes R5 Entities rendering bug (Gap C); 6+ steps; FULL rigor mandatory per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>B-G3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same file as task 040 (`StructuredOutputStreamWidget.tsx`) — SEQUENTIAL with 040 (depends on 040 to land the accumulate-parse-dispatch plumbing first). Cannot run truly in parallel with 040.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `StructuredOutputStreamWidget.tsx` (already updated in task 040 with
+    accumulate-parse-dispatch plumbing + array dispatch) with OBJECT-typed field
+    rendering: when the action's `outputSchema` declares a field as `{ type: "object" }`
+    with nested properties (e.g., `entities: { organizations: string[], persons:
+    string[] }` from `summarize-document-for-workspace@v1`), render it as labeled
+    key-value blocks — one labeled section per nested property, with the nested value
+    formatted appropriately (nested arrays → inner bulleted list reusing task 040's
+    code path; nested strings → plain text). This structurally fixes the R5 SC-18 bug
+    where `entities` rendered as a raw JSON object literal (Gap C in R5 lessons-learned).
+
+    Task 040 must land FIRST — it establishes accumulate-parse-dispatch plumbing + array
+    case. This task adds the object case to the existing dispatch switch. The two tasks
+    share the same file; cannot run in parallel.
+
+    The widget continues to: gracefully fall back when `outputSchema` is absent; handle
+    malformed JSON; respect Fluent UI v9 theming + ADR-021 dark mode; keep
+    streaming-in-progress indicator until `streaming_complete`. The object dispatch must
+    REUSE the task-040 array rendering code path for nested array-typed properties (do
+    NOT duplicate the implementation).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Senior React + Fluent UI v9 developer with deep
+    familiarity with the SpaarkeAi widget framework and the `StructuredOutputStreamWidget`
+    after task 040's update. Comfortable extending the dispatch switch and composing
+    recursive rendering for nested types.
+  </role>
+
+  <goal>
+    `StructuredOutputStreamWidget.tsx` renders object-typed fields as Fluent v9 labeled
+    key-value blocks. The R5 SC-18 entities rendering bug is structurally fixed
+    (`entities` no longer renders as raw JSON object literal). Object dispatch reuses
+    task 040's array code path for nested arrays. Backward compatibility preserved. All
+    unit tests pass (array + object + fallback + malformed JSON cases). Dark-mode
+    compliance verified per ADR-021.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="widget">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="component-skill">.claude/skills/fluent-v9-component/SKILL.md</file>
+    <file purpose="r5-lessons">projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components — Fluent UI v9; do NOT introduce v8 or custom CSS color values.</constraint>
+    <constraint source="ADR-021">Fluent v9 dark-mode compliance — all colors via semantic tokens; dark-mode UI test mandatory.</constraint>
+    <constraint source="ADR-030">PaneEventBus 4-channel preserved; no 5th channel.</constraint>
+    <constraint source="spec NFR-05">PaneEventBus 4-channel preserved.</constraint>
+    <constraint source="spec NFR-11">Backward compatibility — actions without `outputSchema` continue to render as today (string).</constraint>
+    <constraint source="spec FR-29">Object-typed field rendering: labeled key-value blocks; fixes R5 Entities bug.</constraint>
+    <constraint source="project">Object dispatch MUST REUSE task 040's array rendering code path for nested arrays — do NOT duplicate. Refactor to a shared `renderValue(value, schema)` helper if needed.</constraint>
+    <constraint source="project">Verify BFF publish-size; report delta vs prior baseline; ≤+5 MB R6 total budget per NFR-02. Expect 0 MB BFF delta.</constraint>
+    <constraint source="project">Nested object-of-object (depth ≥ 2) is OUT of scope for Phase B; if encountered, fall back to compact JSON string format with a TODO marker. Document this constraint in widget code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 labeled key-value block" location=".claude/patterns/ui/fluent-v9-theming.md">
+        Use `<Label>` from `@fluentui/react-components` for the field key + tokens-styled
+        container for the value. Typical layout: vertical stack of `<div>` rows with
+        `display: flex; flex-direction: column; gap: tokens.spacingVerticalS`.
+      </pattern>
+      <pattern name="Recursive renderValue pattern" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx">
+        Extract a `renderValue(value: unknown, schema?: JsonSchema)` helper that
+        dispatches: `array of string` → bulleted list (task 040 path); `object with
+        properties` → labeled key-value blocks (this task); `string` → plain text.
+        Recurse for nested array-typed properties within an object.
+      </pattern>
+      <pattern name="R5 lessons-learned Gap C — entities bug" location="projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md">
+        `entities: { organizations: string[], persons: string[] }` rendered as raw JSON
+        object literal. Fixing this is the second half of the schema-aware widget
+        upgrade (task 040 = arrays; task 041 = objects).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 SC-18 walkthrough surfaced that `entities: { organizations: string[], persons:
+      string[] }` rendered as a raw JSON object literal in the workspace tab — the
+      widget had no way to dispatch on `type: object`. Task 040 shipped the
+      accumulate-parse-dispatch plumbing plus array dispatch. THIS task extends the
+      dispatch switch with the object case: each nested property becomes a labeled
+      block (`Organizations: ...`; `Persons: ...`), and for nested array values, REUSE
+      task 040's bulleted list rendering. The net effect: a clean grouped UI for
+      multi-field structured output.
+
+      Depth limit: nested object-of-object (e.g., `entities.organizations[0].address`)
+      is out of scope for Phase B and falls back to compact JSON. Future phases may
+      extend recursion depth.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx (MODIFIED — extends task 040)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.test.tsx (MODIFIED — add object dispatch cases)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-041-widget-object-dispatch-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Task 040 MUST land first — establishes accumulate-parse-dispatch plumbing + array case.</item>
+      <item>Task 042 CapabilityRouter dedup depends on this widget being canonical.</item>
+      <item>Task 048 Phase B integration test exercises both array and object rendering.</item>
+      <item>Task 033 supplied the data foundation (action outputSchema includes the entities object).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend code implementation in shared widget; fixes R5 Gap C
+                 (entities bug); 6+ steps; ADR-012 + ADR-021 binding
+      📖 PROTOCOL STEPS: all 12 steps below INCLUDING Step 9.5 quality gates + ui-tests
+                         (Step 9.7)
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 041 status 🔲; dep (040) complete. Verify task 040's
+      array dispatch is working in current branch (git log or test run).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Read the post-task-040
+      `StructuredOutputStreamWidget.tsx` IN FULL — understand where the dispatch switch
+      lives. Read R5 lessons-learned Gap C entities sub-evidence.
+    </step>
+    <step order="3" name="Refactor: Extract `renderValue` Helper">
+      Before adding the object case, refactor task 040's inline array rendering into a
+      `renderValue(value: unknown, schema?: JsonSchema)` helper. This keeps the dispatch
+      switch clean as new cases are added. Verify unit tests still pass after refactor.
+    </step>
+    <step order="4" name="Implement Object Dispatch">
+      Extend `renderValue`: when schema is `{ type: "object", properties: { ... } }`,
+      iterate properties; for each property, render `<div className={labeledBlock}>
+      <Label>{prettyName(propKey)}</Label> {renderValue(value[propKey],
+      properties[propKey])} </div>`. Use Fluent v9 `Label` + tokens-styled vertical
+      stack. RECURSE into `renderValue` for nested values — array properties
+      automatically reuse task 040's bulleted list.
+    </step>
+    <step order="5" name="Implement Depth Guard">
+      Track recursion depth (or detect nested object-of-object). If depth ≥ 2 and inner
+      type is object: fall back to compact JSON.stringify with a TODO marker in widget
+      code. Document this as a known Phase B constraint.
+    </step>
+    <step order="6" name="Author Unit Tests">
+      Extend `StructuredOutputStreamWidget.test.tsx`:
+      (a) object-typed field renders as labeled key-value blocks (e.g., `entities` ->
+          `Organizations: [bullets]; Persons: [bullets]`);
+      (b) nested array within object reuses bulleted list rendering;
+      (c) depth-≥-2 object-of-object falls back to compact JSON with TODO marker;
+      (d) all task-040 tests still pass after the refactor (regression).
+    </step>
+    <step order="7" name="Build + Verify BFF Publish-Size">
+      Run `npm run build` for the widget library. Confirm BFF publish-size delta is 0 MB.
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below. Record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` against the widget + test changes. Run `adr-check`; verify
+      ADR-012 (Fluent v9), ADR-021 (dark-mode tokens), ADR-029 (BFF delta = 0), ADR-030
+      (PaneEventBus unchanged). Both gates MUST pass.
+    </step>
+    <step order="9.7" name="UI Tests (per ui-tests section)">
+      Run UI tests defined below via ui-test skill. Verify object dispatch + dark mode.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update TASK-INDEX.md: 041 🔲 → ✅. Reset `current-task.md`. Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build the widget library; run unit tests</tool>
+    <tool name="dotnet">Build + publish BFF for publish-size verification</tool>
+    <tool name="git">Stage + commit on R6 worktree branch</tool>
+    <tool name="ui-test">Run UI tests via Chrome integration</tool>
+    <tool name="code-review">Quality gate (Step 9.5)</tool>
+    <tool name="adr-check">ADR compliance gate (Step 9.5)</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Object-Typed Field Renders as Labeled Key-Value Blocks (fixes R5 entities bug)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=spaarke-ai-workspace</url>
+      <steps>
+        <step>Open SpaarkeAi workspace shell against a test matter</step>
+        <step>Trigger `summarize-document-for-workspace@v1` against a test document that produces an `entities` field</step>
+        <step>Wait for `streaming_complete` event</step>
+        <step>Inspect rendered output for the `entities` field</step>
+        <step>Verify rendered DOM shows labeled sections (e.g., "Organizations" label + content; "Persons" label + content)</step>
+        <step>Verify nested arrays inside `entities` render as bulleted lists (reusing task 040's path)</step>
+        <step>Verify NO raw JSON object literal (e.g., `{\"organizations\":[`) appears in visible text</step>
+        <step>Check browser console — no JavaScript errors</step>
+      </steps>
+      <expected>`entities` field renders as labeled key-value blocks with nested bulleted lists; no raw JSON visible; no console errors</expected>
+    </test>
+
+    <test name="Array-Rendering Regression (task 040 still works)">
+      <steps>
+        <step>Trigger the same workspace summarization</step>
+        <step>Verify `tldr` field STILL renders as bulleted list (task 040 case)</step>
+        <step>Confirm refactor did not break array dispatch</step>
+      </steps>
+      <expected>`tldr` bulleted list rendering preserved after refactor</expected>
+    </test>
+
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Reload the workspace shell</step>
+        <step>Trigger workspace summarization producing `entities` output</step>
+        <step>Verify labeled-block text color, label color, and section borders all adapt to dark theme via Fluent UI v9 tokens</step>
+        <step>Verify nested bulleted list (from task 040) also adapts</step>
+        <step>Toggle back to light mode; verify reverse adaptation</step>
+      </steps>
+      <expected>All colors adapt via Fluent UI v9 semantic tokens; no hard-coded values</expected>
+    </test>
+
+    <test name="Depth Guard Fallback">
+      <steps>
+        <step>Inject a test outputSchema with nested object-of-object (depth ≥ 2)</step>
+        <step>Trigger streaming with matching payload</step>
+        <step>Verify widget falls back to compact JSON.stringify for the depth-≥-2 value</step>
+        <step>Verify NO infinite recursion / crash</step>
+      </steps>
+      <expected>Depth-≥-2 object falls back to compact JSON with TODO marker; widget remains stable</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx (MODIFIED)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.test.tsx (MODIFIED)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-041-widget-object-dispatch-evidence.md (refactor decisions, build output, BFF size delta, UI test results)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 041 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="report">Task completion report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`renderValue` helper extracted; task 040's array dispatch refactored to use it; no behavior change vs task 040 baseline (regression unit tests pass).</criterion>
+    <criterion testable="true">Object-typed fields (`{ type: "object", properties: {...} }`) render as Fluent v9 labeled key-value blocks; each nested property has a `Label` + value.</criterion>
+    <criterion testable="true">Nested array properties within an object REUSE task 040's bulleted list rendering (no duplicate implementation).</criterion>
+    <criterion testable="true">R5 SC-18 entities bug structurally fixed: `entities` renders as labeled groups (`Organizations`, `Persons`) — NOT raw JSON object literal.</criterion>
+    <criterion testable="true">Depth guard implemented: nested object-of-object (depth ≥ 2) falls back to compact JSON.stringify with a TODO marker; widget does NOT recurse infinitely or crash.</criterion>
+    <criterion testable="true">Backward compatibility preserved (actions without outputSchema render as today).</criterion>
+    <criterion testable="true">ADR-021 dark-mode compliance: zero hard-coded colors; all colors use Fluent UI v9 semantic tokens.</criterion>
+    <criterion testable="true">ADR-030 PaneEventBus: no new channels; widget consumes existing `workspace.*` channels only.</criterion>
+    <criterion testable="true">Unit tests cover: object dispatch happy path; nested array within object; depth-≥-2 fallback; task-040 array case regression. All pass.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB.</criterion>
+    <criterion testable="true">UI tests (4 defined above) pass via ui-test skill; SC-18 entities scenario verified end-to-end.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (041 🔲 → ✅) and `current-task.md` reset.</criterion>
+  </acceptance-criteria>
+</task>

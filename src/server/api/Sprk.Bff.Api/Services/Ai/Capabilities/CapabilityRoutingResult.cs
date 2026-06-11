@@ -33,12 +33,46 @@ public sealed record CapabilityRoutingResult
     /// </summary>
     public string[] SelectedToolNames { get; init; } = [];
 
+    /// <summary>
+    /// R6 task 042 (FR-30): Dataverse <c>sprk_analysisplaybook</c> ID of the playbook
+    /// associated with the SINGLE confident capability, when one can be unambiguously
+    /// identified.
+    ///
+    /// Populated by Layers 1 and 2 when the resolved <see cref="SelectedCapabilities"/>
+    /// contains exactly one entry AND that entry's manifest <c>PlaybookId</c> is non-null.
+    /// Left <c>null</c> when:
+    /// <list type="bullet">
+    ///   <item>Multiple capabilities tied at the top score (Layer 1) — the playbook is
+    ///         ambiguous; consumers fall through to the conversational default.</item>
+    ///   <item>The winning capability has no <c>PlaybookId</c> (e.g., a global
+    ///         capability that does not bind to a playbook).</item>
+    ///   <item>Uncertain / Layer 3 fallback results.</item>
+    /// </list>
+    ///
+    /// Consumed by <c>SprkChatAgentFactory.CreateAgentAsync</c> to resolve the playbook's
+    /// terminal node <c>destination</c> (per <see cref="Models.Ai.NodeRoutingConfig"/>)
+    /// and emit ONE rendering per intent (FR-30 dedup). ADR-015 compliant — a
+    /// deterministic identifier; never user message content.
+    /// </summary>
+    public Guid? SelectedPlaybookId { get; init; }
+
     /// <summary>Creates a high-confidence routing result for the given capabilities.</summary>
+    /// <param name="selectedCapabilities">Selected capability names (non-empty).</param>
+    /// <param name="confidence">Normalised confidence in [0, 1].</param>
+    /// <param name="layer">Originating routing layer (1 or 2).</param>
+    /// <param name="latencyMs">Wall-clock latency in milliseconds.</param>
+    /// <param name="selectedPlaybookId">
+    /// R6 task 042 (FR-30): Optional Dataverse playbook ID associated with the SINGLE
+    /// confident capability. Pass <c>null</c> when ambiguous (multiple capabilities tied)
+    /// or when the capability has no playbook binding. See
+    /// <see cref="SelectedPlaybookId"/> for the full contract.
+    /// </param>
     public static CapabilityRoutingResult Confident(
         string[] selectedCapabilities,
         double confidence,
         int layer,
-        long latencyMs)
+        long latencyMs,
+        Guid? selectedPlaybookId = null)
     {
         ArgumentNullException.ThrowIfNull(selectedCapabilities);
         if (selectedCapabilities.Length == 0)
@@ -51,6 +85,7 @@ public sealed record CapabilityRoutingResult
             Confidence = confidence,
             Layer = layer,
             LatencyMs = latencyMs,
+            SelectedPlaybookId = selectedPlaybookId,
         };
     }
 

@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B-05 Migrate matter-prefill action: populate outputSchema + node destination = form-prefill (NFR-07 binding regression)</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>completed</status>
+    <outcome-note>Closeout completed 2026-06-09 by main session after two sub-agent stream-idle timeouts (7h and 52min). Sub-agents authored + executed the migration successfully: ACT-023 sprk_outputschemajson populated with 8-field draft-07 schema; playbook PB-008 node 444b06d3-... sprk_configjson merged with destination=form-prefill (NodeRoutingConfig kebab-case per task 031). Main session ran NFR-07 inspection (zero diff on IWorkspacePrefillAi/MatterPreFillService/useAiPrefill + 3/3 targeted tests pass), wrote evidence note, updated status. Idempotency verified via dry-run (both Step A + Step B SKIP). BFF publish-size delta 0 MB. Timeout root-cause hypothesis: matter-prefill consumer is significantly more sophisticated than project-prefill (3-fallback ParseAiResponse + findBestLookupMatch lookup resolution); agent inspection loops exceeded streaming idle threshold. Full closeout: notes/task-034-migration-evidence.md.</outcome-note>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>030, 031</dependencies>
+    <blocks>048</blocks>
+    <tags>dataverse, seed, migration, integration-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>NFR-07 BINDING — pre-fill flow signatures + 45s timeout + `useAiPrefill` MUST remain UNCHANGED. Even though this is "data only", the matter-prefill flow is binding-sensitive; any regression breaks production wizard. FULL rigor required: code-review + adr-check at Step 9.5 + explicit before/after pre-fill regression test.</rigor-reason>
+    <parallel-group>B-G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches matter-prefill action row + matching playbook node — different rows from siblings 032/033/035. Pre-fill regression test runs in isolation against a test matter; no shared state.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Populate the new `outputSchema` field on the matter-prefill `sprk_analysisaction` row,
+    and set the playbook node `destination = form-prefill`. This is one of TWO
+    NFR-07-binding migrations (the other is project-prefill in task 035). The pre-fill
+    flow signatures, the 45s timeout, and the `useAiPrefill` React hook MUST remain
+    COMPLETELY UNCHANGED. Only the action's `outputSchema` data field is populated. The
+    node's `destination = form-prefill` is the routing surface — but `form-prefill` is a
+    no-op for the WIDGET (form-prefill output goes directly to wizard fields via
+    `MatterPreFillService` + `IWorkspacePrefillAi`; it does NOT use
+    `StructuredOutputStreamWidget`).
+
+    **NFR-07 BINDING**: pre-fill hook signatures + 45s timeout + `useAiPrefill` UNCHANGED.
+    Only the data field `outputSchema` is populated. Before/after pre-fill regression
+    test REQUIRED. Inspect `IWorkspacePrefillAi`, `MatterPreFillService`, the
+    `useAiPrefill` hook, and the wizard's pre-fill consumer; confirm all signatures are
+    untouched. Run a full end-to-end pre-fill on a test matter BEFORE the migration; run
+    the SAME end-to-end after; diff field-by-field. If ANY field changes value, behavior,
+    or timing — STOP, ROLL BACK, and report immediately.
+
+    Schema change escalation gate per CLAUDE.md Confirmation Triggers: this task modifies
+    data on a binding-sensitive production action; user confirmation required at start
+    of task. Migration script MUST be idempotent (guard GET → PATCH). BFF publish-size
+    delta = 0 MB (no BFF code modified).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Deep familiarity with the pre-fill flow:
+    `IWorkspacePrefillAi` PublicContract, `MatterPreFillService`, `findBestLookupMatch`,
+    `AiFieldTag`, the 45s timeout, `Workspace:PreFillPlaybookId` config, the
+    `useAiPrefill` React hook, the wizard `$choices`-constrained output contract. Capable
+    of running a careful before/after regression test that proves NO change in behavior,
+    signatures, or timing.
+  </role>
+
+  <goal>
+    `sprk_analysisaction` row for the matter-prefill action has `sprk_outputschemajson`
+    populated with a valid JSON Schema that exactly mirrors the existing
+    `$choices`-constrained output the wizard consumes today. The playbook node has
+    `destination = form-prefill`. Migration script committed + idempotent + applied to
+    Spaarke Dev. A documented before/after pre-fill regression test proves NO change
+    in: (a) `IWorkspacePrefillAi` signature; (b) `MatterPreFillService` behavior; (c)
+    45s timeout enforcement; (d) `useAiPrefill` hook behavior; (e) per-field wizard
+    output values; (f) end-to-end latency profile.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="prefill-guide">docs/guides/WORKSPACE-AI-PREFILL-GUIDE.md</file>
+    <file purpose="prefill-facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IWorkspacePrefillAi.cs</file>
+    <file purpose="jps-guide">docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">**NFR-07 BINDING: pre-fill hook signatures + 45s timeout + `useAiPrefill` UNCHANGED.** Only the data field `outputSchema` is populated. Before/after pre-fill regression test REQUIRED. If ANY signature, timing, or behavior differs after the migration — STOP and ROLL BACK.</constraint>
+    <constraint source="project">**Schema change escalation gate per CLAUDE.md Confirmation Triggers; user confirmation required at start of task.** Binding-sensitive production action — agent MUST pause and confirm.</constraint>
+    <constraint source="spec NFR-07">`MatterPreFillService`, `ProjectPreFillService`, `useAiPrefill` hook, `findBestLookupMatch`, `AiFieldTag`, 45s timeout, `$choices`-constrained output contract, `Workspace:PreFillPlaybookId` config — ALL UNCHANGED. R6 may extend `IWorkspacePrefillAi` with new methods but existing signatures stay.</constraint>
+    <constraint source="ADR-013">PublicContracts facade boundary — `IWorkspacePrefillAi` is the contract surface; do NOT modify existing signatures; do NOT inject AI-internal types into CRUD-side wizard code.</constraint>
+    <constraint source="ADR-027">Data migration via Web API; idempotent; committed under `scripts/`.</constraint>
+    <constraint source="ADR-029">No BFF code modified; publish-size delta = 0 MB; confirm in task notes.</constraint>
+    <constraint source="spec FR-27">Q5 RE-SHAPED: `outputSchema` on the ACTION row.</constraint>
+    <constraint source="project">outputSchema for matter-prefill MUST exactly mirror the existing `$choices`-constrained output that the wizard consumes today — no new fields, no removed fields, no renamed fields. Diff against the canonical wizard consumer contract.</constraint>
+    <constraint source="project">Migration script MUST be idempotent (guard GET → PATCH; on mismatch FAIL loudly).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/guides/WORKSPACE-AI-PREFILL-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IWorkspacePrefillAi.cs</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pre-fill canonical pattern" location="docs/guides/WORKSPACE-AI-PREFILL-GUIDE.md">
+        The canonical "playbook from anywhere" pattern. Pre-fill flow: wizard captures
+        document → `useAiPrefill` invokes `IWorkspacePrefillAi.PrefillAsync(...)` with
+        45s timeout → BFF resolves `Workspace:PreFillPlaybookId` → invokes
+        `MatterPreFillService` → playbook execution → `$choices`-constrained JSON output
+        → `findBestLookupMatch` resolves wizard fields → wizard auto-populates. Every
+        signature in this chain is BINDING-UNCHANGED.
+      </pattern>
+      <pattern name="Action row PATCH with binding-sensitive guard" location=".claude/patterns/dataverse/web-api-client.md">
+        Same guard pattern as task 032 — GET by alternate key; check null; PATCH on null
+        OR exact match; FAIL on mismatch. Additionally: before PATCH, capture pre-state
+        for rollback evidence.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The pre-fill flow (matter + project) is canonical proven architecture and the
+      template R6 Pillar 3 `invoke_playbook` follows. NFR-07 is binding: the entire flow
+      stays intact in R6. This task is the LIGHTEST possible touch — just declaring the
+      output's data shape as JSON Schema on the action row, and routing the playbook
+      node's destination to `form-prefill`. The wizard consumer doesn't change. The
+      pre-fill service doesn't change. The hook doesn't change. The schema declaration is
+      ADDITIVE METADATA: it lets Pillar 5's schema-aware widget treat the same data shape
+      consistently with chat + workspace surfaces, but `form-prefill` destination
+      bypasses the widget entirely (output goes to wizard fields directly).
+
+      The risk this task addresses is INADVERTENT regression. The before/after pre-fill
+      test is non-negotiable. If the migration somehow changes the wizard's per-field
+      output — STOP, ROLL BACK, escalate. The schema declaration MUST be byte-equivalent
+      to today's `$choices` contract.
+    </background>
+    <relevant-files>
+      <file>scripts/Migrate-MatterPrefillActionOutputSchema.ps1 (NEW)</file>
+      <file>infra/dataverse/outputschemas/matter-prefill.schema.json (NEW)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-034-migration-evidence.md (NEW)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-034-prefill-regression-test.md (NEW — before/after evidence)</file>
+    </relevant-files>
+    <related-work>
+      <item>Sibling task 035 (project-prefill) follows the same pattern; runs in parallel (B-G2).</item>
+      <item>Task 048 Phase B integration test includes matter-prefill regression as part of broader Phase B exit validation.</item>
+      <item>R6 Pillar 3 (`invoke_playbook`) follows the pre-fill flow's pattern (per Q11 — new `IInvokePlaybookAi` facade, same shape).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL + Confirmation Gate">
+      Check context. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: NFR-07 BINDING — pre-fill flow is binding-sensitive; before/after
+                 regression test required; CLAUDE.md Confirmation Trigger
+      📖 PROTOCOL STEPS: all 12 steps below INCLUDING Step 9.5 quality gates + explicit
+                         pre-fill regression test (Step 7)
+      Proceeding with Step 0...
+      ```
+
+      **PAUSE and confirm with user**: (a) approved to migrate matter-prefill action's
+      `outputSchema` data field only; (b) confirm NO changes to `IWorkspacePrefillAi`,
+      `MatterPreFillService`, `useAiPrefill`, or the 45s timeout are being made.
+    </step>
+    <step order="1" name="Review Progress + Capture Pre-State">
+      Read TASK-INDEX.md; confirm 034 status 🔲; deps (030, 031) complete. Capture the
+      current state of the matter-prefill action row + node via GET — save full JSON to
+      `notes/task-034-pre-migration-state.json`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Read `WORKSPACE-AI-PREFILL-GUIDE.md` IN FULL. Read
+      `IWorkspacePrefillAi.cs` IN FULL — capture exact method signatures + parameter
+      types. Read the existing `$choices`-constrained output contract (JPS source for
+      matter-prefill action).
+    </step>
+    <step order="3" name="BEFORE Pre-Fill Regression Test">
+      Run a full end-to-end pre-fill on a designated test matter document. Capture:
+      (a) all wizard fields populated;
+      (b) per-field values produced;
+      (c) end-to-end latency;
+      (d) any console / server logs.
+      Record in `notes/task-034-prefill-regression-test.md`. This is the BEFORE
+      baseline.
+    </step>
+    <step order="4" name="Author the JSON Schema Document">
+      Create `infra/dataverse/outputschemas/matter-prefill.schema.json`. Mirror the
+      existing `$choices`-constrained output EXACTLY — every field name + type + nullable
+      flag matches today's wizard consumer contract. Validate against draft-07
+      meta-schema.
+    </step>
+    <step order="5" name="Author Migration Script">
+      Create `scripts/Migrate-MatterPrefillActionOutputSchema.ps1`:
+      (a) GET action by alternate key;
+      (b) Guard + PATCH `sprk_outputschemajson`;
+      (c) GET playbook node; PATCH `destination = form-prefill` per task 031 storage
+          surface;
+      (d) Log all actions.
+    </step>
+    <step order="6" name="Apply to Spaarke Dev">
+      Run script. Capture output + post-migration row state in
+      `notes/task-034-migration-evidence.md`.
+    </step>
+    <step order="7" name="AFTER Pre-Fill Regression Test (BINDING)">
+      Run the SAME end-to-end pre-fill against the SAME test matter document. Capture
+      the SAME data points: wizard fields populated; per-field values; end-to-end
+      latency; logs. Diff against the BEFORE baseline in
+      `notes/task-034-prefill-regression-test.md`.
+
+      **Acceptance criterion**: ZERO diff in per-field wizard output values. Latency
+      within ±10% of BEFORE baseline. NO error or warning that wasn't present BEFORE.
+
+      If ANY divergence detected: STOP, run the rollback script (capture in evidence
+      notes), escalate to user before proceeding.
+    </step>
+    <step order="8" name="Verify Idempotency">
+      Re-run migration script. Confirm no-op. Re-run AFTER pre-fill test to confirm no
+      drift across migration runs.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below. Record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against script + schema. Run `adr-check`; verify ADR-013
+      (facade boundary preserved — no signatures changed), ADR-027 (solution management),
+      ADR-029 (publish-size delta = 0), NFR-07 (binding — explicit confirmation that no
+      pre-fill flow signatures, timeout, or hook is touched). Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update TASK-INDEX.md: 034 🔲 → ✅. Reset `current-task.md`. Report completion with
+      explicit confirmation that NFR-07 binding is honored + regression test passed.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI</tool>
+    <tool name="pwsh">PowerShell 7+ for migration script</tool>
+    <tool name="git">Stage + commit on R6 worktree branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/Migrate-MatterPrefillActionOutputSchema.ps1 (NEW; includes rollback path)</output>
+    <output type="schema">infra/dataverse/outputschemas/matter-prefill.schema.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-034-pre-migration-state.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-034-migration-evidence.md (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-034-prefill-regression-test.md (NEW — BEFORE + AFTER side-by-side evidence)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 034 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="report">Task completion report with explicit NFR-07 confirmation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">User confirmed (per CLAUDE.md Confirmation Triggers) approval to migrate matter-prefill action's `outputSchema` data field BEFORE deployment; explicit confirmation that `IWorkspacePrefillAi` / `MatterPreFillService` / `useAiPrefill` / 45s timeout are NOT being modified.</criterion>
+    <criterion testable="true">`sprk_analysisaction` row for the matter-prefill action has `sprk_outputschemajson` populated with a valid draft-07 JSON Schema that exactly mirrors the existing `$choices`-constrained wizard consumer contract.</criterion>
+    <criterion testable="true">Playbook node referencing the matter-prefill action has `destination = form-prefill` per task 031 storage surface.</criterion>
+    <criterion testable="true">`IWorkspacePrefillAi.cs` is UNMODIFIED (verified by git diff showing zero changes).</criterion>
+    <criterion testable="true">`MatterPreFillService.cs` is UNMODIFIED (verified by git diff).</criterion>
+    <criterion testable="true">`useAiPrefill` React hook is UNMODIFIED (verified by git diff).</criterion>
+    <criterion testable="true">The 45s timeout configuration is UNMODIFIED (verified by git diff or config grep).</criterion>
+    <criterion testable="true">BEFORE/AFTER pre-fill regression test recorded in `notes/task-034-prefill-regression-test.md` shows ZERO diff in per-field wizard output values; AFTER latency within ±10% of BEFORE.</criterion>
+    <criterion testable="true">Migration script is idempotent + has a rollback path; second run succeeds with no-op.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (034 🔲 → ✅) and `current-task.md` reset.</criterion>
+  </acceptance-criteria>
+</task>

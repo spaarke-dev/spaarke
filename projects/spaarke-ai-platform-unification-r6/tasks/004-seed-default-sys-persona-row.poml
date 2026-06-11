@@ -1,0 +1,181 @@
+<task id="004" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-04 Seed Default Global SYS- Persona Row (Pillar 1, FR-04)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Seed deployed to Spaarke Dev. Row id 4fe49430-aa62-f111-ab0c-70a8a58ae145.
+      Script: scripts/Seed-AiPersonaDefault.ps1 (cloned from Seed-KnowledgeScopes.ps1
+      canonical pattern; idempotent — re-run returns `unchanged`).
+
+      Canonical-text discovery: `BuildDefaultSystemPrompt()` is defined in
+      `PlaybookChatContextProvider.cs` (not `SprkChatAgentFactory.cs` as the POML
+      goal said — minor drift in the POML). The factory delegates to the context
+      provider which invokes the method. Captured the standalone-mode branch
+      (lines 541-569; playbookName == null), which is the FR-04 SYS-default
+      fallback. The named-playbook branch (lines 526-536) is a runtime-dynamic
+      template (string interpolation on playbookName) and is NOT the SYS-default;
+      it will continue to be produced by the playbook-attached resolution path.
+
+      Verbatim match: stored sprk_systemprompt is byte-identical to the C# 11
+      raw-string-normalized canonical text (2042 chars, LF). Verified via
+      independent Python diff against source — `c:\tmp\verify-persona-text.py`.
+
+      Row shape decisions:
+        - sprk_name           = "SYS-DEFAULT"   (per POML goal)
+        - sprk_personacode    = "SYS-DEF"       (10-char schema limit; the
+                                                 invocation argument suggested
+                                                 "SYS-DEFAULT-PERSONA@v1" which
+                                                 exceeds the limit deployed in
+                                                 task 001 — used short form)
+        - sprk_scopetype      = 100000000 (Global)   per Q1
+        - sprk_availableadhoc = true                 (resolver fallback)
+        - sprk_parentpersonaid = null                (root of inheritance chain)
+        - sprk_tags           = "system,default,fallback,chat"
+
+      BFF publish-size delta: 0 MB (no BFF code changed).
+      Verbatim reference: notes/task-004-system-prompt-source.txt
+      Evidence:           notes/task-004-completion.md
+    </completion-notes>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>001</dependencies>
+    <blocks>005</blocks>
+    <tags>dataverse, seed, deploy, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data seed (no `.cs`); creates one Dataverse row; verbatim text copy from existing C# helper; depends on schema task 001 + resolver task 003.</rigor-reason>
+    <parallel-group>A-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent data-seed task; parallel with 002 (endpoint) + 003 (resolver) — all parallel after 001.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Seed the default global SYS- persona row in the `sprk_aipersona` entity (created in
+    task 001). The row's `systemPrompt` field MUST contain the current hardcoded
+    `BuildDefaultSystemPrompt()` text VERBATIM from `SprkChatAgentFactory.cs`. This is the
+    fallback row returned by `IScopeResolverService.ResolvePersonaForChatAsync` (task 003)
+    when no tenant CUST- or playbook-attached override exists.
+
+    Critical-path context: FR-04 binding — behavior with no tenant/playbook override MUST
+    be identical to today. The whole point of the seed is to make the data-driven cutover
+    in task 005 behavior-preserving. Any drift between the seeded text and the original
+    `BuildDefaultSystemPrompt()` output would change the chat-agent voice on the cutover
+    PR — a regression the project explicitly forbids.
+
+    Seed mechanism options: (a) data-only solution row imported via `pac solution import`;
+    (b) PowerShell deploy script using Dataverse Web API; (c) idempotent migration script
+    run at deploy time. Pick whichever matches the existing scope-seed pattern. Reuse
+    existing seed conventions; do not invent a new mechanism. The seed MUST be idempotent
+    (re-run is no-op if row exists).
+  </prompt>
+
+  <role>
+    Senior Dataverse engineer experienced with Spaarke scope-library seed patterns and the
+    `dataverse-deploy` skill.
+  </role>
+
+  <goal>
+    A single `sprk_aipersona` row named "SYS-DEFAULT" exists in Spaarke Dev with
+    `sprk_systemprompt` containing the verbatim text from
+    `SprkChatAgentFactory.BuildDefaultSystemPrompt()` as of master at task-execution time.
+    Seed script committed to repo, idempotent on re-run. Verification: querying via Web API
+    returns the row with identical text. Acceptance criteria all green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="canonical-text-source">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="scope-architecture">docs/architecture/scope-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Use unmanaged solution / data-seed conventions consistent with existing scope library seeds.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB for this task (no BFF code change). Report explicitly.</constraint>
+    <constraint source="spec FR-04">Seed text MUST be VERBATIM `BuildDefaultSystemPrompt()` output — character-for-character.</constraint>
+    <constraint source="project">Seed script MUST be idempotent — re-run does not create duplicate rows or modify existing row data destructively.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/data-seed</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/architecture/scope-architecture.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing scope-seed mechanism" location="solutions/ or scripts/ (search for existing scope SYS- seeds)">
+        Search the repo for how the 4 existing scopes (Actions / Skills / Knowledge / Tools)
+        seed their global SYS- rows. Reuse that mechanism. If it's a data-solution-only
+        import, add a new solution row entry. If it's a PS1, add a sibling script.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: STANDARD — data seed; no `.cs` modification". Read project CLAUDE.md + spec.md FR-04.
+    </step>
+    <step order="1" name="Review Progress">
+      Verify task 001 ✅. Update `current-task.md` to task 004.
+    </step>
+    <step order="2" name="Extract Canonical Text">
+      Open `SprkChatAgentFactory.cs`; locate `BuildDefaultSystemPrompt()`; capture the EXACT text returned (preserve whitespace + escape sequences). Save to a `notes/task-004-system-prompt-source.txt` for record.
+    </step>
+    <step order="3" name="Inspect Existing Seed Mechanism">
+      Search repo for existing scope seed patterns. Document the chosen mechanism in task notes.
+    </step>
+    <step order="4" name="Author Seed Script / Data Row">
+      Create idempotent seed: row with name "SYS-DEFAULT", description "Default Spaarke AI persona; fallback when no tenant or playbook override exists", scopeType=Global, parentScopeId=null, systemPrompt={verbatim text from Step 2}. Ensure script checks for existing row first (idempotent).
+    </step>
+    <step order="5" name="🛑 Confirmation Gate — Data Seed Deployment">
+      PAUSE per project CLAUDE.md §Confirmation Triggers (data change to production Dataverse entity). Present seed script + verbatim text to user; request approval to deploy.
+    </step>
+    <step order="6" name="Deploy to Spaarke Dev">
+      After confirmation: run seed via `dataverse-deploy` skill / `pac solution import` / Web API call. Verify row exists.
+    </step>
+    <step order="7" name="Verify Verbatim Match">
+      Query the row via Web API + diff against captured text from Step 2 (character-for-character). Any mismatch = HARD FAIL; rerun seed.
+    </step>
+    <step order="8" name="Verify Idempotency">
+      Re-run the seed script. Confirm: existing row not duplicated; no data destruction.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk each criterion below; record evidence.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 004 ✅. Reset `current-task.md`. Report. Note BFF publish-size delta = 0 MB.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">solution import + Web API row query</tool>
+    <tool name="dataverse-deploy">Skill for solution / data deployment</tool>
+    <tool name="mcp__dataverse__read_query">MCP — verify row content after seed</tool>
+    <tool name="mcp__dataverse__create_record">MCP — fallback for one-off row creation</tool>
+    <tool name="git">stage + commit seed script</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">scripts/Seed-AiPersonaDefault.ps1 OR solution data-row file (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (004 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-004-system-prompt-source.txt (verbatim text reference)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-004-seed-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SYS-DEFAULT row exists in `sprk_aipersona` table on Spaarke Dev.</criterion>
+    <criterion testable="true">Row's `sprk_systemprompt` field matches `BuildDefaultSystemPrompt()` output VERBATIM (character-for-character diff = 0).</criterion>
+    <criterion testable="true">Row's scopeType = Global; parentScopeId = null.</criterion>
+    <criterion testable="true">Seed script is idempotent — second run does not duplicate or modify the row.</criterion>
+    <criterion testable="true">Tenant CUST- rows can reference this SYS-DEFAULT as `parentScopeId` (inheritance chain works).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (no BFF code changed; recorded in task notes).</criterion>
+    <criterion testable="true">Seed script committed to repo following existing scope-seed conventions per ADR-027.</criterion>
+  </acceptance-criteria>
+</task>

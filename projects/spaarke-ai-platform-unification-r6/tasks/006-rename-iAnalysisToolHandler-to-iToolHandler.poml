@@ -1,0 +1,144 @@
+<task id="006" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-06 Rename `IAnalysisToolHandler` → `IToolHandler` with Type Alias (Pillar 2)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Rename done via git mv (history preserved). Type alias `IAnalysisToolHandler = IToolHandler` added via `GlobalUsings.cs` in BOTH `Sprk.Bff.Api` AND `Sprk.Bff.Api.Tests` (alias does not cross assembly boundary). 16 production callsites + 5 test files compile unchanged via alias. Build clean (0 errors, 0 warnings). 2908 tests passing (0 failed). BFF publish-size delta = 0 MB. Quality gates: code-review ✅ PASS (0 critical/0 warning/1 informational suggestion); adr-check ✅ PASS (ADR-010, ADR-013, ADR-029 all green; others N/A). Unblocks tasks 007, 008, 009, 010 (Phase A Pillar 2) + 100 (handler infra gate).
+    </completion-notes>
+    <dependencies>none</dependencies>
+    <blocks>007, 008, 009</blocks>
+    <tags>bff-api, refactoring, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` files across `Services/Ai/` ; interface rename impacts all existing handler implementations; tag `bff-api` + `refactoring`; downstream blocker.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent of Pillar 1 tasks; touches different files; safe to run alongside 001-005.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Rename `IAnalysisToolHandler` → `IToolHandler` to reflect its new cross-context use
+    (playbook + chat). Preserve a `using IAnalysisToolHandler = IToolHandler` type alias
+    for source compatibility, so existing handler implementations (`GenericAnalysisHandler`,
+    `DocumentClassifierHandler`, `SummaryHandler`, `SemanticSearchToolHandler`) and any
+    consumer code continue to compile without per-file edits.
+
+    Critical-path context: this rename is the structural prerequisite for Pillar 2's
+    cross-context tool registry. Tasks 007 (AvailableInContexts), 008 (JsonSchema), 009
+    (execution context split), 010 (adapter), 011 (chat agent factory wiring), and 012
+    (batch migration of 10 chat tools) all consume the renamed interface.
+
+    Pattern: simple interface rename + add type alias for source-compat. All existing
+    handlers + DI registrations remain functional. The interface contract itself does NOT
+    change in this task; FR-07/08/09 (adding `AvailableInContexts`, `JsonSchema`,
+    `ChatInvocationContext`) come in later tasks.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with .NET 8 refactoring experience and familiarity with the
+    Spaarke `IAnalysisToolHandler` ecosystem.
+  </role>
+
+  <goal>
+    `IAnalysisToolHandler` is renamed to `IToolHandler`; a `using` alias preserves source
+    compatibility; all existing handlers + DI registrations continue to work; existing
+    tests pass unchanged; build green. Publish-size delta reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="interface-source">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">No new top-level Program.cs lines; existing DI handler registrations continue to work via alias.</constraint>
+    <constraint source="ADR-013">No facade-boundary change; refactor is purely internal to `Services/Ai/`.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; near-zero expected (rename only); ≤+5 MB R6 budget.</constraint>
+    <constraint source="spec FR-06">Type alias preserved for source compatibility; existing handlers (`GenericAnalysisHandler`, `DocumentClassifierHandler`, `SummaryHandler`, `SemanticSearchToolHandler`) continue to work unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/refactoring</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="C# interface alias" location="Standard C# `using OldName = Namespace.NewName;` directive">
+        Place the alias either in a shared `GlobalUsings.cs` (preferred for source-compat
+        across the project) OR per-file in the small set of consumer files. Choose whichever
+        matches the existing project convention; document the choice in task notes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — interface rename impacting multiple consumers + downstream blocker for 6+ tasks". Read project CLAUDE.md + spec.md FR-06.
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX. Update `current-task.md` to task 006.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Capture baseline publish size. Use Grep to find ALL consumers of `IAnalysisToolHandler` across `src/server/api/Sprk.Bff.Api/` + `tests/`.
+    </step>
+    <step order="3" name="Rename the Interface">
+      Rename file `IAnalysisToolHandler.cs` → `IToolHandler.cs`. Rename type symbol. Update its namespace if needed.
+    </step>
+    <step order="4" name="Add Source-Compat Type Alias">
+      Add `using IAnalysisToolHandler = Sprk.Bff.Api.Services.Ai.IToolHandler;` in `GlobalUsings.cs` (or equivalent) so existing handler files compile without per-file edits. Verify approach matches project convention.
+    </step>
+    <step order="5" name="Build + Test">
+      `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors. `dotnet test tests/unit/Sprk.Bff.Api.Tests/` → all green. Confirm: all existing handlers + DI registrations resolve correctly.
+    </step>
+    <step order="6" name="Verify Publish Size">
+      `dotnet publish -c Release` → measure delta vs baseline; report ≤+5 MB R6 budget.
+    </step>
+    <step order="7" name="Verify Acceptance Criteria">
+      Walk each criterion below; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check` against changed files. Verify ADR-010 / ADR-013 / ADR-029 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 006 ✅. Reset `current-task.md`. Report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="git">stage + commit changes on R6 worktree</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IToolHandler.cs (RENAMED from IAnalysisToolHandler.cs)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/GlobalUsings.cs (modified — type alias added) OR per-file alias</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (006 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-006-rename-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IToolHandler.cs` exists; `IAnalysisToolHandler.cs` removed.</criterion>
+    <criterion testable="true">`using IAnalysisToolHandler = IToolHandler` alias preserved for source compatibility.</criterion>
+    <criterion testable="true">All existing handlers (`GenericAnalysisHandler`, `DocumentClassifierHandler`, `SummaryHandler`, `SemanticSearchToolHandler`) compile and pass unit tests unchanged (FR-06 acceptance).</criterion>
+    <criterion testable="true">DI registrations continue to resolve handlers correctly.</criterion>
+    <criterion testable="true">Existing tests pass with no per-file edits required.</criterion>
+    <criterion testable="true">Build green; publish-size delta near-zero; reported in task notes.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

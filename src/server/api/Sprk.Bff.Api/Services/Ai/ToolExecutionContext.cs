@@ -3,32 +3,54 @@ using Sprk.Bff.Api.Services.Ai.Schemas;
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
-/// Execution context provided to tool handlers during analysis.
-/// Contains all the runtime information needed for tool execution.
+/// Execution context provided to tool handlers during playbook-node analysis.
+/// Contains all the runtime information needed for playbook-driven tool execution.
 /// </summary>
 /// <remarks>
-/// The execution context is created by AnalysisOrchestrationService and passed
+/// <para>
+/// The execution context is created by <c>AnalysisOrchestrationService</c> and passed
 /// to each tool handler. It provides:
+/// </para>
 /// <list type="bullet">
 /// <item>Document content (extracted text)</item>
 /// <item>Analysis session state</item>
 /// <item>Tenant isolation information</item>
 /// <item>Service dependencies (logger, cache, etc.)</item>
 /// </list>
+/// <para>
+/// In R6 Pillar 2 (task D-A-09), this type was refactored to derive from
+/// <see cref="ToolInvocationContextBase"/>. The shared fields (TenantId, MaxTokens,
+/// Temperature, ModelDeploymentId, UserContext, CorrelationId, CreatedAt, and a
+/// correlation id) now live on the base; playbook-specific fields (Document,
+/// PreviousResults, ActionSystemPrompt, scope context, DownstreamNodes, etc.) stay here.
+/// A new sibling type, <see cref="ChatInvocationContext"/>, derives from the same base for
+/// chat-driven invocation (see task D-A-10 adapter). Existing handlers continue to receive
+/// <c>ToolExecutionContext</c> with all previous fields accessible by their original names.
+/// </para>
+/// <para>
+/// Per ADR-013 / FR-09 / NFR-08: this refactor is purely internal to <c>Services/Ai/</c>.
+/// No PublicContracts boundary changes; the 11 production node executors and the existing
+/// 4 handlers see identical semantics.
+/// </para>
 /// </remarks>
-public record ToolExecutionContext
+public record ToolExecutionContext : ToolInvocationContextBase
 {
     /// <summary>
     /// Unique identifier for this analysis session.
-    /// Used for correlation in logs and caching.
+    /// Used for correlation in logs and caching. Backed by <see cref="ToolInvocationContextBase.InvocationId"/>
+    /// so existing handler code that reads <c>context.AnalysisId</c> continues to compile unchanged.
     /// </summary>
-    public required Guid AnalysisId { get; init; }
-
-    /// <summary>
-    /// Tenant identifier for multi-tenant isolation.
-    /// All operations must be scoped to this tenant.
-    /// </summary>
-    public required string TenantId { get; init; }
+    /// <remarks>
+    /// Marked <c>required</c>: every <c>ToolExecutionContext</c> caller MUST provide
+    /// <c>AnalysisId = ...</c> at object-initializer time, matching the pre-R6 contract.
+    /// The init accessor writes to the base <see cref="ToolInvocationContextBase.InvocationId"/>
+    /// storage so the base's correlation invariant is satisfied without a duplicate property.
+    /// </remarks>
+    public required Guid AnalysisId
+    {
+        get => InvocationId;
+        init => InvocationId = value;
+    }
 
     /// <summary>
     /// The document being analyzed.
@@ -41,12 +63,6 @@ public record ToolExecutionContext
     /// </summary>
     public IReadOnlyDictionary<string, ToolResult> PreviousResults { get; init; }
         = new Dictionary<string, ToolResult>();
-
-    /// <summary>
-    /// User-provided context or instructions for this analysis.
-    /// May include specific questions or focus areas.
-    /// </summary>
-    public string? UserContext { get; init; }
 
     /// <summary>
     /// System prompt from the Action record (sprk_analysisaction.sprk_systemprompt).
@@ -67,24 +83,6 @@ public record ToolExecutionContext
     /// Pre-resolved by AnalysisOrchestrationService.
     /// </summary>
     public string? KnowledgeContext { get; init; }
-
-    /// <summary>
-    /// Maximum tokens to use for AI model calls.
-    /// Handlers should respect this limit.
-    /// </summary>
-    public int MaxTokens { get; init; } = 4096;
-
-    /// <summary>
-    /// Temperature setting for AI model calls (0.0 - 1.0).
-    /// Lower values are more deterministic.
-    /// </summary>
-    public double Temperature { get; init; } = 0.3;
-
-    /// <summary>
-    /// AI model deployment ID override for this execution.
-    /// If null, uses the default model deployment.
-    /// </summary>
-    public Guid? ModelDeploymentId { get; init; }
 
     /// <summary>
     /// Downstream node info for <c>$choices</c> resolution in JPS prompts.
@@ -116,16 +114,6 @@ public record ToolExecutionContext
     /// Resolved by <see cref="LookupChoicesResolver"/> before tool execution.
     /// </summary>
     public IReadOnlyDictionary<string, string[]>? PreResolvedLookupChoices { get; init; }
-
-    /// <summary>
-    /// Correlation ID for distributed tracing.
-    /// </summary>
-    public string? CorrelationId { get; init; }
-
-    /// <summary>
-    /// Timestamp when this execution context was created.
-    /// </summary>
-    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>

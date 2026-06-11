@@ -1,0 +1,177 @@
+<task id="080" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-D-01 CommandRouter Parser — Intent { command, references[], rawText } (Pillar 8 foundation)</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>078</dependencies>
+    <blocks>081, 082, 083, 084, 086</blocks>
+    <tags>frontend, typescript, react, ai-widgets, command-router</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Foundational parser for Pillar 8; gates 4 downstream Phase D tasks; touches conversation pipeline before agent invocation; spec FR-48 binding.</rigor-reason>
+    <parallel-group>D-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Foundation parser is isolated to a single new file (CommandRouter.ts); 081/082/083 can fan out in parallel after this lands.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the `CommandRouter` parser — the entry point for Pillar 8 Command Router.
+    Per spec FR-48, the parser MUST run BEFORE agent invocation and emit a structured
+    `Intent { command, references[], rawText }` shape that downstream tasks (hard slashes 081,
+    soft slashes 082, references resolver 083) consume.
+
+    The parser is a pure TypeScript module in `src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts`.
+    It does NOT call the LLM. It does NOT alter `CapabilityRouter` behavior. It SITS in front of
+    the existing conversation send path and produces a normalized intent that tasks 081/082/083
+    fan out from.
+
+    Per Q6 the vocabulary is closed at 6 hard slashes (`/clear`, `/new-session`, `/help`,
+    `/export`, `/save-to-matter [matterId]`, `/pin`) + 4 soft slashes (`/summarize`, `/draft`,
+    `/extract-entities`, `/analyze`) + 3 reference types (`#scope`, `@<entity>`, `#<filename>`).
+    The parser tokenizes the input but does NOT execute commands — execution is the
+    concern of tasks 081 (hard) + 082 (soft); reference resolution is task 083.
+
+    NFR-11 binding: natural language still flows through unchanged when no slash is detected.
+    The parser's failure mode for unrecognized slashes is to return `command: null` so the
+    existing `CapabilityRouter` natural-language path handles the input.
+
+    This is a frontend-only task; BFF publish-size delta = 0 MB (no .cs files modified).
+  </prompt>
+
+  <role>
+    Senior TypeScript engineer with Fluent v9 + Spaarke AI Widgets familiarity. Comfortable
+    with command-parser design, intent-typing, and frontend integration into a React
+    conversation pane without disturbing the existing `SprkChat.onBeforeSendMessage` informational hook.
+  </role>
+
+  <goal>
+    `CommandRouter.ts` exists at `src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts`
+    with: (a) typed `Intent` shape; (b) `parse(rawText: string): Intent` function that classifies
+    slashes (hard/soft/none) and extracts unresolved references; (c) unit tests covering each
+    command + reference shape + composition + natural-language passthrough; (d) zero LLM calls
+    in the parse path; (e) clean module exports for downstream tasks. NFR-11 backward compat
+    verified: natural language sends still reach `CapabilityRouter` unchanged when no slash present.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="conversation-pane">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    <file purpose="ai-widgets-component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-48">CommandRouter parses user input into `Intent { command, references[], rawText }`. Runs before agent invocation.</constraint>
+    <constraint source="spec NFR-11">Natural language requests still work alongside slashes. When no slash detected, parser returns `command: null` and existing `CapabilityRouter` path handles the message unchanged.</constraint>
+    <constraint source="spec NFR-01">Conversational primacy — parser MUST NOT interrupt the LLM's conversational ability. It only classifies; it does not block.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB for this task (frontend-only).</constraint>
+    <constraint source="ADR-030">PaneEventBus channels stay at 4. This task does NOT add a 5th channel; parser is a pure module, not an event emitter at this stage.</constraint>
+    <constraint source="project Pillar 8">Q6 vocabulary closed at 6 hard + 4 soft + 3 reference types. Do NOT extend.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/command-router-parser</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Intent shape" location="src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts (new)">
+        Export `interface Intent { command: SlashCommand | null; references: Reference[]; rawText: string; isHardSlash: boolean; isSoftSlash: boolean; }`.
+        Pure function `parse(rawText: string): Intent`. No side effects, no async, no network.
+      </pattern>
+      <pattern name="Slash vocabulary closed" location="Q6 + spec FR-49/FR-50">
+        Hard: `/clear`, `/new-session`, `/help`, `/export`, `/save-to-matter`, `/pin`. Soft: `/summarize`, `/draft`, `/extract-entities`, `/analyze`. Reference shapes: `#scope`, `@<entity>`, `#<filename>`. Use string-literal union type.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. Output: "🔒 RIGOR LEVEL: FULL — Foundational Pillar 8 parser; gates 4 downstream Phase D tasks; spec FR-48 binding". Read project CLAUDE.md §Pillar 8 + spec.md FR-48–54.
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 080 status is 🔲, dependencies (078 Phase C exit gate) are ✅. Verify Phase C is complete before starting. Update `current-task.md` to task 080.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read SPAARKEAI-COMPONENT-MODEL.md + COMPONENT-MODEL §Conversation. Inspect `ConversationPane.tsx` to understand the existing send-message hook surface. Read the project CLAUDE.md §Pillar 8 binding rules.
+    </step>
+    <step order="3" name="Author Intent Type + Parser">
+      Create `src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts`. Define `Intent` type, slash command union, reference shape. Implement `parse(rawText: string): Intent` with: hard-slash detection, soft-slash detection, reference extraction (`#`/`@`), natural-language passthrough (returns `command: null`).
+    </step>
+    <step order="4" name="Unit Tests">
+      Create `CommandRouter.test.ts`. Cover: each hard slash, each soft slash, each reference shape, composition (`/summarize #file.docx`), unrecognized slash → passthrough, natural language → passthrough, empty input. Use existing project test runner (vitest / jest per `SpaarkeAi/` convention).
+    </step>
+    <step order="5" name="NFR-11 Backward Compat Test">
+      Add a specific regression test verifying that input without a slash returns `{ command: null, references: [], rawText, isHardSlash: false, isSoftSlash: false }` so the downstream send path can fall through to `CapabilityRouter` unchanged.
+    </step>
+    <step order="6" name="Wire-Up Stub (no behavior change yet)">
+      Add an import + `const intent = parse(message)` call inside `ConversationPane.tsx` at the send-message boundary BUT do NOT branch behavior yet. Intent is captured + logged via existing telemetry (no new ADR-015 events; tool name + decision only would be added by 081/082). This validates the parser is reachable; behavior changes land in 081/082/083.
+    </step>
+    <step order="7" name="Build Verification">
+      Run `npm install --legacy-peer-deps --no-audit --no-fund` + `npm run build` in `src/solutions/SpaarkeAi/` per CLAUDE.md §11 (avoid `npm ci`). Run the test suite. Confirm zero TypeScript errors.
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk through each &lt;acceptance-criterion&gt; below. Confirm each is testable + green.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against CommandRouter.ts + tests. Run `adr-check` against same; verify ADR-029 (size 0 MB), ADR-030 (no 5th channel), NFR-11 (backward compat), NFR-01 (conversational primacy preserved). Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update TASK-INDEX.md: 080 🔲 → ✅. Reset `current-task.md` to task 081. Note BFF publish-size delta = 0 MB. Report completion + downstream unblock list (081, 082, 083, 084, 086).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Frontend build + test runner</tool>
+    <tool name="git">Stage + commit CommandRouter.ts + tests + ConversationPane wire-up</tool>
+    <tool name="fluent-v9-component">Skill for Fluent v9 component patterns (parser is non-visual but lives alongside Fluent components)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.test.ts (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (MODIFIED — parse() called at send boundary, no behavior change)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 080 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset to task 081)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts` exports `Intent` type + `parse(rawText: string): Intent` function.</criterion>
+    <criterion testable="true">Unit tests cover every hard slash, every soft slash, every reference shape, composition pattern, unrecognized slash passthrough, natural language passthrough — all green.</criterion>
+    <criterion testable="true">Parser is synchronous + pure: no LLM call, no network, no side effects, no React state writes.</criterion>
+    <criterion testable="true">`ConversationPane.tsx` calls `parse()` at the send-message boundary; intent captured but no behavior changes yet (gates 081/082/083).</criterion>
+    <criterion testable="true">NFR-11 backward compat verified: natural language input returns `{ command: null, ... }` and existing `CapabilityRouter` path is untouched.</criterion>
+    <criterion testable="true">`npm run build` succeeds with zero TypeScript errors; test suite green.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (no .cs files modified; recorded in task notes).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">Downstream tasks (081, 082, 083, 084, 086) unblocked.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Parser Loaded in ConversationPane">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control&amp;controlName=spaarke_SpaarkeAi</url>
+      <steps>
+        <step>Open the SpaarkeAi conversation pane</step>
+        <step>Type a natural-language message (no slash) and send</step>
+        <step>Verify the existing CapabilityRouter response surfaces unchanged</step>
+        <step>Check browser console for any CommandRouter errors</step>
+      </steps>
+      <expected>Natural-language send path unchanged; no console errors; parser invoked transparently</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify ConversationPane Fluent components adapt</step>
+        <step>Verify no hardcoded colors regressed</step>
+      </steps>
+      <expected>All Fluent v9 semantic tokens preserved per ADR-021</expected>
+    </test>
+  </ui-tests>
+</task>

@@ -1,0 +1,172 @@
+<task id="007" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-07 Add `AvailableInContexts` Enum + Dataverse Column to `AnalysisTool` DTO (Pillar 2)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      DTO: Added `ToolAvailabilityContext` enum (Playbook=100000000, Chat=100000001, Both=100000002 — Spaarke canonical option-set values) + nullable `AvailableInContexts` property on `AnalysisTool` record in `IScopeResolverService.cs`. Plain enum (NOT [Flags]) — Dataverse single-select picklist semantics require explicit `Both` value.
+
+      Dataverse: Deployed `sprk_availableincontexts` option-set column to existing `sprk_analysistool` entity via new idempotent script `scripts/Add-AnalysisToolAvailableInContexts.ps1` (modeled on `Create-AiPersonaEntity.ps1`). DefaultFormValue=100000000 preserves Playbook behavior for all pre-R6 rows. Customizations published. Idempotency verified by post-deploy dry-run.
+
+      Service mapper: `AnalysisToolService.MapAvailableInContexts(int?)` converts raw Dataverse values to enum (null → null at DTO; null → Playbook semantics applied at downstream resolve time per FR-07 backward-compat). Updated `ToolEntity` JSON property + OData $select clause + 3 AnalysisTool construction sites (Get/List/Create).
+
+      Tests: 18 new tests in `AnalysisToolDtoTests.cs` cover enum value contract, default DTO state, round-trip JSON serialization for all 3 values + null, mapper for known/unknown/null raw values, record `with` expression preserves field. All 18 pass; full BFF unit suite 6141 pass / 0 fail.
+
+      Build: green (0 errors, 0 warnings). Publish-size delta: 0.00 MB compressed (baseline 45.5 → post 45.5; well within ≤+5 MB R6 budget and 60 MB hard ceiling).
+
+      ADR compliance: ADR-010 (zero DI changes), ADR-013 (no PublicContracts modifications), ADR-027 (sprk_ prefix + unmanaged), ADR-029 (delta verified). FR-07 backward-compat invariant honored. No new feature flags, no Agent Framework refs.
+
+      Decisions: (1) Plain enum vs Flags — chose plain because Dataverse single-select picklist + explicit Both value (FR-07 enumerates 3 values, not bit combinations). (2) Nullable DTO field — explicit nullable for migration safety; mapper preserves null and treats null-as-Playbook semantics at downstream resolve sites (per FR-07). (3) Field placed directly in AnalysisTool record (no separate Models/Ai/ file split) — record is already authoritative + co-located with related Tool* types in IScopeResolverService.cs; keeps task 008 (JsonSchema add) trivial without forcing a partial-class split.
+
+      Task 008 ready to proceed: same DTO + entity surface; pattern established (PicklistAttributeMetadata for option-set columns; this task can be MemoAttributeMetadata for JsonSchema string).
+    </completion-notes>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>006</dependencies>
+    <blocks>010</blocks>
+    <tags>bff-api, dataverse, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Schema change to production `sprk_analysistool` Dataverse entity (Confirmation Trigger) + `.cs` DTO modification + downstream blocker.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential with 008 (both modify `AnalysisTool` DTO and `sprk_analysistool` entity). Run 007 then 008.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add `AvailableInContexts` enum (`Playbook` / `Chat` / `Both`) discriminator field to
+    the `AnalysisTool` DTO + a corresponding Dataverse column on `sprk_analysistool`.
+    Existing playbook tool rows default to `Playbook` (backward-compat). New chat tools
+    declare `Chat` or `Both` to expose themselves to `SprkChatAgentFactory.ResolveTools()`
+    in task 011.
+
+    Critical-path context: this discriminator is how the chat-agent's data-driven tool
+    list is filtered. Tasks 010 (adapter) reads the field, task 011 (factory) filters by
+    `AvailableInContexts ∋ "Chat"`, and task 012 (batch migration of 10 chat tools) sets
+    this field on the new `sprk_analysistool` rows.
+
+    The Dataverse column is an option-set (1=Playbook, 2=Chat, 3=Both); default = 1
+    (Playbook). DTO field is the matching C# enum + nullable for migration safety.
+    Schema change to production entity requires Confirmation Trigger pause.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with experience modifying `sprk_analysistool` Dataverse entity and
+    the corresponding `AnalysisTool` DTO. Familiar with option-set columns and DTO
+    backward-compat patterns.
+  </role>
+
+  <goal>
+    `AnalysisTool` DTO has `AvailableInContexts` enum field; `sprk_analysistool` Dataverse
+    entity has the matching option-set column with `Playbook` default. Existing tool rows
+    preserve their behavior (default to `Playbook`). Unit tests cover enum
+    serialization/deserialization. Build green; publish-size delta reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="dto">src/server/api/Sprk.Bff.Api/Services/Ai/Models/AnalysisTool.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Use unmanaged solution conventions for Dataverse column change.</constraint>
+    <constraint source="ADR-010">No new top-level Program.cs lines; DTO change does not introduce new services.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget.</constraint>
+    <constraint source="spec FR-07">Enum values: `Playbook` / `Chat` / `Both`; existing rows default to `Playbook`; new chat tools declare `Chat` or `Both`.</constraint>
+    <constraint source="Confirmation Trigger">Schema change to production Dataverse entity (`sprk_analysistool`) — pause for user confirmation before deploying per project CLAUDE.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/tool-registry</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/scope-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse option-set column addition" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Use the documented Web API recipe for adding an option-set column to an existing
+        entity, with default value of `Playbook` for backward-compat.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — Dataverse production entity schema change + DTO mod + Confirmation Trigger".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 006 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Capture baseline publish size.
+    </step>
+    <step order="3" name="Author DTO Enum Change">
+      Add `AvailableInContexts` C# enum: `[Flags]` or plain — choose to align with `ToolContext ∋ X` set semantics (FR-07 "set-based" `∋` notation suggests flags). Add field to `AnalysisTool` record (nullable for migration safety; serialize as option-set value).
+    </step>
+    <step order="4" name="Author Dataverse Column Change">
+      Add option-set column `sprk_availableincontexts` to `sprk_analysistool`. Values: 1=Playbook (default), 2=Chat, 4=Both (flag semantics) OR enum semantics — match the C# choice. Document in task notes.
+    </step>
+    <step order="5" name="🛑 Confirmation Gate — Schema Deployment">
+      PAUSE per project CLAUDE.md §Confirmation Triggers. Present DTO + column schema to user; request approval.
+    </step>
+    <step order="6" name="Deploy Column to Dataverse">
+      After confirmation: deploy via `dataverse-deploy` skill. Verify column visible; verify existing rows defaulted to Playbook.
+    </step>
+    <step order="7" name="Add Unit Tests">
+      Add tests in `tests/unit/Sprk.Bff.Api.Tests/`: DTO round-trips correctly through serialization; default value applied when field is absent; enum-to-option-set mapping works.
+    </step>
+    <step order="8" name="Build + Verify Publish Size">
+      `dotnet build` → 0 errors. `dotnet publish -c Release` → measure delta vs baseline; report ≤+5 MB R6 budget.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk each criterion; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check` against changed files. Verify ADR-010 / ADR-013 / ADR-027 / ADR-029 + FR-07 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 007 ✅. Reset `current-task.md`. Report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="pac">Dataverse column deployment + verification</tool>
+    <tool name="dataverse-create-schema">Skill for column add via Web API</tool>
+    <tool name="dataverse-deploy">Skill for solution deployment</tool>
+    <tool name="mcp__dataverse__describe">MCP — verify column after deploy</tool>
+    <tool name="git">stage + commit changes</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Models/AnalysisTool.cs (modified — AvailableInContexts added)</output>
+    <output type="schema">solutions/{solution}/Entities/sprk_analysistool/{column-xml} OR scripts/Add-AnalysisToolAvailableInContexts.ps1 (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisToolDtoTests.cs (NEW/modified)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (007 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-007-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`AnalysisTool` DTO has `AvailableInContexts` enum field (Playbook / Chat / Both).</criterion>
+    <criterion testable="true">`sprk_analysistool` entity has matching option-set column; default = Playbook.</criterion>
+    <criterion testable="true">Existing rows post-deploy preserve `Playbook` behavior (backward-compat per FR-07).</criterion>
+    <criterion testable="true">Unit test asserts round-trip serialization works for all three values.</criterion>
+    <criterion testable="true">Schema change committed to repo following ADR-027 conventions.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

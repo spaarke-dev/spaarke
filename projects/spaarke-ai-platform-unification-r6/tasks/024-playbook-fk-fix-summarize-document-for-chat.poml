@@ -1,0 +1,142 @@
+<task id="024" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-16 Playbook FK Fix — Wire `summarize-document-for-chat@v1` Node → `SUM-CHAT@v1` Action (Pillar 4)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>011</dependencies>
+    <blocks>025</blocks>
+    <tags>dataverse, seed, data-fix, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse data fix (no `.cs`); idempotent FK update on existing rows; validates at startup; gates Pillar 4 orchestrator refactor.</rigor-reason>
+    <parallel-group>A-G3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent data fix; parallel with 020 (facade); both unblocked by 011.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Fix the broken Foreign Key in the `summarize-document-for-chat@v1` playbook's node:
+    wire its action FK to `SUM-CHAT@v1`. The FK currently bypasses the chain (per R5
+    closeout limitation acknowledged in Pillar 4), which is why
+    `SessionSummarizeOrchestrator` loads the action by alternate key. After this fix, the
+    full chain `playbook → node → action` is populated and the orchestrator (task 025)
+    can route through `PlaybookExecutionEngine.ExecuteAsync` without the alternate-key
+    bypass.
+
+    Critical-path context: this single Dataverse data fix closes a long-standing R5
+    architectural debt. Task 025 (orchestrator refactor) consumes this fix.
+
+    Implementation: write an idempotent migration script that (a) verifies the
+    `summarize-document-for-chat@v1` playbook exists; (b) verifies the `SUM-CHAT@v1`
+    action exists; (c) updates the node's action-FK column to point at `SUM-CHAT@v1`;
+    (d) verifies the FK chain validates at BFF startup (i.e., no startup error from
+    `PlaybookExecutionEngine` initial validation pass).
+
+    NFR-08 binding: this task does NOT modify any of the 11 production node executors.
+    It's a pure data fix on existing rows.
+  </prompt>
+
+  <role>
+    Senior Dataverse engineer + AI platform familiarity. Familiar with playbook canvas
+    schema (playbook → nodes → action FK) and the BFF's startup FK-validation pass.
+  </role>
+
+  <goal>
+    `summarize-document-for-chat@v1`'s node FK points at `SUM-CHAT@v1` action. FK chain
+    validates at BFF startup (no error log). Migration script is idempotent (re-runs
+    are no-ops). Acceptance criteria green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+    <file purpose="r5-lessons">projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Use unmanaged solution conventions for data fix.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB (no BFF code change). Report explicitly.</constraint>
+    <constraint source="ADR-018">No new feature flags.</constraint>
+    <constraint source="spec NFR-08">11 production node executors UNMODIFIED. This is a data fix on existing rows only.</constraint>
+    <constraint source="spec FR-25">FK chain validates at startup; `summarize-document-for-chat@v1` → `SUM-CHAT@v1` link populated.</constraint>
+    <constraint source="project">Script MUST be idempotent — re-runs check current FK state first; only update if needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/data-fix</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/dataverse/relationship-navigation.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: STANDARD — Dataverse data fix; no `.cs`".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 011 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Read R5 lessons-learned `Gap B` section on the playbook FK bypass.
+    </step>
+    <step order="3" name="Verify Current State">
+      Query Dataverse: confirm `summarize-document-for-chat@v1` playbook exists; confirm `SUM-CHAT@v1` action exists; capture current FK value of the playbook's node.
+    </step>
+    <step order="4" name="Author Idempotent Migration Script">
+      Write PowerShell / Web API script: (a) idempotent check (current FK already = `SUM-CHAT@v1` → no-op); (b) else update node's action FK. Include rollback note: original FK captured in script comment for manual reversal if needed.
+    </step>
+    <step order="5" name="🛑 Confirmation Gate — Data Fix Deployment">
+      PAUSE per project CLAUDE.md §Confirmation Triggers (production Dataverse data change). Present current FK + planned new FK + idempotency check; request approval.
+    </step>
+    <step order="6" name="Deploy Data Fix to Spaarke Dev">
+      Run script. Verify FK now points at `SUM-CHAT@v1`.
+    </step>
+    <step order="7" name="Verify Startup FK Validation">
+      Restart BFF (or invoke startup validation pass). Confirm: no FK-validation error logs for `summarize-document-for-chat@v1`.
+    </step>
+    <step order="8" name="Verify Idempotency">
+      Re-run script; confirm: no-op; no data destruction.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk each criterion; record evidence.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 024 ✅. Reset `current-task.md`. Report. Note BFF publish-size delta = 0 MB.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Dataverse row query + update</tool>
+    <tool name="dataverse-deploy">Skill for data deployment</tool>
+    <tool name="mcp__dataverse__read_query">MCP — query playbook + action rows</tool>
+    <tool name="mcp__dataverse__update_record">MCP — update FK column</tool>
+    <tool name="git">stage + commit migration script</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">scripts/Fix-SummarizeForChatPlaybookFK.ps1 (NEW, idempotent)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (024 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-024-fk-fix-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`summarize-document-for-chat@v1` playbook's node action FK = `SUM-CHAT@v1` action ID.</criterion>
+    <criterion testable="true">BFF startup FK-validation pass produces no error for this playbook.</criterion>
+    <criterion testable="true">Migration script is idempotent — re-run is a no-op.</criterion>
+    <criterion testable="true">Script committed to repo following ADR-027 conventions.</criterion>
+    <criterion testable="true">11 production node executors unchanged (NFR-08).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (no BFF code change).</criterion>
+    <criterion testable="true">Original FK value captured in script comment for manual reversal if needed.</criterion>
+  </acceptance-criteria>
+</task>
