@@ -47,6 +47,7 @@
 | [pcf-deploy](pcf-deploy/SKILL.md) | Build, pack, and deploy PCF controls via solution ZIP import | No | "deploy pcf", "build and deploy pcf", "pcf solution import" |
 | [code-page-deploy](code-page-deploy/SKILL.md) | Build and deploy React Code Page web resources to Dataverse | No | "deploy code page", "deploy web resource", "build webresource" |
 | [power-page-deploy](power-page-deploy/SKILL.md) | Build and deploy Vite/React SPA to Dataverse as a Power Pages web resource | No | `/power-page-deploy`, "deploy power pages", "deploy spa", "deploy external workspace" |
+| [master-deploy](master-deploy/SKILL.md) | **End-to-end unified-master deploy** — all 19 web resources + BFF API from one master HEAD. Encodes today's lessons (build-script fallbacks, Reporting workaround, BFF restore bug). Use after multiple PRs merge. | No | `/master-deploy`, "master deploy", "deploy from master", "deploy everything from master", "unified deploy" |
 | [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
 | [push-to-github](push-to-github/SKILL.md) | Commit changes and push to GitHub | No | `/push-to-github`, "push to github" |
