@@ -203,6 +203,14 @@ jobs:
         working-directory: src/client/shared/Spaarke.AI.Context
         run: npx tsc
 
+      - name: Install Spaarke.SdapClient deps
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.SdapClient (declarations required by UI.Components typecheck — multi-container R1 added @spaarke/sdap-client import in EntityCreationService.ts)
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npx tsc
+
       - name: Install Spaarke.UI.Components deps
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
