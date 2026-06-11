@@ -23,7 +23,7 @@
     "allowSyntheticDefaultImports": true,
     "baseUrl": ".",
     "paths": {
-      "@spaarke/sdap-client": ["../Spaarke.SdapClient/src/index.ts"]
+      "@spaarke/sdap-client": ["../Spaarke.SdapClient/dist/index.d.ts"]
     }
   },
   "include": ["src/**/*"],
