@@ -66,13 +66,7 @@ export interface InsightEnvelope {
  * - `decline` — insufficient evidence (per FR-06 exact text)
  * - `stale`   — cache TTL expired; loaded content shown with refresh affordance
  */
-export type InsightCardStatus =
-  | 'idle'
-  | 'loading'
-  | 'loaded'
-  | 'error'
-  | 'decline'
-  | 'stale';
+export type InsightCardStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'decline' | 'stale';
 
 /**
  * Discriminated state shape. `data` is present on `loaded` and `stale`;
@@ -152,10 +146,7 @@ export const initialInsightCardState: InsightCardState = { status: 'idle' };
  * @param action transition trigger
  * @returns next state (or current state if the transition is a no-op)
  */
-export function insightCardReducer(
-  state: InsightCardState,
-  action: InsightCardAction
-): InsightCardState {
+export function insightCardReducer(state: InsightCardState, action: InsightCardAction): InsightCardState {
   switch (action.type) {
     case 'BEGIN_FETCH':
       // Allowed from idle, stale, loaded, error, decline — but NOT from loading
@@ -206,9 +197,7 @@ export function insightCardReducer(
       // Skips the loading state to avoid a flash of skeleton when the host
       // already has the data. Stale flag lets the host signal that the stored
       // envelope is past its TTL and a background refresh is in flight.
-      return action.stale
-        ? { status: 'stale', data: action.data }
-        : { status: 'loaded', data: action.data };
+      return action.stale ? { status: 'stale', data: action.data } : { status: 'loaded', data: action.data };
 
     case 'RESET':
       return initialInsightCardState;

@@ -57,18 +57,10 @@ import {
 import { ArrowSync20Regular, Sparkle20Regular } from '@fluentui/react-icons';
 
 import { InsightDeclineError } from './InsightSummaryCard.types';
-import type {
-  InsightRegistryEntry,
-  InsightSummaryCardProps,
-} from './InsightSummaryCard.types';
+import type { InsightRegistryEntry, InsightSummaryCardProps } from './InsightSummaryCard.types';
 import type { Citation } from './Citation.types';
 import { isAssessmentCitation, isDocumentCitation } from './Citation.types';
-import {
-  DEFAULT_DECLINE_MESSAGE,
-  DEFAULT_ERROR_MESSAGE,
-  initialInsightCardState,
-  insightCardReducer,
-} from './state';
+import { DEFAULT_DECLINE_MESSAGE, DEFAULT_ERROR_MESSAGE, initialInsightCardState, insightCardReducer } from './state';
 import type { InsightCardState } from './state';
 import { useInsightSummaryCardStyles } from './useInsightSummaryCardStyles';
 
@@ -100,10 +92,7 @@ function topicDisplayFallback(topic: string): string {
 function isDeclineError(err: unknown): err is InsightDeclineError {
   return (
     err instanceof InsightDeclineError ||
-    (typeof err === 'object' &&
-      err !== null &&
-      'kind' in err &&
-      (err as { kind?: unknown }).kind === 'decline')
+    (typeof err === 'object' && err !== null && 'kind' in err && (err as { kind?: unknown }).kind === 'decline')
   );
 }
 
@@ -124,11 +113,7 @@ interface IRenderCitationProps {
   onCitationClick: ((citation: Citation) => void) | undefined;
 }
 
-const RenderCitation: React.FC<IRenderCitationProps> = ({
-  citation,
-  styles,
-  onCitationClick,
-}) => {
+const RenderCitation: React.FC<IRenderCitationProps> = ({ citation, styles, onCitationClick }) => {
   // Display text falls back to id when label is absent; both variants share this.
   const linkText = citation.label || citation.id;
 
@@ -180,9 +165,7 @@ const RenderCitation: React.FC<IRenderCitationProps> = ({
           href={href}
           onClick={handleClick}
           data-testid="citation-document-link"
-          {...(citation.documentId
-            ? { 'data-document-id': citation.documentId }
-            : {})}
+          {...(citation.documentId ? { 'data-document-id': citation.documentId } : {})}
         >
           {linkText}
         </Link>
@@ -215,11 +198,7 @@ interface IInsightBodyProps {
   onCitationClick: ((citation: Citation) => void) | undefined;
 }
 
-const InsightBody: React.FC<IInsightBodyProps> = ({
-  state,
-  styles,
-  onCitationClick,
-}) => {
+const InsightBody: React.FC<IInsightBodyProps> = ({ state, styles, onCitationClick }) => {
   switch (state.status) {
     case 'idle':
       return (
@@ -243,9 +222,7 @@ const InsightBody: React.FC<IInsightBodyProps> = ({
         <div className={styles.errorBlock} role="alert">
           <Text>{state.message}</Text>
           {state.diagnosticCode && (
-            <Text className={styles.errorDiagnostic}>
-              Diagnostic code: {state.diagnosticCode}
-            </Text>
+            <Text className={styles.errorDiagnostic}>Diagnostic code: {state.diagnosticCode}</Text>
           )}
         </div>
       );
@@ -257,11 +234,7 @@ const InsightBody: React.FC<IInsightBodyProps> = ({
       return (
         <div className={styles.declineBlock} role="status" aria-live="polite">
           <Text>{state.message}</Text>
-          {state.recommendedAction && (
-            <Text className={styles.declineRecommendation}>
-              {state.recommendedAction}
-            </Text>
-          )}
+          {state.recommendedAction && <Text className={styles.declineRecommendation}>{state.recommendedAction}</Text>}
         </div>
       );
 
@@ -277,17 +250,10 @@ const InsightBody: React.FC<IInsightBodyProps> = ({
             </div>
           )}
           {data.tldr && <Text weight="semibold">{data.tldr}</Text>}
-          {data.narrative && (
-            <Text className={styles.narrativeBody}>{data.narrative}</Text>
-          )}
-          {!data.tldr && !data.narrative && (
-            <Text>No insight content available.</Text>
-          )}
+          {data.narrative && <Text className={styles.narrativeBody}>{data.narrative}</Text>}
+          {!data.tldr && !data.narrative && <Text>No insight content available.</Text>}
           {citations.length > 0 && (
-            <div
-              className={styles.citationsList}
-              data-testid="insight-summary-card-citations"
-            >
+            <div className={styles.citationsList} data-testid="insight-summary-card-citations">
               <Text className={styles.citationsHeader}>Citations</Text>
               {citations.map(citation => (
                 <RenderCitation
@@ -398,9 +364,7 @@ export const InsightSummaryCard: React.FC<InsightSummaryCardProps> = ({
   // `(topic, mode)` tuple re-runs the check if the host changes scope while
   // the component remains mounted (rare; defensive).
   type RegistryStatus = 'idle' | 'checking' | 'absent' | 'disabled' | 'enabled' | 'error';
-  const [registryStatus, setRegistryStatus] = useState<RegistryStatus>(
-    onFetchRegistry ? 'idle' : 'enabled',
-  );
+  const [registryStatus, setRegistryStatus] = useState<RegistryStatus>(onFetchRegistry ? 'idle' : 'enabled');
   const registryEntryRef = useRef<InsightRegistryEntry | null>(null);
 
   useEffect(() => {
@@ -442,19 +406,11 @@ export const InsightSummaryCard: React.FC<InsightSummaryCardProps> = ({
         if (cancelled) {
           return;
         }
-        const message =
-          err instanceof Error && err.message
-            ? err.message
-            : 'Failed to resolve insight topic registry';
+        const message = err instanceof Error && err.message ? err.message : 'Failed to resolve insight topic registry';
         // Diagnostic log so operators can trace the failure. Per project
         // CLAUDE.md (Q-U1), no `@v1`/`@vN` vernacular in log message.
         // eslint-disable-next-line no-console
-        console.warn(
-          '[InsightSummaryCard] registry fetch failed for topic=%s mode=%s: %s',
-          topic,
-          mode,
-          message,
-        );
+        console.warn('[InsightSummaryCard] registry fetch failed for topic=%s mode=%s: %s', topic, mode, message);
         registryEntryRef.current = null;
         setRegistryStatus('error');
         // Surface the failure via the existing FR-06 error state. We use
@@ -527,7 +483,7 @@ export const InsightSummaryCard: React.FC<InsightSummaryCardProps> = ({
           dispatch({ type: 'FETCH_ERROR', message });
         });
     },
-    [onFetchInsight],
+    [onFetchInsight]
   );
 
   // ── Popover open handler — fetches on first open per FR-02 inline expand.
@@ -547,12 +503,9 @@ export const InsightSummaryCard: React.FC<InsightSummaryCardProps> = ({
     setDialogOpen(true);
   }, []);
 
-  const handleDialogOpenChange = useCallback(
-    (_ev: unknown, openData: { open: boolean }) => {
-      setDialogOpen(openData.open);
-    },
-    []
-  );
+  const handleDialogOpenChange = useCallback((_ev: unknown, openData: { open: boolean }) => {
+    setDialogOpen(openData.open);
+  }, []);
 
   // ── Manual refresh affordance (FR-20 / Task 034).
   //
@@ -577,10 +530,7 @@ export const InsightSummaryCard: React.FC<InsightSummaryCardProps> = ({
   // during `idle` (nothing to refresh yet — the on-open gate handles that)
   // and during `loading` (already fetching — the spinner is the affordance).
   const refreshVisible =
-    state.status === 'loaded' ||
-    state.status === 'stale' ||
-    state.status === 'error' ||
-    state.status === 'decline';
+    state.status === 'loaded' || state.status === 'stale' || state.status === 'error' || state.status === 'decline';
 
   return (
     <Card
@@ -608,11 +558,7 @@ export const InsightSummaryCard: React.FC<InsightSummaryCardProps> = ({
       <div className={styles.body}>
         <Popover positioning="below" withArrow onOpenChange={handlePopoverOpenChange}>
           <PopoverTrigger disableButtonEnhancement>
-            <Button
-              appearance="primary"
-              icon={<Sparkle20Regular />}
-              data-testid="insight-summary-card-trigger"
-            >
+            <Button appearance="primary" icon={<Sparkle20Regular />} data-testid="insight-summary-card-trigger">
               {triggerText}
             </Button>
           </PopoverTrigger>
@@ -631,11 +577,7 @@ export const InsightSummaryCard: React.FC<InsightSummaryCardProps> = ({
                   {topicLabel}
                 </Text>
               </div>
-              <InsightBody
-                state={state}
-                styles={styles}
-                onCitationClick={onCitationClick}
-              />
+              <InsightBody state={state} styles={styles} onCitationClick={onCitationClick} />
               <div className={styles.popoverFooter}>
                 {refreshVisible && (
                   <Button
@@ -695,11 +637,7 @@ export const InsightSummaryCard: React.FC<InsightSummaryCardProps> = ({
             <DialogBody>
               <DialogTitle>{topicLabel}</DialogTitle>
               <DialogContent className={styles.dialogBody}>
-                <InsightBody
-                  state={state}
-                  styles={styles}
-                  onCitationClick={onCitationClick}
-                />
+                <InsightBody state={state} styles={styles} onCitationClick={onCitationClick} />
               </DialogContent>
               <DialogActions>
                 {refreshVisible && (

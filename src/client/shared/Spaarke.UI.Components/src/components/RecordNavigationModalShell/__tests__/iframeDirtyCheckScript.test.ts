@@ -27,10 +27,7 @@ import { DIRTY_CHECK_REQUEST_TYPE, DIRTY_CHECK_RESULT_TYPE } from '../index';
 // up at `src/client/webresources/js/sprk_todo_dirty_check.js`.
 // ---------------------------------------------------------------------------
 
-const SCRIPT_PATH = path.resolve(
-  __dirname,
-  '../../../../../../webresources/js/sprk_todo_dirty_check.js'
-);
+const SCRIPT_PATH = path.resolve(__dirname, '../../../../../../webresources/js/sprk_todo_dirty_check.js');
 
 // Loader helper that resets `window` namespaces + listener sentinels between
 // suites so each test starts from a clean slate. The web resource installs
@@ -150,9 +147,7 @@ describe('onLoad — listener installation', () => {
     const ctx = buildExecutionContext(() => true);
     mod.onLoad(ctx);
     expect((window as any)[mod._internals.FORM_CONTEXT_HOLDER]).toBeTruthy();
-    expect(typeof (window as any)[mod._internals.FORM_CONTEXT_HOLDER].data.entity.getIsDirty).toBe(
-      'function'
-    );
+    expect(typeof (window as any)[mod._internals.FORM_CONTEXT_HOLDER].data.entity.getIsDirty).toBe('function');
   });
 
   it('refreshes the cached formContext on subsequent OnLoad (new record in same iframe)', () => {

@@ -31,12 +31,7 @@ export type { InsightEnvelope } from './state';
 // Re-export the discriminated Citation union + per-variant interfaces +
 // type guards from Citation.types — consumers import everything citation-
 // related from `@spaarke/ai-widgets` via the package barrel.
-export type {
-  Citation,
-  AssessmentCitation,
-  DocumentCitation,
-  UnknownCitation,
-} from './Citation.types';
+export type { Citation, AssessmentCitation, DocumentCitation, UnknownCitation } from './Citation.types';
 export { isAssessmentCitation, isDocumentCitation } from './Citation.types';
 
 // ---------------------------------------------------------------------------
@@ -111,10 +106,7 @@ export interface InsightRegistryEntry {
  * wiring; when absent, the component skips the registry check and renders
  * normally (back-compat for pre-Task-032 consumers).
  */
-export type InsightRegistryFetchFn = (
-  topic: string,
-  mode: string,
-) => Promise<InsightRegistryEntry | null>;
+export type InsightRegistryFetchFn = (topic: string, mode: string) => Promise<InsightRegistryEntry | null>;
 
 // ---------------------------------------------------------------------------
 // Public prop contract (FR-01)
