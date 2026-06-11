@@ -5,31 +5,28 @@
 
 ---
 
-## 🎯 Active task — none (PAUSED pending audit project)
+## 🎯 Active task — none (⏸ PAUSED pending R6 ship)
 
-> **🚦 STATUS UPDATE 2026-06-04 (later)**: r3 design scoping is **PAUSED** by owner direction. A separate project [`bff-ai-architecture-audit-r1`](../bff-ai-architecture-audit-r1/) was initiated to audit the BFF's accumulated AI infrastructure and produce canonical-architecture decisions. r3 resumes after that audit completes (~2 weeks).
+> **🚦 STATUS UPDATE 2026-06-10 (current)**: r3 remains **PAUSED**. The audit that originally caused the pause completed 2026-06-08 (✅ all 10 PRs merged including #341, #343, #344, #346, #347, #348, #351, #353, #357, #360). The audit's `r3-scope-recommendations.md` is now binding input.
 >
-> **What's already locked in r3 design.md and remains valid**:
-> - §2.1 Tier 1 cleanup (5 items, ~5d) — Wave 1 work; **safe to proceed independent of audit** (NullInsightsAi, v1.2 spe:// href, test-fixture hygiene, telemetry, index rename)
-> - §2.2.1 Tier 2.5 reconciliation — current scope is **PROVISIONAL** pending audit findings. The audit may revise the canonical-architecture decision, expanding or contracting the reconciliation work.
+> **NEW pause reason** (replaces audit-pending): R6 (`spaarke-ai-platform-unification-r6`) is reshaping consumer patterns that r3 Wave 2 touches. Coordinating "in-flight" R6 + r3 in parallel is impractical. Owner has pivoted capacity to [`ai-spaarke-insights-engine-widgets-r1`](../ai-spaarke-insights-engine-widgets-r1/) (NEW project 2026-06-10) for user-visible value first.
 >
-> **What's parked**:
-> - All further Tier 2 / 3 / 4 scope discussion
-> - design.md continued refinement
-> - spec.md / plan.md / task POML authoring
+> **REQUIRED READING before resumption**: [`notes/pre-design-context-2026-06-10.md`](notes/pre-design-context-2026-06-10.md) — full pause rationale, r3↔R6 coordination analysis, 3 specific resolution points, resumption plan.
+>
+> **What's now SHIPPED from r3's original scope (via audit)**:
+> - r3 Wave 1.1 `NullInsightsAi` facade ✅ — SUPERSEDED by audit Migration PR #1 (PR #351 merged 2026-06-04)
+>
+> **What's PARKED with r3**:
+> - r3 Wave 1.2 (spe:// href resolution v1.2 contract)
+> - r3 Wave 1.3 (test-fixture hygiene)
+> - r3 Wave 1.4 (telemetry maturity + dashboards)
+> - r3 Wave 1.5 (index rename `playbook-embeddings` → `spaarke-playbook-index`)
+> - r3 Wave 2 (InsightsIntentClassifier ↔ PlaybookDispatcher reconciliation — locked at ~1 week scope per audit)
+> - All Tier 2/3/4 design discussion
+>
+> **Resumption trigger** (all 3 conditions): R6 ships its surface-defining pillars (Pillar 3 + 5 + 6) AND owner directs resumption AND widgets-r1 reaches first proof-point.
 
-r3 is in **design phase / paused** — no implementation tasks yet exist. Active work shifts to the audit project; once audit completes, r3 resumes with informed wave 2 scope.
-
-**Next action (audit project)**: owner-mediated discussion of [`bff-ai-architecture-audit-r1/design.md`](../bff-ai-architecture-audit-r1/design.md) methodology + scope.
-
-**Next action (r3 — after audit)**: revisit r3 design.md §2 with audit's canonical-architecture decisions in hand. Lock final wave 2 / 3 scope. Then:
-
-1. Author full `design.md` content (§1 framing, §2 selected items, §3 decisions, §5 out-of-scope, §6 risks, §8 question answers)
-2. Decision records authored to [`decisions/`](decisions/)
-3. Derive `spec.md` from design
-4. Derive `plan.md` (wave structure + parallel groups + critical path)
-5. Generate task POMLs to `tasks/`
-6. Begin implementation per wave structure (likely Round 1 spike → Round 2 parallel → Round 3 docs per r2 proven pattern)
+**Next action at resumption**: see [`notes/pre-design-context-2026-06-10.md`](notes/pre-design-context-2026-06-10.md) §7 (step-by-step resumption sequence).
 
 ---
 
