@@ -4,8 +4,8 @@
 > **Last Updated**: 2026-06-11 (Wave B complete; 081 POML stale-state fix-up)
 > **Branch**: `work/smart-todo-r4-wave2`
 > **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
-> **Status**: 🔲 6 not-started · 🔄 0 in-progress · ✅ 25 complete · ❌ 0 blocked
-> **Active wave**: none — Wave A ✅ + Wave B ✅ (both build-verified); next = follow-up wave C (041 + 071)
+> **Status**: 🔲 4 not-started · 🔄 0 in-progress · ✅ 27 complete · ❌ 0 blocked
+> **Active wave**: none — Wave A ✅ + Wave B ✅ + Wave C ✅ (all build-verified); remaining: Phase 3 (092 deferred / 093 / 094) + Phase 4 (098)
 
 ---
 
@@ -127,9 +127,9 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [041](041-C-dirty-check-cross-frame-messaging.poml) | C — Cross-frame dirty-check postMessage protocol | cross-frame-messaging, dataverse-form | ❌ | 010, 040 | — |
+| ✅ | [041](041-C-dirty-check-cross-frame-messaging.poml) | C — Cross-frame dirty-check postMessage protocol (Wave C — JS web resource + shell + bind instructions doc) | cross-frame-messaging, dataverse-form | ❌ | 010, 040 | — |
 | ✅ | [042](042-C-retire-TodoDetailPanel.poml) | C — Retire TodoDetailPanel side-pane | cleanup | ❌ | 040 | — |
-| 🔲 | [071](071-F-orientation-persistence.poml) | F — Persist orientation via sprk_userpreference | user-preference | ❌ | 070 | — |
+| ✅ | [071](071-F-orientation-persistence.poml) | F — Persist orientation via sprk_userpreference | user-preference | ❌ | 070 | — |
 
 ---
 

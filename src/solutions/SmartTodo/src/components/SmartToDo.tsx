@@ -378,18 +378,29 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   );
 
   /**
-   * Board layout orientation (R4 task 070 / FR-28 / FR-29).
+   * Board layout orientation (R4 task 070 / 071 / FR-28 / FR-29 / FR-30).
    *
    * Toggled via `<OrientationToggle>` in the KanbanHeader. The swap is a
    * pure CSS-class change on the shared `<KanbanBoard>` — no React
    * re-mount, so cards keep their drag-drop + selection state across an
    * orientation flip (NFR-08).
    *
-   * Persistence of the user's choice is handled by R4 task 071 (writes
-   * `sprk_userpreference`). For task 070, the page always opens
-   * `horizontal` on first mount.
+   * Persisted via `useUserPreferences` (task 071) — the user's choice
+   * round-trips through `sprk_userpreference` (the SAME kanban-prefs JSON
+   * envelope that already carries thresholds + viewMode). On first visit
+   * the hook returns `DEFAULT_SMART_TODO_ORIENTATION` ("horizontal").
+   *
+   * `setOrientation` writes the new value optimistically AND persists via
+   * the hook — `updatePreferences` already does an optimistic local
+   * update, so a single call drives both state + persistence.
    */
-  const [orientation, setOrientation] = React.useState<Orientation>("horizontal");
+  const orientation = preferences.orientation;
+  const setOrientation = React.useCallback(
+    (next: Orientation) => {
+      void updatePreferences({ orientation: next });
+    },
+    [updatePreferences],
+  );
 
   const handleToggleCollapse = React.useCallback((columnId: string) => {
     setCollapsedColumns((prev) => {

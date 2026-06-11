@@ -53,6 +53,30 @@ function isValidViewMode(value: unknown): value is SmartTodoViewMode {
   return typeof value === 'string' && (VALID_VIEW_MODES as readonly string[]).includes(value);
 }
 
+/**
+ * SmartTodo Kanban orientation values (R4 FR-28 / FR-29 / NFR-08 — task 071).
+ *
+ * horizontal = columns laid out side-by-side (default on first visit)
+ * vertical   = columns stacked top-to-bottom
+ *
+ * Mirrors `KanbanOrientation` from `@spaarke/ui-components/Kanban` and
+ * `Orientation` from `@spaarke/ui-components/OrientationToggle`. Persisted
+ * in the SAME JSON payload as the kanban thresholds + viewMode
+ * (preference-type 100000000) — the spec FR-30 "SmartTodoOrientation"
+ * preference is round-tripped via the `orientation` field in this
+ * envelope, NOT via a new preferencetype optionset value.
+ */
+export type SmartTodoOrientation = 'horizontal' | 'vertical';
+
+/** Default orientation shown on first visit (FR-28). */
+export const DEFAULT_SMART_TODO_ORIENTATION: SmartTodoOrientation = 'horizontal';
+
+const VALID_ORIENTATIONS: ReadonlyArray<SmartTodoOrientation> = ['horizontal', 'vertical'];
+
+function isValidOrientation(value: unknown): value is SmartTodoOrientation {
+  return typeof value === 'string' && (VALID_ORIENTATIONS as readonly string[]).includes(value);
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -73,6 +97,13 @@ export interface ITodoKanbanPreferences {
    * SmartTodo Code Page. Defaults to "card" on first visit.
    */
   viewMode: SmartTodoViewMode;
+  /**
+   * R4 FR-28 / FR-29 / FR-30 (task 071) — persisted Kanban board
+   * orientation. Defaults to "horizontal" on first visit. Round-tripped
+   * via this shared envelope (same preferencetype as thresholds +
+   * viewMode) rather than a separate preferencetype optionset value.
+   */
+  orientation: SmartTodoOrientation;
 }
 
 export interface IUseUserPreferencesOptions {
@@ -99,6 +130,7 @@ const DEFAULT_PREFERENCES: ITodoKanbanPreferences = {
   todayThreshold: DEFAULT_TODAY_THRESHOLD,
   tomorrowThreshold: DEFAULT_TOMORROW_THRESHOLD,
   viewMode: DEFAULT_SMART_TODO_VIEW_MODE,
+  orientation: DEFAULT_SMART_TODO_ORIENTATION,
 };
 
 // ---------------------------------------------------------------------------
@@ -159,6 +191,9 @@ export function useUserPreferences(
               viewMode: isValidViewMode(parsed.viewMode)
                 ? parsed.viewMode
                 : DEFAULT_SMART_TODO_VIEW_MODE,
+              orientation: isValidOrientation(parsed.orientation)
+                ? parsed.orientation
+                : DEFAULT_SMART_TODO_ORIENTATION,
             });
           } catch {
             console.warn('[useUserPreferences] Failed to parse preference JSON, using defaults');
