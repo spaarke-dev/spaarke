@@ -148,14 +148,27 @@ function Invoke-ComponentBuild {
             $nodeModulesPath = Join-Path $BuildPath "node_modules"
             if (-not (Test-Path $nodeModulesPath)) {
                 Write-Host "        installing (no node_modules)..." -ForegroundColor DarkGray
-                $installOutput = & npm install --legacy-peer-deps --no-audit --no-fund 2>&1
+                # Localize $ErrorActionPreference inside the script block so
+                # benign stderr emissions from npm don't become terminating
+                # exceptions under the script's outer 'Stop' preference. See
+                # 2026-06-11 incident: every Vite solution was marked FAILED in
+                # batch because rollup's "/* #__PURE__ */" warnings were
+                # captured via 2>&1 and promoted to terminating errors, even
+                # though $LASTEXITCODE was 0 and the build succeeded.
+                $installOutput = & {
+                    $ErrorActionPreference = 'Continue'
+                    npm install --legacy-peer-deps --no-audit --no-fund 2>&1
+                }
                 if ($LASTEXITCODE -ne 0) {
                     throw "npm install failed (exit code $LASTEXITCODE)`n$($installOutput | Out-String)"
                 }
             }
 
-            # npm run build
-            $buildOutput = & npm run build 2>&1
+            # npm run build (same localized $ErrorActionPreference rationale)
+            $buildOutput = & {
+                $ErrorActionPreference = 'Continue'
+                npm run build 2>&1
+            }
             if ($LASTEXITCODE -ne 0) {
                 throw "npm run build failed (exit code $LASTEXITCODE)`n$($buildOutput | Out-String)"
             }
