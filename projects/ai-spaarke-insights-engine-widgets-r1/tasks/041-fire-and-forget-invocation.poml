@@ -1,7 +1,7 @@
 <task id="041" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Fire-and-forget invocation (FR-18 staleness check)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>4</phase>
     <tags>form, javascript, async</tags>
@@ -53,4 +53,8 @@
     <criterion testable="true">POST does NOT block form TTI</criterion>
     <criterion testable="true">Promise rejection only logged, never surfaced</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-11. `_firePrewarm` body replaced with `fetch('/api/insights/ask', { ... })` invocation. POST body: `{ topic: 'matter-health', mode: 'single', subject: 'matter:{guid}', parameters: {} }`. Detached Promise via `pending.then(onFulfilled, onRejected).catch(...)` — no `await`, double-layered swallow ensures no "Uncaught (in promise)" runtime warnings. Fresh-envelope path returns early (no POST). Create-mode (no record id) returns early. Synchronous failures + async rejections both `console.warn` only — never surfaced to user. `_version` bumped 0.1.0 → 0.2.0. tsc clean (TypeScript 5.9.2). Compiled .js emitted alongside .ts.
+  </notes>
 </task>

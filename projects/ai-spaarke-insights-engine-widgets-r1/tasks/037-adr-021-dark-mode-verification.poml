@@ -1,7 +1,7 @@
 <task id="037" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>ADR-021 dark mode verification (semantic tokens)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1.5h</estimated-effort>
     <phase>3</phase>
     <tags>ui, fluent-ui, dark-mode, adr-021</tags>

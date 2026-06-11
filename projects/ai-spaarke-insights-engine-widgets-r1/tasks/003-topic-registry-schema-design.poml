@@ -1,7 +1,7 @@
 <task id="003" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>sprk_aitopicregistry entity design + ADR check</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <phase>0</phase>
     <tags>foundation, dataverse, schema-design</tags>

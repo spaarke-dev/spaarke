@@ -1,7 +1,7 @@
 <task id="090" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Project wrap-up (lessons-learned, README → Complete)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>7</phase>
     <tags>wrap-up, lessons-learned</tags>
@@ -59,4 +59,12 @@
     <criterion testable="true">14 of 15 SCs pass; SC-12 marked DEFERRED with r2+ pointer</criterion>
     <criterion testable="true">Owner sign-off recorded</criterion>
   </acceptance-criteria>
+
+  <notes date="2026-06-11">
+    Completed 2026-06-11. Acceptance:
+    - README §4 status table updated to Complete; implementation, UAT, production-ready packaging, lessons-learned + wrap-up all ✅; SC-15 marked operator-gated 🟡; SC-12 DEFERRED ⏭️; FR-19 visible-render PARTIAL 🟡.
+    - notes/lessons-learned.md authored with 3 sections: What shipped (1.1 framework, 1.2 Matter integration, 1.3 BFF, 1.4 UAT, 1.5 tutorial, 1.6 production-ready packaging); What changed mid-flight (2.1 Q-U3 feedback defer, 2.2 R5 sparkle wiring flipped to net-new, 2.3 ADR-014→Audit DR-007 citation fix, 2.4 IIFE bundle gap, 2.5 playbookVersion omission, 2.6 Task 041 wire-shape P1 fix, 2.7 Task 053 dedup added not just verified); What to improve in r2 (3.1 IIFE bundle, 3.2 playbookVersion if needed, 3.3 Kiota CVE, 3.4 P1 register, 3.5 feedback affordance, 3.6 VisualHost popover JSON-text consequence). Acceptance roll-up table §4 shows 14/15 PASS, SC-12 DEFERRED, SC-15 READY (operator gate).
+    - SC-15 owner sign-off is the operator gate; readiness checklist authored at notes/handoffs/production-deploy.md §7. Not recorded in this task because the walkthrough is the downstream operator action.
+    - current-task.md reset to "none" / "Project complete; r1 graduated".
+  </notes>
 </task>

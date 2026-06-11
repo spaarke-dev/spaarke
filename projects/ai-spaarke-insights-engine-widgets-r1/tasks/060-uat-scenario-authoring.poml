@@ -1,7 +1,7 @@
 <task id="060" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>UAT scenario authoring (3 personas)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>6</phase>
     <tags>uat, planning, docs</tags>

@@ -1,7 +1,7 @@
 <task id="011" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Deploy sprk_aitopicregistry entity to dev Dataverse</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1h</estimated-effort>
     <phase>1</phase>
     <tags>dataverse, deploy, schema, deploy</tags>
@@ -55,4 +55,10 @@
     <criterion testable="true">Web API list endpoint returns 200 with empty value array</criterion>
     <criterion testable="true">Alternate key (topicname, mode) is enforced (attempt duplicate insert fails)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-10. Entity sprk_aitopicregistry live in spaarkedev1. All 3 acceptance criteria PASS:
+    (1) MCP describe shows all 10 sprk_ fields with correct types/sizes; (2) Web API list returns HTTP 200 + empty value; (3) duplicate insert on (topicname, mode) returned HTTP 412 Precondition Failed.
+    Idempotency confirmed: first real run had metadata-propagation race after entity-create (first attribute add failed with 0x80060888); second idempotent run skipped entity create and added all 9 attributes + alt key + published. Handoff: notes/handoffs/topic-registry-deploy.md.
+  </notes>
 </task>

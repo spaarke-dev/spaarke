@@ -1,7 +1,7 @@
 <task id="004" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>adr-check spec.md sweep (verify NFR-09 compliance)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1.5h</estimated-effort>
     <phase>0</phase>
     <tags>foundation, adr-check, quality-gate</tags>

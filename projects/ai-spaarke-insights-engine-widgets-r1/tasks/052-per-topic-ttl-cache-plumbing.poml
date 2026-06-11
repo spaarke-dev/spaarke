@@ -1,7 +1,7 @@
 <task id="052" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Per-topic TTL plumbing (extend IInsightsPlaybookExecutionCache)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4h</estimated-effort>
     <phase>5</phase>
     <tags>bff, cache, dotnet</tags>
@@ -61,4 +61,53 @@
     <criterion testable="true">Tests verify per-topic TTL behavior</criterion>
     <criterion testable="true">Publish-size delta &lt;5 MB</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-11 (Wave 2a parallel sibling to 013, 024, 033, 040, 051).
+
+    **Approach (audit DR-002 / ADR-010 / DR-008 compliant)**:
+    - NO new cache abstraction added; `IInsightsPlaybookExecutionCache` interface UNCHANGED.
+    - NEW sealed POCO `TopicRegistryTtlLookup` (NOT a new interface seam — ADR-010): in-process
+      mirror of enabled `sprk_aitopicregistry` rows, lazy-loaded + 5-min refresh window. Singleton.
+    - `InsightsPlaybookExecutionCache` ctor gains OPTIONAL `TopicRegistryTtlLookup? registryTtl`
+      param + `IOptionsMonitor<InsightsPlaybookNameMapOptions>?` is consumed inside the lookup.
+      Backward compatible: existing 15 `InsightsPlaybookExecutionCacheTests` still pass unchanged.
+    - DI registration co-located in `AnalysisServicesModule.AddInsightsCache` (already inside
+      compound-AI-ON gate — Endpoint↔DI Symmetry preserved per audit DR-008).
+    - TTL precedence: (1) per-call `request.Ttl` override, (2) registry TTL, (3) `DefaultTtl` (5 min).
+    - Dataverse read via existing singleton `IDataverseService.RetrieveMultipleAsync`, filtered
+      by `statecode=0 AND sprk_enabled=true` (matches §5.3 "Active topics" view).
+    - Reverse name-map: `InsightsPlaybookNameMapOptions.Map` (name→Guid) scanned linearly to
+      reverse-resolve playbook Guid → canonical name → registry TTL. Map sizes tiny per env.
+    - Graceful degradation per ADR-009: Dataverse failure → log Warning, keep previous snapshot,
+      fall back to `DefaultTtl`. Cache layer never throws.
+
+    **Files modified**:
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/TopicRegistryTtlLookup.cs` (NEW, 274 LOC)
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsPlaybookExecutionCache.cs` (ctor +
+      TTL resolution; ~30 LOC delta)
+    - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` (+1 registration line
+      + doc comment, ~10 LOC inside `AddInsightsCache`)
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/CacheTtlPerTopicTests.cs` (NEW, 8 tests)
+
+    **Verification**:
+    - `dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release` → 0 errors,
+      16 pre-existing warnings (none in my changes).
+    - `dotnet test --filter "CacheTtlPerTopicTests|InsightsPlaybookExecutionCacheTests"` →
+      23/23 passed (8 new + 15 existing — backward compat verified).
+    - Publish-size: 45.99 MB compressed (per `Compress-Archive -CompressionLevel Optimal` on
+      `dotnet publish -c Release` output). Delta vs Task 005 baseline 44.67 MB = **+1.32 MB**
+      (well under the &lt;5 MB single-task threshold per bff-extensions §A.3 / NFR-01;
+      ceiling 60 MB is far above). Likely reflects cumulative parallel-sibling churn —
+      this task adds zero new NuGet packages.
+
+    **Constraints satisfied**:
+    - audit DR-002 (no new cache abstraction): ✅ — `IInsightsPlaybookExecutionCache` unchanged.
+    - ADR-009 (canonical distributed cache + metadata-cache exception documented): ✅
+    - audit DR-008 (Endpoint↔DI Symmetry): ✅ — co-located registration inside compound-AI-ON gate.
+    - ADR-010 (DI minimalism, no new interface seam): ✅ — `TopicRegistryTtlLookup` is a sealed POCO.
+    - bff-extensions §F (test update obligation): ✅ — 8 new tests added.
+    - Did NOT touch Task 051 territory (`Endpoints/InsightsEndpoints.cs`). All edits in
+      `Services/Ai/Insights/` + 1 line in `Infrastructure/DI/AnalysisServicesModule.cs`.
+  </notes>
 </task>

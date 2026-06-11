@@ -1,7 +1,7 @@
 <task id="051" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Emit widget.insightcard.invoked from invocation path</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>5</phase>
     <tags>telemetry, event-emission</tags>
@@ -55,4 +55,8 @@
     <criterion testable="true">Duration histogram populated</criterion>
     <criterion testable="true">App Insights KQL query returns events</criterion>
   </acceptance-criteria>
+
+  <notes>
+2026-06-11 — Completed. Wired `InsightWidgetsTelemetry` into `Api/Insights/InsightEndpoints.cs` (singular — task POML referenced `Endpoints/InsightsEndpoints.cs` which doesn't exist; actual file is `Api/Insights/InsightEndpoints.cs`). Activity span wraps `IInsightsAi.AnswerQuestionAsync` carrying subject GUID + correlationId per task 050 cardinality discipline. Stopwatch measures end-to-end duration recorded on histogram. RecordInvocation emits on all four exit paths (kill_switched / failed / success+cache_hit / success); cancellation + validation paths intentionally skip telemetry (not invocation outcomes). Build clean (0 errors). DI registration re-uses task 050 singleton — no new DI churn. App Insights empirical verification deferred to task 066 SC-11 post-deploy gate. See `notes/handoffs/telemetry-events-verified.md` for full handoff (dim mapping table, KQL queries pre-staged for ops, ADR-013/014/015/018/032 compliance check).
+  </notes>
 </task>

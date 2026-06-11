@@ -1,7 +1,7 @@
 <task id="002" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>R5 sparkle-wiring baseline grep (Assumption 2/11 OPEN INVESTIGATION)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>0</phase>
     <tags>foundation, investigation, dataverse, r5-archaeology</tags>

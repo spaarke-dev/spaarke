@@ -1,7 +1,7 @@
 <task id="022" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>UpdateRecord node config — write JSON envelope to Matter</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>2</phase>
     <tags>jps, playbook, persistence</tags>

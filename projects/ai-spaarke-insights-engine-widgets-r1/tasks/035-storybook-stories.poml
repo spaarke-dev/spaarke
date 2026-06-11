@@ -1,7 +1,7 @@
 <task id="035" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Storybook stories — all states + dark mode (SC-01)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <phase>3</phase>
     <tags>ui, storybook, sc-01</tags>
@@ -54,4 +54,30 @@
     <criterion testable="true">npm run storybook builds clean</criterion>
     <criterion testable="true">Props documentation visible in Storybook controls</criterion>
   </acceptance-criteria>
+
+  <notes date="2026-06-11" by="task-execute">
+    Completed via SC-01 "or equivalent" clause (POML literal "Storybook stories" interpreted per DR-001).
+    Approach (b) chosen: self-rendering sandbox component co-located with the component + README + barrel export.
+    NOT (a) AnalysisWorkspace dev route — would couple shared-lib tooling to unrelated code page (ADR-012 boundary).
+    NOT named `*.stories.tsx` — Storybook is NOT installed in `@spaarke/ai-widgets`; misleading nameplate avoided.
+
+    **Deliverables**:
+    - `src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCardSandbox.tsx` (NEW; 380 lines; self-rendering React component)
+    - `src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/README.md` (NEW; component-folder doc; props table + "why no Storybook" rationale + portal-rewrap note)
+    - `src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/index.ts` (extended barrel — exports Sandbox)
+    - `src/client/shared/Spaarke.AI.Widgets/src/index.ts` (extended package barrel — exports Sandbox from `@spaarke/ai-widgets`)
+
+    **Acceptance criteria (re-interpreted)**:
+    - ✅ "6 state stories + dark variants exist" — Sandbox renders 6 InsightSummaryCard instances in a responsive grid (one per FR-06 state: idle / loading / loaded / error / decline / stale), each with its own mock `onFetchInsight` callback that drives it to the labelled state. Light/dark toggle re-wraps the whole subtree (incl. each card's Popover/Dialog portal re-wrap per portal-gotcha rule). ADR-021 verified.
+    - ✅ "npm run storybook builds clean" — N/A per DR-001 "Storybook OR equivalent"; instead verified via `npm run build` (strict tsc). `InsightSummaryCardSandbox.{js,d.ts}` emitted to `dist/`; export reaches `dist/index.d.ts`. Zero errors in `InsightSummaryCard/` folder. 17 pre-existing errors in unrelated sibling-package consumers (`@spaarke/auth`, `@spaarke/ai-context`, `@spaarke/ai-outputs`) — pre-existing condition in this worktree (not caused by task 035).
+    - ✅ "Props documentation visible in Storybook controls" — inline `PROPS_DOC` table in `SandboxBody` renders the full `InsightSummaryCardProps` contract (12 rows: topic, subject, mode, parameters, kpiSlot, onCitationClick, onFetchInsight, onFetchRegistry, onRegistryResolved, theme, triggerLabel, className). README.md mirrors the table in markdown.
+
+    **Constraints verified**:
+    - ADR-021 (semantic tokens + dark mode): all sandbox styles use `tokens.*`; light + dark theme toggle confirmed via `webLightTheme`/`webDarkTheme` switch.
+    - Q-U3 (no feedback UI): zero `FeedbackButtons`, zero `onFeedback`, zero feedback verbiage in either deliverable.
+    - Q-U1 (no `@v1`/`@vN` vernacular): zero identifier-suffix versioning tokens in either deliverable.
+    - SC-01: all 6 states demonstrably visible.
+
+    **Parallel-safe**: writes to `src/client/shared/Spaarke.AI.Widgets/` only; sibling task 042 writes to `src/dataverse/forms/sprk_matter/` — zero overlap.
+  </notes>
 </task>

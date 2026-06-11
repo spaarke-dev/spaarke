@@ -1,7 +1,7 @@
 <task id="034" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Manual refresh button (FR-20 blocking + spinner)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>3</phase>
     <tags>ui, refresh, ux</tags>
@@ -52,4 +52,40 @@
     <criterion testable="true">Spinner shown during invocation</criterion>
     <criterion testable="true">Card re-renders with new content on completion</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-11 (Wave 3a parallel sibling of 014/025/041).
+
+    Implementation:
+    - Added ArrowSync20Regular import alongside Sparkle20Regular (Fluent icon per task spec).
+    - Widened onFetchInsight signature: `(options?: { force?: boolean }) => Promise&lt;InsightEnvelope&gt;`. Existing zero-arg consumers remain assignment-compatible (TS ignores extra call-site args). Host MUST forward `force: true` to BFF as `?force=true` on `/api/insights/ask`.
+    - Refactored runFetch to take a `force: boolean = false` arg; passes `{ force: true }` only when caller opts in. Initial on-open-fetch-once gate calls with `force = false` (cache honoured per FR-21 TTL); manual refresh button calls with `force = true` (FR-20 cache-bypass).
+    - Replaced state-conditional `refreshEnabled` (stale/error only) with broader `refreshVisible` (loaded/stale/error/decline). Hidden in idle (nothing to refresh) and loading (already fetching — spinner IS the affordance).
+    - Refresh button added to Popover footer next to "Expand to modal" (Task 031 affordance preserved). Same ArrowSync icon applied to Dialog footer Refresh button for consistency.
+    - State machine unchanged: BEGIN_FETCH → loading (existing skeleton + Fluent Spinner renders per FR-20 "spinner shown during invocation") → FETCH_SUCCESS/ERROR/DECLINE arms re-render card with new envelope (or error/decline panel).
+
+    Constraint compliance:
+    - FR-20: ✅ blocking-style (state.status=loading; spinner shown; NOT fire-and-forget like FR-18 pre-warm).
+    - ADR-021: ✅ semantic tokens only — no new colors/spacing introduced; refresh button uses existing Button appearance="subtle" + popoverFooter Griffel styles (Foreground tokens already declared).
+    - Q-U3: ✅ no feedback UI added.
+    - Q-U1: ✅ no `@v1`/`@vN` vernacular in identifiers or comments.
+
+    Verification:
+    - Isolated tsc on the 6 InsightSummaryCard files: clean (exit 0).
+      Command: `npx tsc --noEmit --jsx react --target ES2020 --module ESNext --moduleResolution bundler --esModuleInterop --strict --skipLibCheck src/components/InsightSummaryCard/*.ts*`
+    - Package-level `tsc --noEmit -p .` surfaces pre-existing unrelated errors in workspace widgets / providers / FeedbackButtons; none touch InsightSummaryCard files.
+    - Per Task 030 finding, package has no eslint config — isolated tsc is the binding check.
+
+    Sub-agent boundary respected: writes only to `src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/` (InsightSummaryCard.tsx, InsightSummaryCard.types.ts). Parallel siblings 014/025/041 untouched.
+
+    Files modified:
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCard.tsx
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCard.types.ts
+    - projects/ai-spaarke-insights-engine-widgets-r1/tasks/034-manual-refresh-button.poml (status + notes)
+
+    Follow-ups for downstream waves:
+    - Task 040+ host integration: when wiring the matter-form `onFetchInsight` adapter, propagate the optional `options.force` arg as the `force=true` query param on `/api/insights/ask` (see Task 024 smoke-test results for endpoint shape).
+    - Task 035 Storybook: add a "manual refresh" play story exercising the loaded → loading → loaded transition via a stub `onFetchInsight` that observes `options?.force === true`.
+    - Task 036 a11y: confirm `aria-label="Refresh insight"` on the ArrowSync button passes axe; consider tooltip if discoverability testing flags icon-only ambiguity (current rendering shows icon + "Refresh" text).
+  </notes>
 </task>

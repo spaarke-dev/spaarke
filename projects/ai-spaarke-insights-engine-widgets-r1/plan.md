@@ -155,7 +155,8 @@ Final phase counts and exact parallel groups are owned by [`tasks/TASK-INDEX.md`
 - **ADR-010** DI minimalism
 - **ADR-012** Shared Component Library
 - **ADR-013** AI Architecture (use existing facade per audit DR-003)
-- **ADR-014** Playbook prompts in `sprk_analysisaction.sprk_systemprompt`
+- **ADR-014** AI Caching and Reuse Policy — versioned tenant-scoped artifact reuse (inherited via `IInsightsPlaybookExecutionCache`; per-topic TTL extends per FR-21)
+- **Audit DR-007** (canonical-architecture-decisions.md §2.7) — Playbook prompts in `sprk_analysisaction.sprk_systemprompt`, NOT `/Prompts/` `.txt` files (citation corrected 2026-06-10 per Task 004 finding; not ADR-014)
 - **ADR-018** Kill switches → 503 ProblemDetails
 - **ADR-019** ProblemDetails shape
 - **ADR-021** Fluent UI v9 + semantic tokens + dark mode (BINDING)

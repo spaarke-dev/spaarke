@@ -1,7 +1,7 @@
 <task id="033" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Citation rendering (type-discriminated per FR-07)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <phase>3</phase>
     <tags>ui, citation, render</tags>

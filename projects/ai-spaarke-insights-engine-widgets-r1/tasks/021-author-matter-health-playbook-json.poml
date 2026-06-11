@@ -1,7 +1,7 @@
 <task id="021" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Author matter-health-single playbook JSON (no @v suffix)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4h</estimated-effort>
     <phase>2</phase>
     <tags>jps, playbook, json</tags>
@@ -64,4 +64,8 @@
     <criterion testable="true">All referenced executor types exist in ActionType enum</criterion>
     <criterion testable="true">DeclineToFind branch covers EvidenceSufficiency failure path</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-10. File `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/matter-health-single.playbook.json` created (8 nodes). Q-U1 owner ban respected: zero `@v` in identifier/name/value/description/criteria fields; `$comment*` narrative keys reference r2's pre-existing `@v1`-suffixed action rows as data of record (they are not r1 identifiers — Deploy-Playbook.ps1 will resolve action-row FKs via the bare actionCode strings, with deploy-time aliasing/re-keying decisions noted inline at each $comment-actionCode for Wave 1B task 023). FR-11 executor coverage: LiveFact=80 (queryMatterContext), QueryDataverse=51 (queryKpiAssessments — KPI fetch via fetchXml across all 3 Performance Areas per FR-13), IndexRetrieve=90 (retrieveObservations — graceful empty per FR-11), EvidenceSufficiency=100 (checkSufficiency — kpiAssessments.min=2 per design.md §4.4), AgentService=60 (synthesize — references Task 020 actionCode `matter-health-synthesis` row 5981632e-4165-f111-ab0c-7ced8ddc4cc6 per audit DR-007), GroundingVerify=70 (groundCitations), ReturnInsightArtifact=120 (ReturnInsightArtifactNode literal name preserved per InsightsPlaybookExecutionCache.cs:59), DeclineToFind=110 (declineInsufficient dependsOn:[checkSufficiency], wired via checkSufficiency.insufficientBranch). UpdateRecord persistence to sprk_matter.sprk_performancesummary is intentionally deferred to sibling task 022 per `$comment-updateRecord-note` in the playbook JSON. JSON parses cleanly via python json.load; all 8 actionType values resolve to ActionType enum entries in INodeExecutor.cs.
+  </notes>
 </task>

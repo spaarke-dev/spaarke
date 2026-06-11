@@ -1,7 +1,7 @@
 <task id="053" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Concurrency dedup verification (FR-22)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>5</phase>
     <tags>bff, concurrency, idempotency</tags>

@@ -53,7 +53,7 @@ The `task-execute` skill ensures:
 | Audit DR-003 + [`.claude/patterns/ai/public-contracts-facade.md`](../../.claude/patterns/ai/public-contracts-facade.md) | Use existing `IInsightsAi.AnswerQuestionAsync`. Do NOT create new BFF facade for widget invocation — r1 is a consumer. |
 | Audit DR-008 + [`.claude/patterns/ai/endpoint-di-symmetry.md`](../../.claude/patterns/ai/endpoint-di-symmetry.md) | If any DI change is needed (unlikely in r1), follow Endpoint↔DI Symmetry Rule + add Null peer if facade. |
 | Audit DR-002 + [ADR-009](../../.claude/adr/ADR-009-caching.md) | Use existing `IInsightsPlaybookExecutionCache`. Extend TTL config to read from `sprk_aitopicregistry.sprk_cachettlminutes`. Do NOT add new cache abstractions. |
-| Audit canonical prompt pattern (§2.7) | Playbook prompts authored per Spaarke Canonical Prompt Construction Pattern. Prompts live in `sprk_analysisaction.sprk_systemprompt` rows per ADR-014, NOT in `/Prompts/` directories or `.txt` files. |
+| Audit DR-007 + canonical prompt pattern (§2.7) | Playbook prompts authored per Spaarke Canonical Prompt Construction Pattern. Prompts live in `sprk_analysisaction.sprk_systemprompt` rows per **Audit DR-007 / canonical-architecture-decisions.md §2.7** (audit-codified pattern, NOT ADR-014 — citation corrected 2026-06-10 per Task 004 finding), NOT in `/Prompts/` directories or `.txt` files. |
 | r2 multi-entity subject scheme | Use `matter:GUID` for r1. Framework-shape (but don't implement) `matter-collection:` and `cohort:` subjects for r2+. |
 | ADR-013 | AI features extend the BFF, not separate services. All AI calls flow through `IInsightsAi.*` facade methods. |
 | ADR-018 + ADR-019 | Kill-switch surfaces 503 ProblemDetails (NOT 500). |
@@ -76,7 +76,8 @@ The `task-execute` skill ensures:
 | ADR-010 | DI minimalism (no new interface seams in r1) | Telemetry meter is standalone |
 | ADR-012 | Shared Component Library (`@spaarke/ui-components` as SoT) | `InsightSummaryCard` ships in `@spaarke/ai-widgets` (per FR-03 finding) |
 | ADR-013 | AI Architecture (extends BFF, public facade contract) | Use existing `IInsightsAi.AnswerQuestionAsync` directly |
-| ADR-014 | Playbook prompts in `sprk_analysisaction.sprk_systemprompt` | Q-U4 — registry routes only; prompt canonical in playbook |
+| ADR-014 | AI Caching and Reuse Policy (versioned tenant-scoped artifact reuse) | Inherited via `IInsightsPlaybookExecutionCache`; per-topic TTL (FR-21) extends |
+| Audit DR-007 (canonical-architecture-decisions.md §2.7) | Playbook prompts live in `sprk_analysisaction.sprk_systemprompt`, NOT `/Prompts/` `.txt` files | Q-U4 — registry routes only; prompt canonical in playbook (citation corrected 2026-06-10) |
 | ADR-018 | Kill switches surface 503 ProblemDetails | FR-25 acceptance |
 | ADR-019 | ProblemDetails error response shape | FR-25 |
 | ADR-021 | Fluent UI v9 + semantic tokens + dark mode | All UI tasks |

@@ -1,13 +1,26 @@
 <task id="065" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Background pre-warm UAT (SC-10)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1h</estimated-effort>
     <phase>6</phase>
     <tags>uat, pre-warm, sc-10</tags>
     <dependencies>060</dependencies>
     <parallel-safe>true</parallel-safe>
     <rigor>STANDARD</rigor>
+    <completed>2026-06-11</completed>
+    <notes>
+      Sub-agent boundary respected: static verification of deployed insightWidgetOnLoad.js
+      v0.2.0 confirms Task 041 P1 wire-shape fix at line 177 ({ question:"matter-health-single",
+      subject:"matter:{guid}", parameters:{} }) — aligns with InsightAskRequest contract.
+      NFR-03 statically PASS (synchronous OnLoad return + detached Promise + double-layer
+      .catch swallow; no await, no blocking path). Staleness gating correct (fresh envelopes
+      skip POST per FR-18). Q-U1 compliant (no @v identifiers). Conditional caveat documented:
+      BFF deploy state of Insights:Playbooks:Map:Map (per smoke-test-results.md §3); recovery
+      paths A (raw Guid) + B (bff-deploy) covered. Operator script ready for live spaarkedev1
+      run (5 steps: PATCH stale envelope → reload form → observe Network POST 200/202 →
+      Performance API TTI check → cleanup). Deliverable: notes/uat-results/sc-10-pre-warm.md.
+    </notes>
   </metadata>
 
   <prompt>

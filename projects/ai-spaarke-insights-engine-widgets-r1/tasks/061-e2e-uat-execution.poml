@@ -1,7 +1,7 @@
 <task id="061" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>End-to-end UAT (SC-05 + SC-06 cache hit)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>6</phase>
     <tags>uat, e2e-test, sc-05</tags>

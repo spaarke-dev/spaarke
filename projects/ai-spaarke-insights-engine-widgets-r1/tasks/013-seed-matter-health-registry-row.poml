@@ -1,7 +1,7 @@
 <task id="013" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Seed matter-health / single registry row</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>0.5h</estimated-effort>
     <phase>1</phase>
     <tags>dataverse, seed-data</tags>
@@ -50,4 +50,8 @@
     <criterion testable="true">All 9 fields populated as specified</criterion>
     <criterion testable="true">No `@v1` substring in `playbookname`</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-11. Row Guid: c46b940e-4b65-f111-ab0c-70a8a590c51c. All 10 fields verified via Web API GET (sprk_name="matter-health/single", sprk_topicname="matter-health", sprk_mode="single", sprk_playbookname="matter-health-single", sprk_displayname="Matter Health Insight", sprk_icon="Sparkle24Filled", sprk_hostentity="sprk_matter", sprk_targetfield="sprk_performancesummary", sprk_cachettlminutes=60, sprk_enabled=true). Q-U1 compliance: 0 occurrences of "@v" in values. Q-U2 compliance: icon is bare Fluent component name "Sparkle24Filled".
+  </notes>
 </task>

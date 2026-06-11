@@ -1,7 +1,7 @@
 <task id="030" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Component scaffold InsightSummaryCard in @spaarke/ai-widgets</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4h</estimated-effort>
     <phase>3</phase>
     <tags>ui, fluent-ui, scaffold</tags>
@@ -77,4 +77,29 @@
       <expected>Card placeholder visible; no console errors</expected>
     </test>
   </ui-tests>
+
+  <notes>
+    Completed 2026-06-10.
+
+    Deliverables:
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCard.tsx
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCard.types.ts
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/useInsightSummaryCardStyles.ts
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/index.ts
+    - src/client/shared/Spaarke.AI.Widgets/src/index.ts (export added)
+
+    Acceptance criteria verified:
+    - npm run build passes for InsightSummaryCard files (0 TS errors in these files; 17 pre-existing repo-wide errors unrelated to this task — all in other widgets / missing @spaarke/auth + @spaarke/ai-context workspace deps)
+    - No `onFeedback` prop in types (grep-verified — Q-U3 honoured)
+    - No hex / rgba / var(--...) literals in styles (grep-verified — semantic tokens only per ADR-021)
+    - Placeholder Card renders with topic / subject / mode metadata visible
+
+    Lint note: `npm run lint` cannot run — package has no `eslint.config.js` (ESLint v9 requires flat config; pre-existing repo state). Type-strict tsc is the binding check. Filing this as observation, not a blocker — the package builds clean with strict TS.
+
+    Followups (Task 031):
+    - Replace placeholder body with 6-state machine (idle/loading/loaded/decline/stale/error)
+    - Add lazy-load callback wiring (reuse AiSummaryPopover.handleOpenChange shape per DR-001)
+    - Add Dialog modal-expand affordance (FR-02 — apply fluent-v9-portal-gotcha re-wrap)
+    - Wire `parameters` and `onCitationClick` into the invocation payload + citation render
+  </notes>
 </task>

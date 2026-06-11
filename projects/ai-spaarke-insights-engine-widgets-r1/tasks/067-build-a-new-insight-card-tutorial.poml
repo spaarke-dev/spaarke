@@ -1,7 +1,7 @@
 <task id="067" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Author docs/guides/BUILD-A-NEW-INSIGHT-CARD.md tutorial (SC-13)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <phase>6</phase>
     <tags>docs, tutorial, sc-13</tags>
@@ -28,7 +28,7 @@
   <constraints>
     <constraint source="Q-U7">Single engineer writes both component + tutorial</constraint>
     <constraint source="Q-U1">No `@v1`/`@vN` syntax in code samples</constraint>
-    <constraint source="ADR-014">Show prompt in sprk_analysisaction, NOT .txt file</constraint>
+    <constraint source="audit-DR-007 / canonical-architecture-decisions.md §2.7">Show prompt in sprk_analysisaction, NOT .txt file (audit-codified pattern; NOT ADR-014 — citation corrected 2026-06-10)</constraint>
   </constraints>
 
   <knowledge>

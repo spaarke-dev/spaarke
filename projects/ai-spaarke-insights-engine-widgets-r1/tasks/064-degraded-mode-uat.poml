@@ -1,7 +1,7 @@
 <task id="064" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Degraded-mode UAT (SC-14 empty index)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1.5h</estimated-effort>
     <phase>6</phase>
     <tags>uat, degraded, sc-14</tags>

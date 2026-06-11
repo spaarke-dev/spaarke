@@ -1,7 +1,7 @@
 <task id="062" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Decline rendering UAT (SC-07)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1h</estimated-effort>
     <phase>6</phase>
     <tags>uat, decline, sc-07</tags>

@@ -1,57 +1,63 @@
 # Current Task — Insights Engine Widgets r1
 
 > **Purpose**: Active task state tracker. Managed by `task-execute` skill.
-> **Status**: 🚧 Ready for Task 001 — no active task in progress.
 
 ---
 
-## 🎯 Active task — none (pre-execution)
+## Active task — none
 
-**Project state**: Plan + tasks generated 2026-06-10 via `/project-pipeline` constrained run. All 8 open spec questions resolved (Q-U1..Q-U8). Master rebased. README.md / CLAUDE.md / plan.md / spec.md all stable.
+### Task: none
 
-**Next action**: Run `task-execute` on the first 🔲 task in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
-
-```
-task-execute projects/ai-spaarke-insights-engine-widgets-r1/tasks/001-...poml
-```
-
-The `task-execute` skill will:
-1. Load task POML + applicable ADRs + patterns
-2. Declare rigor level (FULL / STANDARD / MINIMAL)
-3. Update this `current-task.md` with active state
-4. Checkpoint every 3 steps
-5. Run quality gates at Step 9.5 (code-review + adr-check) for FULL tasks
+**Status**: Project complete; r1 graduated (2026-06-11)
+**Next Action**: Run `/repo-cleanup` to validate structure; then `/merge-to-master` to bring `work/ai-spaarke-insights-engine-widgets-r1` onto master. Owner walkthrough (SC-15) is the operator-side closure gate — see [`notes/handoffs/production-deploy.md`](notes/handoffs/production-deploy.md) §7.
 
 ---
 
-## Phase status
+## Prior task — Wave 8 sole (090) — ✅ completed
 
-| Phase | Tasks | Status |
-|---|---|---|
-| Phase 0 — Foundation | 001–005 | 🔲 ready |
-| Phase 1 — Dataverse schema | 010–014 | 🔲 ready |
-| Phase 2 — Playbook authoring | 020–025 | 🔲 ready |
-| Phase 3 — UI component | 030–037 | 🔲 ready |
-| Phase 4 — Matter form integration | 040–044 | 🔲 ready |
-| Phase 5 — Telemetry + cache | 050–053 | 🔲 ready |
-| Phase 6 — UAT + documentation | 060–067 | 🔲 ready |
-| Phase 7 — Deploy + wrap | 080, 090 | 🔲 ready |
+### Task 090 — Project wrap-up (lessons-learned, README → Complete) (completed 2026-06-11)
+
+**Task File**: `tasks/090-project-wrap-up.poml`
+**Phase**: 7 (Project wrap)
+**Rigor Level**: STANDARD
+**Status**: completed
+**Started**: 2026-06-11
+**Completed**: 2026-06-11
+
+**Files Modified**:
+- `projects/ai-spaarke-insights-engine-widgets-r1/notes/lessons-learned.md` (NEW — 3 sections: shipped / changed / improve)
+- `projects/ai-spaarke-insights-engine-widgets-r1/README.md` (§Status banner + §4 status table + §5 working-artifacts column + footer line updated to Complete)
+- `projects/ai-spaarke-insights-engine-widgets-r1/tasks/TASK-INDEX.md` (Task 090 + Task 025 statuses → ✅)
+- `projects/ai-spaarke-insights-engine-widgets-r1/tasks/090-project-wrap-up.poml` (status → completed + notes appended)
+- `projects/ai-spaarke-insights-engine-widgets-r1/current-task.md` (this file — reset to "none")
+
+**Acceptance verdict**:
+- ✅ Criterion 1 (README status = Complete): PASS
+- ✅ Criterion 2 (lessons-learned.md with all 3 sections): PASS — §1 shipped (6 sub-sections), §2 changed (7 mid-flight changes), §3 improve (6 r2 backlog items)
+- ✅ Criterion 3 (14 of 15 SCs pass; SC-12 marked DEFERRED with r2+ pointer): PASS — full table in lessons-learned.md §4
+- 🟡 Criterion 4 (Owner sign-off recorded): READY — operator-side action; readiness checklist + walkthrough script at `notes/handoffs/production-deploy.md` §7. Not gating r1 close per orchestrator brief.
+
+**Completed Steps**:
+- [x] Step 0: Context recovery + Rigor declaration (STANDARD)
+- [x] Step 1: Load Task File (090 POML)
+- [x] Step 2: Initialize current-task.md (090 in-progress)
+- [x] Step 3: Context Budget Check (< 60%)
+- [x] Step 4: Author lessons-learned.md (3 sections)
+- [x] Step 5: Update README §4 status to Complete
+- [x] Step 6: Verify 14/15 SC acceptance + SC-12 DEFERRED
+- [x] Step 7: Reset current-task.md for "none" (project complete)
 
 ---
 
-## Recovery notes for next session
+## Quick Recovery
 
-If resuming in a fresh session:
-
-- Project root: `projects/ai-spaarke-insights-engine-widgets-r1/`
-- Branch: `work/ai-spaarke-insights-engine-widgets-r1` (rebased onto master 2026-06-10)
-- Draft PR: see project README §4 status table
-- Status: plan + tasks generated; no implementation has started
-- Next action: invoke `task-execute` on first 🔲 task in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md)
-- Spec edits applied 2026-06-10 (Q-U1..Q-U8 resolved); see [spec.md Resolution Decisions](spec.md#resolution-decisions)
-- FR-08 feedback affordance + SC-12 are DEFERRED to r2+ — do NOT implement in r1
-- `@v1`/`@vN` identifier-suffix vernacular is BANNED — do NOT introduce anywhere
+| Field | Value |
+|---|---|
+| **Task** | none — project complete |
+| **Step** | n/a |
+| **Status** | none |
+| **Next Action** | `/repo-cleanup` → `/merge-to-master`; owner walkthrough SC-15 (operator) per `notes/handoffs/production-deploy.md` §7 |
 
 ---
 
-*Reset 2026-06-10 by `/project-pipeline`. Updates flow as `task-execute` runs.*
+*Updated 2026-06-11 by `task-execute` for task 090 completion + project close. r1 graduated; lessons captured in `notes/lessons-learned.md`.*

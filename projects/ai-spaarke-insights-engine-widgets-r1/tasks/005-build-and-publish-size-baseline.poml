@@ -1,7 +1,7 @@
 <task id="005" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Build + publish-size baseline (NFR-01 verification)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1h</estimated-effort>
     <phase>0</phase>
     <tags>foundation, build, bff-publish-size</tags>
@@ -56,4 +56,10 @@
     <criterion testable="true">Delta vs 45.65 MB baseline recorded</criterion>
     <criterion testable="true">If delta &gt;5 MB or absolute &gt;55 MB, explicit escalation note included per constraint doc</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary date="2026-06-10">
+      Build: 0 errors, 16 pre-existing warnings. Publish: 44.67 MB compressed (46,835,862 bytes), 139.13 MB uncompressed, 260 files. Delta vs 45.65 MB constraint-doc baseline: -0.98 MB (within noise). Gap to 60 MB NFR-01 ceiling: 15.33 MB. No escalation required. Deliverable: notes/baseline-2026-06-10.md.
+    </completion-summary>
+  </notes>
 </task>

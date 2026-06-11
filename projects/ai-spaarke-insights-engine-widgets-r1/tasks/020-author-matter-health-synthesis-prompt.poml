@@ -1,7 +1,7 @@
 <task id="020" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Author Matter Health synthesis prompt via jps-action-create</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4h</estimated-effort>
     <phase>2</phase>
     <tags>jps, action-row, prompt</tags>
@@ -28,7 +28,7 @@
   </inputs>
 
   <constraints>
-    <constraint source="ADR-014">Prompt lives in sprk_analysisaction.sprk_systemprompt, NOT in .txt or /Prompts/ folder</constraint>
+    <constraint source="audit-DR-007 / canonical-architecture-decisions.md §2.7">Prompt lives in sprk_analysisaction.sprk_systemprompt, NOT in .txt or /Prompts/ folder (audit-codified pattern; NOT ADR-014 — citation corrected 2026-06-10)</constraint>
     <constraint source="audit-§2.7">Apply Canonical Prompt Construction Pattern</constraint>
     <constraint source="Q-U1">No `@v1`/`@vN` in action code</constraint>
     <constraint source="spec-FR-13">Exact KPI names: Guideline Compliance / Budget Compliance / Outcomes Achievement</constraint>
@@ -64,6 +64,10 @@
     <criterion testable="true">sprk_analysisaction row exists with action code `matter-health-synthesis` (no @v suffix)</criterion>
     <criterion testable="true">Test invocation produces output covering all 7 dimensions</criterion>
     <criterion testable="true">Output uses exact KPI Performance Area names per FR-13</criterion>
-    <criterion testable="true">No new .txt prompt file created (ADR-014)</criterion>
+    <criterion testable="true">No new .txt prompt file created (audit-DR-007 / canonical-architecture-decisions.md §2.7)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-10. sprk_analysisaction row id 5981632e-4165-f111-ab0c-7ced8ddc4cc6 (sprk_actioncode=matter-health-synthesis, executor action type=60 Agent Service). All 4 acceptance criteria PASS. 7 DIMENSION constraints encoded + dedicated KPI NAMING constraint forbidding abbreviation/synonym; FR-13 names appear 15/9/8 times. Zero @vN vernacular (Q-U1 ban respected). Two embedded examples cover full diagnostic (D1-D6 narrative) + Decline path (D7 evidence-gap). No .txt file created — canonical surface is sprk_systemprompt per audit DR-007 / canonical-architecture-decisions.md §2.7. Live LLM invocation deferred to playbook UAT task downstream (matter-health-single playbook does not exist yet). Handoff: notes/handoffs/matter-health-prompt-design.md.
+  </notes>
 </task>

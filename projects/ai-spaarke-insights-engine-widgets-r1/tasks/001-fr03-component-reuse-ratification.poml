@@ -1,7 +1,9 @@
 <task id="001" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>FR-03 pre-flight ratification — DR-001 component reuse</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-10</completed>
+    <completion-note>Empirical investigation RATIFIES plan-time FR-03 finding. No divergence — no owner escalation required. Deliverables: notes/insight-component-reuse-investigation.md + decisions/DR-001-component-reuse.md.</completion-note>
     <estimated-effort>3h</estimated-effort>
     <phase>0</phase>
     <tags>foundation, investigation, ui, decision-record</tags>

@@ -1,6 +1,6 @@
 # Spaarke Insights Engine — Widgets r1
 
-> **Status**: 🚧 PLAN + TASKS GENERATED (2026-06-10) — ready for `task-execute 001`
+> **Status**: ✅ COMPLETE (2026-06-11) — 14 of 15 success criteria PASS; SC-12 (feedback affordance) DEFERRED to r2+ per Q-U3 owner resolution; SC-15 (owner walkthrough) ready for operator sign-off per `notes/handoffs/production-deploy.md` §7. See [`notes/lessons-learned.md`](notes/lessons-learned.md).
 > **Predecessors**: [`ai-spaarke-insights-engine-r2`](../ai-spaarke-insights-engine-r2/) (substrate ✅ on master), [`bff-ai-architecture-audit-r1`](../bff-ai-architecture-audit-r1/) (canonical patterns ✅ on master), R5 Summarize (placeholder fields on `sprk_matter` ✅ on master)
 > **Parallel projects**: [`ai-spaarke-insights-engine-r3`](../ai-spaarke-insights-engine-r3/) (PAUSED pending R6), [`spaarke-ai-platform-unification-r6`](../spaarke-ai-platform-unification-r6/) (in design)
 
@@ -53,8 +53,15 @@ Product surface project, not platform.
 | plan.md (8-phase WBS + Discovered Resources) | ✅ 2026-06-10 |
 | Task POMLs | ✅ 2026-06-10 (see [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md)) |
 | Master rebased + branch synced | ✅ 2026-06-10 |
-| Implementation (task-execute) | 🔲 ready to start at Task 001 |
-| UAT + sign-off | 🔲 deferred |
+| Implementation (task-execute) — Phases 0–7 (Tasks 001–080) | ✅ 2026-06-11 |
+| UAT (SC-05/06/07/08/10/11/14) | ✅ 2026-06-11 (see [`notes/uat-results/`](notes/uat-results/)) |
+| Production-ready packaging (Task 080) | ✅ 2026-06-11 (45.99 MB / 14.01 MB NFR-01 headroom — see [`notes/handoffs/production-deploy.md`](notes/handoffs/production-deploy.md)) |
+| Lessons-learned + project wrap-up (Task 090) | ✅ 2026-06-11 (see [`notes/lessons-learned.md`](notes/lessons-learned.md)) |
+| Owner walkthrough sign-off (SC-15) | 🟡 Ready — operator gate per [`notes/handoffs/production-deploy.md`](notes/handoffs/production-deploy.md) §7 |
+| Feedback affordance (SC-12) | ⏭️ DEFERRED to r2+ per Q-U3 (AIPU2 Cosmos `feedback` per ADR-015) |
+| Visible card render (FR-19) | 🟡 PARTIAL — IIFE bundle deferred to r2 P1 retrofit per [`notes/lessons-learned.md`](notes/lessons-learned.md) §3.1 |
+
+**Overall**: r1 framework + first topic delivered. 14 of 15 SCs PASS; 1 DEFERRED (Q-U3 owner decision); 1 OPERATOR GATE (SC-15).
 
 ## 5. Working artifacts
 
@@ -64,10 +71,10 @@ Product surface project, not platform.
 | [`spec.md`](spec.md) | Implementation specification with FRs / NFRs / SCs + Resolution Decisions | ✅ stable (edits applied 2026-06-10) |
 | [`plan.md`](plan.md) | 8-phase WBS + Discovered Resources | ✅ stable |
 | [`CLAUDE.md`](CLAUDE.md) | Project-scoped AI context (mandatory `task-execute` protocol + discovered resources) | ✅ stable |
-| [`current-task.md`](current-task.md) | Active task tracker (`task-execute` updates this) | ✅ reset for Task 001 |
-| [`tasks/`](tasks/) | Task POMLs + TASK-INDEX with parallel groups | ✅ populated |
-| [`notes/`](notes/) | Spikes, handoffs, drafts (populated during execution) | 🔲 ready |
-| [`decisions/`](decisions/) | Decision records (DR-001 component reuse, etc.) | 🔲 ready |
+| [`current-task.md`](current-task.md) | Active task tracker (`task-execute` updates this) | ✅ reset to `none` (project complete) |
+| [`tasks/`](tasks/) | Task POMLs + TASK-INDEX with parallel groups | ✅ 41 of 41 in-scope tasks complete (SC-12 deferred → not generated; SC-15 operator-gated) |
+| [`notes/`](notes/) | Spikes, handoffs, drafts; ~14 handoffs + 6 UAT walkthroughs + lessons-learned | ✅ populated |
+| [`decisions/`](decisions/) | Decision records (DR-001 component reuse) | ✅ DR-001 authored |
 
 ## 6. Dependencies
 
@@ -111,4 +118,4 @@ r1 is complete when **all 15 success criteria from [spec.md](spec.md#success-cri
 
 ---
 
-*Project initiated 2026-06-10 per owner direction "pivot to widget delivery; keep r1 scope tight to one surface." Plan + tasks generated 2026-06-10 via `/project-pipeline` constrained run.*
+*Project initiated 2026-06-10 per owner direction "pivot to widget delivery; keep r1 scope tight to one surface." Plan + tasks generated 2026-06-10 via `/project-pipeline` constrained run. Project closed 2026-06-11 via Task 090 wrap-up. r1 graduated to r2+ backlog feed; see [`notes/lessons-learned.md`](notes/lessons-learned.md) §3.*

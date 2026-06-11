@@ -1,7 +1,7 @@
 <task id="040" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Author Matter form OnLoad handler (net-new per Task 002)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <phase>4</phase>
     <tags>form, javascript, xrm</tags>
@@ -68,4 +68,16 @@
       <expected>Handler runs; form interactive immediately</expected>
     </test>
   </ui-tests>
+
+  <notes completed="2026-06-11" rigor="FULL">
+    Authored `insightWidgetOnLoad.ts` (12,213 bytes) + compiled `insightWidgetOnLoad.js` (9,867 bytes) under `src/dataverse/forms/sprk_matter/`.
+    Local `tsconfig.json` added (ES5 target, strict mode, no @types/xrm dep — minimal ambient Xrm namespace declared inline).
+    Namespace: `Spaarke.MatterInsight` (coexists with pre-existing `Spaarke.MatterKpi` per Task 002 baseline).
+    Non-blocking design: `Xrm.WebApi.retrieveRecord(...).then(...)` fire-and-forget; outer `onLoad` returns synchronously (NFR-03).
+    Graceful FR-17 handling: `_parseEnvelope` catches `JSON.parse` errors AND rejects non-object JSON primitives → null; decision distinguishes `absent` (null/empty) vs `unparseable` (legacy R5 text) for telemetry.
+    Staleness: `_computeDecision` returns one of `absent | unparseable | fresh | stale`. Threshold 60 min (overridable; matches FR-18 default).
+    Task 041 hand-off: `_firePrewarm(formContext, decision)` is a logged no-op; Task 041 replaces body with `fetch('/api/insights/ask', ...)`.
+    Verification: 12/12 unit tests pass (parse: null/empty/legacy text/JSON primitive/object; decision: absent/unparseable/no generatedAt/90min old/10min old/bad date). `npx tsc -p .` clean (strict mode, noImplicitAny, strictNullChecks).
+    No new ADRs, no BFF code, no UI rendering — handler is pure logic + Xrm.WebApi.
+  </notes>
 </task>

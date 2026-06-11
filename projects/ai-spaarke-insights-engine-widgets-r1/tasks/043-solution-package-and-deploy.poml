@@ -1,13 +1,25 @@
 <task id="043" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Solution package (FormXml + web resource); deploy</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <phase>4</phase>
     <tags>dataverse, deploy, solution, deploy</tags>
     <dependencies>040, 041, 042</dependencies>
     <parallel-safe>true</parallel-safe>
     <rigor>STANDARD</rigor>
+    <completed>2026-06-11</completed>
+    <notes>
+      Deployed to spaarkedev1 via scripts/temp/Deploy-MatterInsightCard.ps1 (Web API path).
+      3 web resources live (sprk_matter_insight_onload.js, sprk_matter_insight_card_mount.js,
+      sprk_matter_insight_card_host.html), 2 OnLoad handlers wired alongside pre-existing 3,
+      4 libraries on form. Customizations published. P1 GAP documented: @spaarke/ai-widgets
+      IIFE bundle + WebResource control on tab_report card_section_3 deferred (needs Vite/
+      esbuild config + pac solution import route). Phase 4 demo uses console-observable
+      pre-warm + mount-glue signals — visible card render is a r2/P1 retrofit.
+      See notes/handoffs/form-deploy.md for full handoff (gotchas, recovery path, operator
+      smoke test).
+    </notes>
   </metadata>
 
   <prompt>

@@ -167,12 +167,13 @@ r1 delivers a **reusable, topic-scoped, subject-aware Insight Summary widget fra
     ],
     "generatedAt": "2026-06-10T18:45:00Z",
     "playbookName": "matter-health-single",
-    "playbookVersion": "<from sprk_playbook.sprk_version>",
     "tenantId": "<Guid>",
     "dimensions": ["composite", "trend", "themes", "inflection", "critical", "risk", "evidenceGaps"]
   }
   ```
-  
+
+  > **NOTE (Task 025 reconciliation, 2026-06-11)**: `playbookVersion` is **intentionally omitted** from the in-envelope payload. The authoritative version source is `sprk_analysisplaybook.sprk_version` (Dataverse-side), resolvable via `playbookName='matter-health-single'`. Including it in-envelope would create a double source of truth. The in-envelope `playbookName` is bare per Q-U1 owner ban on version-suffix vernacular. See `notes/insight-envelope-schema.md` §6 for full rationale.
+
   Acceptance: post-invocation, `sprk_performancesummary` contains a valid JSON envelope; envelope schema documented in `notes/insight-envelope-schema.md`.
 
 - **FR-15**: Persisted envelope is consumable by reports, emails, notifications, and other downstream surfaces. Plain-text consumers extract `.body` from the JSON envelope (via Power Fx, plugin code, view/column transformation, or other mechanism owned by downstream consumer). r1 does NOT implement downstream consumers — it ENABLES them. Acceptance: schema documentation includes `.body` extraction guidance for downstream consumers (Power Fx example, plugin example).
@@ -236,7 +237,8 @@ r1 delivers a **reusable, topic-scoped, subject-aware Insight Summary widget fra
 - **ADR-019** — ProblemDetails: error response shape.
 - **ADR-032** — Null-Object Fail-Fast: facade Null peers throw `FeatureDisabledException` with stable `errorCode`. r1 relies on existing PR #351 Null peers (no new facades to add Null peers for).
 - **ADR-009** — Caching: use canonical `DistributedCacheExtensions.GetOrCreateAsync<T>`; in-process MemoryCache requires explicit ADR-009 exception XML doc.
-- **ADR-014** — Playbook prompts in Dataverse `sprk_analysisaction.sprk_systemprompt`, NOT .txt files.
+- **ADR-014** — AI Caching and Reuse Policy: derived AI artifacts (text, embeddings, completions) are cacheable with versioned, tenant-scoped keys. r1 inherits this via existing `IInsightsPlaybookExecutionCache`; per-topic TTL (FR-21) extends the policy.
+- **Audit DR-007 / `projects/bff-ai-architecture-audit-r1/notes/canonical-architecture-decisions.md` §2.7** — Playbook prompts live in Dataverse `sprk_analysisaction.sprk_systemprompt`, NOT in `/Prompts/` directories or `.txt` files. (Audit-codified pattern, not an ADR — consistent with NFR-09. Citation corrected 2026-06-10 per Task 004 adr-check finding.)
 - **ADR-010** — DI minimalism (no new interface seams in r1).
 - **ADR-001** — Single BFF runtime, no microservices.
 
@@ -356,7 +358,7 @@ Captured 2026-06-10 from owner interview:
 Where owner did not explicitly answer, proceeding with these assumptions. Open to override in implementation:
 
 1. **JSON envelope schema (FR-14)** — assumed structure documented; please confirm or amend during spec review
-2. **R5 popup wiring removal** — assumed the current R5 sparkle-icon-to-popup wiring on Matter form (linked to `sprk_performancesummary`) is REPLACED by the new `InsightSummaryCard` host. Old R5 popup is decommissioned. **OPEN INVESTIGATION**: Task 001 must grep R5 source + Matter FormXml to confirm what's actually wired (research found NO existing Matter form OnLoad handler in codebase — assumption may be incorrect; net-new form customization likely).
+2. **R5 popup wiring removal** — ~~assumed the current R5 sparkle-icon-to-popup wiring on Matter form (linked to `sprk_performancesummary`) is REPLACED by the new `InsightSummaryCard` host. Old R5 popup is decommissioned.~~ **RESOLVED 2026-06-10** (Task 002, see [`notes/r5-sparkle-wiring-baseline.md`](notes/r5-sparkle-wiring-baseline.md)): **No R5 popup on the Matter form to decommission.** The only Matter main form OnLoad handler in src is `Spaarke.MatterKpi.onLoad` (KPI subgrid refresh — `matter-performance-KPI-r1` deliverable, not R5, no sparkle). The `sprk_performancesummary`-bound sparkle that exists lives **inside the VisualHost PCF chart toolbar** as `AiSummaryPopover`, NOT on the Matter form. R5 itself shipped a chat-driven Summarize-document vertical slice (no Matter form work). **Phase 4 is NET-NEW Matter form customization** (no replacement step required).
 3. **Pre-warm scope** — form load only; scheduled background batch refresh deferred to r2
 4. **History** — always overwrite "current"; no audit trail in r1
 5. **Stored summary stale threshold** — 1 hour aligned to cache TTL (configurable per-topic via registry per FR-21)
@@ -365,7 +367,7 @@ Where owner did not explicitly answer, proceeding with these assumptions. Open t
 8. **Feedback storage** — TBD: dedicated Dataverse table OR App Insights custom event OR both (see Unresolved Q-U3)
 9. **UI library home** — investigate `@spaarke/ai-widgets` first per FR-03; fall back to `@spaarke/ui-components` if no existing pattern
 10. **`sprk_performancesummary` backwards compat** — assumed safe to overwrite R5's static placeholder text; please confirm no other consumers depend on the placeholder content
-11. **R5 sparkle icon currently wired** — assumed exists on Matter form pointing to `sprk_performancesummary`; r1 replaces this wiring with new `InsightSummaryCard`; **OPEN INVESTIGATION** (Task 001 deliverable): research found NO Matter form OnLoad handler or sparkle wiring in src tree — verify whether R5 wiring is in solution XML / unmanaged customization not in src; if absent, r1 is net-new form customization (not replacement)
+11. **R5 sparkle icon currently wired** — ~~assumed exists on Matter form pointing to `sprk_performancesummary`; r1 replaces this wiring with new `InsightSummaryCard`~~. **RESOLVED 2026-06-10** (Task 002, see [`notes/r5-sparkle-wiring-baseline.md`](notes/r5-sparkle-wiring-baseline.md)): No Matter form OnLoad handler wires a sparkle to `sprk_performancesummary` in src. The `sprk_performancesummary` consumer that DOES exist is the VisualHost PCF card toolbar `AiSummaryPopover` (PCF-internal — `src/client/pcf/VisualHost/control/components/{VisualHostRoot.tsx, CardChrome.tsx}`), reachable from the Matter Report Card tab's VisualHost trend cards. That popover is **out of scope for r1 Phase 4** (it's a PCF affordance, not a Matter form customization). Phase 4 is **NET-NEW**: net-new OnLoad handler for pre-warm (FR-17/18) + net-new `InsightSummaryCard` host placement. Downstream consequence (NOT r1): once the playbook writes JSON envelopes to `sprk_performancesummary`, the VisualHost popover for the Matter Health Composite card will render JSON text — a follow-up VisualHost PCF concern, separate from r1.
 12. **Modal expansion threshold** — UX TBD: auto-prompt modal when narrative >N characters/lines, or always manual expand only? Suggest manual-only for r1 (simpler)
 
 ---
@@ -379,7 +381,7 @@ Where owner did not explicitly answer, proceeding with these assumptions. Open t
 - [x] **Q-U3**: RESOLVED — **Feedback affordance DEFERRED to r2+** (owner decision); see Out of Scope, FR-08 deferred marker, SC-12 deferred marker
 - [x] **Q-U4**: RESOLVED — Playbook is canonical prompt source via `sprk_analysisaction.sprk_systemprompt`; registry maps topic→playbook by name only
 - [x] **Q-U5**: RESOLVED — Inherit Dataverse `RetrievePrincipalAccess` via playbook authz layer; no new FLS layer in r1; document inheritance
-- [x] **Q-U6**: RESOLVED — Power Apps form OnLoad via `Xrm.WebApi` (already in FR-17); no Power Automate flow; no React Code Page wrapper. **NOTE**: Research found NO existing handler in codebase — this is net-new customization (see Assumptions 2/11 OPEN INVESTIGATION)
+- [x] **Q-U6**: RESOLVED — Power Apps form OnLoad via `Xrm.WebApi` (already in FR-17); no Power Automate flow; no React Code Page wrapper. **NOTE**: Research found NO existing sparkle/AI OnLoad handler in codebase — this is net-new customization (confirmed 2026-06-10 by Task 002; see Assumptions 2/11 RESOLVED entries + [`notes/r5-sparkle-wiring-baseline.md`](notes/r5-sparkle-wiring-baseline.md))
 - [x] **Q-U7**: RESOLVED — Same engineer writes component + `BUILD-A-NEW-INSIGHT-CARD.md` tutorial (one task in plan, owner decision)
 - [x] **Q-U8**: RESOLVED — Meter name **`Sprk.Bff.Api.InsightWidgets`** (matches existing `Sprk.Bff.Api.<Feature>` convention used by all 9 BFF meters); r3 Wave 1.4 telemetry on separate meter; converge later
 

@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FormXml patch — hosts InsightSummaryCard on Matter form
+  =======================================================
+
+  Task 042 deliverable. Adds:
+    1. A new <library> registration for `sprk_/scripts/matter_insight_card_mount.js`
+       on the Matter main form's events collection.
+    2. A new <Handler> binding wiring the library's `Spaarke.MatterInsightCard.onLoad`
+       function to the form's OnLoad event (in addition to existing handlers).
+    3. A new <control> of class "WebResource" inside the existing Matter Health
+       card section, pointing at the HTML host web resource that wraps the
+       `<div id="spaarke-matter-insight-card-host"></div>` mount target.
+
+  Companion artefacts shipped together in Task 043 (solution package):
+    - Web resource: sprk_/scripts/matter_insight_card_mount.js
+       (compiled output of insightCardMount.ts)
+    - Web resource: sprk_/html/matter_insight_card_host.html
+       (static HTML containing the mount target div + bundle <script> tag)
+    - Web resource: sprk_/scripts/matter_insight_onload.js
+       (Task 040/041 deliverable; already registered separately per FR-18)
+    - Web resource: sprk_/scripts/spaarke_ai_widgets_bundle.js
+       (Task 043 deliverable — IIFE bundle of @spaarke/ai-widgets + React;
+        exposes `window.SpaarkeAiWidgets.mountInsightSummaryCard`)
+
+  This file is a PATCH (not a full FormXml replacement). The Task 043 solution
+  packaging step merges these fragments into the exported Matter form XML.
+
+  Form / control / section identifiers
+  -------------------------------------
+  Tab name:       "tab_matter_health"
+  Section name:   "section_matter_health_card"
+  Control name:   "WebResource_matter_insight_card"   (NEW per this patch)
+  Library name:   "sprk_/scripts/matter_insight_card_mount.js"   (NEW per this patch)
+
+  Both tab and section names mirror the existing "Matter Health card" surface
+  from matter-performance-KPI-r1 (verified via Task 002 R5 sparkle-wiring
+  baseline grep — the section exists and is the canonical "Matter Health"
+  surface on the Matter form). Final solution packaging (Task 043) MUST verify
+  the tab/section identifiers against the actual exported FormXml — names are
+  often suffixed (e.g., `tab_5`, `section_3`) by the platform.
+
+  Coexistence rules
+  -----------------
+  - The existing `Spaarke.MatterInsight.onLoad` (Task 040/041, pre-warm) and
+    `Spaarke.MatterKpi.onLoad` (matter-performance-KPI-r1) handlers are
+    UNCHANGED. Both remain registered alongside the new
+    `Spaarke.MatterInsightCard.onLoad`.
+  - Handler order: `Spaarke.MatterInsight.onLoad` (pre-warm) SHOULD fire before
+    `Spaarke.MatterInsightCard.onLoad` (render) so the pre-warm POST is
+    in-flight by the time the card mounts. The platform fires OnLoad handlers
+    in registered order; Task 043 verifies via the exported FormXml.
+-->
+
+<!-- ============================================================ -->
+<!-- 1. Library registration (Matter form events.libraries)       -->
+<!-- ============================================================ -->
+<libraries-patch>
+  <!--
+    Append this <library> entry to <events><libraries> in the Matter main form's
+    customizations.xml. The library `sprk_/scripts/matter_insight_card_mount.js`
+    is added as a NEW entry; existing entries (matter_insight_onload.js,
+    matter_kpi_onload.js, etc.) are preserved.
+  -->
+  <library name="sprk_/scripts/matter_insight_card_mount.js" libraryUniqueId="{REPLACE-WITH-NEW-GUID}" />
+</libraries-patch>
+
+<!-- ============================================================ -->
+<!-- 2. OnLoad handler binding (Matter form events.event[OnLoad]) -->
+<!-- ============================================================ -->
+<handlers-patch>
+  <!--
+    Append this <Handler> entry to the <event name="OnLoad"> <Handlers> collection.
+    Preserves existing handlers (Spaarke.MatterInsight.onLoad, Spaarke.MatterKpi.onLoad).
+  -->
+  <Handler
+    functionName="Spaarke.MatterInsightCard.onLoad"
+    libraryName="sprk_/scripts/matter_insight_card_mount.js"
+    handlerUniqueId="{REPLACE-WITH-NEW-GUID}"
+    enabled="true"
+    parameters=""
+    passExecutionContext="true" />
+</handlers-patch>
+
+<!-- ============================================================ -->
+<!-- 3. WebResource control on Matter Health card section         -->
+<!-- ============================================================ -->
+<section-control-patch
+  targetTab="tab_matter_health"
+  targetSection="section_matter_health_card">
+  <!--
+    Append this <row><cell><control/></cell></row> to the Matter Health card
+    section's <rows> collection. The control hosts a Power Apps WebResource
+    that renders the static HTML containing the mount target div.
+
+    width / height are starter values — Task 043 + Task 044 UX verification may
+    tune them. Width "fillRow" stretches the control to the section column
+    width (recommended for the card render surface).
+  -->
+  <row>
+    <cell id="{REPLACE-WITH-NEW-GUID}" showLabel="false" rowSpan="6" colSpan="2" auto="false">
+      <labels>
+        <label description="Matter Health Insight" languagecode="1033" />
+      </labels>
+      <control
+        id="WebResource_matter_insight_card"
+        classid="{9FDF5F91-88B1-47F4-AD53-C11EFC01A01D}"
+        indicationOfSubgrid="false">
+        <parameters>
+          <Url>$webresource:sprk_/html/matter_insight_card_host.html</Url>
+          <PassParameters>false</PassParameters>
+          <Security>false</Security>
+          <Scrolling>auto</Scrolling>
+          <Border>false</Border>
+        </parameters>
+      </control>
+    </cell>
+  </row>
+</section-control-patch>
+
+<!--
+  ============================================================
+  4. Companion HTML host web resource (separate file)
+  ============================================================
+
+  The web resource at `sprk_/html/matter_insight_card_host.html` MUST contain:
+
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <title>Matter Health Insight</title>
+          <style>
+            html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+            #spaarke-matter-insight-card-host {
+              width: 100%;
+              min-height: 200px;
+              padding: 8px;
+              box-sizing: border-box;
+            }
+          </style>
+        </head>
+        <body>
+          <div id="spaarke-matter-insight-card-host"></div>
+          <!-- React + ReactDOM + @spaarke/ai-widgets IIFE bundle (Task 043) -->
+          <script src="../scripts/spaarke_ai_widgets_bundle.js"></script>
+        </body>
+      </html>
+
+  The bundle script attaches `window.SpaarkeAiWidgets.mountInsightSummaryCard`,
+  which the parent form's `insightCardMount.js` invokes (the form-side handler
+  reaches into the iframe via the WebResource control's DOM bridge — Task 043
+  finalises the bridge mechanism if direct `getElementById` from the parent
+  scope is unavailable).
+
+  Cross-frame note
+  ----------------
+  Power Apps "WebResource" controls render inside an iframe. The mount glue
+  in `insightCardMount.ts` uses `document.getElementById(...)` which runs in
+  the PARENT (form) document; if the host div lives inside the iframe, the
+  resolution will fail and the mount will fall through to the warning log
+  ("host element not found"). Task 043 chooses one of two paths:
+    (a) Move the mount glue itself INTO the html web resource (so it runs in
+        the iframe scope) — simplest, isolates the React render entirely;
+    (b) Expose a `window.parent.Spaarke.MatterInsightCard._registerHost(...)`
+        bridge from the iframe to the parent — more complex, allows the parent
+        OnLoad handler to drive the lifecycle.
+
+  Task 042 ships the contract; Task 043 chooses (a) or (b) and updates this
+  patch + the html web resource accordingly.
+
+  ============================================================
+  5. Solution packaging (Task 043 scope)
+  ============================================================
+
+  Task 043 packages this patch + the .js compiled output + the html web
+  resource + the bundle web resource into a single managed solution and
+  imports to dev/UAT/prod via `pac solution import` per the canonical
+  Spaarke dataverse-deploy pattern.
+-->

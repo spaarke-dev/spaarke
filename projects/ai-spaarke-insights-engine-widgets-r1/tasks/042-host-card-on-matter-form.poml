@@ -1,7 +1,7 @@
 <task id="042" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Host InsightSummaryCard on Matter Health card</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <phase>4</phase>
     <tags>form, ui-integration</tags>
@@ -65,4 +65,27 @@
       <expected>Card visible; no blocking spinner</expected>
     </test>
   </ui-tests>
+
+  <notes>
+    Completed 2026-06-11. Wire-shape gap resolved via Option (b) — client sends `{ question: "matter-health-single", subject: "matter:{guid}", parameters: {} }`. No BFF change needed: `InsightEndpoints.Ask` (lines 176-198) already accepts `question` as either a Guid OR a canonical playbook name via `InsightsPlaybookNameMapOptions.ResolveOrDefault`; the `matter-health-single` → Guid map is registered per `notes/handoffs/playbook-deploy.md`.
+
+    Deliverables:
+      - `src/dataverse/forms/sprk_matter/insightCardMount.ts` (NEW; namespace `Spaarke.MatterInsightCard`; coexists with `Spaarke.MatterInsight.onLoad` and `Spaarke.MatterKpi.onLoad`)
+      - `src/dataverse/forms/sprk_matter/insightCardMount.js` (compiled output)
+      - `src/dataverse/forms/sprk_matter/insightCardMount.FormXml.patch.xml` (NEW; patch fragments for library + handler + section control)
+      - `src/dataverse/forms/sprk_matter/tsconfig.json` (extended `files` to include new TS)
+
+    Mount glue contract:
+      - Reads `sprk_performancesummary` via `Xrm.WebApi.retrieveRecord` (mirrors Task 040 pattern)
+      - Parses JSON envelope; passes via `initialEnvelope` prop → FR-19 immediate render
+      - `onFetchInsight` adapter POSTs to `/api/insights/ask` with correct wire shape; propagates `force` param per FR-20
+      - `onCitationClick` opens `Xrm.Navigation.openForm` for assessment + document citations; uses SPE href when present (FR-07)
+      - `_renderPlaceholder` fallback when `@spaarke/ai-widgets` bundle (Task 043) is not yet loaded — shows topic/subject/mode/envelope status + narrative preview so operators can verify mount wiring during Phase 4 staging
+
+    Smoke verification: tsc clean (TypeScript 5.9.2; strict mode; noEmitOnError). Live Dataverse mount NOT verified by sub-agent (no auth context); Task 043 packages + deploys the solution; Task 044 runs end-to-end form test (TTI NFR-03 + FR-19 immediate-render).
+
+    Task 041 follow-up flagged (P1, not blocking 042): Task 041's `_firePrewarm` POSTs `{ topic, mode, subject, parameters }` — the BFF returns 400 ProblemDetails for that shape. Per Task 041's silent-swallow design, this does NOT surface to the user, but the pre-warm benefit is lost. Recommended fix: update Task 041's `_firePrewarm` body to mirror `insightCardMount._invokeInsight` (use `{ question: "matter-health-single", subject, parameters }`). Filed as P1 follow-up in `current-task.md`.
+
+    Constraints honoured: spec FR-19 (immediate render via `initialEnvelope`), ADR-021 (themeId propagation; semantic tokens deferred to bundle), ADR-012 (host-agnostic card; all Xrm glue in mount), Q-U3 (no feedback prop wired), Q-U1 (no `@v` vernacular), NFR-03 (single requestAnimationFrame defer; fire-and-forget Promise chain).
+  </notes>
 </task>

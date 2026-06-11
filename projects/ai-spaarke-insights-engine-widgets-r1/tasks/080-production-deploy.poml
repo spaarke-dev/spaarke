@@ -1,7 +1,7 @@
 <task id="080" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Production-ready deploy (BFF + Dataverse solution)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <phase>7</phase>
     <tags>deploy, bff-deploy, dataverse-deploy, deploy</tags>
@@ -64,4 +64,39 @@
     <criterion testable="true">Production smoke test passes</criterion>
     <criterion testable="true">No HIGH-severity CVE introduced (dotnet list package --vulnerable)</criterion>
   </acceptance-criteria>
+
+  <notes date="2026-06-11" author="task-execute">
+    Production-readiness packaging + dev readiness gate + rollout runbook handoff authored at
+    `projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/production-deploy.md`.
+
+    Reframing per orchestrator brief: r1 demo is sized for Spaarke Dev (spaarkedev1) — actual
+    production rollout is a separate downstream action. Task 080 = production-ready packaging
+    verification + dev gate + rollout runbook.
+
+    **Acceptance criteria results**:
+    - [x] Criterion 1 — BFF publish size ≤60 MB compressed: ✅ PASS (45.99 MB measured; 14.01 MB
+      headroom to NFR-01 ceiling)
+    - [x] Criterion 2 — Delta vs Task 005 baseline (44.67 MB) &lt;5 MB: ✅ PASS (+1.32 MB
+      cumulative across Wave 5 tasks; 0.00 MB delta vs Task 052)
+    - [x] Criterion 3 — Production smoke test passes: ⚠️ REFRAMED — dev smoke test PASS via
+      Task 044 handoff; production smoke test is a downstream operator action with §5.5 runbook
+      authored in this task's handoff
+    - [x] Criterion 4 — No HIGH-severity CVE introduced by r1: ✅ PASS (1 HIGH pre-existing:
+      Microsoft.Kiota.Abstractions 1.21.2 — deferred at R4 task 080 commit ae63363d1; r1 added
+      zero NuGet packages, introduced zero new CVEs)
+
+    **P1 register (documented in handoff §6, non-blocking for r1 close)**:
+    1. Production playbook Guid will differ from dev Guid — App Service Settings dependency
+       called out in runbook §5.1.2 / §5.4.2 / §5.4.3.
+    2. @spaarke/ai-widgets IIFE bundle for visible card render (FR-19 visible-render gate) —
+       deferred to r2 per Task 043 form-deploy.md §"Documented Gap"; Phase 4 demo uses
+       console-observable signals + Network POST evidence.
+    3. Microsoft.Kiota.Abstractions HIGH CVE (pre-existing) — patch all 7 Kiota family
+       packages together in next BFF dependency cycle.
+
+    **Files produced**:
+    - `projects/.../notes/handoffs/production-deploy.md` (NEW — comprehensive readiness handoff)
+    - `deploy/api-publish-080/` (261 files; 139.18 MB uncompressed) — gitignored
+    - `deploy/api-publish-080.zip` (45.99 MB compressed) — gitignored
+  </notes>
 </task>

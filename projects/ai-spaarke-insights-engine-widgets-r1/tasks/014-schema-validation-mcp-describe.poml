@@ -1,7 +1,7 @@
 <task id="014" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Schema validation via MCP describe + Web API query</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>0.5h</estimated-effort>
     <phase>1</phase>
     <tags>dataverse, validation, mcp</tags>
@@ -51,4 +51,8 @@
     <criterion testable="true">All 5 validation steps pass</criterion>
     <criterion testable="true">Report explicitly states "Phase 2 cleared to start"</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-11. All 5 validation checks PASS. (1) MCP describe returned all 10 sprk_* fields with correct types/sizes/nullability. (2) Web API confirmed seed row c46b940e-4b65-f111-ab0c-70a8a590c51c with all 9 business fields exactly matching Task 013 notes; Q-U1 and Q-U2 compliance reaffirmed. (3) Alt-key query by sprk_topicname='matter-health' returned exactly 1 row (FR-05 mount-check filter shape confirmed). (4) Both forms present with formids matching Task 012 exactly: Main 1823746f-4665-f111-ab0c-7ced8ddc4cc6, Quick Create 5523746f-4665-f111-ab0c-7ced8ddc4cc6. (5) Report authored at notes/handoffs/phase-1-validation.md with explicit "Phase 2 cleared to start" statement (legacy framing — actual practical effect is Phase 7 production-deploy readiness gate since Phase 2 already complete except Task 025 parallel sibling). No blockers. No drift between handoff records and live Dataverse state.
+  </notes>
 </task>

@@ -1,7 +1,7 @@
 <task id="010" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Author sprk_aitopicregistry entity definition (9 fields)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <phase>1</phase>
     <tags>dataverse, schema, entity-design</tags>
@@ -59,4 +59,15 @@
     <criterion testable="true">Alternate key on (topicname, mode) defined</criterion>
     <criterion testable="true">Deploy script is idempotent</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-10. Deliverables:
+      - scripts/temp/Create-AiTopicRegistryEntity.json (canonical Web API payloads, 9 attributes + alt key + publish, JSON validates)
+      - scripts/temp/Deploy-AiTopicRegistryEntity.ps1 (idempotent deploy wrapper, DryRun support, PS syntax validates)
+    Pattern source: scripts/Create-AiPersonaEntity.ps1 (canonical exemplar; R6 Pillar 1 sibling).
+    Design implemented verbatim from notes/topic-registry-schema-design.md §8 (steps 1-5 in this task; steps 6-9 deferred to Task 012/014/011).
+    Constraints honored: Q-U1 (no @v1/@vN — documented in sprk_playbookname description), Q-U2 (sprk_icon as Fluent component name string — documented in sprk_icon description), Q-U4 (no sprk_systemprompt — registry routes only), NFR-09 (no new ADR).
+    ADR-014 citation correction applied: prompts canonical-source citation is Audit DR-007 / canonical-architecture-decisions.md §2.7, NOT ADR-014.
+    Task 011 deploys these artifacts to spaarkedev1 (next sequential task).
+  </notes>
 </task>

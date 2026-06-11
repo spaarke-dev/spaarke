@@ -1,7 +1,7 @@
 <task id="031" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>State machine (5+ states; compose Popover + Dialog)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6h</estimated-effort>
     <phase>3</phase>
     <tags>ui, fluent-ui, state-machine, portal-gotcha</tags>
@@ -84,4 +84,20 @@
       <expected>All surfaces honor active theme; no light fragments in dark mode</expected>
     </test>
   </ui-tests>
+
+  <notes>
+    Completed 2026-06-10. 6-state machine implemented via useReducer in state.ts
+    (idle / loading / loaded / error / decline / stale). InsightSummaryCard.tsx
+    composes Popover (inline expand from trigger button) + Dialog (modal expand
+    from Popover footer button). Both portal surfaces re-wrapped in
+    FluentProvider with `theme` prop per fluent-v9-portal-gotcha.md (Option A).
+    `InsightDeclineError` helper added for hosts to signal insufficient-evidence
+    outcomes via callback rejection. FR-06 exact text for error / decline
+    encoded as DEFAULT_ERROR_MESSAGE / DEFAULT_DECLINE_MESSAGE constants.
+    Q-U3 honoured (no onFeedback). Q-U1 honoured (no @v vernacular). ADR-021
+    semantic-token discipline verified (zero hex / rgba / var(--)). Strict tsc
+    passes on the four InsightSummaryCard files (package-wide build errors are
+    pre-existing baseline from unbuilt workspace deps — @spaarke/auth,
+    @spaarke/ai-context, etc. — not touched by this task).
+  </notes>
 </task>

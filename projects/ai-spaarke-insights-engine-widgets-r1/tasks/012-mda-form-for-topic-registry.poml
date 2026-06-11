@@ -1,7 +1,7 @@
 <task id="012" project="ai-spaarke-insights-engine-widgets-r1">
   <metadata>
     <title>Generate model-driven app form for sprk_aitopicregistry (SME-editable)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1.5h</estimated-effort>
     <phase>1</phase>
     <tags>dataverse, form, mda</tags>
@@ -52,4 +52,11 @@
     <criterion testable="true">Quick Create form successfully adds a row</criterion>
     <criterion testable="true">No JavaScript required to add a row</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-10. Both forms deployed to spaarkedev1 in solution spaarke_insights:
+    - Main "AI Topic Registration" (formid 1823746f-4665-f111-ab0c-7ced8ddc4cc6) — 3 sections (Identity / Routing / Runtime), all 9 FR-04 fields + sprk_name + header sprk_enabled.
+    - Quick Create "Add Topic" (formid 5523746f-4665-f111-ab0c-7ced8ddc4cc6) — minimal subset per step 2 (7 fields).
+    Smoke test (Smoke-AiTopicRegistryQuickCreate.ps1) inserted + verified + deleted a test row using pure OData (no JS). Q-U1 guard in deploy script passed (zero @vN in FormXml). See notes/handoffs/topic-registry-form-deploy.md for full handoff.
+  </notes>
 </task>
