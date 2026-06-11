@@ -529,6 +529,41 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRepository>();
         Console.WriteLine("✓ R6 Pillar 7 PinnedContextRepository registered (task 065, D-C-18; user-curated memory anchors foundation)");
 
+        // R6 Pillar 7 (task 066, D-C-19) — PinnedContextRecallService. Embedding-based
+        // selective recall: ranks the user's pinned-context items by cosine similarity of
+        // their content embedding against the current user-message embedding and returns
+        // the top-K most relevant pins. Reuses the EXISTING IEmbeddingCache + IOpenAiClient
+        // pipeline per the spec FR-43 rule ("use the existing IEmbeddingCache
+        // infrastructure — do NOT introduce a new embedding service"). Foundation for task
+        // 067 (hierarchical memory composition) when the matter has more pins than fit
+        // the NFR-10 8K system-prompt budget.
+        //
+        // §F.1 asymmetric-registration audit: this registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate matching the surrounding
+        // Memory services. The only consumer in R6 is task 067's memory-composition
+        // wiring, which is itself inside the same compound gate. The Null-Object
+        // kill-switch posture is intrinsic to the service: it returns an empty list (P2
+        // Quiet) when PinnedContextRecall:Enabled=false, no pins exist, or the embedding
+        // pipeline fails; the caller (task 067) treats empty as "no recall — proceed with
+        // unranked or skip recall". No separate Null peer needed at the DI layer.
+        //
+        // Options binding uses BindConfiguration; the B-G11 hardening pattern means the
+        // options class does NOT decorate use-site-conditional fields with [Required], so
+        // an app start with no PinnedContextRecall section in appsettings is allowed
+        // (defaults take over, kill switch defaults to true).
+        //
+        // Placement (CLAUDE.md §10 / ADR-013): memory plumbing only. NO PublicContracts
+        // facade because the only consumers are AI-internal callers per the refined
+        // 2026-05-20 ADR-013 boundary rule.
+        //
+        // Lifetime: Scoped — matches the SummarizationCompressionService precedent (R6
+        // task 064) and the IPinnedContextRepository it depends on (R6 task 065).
+        services.AddOptions<Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRecallOptions>()
+            .BindConfiguration(Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRecallOptions.SectionName);
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IPinnedContextRecallService,
+                           Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRecallService>();
+        Console.WriteLine("✓ R6 Pillar 7 PinnedContextRecallService registered (task 066, D-C-19; embedding-based selective recall over pinned items)");
+
         // --- InvokeInsightsQueryTool typed HttpClient ---
         // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): the specialized
         // InvokeInsightsQueryTool C# bridge class was deleted in favor of the generic

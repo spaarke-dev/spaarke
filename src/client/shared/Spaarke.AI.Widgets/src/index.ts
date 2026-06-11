@@ -508,6 +508,23 @@ export {
   MAX_TRACE_ENTRIES,
 } from './widgets/context/ExecutionTraceWidget';
 
+// R6 task 062 / D-C-15: register the widget so the SpaarkeAi shell can mount it
+// as the Context-pane primary widget via `resolveContextWidget('execution-trace')`.
+// Registration is idempotent (the registry is first-wins; the parallel inline
+// path in `src/registry/register-context-widgets.ts` is the mirror call for
+// shell entry points that bypass this barrel — both call sites are deliberate
+// per the FilePreviewContextWidget pattern above).
+registerContextWidget('execution-trace', {
+  factory: () =>
+    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
+    // widget's default export is typed ContextWidgetComponent<ExecutionTraceData>.
+    // Generic variance at the registry boundary — see PlaybookGalleryWidget
+    // registration above for the same pattern.
+    import('./widgets/context/ExecutionTraceWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
 // ---------------------------------------------------------------------------
 // Hooks: useWorkspaceLayouts (R4 task 051 / C-3 — consolidated workspace-layouts hook)
 //

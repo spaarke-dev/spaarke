@@ -262,6 +262,11 @@ const EXPECTED_CONTEXT_WIDGETS = [
   'playbook-gallery',
   'entity-info',
   'findings',
+  // R6 task 062 / D-C-15: ExecutionTraceWidget — Claude-Code-like activity
+  // timeline. Subscribes to the six `context.*` trace event types added by
+  // R6 task 059 (D-C-12). Per ADR-015 BINDING: renders only typed enumerated
+  // fields (tool name + decision + timestamp + numeric metrics).
+  'execution-trace',
 ] as const;
 
 // ===========================================================================
@@ -340,7 +345,7 @@ describe('Context widget serialize/restore — registration', () => {
     loadContextRegistrations();
   });
 
-  it('registers all 10 context widget types', () => {
+  it('registers all 11 context widget types', () => {
     const types = getAllContextWidgetTypes();
     expect(types).toHaveLength(EXPECTED_CONTEXT_WIDGETS.length);
   });

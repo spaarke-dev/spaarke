@@ -136,6 +136,32 @@ safeRegisterContext('file-preview', {
 });
 
 // ---------------------------------------------------------------------------
+// execution-trace (R6 task 062 / D-C-15)
+//
+// Widget type: 'execution-trace'
+// Stage:       Active-chat (Context-pane primary widget when no entity is
+//              selected and trace events are flowing). Subscribes to the six
+//              `context.*` trace event types added by R6 task 059 (D-C-12):
+//              tool_call_started, tool_call_completed, knowledge_retrieved,
+//              playbook_node_executing, playbook_node_completed, decision_made.
+// Purpose:     Renders a Claude-Code-like ordered timeline of the chat agent's
+//              deterministic activity. Per ADR-015 BINDING: renders only the
+//              typed enumerated fields (tool name + decision + timestamp +
+//              numeric metrics) — NEVER user-message text or document content.
+// Channel:     Subscribes to the existing `context` PaneEventBus channel —
+//              NO new channel introduced (per ADR-030 + NFR-05).
+// (also registered inline in index.ts — duplicate is safe, first wins)
+// ---------------------------------------------------------------------------
+
+safeRegisterContext('execution-trace', {
+  factory: () =>
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/ExecutionTraceWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from shell entry points)
 // ---------------------------------------------------------------------------
 
