@@ -15,8 +15,10 @@ using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.Foundry;
+using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
+using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -296,6 +298,47 @@ public class SprkChatAgentFactory
         // content. NFR-01 conversational primacy preserved.
         context = context with { SystemPrompt = context.SystemPrompt + BuildCompactFormattingDirective() };
         // === End R6 Hotfix Wave B-G10b =========================================
+
+        // === R6 task 053 — Workspace State block (Pillar 6a / FR-34) ===========
+        // Per-turn snapshot of currently open workspace tabs the user has marked
+        // visible to the assistant. Lets the LLM answer questions like "what's
+        // open in my workspace?" / "what file is on tab 2?". Pillar 9 (task 074)
+        // refines this to schema-aware per-widget visible state.
+        //
+        // ADR-010: IWorkspaceStateService is Scoped; resolved from the same
+        // per-turn scope as IChatContextProvider (factory is Singleton) — ZERO
+        // new top-level DI registrations.
+        // ADR-014: tenantId in the read path (cache key + Cosmos partition key).
+        // ADR-015: block carries widget type + matterName + isPinned flags ONLY —
+        // never raw user message text from prior turns.
+        // NFR-10: workspace block truncates after ~500 chars to preserve the 8K
+        // system prompt budget; truncation emits telemetry.
+        try
+        {
+            var workspaceService = scope.ServiceProvider.GetService<IWorkspaceStateService>();
+            if (workspaceService is not null)
+            {
+                var tabs = await workspaceService.GetTabsAsync(tenantId, sessionId, cancellationToken);
+                var workspaceBlock = BuildWorkspaceStateBlock(tabs, sessionId);
+                if (!string.IsNullOrEmpty(workspaceBlock))
+                {
+                    context = context with { SystemPrompt = context.SystemPrompt + workspaceBlock };
+                    _logger.LogDebug(
+                        "R6 task 053: appended Workspace State block to system prompt — sessionId={SessionId}, blockLength={BlockLength}",
+                        sessionId, workspaceBlock.Length);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Soft failure — workspace state is enhancing, not required. The agent
+            // still works without the block; it just can't answer workspace-aware
+            // questions for this turn. Logged so operators see in App Insights.
+            _logger.LogWarning(ex,
+                "R6 task 053: failed to query workspace state for system prompt — sessionId={SessionId}, continuing without",
+                sessionId);
+        }
+        // === End R6 task 053 ===================================================
 
         // Resolve playbook capabilities from Dataverse to determine which tools should be available.
         // When no playbook is specified (generic/standalone chat mode), use core capabilities only.
@@ -1894,6 +1937,72 @@ public class SprkChatAgentFactory
     /// widen the AI public-contracts surface.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// R6 Task 053 (Pillar 6a / FR-34) — builds the per-turn Workspace State block
+    /// summarizing currently open tabs the user has marked visible to the assistant.
+    /// Returns empty string when no tab is visible — call site short-circuits.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>ADR-015 governance</b>: block carries widget type + matterName + isPinned flag
+    /// ONLY. NEVER raw user message text from prior turns. The widget-data payload (which
+    /// may contain user content) is NOT serialized here — Pillar 9 (task 074) introduces
+    /// schema-aware <c>getAgentVisibleState()</c> for that purpose.
+    /// </para>
+    /// <para>
+    /// <b>NFR-10 budget</b>: hard-capped at <see cref="WorkspaceStateBlockMaxChars"/>
+    /// (~500 chars). Tabs beyond the cap are truncated; the truncation count is logged
+    /// for telemetry.
+    /// </para>
+    /// <para>
+    /// <b>Active tab convention</b>: the tab with the most recent <c>UpdatedAt</c>
+    /// is labeled "(active)". v1 simplification — task 074 / Pillar 9 refines this
+    /// with explicit active-tab state from the registry.
+    /// </para>
+    /// </remarks>
+    internal const int WorkspaceStateBlockMaxChars = 500;
+
+    internal string BuildWorkspaceStateBlock(IReadOnlyList<WorkspaceTab> tabs, string sessionId)
+    {
+        var visible = tabs.Where(t => t.VisibleToAssistant).ToList();
+        if (visible.Count == 0) return string.Empty;
+
+        // Most-recent UpdatedAt → "active" (v1 simplification; task 074 refines).
+        var ordered = visible.OrderByDescending(t => t.UpdatedAt).ToList();
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("\n\n## Workspace State\n");
+
+        var truncatedAt = -1;
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var tab = ordered[i];
+            var activeMarker = i == 0 ? " (active)" : "";
+            var pinnedMarker = tab.IsPinned ? " — user-pinned" : "";
+            var matterName = tab.MatterContext?.MatterName;
+            var matterSuffix = string.IsNullOrWhiteSpace(matterName) ? "" : $"; matter: {matterName}";
+
+            // Each row: "- Tab N (active): <WidgetType> — user-pinned; matter: <Name>\n"
+            var line = $"- Tab {i + 1}{activeMarker}: {tab.WidgetType}{pinnedMarker}{matterSuffix}\n";
+
+            if (sb.Length + line.Length > WorkspaceStateBlockMaxChars)
+            {
+                truncatedAt = i;
+                break;
+            }
+            sb.Append(line);
+        }
+
+        if (truncatedAt >= 0)
+        {
+            _logger.LogInformation(
+                "R6 task 053: Workspace State block truncated — sessionId={SessionId}, includedTabs={Included}, droppedTabs={Dropped}, charBudget={Budget}",
+                sessionId, truncatedAt, ordered.Count - truncatedAt, WorkspaceStateBlockMaxChars);
+        }
+
+        return sb.ToString();
+    }
+
     /// <summary>
     /// Hotfix Wave B-G10b (R6, 2026-06-10) — builds the system-prompt suffix that
     /// instructs the LLM to use compact markdown formatting in chat-pane responses.
