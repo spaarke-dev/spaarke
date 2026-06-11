@@ -31,13 +31,25 @@ import {
   createXrmDataService,
   createXrmNavigationService,
 } from "@spaarke/ui-components/utils";
+import {
+  Open20Regular,
+  Delete20Regular,
+  Mail20Regular,
+  Pin20Regular,
+} from "@fluentui/react-icons";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
+import { ListView } from "./components/ListView";
 import { TodoDetailPanel } from "./components/TodoDetailPanel";
 import { Header } from "./components/Header";
+import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
+import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
+import { SmartTodoModal, todosToModalRecords } from "./components/Modal";
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
 import { useLaunchContext } from "./hooks/useLaunchContext";
+import { useUserPreferences } from "./hooks/useUserPreferences";
+import type { SmartTodoViewMode } from "./hooks/useUserPreferences";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -92,7 +104,26 @@ const useStyles = makeStyles({
 
 function SmartTodoLayout(): React.ReactElement {
   const styles = useStyles();
-  const { selectedEventId, refetch } = useTodoContext();
+  const { selectedEventId, refetch, items, selectItem } = useTodoContext();
+
+  // ── R4 task 033 — Persisted list/card view mode (FR-09) ──────────────────
+  //
+  // The view mode round-trips through `useUserPreferences` (extended in this
+  // task to carry a `viewMode` field on the existing kanban-prefs JSON
+  // envelope — see `hooks/useUserPreferences.ts`). Default = "card" on first
+  // visit (no preference record). The SmartToDo Kanban surface ALSO calls
+  // `useUserPreferences` for its threshold + filter-mode round-trip; both
+  // hook instances read the same preferencetype record, so the next fetch on
+  // either surface sees the latest viewMode persisted here.
+  const { preferences: viewPrefs, updatePreferences: updateViewPrefs } =
+    useUserPreferences({ webApi: getWebApi(), userId: getUserId() });
+  const viewMode = viewPrefs.viewMode;
+  const handleViewModeChange = React.useCallback(
+    (mode: SmartTodoViewMode) => {
+      void updateViewPrefs({ viewMode: mode });
+    },
+    [updateViewPrefs],
+  );
 
   // ── R4 task 030 — Header state (App-level, per task brief) ───────────────
   //
@@ -105,37 +136,152 @@ function SmartTodoLayout(): React.ReactElement {
   // `null` (zero selection). Task 060 will populate the Set as the user
   // multi-selects cards in the kanban + list views.
   const [searchQuery, setSearchQuery] = React.useState<string>("");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [selectedIds, _setSelectedIds] = React.useState<Set<string>>(
+  // `setSelectedIds` is consumed by task 032 Delete's `onClearSelection`
+  // callback. Task 060 will additionally populate the Set as the user
+  // multi-selects cards in the kanban + list views.
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(
     () => new Set<string>(),
   );
 
-  // Stub toolbar actions — task 032 will replace these with real Open /
-  // Delete / Email / Pin handlers wired to the underlying data layer.
+  // ── R4 task 040 — Card-open modal state ──────────────────────────────────
+  //
+  // `modalTodoId` is the GUID of the to-do currently rendered inside the
+  // <SmartTodoModal>. `null` means the modal is closed. Setting it (via the
+  // `OPEN_TODOS_EVENT` window listener below) mounts the modal; the modal's
+  // `<` / `>` nav writes back to update the iframe src.
+  //
+  // Spec FR-16 / FR-17 — the hybrid modal works in BOTH MDA context (this
+  // Code Page launched from a parent-form subgrid / Visual Host
+  // drill-through) AND Code Page context (standalone Code Page). The shell
+  // is host-agnostic by construction (no MDA-only API calls).
+  const [modalTodoId, setModalTodoId] = React.useState<string | null>(null);
+
+  // ── R4 task 040 — Filter-set projection for modal navigation ─────────────
+  // The modal's `<` / `>` nav walks the CURRENT filter set — the items array
+  // from TodoContext (which reflects search + facets per task 031). We
+  // memoize the projection so the modal sees a stable record list per
+  // items-array identity.
+  const modalRecords = React.useMemo(
+    () => todosToModalRecords(items),
+    [items],
+  );
+
+  // ── R4 task 040 — Subscribe to OPEN_TODOS_EVENT ──────────────────────────
+  // Task 032's `createToolbarActions` Open handler dispatches a window
+  // `CustomEvent` with shape `{selectedIds: string[], firstId: string}`
+  // whenever the user clicks the toolbar Open. Task 060 will additionally
+  // dispatch the same event from card double-click + the per-card Open icon.
+  // Subscribing here makes the modal the SINGLE consumer of the event — any
+  // future launcher just dispatches.
+  React.useEffect(() => {
+    const handler = (ev: Event): void => {
+      const detail = (ev as CustomEvent<OpenTodosEventDetail>).detail;
+      if (detail?.firstId) {
+        setModalTodoId(detail.firstId);
+      }
+    };
+    window.addEventListener(OPEN_TODOS_EVENT, handler);
+    return () => {
+      window.removeEventListener(OPEN_TODOS_EVENT, handler);
+    };
+  }, []);
+
+  // ── R4 task 032 — Selection-aware toolbar actions (Open / Delete / Email /
+  // Pin) wired via `createToolbarActions` from `./components/Toolbar`
+  // (spec FR-08). The action factory closes over `ctx` by reference so each
+  // handler reads the LATEST items + selectedIds at click time (avoids
+  // recreating handlers on every render).
+  //
+  // Open  — dispatches `sprk-smarttodo:open-todos` on window. Task 040 will
+  //         subscribe and route to <RecordNavigationModalShell> + To Do main
+  //         form iframe. Until 040's listener lands, the event is observed
+  //         only by `console.info` (smoke-test safe).
+  // Delete — confirms via window.confirm, deletes selected, refetches via
+  //          TodoContext.
+  // Email  — composes a mailto: with selected todo names + due dates.
+  // Pin    — toggles `sprk_todopinned`; any-unpinned ⇒ pin all; all-pinned ⇒
+  //          unpin all (mirrors M365 "Mark as read" UX).
+  //
+  // Per `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` Delete + Pin use
+  // `Xrm.WebApi` directly from this Code Page host (no BFF needed for simple
+  // per-record CRUD).
+  const itemsRef = React.useRef(items);
+  itemsRef.current = items;
+  const selectedIdsRef = React.useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+
+  const actionHandlers = React.useMemo(() => {
+    // Cast getWebApi() to our minimal action surface (Xrm.WebApi has these
+    // members at runtime; the narrow interface decouples this code from the
+    // full Xrm typings).
+    const rawWebApi = getWebApi() as unknown as ITodoActionWebApi | null;
+    return createToolbarActions({
+      webApi: rawWebApi,
+      getSelectedTodos: () =>
+        itemsRef.current.filter((t) =>
+          selectedIdsRef.current.has(t.sprk_todoid),
+        ),
+      onAfterMutate: () => refetch(),
+      onClearSelection: () => setSelectedIds(new Set<string>()),
+    });
+  }, [refetch]);
+
   const toolbarActions: ToolbarAction[] = React.useMemo(
     () => [
       {
         id: "open",
         label: "Open",
-        onClick: () => console.log("[SmartTodo] Open clicked — wired by task 032"),
+        icon: <Open20Regular />,
+        onClick: () => {
+          const result = actionHandlers.handleOpen();
+          if (result.failed > 0) {
+            console.error("[SmartTodo] Open action failed:", result.message);
+          }
+        },
       },
       {
         id: "delete",
         label: "Delete",
-        onClick: () => console.log("[SmartTodo] Delete clicked — wired by task 032"),
+        icon: <Delete20Regular />,
+        onClick: () => {
+          void actionHandlers.handleDelete().then((result) => {
+            if (result.failed > 0) {
+              console.error(
+                "[SmartTodo] Delete action failures:",
+                result.message,
+              );
+            }
+          });
+        },
       },
       {
         id: "email",
         label: "Email",
-        onClick: () => console.log("[SmartTodo] Email clicked — wired by task 032"),
+        icon: <Mail20Regular />,
+        onClick: () => {
+          const result = actionHandlers.handleEmail();
+          if (result.failed > 0) {
+            console.error("[SmartTodo] Email action failed:", result.message);
+          }
+        },
       },
       {
         id: "pin",
         label: "Pin",
-        onClick: () => console.log("[SmartTodo] Pin clicked — wired by task 032"),
+        icon: <Pin20Regular />,
+        onClick: () => {
+          void actionHandlers.handlePin().then((result) => {
+            if (result.failed > 0) {
+              console.error(
+                "[SmartTodo] Pin action failures:",
+                result.message,
+              );
+            }
+          });
+        },
       },
     ],
-    [],
+    [actionHandlers],
   );
 
   // Refresh → re-query todos via the existing context refetch (task 022).
@@ -193,13 +339,23 @@ function SmartTodoLayout(): React.ReactElement {
         onCreateTodo={handleCreateTodo}
         selectedCount={selectedIds.size}
         toolbarActions={toolbarActions}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
       />
 
-      {/* ── Two-pane content — kanban + (optional) detail panel ─────────── */}
+      {/* ── Two-pane content — kanban/list + (optional) detail panel ────── */}
       <div ref={containerRef} className={styles.container}>
-        {/* Left panel — Kanban Board */}
+        {/* Left panel — Kanban Board (default) OR List View (R4 task 033 / FR-09) */}
         <div className={styles.primaryPanel} style={{ width: primaryWidth }}>
-          <SmartToDo webApi={getWebApi()} userId={getUserId()} />
+          {viewMode === "list" ? (
+            <ListView
+              items={items}
+              onItemClick={selectItem}
+              selectedTodoId={selectedEventId}
+            />
+          ) : (
+            <SmartToDo webApi={getWebApi()} userId={getUserId()} />
+          )}
         </div>
 
         {/* Splitter + Detail Panel (only when visible) */}
@@ -224,6 +380,20 @@ function SmartTodoLayout(): React.ReactElement {
           </>
         )}
       </div>
+
+      {/* ── R4 task 040 — Card-open modal (HYBRID modal pattern, FR-13/16/17)
+          ──────────────────────────────────────────────────────────────────
+          Conditionally mounted so the iframe / dialog DOM only exists when
+          the modal is open. Closing the modal (X / ESC / backdrop) unmounts
+          and disposes the iframe so the next open is a fresh load. */}
+      {modalTodoId !== null && (
+        <SmartTodoModal
+          todos={modalRecords}
+          currentId={modalTodoId}
+          onNavigateToId={setModalTodoId}
+          onClose={() => setModalTodoId(null)}
+        />
+      )}
     </div>
   );
 }

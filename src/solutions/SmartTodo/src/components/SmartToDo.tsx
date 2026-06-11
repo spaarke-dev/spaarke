@@ -45,7 +45,7 @@ import {
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import { KanbanBoard } from "@spaarke/ui-components";
+import { KanbanBoard, OrientationToggle, type Orientation } from "@spaarke/ui-components";
 import { KanbanCard } from "./KanbanCard";
 import { KanbanHeader } from "./KanbanHeader";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";
@@ -298,24 +298,14 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     webApi,
     userId,
     mockItems,
-    filterMode: preferences.myTasksFilterMode,
   });
 
-  // -------------------------------------------------------------------------
-  // My Tasks filter change handler (FR-12)
-  //
-  // Persists the new mode through the existing user-preference record (no new
-  // optionset value required — see hooks/useUserPreferences.ts). The
-  // useTodoItems hook subscribes to preferences.myTasksFilterMode, so the
-  // update triggers a re-fetch with the new OData predicate.
-  // -------------------------------------------------------------------------
-
-  const handleMyTasksFilterModeChange = React.useCallback(
-    (mode: typeof preferences.myTasksFilterMode) => {
-      void updatePreferences({ myTasksFilterMode: mode });
-    },
-    [updatePreferences]
-  );
+  // R4 task 031 / FR-07 / OD-2 — "Assigned to Me" is the sole filter mode for
+  // the SmartTodo Code Page. The R3 user-controllable `myTasksFilterMode` was
+  // removed (legacy "My Tasks" + "All" modes dropped because `ownerid` is
+  // BU-owned and UAT users couldn't distinguish the parallel modes). The
+  // single mode is now baked into the OData predicate in
+  // `services/queryHelpers.ts buildTodoItemsQuery`.
 
   // Expose refetch to parent for refresh button routing (embedded mode)
   React.useEffect(() => {
@@ -360,6 +350,20 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(
     new Set(["Future"])
   );
+
+  /**
+   * Board layout orientation (R4 task 070 / FR-28 / FR-29).
+   *
+   * Toggled via `<OrientationToggle>` in the KanbanHeader. The swap is a
+   * pure CSS-class change on the shared `<KanbanBoard>` — no React
+   * re-mount, so cards keep their drag-drop + selection state across an
+   * orientation flip (NFR-08).
+   *
+   * Persistence of the user's choice is handled by R4 task 071 (writes
+   * `sprk_userpreference`). For task 070, the page always opens
+   * `horizontal` on first mount.
+   */
+  const [orientation, setOrientation] = React.useState<Orientation>("horizontal");
 
   const handleToggleCollapse = React.useCallback((columnId: string) => {
     setCollapsedColumns((prev) => {
@@ -661,9 +665,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         isAdding={isAdding}
         onSettingsOpen={() => setSettingsOpen(true)}
         embedded={embedded}
-        myTasksFilterMode={preferences.myTasksFilterMode}
-        onMyTasksFilterModeChange={handleMyTasksFilterModeChange}
-        myTasksFilterDisabled={prefsLoading}
+        orientationSlot={
+          <OrientationToggle
+            orientation={orientation}
+            onChange={setOrientation}
+          />
+        }
       />
 
       {/* ── Settings popover — anchor to a hidden trigger ──────────────── */}
@@ -742,6 +749,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
                 ariaLabel="Smart To Do Kanban board"
                 collapsedColumns={collapsedColumns}
                 onToggleCollapse={handleToggleCollapse}
+                orientation={orientation}
               />
             </div>
           )}

@@ -50,7 +50,9 @@ import {
 import { Add20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
 import {
   SelectionAwareToolbar,
+  ViewToggle,
   type ToolbarAction,
+  type ViewToggleMode,
 } from '@spaarke/ui-components';
 import { useHeaderStyles } from './Header.styles';
 
@@ -121,6 +123,23 @@ export interface HeaderProps {
    * real Open / Delete / Email / Pin actions.
    */
   toolbarActions?: ToolbarAction[];
+
+  /**
+   * Current SmartTodo view mode (R4 FR-09 / task 033).
+   *
+   * When both `viewMode` AND `onViewModeChange` are provided, the trailing-
+   * edge of Row 3 renders a `<ViewToggle>` that lets the user switch between
+   * Card and List renderings. When either is omitted (e.g. surfaces that do
+   * not yet support a list view), the toggle is hidden — Row 3's layout stays
+   * stable per FR-06.
+   */
+  viewMode?: ViewToggleMode;
+
+  /**
+   * Called when the user clicks the opposite view-mode segment (R4 FR-09).
+   * The parent should persist the new mode via `useUserPreferences`.
+   */
+  onViewModeChange?: (mode: ViewToggleMode) => void;
 }
 
 /** A single filter facet (rendered as a Fluent v9 dismissible Tag in Row 3). */
@@ -189,6 +208,8 @@ export const Header: React.FC<HeaderProps> = ({
   onClearFilters,
   selectedCount,
   toolbarActions = [],
+  viewMode,
+  onViewModeChange,
 }) => {
   const styles = useHeaderStyles();
 
@@ -289,6 +310,10 @@ export const Header: React.FC<HeaderProps> = ({
           <Button appearance="subtle" size="small" onClick={onClearFilters}>
             Clear
           </Button>
+        )}
+        {/* ── Row 3 trailing-edge — ViewToggle (R4 FR-09 / task 033) ─────── */}
+        {viewMode !== undefined && onViewModeChange !== undefined && (
+          <ViewToggle mode={viewMode} onChange={onViewModeChange} />
         )}
       </div>
 

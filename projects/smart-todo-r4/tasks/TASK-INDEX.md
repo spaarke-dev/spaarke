@@ -4,7 +4,7 @@
 > **Last Updated**: 2026-06-10 (Wave G0 complete + new task 034 registered)
 > **Branch**: `work/smart-todo-r4`
 > **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
-> **Status**: 🔲 18 not-started · 🔄 0 in-progress · ✅ 13 complete · ❌ 0 blocked
+> **Status**: 🔲 17 not-started · 🔄 0 in-progress · ✅ 14 complete · ❌ 0 blocked
 > **Active wave**: none — Wave G1+2a-followups ✅ complete (build-verified)
 
 ---
@@ -99,9 +99,9 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [031](031-B-assigned-to-me-filter.poml) | B — "Assigned to Me" filter mode (drop "My Tasks") | smart-todo, filter | ✅ (with 032, 033) | 030 | — |
-| 🔲 | [032](032-B-selection-aware-toolbar-actions.poml) | B — Selection-aware toolbar actions (Open / Delete / Email / Pin) | smart-todo, toolbar | ✅ (with 031, 033) | 012, 030 | 040 (Open action) |
-| 🔲 | [033](033-B-list-card-view-toggle.poml) | B — List / Card view toggle with persistence | smart-todo, user-preference | ✅ (with 031, 032) | 012, 030 | — |
+| ✅ | [031](031-B-assigned-to-me-filter.poml) | B — "Assigned to Me" is now the sole filter mode. Header.tsx Row 3 renders a single non-dismissible `<Tag>Assigned to Me</Tag>`; `MyTasksFilter.tsx` deleted; `TodoFilterMode` + `MyTasksFilterMode` types removed; `buildTodoItemsQuery(userId)` bakes `_sprk_assignedto_value eq ${userId}` into the filter unconditionally; useUserPreferences drops the `myTasksFilterMode` field (backwards-compatible on read). TypeScript clean across all 9 touched files. | smart-todo, filter | ✅ (with 032, 033) | 030 | — |
+| ✅ | [032](032-B-selection-aware-toolbar-actions.poml) | B — Selection-aware toolbar actions (Open / Delete / Email / Pin) — wired via `createToolbarActions` from new `components/Toolbar/`; Open dispatches `sprk-smarttodo:open-todos` window event (task 040 listener); Delete confirms + parallel `Xrm.WebApi.deleteRecord`; Email composes mailto:; Pin any-unpinned ⇒ pin-all, all-pinned ⇒ unpin-all per spec FR-08; 20+ executable-spec test cases (no runner yet) | smart-todo, toolbar | ✅ (with 031, 033) | 012, 030 | 040 (Open action) |
+| ✅ | [033](033-B-list-card-view-toggle.poml) | B — List/Card view toggle wired. New ListView + Header `viewMode` props consuming hoisted `<ViewToggle>`; persisted via `viewMode` field on `useUserPreferences` JSON envelope (preferencetype 100000000, no new optionset). Default = card. `npm run build` 3,274 modules 8.29s clean. | smart-todo, user-preference | ✅ (with 031, 032) | 012, 030 | — |
 | ✅ | [034](034-B-extend-useLaunchContext.poml) | B — Extended useLaunchContext (235→471 LOC, 22 tests) **(NEW from Phase 0)** + parseDataParams extended | smart-todo, hook, url-params | ✅ | — | 081, 082, 083, 084 |
 
 #### D sub-tasks (serial after 050)
@@ -119,9 +119,9 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [040](040-C-wire-smarttodo-modal.poml) | C — Wire SmartTodo card-open to `<RecordNavigationModalShell>` with iframe | modal, iframe, smart-todo | ⚠️ | 010, 030 | 041, 042 |
+| ✅ | [040](040-C-wire-smarttodo-modal.poml) | C — Wire SmartTodo card-open to `<RecordNavigationModalShell>` with iframe | modal, iframe, smart-todo | ⚠️ | 010, 030 | 041, 042 |
 | 🔲 | [060](060-E-card-affordances.poml) | E — Card affordances (Open icon, double-click, selection checkbox) | smart-todo, ui | ⚠️ | 012, 030, 040 | — |
-| 🔲 | [070](070-F-vertical-kanban-orientation.poml) | F — Vertical Kanban orientation toggle | smart-todo, ui, layout | ⚠️ | 012, 030 | 071 |
+| ✅ | [070](070-F-vertical-kanban-orientation.poml) | F — Vertical Kanban orientation toggle (CSS transform-only, no DOM reflow) | smart-todo, ui, layout | ⚠️ | 012, 030 | 071 |
 
 #### Sub-tasks (serial after parents)
 
