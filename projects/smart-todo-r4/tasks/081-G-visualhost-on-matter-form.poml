@@ -3,7 +3,7 @@
     <title>G — Add Visual Host "Upcoming To Dos" to Matter main form</title>
     <phase>Phase 2: Wave 2c</phase>
     <workstream>G</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>0.5 day</estimated-effort>
     <tags>dataverse, form-designer, visual-host, deploy, matter</tags>
     <parallel-safe>true</parallel-safe>

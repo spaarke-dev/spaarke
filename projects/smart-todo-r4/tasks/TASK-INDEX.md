@@ -1,11 +1,11 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-10 (Wave G0 complete + new task 034 registered)
-> **Branch**: `work/smart-todo-r4`
+> **Last Updated**: 2026-06-11 (Wave B complete; 081 POML stale-state fix-up)
+> **Branch**: `work/smart-todo-r4-wave2`
 > **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
-> **Status**: 🔲 17 not-started · 🔄 0 in-progress · ✅ 14 complete · ❌ 0 blocked
-> **Active wave**: none — Wave G1+2a-followups ✅ complete (build-verified)
+> **Status**: 🔲 6 not-started · 🔄 0 in-progress · ✅ 25 complete · ❌ 0 blocked
+> **Active wave**: none — Wave A ✅ + Wave B ✅ (both build-verified); next = follow-up wave C (041 + 071)
 
 ---
 
@@ -137,7 +137,7 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [081](081-G-visualhost-on-matter-form.poml) | G — Visual Host on Matter main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [081](081-G-visualhost-on-matter-form.poml) | G — Visual Host on Matter main form (10-section maker doc — Wave A) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
 | ✅ | [082](082-G-visualhost-on-project-form.poml) | G — Visual Host on Project main form (instructions doc — Wave B parallel) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
 | ✅ | [083](083-G-visualhost-on-invoice-form.poml) | G — Visual Host on Invoice main form → 10-section maker doc cloned from 081 template with Invoice substitutions | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
 | ✅ | [084](084-G-visualhost-on-workassignment-form.poml) | G — Visual Host on WorkAssignment main form (instructions doc — Wave B parallel) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
