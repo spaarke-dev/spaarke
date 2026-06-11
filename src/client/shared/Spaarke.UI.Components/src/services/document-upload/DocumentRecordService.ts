@@ -85,13 +85,20 @@ export class DocumentRecordService {
    *                         this batch. When empty / undefined the field is OMITTED so the
    *                         BFF tenant-default chain (FR-BFF-04) takes over server-side.
    *                         Per spec FR-WIZ-07 (2026-06-07).
+   * @param searchIndexId - Optional GUID of `sprk_aisearchindex` lookup target. Cascaded from
+   *                        parent's `sprk_ai_search_index` lookup (Phase G canonical field).
+   *                        When non-empty, bound as `sprk_AI_Search_Index@odata.bind` on the
+   *                        new Document. When empty/undefined, the field is OMITTED so the
+   *                        Matter→Document Dataverse field mapping (or BFF resolver fallback)
+   *                        handles cascade server-side.
    * @returns Array of creation results (success/error per file)
    */
   async createDocuments(
     files: SpeFileMetadata[],
     parentContext: ParentContext,
     formData: DocumentFormData,
-    searchIndexName?: string
+    searchIndexName?: string,
+    searchIndexId?: string
   ): Promise<CreateResult[]> {
     this.logger.info('DocumentRecordService', `Creating ${files.length} Document records`);
 
@@ -99,7 +106,7 @@ export class DocumentRecordService {
 
     // Sequential creation
     for (const file of files) {
-      const result = await this.createSingleDocument(file, parentContext, formData, searchIndexName);
+      const result = await this.createSingleDocument(file, parentContext, formData, searchIndexName, searchIndexId);
       results.push(result);
     }
 
@@ -154,7 +161,8 @@ export class DocumentRecordService {
     file: SpeFileMetadata,
     parentContext: ParentContext,
     formData: DocumentFormData,
-    searchIndexName?: string
+    searchIndexName?: string,
+    searchIndexId?: string
   ): Promise<CreateResult> {
     try {
       // Unassociated mode: create document without parent lookup binding
@@ -181,6 +189,11 @@ export class DocumentRecordService {
         // No INV-5 guard needed here — payload is freshly assembled and has no pre-existing value.
         if (this._isNonEmptyIndexName(searchIndexName)) {
           payload.sprk_searchindexname = searchIndexName;
+        }
+        // Phase G: bind sprk_ai_search_index lookup when the caller resolved a GUID
+        // (parent's lookup → parent's BU's lookup). Nav-prop is sprk_AI_Search_Index (PascalCase).
+        if (searchIndexId && searchIndexId.trim() !== '') {
+          payload['sprk_AI_Search_Index@odata.bind'] = `/sprk_aisearchindexes(${searchIndexId.trim()})`;
         }
         this.logger.info('DocumentRecordService', `Creating unassociated Document: ${file.name}`);
         const result = await this.dataverseClient.createRecord('sprk_document', payload);
@@ -237,7 +250,8 @@ export class DocumentRecordService {
         formData,
         navigationPropertyName,
         targetEntitySetName,
-        searchIndexName
+        searchIndexName,
+        searchIndexId
       );
 
       this.logger.info('DocumentRecordService', `Creating Document: ${file.name}`);
@@ -278,6 +292,9 @@ export class DocumentRecordService {
    *                          included in the payload; when empty / undefined, the field is
    *                          OMITTED so the BFF tenant-default chain (FR-BFF-04) takes over
    *                          server-side. Per spec FR-WIZ-07 (2026-06-07).
+   * @param searchIndexId - Optional GUID of `sprk_aisearchindex` lookup target. When non-empty,
+   *                        bound as `sprk_AI_Search_Index@odata.bind`. When empty/undefined, the
+   *                        Matter→Document Dataverse field mapping cascades the parent's value.
    *
    *                          CRITICAL design invariant (design.md INV): the canonical Document
    *                          container field is `sprk_graphdriveid`. `sprk_containerid` stays
@@ -290,7 +307,8 @@ export class DocumentRecordService {
     formData: DocumentFormData,
     navigationPropertyName: string,
     entitySetName: string,
-    searchIndexName?: string
+    searchIndexName?: string,
+    searchIndexId?: string
   ): Record<string, unknown> {
     // Sanitize GUID (remove curly braces, convert to lowercase)
     const sanitizedGuid = parentContext.parentRecordId.replace(/[{}]/g, '').toLowerCase();
@@ -330,6 +348,12 @@ export class DocumentRecordService {
     // guard needed here — payload is freshly assembled and has no pre-existing value.
     if (this._isNonEmptyIndexName(searchIndexName)) {
       payload.sprk_searchindexname = searchIndexName;
+    }
+
+    // Phase G: bind sprk_ai_search_index lookup when caller resolved a GUID
+    // (parent's lookup → parent's BU's lookup). Nav-prop is sprk_AI_Search_Index (PascalCase).
+    if (searchIndexId && searchIndexId.trim() !== '') {
+      payload['sprk_AI_Search_Index@odata.bind'] = `/sprk_aisearchindexes(${searchIndexId.trim()})`;
     }
 
     this.logger.info(

@@ -375,6 +375,16 @@ export class ProjectService {
       });
     }
 
+    // Phase G: cascade BU's `sprk_ai_search_index` lookup onto the new Project.
+    if (cascadeDefaults?.searchIndexId) {
+      lookups.push({
+        referencedEntity: 'sprk_aisearchindex',
+        entitySet: 'sprk_aisearchindexes',
+        guid: cascadeDefaults.searchIndexId,
+        label: 'AI Search Index',
+      });
+    }
+
     for (const lk of lookups) {
       const navProp = _findNavProp(navProps, lk.referencedEntity, lk.columnHint);
       if (navProp) {

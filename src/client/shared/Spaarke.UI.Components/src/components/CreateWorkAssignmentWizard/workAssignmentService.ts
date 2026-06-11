@@ -459,25 +459,6 @@ export class WorkAssignmentService {
       entity['sprk_containerid'] = this._containerId;
     }
 
-    // FR-WIZ-04: Cascade `sprk_containerid` + `sprk_searchindexname` from the current user's
-    // owning Business Unit. INV-5 guards each field independently — values set by the caller
-    // above (or pre-seeded on `form`) are preserved. If the user's BU has either field unset,
-    // the corresponding payload field is left untouched and the BFF tenant-default chain takes
-    // over server-side (e.g. Spaarke Dev 1 / Test 1 per Phase A.5 ordering).
-    try {
-      const currentUserId = _getCurrentUserId();
-      if (currentUserId) {
-        // IDataService is a structural superset of IWebApiLike (retrieveRecord, retrieveMultipleRecords).
-        const defaults = await EntityCreationService.resolveUserBuDefaults(this._dataService, currentUserId);
-        EntityCreationService.applyUserBuDefaults(entity, defaults);
-      } else {
-        console.warn('[WorkAssignmentService] BU cascade skipped: current user ID could not be resolved.');
-      }
-    } catch (err) {
-      // Non-fatal: log and continue. BFF tenant-default chain handles routing if both fields are unset.
-      console.warn('[WorkAssignmentService] BU cascade failed (non-fatal):', err);
-    }
-
     // Helper: bind a lookup if the nav-prop exists on the entity
     const bindLookup = (referencedEntity: string, entitySet: string, guid: string, columnHint?: string) => {
       const navProp = findNavProp(navProps, referencedEntity, columnHint);
@@ -489,6 +470,27 @@ export class WorkAssignmentService {
         );
       }
     };
+
+    // FR-WIZ-04: Cascade `sprk_containerid` + `sprk_searchindexname` + Phase G `sprk_ai_search_index`
+    // lookup from the current user's owning Business Unit. INV-5 guards each scalar field
+    // independently. If the user's BU has any field unset, the corresponding payload field is
+    // left untouched and the BFF tenant-default chain takes over server-side.
+    try {
+      const currentUserId = _getCurrentUserId();
+      if (currentUserId) {
+        // IDataService is a structural superset of IWebApiLike (retrieveRecord, retrieveMultipleRecords).
+        const defaults = await EntityCreationService.resolveUserBuDefaults(this._dataService, currentUserId);
+        EntityCreationService.applyUserBuDefaults(entity, defaults);
+        if (defaults.searchIndexId) {
+          bindLookup('sprk_aisearchindex', 'sprk_aisearchindexes', defaults.searchIndexId);
+        }
+      } else {
+        console.warn('[WorkAssignmentService] BU cascade skipped: current user ID could not be resolved.');
+      }
+    } catch (err) {
+      // Non-fatal: log and continue. BFF tenant-default chain handles routing if all fields are unset.
+      console.warn('[WorkAssignmentService] BU cascade failed (non-fatal):', err);
+    }
 
     // Related record (matter, project, invoice, event)
     // Uses the shared Polymorphic Resolver pattern (ADR-024):
