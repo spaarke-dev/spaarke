@@ -14,6 +14,8 @@
     "@fluentui/react-components": "^9.46.2",
     "@fluentui/react-icons": "^2.0.200",
     "@spaarke/events-components": "file:../../client/shared/Spaarke.Events.Components",
+    "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
+    "@spaarke/smart-todo-components": "file:../../client/shared/Spaarke.SmartTodo.Components",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components"
   },
   "devDependencies": {
