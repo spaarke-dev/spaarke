@@ -86,6 +86,7 @@
   },
   "dependencies": {
     "@microsoft/applicationinsights-web": "^3.3.0",
+    "@spaarke/sdap-client": "file:../Spaarke.SdapClient",
     "d3-force": "^3.0.0",
     "diff": "^8.0.3",
     "dompurify": "^3.4.0",
