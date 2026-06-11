@@ -1,0 +1,56 @@
+<task id="041" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Fire-and-forget invocation (FR-18 staleness check)</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>4</phase>
+    <tags>form, javascript, async</tags>
+    <dependencies>040</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Per FR-18: if stored envelope is stale (>1 hour) or absent, fire-and-forget POST to `/api/insights/ask`. UI must not block (NFR-03). Per FR-19, the existing stale envelope renders immediately while background invocation runs.
+  </prompt>
+
+  <role>Form async-invocation developer.</role>
+
+  <goal>
+    OnLoad handler triggers async POST without awaiting; existing envelope rendered immediately; no spinner; no blocking.
+  </goal>
+
+  <inputs>
+    <file purpose="handler">Task 040 output</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-18, FR-19)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-18">Fire-and-forget — do NOT await</constraint>
+    <constraint source="NFR-03">Form TTI unaffected</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fetch fire-and-forget, xrm.webapi.online.execute</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Compose POST body">topic, mode, subject, parameters</step>
+    <step order="2" name="fetch() without await">Or Xrm.WebApi.online.execute analog</step>
+    <step order="3" name="Catch promise rejection">Log only; do not surface to user</step>
+    <step order="4" name="Verify no blocking">Form TTI metric</step>
+  </steps>
+
+  <outputs>
+    <output type="code">insightWidgetOnLoad.ts (pre-warm logic added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST fires when envelope stale or absent</criterion>
+    <criterion testable="true">POST does NOT block form TTI</criterion>
+    <criterion testable="true">Promise rejection only logged, never surfaced</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,53 @@
+<task id="066" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Telemetry verification — App Insights query (SC-11)</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <phase>6</phase>
+    <tags>uat, telemetry, sc-11</tags>
+    <dependencies>051</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Per SC-11: App Insights query confirms `widget.insightcard.invoked` events with full metadata (topic, mode, subject, duration, outcome, cacheHit). Run KQL query covering UAT invocations from Tasks 061-065.
+  </prompt>
+
+  <role>Telemetry verifier.</role>
+
+  <goal>
+    KQL query result demonstrating all required tags populated; saved query for ongoing dashboard.
+  </goal>
+
+  <inputs>
+    <file purpose="telemetry">Task 051 output</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-06">All tags present</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>app insights, kql, custom metrics</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Compose KQL query">customMetrics | where name == 'widget.insightcard.invoked'</step>
+    <step order="2" name="Run against UAT timeframe">Verify count matches UAT invocations</step>
+    <step order="3" name="Verify all tags populated">No nulls in topic/mode/outcome/cacheHit</step>
+    <step order="4" name="Save query">For Phase 7 dashboard reference</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-results/sc-11-telemetry.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Events visible in App Insights</criterion>
+    <criterion testable="true">All required tags populated</criterion>
+  </acceptance-criteria>
+</task>

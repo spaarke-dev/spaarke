@@ -1,0 +1,61 @@
+<task id="002" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>R5 sparkle-wiring baseline grep (Assumption 2/11 OPEN INVESTIGATION)</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>0</phase>
+    <tags>foundation, investigation, dataverse, r5-archaeology</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Spec Assumptions 2 + 11 claim R5 already wired a sparkle icon on the Matter form pointing at `sprk_performancesummary`. The plan-time research found NO Matter form OnLoad handler or sparkle wiring in `src/dataverse/` or `src/solutions/`. This is flagged as OPEN INVESTIGATION in spec. Resolve it: grep the codebase + inspect Dataverse Matter form XML in the dev environment via MCP. If R5 wiring exists outside src (i.e., in unmanaged customization in dev Dataverse), Phase 4 is a REPLACEMENT. If absent, Phase 4 is NET-NEW form customization (most likely outcome).
+  </prompt>
+
+  <role>Dataverse customization archaeologist + git history reader.</role>
+
+  <goal>
+    Single deliverable: `notes/r5-sparkle-wiring-baseline.md` documenting: (a) what's in src tree (likely nothing); (b) what's in dev Dataverse Matter form (via MCP describe / FormXml retrieval); (c) explicit decision: "Phase 4 is NET-NEW" or "Phase 4 is REPLACEMENT of existing R5 wiring at [location]". This drives Phase 4 task framing.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (Assumptions 2, 11)</file>
+    <file purpose="r5-project">projects/spaarke-ai-platform-unification-r5/ (closed; check for "sparkle" or "matter form" deliverables)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-NFR-09">No new ADR introduced</constraint>
+    <constraint source="dataverse-mcp">Use MCP describe/read tools to inspect dev Dataverse — do NOT modify any form</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>r5 archaeology, dataverse form xml, xrm.webapi, matter form, sprk_performancesummary</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/README.md</file>
+      <file>docs/data-model/sprk_matter.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="grep src for sparkle/matter-form handlers">Search `src/dataverse/`, `src/solutions/`, `src/client/` for `OnLoad`, `addOnLoad`, `Sparkle`, `sprk_performancesummary` references</step>
+    <step order="2" name="Read R5 project artifacts">README, plan, lessons-learned; identify what R5 actually shipped relating to Matter form</step>
+    <step order="3" name="MCP describe sprk_matter form metadata">Use mcp__dataverse__describe to inspect Matter entity form definitions; look for OnLoad event handlers</step>
+    <step order="4" name="If form OnLoad exists">Retrieve FormXml; document existing handlers; assess whether they can be extended or must be replaced</step>
+    <step order="5" name="Decide REPLACEMENT vs NET-NEW">Record decision + rationale in notes</step>
+    <step order="6" name="Update spec.md Assumption 2/11">Change OPEN INVESTIGATION to RESOLVED with finding</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/r5-sparkle-wiring-baseline.md</output>
+    <output type="spec-update">spec.md Assumptions 2 + 11 updated from OPEN to RESOLVED</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes file explicitly states "Phase 4 is NET-NEW" or "Phase 4 is REPLACEMENT of [location]"</criterion>
+    <criterion testable="true">spec.md Assumptions 2 + 11 no longer contain "OPEN INVESTIGATION" marker</criterion>
+    <criterion testable="true">Any FormXml or Matter customization referenced cites a verifiable source (file path or MCP query result)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,59 @@
+<task id="023" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Deploy playbook via Deploy-Playbook.ps1 + config Guid</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <phase>2</phase>
+    <tags>jps, deploy, dataverse, deploy</tags>
+    <dependencies>022</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Deploy `matter-health-single.playbook.json` to dev Dataverse via existing `scripts/Deploy-Playbook.ps1` (proven in r2 Wave B). Set `Insights:Playbooks:Map.matter-health-single` config Guid in dev environment so `/api/insights/ask` can resolve the playbook by name.
+  </prompt>
+
+  <role>Playbook deployment engineer.</role>
+
+  <goal>
+    Playbook row exists in `sprk_playbook`; config Guid set; playbook discoverable by BFF.
+  </goal>
+
+  <inputs>
+    <file purpose="playbook">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/matter-health-single.playbook.json</file>
+    <file purpose="deploy-script">scripts/Deploy-Playbook.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="r2-wave-b-proven">Use existing script — do NOT modify</constraint>
+    <constraint source="environment">Spaarke Dev only</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deploy-playbook script, sprk_playbook, config map</topic>
+    <files>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>scripts/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run Deploy-Playbook.ps1">With matter-health-single.playbook.json</step>
+    <step order="2" name="Verify sprk_playbook row">Web API query confirms creation</step>
+    <step order="3" name="Capture sprk_playbookid Guid">Record for config</step>
+    <step order="4" name="Update dev BFF config">Insights:Playbooks:Map.matter-health-single = {Guid}</step>
+    <step order="5" name="Restart dev BFF if needed">Config refresh</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">Playbook row in sprk_playbook + config Guid mapped</output>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/playbook-deploy.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_playbook row queryable by name 'matter-health-single'</criterion>
+    <criterion testable="true">BFF config map contains the playbook Guid under key matter-health-single</criterion>
+    <criterion testable="true">No `@v` suffix in sprk_playbook.sprk_name</criterion>
+  </acceptance-criteria>
+</task>

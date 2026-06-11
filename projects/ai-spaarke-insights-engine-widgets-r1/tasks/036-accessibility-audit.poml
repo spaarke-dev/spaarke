@@ -1,0 +1,54 @@
+<task id="036" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Accessibility audit (WCAG 2.1 AA per NFR-04)</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>3</phase>
+    <tags>ui, a11y, audit</tags>
+    <dependencies>035</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Run axe DevTools against each Storybook story; ensure WCAG 2.1 AA compliance per NFR-04. Verify keyboard navigation (Tab order, Enter/Space activate, Escape closes Popover/Dialog).
+  </prompt>
+
+  <role>Accessibility engineer.</role>
+
+  <goal>
+    Zero axe violations across all stories; keyboard navigation works end-to-end; documented in `notes/handoffs/a11y-audit.md`.
+  </goal>
+
+  <inputs>
+    <file purpose="stories">Task 035 output</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-04">WCAG 2.1 AA</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>axe devtools, wcag, keyboard navigation</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run axe DevTools per story">Capture violations</step>
+    <step order="2" name="Fix violations">Edit component as needed</step>
+    <step order="3" name="Keyboard nav verification">Tab, Enter, Space, Escape</step>
+    <step order="4" name="Screen reader smoke test">NVDA or Narrator on at least loaded + decline states</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/a11y-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero axe violations across all stories</criterion>
+    <criterion testable="true">Tab order is logical</criterion>
+    <criterion testable="true">Escape closes Popover and Dialog</criterion>
+  </acceptance-criteria>
+</task>

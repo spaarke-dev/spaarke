@@ -1,0 +1,59 @@
+<task id="005" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Build + publish-size baseline (NFR-01 verification)</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <phase>0</phase>
+    <tags>foundation, build, bff-publish-size</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Establish baseline build + publish-size measurements per `.claude/constraints/bff-extensions.md` "BFF Publish-Size Per-Task Verification Rule (NFR-01)". Since r1 adds NO new BFF code (per spec — uses existing facade), publish size should remain ~45.65 MB. This task captures the pre-implementation baseline so Phase 7 Task 080 can confirm no regression.
+  </prompt>
+
+  <role>Build engineer + ops baseline keeper.</role>
+
+  <goal>
+    Single deliverable: `notes/baseline-2026-06-10.md` recording: build status (errors + warnings), publish size (compressed), compared to `.claude/constraints/bff-extensions.md` baseline (45.65 MB), gap to NFR-01 ceiling (60 MB).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (NFR-01)</file>
+    <file purpose="constraint">.claude/constraints/bff-extensions.md (publish-size rule)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="bff-extensions-md">Measure compressed publish size; record absolute + diff vs prior baseline</constraint>
+    <constraint source="spec-NFR-01">Ceiling ≤60 MB compressed</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dotnet publish, bff size measurement</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="dotnet build src/server/api/Sprk.Bff.Api/">Capture error/warning count</step>
+    <step order="2" name="dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/">Produce publish artifact</step>
+    <step order="3" name="Measure compressed size">Compress publish folder, record byte count</step>
+    <step order="4" name="Compare to baseline">45.65 MB per constraint doc; compute delta</step>
+    <step order="5" name="Author report">Baseline document for Phase 7 reference</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/baseline-2026-06-10.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Build passes with 0 errors</criterion>
+    <criterion testable="true">Publish-size measurement recorded as absolute MB</criterion>
+    <criterion testable="true">Delta vs 45.65 MB baseline recorded</criterion>
+    <criterion testable="true">If delta &gt;5 MB or absolute &gt;55 MB, explicit escalation note included per constraint doc</criterion>
+  </acceptance-criteria>
+</task>

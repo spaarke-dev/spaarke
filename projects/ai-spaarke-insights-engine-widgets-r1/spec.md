@@ -57,6 +57,7 @@ r1 delivers a **reusable, topic-scoped, subject-aware Insight Summary widget fra
 - Modifications to `sprk_kpiassessment` scoring or roll-up logic (owned by other components)
 - Multi-tenant support (single-tenant only for r1)
 - New ADRs (operate within audit-codified constraints)
+- Feedback affordance (thumbs up/down + free-text) — deferred to r2+ pending AIPU2 Cosmos `feedback` container landing on master per ADR-015 governed data stores (Q-U3 resolution)
 
 ### Affected Areas
 
@@ -78,18 +79,18 @@ r1 delivers a **reusable, topic-scoped, subject-aware Insight Summary widget fra
 
 #### Framework
 
-- **FR-01**: Reusable `InsightSummaryCard` component shipped in `@spaarke/ui-components` (or `@spaarke/ai-widgets` — TBD by investigation). Component props: `{ topic: string, subject: string, mode?: string ("single" default), parameters?: object, kpiSlot?: ReactNode, onCitationClick?: function, onFeedback?: function }`. Acceptance: documented props + Storybook story (or equivalent) demonstrating all 5 states (idle / loading / loaded / error / decline / stale).
+- **FR-01**: Reusable `InsightSummaryCard` component shipped in `@spaarke/ai-widgets` (Q-U3 deferred feedback; FR-03 pre-flight resolved package home — see Resolution Decisions section). Component props: `{ topic: string, subject: string, mode?: string ("single" default), parameters?: object, kpiSlot?: ReactNode, onCitationClick?: function }`. Acceptance: documented props + Storybook story (or equivalent) demonstrating all 5 states (idle / loading / loaded / error / decline / stale).
 
 - **FR-02**: Component supports inline expand (default, in-card growth) with optional modal expansion for long/complex narratives. Acceptance: configurable threshold for auto-modal-prompt; manual "expand to modal" affordance always available.
 
-- **FR-03**: **Pre-flight investigation**: grep `src/client/shared/Spaarke.UI.Components/` and `@spaarke/ai-widgets` for existing inline-expand-to-modal patterns BEFORE building. If a suitable pattern exists, reuse and extend; if not, build new. Acceptance: investigation note in `notes/` recording findings; design decision documented as `decisions/DR-001-component-reuse.md`.
+- **FR-03**: **Pre-flight investigation**: grep `src/client/shared/Spaarke.UI.Components/` and `@spaarke/ai-widgets` for existing inline-expand-to-modal patterns BEFORE building. If a suitable pattern exists, reuse and extend; if not, build new. Acceptance: investigation note in `notes/` recording findings; design decision documented as `decisions/DR-001-component-reuse.md`. **Pre-flight investigation completed at plan time** (see Resolution Decisions): no full inline-expand-to-modal pattern exists; closest is `src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover/` (inline trigger + popover, not modal); `InsightSummaryCard` ships in `@spaarke/ai-widgets` composing Fluent v9 Popover + Dialog. `DR-001-component-reuse.md` is a Task 001 deliverable that ratifies this finding.
 
 - **FR-04**: `sprk_aitopicregistry` Dataverse entity created with fields:
   - `sprk_topicname` (text, e.g., `matter-health`) — unique
   - `sprk_mode` (text, e.g., `single`) — combined unique with topicname
   - `sprk_playbookname` (text, FK by name to `sprk_playbook`)
   - `sprk_displayname` (text)
-  - `sprk_icon` (text, identifier of icon — convention TBD in spec review)
+  - `sprk_icon` (text, Fluent icon component name as string — e.g., `'Sparkle24Filled'`; convention matches existing `sprk_gridconfiguration.sprk_iconname` pattern per Q-U2 resolution)
   - `sprk_hostentity` (text, e.g., `sprk_matter`)
   - `sprk_targetfield` (text, e.g., `sprk_performancesummary`) — the single longtext field on the host entity where the JSON envelope is persisted
   - `sprk_cachettlminutes` (whole number, default 60)
@@ -115,7 +116,7 @@ r1 delivers a **reusable, topic-scoped, subject-aware Insight Summary widget fra
   
   Acceptance: JSON envelope schema supports `citations[].type` discriminator; UI renders type-appropriate links; owner-confirmed flexibility ("the key is that we build flexible way to surface the context/citations").
 
-- **FR-08**: Feedback affordance: thumbs up/down with optional free-text. Persists to designated table/field for SME calibration. Acceptance: feedback events captured to Dataverse OR App Insights OR (TBD — see Unresolved Questions); minimum: visible in BFF telemetry.
+- **FR-08**: **DEFERRED to r2+** (Q-U3 resolution). Feedback affordance (thumbs up/down + free-text) is removed from r1 scope pending AIPU2 Cosmos `feedback` container landing on master per ADR-015 governed data stores. `InsightSummaryCard` ships in r1 WITHOUT feedback UI; `onFeedback` prop removed from FR-01. See Out of Scope and Resolution Decisions sections. FR number preserved to avoid renumbering downstream refs.
 
 - **FR-09**: Topic registry is SME-editable in Power Apps (Dataverse model-driven app form for `sprk_aitopicregistry`). Acceptance: model-driven app form generated; SME can add a new topic row without code deploy.
 
@@ -158,7 +159,7 @@ r1 delivers a **reusable, topic-scoped, subject-aware Insight Summary widget fra
 - **FR-14**: Playbook's `UpdateRecord` node writes the **structured JSON envelope** to **existing** `sprk_matter.sprk_performancesummary` (longtext, R5-era placeholder field). This REPLACES the R5 static placeholder text with the AI-generated envelope. Envelope structure:
   ```json
   {
-    "schemaVersion": 1,
+    "schemaVersion": "1.0",
     "body": "<markdown narrative>",
     "citations": [
       { "type": "assessment", "id": "<sprk_kpiassessment Guid>", "label": "Q1 2026 Guideline Compliance assessment", "excerpt": "..." },
@@ -216,7 +217,7 @@ r1 delivers a **reusable, topic-scoped, subject-aware Insight Summary widget fra
 
 - **NFR-05**: Component honors Spaarke Fluent v9 design system theming. Acceptance: light/dark theme rendering verified.
 
-- **NFR-06**: Telemetry events emitted per invocation: `widget.insightcard.invoked` (with `topic`, `mode`, `subject`, `duration`, `outcome`, `cacheHit`). Acceptance: events visible in App Insights.
+- **NFR-06**: Telemetry events emitted per invocation: `widget.insightcard.invoked` (with `topic`, `mode`, `subject`, `duration`, `outcome`, `cacheHit`). Meter name: `Sprk.Bff.Api.InsightWidgets` (matches existing `Sprk.Bff.Api.<Feature>` convention used by all 9 existing BFF meters; Q-U8 resolution). Acceptance: events visible in App Insights.
 
 - **NFR-07**: Single-tenant scope only for r1. Cross-tenant federation NOT supported. Acceptance: design + code reviewed for tenant-leak risk; tenantId always set.
 
@@ -283,7 +284,7 @@ r1 delivers a **reusable, topic-scoped, subject-aware Insight Summary widget fra
 9. [ ] **SC-09**: Manual refresh button forces re-invocation — Verify: cache miss on refresh click
 10. [ ] **SC-10**: Background pre-warm fires on form load when stored summary stale — Verify: telemetry shows OnLoad-triggered invocation; UI not blocked
 11. [ ] **SC-11**: Telemetry events emitted with full metadata — Verify: App Insights query confirms
-12. [ ] **SC-12**: Feedback (thumbs up/down) captured — Verify: at least 1 captured event observable
+12. [ ] **SC-12**: **DEFERRED to r2+** per Q-U3 resolution. Original: Feedback (thumbs up/down) captured — Verify: at least 1 captured event observable. SC number preserved; r2+ re-introduces with Cosmos backing.
 13. [ ] **SC-13**: `BUILD-A-NEW-INSIGHT-CARD.md` authored — Verify: doc in `docs/guides/` walks through the full flow
 14. [ ] **SC-14**: Degraded-mode UAT: when `spaarke-insights-index` is empty, narrative still produced from KPI data alone — Verify: limitation documented
 15. [ ] **SC-15**: Owner walkthrough sign-off — Verify: documented owner approval of UX + narrative quality
@@ -336,7 +337,7 @@ Captured 2026-06-10 from owner interview:
 | Streaming | SSE or one-shot? | **One-shot + background pre-warm** for freshness | Simpler component; freshness via FR-17 to FR-22 |
 | Citations | Assessment row, source doc, both? | **Both — flexible** ("the key is that we build flexible way to surface the context/citations") | Citation envelope supports type discriminator |
 | Decline UX | Same card or separate? | **Same card** with "Insufficient data is available to provide Insights Analysis" message | Simpler UI state model |
-| Feedback affordance | r1 or defer? | **r1** | SME calibration data starts at launch |
+| Feedback affordance | r1 or defer? | **Deferred to r2+** (Q-U3 resolution 2026-06-10 — pending AIPU2 Cosmos `feedback` container per ADR-015) | r1 ships `InsightSummaryCard` WITHOUT feedback UI; r2+ re-introduces with Cosmos backing |
 | Cache TTL | TTL or per-action? | **1-hour TTL + manual refresh + background pre-warm** | Per-topic TTL via topic registry (FR-21) |
 | Multi-tenant | r1 considerations? | **Single-tenant for r1** | Cross-tenant deferred |
 | Privilege model | New layer or reuse? | **Reuse record authz** | No new authz layer |
@@ -355,33 +356,51 @@ Captured 2026-06-10 from owner interview:
 Where owner did not explicitly answer, proceeding with these assumptions. Open to override in implementation:
 
 1. **JSON envelope schema (FR-14)** — assumed structure documented; please confirm or amend during spec review
-2. **R5 popup wiring removal** — assumed the current R5 sparkle-icon-to-popup wiring on Matter form (linked to `sprk_performancesummary`) is REPLACED by the new `InsightSummaryCard` host. Old R5 popup is decommissioned. Please confirm during implementation grep of R5 source.
+2. **R5 popup wiring removal** — assumed the current R5 sparkle-icon-to-popup wiring on Matter form (linked to `sprk_performancesummary`) is REPLACED by the new `InsightSummaryCard` host. Old R5 popup is decommissioned. **OPEN INVESTIGATION**: Task 001 must grep R5 source + Matter FormXml to confirm what's actually wired (research found NO existing Matter form OnLoad handler in codebase — assumption may be incorrect; net-new form customization likely).
 3. **Pre-warm scope** — form load only; scheduled background batch refresh deferred to r2
 4. **History** — always overwrite "current"; no audit trail in r1
 5. **Stored summary stale threshold** — 1 hour aligned to cache TTL (configurable per-topic via registry per FR-21)
 6. **Topic registry fields** (FR-04) — proposed schema; please confirm/amend during implementation
-7. **Telemetry destination** — App Insights via existing `R5SummarizeTelemetry` pattern; new meter name `Spaarke.InsightWidgets` (subject to renaming)
+7. **Telemetry destination** — App Insights via existing `R5SummarizeTelemetry` pattern; new meter name **`Sprk.Bff.Api.InsightWidgets`** (Q-U8 resolved by evidence: all 9 existing BFF meters follow `Sprk.Bff.Api.<Feature>` convention per `src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs:49`)
 8. **Feedback storage** — TBD: dedicated Dataverse table OR App Insights custom event OR both (see Unresolved Q-U3)
 9. **UI library home** — investigate `@spaarke/ai-widgets` first per FR-03; fall back to `@spaarke/ui-components` if no existing pattern
 10. **`sprk_performancesummary` backwards compat** — assumed safe to overwrite R5's static placeholder text; please confirm no other consumers depend on the placeholder content
-11. **R5 sparkle icon currently wired** — assumed exists on Matter form pointing to `sprk_performancesummary`; r1 replaces this wiring with new `InsightSummaryCard`; confirm via R5 source grep during implementation
+11. **R5 sparkle icon currently wired** — assumed exists on Matter form pointing to `sprk_performancesummary`; r1 replaces this wiring with new `InsightSummaryCard`; **OPEN INVESTIGATION** (Task 001 deliverable): research found NO Matter form OnLoad handler or sparkle wiring in src tree — verify whether R5 wiring is in solution XML / unmanaged customization not in src; if absent, r1 is net-new form customization (not replacement)
 12. **Modal expansion threshold** — UX TBD: auto-prompt modal when narrative >N characters/lines, or always manual expand only? Suggest manual-only for r1 (simpler)
 
 ---
 
 ## Unresolved Questions
 
-Need answers before or during implementation (some may resolve during spec review iteration):
+**All 8 questions RESOLVED 2026-06-10** via codebase-evidence research (Q-U2, Q-U4, Q-U5, Q-U6, Q-U8) + owner decision (Q-U1, Q-U3, Q-U7). See Resolution Decisions section below.
 
-- [ ] **Q-U1**: JSON envelope `schemaVersion` field — should this be `int` (1, 2, ...) or `string` (`"1.0"`, `"1.1"`)? Implementation detail; suggest `int` for r1 simplicity
-- [ ] **Q-U2**: Topic registry's `sprk_icon` field convention — string ID matching a Fluent icon? Inline SVG? Icon URL? Suggest string ID matching `@fluentui/react-icons` for r1
-- [ ] **Q-U3**: Feedback storage destination — dedicated Dataverse `sprk_insightfeedback` table, or App Insights custom event, or both? Recommendation: both (Dataverse for SME query + App Insights for analytics)
-- [ ] **Q-U4**: Should the `sprk_aitopicregistry` row carry the `sprk_systemprompt` reference OR is the playbook the canonical source of prompt? Recommendation: playbook is canonical (per ADR-014); registry references playbook by name only
-- [ ] **Q-U5**: Are there any field-level security (FLS) considerations on `sprk_performancesummary` (the persistence field)? Confirm with security team — content now carries citation refs to assessment rows which may have stricter FLS
-- [ ] **Q-U6**: Should the model-driven app form (Matter) trigger pre-warm via Power Apps form OnLoad event handler, or via a Power Automate flow, or via a React Code Page wrapper? Suggest form OnLoad for simplicity
-- [ ] **Q-U7**: Schedule + ownership of `BUILD-A-NEW-INSIGHT-CARD.md` tutorial (FR-27) — same engineer as component author or separate doc writer? Affects task POML decomposition
-- [ ] **Q-U8**: Does `r3` Wave 1.4 telemetry maturity (`InsightsActionLookupFailed` + dashboards) need to coordinate with this project's telemetry? Recommend separate meters; can converge later
+- [x] **Q-U1**: RESOLVED — `schemaVersion` is **`string` semver** (e.g., `"1.0"`); **`@v1`/`@vN` identifier-suffix vernacular is forbidden anywhere** in r1 (owner decision)
+- [x] **Q-U2**: RESOLVED — `sprk_icon` is Fluent icon component name as string (e.g., `'Sparkle24Filled'`) per existing `sprk_gridconfiguration.sprk_iconname` convention
+- [x] **Q-U3**: RESOLVED — **Feedback affordance DEFERRED to r2+** (owner decision); see Out of Scope, FR-08 deferred marker, SC-12 deferred marker
+- [x] **Q-U4**: RESOLVED — Playbook is canonical prompt source via `sprk_analysisaction.sprk_systemprompt`; registry maps topic→playbook by name only
+- [x] **Q-U5**: RESOLVED — Inherit Dataverse `RetrievePrincipalAccess` via playbook authz layer; no new FLS layer in r1; document inheritance
+- [x] **Q-U6**: RESOLVED — Power Apps form OnLoad via `Xrm.WebApi` (already in FR-17); no Power Automate flow; no React Code Page wrapper. **NOTE**: Research found NO existing handler in codebase — this is net-new customization (see Assumptions 2/11 OPEN INVESTIGATION)
+- [x] **Q-U7**: RESOLVED — Same engineer writes component + `BUILD-A-NEW-INSIGHT-CARD.md` tutorial (one task in plan, owner decision)
+- [x] **Q-U8**: RESOLVED — Meter name **`Sprk.Bff.Api.InsightWidgets`** (matches existing `Sprk.Bff.Api.<Feature>` convention used by all 9 BFF meters); r3 Wave 1.4 telemetry on separate meter; converge later
 
 ---
 
-*AI-optimized specification. Original design: [`design.md`](design.md). Generated by `/design-to-spec` 2026-06-10.*
+## Resolution Decisions
+
+Captured at plan time (2026-06-10) by `/project-pipeline` constrained run.
+
+| # | Source | Decision | Evidence / Authority |
+|---|---|---|---|
+| Q-U1 | Owner | `schemaVersion: "1.0"` string semver; ban `@v1`/`@vN` identifier suffixes anywhere | Owner decision 2026-06-10 |
+| Q-U2 | Evidence | Fluent icon component name as string | `src/client/shared/Spaarke.UI.Components/src/types/ConfigurationTypes.ts:167` (existing `sprk_iconname` on `sprk_gridconfiguration`); `Spaarke.AI.Widgets` widget registry pattern |
+| Q-U3 | Owner | Feedback DEFERRED to r2+; remove FR-08, SC-12, `onFeedback` prop | Owner decision 2026-06-10; AIPU2 Cosmos `feedback` container per ADR-015 not yet on master |
+| Q-U4 | Evidence | Playbook canonical via `sprk_analysisaction.sprk_systemprompt`; registry routes only | `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json:133-134`; audit `canonical-architecture-decisions.md` §2.7; `DR-007-prompt-construction.md` |
+| Q-U5 | Evidence | Inherit Dataverse `RetrievePrincipalAccess` via playbook authz | `docs/architecture/uac-access-control.md:24` ("`RetrievePrincipalAccess` already factors in security roles, team memberships, business units, record sharing, and field-level security — one rule is sufficient") |
+| Q-U6 | Evidence + spec | Form OnLoad via `Xrm.WebApi` (already in FR-17); net-new customization | No existing handler found in `src/dataverse/` or `src/solutions/` grep |
+| Q-U7 | Owner | Same engineer writes component + tutorial; one task in plan | Owner decision 2026-06-10 |
+| Q-U8 | Evidence | Meter name `Sprk.Bff.Api.InsightWidgets` | All 9 existing BFF meters use `Sprk.Bff.Api.<Feature>` pattern (`R5SummarizeTelemetry.cs:49`, `InsightsCacheMetrics.cs:33`, `AiTelemetry.cs:54`, etc.) |
+| FR-03 | Evidence (pre-flight) | No inline-expand-to-modal pattern exists; closest is `AiSummaryPopover` (inline+popover, not modal); `InsightSummaryCard` ships in `@spaarke/ai-widgets` composing Popover + Dialog | `src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover/AiSummaryPopover.tsx`; `src/client/shared/Spaarke.AI.Widgets/` package (v0.1.0) |
+
+---
+
+*AI-optimized specification. Original design: [`design.md`](design.md). Generated by `/design-to-spec` 2026-06-10. Spec-edit pass applied 2026-06-10 by `/project-pipeline` resolving 8 open questions.*

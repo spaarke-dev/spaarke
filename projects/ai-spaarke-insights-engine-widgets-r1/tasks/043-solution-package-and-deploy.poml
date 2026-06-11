@@ -1,0 +1,58 @@
+<task id="043" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Solution package (FormXml + web resource); deploy</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>4</phase>
+    <tags>dataverse, deploy, solution, deploy</tags>
+    <dependencies>040, 041, 042</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Package Phase 4 deliverables (Matter form FormXml + JS web resources + React bundle) into a Dataverse solution patch. Deploy to Spaarke Dev via `scripts/Deploy-AllWebResources.ps1` or equivalent dataverse-deploy path.
+  </prompt>
+
+  <role>Dataverse solution packager.</role>
+
+  <goal>
+    Solution patch successfully imported to Spaarke Dev; Matter form shows InsightSummaryCard; OnLoad handler fires.
+  </goal>
+
+  <inputs>
+    <file purpose="form-changes">FormXml patch from Task 042</file>
+    <file purpose="web-resources">JS bundles from Tasks 040, 041, 042</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="environment">Spaarke Dev only</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse solution, web resources, formxml deployment</topic>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>scripts/Deploy-AllWebResources.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Add components to solution">Forms, web resources</step>
+    <step order="2" name="Export solution patch">Unmanaged for dev</step>
+    <step order="3" name="Import via dataverse-deploy">scripts/Deploy-AllWebResources.ps1 or PAC CLI</step>
+    <step order="4" name="Publish all customizations">After import</step>
+    <step order="5" name="Smoke test">Open a Matter; verify card</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">Form + web resources live in Spaarke Dev</output>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/form-deploy.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution import shows no errors</criterion>
+    <criterion testable="true">Customizations published</criterion>
+    <criterion testable="true">Card visible on Matter form post-deploy</criterion>
+  </acceptance-criteria>
+</task>

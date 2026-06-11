@@ -1,0 +1,54 @@
+<task id="044" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>End-to-end form test (TTI unblocked NFR-03)</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>4</phase>
+    <tags>form, e2e-test, ui-test</tags>
+    <dependencies>043</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    End-to-end Matter form test via `ui-test` skill: open Matter form → verify TTI unblocked → verify pre-warm fires (when stale) → verify card renders content. Covers FR-17 through FR-20 acceptance.
+  </prompt>
+
+  <role>UI E2E test engineer.</role>
+
+  <goal>
+    `notes/handoffs/phase-4-e2e-test.md` with pass/fail verdicts for FR-17/18/19/20/NFR-03.
+  </goal>
+
+  <inputs>
+    <file purpose="deployment">Task 043 (live form)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-03">Form TTI unaffected</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui test, chrome devtools, performance measurement</topic>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Apply ui-test skill">Browser-based test against dev Matter form</step>
+    <step order="2" name="Measure TTI">Performance timing API</step>
+    <step order="3" name="Verify pre-warm fires when stale">Network tab + telemetry (after Phase 5)</step>
+    <step order="4" name="Manual refresh test">Click refresh; verify spinner + new content</step>
+    <step order="5" name="Document pass/fail">Per FR-17/18/19/20</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/phase-4-e2e-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">TTI measured + within budget</criterion>
+    <criterion testable="true">FR-17/18/19/20 all pass</criterion>
+  </acceptance-criteria>
+</task>

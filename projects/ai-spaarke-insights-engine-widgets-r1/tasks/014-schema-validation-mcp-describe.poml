@@ -1,0 +1,54 @@
+<task id="014" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Schema validation via MCP describe + Web API query</title>
+    <status>not-started</status>
+    <estimated-effort>0.5h</estimated-effort>
+    <phase>1</phase>
+    <tags>dataverse, validation, mcp</tags>
+    <dependencies>013</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    Final Phase 1 gate: verify entity + form + seed row all coherent via MCP describe + Web API. Produce a one-page validation report — Phase 2 cannot start until this passes.
+  </prompt>
+
+  <role>Schema QA.</role>
+
+  <goal>
+    `notes/handoffs/phase-1-validation.md` recording: entity exists, 9 fields confirmed, alternate key enforced, 1 seed row present, forms open in Power Apps. Phase 2 unblocked.
+  </goal>
+
+  <inputs>
+    <file purpose="dependencies">Tasks 011, 012, 013 outputs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="phase-gate">Phase 2 cannot start without this pass</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse mcp, validation</topic>
+    <files>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="mcp__dataverse__describe('sprk_aitopicregistry')">Verify metadata shape</step>
+    <step order="2" name="Web API list with all attributes selected">GET ?$select=all-9-fields — verify seed row</step>
+    <step order="3" name="MCP search by topicname">Verify alternate-key query works</step>
+    <step order="4" name="Form check">Open Main form in Power Apps; render verified</step>
+    <step order="5" name="Author validation report">Pass/fail per check</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/phase-1-validation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 validation steps pass</criterion>
+    <criterion testable="true">Report explicitly states "Phase 2 cleared to start"</criterion>
+  </acceptance-criteria>
+</task>

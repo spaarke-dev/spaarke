@@ -1,0 +1,64 @@
+<task id="052" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Per-topic TTL plumbing (extend IInsightsPlaybookExecutionCache)</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <phase>5</phase>
+    <tags>bff, cache, dotnet</tags>
+    <dependencies>011</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Extend the existing `IInsightsPlaybookExecutionCache` to read TTL from `sprk_aitopicregistry.sprk_cachettlminutes` per FR-21. Default remains 60 minutes for matter-health. Do NOT introduce a new cache abstraction per audit DR-002. Apply audit Endpoint↔DI Symmetry Rule if DI changes are needed.
+  </prompt>
+
+  <role>BFF cache layer engineer.</role>
+
+  <goal>
+    Cache layer reads per-topic TTL from registry; cache hit/miss behavior verified per topic.
+  </goal>
+
+  <inputs>
+    <file purpose="cache-impl">existing IInsightsPlaybookExecutionCache</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-21)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="audit-DR-002">Do NOT add new cache abstraction; extend existing</constraint>
+    <constraint source="ADR-009">Use canonical DistributedCacheExtensions.GetOrCreateAsync&lt;T&gt;</constraint>
+    <constraint source="audit-DR-008">Endpoint↔DI Symmetry — verify before adding any DI registration</constraint>
+    <constraint source="ADR-010">DI minimalism — no new interface seam unless absolutely required</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>caching, distributedcache, topic registry, per-topic ttl</topic>
+    <files>
+      <file>.claude/adr/ADR-009-caching.md</file>
+      <file>.claude/patterns/ai/endpoint-di-symmetry.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Locate IInsightsPlaybookExecutionCache impl">In BFF Services/Ai/Insights/</step>
+    <step order="2" name="Read topic registry once per cache write">Avoid per-call lookup; consider in-memory registry mirror</step>
+    <step order="3" name="Pass TTL from registry into GetOrCreateAsync">Per-topic instead of universal 15-min</step>
+    <step order="4" name="Update tests">Tests/unit cache TTL per topic</step>
+    <step order="5" name="Verify no new abstraction">Existing interface unchanged</step>
+    <step order="6" name="Measure publish-size delta">Per NFR-01 rule</step>
+  </steps>
+
+  <outputs>
+    <output type="code">existing cache implementation (extended)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Insights/CacheTtlPerTopicTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Cache reads TTL from sprk_aitopicregistry.sprk_cachettlminutes</criterion>
+    <criterion testable="true">No new interface added</criterion>
+    <criterion testable="true">Tests verify per-topic TTL behavior</criterion>
+    <criterion testable="true">Publish-size delta &lt;5 MB</criterion>
+  </acceptance-criteria>
+</task>

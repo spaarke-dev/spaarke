@@ -1,0 +1,55 @@
+<task id="034" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Manual refresh button (FR-20 blocking + spinner)</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>3</phase>
+    <tags>ui, refresh, ux</tags>
+    <dependencies>031</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Add manual refresh button (FR-20) that triggers blocking-style invocation regardless of cache age. Spinner shown during invocation; card re-renders on completion. Distinct from background pre-warm (which is fire-and-forget per FR-18).
+  </prompt>
+
+  <role>UI interaction developer.</role>
+
+  <goal>
+    Refresh button in Popover footer; click → state transitions to loading with spinner → on result, transitions to loaded (or error/decline).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-20)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-20">Blocking-style (spinner) — NOT fire-and-forget</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent v9 button + spinner, optimistic ui</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Add Refresh button to Popover footer">Fluent v9 Button + ArrowSync icon</step>
+    <step order="2" name="onClick → invoke /api/insights/ask">force=true query param to bypass cache</step>
+    <step order="3" name="State transitions">idle/loaded/stale → loading → loaded/error/decline</step>
+    <step order="4" name="Show spinner during invocation">Inline within card</step>
+  </steps>
+
+  <outputs>
+    <output type="code">InsightSummaryCard.tsx (refresh button added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Refresh button visible in Popover footer</criterion>
+    <criterion testable="true">Click triggers force-cache-bypass invocation</criterion>
+    <criterion testable="true">Spinner shown during invocation</criterion>
+    <criterion testable="true">Card re-renders with new content on completion</criterion>
+  </acceptance-criteria>
+</task>

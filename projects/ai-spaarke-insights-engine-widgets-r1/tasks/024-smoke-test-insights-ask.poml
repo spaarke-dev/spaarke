@@ -1,0 +1,60 @@
+<task id="024" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>End-to-end smoke test via /api/insights/ask</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>2</phase>
+    <tags>jps, smoke-test, bff-api</tags>
+    <dependencies>023</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Invoke `/api/insights/ask` against dev BFF with the matter-health/single payload; verify response shape; verify envelope appears in target Matter's `sprk_performancesummary` field.
+  </prompt>
+
+  <role>BFF integration tester.</role>
+
+  <goal>
+    Successful invocation against sample Matter with ≥3 assessments. Response contains valid envelope; Matter record updated with envelope.
+  </goal>
+
+  <inputs>
+    <file purpose="api-spec">existing /api/insights/ask endpoint</file>
+    <file purpose="playbook">matter-health-single (Task 023)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="dev-environment">Use Spaarke Dev BFF + real Matter row</constraint>
+    <constraint source="audit-DR-003">Direct facade call via IInsightsAi — no new BFF code</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>insights ask endpoint, IInsightsAi facade</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/InsightsEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Identify test Matter">Real dev Matter with ≥3 KPI assessments per area</step>
+    <step order="2" name="POST /api/insights/ask">payload: topic=matter-health, mode=single, subject=matter:{Guid}</step>
+    <step order="3" name="Verify response shape">Envelope returned matches schemaVersion '1.0' + 7 dimensions</step>
+    <step order="4" name="Verify Matter update">GET sprk_matter; sprk_performancesummary contains envelope JSON</step>
+    <step order="5" name="Second invocation cache hit">Repeat call; verify cache hit (telemetry or BFF logs)</step>
+    <step order="6" name="Document run">notes/handoffs/smoke-test-results.md</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/smoke-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/api/insights/ask returns 200 with envelope body</criterion>
+    <criterion testable="true">sprk_matter.sprk_performancesummary contains valid envelope JSON</criterion>
+    <criterion testable="true">Second invocation in TTL window served from cache</criterion>
+    <criterion testable="true">No `@v` in any envelope or response field</criterion>
+  </acceptance-criteria>
+</task>

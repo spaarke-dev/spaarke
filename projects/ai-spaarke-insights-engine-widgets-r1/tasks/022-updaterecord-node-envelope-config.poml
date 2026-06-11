@@ -1,0 +1,60 @@
+<task id="022" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>UpdateRecord node config — write JSON envelope to Matter</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>2</phase>
+    <tags>jps, playbook, persistence</tags>
+    <dependencies>021</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Configure the UpdateRecord node in `matter-health-single.playbook.json` to write the FR-14 JSON envelope into `sprk_matter.sprk_performancesummary`. Envelope schema: `schemaVersion: "1.0"` (string semver per Q-U1), body (markdown), citations (type-discriminated), generatedAt (ISO 8601), playbookName, tenantId, dimensions. No `@v` suffixes anywhere.
+  </prompt>
+
+  <role>JPS persistence integrator.</role>
+
+  <goal>
+    UpdateRecord node in playbook writes valid envelope to existing `sprk_performancesummary` field. End-to-end smoke test (Task 024) confirms envelope appears post-invocation.
+  </goal>
+
+  <inputs>
+    <file purpose="playbook">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/matter-health-single.playbook.json (from Task 021)</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-14)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-14">Envelope schema as defined; schemaVersion = "1.0" (string, not int)</constraint>
+    <constraint source="spec-FR-16">No new Dataverse fields; write to existing sprk_performancesummary</constraint>
+    <constraint source="Q-U1">No `@v` in any envelope field — including playbookName</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps updaterecord node, envelope schema, sprk_performancesummary</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Define output mapping in UpdateRecord config">Map AiAnalysis output + GroundingVerify citations → envelope JSON</step>
+    <step order="2" name="Set schemaVersion as literal '1.0' string">Verify in JSON</step>
+    <step order="3" name="Define targetEntity = sprk_matter, targetField = sprk_performancesummary">Per topic registry</step>
+    <step order="4" name="Include generatedAt, playbookName, tenantId, dimensions[]">Per FR-14</step>
+    <step order="5" name="jps-validate">Validate playbook still passes schema</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/matter-health-single.playbook.json (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UpdateRecord node config writes to sprk_performancesummary</criterion>
+    <criterion testable="true">schemaVersion in node config is string "1.0", not int 1</criterion>
+    <criterion testable="true">All 7 envelope fields present</criterion>
+    <criterion testable="true">No `@v` substring in playbookName field</criterion>
+  </acceptance-criteria>
+</task>

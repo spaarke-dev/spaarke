@@ -1,0 +1,57 @@
+<task id="033" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Citation rendering (type-discriminated per FR-07)</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <phase>3</phase>
+    <tags>ui, citation, render</tags>
+    <dependencies>031</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Render envelope.citations[] with type discriminator: `assessment` → in-product nav link; `document` → SPE href. Extensible — adding a new citation type means adding a render case, not a new component. Invoke `onCitationClick` prop callback.
+  </prompt>
+
+  <role>UI citation render developer.</role>
+
+  <goal>
+    Citations render as type-appropriate links; click invokes prop callback; supports `assessment` + `document` types; gracefully ignores unknown types.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-07)</file>
+    <file purpose="component">InsightSummaryCard.tsx (Task 031 state)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-07">Type discriminator; extensible</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>citation rendering, type discriminator, fluent v9 link</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Author Citation type union">Discriminated by type ('assessment' | 'document' | string)</step>
+    <step order="2" name="renderCitation switch">Assessment → in-product link; Document → SPE href</step>
+    <step order="3" name="Wire onCitationClick prop">Invoked on click with the citation object</step>
+    <step order="4" name="Unknown types">Render as plain text label; do not throw</step>
+  </steps>
+
+  <outputs>
+    <output type="code">InsightSummaryCard.tsx (citation render added)</output>
+    <output type="code">Citation.types.ts (discriminator union)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Assessment citations render as clickable links</criterion>
+    <criterion testable="true">Document citations render with SPE href</criterion>
+    <criterion testable="true">onCitationClick invoked with citation object</criterion>
+    <criterion testable="true">Unknown type renders as plain text (no throw)</criterion>
+  </acceptance-criteria>
+</task>

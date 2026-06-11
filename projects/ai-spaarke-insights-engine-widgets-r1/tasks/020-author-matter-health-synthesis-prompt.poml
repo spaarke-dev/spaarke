@@ -1,0 +1,69 @@
+<task id="020" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Author Matter Health synthesis prompt via jps-action-create</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <phase>2</phase>
+    <tags>jps, action-row, prompt</tags>
+    <dependencies>014</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Author the synthesis system prompt covering 7 baseline diagnostic dimensions per FR-12 (composite grade explanation; trend; themes from Notes; inflection-point detection; critical assessments cited as anchors; forward-looking risk; honest evidence-gap acknowledgment). Persist to `sprk_analysisaction.sprk_systemprompt` via the `jps-action-create` skill. Use exact KPI Performance Area names per FR-13 (Guideline Compliance, Budget Compliance, Outcomes Achievement). Apply Spaarke Canonical Prompt Construction Pattern (audit §2.7).
+  </prompt>
+
+  <role>JPS prompt engineer + legal-domain SME proxy.</role>
+
+  <goal>
+    One `sprk_analysisaction` row exists in dev Dataverse carrying the matter-health synthesis prompt. Prompt yields valid 7-dimension narrative when invoked against a sample Matter.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-12, FR-13)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-widgets-r1/design.md (§4.2 dimensions)</file>
+    <file purpose="canonical-pattern">projects/bff-ai-architecture-audit-r1/notes/canonical-architecture-decisions.md §2.7</file>
+    <file purpose="reference-prompt">existing predict-matter-cost synthesis prompt (in sprk_analysisaction)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-014">Prompt lives in sprk_analysisaction.sprk_systemprompt, NOT in .txt or /Prompts/ folder</constraint>
+    <constraint source="audit-§2.7">Apply Canonical Prompt Construction Pattern</constraint>
+    <constraint source="Q-U1">No `@v1`/`@vN` in action code</constraint>
+    <constraint source="spec-FR-13">Exact KPI names: Guideline Compliance / Budget Compliance / Outcomes Achievement</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps action create, system prompt, sprk_analysisaction, canonical prompt pattern</topic>
+    <files>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/bff-ai-architecture-audit-r1/notes/canonical-architecture-decisions.md</file>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/design.md</file>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Invoke jps-action-create skill">Per its workflow</step>
+    <step order="2" name="Compose 7-dimension prompt">Each dimension addressed; cite KPI names exactly</step>
+    <step order="3" name="Apply Canonical Prompt Construction Pattern">Structure: role, task, constraints, context</step>
+    <step order="4" name="Define output schema">Markdown body + citations array shape</step>
+    <step order="5" name="Persist to sprk_analysisaction">New action row; action code = `matter-health-synthesis` (no @v suffix)</step>
+    <step order="6" name="Test invocation against sample data">Verify 7 dimensions appear in output</step>
+  </steps>
+
+  <outputs>
+    <output type="dataverse-data">One sprk_analysisaction row with synthesis prompt</output>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/matter-health-prompt-design.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_analysisaction row exists with action code `matter-health-synthesis` (no @v suffix)</criterion>
+    <criterion testable="true">Test invocation produces output covering all 7 dimensions</criterion>
+    <criterion testable="true">Output uses exact KPI Performance Area names per FR-13</criterion>
+    <criterion testable="true">No new .txt prompt file created (ADR-014)</criterion>
+  </acceptance-criteria>
+</task>

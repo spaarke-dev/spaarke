@@ -1,0 +1,58 @@
+<task id="063" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Kill-switch UAT — 503 verification (SC-08)</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <phase>6</phase>
+    <tags>uat, kill-switch, sc-08, adr-018</tags>
+    <dependencies>060</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Execute Scenario C with `DocumentIntelligence:Enabled=false` in dev. Verify FR-25 / SC-08: BFF returns 503 ProblemDetails (per ADR-018; NOT 500), card shows graceful "AI summaries unavailable" state.
+  </prompt>
+
+  <role>Kill-switch test engineer.</role>
+
+  <goal>
+    503 returned by BFF (not 500); UI shows graceful error per FR-06 Error state.
+  </goal>
+
+  <inputs>
+    <file purpose="scenario">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-scenarios.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-018">503 ProblemDetails, not 500</constraint>
+    <constraint source="ADR-032">FeatureDisabledException → 503 plumbing</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>feature flag, problemdetails, adr-018</topic>
+    <files>
+      <file>.claude/adr/ADR-018-kill-switches.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Toggle config DocumentIntelligence:Enabled=false">Dev BFF</step>
+    <step order="2" name="Restart BFF">Apply config</step>
+    <step order="3" name="Open Matter form, click sparkle">Trigger invocation</step>
+    <step order="4" name="Verify 503 response in network tab">ProblemDetails shape</step>
+    <step order="5" name="Verify UI error state">Graceful message; no stack trace exposed</step>
+    <step order="6" name="Restore config">Re-enable for subsequent UAT</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-results/scenario-c-kill-switch.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF returns 503 (not 500)</criterion>
+    <criterion testable="true">UI error state matches FR-06 spec</criterion>
+  </acceptance-criteria>
+</task>

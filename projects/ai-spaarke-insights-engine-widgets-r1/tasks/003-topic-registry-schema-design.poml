@@ -1,0 +1,65 @@
+<task id="003" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>sprk_aitopicregistry entity design + ADR check</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <phase>0</phase>
+    <tags>foundation, dataverse, schema-design</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Design the `sprk_aitopicregistry` entity schema before Phase 1 implementation. Spec FR-04 lists 9 fields; this task ratifies field types, primary key choice, unique constraints (topicname + mode combination), display name conventions, and Power Apps form layout. Output is a design note that Phase 1 task 010 implements verbatim. Verify schema decisions against existing `sprk_gridconfiguration` entity (Q-U2 reference pattern).
+  </prompt>
+
+  <role>Dataverse schema architect familiar with Spaarke entity conventions.</role>
+
+  <goal>
+    Single deliverable: `notes/topic-registry-schema-design.md` with: complete field list (logical name, type, constraints, default, description), primary key + unique-constraint approach, model-driven app form layout sketch, decision on `sprk_icon` field convention citing Q-U2 resolution (Fluent icon component name as string).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-04 + FR-05 + FR-09)</file>
+    <file purpose="reference-entity">existing `sprk_gridconfiguration` entity (via mcp__dataverse__describe)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-04">9 fields: sprk_topicname, sprk_mode, sprk_playbookname, sprk_displayname, sprk_icon, sprk_hostentity, sprk_targetfield, sprk_cachettlminutes, sprk_enabled</constraint>
+    <constraint source="Q-U2">sprk_icon = Fluent icon component name as string (e.g., 'Sparkle24Filled')</constraint>
+    <constraint source="Q-U4">NO sprk_systemprompt reference on registry — playbook is canonical prompt source</constraint>
+    <constraint source="spec-FR-09">SME-editable via model-driven app form</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse schema, sprk_gridconfiguration precedent, model-driven app forms</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/ConfigurationTypes.ts</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Query existing sprk_gridconfiguration schema">Use mcp__dataverse__describe('sprk_gridconfiguration') as field-type / convention reference</step>
+    <step order="2" name="Map each FR-04 field to a Dataverse type">Document logical name, display name, type (text length / int range / boolean), default, description</step>
+    <step order="3" name="Define unique constraint">topicname + mode combined unique (alternate-key approach in Dataverse)</step>
+    <step order="4" name="Sketch model-driven app form">Tab/section layout, field order, lookups vs free text</step>
+    <step order="5" name="Document indexing / search needs">Active records view, search by topicname</step>
+    <step order="6" name="ADR check">Verify no ADR violation; spec NFR-09 forbids new ADR</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/topic-registry-schema-design.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 9 fields documented with type + constraints</criterion>
+    <criterion testable="true">Unique constraint on (topicname, mode) is explicit</criterion>
+    <criterion testable="true">`sprk_icon` field documented as string holding Fluent icon component name per Q-U2</criterion>
+    <criterion testable="true">No reference to `sprk_systemprompt` (Q-U4 — registry routes only)</criterion>
+    <criterion testable="true">Phase 1 task 010 can be implemented verbatim from this design</criterion>
+  </acceptance-criteria>
+</task>

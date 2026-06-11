@@ -1,0 +1,59 @@
+<task id="032" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Topic registry mount check (FR-05 no orphan sparkles)</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>3</phase>
+    <tags>ui, dataverse, registry-check</tags>
+    <dependencies>030, 013</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    On `InsightSummaryCard` mount, query `sprk_aitopicregistry` for the (topic, mode) combination via `IDataService` adapter. If the row is absent OR `sprk_enabled=false`, render nothing (no sparkle). FR-05 acceptance: no orphan sparkles.
+  </prompt>
+
+  <role>UI data-fetching engineer.</role>
+
+  <goal>
+    Component mount fetches registry row; absent → renders null; disabled → renders null; enabled → proceeds to idle state.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-05)</file>
+    <file purpose="data-service">src/client/shared/Spaarke.UI.Components/src/services/ConfigurationService.ts (Q-U2 reference)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-05">No render unless registry row exists AND enabled=true</constraint>
+    <constraint source="IDataService">Use existing adapter; do NOT use Xrm.WebApi directly in the component</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse fetch, idataservice, sprk_aitopicregistry</topic>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/ConfigurationService.ts</file>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Add IDataService dependency to component">Inject or import</step>
+    <step order="2" name="useEffect on mount">Fetch sprk_aitopicregistry by (topic, mode)</step>
+    <step order="3" name="If absent or disabled">Return null (no render)</step>
+    <step order="4" name="If enabled">Set initial state to idle; cache TTL from row</step>
+    <step order="5" name="Handle fetch errors">Surface as error state with diagnostic log</step>
+  </steps>
+
+  <outputs>
+    <output type="code">InsightSummaryCard.tsx (registry-fetch logic added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Component with no matching registry row renders null</criterion>
+    <criterion testable="true">Component with disabled row renders null</criterion>
+    <criterion testable="true">Component with enabled row proceeds to idle state</criterion>
+    <criterion testable="true">Fetch error → error state</criterion>
+  </acceptance-criteria>
+</task>

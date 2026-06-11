@@ -1,0 +1,60 @@
+<task id="004" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>adr-check spec.md sweep (verify NFR-09 compliance)</title>
+    <status>not-started</status>
+    <estimated-effort>1.5h</estimated-effort>
+    <phase>0</phase>
+    <tags>foundation, adr-check, quality-gate</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Run `adr-check` skill against spec.md to verify every named ADR is being applied correctly + no NFR-09 violations (spec must not introduce a new ADR). Produce a pass/fail report at `notes/adr-check-2026-06-10.md`. This is the planning-stage quality gate before Phase 1 begins.
+  </prompt>
+
+  <role>ADR compliance auditor.</role>
+
+  <goal>
+    Single deliverable: `notes/adr-check-2026-06-10.md` with pass/fail per ADR cited in spec, plus explicit verification that no new ADR is introduced. Any failure halts Phase 1 until resolved.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    <file purpose="adr-index">.claude/adr/INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-NFR-09">No new ADR introduced — r1 operates within audit-codified constraints</constraint>
+    <constraint source="root-CLAUDE.md">Apply adr-check skill</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>adr-check, adr-aware, spec verification</topic>
+    <files>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/adr-aware/SKILL.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Enumerate ADRs cited in spec">List each ADR-XXX reference in spec.md</step>
+    <step order="2" name="Read each cited ADR">Verify the spec applies its constraints correctly</step>
+    <step order="3" name="Run adr-check skill workflow">Per skill SKILL.md</step>
+    <step order="4" name="Verify NFR-09">No `docs/adr/` additions; no new ADR markdown filed by r1</step>
+    <step order="5" name="Author report">Pass/fail per ADR + overall verdict</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/adr-check-2026-06-10.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Report covers every ADR cited in spec (ADR-001, ADR-009, ADR-010, ADR-013, ADR-014, ADR-018, ADR-019, ADR-021, ADR-032)</criterion>
+    <criterion testable="true">Report explicitly verifies NFR-09: no new ADR introduced</criterion>
+    <criterion testable="true">Any failure produces a concrete spec.md edit recommendation</criterion>
+  </acceptance-criteria>
+</task>

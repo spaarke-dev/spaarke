@@ -1,0 +1,67 @@
+<task id="021" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Author matter-health-single playbook JSON (no @v suffix)</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <phase>2</phase>
+    <tags>jps, playbook, json</tags>
+    <dependencies>020</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Author `matter-health-single.playbook.json` following the shape of `predict-matter-cost.playbook.json` and the conventions of `universal-ingest.playbook.json`. Use only existing node executors per FR-11. Wire the Task 020 synthesis prompt by actionCode FK. Apply `jps-playbook-design` skill workflow.
+  </prompt>
+
+  <role>JPS playbook architect.</role>
+
+  <goal>
+    `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/matter-health-single.playbook.json` — valid playbook JSON that loads in `PlaybookExecutionEngine`, references the Task 020 action code, persists output via UpdateRecord (Task 022 configures that node).
+  </goal>
+
+  <inputs>
+    <file purpose="reference-playbook">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json</file>
+    <file purpose="reference-playbook">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-10, FR-11)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-widgets-r1/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-11">Use ONLY existing node executor types: QueryDataverse, IndexRetrieve (or LiveFact), EvidenceSufficiency, AiAnalysis, GroundingVerify, UpdateRecord, ReturnInsightArtifact, DeclineToFind</constraint>
+    <constraint source="Q-U1">Playbook name = bare `matter-health-single`. NO `@v1` suffix anywhere — not in name, not in identifiers, not in any field.</constraint>
+    <constraint source="audit-DR-003">No new BFF facade — playbook invoked via existing IInsightsAi.AnswerQuestionAsync</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps playbook, node executors, ActionType enum, PlaybookExecutionEngine</topic>
+    <files>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>.claude/catalogs/scope-model-index.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Invoke jps-playbook-design skill">Per its workflow</step>
+    <step order="2" name="Compose top-level playbook metadata">name=`matter-health-single`, hostentity=`sprk_matter`, scopes</step>
+    <step order="3" name="Compose nodes[]">QueryDataverse → IndexRetrieve → EvidenceSufficiency → (branch) AiAnalysis(actionCode=matter-health-synthesis) → GroundingVerify → UpdateRecord → ReturnInsightArtifact; with DeclineToFind branch</step>
+    <step order="4" name="Wire DeclineToFind">When EvidenceSufficiency fails</step>
+    <step order="5" name="Validate JSON against schema">jps-validate skill</step>
+    <step order="6" name="Save playbook file">canonical Playbooks/ directory</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/matter-health-single.playbook.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">jps-validate skill passes</criterion>
+    <criterion testable="true">No `@v` substring anywhere in file</criterion>
+    <criterion testable="true">All referenced actionCodes resolve to existing sprk_analysisaction rows</criterion>
+    <criterion testable="true">All referenced executor types exist in ActionType enum</criterion>
+    <criterion testable="true">DeclineToFind branch covers EvidenceSufficiency failure path</criterion>
+  </acceptance-criteria>
+</task>

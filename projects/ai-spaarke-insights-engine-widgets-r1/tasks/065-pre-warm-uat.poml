@@ -1,0 +1,53 @@
+<task id="065" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Background pre-warm UAT (SC-10)</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <phase>6</phase>
+    <tags>uat, pre-warm, sc-10</tags>
+    <dependencies>060</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Verify SC-10: background pre-warm fires on Matter form load when stored summary is stale. Telemetry shows OnLoad-triggered invocation; UI not blocked.
+  </prompt>
+
+  <role>Pre-warm verifier.</role>
+
+  <goal>
+    Telemetry confirms OnLoad-triggered call; form TTI metrics unaffected.
+  </goal>
+
+  <inputs>
+    <file purpose="scenario">notes/uat-scenarios.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-03">Form TTI unaffected</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pre-warm, telemetry, form tti</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Stale a Matter's envelope">Set generatedAt to 2h ago via Web API patch</step>
+    <step order="2" name="Open Matter form">Observe network tab + telemetry</step>
+    <step order="3" name="Verify pre-warm POST fires">Async; no await blocking</step>
+    <step order="4" name="Verify TTI unblocked">Performance API</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-results/sc-10-pre-warm.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Pre-warm telemetry event present</criterion>
+    <criterion testable="true">Form TTI within budget</criterion>
+  </acceptance-criteria>
+</task>

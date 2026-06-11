@@ -1,0 +1,62 @@
+<task id="010" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Author sprk_aitopicregistry entity definition (9 fields)</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <phase>1</phase>
+    <tags>dataverse, schema, entity-design</tags>
+    <dependencies>003</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Implement the entity definition designed in Task 003. Author Web API metadata payload (EntityMetadata + AttributeMetadata) per `dataverse-create-schema` skill conventions. Output is the deployable Web API request body + a deploy script; entity is NOT yet deployed (Task 011 deploys).
+  </prompt>
+
+  <role>Dataverse schema engineer.</role>
+
+  <goal>
+    Two deliverables: (a) Web API metadata request bodies for entity + 9 attributes; (b) PowerShell deploy script wrapping the requests with auth + idempotency. Mirrors the `dataverse-create-schema` skill exemplar.
+  </goal>
+
+  <inputs>
+    <file purpose="design">projects/ai-spaarke-insights-engine-widgets-r1/notes/topic-registry-schema-design.md</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-04)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-04">9 fields exact set per spec</constraint>
+    <constraint source="Q-U2">sprk_icon stores Fluent icon component name string</constraint>
+    <constraint source="dataverse-create-schema">PAC CLI lacks `pac table create` — use Web API EntityMetadata + AttributeMetadata</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse web api, entity metadata, attribute metadata, sprk_aitopicregistry</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/notes/topic-registry-schema-design.md</file>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Compose EntityMetadata JSON">name, schemaName, displayName, primaryName attr, etc.</step>
+    <step order="2" name="Compose AttributeMetadata for each of 9 fields">Per design doc field types</step>
+    <step order="3" name="Compose AlternateKeyMetadata">topicname + mode combined unique key</step>
+    <step order="4" name="Wrap in deploy script">PowerShell calling Web API with token; idempotent (check exists, create or skip)</step>
+    <step order="5" name="Dry-run verification">Validate JSON against MetadataService schema without deploying</step>
+  </steps>
+
+  <outputs>
+    <output type="artifact">scripts/temp/Create-AiTopicRegistryEntity.json (metadata payloads)</output>
+    <output type="artifact">scripts/temp/Deploy-AiTopicRegistryEntity.ps1 (deploy wrapper)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Metadata payload validates against Dataverse Web API schema (dry-run)</criterion>
+    <criterion testable="true">All 9 fields present with correct types per design doc</criterion>
+    <criterion testable="true">Alternate key on (topicname, mode) defined</criterion>
+    <criterion testable="true">Deploy script is idempotent</criterion>
+  </acceptance-criteria>
+</task>
