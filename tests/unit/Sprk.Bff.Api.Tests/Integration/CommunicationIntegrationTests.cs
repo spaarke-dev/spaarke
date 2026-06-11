@@ -1277,6 +1277,7 @@ public class CommunicationIntegrationTests
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore - ArchiveContainerId not configured in tests, so archival path is skipped
             jobSubmissionService,
+            Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Options.Create(opts),
             config,

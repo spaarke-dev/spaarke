@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>PCF unit + UI tests (request shape, envelope shape, dark-mode)</title>
+    <phase>D: PCF v1.1.74</phase>
+    <status>not-started</status>
+    <estimated-hours>3-5</estimated-hours>
+    <dependencies>033</dependencies>
+    <blocks>035</blocks>
+    <tags>pcf, testing, unit-test, e2e-test, fluent-ui, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test creation task — `testing` tag; new test files. Explicit constraints from spec NFR-03/06/07/09 + ADR-021. Not source-code logic.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Must follow 033 (version bump complete) and precede 035 (deploy depends on tests green).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add (or verify) unit tests for the PCF changes from tasks 031 + 032 (request body shape + envelope shape per parity field). Add UI tests via the `ui-test` skill for: control renders without console errors, dark-mode compliance per ADR-021 (semantic tokens, currentColor icons), and the "Open in Semantic Search" interaction with seeded filters. Verify no `@fluentui/react` v8 imports (NFR-06) and no React 18-only APIs in PCF code (NFR-07).
+  </prompt>
+
+  <role>
+    PCF developer with familiarity with Jest unit tests + the `ui-test` skill for browser-based PCF verification. ADR-021 dark-mode compliance is a hard gate — semantic tokens via `tokens.*` only, `currentColor` for icons, no hex / no `var(--…)` / no rgb literals.
+  </role>
+
+  <goal>
+    Unit tests cover (a) `SemanticSearchApiService.search()` body shape with + without `searchIndexName`; (b) `NavigationService.openSemanticSearchPage()` envelope shape for every parity field (set + omitted). UI tests pass for: Component Renders, Dark Mode Compliance (ADR-021), User Interaction (Open in Semantic Search seeds filters). Build-time check confirms no v8 imports and no React-18-only APIs.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 031 + 032 added the request-body and envelope changes. Task 033 bumped the version + verified the production-mode bundle. This task is the test gate before deploy in task 035. Tests must be green to proceed.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/NavigationService.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-03">Production bundle ≤ 1 MB (already verified in 033; revalidate here on test artifact).</constraint>
+    <constraint source="spec.md NFR-06">Fluent UI v9 only. No `@fluentui/react` v8 imports. Build-time check.</constraint>
+    <constraint source="spec.md NFR-07">PCF stays React 16-safe. No React 18-only APIs (e.g. `createRoot`, `useId`, `useSyncExternalStore`).</constraint>
+    <constraint source="spec.md NFR-09">All BFF calls use `authenticatedFetch` from `@spaarke/auth`. No `Bearer ${token}` literals. Code-review confirmation.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + `tokens.*` only. Dark-mode compliant: semantic tokens for colors; `currentColor` for icons; no hex / no `var(--…)` / no rgb literals.</constraint>
+    <constraint source="ADR-022">PCF stays React 16. No React 18-only APIs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF dark-mode token usage" location=".claude/patterns/pcf/theme-management.md">
+        Use `tokens.colorNeutralBackground1`, `tokens.colorNeutralForeground1`, etc. for theme-aware colors. Use `currentColor` for icon fills/strokes so they inherit text color. Never hardcode hex/rgb.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify unit tests from task 031 exist and cover `SemanticSearchApiService.search()` body shape: (a) `searchIndexName` present when non-empty; (b) absent when null/empty/whitespace. Add tests if missing.</step>
+    <step order="2">Verify unit tests from task 032 exist and cover `NavigationService.openSemanticSearchPage()` envelope shape for every parity field: query, scope, entityId, threshold, searchMode, fileTypes (CSV round-trip), dateFrom (ISO round-trip), dateTo (ISO round-trip), tags (CSV round-trip), associatedOnly (boolean round-trip), theme, searchIndexName. Plus the omit-when-empty case per field. Add tests if missing.</step>
+    <step order="3">Add UI tests via the `ui-test` skill for the 3 scenarios in &lt;ui-tests&gt; below: Component Renders, Dark Mode Compliance (ADR-021), User Interaction (Open in Semantic Search). Capture test artifacts (screenshots, console output) for the project handoff.</step>
+    <step order="4">Run a grep over `src/client/pcf/SemanticSearchControl/` for `@fluentui/react` (v8 import — must be 0 matches outside v9 aliasing) and React 18-only APIs (`createRoot`, `useId`, `useSyncExternalStore`, `useTransition`, etc.). Document the check result in handoff notes.</step>
+    <step order="5">Run `npm run test` to confirm all unit tests pass; run UI tests via `ui-test` skill. Capture results in `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/034-pcf-tests.md`.</step>
+    <step order="6">If any test fails, fix the implementation (not the test). Re-run until all green.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing tests + source files</tool>
+    <tool name="Edit">Add missing unit tests; fix any v8/React-18 imports if found</tool>
+    <tool name="Bash">Run `npm run test`; grep for forbidden imports</tool>
+    <tool name="Skill">Invoke `ui-test` skill for browser-based PCF verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="tests">Unit tests for request body + envelope shape</output>
+    <output type="tests">UI tests for Component Renders, Dark Mode, User Interaction</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/034-pcf-tests.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All unit tests pass: request-body shape (task 031) + envelope shape (task 032) coverage complete.</criterion>
+    <criterion testable="true">UI test "Component Renders" passes — control mounts without console errors.</criterion>
+    <criterion testable="true">UI test "Dark Mode Compliance (ADR-021)" passes — colors adapt via semantic tokens; icons use currentColor.</criterion>
+    <criterion testable="true">UI test "User Interaction (Open in Semantic Search)" passes — clicking Open launches modal with seeded filters identical to PCF state.</criterion>
+    <criterion testable="true">NFR-06: No `@fluentui/react` v8 imports detected. Verified by grep.</criterion>
+    <criterion testable="true">NFR-07: No React 18-only APIs in PCF code. Verified by grep.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Component Renders">
+      <description>PCF mounts without console errors on a model-driven form.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn={entity}&amp;id={record-id}</url>
+      <steps>
+        <step>Open a model-driven form hosting SemanticSearchControl.</step>
+        <step>Open browser DevTools → Console tab.</step>
+        <step>Verify the control renders and is interactive.</step>
+      </steps>
+      <expected>Control renders; no console errors; footer shows `v1.1.74 • Built YYYY-MM-DD`.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <description>Verify the PCF adapts to dark mode via semantic Fluent v9 tokens, not hardcoded colors.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn={entity}&amp;id={record-id}</url>
+      <steps>
+        <step>Open a model-driven form hosting SemanticSearchControl in default (light) mode.</step>
+        <step>Toggle browser/OS to dark mode (or toggle the host app's theme).</step>
+        <step>Reload the form; observe the PCF rendering.</step>
+        <step>Inspect computed styles via DevTools for primary surfaces and icons.</step>
+      </steps>
+      <expected>Background, text, borders, and icons all adapt to dark mode via Fluent v9 semantic tokens (`tokens.colorNeutralBackground1`, etc.). Icons use `currentColor` for fill/stroke. No hex/rgb literals visible in computed styles for color-bearing surfaces.</expected>
+    </test>
+    <test name="User Interaction (Open in Semantic Search)">
+      <description>End-to-end: apply filters in PCF, click Open, verify the launched modal/page seeds the same filters and shows identical results.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn={entity}&amp;id={record-id}</url>
+      <steps>
+        <step>Open a model-driven form hosting SemanticSearchControl on a record.</step>
+        <step>In the PCF, set Threshold=50%, Mode=Hybrid, Associated Only=true.</step>
+        <step>Run a search to populate results.</step>
+        <step>Click "Open in Semantic Search".</step>
+        <step>In the modal/full-page, inspect filter values + result set.</step>
+      </steps>
+      <expected>Modal shows Threshold=50%, Mode=Hybrid, Associated Only=true seeded from the envelope. Result document set is identical to the PCF's (same titles, same order, same count).</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The forbidden-import check in Step 4 is a fast safety net — it's better to catch a v8 or React-18-only API here than during deploy/review. If any match is found, treat it as a blocker and fix before proceeding to task 035.
+
+    UI tests should be captured with screenshots + console-output snapshots for the project handoff. The `ui-test` skill documents the standard capture format.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-021 / ADR-022 + .claude/constraints/pcf.md + .claude/constraints/testing.md + .claude/skills/ui-test/SKILL.md before Step 1. Declare rigor (STANDARD) per task-execute Step 0.
+    </protocol>
+  </execution>
+</task>

@@ -19,6 +19,7 @@
 | [xrm-webapi-vs-bff-auth.md](xrm-webapi-vs-bff-auth.md) | Decision: Xrm.WebApi vs BFF auth | 2026-04-05 | Verified |
 | [bff-url-normalization.md](bff-url-normalization.md) | **CRITICAL**: BFF URL construction via `buildBffApiUrl()` — unchanged in v2 | 2026-05-19 | Verified (v2) |
 | [managed-identity-resource-rbac.md](managed-identity-resource-rbac.md) | Provisioning UAMI on Azure resources (KV, Cosmos, AI Services) + `keyVaultReferenceIdentity` requirement | 2026-05-28 | Verified (post-incident) |
+| [spe-writer-identity-matching.md](spe-writer-identity-matching.md) | **CRITICAL** — SPE file read identity must match the writer's. Decides whether a post-upload pipeline dispatches sync OBO (user uploads) or async Service Bus (MI-written files). Encodes the Phase 3a UAT incident finding. | 2026-06-08 | Verified (post-incident) |
 
 ## Graph API
 | Pattern | When to Load | Last Reviewed | Status |

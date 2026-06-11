@@ -163,6 +163,29 @@ async function resolveContainerIdForRecord(
 }
 
 // ---------------------------------------------------------------------------
+// Search index name resolution (FR-WIZ-06)
+// ---------------------------------------------------------------------------
+//
+// `resolveSearchIndexNameForRecord` is the parallel sibling of
+// `resolveContainerIdForRecord` above. It lives in a standalone module
+// (`./searchIndexResolver.ts`) because, unlike the container resolver, it
+// pulls in no JSX / Fluent / Xrm-full-handle dependencies — keeping it
+// pure-TS makes the FR-WIZ-06 unit tests (3-step chain) trivially runnable
+// without a DOM. Re-exported here so the public symbol surface stays at
+// `AssociateToStep.tsx` as the task contract requires, and task 027 has a
+// single canonical import location.
+//
+// Semantic difference vs the container resolver:
+//   - Container resolver falls back to CURRENT USER's BU and THROWS when
+//     no container is found (container is REQUIRED for upload).
+//   - SearchIndexName resolver falls back to PARENT RECORD's owning BU and
+//     never throws — empty string is a legitimate result that defers to the
+//     server-side BFF tenant default (FR-BFF-04).
+//
+export { resolveSearchIndexNameForRecord } from "./searchIndexResolver";
+export type { IXrmWebApiLike } from "./searchIndexResolver";
+
+// ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
 

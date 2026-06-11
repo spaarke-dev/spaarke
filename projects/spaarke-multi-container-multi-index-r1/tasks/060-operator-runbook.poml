@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Docs — `MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` (FR-DOC-01)</title>
+    <phase>G: Operator Runbook + Docs</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>090</blocks>
+    <tags>docs, operations, runbook</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Pure documentation task — creates a new operator-facing guide. No code; no tests; no architecture changes. Standard docs/guides convention applies.</rigor-reason>
+    <parallel-group>G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint with task 061 (different doc file: new runbook here vs existing arch doc update there). No dependencies on prior tasks; can start anytime.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create `docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` per spec.md FR-DOC-01 and design.md §6. Cover all 7 operator-facing topics: pre-deploy BU value setup, how to assign a new index to a BU, how to mark a single record as Protected, drift coexistence model, adding a new physical index, Document container reference clarification (`sprk_graphdriveid` only), and the non-wizard creates caveat. Cross-reference design.md invariants (INV-1..INV-8) and spec.md FRs.
+  </prompt>
+
+  <role>
+    Spaarke technical writer producing operator-facing documentation. Follows the `docs/guides/` convention used by other Spaarke guides.
+  </role>
+
+  <goal>
+    New operator runbook at `docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` covers all 7 design.md §6 bullets. Each section cross-links to the relevant invariant (INV-*) and FR (FR-*). The runbook is the single self-serve resource for operators handling Protected Matter setup, BU changes, drift handling, and new-container onboarding.
+  </goal>
+
+  <context>
+    <background>
+      design.md §6 enumerates the 7 operator-facing topics this project must document. This task converts that outline into a polished `docs/guides/` page that operators can self-serve from without consulting Claude Code or developers. Cross-linking to invariants makes the "why" discoverable.
+    </background>
+    <relevant-files>
+      <file>docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md (new)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-DOC-01">Runbook MUST cover all 7 bullets from design.md §6. Cross-references the design.md for invariants.</constraint>
+    <constraint source="design.md §6 bullet 1">Pre-deploy BU value setup — reference §5.0 table; Spaarke Demo &#8594; `spaarke-knowledge-index-v2`; Spaarke &#8594; `spaarke-file-index`.</constraint>
+    <constraint source="design.md §6 bullet 2">How to assign a new index to a BU — edit BU `sprk_searchindexname`; new records via wizards inherit; existing records unaffected (INV-3).</constraint>
+    <constraint source="design.md §6 bullet 3">How to mark a single record as Protected — set its `sprk_containerid` + `sprk_searchindexname` explicitly; wizard + backfill respect explicit overrides (INV-5).</constraint>
+    <constraint source="design.md §6 bullet 4">Drift coexistence model — old records keep their original routing; drift between BU and record values is intentional after BU changes (INV-3).</constraint>
+    <constraint source="design.md §6 bullet 5">Adding a new physical index — add to `appsettings.AiSearch.AllowedIndexes` + redeploy BFF; set BU `sprk_searchindexname`; first new record via wizard flows to new index.</constraint>
+    <constraint source="design.md §6 bullet 6">Document container reference clarification — canonical Document container field is `sprk_graphdriveid`, NOT `sprk_containerid` (which is intentionally blank on Documents per Spaarke convention).</constraint>
+    <constraint source="design.md §6 bullet 7">Non-wizard creates caveat — records created outside the 5 wizards (raw API, Power Automate, mobile) will have empty `sprk_searchindexname` until backfill runs. Acceptable in dev/test.</constraint>
+    <constraint source="CLAUDE.md §13">Operational guides live in `docs/guides/`. Follow folder convention (kebab-case filename like other guides where applicable, but file is named per FR-DOC-01).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+      <file>docs/guides/</file>
+    </files>
+    <patterns>
+      <pattern name="docs/guides structure" location="docs/guides/">
+        Header with Status + Last Reviewed; Purpose paragraph; numbered sections per topic; cross-links to architecture / ADRs / invariants; trouble-shooting section at end where applicable.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create new file `docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` with header (Status: Active; Last Reviewed: today's date; Purpose: operator-facing self-serve for multi-container multi-index routing).</step>
+    <step order="2">Write Section 1: "Pre-deploy BU value setup" — table from design.md §5.0; mark which BUs are NULL operator-determined; reference FR-OPS-01 + task 001.</step>
+    <step order="3">Write Section 2: "How to assign a new index to a BU" — step-by-step (Power Apps maker portal navigation OR MCP query); cross-link to INV-1 (BU is default at create time) and INV-3 (existing records unaffected).</step>
+    <step order="4">Write Section 3: "How to mark a single record as Protected" — explicit field-setting flow; reference INV-2 (record's own fields authoritative after create) and INV-5 (explicit overrides sacred); reference the Protected Matter use case from design.md §1.</step>
+    <step order="5">Write Section 4: "Drift coexistence model" — explain why old records SHOULD keep old values per INV-3; reference the drift audit script (task 052) for diagnostic; emphasize that `drift` classification is normal post-migration, not an error.</step>
+    <step order="6">Write Section 5: "Adding a new physical index" — sequence: add to `appsettings.AiSearch.AllowedIndexes` + redeploy BFF &#8594; update operator runbook §5.1 map &#8594; set BU `sprk_searchindexname` &#8594; first wizard-created record flows. Reference FR-BFF-06.</step>
+    <step order="7">Write Section 6: "Document container reference clarification" — `sprk_graphdriveid` is canonical on Documents; `sprk_containerid` on Documents is intentionally blank; reference design.md §4.1 + INV-6.</step>
+    <step order="8">Write Section 7: "Non-wizard creates caveat" — flag that programmatic / Power Automate / mobile / API creates leave fields empty until backfill; backfill catches them; production handling is future epic.</step>
+    <step order="9">Add a "References" footer linking to design.md, spec.md, ADRs (ADR-013, ADR-019), and the three backfill scripts. Update TASK-INDEX + current-task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create the new runbook</tool>
+    <tool name="Read">Read design.md §5.0, §5.1, §6 + spec.md FR-OPS-01, FR-DOC-01, FR-BFF-06 for canonical values</tool>
+    <tool name="Glob">List `docs/guides/` to confirm folder convention</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-DOC-01: runbook covers all 7 bullets from design.md §6.</criterion>
+    <criterion testable="true">Each section cross-references the relevant invariant (INV-*) and/or FR (FR-*).</criterion>
+    <criterion testable="true">References footer links to design.md, spec.md, and relevant ADRs.</criterion>
+    <criterion testable="true">File location is `docs/guides/` per CLAUDE.md §13.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 061 — separate files. Can start anytime (no dependencies).
+
+    Keep the runbook **operator-facing** — minimum jargon, concrete steps, escape hatches (what to do if something goes wrong). Don't explain WHY of architecture decisions — link to design.md for that.
+
+    Consider including a one-paragraph "Quick reference" at the top: "Which file does the runbook map to which scenario?" for fast scanning.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load design.md §5.0, §5.1, §6 and INV-1..INV-8 before drafting. Follow task-execute Step 0 (MINIMAL rigor — docs only).
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>INV-5 unit tests for all wizards (FR-WIZ-08)</title>
+    <phase>A: Wizards</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>021, 022, 023, 024, 025, 027</dependencies>
+    <blocks>029</blocks>
+    <tags>testing, unit-test, react, typescript</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test-only task — adds `.test.ts(x)` files; does not modify production `.cs`/`.ts`/`.tsx` source. STANDARD rigor per CLAUDE.md task-execute rigor table (tests / new file creation).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Cross-cutting test consolidation; runs after all six wizard implementation tasks complete; depends on their behaviors being implemented.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add (or finalize) INV-5 unit tests for all 6 wizards (CreateMatterWizard, CreateProjectWizard, CreateInvoiceWizard, CreateWorkAssignmentWizard, CreateEventWizard, DocumentUploadWizard). Each test pre-seeds the create payload with an explicit `sprk_searchindexname` value, runs the wizard's BU-cascade step, and asserts the original explicit value persists. Cover `sprk_containerid` the same way for the 5 parent-record wizards (NOT for Document — per design INV that field stays NULL).
+  </prompt>
+
+  <role>
+    Spaarke.UI.Components test engineer. Jest / Vitest + React Testing Library familiarity; comfortable mocking Xrm.WebApi.
+  </role>
+
+  <goal>
+    A single coherent INV-5 test suite proves that for every one of the 6 wizards, an explicit override value pre-set on the create payload survives the BU-cascade step. Suite runs in CI alongside the existing tests; all pass.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 021–025 + 027 each ship their own INV-5 unit test as part of the implementation. This task consolidates / verifies that the FR-WIZ-08 acceptance bar is met across the entire wizard surface — explicit override persistence is the project's most important behavioral invariant and is worth a dedicated cross-wizard test pass.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/document-upload/DocumentRecordService.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Test runner consistent with each module's existing setup (Jest or Vitest); React 18 in code-page test setup.</constraint>
+    <constraint source="spec.md FR-WIZ-08">Explicit override values must persist across all 6 wizards. Test must pre-seed the payload before the cascade and assert no overwrite.</constraint>
+    <constraint source="design.md INV (Document container)">For DocumentRecordService, INV-5 test is for `sprk_searchindexname` only. Do NOT add a `sprk_containerid` INV-5 test there — that field is NEVER set on Document by design.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Unit-test structure" location=".claude/patterns/testing/unit-test-structure.md">
+        Arrange — Act — Assert. Mock Xrm.WebApi to return known BU values. Pre-set payload with explicit override; call the cascade method; assert payload value unchanged.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit the INV-5 tests added by tasks 021–025 + 027. Each task was supposed to add one; verify they exist and cover the FR-WIZ-08 acceptance pattern. List gaps in `notes/handoffs/028-inv5-suite-audit.md`.</step>
+    <step order="2">For each wizard with a gap, add the canonical INV-5 test: (a) Arrange — mock Xrm.WebApi to return a BU with `sprk_searchindexname = "spaarke-knowledge-index-v2"`; pre-set payload `entity['sprk_searchindexname'] = "explicit-override-value"`; (b) Act — call the wizard's cascade method; (c) Assert — `entity['sprk_searchindexname']` is still `"explicit-override-value"`.</step>
+    <step order="3">For the 5 parent-record wizards (NOT Document), repeat the same test for `sprk_containerid`: pre-set explicit value, run cascade, assert preserved.</step>
+    <step order="4">For DocumentRecordService, add the INV-5 test for `sprk_searchindexname` only (no `sprk_containerid` — design INV).</step>
+    <step order="5">Run `npm test` in `Spaarke.UI.Components`. All 6 INV-5 tests (one per wizard) plus the parent-only `sprk_containerid` tests must pass. Capture results in the handoff file.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing wizard test files</tool>
+    <tool name="Write">Add/extend wizard `.test.ts(x)` files</tool>
+    <tool name="Bash">Run `npm test` in Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Updated wizard `.test.ts(x)` files under each wizard's folder</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/028-inv5-suite-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-WIZ-08: All 6 wizards have an INV-5 test for `sprk_searchindexname` (explicit override persists across cascade). All pass.</criterion>
+    <criterion testable="true">All 5 parent-record wizards also have an INV-5 test for `sprk_containerid`. All pass.</criterion>
+    <criterion testable="true">DocumentRecordService does NOT have a `sprk_containerid` INV-5 test (per design INV — that field is never set there).</criterion>
+    <criterion testable="true">`npm test` in `Spaarke.UI.Components` is green; test count reflects the new INV-5 cases.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task confirms the FR-WIZ-08 acceptance bar before the Phase A code-page deploy in task 029. If any per-wizard test from tasks 021–025/027 is missing the canonical INV-5 shape, this task adds it. The handoff file should explicitly list the test count per wizard for downstream UAT (task 071) verification.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-022 + .claude/constraints/testing.md + .claude/patterns/testing/unit-test-structure.md before Step 1. Declare rigor (STANDARD — testing). Quality gates at Step 9.5 are skipped per STANDARD rigor rules.
+    </protocol>
+  </execution>
+</task>

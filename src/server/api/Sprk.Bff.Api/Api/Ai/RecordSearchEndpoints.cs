@@ -121,6 +121,13 @@ public static class RecordSearchEndpoints
 
             return Results.Ok(response);
         }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
+        {
+            // multi-container-multi-index-r1 FR-BFF-07 (task 016) — rethrow so the
+            // global `UseExceptionHandler` middleware renders the canonical
+            // ProblemDetails JSON per ADR-019 (e.g., 400 INDEX_NOT_ALLOWED).
+            throw;
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Record search failed for recordTypes=[{RecordTypes}]",

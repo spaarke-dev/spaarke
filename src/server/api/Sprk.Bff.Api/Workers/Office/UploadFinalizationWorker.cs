@@ -8,6 +8,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
@@ -53,6 +54,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly IEmailToEmlConverter _emlConverter;
     private readonly AttachmentFilterService _attachmentFilterService;
     private readonly JobSubmissionService _jobSubmissionService;
+    private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly IConfiguration _configuration;
 
     private const string QueueName = "office-upload-finalization";
@@ -86,6 +88,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         IEmailToEmlConverter emlConverter,
         AttachmentFilterService attachmentFilterService,
         JobSubmissionService jobSubmissionService,
+        IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         IConfiguration configuration)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -100,6 +103,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _emlConverter = emlConverter ?? throw new ArgumentNullException(nameof(emlConverter));
         _attachmentFilterService = attachmentFilterService ?? throw new ArgumentNullException(nameof(attachmentFilterService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
+        _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer ?? throw new ArgumentNullException(nameof(postUploadIndexingEnqueuer));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
 
@@ -1278,10 +1282,23 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     }
 
     /// <summary>
-    /// Enqueues a RAG indexing job for a document.
-    /// Uses try/catch to ensure enqueueing failures don't fail the main processing.
-    /// Follows the same pattern as EmailToDocumentJobHandler.EnqueueRagIndexingJobAsync.
+    /// Enqueues a RAG indexing job for a document by delegating to the centralized
+    /// <see cref="IPostUploadIndexingEnqueuer"/> helper.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Phase 2 refactor (upload-indexing centralization, scope extension to
+    /// multi-container-multi-index-r1): the inline enqueue body that used to live
+    /// here was the canonical pattern source. It now lives in
+    /// <see cref="Services.Ai.PostUploadIndexingEnqueuer"/>. This method preserves
+    /// its existing signature so call sites don't change.
+    /// </para>
+    /// <para>
+    /// Behavior is identical: non-fatal try/catch around enqueue (handled inside
+    /// the helper), same idempotency key (<c>rag-index-{driveId}-{itemId}</c>),
+    /// same payload shape, same <c>Source="OfficeAddin"</c> tag for telemetry.
+    /// </para>
+    /// </remarks>
     private async Task EnqueueRagIndexingAsync(
         string driveId,
         string itemId,
@@ -1289,46 +1306,25 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string fileName,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            // Get tenant ID from configuration (same pattern as EmailToDocumentJobHandler)
-            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+        var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+        var correlationId = Activity.Current?.Id ?? Guid.NewGuid().ToString();
 
-            var indexingJob = new JobContract
-            {
-                JobId = Guid.NewGuid(),
-                JobType = RagIndexingJobHandler.JobTypeName,
-                SubjectId = documentId.ToString(),
-                CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
-                IdempotencyKey = $"rag-index-{driveId}-{itemId}",
-                Attempt = 1,
-                MaxAttempts = 3,
-                CreatedAt = DateTimeOffset.UtcNow,
-                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
-                {
-                    TenantId = tenantId,
-                    DriveId = driveId,
-                    ItemId = itemId,
-                    FileName = fileName,
-                    DocumentId = documentId.ToString(),
-                    Source = "OfficeAddin",
-                    EnqueuedAt = DateTimeOffset.UtcNow
-                }))
-            };
+        var request = new PostUploadIndexingRequest(
+            TenantId: tenantId,
+            DriveId: driveId,
+            ItemId: itemId,
+            FileName: fileName,
+            FileSizeBytes: null, // unknown at this site; helper bypasses size-based skips when null
+            ContentType: null,
+            DocumentId: documentId.ToString(),
+            ParentEntity: null,
+            SearchIndexName: null, // handler runs the ISearchIndexNameResolver chain
+            Source: "OfficeAddin",
+            CorrelationId: correlationId);
 
-            await _jobSubmissionService.SubmitJobAsync(indexingJob, cancellationToken);
-
-            _logger.LogInformation(
-                "Enqueued RAG indexing job {JobId} for document {DocumentId} (file: {FileName})",
-                indexingJob.JobId, documentId, fileName);
-        }
-        catch (Exception ex)
-        {
-            // Log but don't fail - RAG indexing is non-critical
-            _logger.LogWarning(ex,
-                "Failed to enqueue RAG indexing job for document {DocumentId}: {Error}. Processing will continue.",
-                documentId, ex.Message);
-        }
+        // App-only path: Office Add-in finalization uploads files AS MI, so MI can read them
+        // (writer-identity rule per sdap-auth-patterns.md Pattern 4).
+        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, cancellationToken);
     }
 
     /// <summary>

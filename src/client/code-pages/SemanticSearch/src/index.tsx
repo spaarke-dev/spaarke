@@ -81,6 +81,7 @@ function renderApp(): void {
         initialEntityId={initialEntityId}
         initialSavedSearchId={initialSavedSearchId}
         isDark={isDark}
+        urlParams={appParams}
       />
     </FluentProvider>
   );

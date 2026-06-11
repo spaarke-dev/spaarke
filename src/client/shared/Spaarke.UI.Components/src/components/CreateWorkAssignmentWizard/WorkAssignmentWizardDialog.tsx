@@ -93,6 +93,12 @@ export interface IWorkAssignmentWizardDialogProps {
    * not set, file uploads will be skipped.
    */
   resolveSpeContainerId?: () => Promise<string>;
+  /**
+   * AAD tenant ID. Forwarded to `WorkAssignmentService` so post-upload RAG
+   * indexing via `@spaarke/sdap-client` routes to the correct multi-tenant
+   * index. When omitted, indexing is skipped (files still upload to SPE).
+   */
+  tenantId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +115,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   navigationService,
   embedded,
   resolveSpeContainerId,
+  tenantId,
 }) => {
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
@@ -171,7 +178,8 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       dataService,
       authenticatedFetch,
       bffBaseUrl,
-      resolvedContainerId || containerId
+      resolvedContainerId || containerId,
+      tenantId
     );
   }
 
@@ -180,7 +188,13 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     if (!open) return;
     if (containerId) {
       setResolvedContainerId(containerId);
-      serviceRef.current = new WorkAssignmentService(dataService, authenticatedFetch, bffBaseUrl, containerId);
+      serviceRef.current = new WorkAssignmentService(
+        dataService,
+        authenticatedFetch,
+        bffBaseUrl,
+        containerId,
+        tenantId
+      );
       return;
     }
     if (resolveSpeContainerId) {
@@ -189,7 +203,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         .then(cid => {
           if (!cancelled && cid) {
             setResolvedContainerId(cid);
-            serviceRef.current = new WorkAssignmentService(dataService, authenticatedFetch, bffBaseUrl, cid);
+            serviceRef.current = new WorkAssignmentService(dataService, authenticatedFetch, bffBaseUrl, cid, tenantId);
           }
         })
         .catch(err => {

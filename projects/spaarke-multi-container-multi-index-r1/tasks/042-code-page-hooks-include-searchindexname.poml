@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Code page — `useSemanticSearch.ts` + `useRecordSearch.ts` include `searchIndexName` (FR-CP-04)</title>
+    <phase>E: SemanticSearch Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>043</blocks>
+    <tags>react, typescript, frontend, code-page</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies code-page hooks `.ts`; touches BFF request shape (parallel to task 031 in PCF surface); carries ADR-022 (React 18) / ADR-028 (`authenticatedFetch`) obligations.</rigor-reason>
+    <parallel-group>E1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Both hooks are tightly related; combining into single task is appropriate. Sequential with task 041 only via App.tsx wiring path; can technically run after 040 in parallel with 041 if hook signatures are agreed up front.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts` and `src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts` to include `searchIndexName` in their BFF request bodies when non-empty (omit when empty). Both hooks MUST continue using `authenticatedFetch` from `@spaarke/auth` (ADR-028 — no `Bearer ${token}` literals). Unit-test the request body shape (with + without the field) for each hook.
+  </prompt>
+
+  <role>
+    Code-page developer with familiarity with `src/client/code-pages/SemanticSearch/src/hooks/`, ADR-022 (React 18), ADR-028 (Spaarke Auth v2 — `authenticatedFetch` is the only BFF call path).
+  </role>
+
+  <goal>
+    `useSemanticSearch` and `useRecordSearch` both forward `searchIndexName` in their POST `/api/ai/search` (or equivalent) body when non-empty; omit entirely when null/empty/whitespace. `authenticatedFetch` remains the call mechanism. Unit tests verify the present + omitted cases for each hook. Network trace in UAT shows `searchIndexName` in the POST body.
+  </goal>
+
+  <context>
+    <background>
+      Phase B (tasks 010-018) made the BFF accept `searchIndexName` in the request DTO + validate it. Phase D (tasks 030-035) made the PCF send it. This task completes the symmetry: the code-page side, when invoked from the PCF's "Open in Semantic Search" envelope, also sends `searchIndexName`. Together they form the end-to-end record-scoped routing.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts</file>
+      <file>src/client/code-pages/SemanticSearch/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-CP-04">`useSemanticSearch` and `useRecordSearch` hooks MUST include `searchIndexName` in their request bodies when non-empty.</constraint>
+    <constraint source="ADR-022">Code Page uses React 18. Hook signatures must work with React 18 deps tracking; `searchIndexName` should be in the deps array if it can change.</constraint>
+    <constraint source="ADR-028">All BFF calls use `authenticatedFetch` from `@spaarke/auth`. No `Bearer ${token}` literals. No `new PublicClientApplication`.</constraint>
+    <constraint source="spec.md NFR-09">Code review confirms no new `Bearer ${token}` literals; all BFF calls use `authenticatedFetch`.</constraint>
+    <constraint source="project">Omit the field entirely from the JSON body when empty/null — do not send empty string. BFF treats absence as "fall through to existing tenant chain" (FR-BFF-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke Auth v2 binding" location=".claude/patterns/auth/spaarke-sso-binding.md">
+        `authenticatedFetch` is the only sanctioned BFF call mechanism. It transparently injects the OBO token. Never use raw `fetch` with a `Bearer ${token}` header.
+      </pattern>
+      <pattern name="Omit-when-empty body composition" location="spec.md FR-BFF-04">
+        BFF treats absence of `searchIndexName` as "use the 2-tier tenant default chain". Therefore the client MUST omit the field entirely when value is null/empty/whitespace.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read both hooks (`useSemanticSearch.ts`, `useRecordSearch.ts`) to locate the request-body composition sites. Identify the current shape sent to `/api/ai/search` (or the per-hook endpoint).</step>
+    <step order="2">Extend both hooks' signatures to accept `searchIndexName?: string` (either as a hook param or as a member of the existing options object — match the existing convention). Plumb the value through `App.tsx` (task 041 already extended hook construction sites to receive `initialScope`/`initialEntityId`; add `searchIndexName` to the same path).</step>
+    <step order="3">In each hook's body-composition site, conditionally add `searchIndexName` when value is non-empty (trim + check). When empty/null/whitespace, omit the field entirely from the body.</step>
+    <step order="4">Confirm both hooks still use `authenticatedFetch` from `@spaarke/auth` (no new Bearer literals). Confirm no `accessToken` prop drilling. Add `searchIndexName` to the hook's `useEffect` deps if the search re-fires on change.</step>
+    <step order="5">Add unit tests per hook for the request body shape: (a) `searchIndexName="spaarke-file-index"` → body includes the field; (b) `searchIndexName=""` → body does NOT include the field; (c) `searchIndexName` omitted → body does NOT include the field. Mock `authenticatedFetch` to inspect the body argument.</step>
+    <step order="6">Run `npm run test` and confirm all hook tests pass. Run `npm run build` (validation only — production deploy is task 044).</step>
+    <step order="7">Run code-review + adr-check skills at Step 9.5 (FULL rigor requirement). Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md` to reflect completion and advance to next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read both hook files</tool>
+    <tool name="Edit">Add the conditional body field</tool>
+    <tool name="Bash">Run `npm run test` and `npm run build`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts (request body shape)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts (request body shape)</output>
+    <output type="tests">Unit tests per hook for body shape</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-CP-04: `useSemanticSearch` includes `searchIndexName` in POST body when non-empty. Verified by unit test.</criterion>
+    <criterion testable="true">FR-CP-04: `useRecordSearch` includes `searchIndexName` in POST body when non-empty. Verified by unit test.</criterion>
+    <criterion testable="true">When `searchIndexName` is null/empty/whitespace, the field is omitted entirely. Verified by unit test.</criterion>
+    <criterion testable="true">NFR-09: No new `Bearer ${token}` literals; both hooks still use `authenticatedFetch`. Verified by code review.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Code page hooks send searchIndexName">
+      <description>Verify the live code-page request body includes `searchIndexName` when launched via PCF envelope.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_semanticsearch&amp;data=searchIndexName%3Dspaarke-file-index%26query%3Dtest</url>
+      <steps>
+        <step>Navigate to the SemanticSearch code page via a URL with `searchIndexName` in the data envelope (e.g. PCF Open in Semantic Search on a Protected Matter).</step>
+        <step>Open browser DevTools → Network tab → filter `/api/ai/search`.</step>
+        <step>Trigger the auto-search on page load.</step>
+        <step>Inspect the request body of the POST.</step>
+      </steps>
+      <expected>Request body JSON contains `"searchIndexName": "spaarke-file-index"`. When envelope omits `searchIndexName`, body does NOT include the field.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Sequencing with task 041: both modify the App.tsx → hooks interaction. Recommend running 041 first to establish the hook-receives-scope-at-construction pattern, then adding `searchIndexName` to the same construction path here. Coordination through TASK-INDEX rather than parallel-group is correct.
+
+    The hook-deps consideration: if `searchIndexName` can change at runtime (operator updates the bound record's field), include it in the search effect's deps array. If it's effectively immutable per page load (set by envelope at mount), it does not need to be in deps.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-022 / ADR-028 + .claude/constraints/auth.md + .claude/patterns/auth/spaarke-sso-binding.md before Step 1. Declare rigor (FULL) per task-execute Step 0. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

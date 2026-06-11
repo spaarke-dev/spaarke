@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Backfill — `Backfill-MultiContainerMultiIndex-ParentRecords.ps1` (FR-BF-01)</title>
+    <phase>F: PowerShell Backfill</phase>
+    <status>not-started</status>
+    <estimated-hours>4-6</estimated-hours>
+    <dependencies>029, 044</dependencies>
+    <blocks>053</blocks>
+    <tags>backfill, powershell, dataverse, mcp, operations</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates a new script that mutates production-class Dataverse records. Complex idempotency + halt-loud logic + INV-5 enforcement. Failure mode is silent data corruption — requires Step 9.5 quality gates.</rigor-reason>
+    <parallel-group>F1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint with tasks 051 (Documents backfill) and 052 (drift audit) — each creates a separate script file under `scripts/backfill-multi-container-multi-index/`.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create `scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-ParentRecords.ps1` per spec.md FR-BF-01 and design.md §5.2. For each Matter / Project / Invoice / WorkAssignment / Event record, derive its effective container from existing-data evidence (majority/mode of child Documents' `sprk_graphdriveid`, with owner-BU fallback when zero children), map that container via design.md §5.1 to an index name, and fill any empty `sprk_containerid` + `sprk_searchindexname` fields. NEVER overwrite existing non-null values (INV-5). HALT LOUD on any unmapped container. Idempotent + resumable + paged.
+  </prompt>
+
+  <role>
+    Spaarke operations developer with PowerShell + Dataverse Web API + MCP-query familiarity. Reads design.md §5.1 + §5.2 + INV-5 + INV-7 as binding contracts.
+  </role>
+
+  <goal>
+    New PowerShell script exists at `scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-ParentRecords.ps1`. When invoked, it derives container per design.md §5.2, fills empty fields without overwriting non-null values, halts loudly on unmapped containers, paginates safely, checkpoints for resumability, and emits a per-record audit log.
+  </goal>
+
+  <context>
+    <background>
+      BU `sprk_containerid` has been changed since older parent records were created (the migration that motivated this project). Backfilling from BU produces wrong values. Per design.md §5.2 + round-3 decision log, the canonical evidence source is each parent record's child Documents — specifically the mode of their `sprk_graphdriveid`. The §5.1 hardcoded table maps each known container id to an index name; unmapped containers HALT to prevent silent misalignment. INV-5 is the binding rule that any existing non-null value is sacred.
+    </background>
+    <relevant-files>
+      <file>scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-ParentRecords.ps1 (new)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BF-01">For each Matter/Project/Invoice/WorkAssignment/Event: query existing child Documents; if &#8805;1 children, derive container as MAJORITY/MODE of child Documents' `sprk_graphdriveid`; if 0 children, fall back to owner BU's current `sprk_containerid`; fill empty `sprk_containerid` (INV-5); map via §5.1 to set `sprk_searchindexname` if empty; halt LOUD on unmapped container.</constraint>
+    <constraint source="spec.md FR-BF-04">Idempotent (re-running produces same end-state); resumable (checkpoint per N records, default 100); paged (batch size configurable, default 500); never overwrite existing non-null values (INV-5).</constraint>
+    <constraint source="spec.md NFR-04">MUST process at least 10K records in a single run without throttling or memory pressure.</constraint>
+    <constraint source="design.md INV-5">Never overwrite an existing non-null value — explicit overrides are sacred.</constraint>
+    <constraint source="design.md §5.1">Container &#8594; index map is HARDCODED in the script for R1 (2 known entries: `b!yLRd...` &#8594; `spaarke-knowledge-index-v2`, `b!vzGD...` &#8594; `spaarke-file-index`). Unknown container =&gt; halt + surface error so operator extends the map.</constraint>
+    <constraint source="design.md §5.2">Tiebreaker = majority/mode of child Documents' `sprk_graphdriveid` (NOT "most recent" or "current BU").</constraint>
+    <constraint source="project">Per-record audit log line: existing value, derived value, source (existing-doc-mode / BU-fallback), action taken (filled / skipped / would-overwrite-aborted).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Hardcoded container map" location="design.md §5.1">
+        Embed the map at the top of the script as a hashtable: `$ContainerIndexMap = @{ 'b!yLRd...' = 'spaarke-knowledge-index-v2'; 'b!vzGD...' = 'spaarke-file-index' }`. Validate lookups; halt with an actionable error on miss.
+      </pattern>
+      <pattern name="Resumable paging" location="spec.md FR-BF-04">
+        Persist a checkpoint file (e.g., `.checkpoint.json`) per entity type holding the last processed record's modifiedon timestamp + id. On restart, read the checkpoint and resume.
+      </pattern>
+      <pattern name="Mode of child Documents" location="design.md §5.2">
+        Group child Documents by `sprk_graphdriveid`, take the most common value. Tie-break by alphabetical container id (deterministic).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create folder `scripts/backfill-multi-container-multi-index/` if missing. Create new script file `Backfill-MultiContainerMultiIndex-ParentRecords.ps1` with script header comments referencing FR-BF-01 + design.md §5.2 + INV-5.</step>
+    <step order="2">Declare script parameters: `-EnvironmentUrl` (Dataverse URL), `-BatchSize 500`, `-CheckpointEvery 100`, `-DryRun` (switch, default false), `-AuditLogPath` (default `./audit-parent-records-{timestamp}.log`). Embed the §5.1 `$ContainerIndexMap` hashtable.</step>
+    <step order="3">For each entity logical name in (`sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_workassignment`, `sprk_event`): page through records via Web API (`$top=500`, paging cookie); for each record, query its child Documents (`sprk_document` where the relevant lookup matches); compute mode of `sprk_graphdriveid` if &#8805;1 children, else read owner BU's current `sprk_containerid`.</step>
+    <step order="4">If record's `sprk_containerid` is empty, fill it with the derived value (skip if non-null per INV-5; log "would-overwrite-aborted"). Map derived container via `$ContainerIndexMap`; if record's `sprk_searchindexname` is empty, fill it with the mapped index name (skip if non-null).</step>
+    <step order="5">On unmapped container: `Write-Error` with a surfaceable message naming the unknown container id + the record id + the entity type + the instruction "operator must extend `$ContainerIndexMap` in this script". Exit with non-zero code. (Halt LOUD.)</step>
+    <step order="6">Emit per-record audit line (CSV or JSON-Lines): `entity, recordId, existing_containerid, existing_indexname, derived_container, source (doc-mode|bu-fallback), action (filled|skipped|halt)`. Checkpoint after every `$CheckpointEvery` records.</step>
+    <step order="7">In `-DryRun` mode: do all the computation + audit logging but issue NO write API calls. Confirm with a banner at script start. Verify idempotency: a successful real run followed by `-DryRun` shows zero "fill" actions on the second pass.</step>
+    <step order="8">Test the script locally against a test environment with at least one Matter that has children + one with no children + (manually inject) one referencing an unmapped synthetic container id to verify the halt-loud behavior. Capture audit log to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/050-parent-backfill-test.md`. Update `TASK-INDEX.md`: 🔲 &#8594; ✅; update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create the new PowerShell script</tool>
+    <tool name="Read">Read design.md §5.1/§5.2 + spec.md FR-BF-01/04 for canonical values</tool>
+    <tool name="Bash">Test-run the script with -DryRun against a test environment</tool>
+    <tool name="mcp__dataverse__read_query">Verify pre/post state during testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-ParentRecords.ps1</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/050-parent-backfill-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BF-01: dry-run audit log shows expected fills (empty fields filled) + zero overwrites (INV-5 honored) + halt-on-unmapped behavior verified with synthetic input.</criterion>
+    <criterion testable="true">FR-BF-04: re-running after a partial kill produces identical final state (idempotent + resumable); paging works at default 500 batch size.</criterion>
+    <criterion testable="true">NFR-04: script processes a 10K-record synthetic dataset without throttling (or `Start-Sleep` backoff handled gracefully) — verified in task 053.</criterion>
+    <criterion testable="true">Audit log line per record with required columns (entity, recordId, existing/derived/source/action).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with tasks 051 and 052 — three different script files, no shared state. All three depend on the wizards being deployed (029) and the code page being deployed (044) so any post-deploy new records use the correct values BEFORE this script runs.
+
+    The 10K-record + resumability proof is task 053's responsibility, not this task's — keep the testing here focused on correctness + halt-loud + INV-5.
+
+    Mode tie-breaking: if exactly two `sprk_graphdriveid` values appear in equal counts, sort alphabetically and take the first. Document this in the script header.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load design.md §5.1, §5.2, INV-5, INV-7, spec.md FR-BF-01, FR-BF-04, NFR-04. Follow task-execute Step 0 (rigor declaration: FULL) before writing any code. Step 9.5 quality gates (code-review + adr-check) are mandatory at task completion.
+    </protocol>
+  </execution>
+</task>

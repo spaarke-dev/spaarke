@@ -1,10 +1,13 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Graph;
 using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Validation;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -16,7 +19,9 @@ public static class UploadEndpoints
 {
     public static IEndpointRouteBuilder MapUploadEndpoints(this IEndpointRouteBuilder app)
     {
-        // PUT /api/containers/{id}/files/{*path} - Upload small file (MI)
+        // PUT /api/containers/{id}/files/{*path} - Upload small file (MI). Post-upload
+        // RAG indexing is triggered by the client via `@spaarke/sdap-client.SdapApiClient.indexFile()`
+        // after a successful PUT — see `sdap-client-shared-library-fix-r1` project.
         app.MapPut("/api/containers/{containerId}/files/{*path}", async (
             string containerId,
             string path,

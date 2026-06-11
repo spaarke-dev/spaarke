@@ -237,6 +237,25 @@ The 5 Dataverse-seeded layouts come from `scripts/system-layouts.json` via `Depl
 
 **Calendar is architecturally distinct from the other 5 sections** (task 115): the Calendar section is a 62-line REGISTRATION SHIM in `src/solutions/LegalWorkspace/src/sections/calendar.registration.ts` that delegates rendering entirely to `CalendarWorkspaceWidget` from the shared `@spaarke/events-components` library (task 114). The other 5 sections embed via the same `LegalWorkspaceApp(embedded)` pipeline but their factories reach into LegalWorkspace-local components + `DataverseService` + `FeedTodoSyncContext`. Calendar's "shared-lib widget + thin LW section shim" pattern is the **proven canonical model** for future widgets that should be reusable across non-LegalWorkspace hosts. See the [componentization audit §2A](./SPAARKEAI-COMPONENTIZATION-AUDIT.md) for the implications.
 
+### 6.3 Per-BU container + index routing (multi-container, multi-index)
+
+As of project `spaarke-multi-container-multi-index-r1`, document storage and search indexing are **record-scoped**: the SharePoint Embedded container + Azure AI Search index are chosen per record at create time, not as a tenant-wide singleton. Parent records (`sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_workassignment`, `sprk_event`) and `sprk_document` carry their own `sprk_containerid` + `sprk_searchindexname` (Document's canonical container reference is `sprk_graphdriveid`).
+
+**Cascade at create time** (Spaarke Create Wizards — `CreateMatterWizard`, `CreateProjectWizard`, `CreateInvoiceWizard`, `CreateWorkAssignmentWizard`, `CreateEventWizard`, plus `DocumentUploadWizard`):
+
+1. Wizard reads owning Business Unit's `sprk_containerid` + `sprk_searchindexname`.
+2. For Documents, the wizard reads the parent record's values first, then falls back to the parent's BU.
+3. Explicit overrides on the create form persist (e.g., a "Protected Matter" with `sprk_searchindexname = "spaarke-file-index"` keeps that value).
+4. No Dataverse plugins, no Power Automate flows, no new field mappings — the wizards are the canonical cascade mechanism.
+
+**Resolution at search time** (`IKnowledgeDeploymentService.GetSearchClientAsync` — see `src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs`):
+
+1. Client (PCF `SemanticSearchControl` v1.1.74 or the `sprk_semanticsearch` Code Page) sends the record's `sprk_searchindexname` in the search request.
+2. BFF validates against the static `appsettings.AiSearch.AllowedIndexes` allow-list. A miss returns `400 INDEX_NOT_ALLOWED` ProblemDetails (per ADR-019).
+3. Empty / null `searchIndexName` falls back to the existing 2-tier chain: `sprk_aiknowledgedeployment` Dataverse entity → `appsettings.AiSearch.KnowledgeIndexName`.
+
+**Coexistence is the design.** Changing a BU's `sprk_searchindexname` does NOT propagate to existing records — old records continue to point at their original container/index; only new records get the new BU default. This enables the migration scenario (old documents stay in the old index, new ones land in the new) without any sync engine. See design invariants INV-1..INV-8 in [`projects/spaarke-multi-container-multi-index-r1/design.md`](../../projects/spaarke-multi-container-multi-index-r1/design.md) §3 for the binding contracts; see [`docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md`](../guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md) for operator procedures (assigning indexes to BUs, marking records Protected, drift handling, adding new physical indexes, backfill).
+
 ---
 
 ## 7. Storage contract (localStorage / sessionStorage)
@@ -323,3 +342,4 @@ The overlay is contained entirely inside `ThreePaneLayout`; no SpaarkeAi-side ch
 - **2026-05-22 (task 113)**: initial publication (post-R9 state). Documented the cold-load pipeline, embedded LegalWorkspaceApp pattern, 4-stage shell lifecycle, BFF surface, Dataverse schema, 5 system layouts, and storage contract.
 - **2026-05-22 (task 123)**: refreshed through R13. Added Calendar widget (task 115) as 6th system layout + its distinct "shared-lib widget + thin LW shim" architecture, `@spaarke/events-components` shared lib (task 114), pane-width fracs precedence chain (task 117), all-panes-collapsed overlay UX + `resetToFracDefaults()` recovery (task 119), `spaarke:calendar:collapsed` localStorage key (task 116), QuickSummary 6-card expansion (task 110). Calendar widget polish history (tasks 116/118/120/121/122) is captured in the componentization audit and the build-a-widget guide; this file references the architectural surface only.
 - **2026-05-26 (R4 task 010 / W-1)**: cross-linked to new authoritative two-wrapper architecture doc `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` (R4 DR-01). This doc remains the cold-load → render pipeline reference; the new doc establishes the mental model (surfaces / wrappers / mount sources / dual-use / LegalWorkspace-as-engine) that future widget authors apply on top of this pipeline.
+- **2026-06-07 (project `spaarke-multi-container-multi-index-r1` task 061 / FR-DOC-02)**: added §6.3 "Per-BU container + index routing" describing record-scoped storage + search routing (containers + AI Search indexes selected per record at create time via the 5 parent-record create wizards + DocumentUploadWizard), BFF allow-list validation (`400 INDEX_NOT_ALLOWED`), and INV-3 coexistence model. Cross-linked to design.md §3 invariants + the new operator runbook.

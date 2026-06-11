@@ -6,6 +6,8 @@ using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -47,7 +49,10 @@ public static class OBOEndpoints
         }).RequireRateLimiting("graph-read");
 
 
-        // PUT: small upload (as user)
+        // PUT: small upload (as user). Post-upload RAG indexing is triggered by the
+        // wizard client via `@spaarke/sdap-client.SdapApiClient.indexFile()` after a
+        // successful PUT — see project `sdap-client-shared-library-fix-r1` and the
+        // canonical pattern used by DocumentUploadWizard's `triggerRagIndexing`.
         app.MapPut("/api/obo/containers/{id}/files/{*path}", async (
             string id, string path, HttpRequest req, HttpContext ctx,
             [FromServices] SpeFileStore speFileStore,
@@ -69,6 +74,7 @@ public static class OBOEndpoints
                 var item = await speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct);
 
                 logger.LogInformation("OBO upload successful - DriveItemId: {ItemId}", item?.Id);
+
                 return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
             }
             catch (UnauthorizedAccessException ex)
