@@ -365,7 +365,7 @@ public sealed class DocumentSearchHandlerTests : TypedToolHandlerTestFixture
     {
         var response = BuildRagResponse(
             ("d-1", "Brief.pdf", "Discovery excerpt one."),
-            ("d-2", "Memo.pdf",  "Discovery excerpt two."));
+            ("d-2", "Memo.pdf", "Discovery excerpt two."));
 
         _ragServiceMock
             .Setup(s => s.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
