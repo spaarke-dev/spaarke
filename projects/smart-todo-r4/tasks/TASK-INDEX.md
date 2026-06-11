@@ -1,11 +1,11 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-10 (Wave G0 complete + new task 034 registered)
-> **Branch**: `work/smart-todo-r4`
+> **Last Updated**: 2026-06-11 (Wave B complete; 081 POML stale-state fix-up)
+> **Branch**: `work/smart-todo-r4-wave2`
 > **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
-> **Status**: 🔲 18 not-started · 🔄 0 in-progress · ✅ 13 complete · ❌ 0 blocked
-> **Active wave**: none — Wave G1+2a-followups ✅ complete (build-verified)
+> **Status**: 🔲 4 not-started · 🔄 0 in-progress · ✅ 27 complete · ❌ 0 blocked
+> **Active wave**: none — Wave A ✅ + Wave B ✅ + Wave C ✅ (all build-verified); remaining: Phase 3 (092 deferred / 093 / 094) + Phase 4 (098)
 
 ---
 
@@ -99,9 +99,9 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [031](031-B-assigned-to-me-filter.poml) | B — "Assigned to Me" filter mode (drop "My Tasks") | smart-todo, filter | ✅ (with 032, 033) | 030 | — |
-| 🔲 | [032](032-B-selection-aware-toolbar-actions.poml) | B — Selection-aware toolbar actions (Open / Delete / Email / Pin) | smart-todo, toolbar | ✅ (with 031, 033) | 012, 030 | 040 (Open action) |
-| 🔲 | [033](033-B-list-card-view-toggle.poml) | B — List / Card view toggle with persistence | smart-todo, user-preference | ✅ (with 031, 032) | 012, 030 | — |
+| ✅ | [031](031-B-assigned-to-me-filter.poml) | B — "Assigned to Me" is now the sole filter mode. Header.tsx Row 3 renders a single non-dismissible `<Tag>Assigned to Me</Tag>`; `MyTasksFilter.tsx` deleted; `TodoFilterMode` + `MyTasksFilterMode` types removed; `buildTodoItemsQuery(userId)` bakes `_sprk_assignedto_value eq ${userId}` into the filter unconditionally; useUserPreferences drops the `myTasksFilterMode` field (backwards-compatible on read). TypeScript clean across all 9 touched files. | smart-todo, filter | ✅ (with 032, 033) | 030 | — |
+| ✅ | [032](032-B-selection-aware-toolbar-actions.poml) | B — Selection-aware toolbar actions (Open / Delete / Email / Pin) — wired via `createToolbarActions` from new `components/Toolbar/`; Open dispatches `sprk-smarttodo:open-todos` window event (task 040 listener); Delete confirms + parallel `Xrm.WebApi.deleteRecord`; Email composes mailto:; Pin any-unpinned ⇒ pin-all, all-pinned ⇒ unpin-all per spec FR-08; 20+ executable-spec test cases (no runner yet) | smart-todo, toolbar | ✅ (with 031, 033) | 012, 030 | 040 (Open action) |
+| ✅ | [033](033-B-list-card-view-toggle.poml) | B — List/Card view toggle wired. New ListView + Header `viewMode` props consuming hoisted `<ViewToggle>`; persisted via `viewMode` field on `useUserPreferences` JSON envelope (preferencetype 100000000, no new optionset). Default = card. `npm run build` 3,274 modules 8.29s clean. | smart-todo, user-preference | ✅ (with 031, 032) | 012, 030 | — |
 | ✅ | [034](034-B-extend-useLaunchContext.poml) | B — Extended useLaunchContext (235→471 LOC, 22 tests) **(NEW from Phase 0)** + parseDataParams extended | smart-todo, hook, url-params | ✅ | — | 081, 082, 083, 084 |
 
 #### D sub-tasks (serial after 050)
@@ -109,7 +109,7 @@
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
 | ✅ | [051](051-D-add-to-todo-main-form.poml) | D — JS Web Resource `sprk_todo_regarding_presave.js` (347 LOC) + 9-section form-bind instructions doc. Live form-designer steps deferred to user. **PCF enhancement follow-up flagged** (see Wave outcomes below) | dataverse, form-designer, deploy | ❌ (after 050 ✅) | 050 ✅ | 081-084 |
-| 🔲 | [052](052-D-read-only-mode.poml) | D — Read-only mode for view-only roles | regarding, security | ❌ (after 051) | 050, 051 | — |
+| ✅ | [052](052-D-read-only-mode.poml) | D — Read-only mode verified + hardened. RegardingResolverHost already detects `context.mode.isControlDisabled` (lines 38-44); added defensive write-gates in `handleSelectRecord` + `handleClear` (early-return if `readOnly`); pre-save handler skips `formType === 3/4`; +3 unit tests (23 passing); PCF v1.0.0 → v1.1.0; webpack alias stubs `@spaarke/sdap-client` (PR #369 cascade workaround). Prod bundle 1.57 MiB (+10 KiB vs 050) | regarding, security | ❌ (after 051) | 050, 051 | — |
 
 ---
 
@@ -119,17 +119,17 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [040](040-C-wire-smarttodo-modal.poml) | C — Wire SmartTodo card-open to `<RecordNavigationModalShell>` with iframe | modal, iframe, smart-todo | ⚠️ | 010, 030 | 041, 042 |
-| 🔲 | [060](060-E-card-affordances.poml) | E — Card affordances (Open icon, double-click, selection checkbox) | smart-todo, ui | ⚠️ | 012, 030, 040 | — |
-| 🔲 | [070](070-F-vertical-kanban-orientation.poml) | F — Vertical Kanban orientation toggle | smart-todo, ui, layout | ⚠️ | 012, 030 | 071 |
+| ✅ | [040](040-C-wire-smarttodo-modal.poml) | C — Wire SmartTodo card-open to `<RecordNavigationModalShell>` with iframe | modal, iframe, smart-todo | ⚠️ | 010, 030 | 041, 042 |
+| ✅ | [060](060-E-card-affordances.poml) | E — Card affordances (Open icon, double-click, selection checkbox) | smart-todo, ui | ⚠️ | 012, 030, 040 | — |
+| ✅ | [070](070-F-vertical-kanban-orientation.poml) | F — Vertical Kanban orientation toggle (CSS transform-only, no DOM reflow) | smart-todo, ui, layout | ⚠️ | 012, 030 | 071 |
 
 #### Sub-tasks (serial after parents)
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [041](041-C-dirty-check-cross-frame-messaging.poml) | C — Cross-frame dirty-check postMessage protocol | cross-frame-messaging, dataverse-form | ❌ | 010, 040 | — |
-| 🔲 | [042](042-C-retire-TodoDetailPanel.poml) | C — Retire TodoDetailPanel side-pane | cleanup | ❌ | 040 | — |
-| 🔲 | [071](071-F-orientation-persistence.poml) | F — Persist orientation via sprk_userpreference | user-preference | ❌ | 070 | — |
+| ✅ | [041](041-C-dirty-check-cross-frame-messaging.poml) | C — Cross-frame dirty-check postMessage protocol (Wave C — JS web resource + shell + bind instructions doc) | cross-frame-messaging, dataverse-form | ❌ | 010, 040 | — |
+| ✅ | [042](042-C-retire-TodoDetailPanel.poml) | C — Retire TodoDetailPanel side-pane | cleanup | ❌ | 040 | — |
+| ✅ | [071](071-F-orientation-persistence.poml) | F — Persist orientation via sprk_userpreference | user-preference | ❌ | 070 | — |
 
 ---
 
@@ -137,10 +137,10 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [081](081-G-visualhost-on-matter-form.poml) | G — Visual Host on Matter main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
-| 🔲 | [082](082-G-visualhost-on-project-form.poml) | G — Visual Host on Project main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
-| 🔲 | [083](083-G-visualhost-on-invoice-form.poml) | G — Visual Host on Invoice main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
-| 🔲 | [084](084-G-visualhost-on-workassignment-form.poml) | G — Visual Host on WorkAssignment main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [081](081-G-visualhost-on-matter-form.poml) | G — Visual Host on Matter main form (10-section maker doc — Wave A) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [082](082-G-visualhost-on-project-form.poml) | G — Visual Host on Project main form (instructions doc — Wave B parallel) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [083](083-G-visualhost-on-invoice-form.poml) | G — Visual Host on Invoice main form → 10-section maker doc cloned from 081 template with Invoice substitutions | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [084](084-G-visualhost-on-workassignment-form.poml) | G — Visual Host on WorkAssignment main form (instructions doc — Wave B parallel) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
 
 ---
 

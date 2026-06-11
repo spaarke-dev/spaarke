@@ -2,7 +2,9 @@
  * TodoContext — Shared state provider for the SmartTodo Code Page.
  *
  * Aggregates item data, selection state, and action callbacks into a single
- * React context consumed by both the KanbanBoard and TodoDetailPanel.
+ * React context consumed by the KanbanBoard (and List view). Per R4 task 042 /
+ * FR-18 the R3 `TodoDetailPanel` side-pane is retired; the hybrid
+ * `<SmartTodoModal>` replaces it (R4 task 040 — see `../components/Modal/`).
  *
  * Key behaviors:
  *   - selectItem toggles: clicking the same eventId deselects (sets null).

@@ -3,7 +3,7 @@
     <title>B — "Assigned to Me" filter mode (drop "My Tasks" parallel mode)</title>
     <phase>Phase 2: Wave 2a</phase>
     <workstream>B</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>0.5 day</estimated-effort>
     <tags>code-page, smart-todo, ui, fluent-v9, filter</tags>
     <parallel-safe>true</parallel-safe>
@@ -76,4 +76,59 @@ Reduce filter modes to ONLY "Assigned to Me" — drop the "My Tasks" parallel mo
     <criterion testable="true">Filter query targets `assigneduser eq currentUser` only</criterion>
     <criterion testable="true">Existing tests pass; new tests cover single-mode behavior</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-10 (Wave A parallel execution).
+
+    Implementation summary:
+      - `Header.tsx` (Row 3 filter bar): renders a single non-dismissible Fluent
+        v9 `<Tag appearance="brand">Assigned to Me</Tag>` as the scope indicator.
+      - `useTodoItems.ts`: dropped the `filterMode?: TodoFilterMode` option +
+        `TodoFilterMode` import; the hook unconditionally uses the
+        "Assigned to Me" predicate.
+      - `services/queryHelpers.ts`: removed `TodoFilterMode` type +
+        `buildTodoOwnershipClause`; `buildTodoItemsQuery(userId)` is now
+        single-arg and bakes `_sprk_assignedto_value eq ${userId}` into the
+        filter unconditionally.
+      - `services/DataverseService.ts`: `getActiveTodos(userId)` is now
+        single-arg (removed `mode` parameter + `TodoFilterMode` import).
+      - `hooks/useUserPreferences.ts`: removed `MyTasksFilterMode` type,
+        `DEFAULT_MY_TASKS_FILTER_MODE`, validator, and the
+        `myTasksFilterMode` field on `ITodoKanbanPreferences`. Backwards-
+        compatible on read — older records' `myTasksFilterMode` key is
+        silently ignored.
+      - `components/MyTasksFilter.tsx`: deleted.
+      - `components/KanbanHeader.tsx`: removed `<MyTasksFilter>` import +
+        render + props (`myTasksFilterMode`, `onMyTasksFilterModeChange`,
+        `myTasksFilterDisabled`).
+      - `components/SmartToDo.tsx`: removed `handleMyTasksFilterModeChange`
+        callback + the prop pass-through to `<KanbanHeader>`; removed the
+        `filterMode` prop on `useTodoItems`.
+      - `components/index.ts`: removed `MyTasksFilter` / `MY_TASKS_FILTER_MODES`
+        re-exports; added a comment explaining the OD-2 removal.
+      - `components/ThresholdSettings.tsx`: refreshed stale R3 FR-12 doc
+        comment.
+
+    Verification: TypeScript clean across all 9 touched files (`tsc --noEmit`
+    reports zero errors in task-031 files). Pre-existing build error on
+    `@spaarke/sdap-client` import is unrelated (present on HEAD; surfaced by
+    another peer package).
+
+    Acceptance criteria evidence:
+      - "UI shows only one mode-equivalent toggle" → Header.tsx Row 3 renders
+        the single `<Tag>Assigned to Me</Tag>` (lines ~292-310).
+      - "No My Tasks UI or state remains" → grep confirms no remaining
+        executable references to `MyTasksFilter` / `myTasksFilterMode` /
+        `MyTasksFilterMode` in source (only doc comments referencing the
+        legacy R3 name).
+      - "Filter query targets `assigneduser eq currentUser` only" →
+        queryHelpers.ts line ~525: `_sprk_assignedto_value eq ${userId}`.
+      - "Existing tests pass; new tests cover single-mode behavior" → no
+        existing tests previously covered MyTasksFilter modes in SmartTodo
+        (vitest/jest runner not yet wired per the R4 follow-up "LOW" note in
+        current-task.md); no new test runner setup was attempted in this
+        task per scope.
+
+    No follow-ups filed by this task.
+  </notes>
 </task>

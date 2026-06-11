@@ -18,4 +18,10 @@
 
 export { KanbanBoard } from './KanbanBoard';
 export { KanbanCard } from './KanbanCard';
-export type { IKanbanBoardProps, IKanbanCardProps, IKanbanColumn, KanbanColumn } from './types';
+export type {
+  IKanbanBoardProps,
+  IKanbanCardProps,
+  IKanbanColumn,
+  KanbanColumn,
+  KanbanOrientation,
+} from './types';

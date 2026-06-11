@@ -187,4 +187,68 @@ describe('KanbanBoard (shared primitive — R2 baseline lock)', () => {
 
     expect(screen.getByRole('group', { name: 'Tomorrow (collapsed)' })).toBeInTheDocument();
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Orientation (R4 task 070 / FR-28 / FR-29 / NFR-08)
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('defaults to horizontal orientation (data-orientation="horizontal")', () => {
+    renderWithProviders(
+      <KanbanBoard<ITestItem>
+        columns={makeColumns()}
+        onDragEnd={jest.fn()}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
+      />
+    );
+    const region = screen.getByRole('region');
+    expect(region).toHaveAttribute('data-orientation', 'horizontal');
+    expect(region).toHaveAttribute('aria-orientation', 'horizontal');
+  });
+
+  it('honours orientation="vertical" with matching aria + data attrs', () => {
+    renderWithProviders(
+      <KanbanBoard<ITestItem>
+        columns={makeColumns()}
+        onDragEnd={jest.fn()}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
+        orientation="vertical"
+      />
+    );
+    const region = screen.getByRole('region');
+    expect(region).toHaveAttribute('data-orientation', 'vertical');
+    expect(region).toHaveAttribute('aria-orientation', 'vertical');
+  });
+
+  it('keeps the same column structure across orientation flips (no DOM re-creation contract)', () => {
+    const { rerender } = renderWithProviders(
+      <KanbanBoard<ITestItem>
+        columns={makeColumns()}
+        onDragEnd={jest.fn()}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
+        orientation="horizontal"
+      />
+    );
+
+    // Same groups present in horizontal mode.
+    expect(screen.getByRole('group', { name: 'Today' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Tomorrow' })).toBeInTheDocument();
+
+    rerender(
+      <KanbanBoard<ITestItem>
+        columns={makeColumns()}
+        onDragEnd={jest.fn()}
+        renderCard={item => <span>{item.name}</span>}
+        getItemId={item => item.id}
+        orientation="vertical"
+      />
+    );
+
+    // Same groups still present after orientation flip — no DOM re-creation.
+    expect(screen.getByRole('group', { name: 'Today' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Tomorrow' })).toBeInTheDocument();
+    expect(screen.getByRole('region')).toHaveAttribute('data-orientation', 'vertical');
+  });
 });

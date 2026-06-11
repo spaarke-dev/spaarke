@@ -148,13 +148,29 @@ Default allow-list:
 Override via the `allowedOrigins` prop when embedding in non-Dataverse
 contexts. Patterns support a single leading `*.` wildcard subdomain.
 
-### Iframe-side reference implementation (informative)
+### Iframe-side reference implementation
+
+The iframe-side listener is **NOT** part of this component — it is implemented
+separately as a Dataverse JS Web Resource registered on the embedded form.
+For the SmartTodo To Do main form, the canonical implementation is:
+
+**File**: `src/client/webresources/js/sprk_todo_dirty_check.js`
+**Namespace**: `Spaarke.SmartTodo.DirtyCheck`
+**OnLoad entry point**: `Spaarke.SmartTodo.DirtyCheck.onLoad`
+**Form bind**: see [`projects/smart-todo-r4/notes/c-dirty-check-bind-instructions.md`](../../../../../../../projects/smart-todo-r4/notes/c-dirty-check-bind-instructions.md)
+**Tests**: `__tests__/iframeDirtyCheckScript.test.ts` (21 jest tests — origin allow-list, round-trip, idempotency, graceful fallback)
+
+Minimal handler shape (the production script extends this with origin
+allow-list validation, idempotent listener install, and cached
+formContext refresh on each OnLoad):
 
 ```ts
 // Inside the iframe (e.g. the SmartTodo form-script web resource):
 window.addEventListener('message', (ev) => {
   if (ev.data?.type !== 'request-dirty-check') return;
-  const dirty = Boolean(Xrm.Page.data.entity.getIsDirty());
+  // Production script validates ev.origin against an allow-list
+  // (https://*.dynamics.com + same-origin) BEFORE responding.
+  const dirty = Boolean(formContext.data.entity.getIsDirty());
   ev.source?.postMessage(
     { type: 'dirty-check-result', correlationId: ev.data.correlationId, dirty },
     ev.origin   // echo origin — never use "*" for responses
@@ -162,9 +178,13 @@ window.addEventListener('message', (ev) => {
 });
 ```
 
-**Authoring note**: the iframe-side listener is NOT part of this component.
-It is implemented separately in smart-todo-r4 task 041 (form-script web
-resource for SmartTodo modal). The shape above is the contract.
+**Origin allow-list (production script)** — mirrors the parent shell's default:
+
+- `https://*.dynamics.com` — any Spaarke MDA / customer tenant
+- `window.location.origin` — same-origin embeds (Code Page → Code Page)
+
+Untrusted-origin requests are silently dropped — the parent shell's timeout
+fallback then fires (treats no-response as clean per spec FR-14).
 
 ### Opting out of dirty-check
 

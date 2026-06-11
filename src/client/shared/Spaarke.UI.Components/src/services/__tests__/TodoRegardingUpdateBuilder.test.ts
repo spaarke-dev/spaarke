@@ -452,8 +452,8 @@ describe('discoverTodoNavProps', () => {
 // Verifies that the URL produced by buildTodoRegardingUpdate is a Dataverse
 // `/main.aspx?pagetype=entityrecord&...` URL that, when passed to a host's
 // open-url handler, navigates to the correct regarding record. The actual
-// Xrm.Navigation.openUrl call is exercised in the TodoDetailPanel host
-// integration; here we verify the URL shape is correct.
+// Xrm.Navigation.openUrl call is exercised at the consumer host (e.g. the
+// SmartTodoModal flow post-R4 task 042); here we verify the URL shape is correct.
 // ---------------------------------------------------------------------------
 
 describe('regardingrecordurl shape (FR-13 link target)', () => {

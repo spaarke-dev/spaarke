@@ -45,7 +45,7 @@ import {
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import { KanbanBoard } from "@spaarke/ui-components";
+import { KanbanBoard, OrientationToggle, type Orientation } from "@spaarke/ui-components";
 import { KanbanCard } from "./KanbanCard";
 import { KanbanHeader } from "./KanbanHeader";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";
@@ -247,6 +247,29 @@ export interface ISmartToDoProps {
   onRefetchReady?: (refetch: () => void) => void;
   /** Called when "Show more" is clicked. */
   onShowMore?: () => void;
+  /**
+   * Multi-select set lifted to the host (R4 task 060 / spec FR-27).
+   * When provided, each KanbanCard renders a selection checkbox bound to this
+   * Set + the `onToggleSelect` callback. The same Set drives the
+   * selection-aware toolbar in `<Header>` (FR-08).
+   *
+   * Omit (both `selectedIds` and `onToggleSelect`) for embedded surfaces that
+   * don't yet plumb multi-select — checkboxes are hidden + the toolbar Row 4
+   * is not affected.
+   */
+  selectedIds?: ReadonlySet<string>;
+  /** Called when the user toggles a card's selection checkbox. */
+  onToggleSelect?: (todoId: string) => void;
+  /**
+   * Called when the user requests to OPEN a card (per-card Open icon or
+   * double-click — R4 task 060 / spec FR-25 + FR-26). The callback is expected
+   * to dispatch the canonical `OPEN_TODOS_EVENT` so the existing modal
+   * subscriber (in `<SmartTodoLayout>`, Wave A task 040) handles routing.
+   *
+   * When omitted, the Open icon button is not rendered and double-click is a
+   * no-op — back-compat for embedded surfaces (LegalWorkspace dashboard).
+   */
+  onOpenTodo?: (todoId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +284,9 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onCountChange,
   onRefetchReady,
   onShowMore,
+  selectedIds,
+  onToggleSelect,
+  onOpenTodo,
 }) => {
   const styles = useStyles();
 
@@ -298,24 +324,14 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     webApi,
     userId,
     mockItems,
-    filterMode: preferences.myTasksFilterMode,
   });
 
-  // -------------------------------------------------------------------------
-  // My Tasks filter change handler (FR-12)
-  //
-  // Persists the new mode through the existing user-preference record (no new
-  // optionset value required — see hooks/useUserPreferences.ts). The
-  // useTodoItems hook subscribes to preferences.myTasksFilterMode, so the
-  // update triggers a re-fetch with the new OData predicate.
-  // -------------------------------------------------------------------------
-
-  const handleMyTasksFilterModeChange = React.useCallback(
-    (mode: typeof preferences.myTasksFilterMode) => {
-      void updatePreferences({ myTasksFilterMode: mode });
-    },
-    [updatePreferences]
-  );
+  // R4 task 031 / FR-07 / OD-2 — "Assigned to Me" is the sole filter mode for
+  // the SmartTodo Code Page. The R3 user-controllable `myTasksFilterMode` was
+  // removed (legacy "My Tasks" + "All" modes dropped because `ownerid` is
+  // BU-owned and UAT users couldn't distinguish the parallel modes). The
+  // single mode is now baked into the OData predicate in
+  // `services/queryHelpers.ts buildTodoItemsQuery`.
 
   // Expose refetch to parent for refresh button routing (embedded mode)
   React.useEffect(() => {
@@ -359,6 +375,31 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   /** Collapsed Kanban columns — Future is collapsed by default */
   const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(
     new Set(["Future"])
+  );
+
+  /**
+   * Board layout orientation (R4 task 070 / 071 / FR-28 / FR-29 / FR-30).
+   *
+   * Toggled via `<OrientationToggle>` in the KanbanHeader. The swap is a
+   * pure CSS-class change on the shared `<KanbanBoard>` — no React
+   * re-mount, so cards keep their drag-drop + selection state across an
+   * orientation flip (NFR-08).
+   *
+   * Persisted via `useUserPreferences` (task 071) — the user's choice
+   * round-trips through `sprk_userpreference` (the SAME kanban-prefs JSON
+   * envelope that already carries thresholds + viewMode). On first visit
+   * the hook returns `DEFAULT_SMART_TODO_ORIENTATION` ("horizontal").
+   *
+   * `setOrientation` writes the new value optimistically AND persists via
+   * the hook — `updatePreferences` already does an optimistic local
+   * update, so a single call drives both state + persistence.
+   */
+  const orientation = preferences.orientation;
+  const setOrientation = React.useCallback(
+    (next: Orientation) => {
+      void updatePreferences({ orientation: next });
+    },
+    [updatePreferences],
   );
 
   const handleToggleCollapse = React.useCallback((columnId: string) => {
@@ -623,10 +664,25 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
           onClick={handleCardClick}
           accentColor={col?.accentColor}
           isSelected={item.sprk_todoid === selectedEventId}
+          // R4 task 060 — Card affordances (FR-25 / FR-26 / FR-27).
+          // Per-card props plumbed only when the host provides the wiring;
+          // omitting `onOpenTodo` / `onToggleSelect` keeps the card
+          // backwards-compatible for embedded LW surfaces.
+          onOpen={onOpenTodo}
+          isMultiSelected={selectedIds?.has(item.sprk_todoid) ?? false}
+          onToggleSelect={onToggleSelect}
         />
       );
     },
-    [columns, handlePinToggle, handleCardClick, selectedEventId]
+    [
+      columns,
+      handlePinToggle,
+      handleCardClick,
+      selectedEventId,
+      onOpenTodo,
+      selectedIds,
+      onToggleSelect,
+    ]
   );
 
   const getItemId = React.useCallback(
@@ -661,9 +717,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         isAdding={isAdding}
         onSettingsOpen={() => setSettingsOpen(true)}
         embedded={embedded}
-        myTasksFilterMode={preferences.myTasksFilterMode}
-        onMyTasksFilterModeChange={handleMyTasksFilterModeChange}
-        myTasksFilterDisabled={prefsLoading}
+        orientationSlot={
+          <OrientationToggle
+            orientation={orientation}
+            onChange={setOrientation}
+          />
+        }
       />
 
       {/* ── Settings popover — anchor to a hidden trigger ──────────────── */}
@@ -742,6 +801,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
                 ariaLabel="Smart To Do Kanban board"
                 collapsedColumns={collapsedColumns}
                 onToggleCollapse={handleToggleCollapse}
+                orientation={orientation}
               />
             </div>
           )}

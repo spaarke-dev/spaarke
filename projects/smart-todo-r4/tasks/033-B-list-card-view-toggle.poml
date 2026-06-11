@@ -3,7 +3,7 @@
     <title>B — List / Card view toggle with per-user persistence</title>
     <phase>Phase 2: Wave 2a</phase>
     <workstream>B</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>code-page, smart-todo, ui, fluent-v9, user-preference, dataverse</tags>
     <parallel-safe>true</parallel-safe>

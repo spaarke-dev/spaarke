@@ -26,7 +26,7 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { IKanbanBoardProps } from './types';
 
@@ -42,6 +42,26 @@ const useStyles = makeStyles({
     flex: '1 1 0',
     minHeight: 0,
     overflow: 'hidden',
+    // FR-29 / NFR-08 — smooth row↔column flip (CSS-only). Honour
+    // prefers-reduced-motion by snapping with zero transition.
+    transitionProperty: 'gap',
+    transitionDuration: tokens.durationNormal,
+    transitionTimingFunction: tokens.curveEasyEase,
+    '@media (prefers-reduced-motion: reduce)': {
+      transitionDuration: '0ms',
+    },
+  },
+  /**
+   * Vertical orientation — columns stack top-to-bottom as collapsible
+   * sections. `overflow-y: auto` lets the page scroll when the cumulative
+   * section heights exceed the container height (FR-29: narrow workspace
+   * widget container).
+   */
+  boardVertical: {
+    flexDirection: 'column',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    gap: tokens.spacingVerticalS,
   },
   column: {
     flex: '1 1 0',
@@ -51,6 +71,16 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
     overflow: 'hidden',
+  },
+  /**
+   * Vertical-mode column — natural height. `flex: 0 0 auto` releases the
+   * equal-flex distribution so each section sizes by its own card list;
+   * the page-level scroll on `boardVertical` handles overflow.
+   */
+  columnVertical: {
+    flex: '0 0 auto',
+    width: '100%',
+    minWidth: 0,
   },
   columnHeader: {
     display: 'flex',
@@ -82,6 +112,15 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
+  },
+  /**
+   * Vertical-mode card list — auto-height so the section grows with its
+   * cards; page-level scroll on `boardVertical` takes over when content
+   * exceeds the container.
+   */
+  cardListVertical: {
+    flex: '0 0 auto',
+    overflowY: 'visible',
   },
   cardWrapper: {
     marginBottom: tokens.spacingVerticalXS,
@@ -127,12 +166,32 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDivElement>) {
-  const { columns, onDragEnd, renderCard, getItemId, ariaLabel, collapsedColumns, onToggleCollapse } = props;
+  const {
+    columns,
+    onDragEnd,
+    renderCard,
+    getItemId,
+    ariaLabel,
+    collapsedColumns,
+    onToggleCollapse,
+    orientation = 'horizontal',
+  } = props;
   const styles = useStyles();
+
+  const isVertical = orientation === 'vertical';
+  const boardClassName = mergeClasses(styles.board, isVertical && styles.boardVertical);
+  const columnClassName = mergeClasses(styles.column, isVertical && styles.columnVertical);
+  const cardListClassName = mergeClasses(styles.cardList, isVertical && styles.cardListVertical);
 
   return (
     <DragDropContext onDragEnd={onDragEnd}>
-      <div className={styles.board} role="region" aria-label={ariaLabel ?? 'Kanban board'}>
+      <div
+        className={boardClassName}
+        role="region"
+        aria-label={ariaLabel ?? 'Kanban board'}
+        aria-orientation={isVertical ? 'vertical' : 'horizontal'}
+        data-orientation={orientation}
+      >
         {columns.map(column => {
           const isCollapsed = collapsedColumns?.has(column.id) ?? false;
 
@@ -161,7 +220,7 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
           return (
             <div
               key={column.id}
-              className={styles.column}
+              className={columnClassName}
               role="group"
               aria-label={column.title}
               style={
@@ -188,7 +247,7 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
               {/* Droppable card list */}
               <Droppable droppableId={column.id}>
                 {provided => (
-                  <div ref={provided.innerRef} {...provided.droppableProps} className={styles.cardList} role="list">
+                  <div ref={provided.innerRef} {...provided.droppableProps} className={cardListClassName} role="list">
                     {column.items.length === 0 && <div className={styles.emptyColumn}>No items</div>}
                     {column.items.map((item, index) => {
                       const itemId = getItemId(item);

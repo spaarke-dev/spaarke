@@ -3,7 +3,7 @@
     <title>D — Read-only mode handling for view-only roles</title>
     <phase>Phase 2: Wave 2a</phase>
     <workstream>D</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>0.5 day</estimated-effort>
     <tags>regarding, read-only, security, fluent-v9</tags>
     <parallel-safe>false</parallel-safe>
