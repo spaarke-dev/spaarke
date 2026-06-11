@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-11 (post-Wave-A, all 6 tasks landed on `work/smart-todo-r4-wave2`)
+> **Last Updated**: 2026-06-11 (post-Wave-B; 25/31 ✅; 6 remaining)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,13 +10,13 @@
 | Field | Value |
 |-------|-------|
 | **Project** | smart-todo-r4 — 7 workstreams (A-G), 31 tasks total |
-| **Status** | **19 of 31 tasks ✅** (61% by count; foundation + Wave 2a + Wave 2a-followups + Wave A all complete) |
+| **Status** | **25 of 31 tasks ✅** (80.6% by count; foundation + Wave 2a + Wave 2a-followups + Wave A + Wave B all complete) |
 | **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
-| **Worktree branch** | `work/smart-todo-r4-wave2` @ `54fb0d541` (Wave A: +6 tasks) — pushed to origin |
-| **Active task** | none — between waves; ready to dispatch Wave B |
+| **Worktree branch** | `work/smart-todo-r4-wave2` @ `0c2dd15da` (Wave A + Wave B: +12 tasks) — pushed to origin |
+| **Active task** | none — between waves; 6 tasks remain |
 | **Working tree** | clean |
-| **Next Action** | Dispatch Wave B (up to 8 parallel agents — see "Wave proposal B" table below) |
-| **PR for Wave A** | Not yet opened — recommended NEXT: open PR for `work/smart-todo-r4-wave2` → master so Wave B can rebase off a clean post-merge master. OR continue Wave B on same branch and open one combined PR. **User decision required.** |
+| **Next Action** | Dispatch follow-up wave: **041 + 071** (serialized — 041 depends on 040 ✅ for modal subtree; 071 extends 033's `useUserPreferences`). Both can run as 2 parallel Agent calls; conflict risk is low because 041 is iframe `postMessage` work in `<SmartTodoModal>` and 071 is `useUserPreferences` + `<SmartToDo>` (different files). |
+| **PR strategy** | User chose to bundle Wave A + Wave B on same branch (`work/smart-todo-r4-wave2`). After 041 + 071 land, complete Phase 3/4 (092, 093, 094, 098) then open ONE combined PR for the entire `wave2` branch (12 + 2 + 4 = 18 tasks). |
 
 ### Critical context for resume
 
@@ -36,32 +36,27 @@
 | **G1+2a-followups** | 011, 020, 030, 051 | RichFilePreviewDialog refactor (regression-safety pass), SmartToDo widget rebuild via new `@spaarke/smart-todo-components` peer package (Pattern D; FeedTodoSyncContext lifted to LW shim per user decision; agent hit timeout but produced clean buildable work; main session did closeout), SmartTodo 4-row Header layout, form-binding JS Web Resource + 9-section instructions doc. |
 | **R4-051 follow-up fix** | (no new task) | PCF CREATE-mode bridge: `RegardingResolverApp.tsx` populates `window.__sprk_regarding_pending__` on CREATE so OnSave handler stages all 5 fields in INSERT transaction. Closes the HIGH-priority follow-up before any deploy. |
 | **Wave A (post-/compact)** | 031, 032, 033, 040, 070, 081 | 6 parallel agents on `work/smart-todo-r4-wave2`. All returned clean with builds green. 031 "Assigned to Me" filter + MyTasksFilter deletion; 032 selection-aware toolbar (Open/Delete/Email/Pin); 033 List/Card view toggle + persistence; 040 SmartTodo modal wire-up (`<RecordNavigationModalShell>` + iframe OOB form); 070 vertical Kanban orientation (CSS flex-direction); 081 Matter form Visual Host instructions doc. Main-session reconciliation: deduped `OPEN_TODOS_EVENT` between 032 + 040 (032 canonical); added `@spaarke/sdap-client` vite alias to LegalWorkspace (PR #369 cascade unblock). Commit `54fb0d541`. |
+| **Wave B** | 042, 052, 060, 082, 083, 084 | 6 parallel agents. All returned clean. 042 retired `TodoDetailPanel` side-pane (FR-18; deleted `TodoDetailPanel.tsx` + `todoDetailService.ts`); 060 card affordances (Open icon + Checkbox + double-click on KanbanCard; reused Wave A `OPEN_TODOS_EVENT`); 052 RegardingResolver PCF read-only mode + pre-save handler formType 3/4 skip (PCF version bump 1.0.0 → 1.1.0, +3 tests = 23/23 pass, added PCF-side webpack alias for PR #369 cascade); 082/083/084 Visual Host instructions docs for Project/Invoice/WorkAssignment (clones of 081 template per §10 substitution table). 042 + 060 successfully merged on `SmartTodoApp.tsx` without write-race losses. Commit `0c2dd15da`. |
 
 ---
 
-## Remaining Work — 12 tasks (suggested grouping for next waves)
+## Remaining Work — 6 tasks (1 small follow-up wave + Phase 3/4)
 
-### Wave proposal B (dispatch NEXT — up to 8 parallel)
+### Follow-up wave C (dispatch NEXT — 2 parallel)
 
 | Task | Touches | Dependencies (all ✅) | Estimated | Parallel risk |
 |---|---|---|---|---|
-| **041** C cross-frame dirty-check messaging | iframe `postMessage` protocol + `<RecordNavigationModalShell>` wiring | 040 ✅ | 1d | Low — separate concern |
-| **042** C retire `TodoDetailPanel` side-pane (FR-18) | `SmartTodoApp.tsx` cleanup + `TodoDetailPanel/` removal | 040 ✅ | 0.5d | **HIGH on `SmartTodoApp.tsx`** — should land BEFORE 041 to simplify diff, or serialize against it |
-| **060** E card affordances: Open icon + double-click + selection checkbox | `SmartTodo/src/components/SmartToDoCard.tsx` + `KanbanBoard.tsx` | 012 ✅, 030 ✅, 040 ✅ | 1d | Medium — touches card subtree |
-| **052** D read-only mode for view-only roles | `RegardingResolver` PCF + pre-save handler gate | 050 ✅, 051 ✅ | 0.5-1d | Low — PCF is separate |
-| **071** F orientation persistence via `sprk_userpreference` | `useUserPreferences.ts` (extend further) + `SmartToDo.tsx` | 070 ✅, 033 ✅ | 0.5d | **HIGH overlap with 033's useUserPreferences viewMode field — read 033's final hook shape before extending** |
-| **082** G Visual Host on Project form (clone 081 doc) | new instructions doc | 051 ✅, 080 ✅, 034 ✅ | 0.25d | None |
-| **083** G Visual Host on Invoice form (clone 081 doc) | new instructions doc | 051 ✅, 080 ✅, 034 ✅ | 0.25d | None |
-| **084** G Visual Host on WorkAssignment form (clone 081 doc) | new instructions doc | 051 ✅, 080 ✅, 034 ✅ | 0.25d | None |
+| **041** C cross-frame dirty-check messaging | `<SmartTodoModal>` (Wave A task 040) + iframe `postMessage` listener | 040 ✅ | 1d | Low — modal subtree only |
+| **071** F orientation persistence via `sprk_userpreference` | `useUserPreferences.ts` (extend with orientation field; same JSON envelope pattern 033 used for viewMode) + `<SmartToDo>` | 070 ✅, 033 ✅ | 0.5d | Low — different file from 041 |
 
-**Dispatch recommendation**: 042 + 041 should be serialized (042 first, then 041 — both touch the modal subtree). 071 should be serialized against any other useUserPreferences-touching work. The four G-tasks (082/083/084 plus optionally 081 redo if needed) are zero-conflict and fully parallel-safe. Suggested wave: dispatch 6 parallel = 042 + 060 + 052 + 082 + 083 + 084, then 041 + 071 in a small follow-up wave.
+**Dispatch recommendation**: 2 parallel agents in one message. 071 must respect 033's `useUserPreferences` envelope shape (read the hook source first) — orientation field joins viewMode + thresholdLowAt + thresholdHighAt + myTasksFilterMode in the same kanban-prefs JSON.
 
-### Phase 3 + 4 (final 4 tasks — after Wave B)
+### Phase 3 + 4 (final 4 tasks — after follow-up wave C)
 
-- **092** Deploy all affected solutions (per project-pipeline deploy convention now: **deploy from master**, not from feature branch) — also fold in project-wide tsconfig refs fix for `@spaarke/sdap-client` cascade
+- **092** Deploy all affected solutions (per project-pipeline deploy convention now: **deploy from master**, not from feature branch) — also fold in project-wide tsconfig refs fix for `@spaarke/sdap-client` cascade (5 code-pages + 1 PCF currently have local workaround aliases)
 - **093** UI test suite (NFR-05 modal nav latency, NFR-07 a11y, NFR-08 orientation switch)
 - **094** Final `grep -ri sprk_todoflag src/` → 0 functional hits (graduation criterion 12)
-- **098** Wrap-up: lessons-learned + README status → Complete + repo-cleanup + final PR
+- **098** Wrap-up: lessons-learned + README status → Complete + repo-cleanup + final PR (ONE combined PR for entire `work/smart-todo-r4-wave2` branch covering Wave A + Wave B + Wave C + Phase 3/4)
 
 ---
 
@@ -130,13 +125,13 @@ Refer to `git log master..work/smart-todo-r4-wave2` for the precise Wave A delta
 - CLAUDE.md: project AI context (binding decisions + parallel branch coord)
 - TASK-INDEX: 31 tasks with statuses + 5 follow-ups documented
 
-### To resume (post-Wave-A)
-1. Quick read: this file's Quick Recovery + "Wave proposal B" table
-2. Verify branch + master sync: `git status` clean, `git fetch origin --prune`, `git rev-list --count HEAD..origin/master` (≥0 is OK — Wave A is ahead of master by 1 commit; if behind, rebase)
-3. **Decision point**: open PR for Wave A now (decouples Wave B from any rebase work), OR continue Wave B on same branch and open one combined PR. Ask user before assuming.
-4. Dispatch Wave B (recommended 6 parallel): 042 + 060 + 052 + 082 + 083 + 084. Then a follow-up wave for 041 + 071 (serialized against 042/033 respectively). Use the **Agent tool** with `general-purpose` subagent — Skill tool just loads the protocol into main context; Agent tool spawns concurrent sub-agents.
-5. After Wave B returns: same reconciliation pattern as Wave A — main session does merges, dedupes, build-verify across all 4 packages, commit + push.
-6. **Do NOT deploy from the branch.** Master-only deploy discipline holds.
+### To resume (post-Wave-B)
+1. Quick read: this file's Quick Recovery + "Follow-up wave C" table
+2. Verify branch + master sync: `git status` clean, `git fetch origin --prune`, branch should be ~3 commits ahead of master
+3. Dispatch follow-up wave C: 2 parallel Agent calls (041 + 071) — same Agent-tool pattern as Wave A + B
+4. After wave C returns: build verify across SmartTodo + Spaarke.UI.Components + LegalWorkspace + RegardingResolver PCF; commit + push
+5. Phase 3: tackle 092 (deploy plan), 093 (UI tests), 094 (sprk_todoflag final grep), 098 (wrap-up + PR)
+6. **Do NOT deploy from the branch.** Master-only deploy discipline holds — PR merge triggers the master-side deploy.
 
 ### Commands for resume
 ```bash
@@ -146,7 +141,7 @@ git branch --show-current   # expect: work/smart-todo-r4-wave2
 # 2. Master sync check
 git fetch origin --prune
 git rev-list --count HEAD..origin/master  # expect 0 unless master moved; rebase if non-zero
-git rev-list --count origin/master..HEAD  # expect 1 (Wave A commit 54fb0d541)
+git rev-list --count origin/master..HEAD  # expect 3 (resume + Wave A + Wave B)
 
 # 3. Open project task index
 # View projects/smart-todo-r4/tasks/TASK-INDEX.md for task list (look for 🔲 markers)
