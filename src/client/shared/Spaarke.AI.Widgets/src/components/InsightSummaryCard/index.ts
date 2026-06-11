@@ -24,21 +24,7 @@ export type {
 } from './InsightSummaryCard.types';
 export { InsightDeclineError } from './InsightSummaryCard.types';
 // Task 033 — discriminated citation union (FR-07)
-export type {
-  Citation,
-  AssessmentCitation,
-  DocumentCitation,
-  UnknownCitation,
-} from './Citation.types';
+export type { Citation, AssessmentCitation, DocumentCitation, UnknownCitation } from './Citation.types';
 export { isAssessmentCitation, isDocumentCitation } from './Citation.types';
-export type {
-  InsightCardState,
-  InsightCardStatus,
-  InsightCardAction,
-} from './state';
-export {
-  insightCardReducer,
-  initialInsightCardState,
-  DEFAULT_ERROR_MESSAGE,
-  DEFAULT_DECLINE_MESSAGE,
-} from './state';
+export type { InsightCardState, InsightCardStatus, InsightCardAction } from './state';
+export { insightCardReducer, initialInsightCardState, DEFAULT_ERROR_MESSAGE, DEFAULT_DECLINE_MESSAGE } from './state';

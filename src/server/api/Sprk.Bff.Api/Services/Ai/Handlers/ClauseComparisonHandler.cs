@@ -561,7 +561,8 @@ public sealed class ClauseComparisonHandler : IToolHandler
                     DiffSegmentType.Added,
                     null,
                     null,
-                    pj - 1) with { Text = tokensB[pj - 1].Original });
+                    pj - 1)
+                { Text = tokensB[pj - 1].Original });
                 pj--;
             }
         }
