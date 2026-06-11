@@ -21,7 +21,12 @@ namespace Sprk.Bff.Api.Services.Ai.Safety.Citations;
 /// </summary>
 public sealed class InternalIndexProvider : IVerificationProvider
 {
-    private readonly SearchClient _searchClient;
+    // R6 Wave B-G11 (2026-06-10) — Lazy<SearchClient> so DI startup doesn't crash
+    // when AiSearch:ReferencesEndpoint/ApiKey aren't configured (matches the
+    // BingGroundingOptions B-G8 + AgentServiceOptions B-G11 hardening pattern).
+    // Config validation happens on first VerifyAsync/SearchAsync call.
+    private readonly Lazy<SearchClient> _searchClientLazy;
+    private SearchClient _searchClient => _searchClientLazy.Value;
     private readonly ILogger<InternalIndexProvider> _logger;
 
     /// <summary>Name of the semantic configuration defined in spaarke-rag-references.json.</summary>
@@ -51,7 +56,8 @@ public sealed class InternalIndexProvider : IVerificationProvider
     /// </summary>
     public InternalIndexProvider(SearchClient searchClient, ILogger<InternalIndexProvider> logger)
     {
-        _searchClient = searchClient ?? throw new ArgumentNullException(nameof(searchClient));
+        if (searchClient is null) throw new ArgumentNullException(nameof(searchClient));
+        _searchClientLazy = new Lazy<SearchClient>(() => searchClient, isThreadSafe: true);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -59,22 +65,28 @@ public sealed class InternalIndexProvider : IVerificationProvider
     /// Production constructor: builds the <see cref="SearchClient"/> from configuration keys
     /// <c>AiSearch:ReferencesEndpoint</c>, <c>AiSearch:ReferencesApiKey</c>, and
     /// <c>AiSearch:ReferencesIndexName</c> (default: <c>spaarke-rag-references</c>).
+    ///
+    /// R6 Wave B-G11 (2026-06-10) — SearchClient creation is deferred to first use via
+    /// <see cref="Lazy{T}"/> so DI startup doesn't crash when these config keys are
+    /// missing (matches the BingGroundingOptions B-G8 + AgentServiceOptions B-G11 pattern).
     /// </summary>
     public InternalIndexProvider(IConfiguration configuration, ILogger<InternalIndexProvider> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _searchClientLazy = new Lazy<SearchClient>(() =>
+        {
+            var endpoint = configuration["AiSearch:ReferencesEndpoint"]
+                ?? throw new InvalidOperationException("AiSearch:ReferencesEndpoint is not configured.");
+            var apiKey = configuration["AiSearch:ReferencesApiKey"]
+                ?? throw new InvalidOperationException("AiSearch:ReferencesApiKey is not configured.");
+            var indexName = configuration["AiSearch:ReferencesIndexName"]
+                ?? "spaarke-rag-references";
 
-        var endpoint = configuration["AiSearch:ReferencesEndpoint"]
-            ?? throw new InvalidOperationException("AiSearch:ReferencesEndpoint is not configured.");
-        var apiKey = configuration["AiSearch:ReferencesApiKey"]
-            ?? throw new InvalidOperationException("AiSearch:ReferencesApiKey is not configured.");
-        var indexName = configuration["AiSearch:ReferencesIndexName"]
-            ?? "spaarke-rag-references";
-
-        _searchClient = new SearchClient(
-            new Uri(endpoint),
-            indexName,
-            new AzureKeyCredential(apiKey));
+            return new SearchClient(
+                new Uri(endpoint),
+                indexName,
+                new AzureKeyCredential(apiKey));
+        }, isThreadSafe: true);
     }
 
     // =========================================================================

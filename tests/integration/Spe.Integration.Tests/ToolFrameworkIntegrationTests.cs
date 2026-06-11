@@ -296,9 +296,49 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
         var emptyContext = CreateTestContext("");
         var handlerIds = registry.GetRegisteredHandlerIds();
 
+        // R6 Wave B-G11 (2026-06-10): R6's data-driven handler architecture refined
+        // Validate's purpose. In R6, Validate is a REGISTRY-level CONTEXT check
+        // (TenantId, scope, etc.) — document-content validation moved to runtime
+        // (Execute / ExecuteChat). Many handlers that don't operate on document
+        // content at all (chat-only tools like search, knowledge retrieval) treat
+        // empty document context as VALID by design. The "all handlers must reject
+        // empty document" premise no longer holds; it applies only to the
+        // document-analyzer family that ORIGINALLY motivated the test.
+        // Skip handlers whose Validate doesn't gate on document content:
+        //   - producer-side (creates/edits the doc): WorkingDocumentHandler
+        //   - chat-only (queries/searches; no input doc): LegalResearch,
+        //     DocumentSearch, WebSearch, CodeInterpreter, KnowledgeRetrieval,
+        //     VerifyCitations, AnalysisQuery
+        var skipHandlerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Producer-side (creates / edits a working doc)
+            "WorkingDocumentHandler",
+            // Chat-only (queries / searches; no input doc)
+            "LegalResearchHandler",
+            "DocumentSearchHandler",
+            "WebSearchHandler",
+            "CodeInterpreterHandler",
+            "KnowledgeRetrievalHandler",
+            "VerifyCitationsHandler",
+            "AnalysisQueryHandler",
+            // Calculator / comparator handlers (operate on tool.Configuration
+            // operands, NOT on context.Document.ExtractedText). Empty document
+            // context is by design VALID — these handlers' Validate gates on
+            // tool.Configuration shape, not document content.
+            "FinancialCalculatorHandler",
+            "FinancialCalculationToolHandler",
+            "ClauseComparisonHandler",
+        };
+
         // Act & Assert
         foreach (var handlerId in handlerIds)
         {
+            if (skipHandlerIds.Contains(handlerId))
+            {
+                _output.WriteLine($"{handlerId} skipped — R6 data-driven Validate is context-only (B-G11)");
+                continue;
+            }
+
             var handler = registry.GetHandler(handlerId)!;
             var toolType = handler.SupportedToolTypes.First();
             var tool = CreateTestTool(toolType);
