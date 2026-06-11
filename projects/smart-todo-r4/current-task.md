@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-11 (post-Wave-B; 25/31 ✅; 6 remaining)
+> **Last Updated**: 2026-06-11 (post-Wave-C; 27/31 ✅; 4 remaining; 092 deploy deferred)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,13 +10,13 @@
 | Field | Value |
 |-------|-------|
 | **Project** | smart-todo-r4 — 7 workstreams (A-G), 31 tasks total |
-| **Status** | **25 of 31 tasks ✅** (80.6% by count; foundation + Wave 2a + Wave 2a-followups + Wave A + Wave B all complete) |
+| **Status** | **27 of 31 tasks ✅** (87% by count; all implementation waves complete) |
 | **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
-| **Worktree branch** | `work/smart-todo-r4-wave2` @ `0c2dd15da` (Wave A + Wave B: +12 tasks) — pushed to origin |
-| **Active task** | none — between waves; 6 tasks remain |
+| **Worktree branch** | `work/smart-todo-r4-wave2` @ `2ff4d9b75` (Wave A + B + C: +14 tasks) — pushed to origin |
+| **Active task** | none; 4 tasks remain |
 | **Working tree** | clean |
-| **Next Action** | Dispatch follow-up wave: **041 + 071** (serialized — 041 depends on 040 ✅ for modal subtree; 071 extends 033's `useUserPreferences`). Both can run as 2 parallel Agent calls; conflict risk is low because 041 is iframe `postMessage` work in `<SmartTodoModal>` and 071 is `useUserPreferences` + `<SmartToDo>` (different files). |
-| **PR strategy** | User chose to bundle Wave A + Wave B on same branch (`work/smart-todo-r4-wave2`). After 041 + 071 land, complete Phase 3/4 (092, 093, 094, 098) then open ONE combined PR for the entire `wave2` branch (12 + 2 + 4 = 18 tasks). |
+| **Next Action** | Choice of: (a) **094** final `sprk_todoflag` grep gate (~15 min, mechanical — strict gate per graduation criterion 12); (b) **093** UI test suite (NFR-05 latency, NFR-07 a11y, NFR-08 orientation switch — requires deployed bits or live `npm run dev` smoke); (c) **098** wrap-up + open combined PR. 092 deploy plan is DEFERRED per user instruction (master-only deploy happens after PR merge, NOT as a branch task). |
+| **PR strategy** | User chose to bundle Wave A + B + C on same branch (`work/smart-todo-r4-wave2`). After 093 + 094 + 098 land, open ONE combined PR for the entire `wave2` branch (14 + ~3 = ~17 tasks). |
 
 ### Critical context for resume
 
@@ -37,26 +37,22 @@
 | **R4-051 follow-up fix** | (no new task) | PCF CREATE-mode bridge: `RegardingResolverApp.tsx` populates `window.__sprk_regarding_pending__` on CREATE so OnSave handler stages all 5 fields in INSERT transaction. Closes the HIGH-priority follow-up before any deploy. |
 | **Wave A (post-/compact)** | 031, 032, 033, 040, 070, 081 | 6 parallel agents on `work/smart-todo-r4-wave2`. All returned clean with builds green. 031 "Assigned to Me" filter + MyTasksFilter deletion; 032 selection-aware toolbar (Open/Delete/Email/Pin); 033 List/Card view toggle + persistence; 040 SmartTodo modal wire-up (`<RecordNavigationModalShell>` + iframe OOB form); 070 vertical Kanban orientation (CSS flex-direction); 081 Matter form Visual Host instructions doc. Main-session reconciliation: deduped `OPEN_TODOS_EVENT` between 032 + 040 (032 canonical); added `@spaarke/sdap-client` vite alias to LegalWorkspace (PR #369 cascade unblock). Commit `54fb0d541`. |
 | **Wave B** | 042, 052, 060, 082, 083, 084 | 6 parallel agents. All returned clean. 042 retired `TodoDetailPanel` side-pane (FR-18; deleted `TodoDetailPanel.tsx` + `todoDetailService.ts`); 060 card affordances (Open icon + Checkbox + double-click on KanbanCard; reused Wave A `OPEN_TODOS_EVENT`); 052 RegardingResolver PCF read-only mode + pre-save handler formType 3/4 skip (PCF version bump 1.0.0 → 1.1.0, +3 tests = 23/23 pass, added PCF-side webpack alias for PR #369 cascade); 082/083/084 Visual Host instructions docs for Project/Invoice/WorkAssignment (clones of 081 template per §10 substitution table). 042 + 060 successfully merged on `SmartTodoApp.tsx` without write-race losses. Commit `0c2dd15da`. |
+| **Wave C** | 041, 071 | 2 parallel agents. 071 returned clean (orientation persistence via `useUserPreferences` envelope extension mirroring 033's `viewMode` pattern; 13-assertion executable-spec test; back-compat with pre-071 records). 041 produced its on-disk artifacts (318-LOC `sprk_todo_dirty_check.js` web resource with `request-dirty-check`/`dirty-check-result` correlationId handshake + origin allow-list; 359-LOC test suite at `iframeDirtyCheckScript.test.ts`; 298-LOC bind instructions doc at `notes/c-dirty-check-bind-instructions.md`; shell README protocol section) but its final response was rate-limited before TASK-INDEX bump — main session fixed up row + counter. Commit `2ff4d9b75`. |
 
 ---
 
-## Remaining Work — 6 tasks (1 small follow-up wave + Phase 3/4)
+## Remaining Work — 4 tasks (Phase 3/4; 092 deploy DEFERRED)
 
-### Follow-up wave C (dispatch NEXT — 2 parallel)
+### Phase 3 + 4 (final tasks)
 
-| Task | Touches | Dependencies (all ✅) | Estimated | Parallel risk |
+| Task | Description | Dependencies | Estimated | Recommended order |
 |---|---|---|---|---|
-| **041** C cross-frame dirty-check messaging | `<SmartTodoModal>` (Wave A task 040) + iframe `postMessage` listener | 040 ✅ | 1d | Low — modal subtree only |
-| **071** F orientation persistence via `sprk_userpreference` | `useUserPreferences.ts` (extend with orientation field; same JSON envelope pattern 033 used for viewMode) + `<SmartToDo>` | 070 ✅, 033 ✅ | 0.5d | Low — different file from 041 |
+| **094** | Final `grep -ri sprk_todoflag src/` → 0 functional hits (graduation criterion 12) | none on this branch (was `092` originally, but per user decision 092 is deferred) | ~15 min | **DO FIRST** — cheap, fully local, gating |
+| **093** | UI test suite — NFR-05 modal nav latency, NFR-07 a11y, NFR-08 orientation switch | could run against `npm run dev` (no deploy needed) instead of deployed bits | ~1 day | DO SECOND |
+| **098** | Project wrap-up — lessons-learned + README status → Complete + repo-cleanup + open ONE combined PR for `work/smart-todo-r4-wave2` (Waves A + B + C + Phase 3 = 16 tasks delta over master) | 093, 094 | ~0.5 day | DO LAST |
+| **092** | Deploy all affected solutions — **DEFERRED per user instruction**. The master-only-deploy policy means this happens after the combined PR merges, NOT as a branch task. The task POML can be marked complete when 098 opens the PR (since merge → master triggers deploy responsibility for the last lander). Also fold in project-wide tsconfig refs fix for `@spaarke/sdap-client` cascade (5 code-pages + 1 PCF currently have local workaround aliases). | all 020-084 ✅ | n/a here | After PR merge |
 
-**Dispatch recommendation**: 2 parallel agents in one message. 071 must respect 033's `useUserPreferences` envelope shape (read the hook source first) — orientation field joins viewMode + thresholdLowAt + thresholdHighAt + myTasksFilterMode in the same kanban-prefs JSON.
-
-### Phase 3 + 4 (final 4 tasks — after follow-up wave C)
-
-- **092** Deploy all affected solutions (per project-pipeline deploy convention now: **deploy from master**, not from feature branch) — also fold in project-wide tsconfig refs fix for `@spaarke/sdap-client` cascade (5 code-pages + 1 PCF currently have local workaround aliases)
-- **093** UI test suite (NFR-05 modal nav latency, NFR-07 a11y, NFR-08 orientation switch)
-- **094** Final `grep -ri sprk_todoflag src/` → 0 functional hits (graduation criterion 12)
-- **098** Wrap-up: lessons-learned + README status → Complete + repo-cleanup + final PR (ONE combined PR for entire `work/smart-todo-r4-wave2` branch covering Wave A + Wave B + Wave C + Phase 3/4)
+**Rationale for the 094 → 093 → 098 sequence**: 094 is a mechanical local grep gate that catches any straggler `sprk_todoflag` references; better to know early than to discover it in the PR review. 093 can use `npm run dev` smoke testing instead of deployed bits. 098 closes the loop.
 
 ---
 
@@ -125,13 +121,13 @@ Refer to `git log master..work/smart-todo-r4-wave2` for the precise Wave A delta
 - CLAUDE.md: project AI context (binding decisions + parallel branch coord)
 - TASK-INDEX: 31 tasks with statuses + 5 follow-ups documented
 
-### To resume (post-Wave-B)
-1. Quick read: this file's Quick Recovery + "Follow-up wave C" table
-2. Verify branch + master sync: `git status` clean, `git fetch origin --prune`, branch should be ~3 commits ahead of master
-3. Dispatch follow-up wave C: 2 parallel Agent calls (041 + 071) — same Agent-tool pattern as Wave A + B
-4. After wave C returns: build verify across SmartTodo + Spaarke.UI.Components + LegalWorkspace + RegardingResolver PCF; commit + push
-5. Phase 3: tackle 092 (deploy plan), 093 (UI tests), 094 (sprk_todoflag final grep), 098 (wrap-up + PR)
-6. **Do NOT deploy from the branch.** Master-only deploy discipline holds — PR merge triggers the master-side deploy.
+### To resume (post-Wave-C)
+1. Quick read: this file's Quick Recovery + "Phase 3 + 4" table
+2. Verify branch state: `git status` clean, `git fetch origin --prune`, branch is ~6 commits ahead of master
+3. Recommended next: **094** (mechanical local grep gate; ~15 min) — flips ✅ then proceed
+4. Then **093** UI tests via `npm run dev` smoke (no deploy needed); then **098** wrap-up + open ONE combined PR for `work/smart-todo-r4-wave2`
+5. **092 is DEFERRED per user instruction** — master-only-deploy means deploy happens AFTER PR merge, not as a branch task
+6. **Do NOT deploy from the branch.** Master-only deploy discipline holds.
 
 ### Commands for resume
 ```bash
@@ -141,7 +137,7 @@ git branch --show-current   # expect: work/smart-todo-r4-wave2
 # 2. Master sync check
 git fetch origin --prune
 git rev-list --count HEAD..origin/master  # expect 0 unless master moved; rebase if non-zero
-git rev-list --count origin/master..HEAD  # expect 3 (resume + Wave A + Wave B)
+git rev-list --count origin/master..HEAD  # expect ~6 (resume + Wave A + post-A doc + Wave B + post-B doc + Wave C)
 
 # 3. Open project task index
 # View projects/smart-todo-r4/tasks/TASK-INDEX.md for task list (look for 🔲 markers)
