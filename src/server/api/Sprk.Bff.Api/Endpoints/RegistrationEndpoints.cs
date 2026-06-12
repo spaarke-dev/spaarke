@@ -298,7 +298,15 @@ public static class RegistrationEndpoints
                 TeamName = environment.TeamName ?? throw new InvalidOperationException("Environment is missing TeamName"),
                 SpeContainerId = environment.SpeContainerId ?? throw new InvalidOperationException("Environment is missing SpeContainerId"),
                 AppId = environment.AppId,
-                DefaultDemoDurationDays = environment.DefaultDurationDays ?? 14
+                DefaultDemoDurationDays = environment.DefaultDurationDays ?? 14,
+                // FR-11: per-environment license SKUs; GraphUserService falls back to
+                // global DemoProvisioning:Licenses when null or all-empty
+                Licenses = licenseConfig == null ? null : new LicenseSkuConfig
+                {
+                    PowerAppsPlan2TrialSkuId = licenseConfig.PowerAppsPlan2TrialSkuId ?? string.Empty,
+                    FabricFreeSkuId = licenseConfig.FabricFreeSkuId ?? string.Empty,
+                    PowerAutomateFreeSkuId = licenseConfig.PowerAutomateFreeSkuId ?? string.Empty
+                }
             };
 
             logger.LogInformation(

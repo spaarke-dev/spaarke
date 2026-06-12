@@ -98,6 +98,12 @@ public class DemoEnvironmentConfig
     /// Default demo access duration in days. Admin can adjust per record.
     /// </summary>
     public int DefaultDemoDurationDays { get; set; } = 14;
+
+    /// <summary>
+    /// Per-environment license SKUs (FR-11), populated from sprk_licenseconfigjson at
+    /// approval time. Null or all-empty falls back to DemoProvisioningOptions.Licenses.
+    /// </summary>
+    public LicenseSkuConfig? Licenses { get; set; }
 }
 
 /// <summary>
