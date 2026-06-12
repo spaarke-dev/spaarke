@@ -136,12 +136,16 @@ jobs:
   client-quality:
     name: Client Quality (Prettier + ESLint)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Auto-format push-back on PRs
     steps:
       - name: Configure git line endings
         run: git config --global core.autocrlf true
 
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -166,6 +170,21 @@ jobs:
 
       - name: Install root dependencies (Prettier)
         run: npm ci --ignore-scripts
+
+      - name: Prettier auto-fix
+        run: npx prettier --write "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
+
+      - name: Push Prettier fixes
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ -n "$(git diff --name-only)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -u
+            git commit -m "style: auto-format Prettier (CI)"
+            git push
+            echo "::notice::Prettier fixes auto-committed and pushed to PR branch."
+          fi
 
       - name: Prettier format check
         run: npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
@@ -203,6 +222,14 @@ jobs:
         working-directory: src/client/shared/Spaarke.AI.Context
         run: npx tsc
 
+      - name: Install Spaarke.SdapClient deps
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.SdapClient (declarations required by UI.Components typecheck)
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npx tsc
+
       - name: Install Spaarke.UI.Components deps
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
@@ -231,10 +258,14 @@ jobs:
     name: Code Quality
     runs-on: windows-latest
     needs: build-test
+    permissions:
+      contents: write   # Auto-format push-back on PRs
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref || github.ref }}
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
@@ -243,6 +274,23 @@ jobs:
 
       - name: Restore dependencies
         run: dotnet restore --verbosity minimal
+
+      - name: Auto-fix whitespace formatting
+        run: dotnet format whitespace --verbosity minimal
+
+      - name: Push dotnet format fixes
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          git pull --rebase || true
+          if [ -n "$(git diff --name-only)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -u
+            git commit -m "style: auto-format dotnet whitespace (CI)"
+            git push
+            echo "::notice::dotnet format fixes auto-committed and pushed to PR branch."
+          fi
 
       - name: Format verification
         # `dotnet format whitespace` restricts to whitespace-only checks; excludes

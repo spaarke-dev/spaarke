@@ -33,6 +33,9 @@ public static class TelemetryModule
                 // R5 Summarize meter (D1-08 task 008): r5.summarize.invocation + r5.session_files.index_size
                 // Stable downstream contract for Phase 3 D3-03 dashboards.
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry.MeterName);
+                // Insights Engine Widgets r1 meter (project ai-spaarke-insights-engine-widgets-r1 task 050):
+                // widget.insightcard.invoked + widget.insightcard.duration with bounded dimensions per NFR-06.
+                metrics.AddMeter(Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {
@@ -41,6 +44,9 @@ public static class TelemetryModule
                 tracing.AddSource("Sprk.Bff.Api.Finance");
                 // R5 Summarize ActivitySource (D1-08 task 008): distributed-trace spans for Summarize-for-Chat invocations.
                 tracing.AddSource(Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry.MeterName);
+                // Insights Engine Widgets r1 ActivitySource (task 050): distributed-trace spans for
+                // InsightSummaryCard invocations through /api/insights/ask.
+                tracing.AddSource(Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry.MeterName);
             });
 
         // Circuit Breaker Registry

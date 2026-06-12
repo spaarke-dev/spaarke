@@ -1,0 +1,71 @@
+<task id="021" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Author matter-health-single playbook JSON (no @v suffix)</title>
+    <status>completed</status>
+    <estimated-effort>4h</estimated-effort>
+    <phase>2</phase>
+    <tags>jps, playbook, json</tags>
+    <dependencies>020</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Author `matter-health-single.playbook.json` following the shape of `predict-matter-cost.playbook.json` and the conventions of `universal-ingest.playbook.json`. Use only existing node executors per FR-11. Wire the Task 020 synthesis prompt by actionCode FK. Apply `jps-playbook-design` skill workflow.
+  </prompt>
+
+  <role>JPS playbook architect.</role>
+
+  <goal>
+    `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/matter-health-single.playbook.json` — valid playbook JSON that loads in `PlaybookExecutionEngine`, references the Task 020 action code, persists output via UpdateRecord (Task 022 configures that node).
+  </goal>
+
+  <inputs>
+    <file purpose="reference-playbook">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json</file>
+    <file purpose="reference-playbook">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-10, FR-11)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-widgets-r1/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-11">Use ONLY existing node executor types: QueryDataverse, IndexRetrieve (or LiveFact), EvidenceSufficiency, AiAnalysis, GroundingVerify, UpdateRecord, ReturnInsightArtifact, DeclineToFind</constraint>
+    <constraint source="Q-U1">Playbook name = bare `matter-health-single`. NO `@v1` suffix anywhere — not in name, not in identifiers, not in any field.</constraint>
+    <constraint source="audit-DR-003">No new BFF facade — playbook invoked via existing IInsightsAi.AnswerQuestionAsync</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps playbook, node executors, ActionType enum, PlaybookExecutionEngine</topic>
+    <files>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>.claude/catalogs/scope-model-index.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/predict-matter-cost.playbook.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/universal-ingest.playbook.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Invoke jps-playbook-design skill">Per its workflow</step>
+    <step order="2" name="Compose top-level playbook metadata">name=`matter-health-single`, hostentity=`sprk_matter`, scopes</step>
+    <step order="3" name="Compose nodes[]">QueryDataverse → IndexRetrieve → EvidenceSufficiency → (branch) AiAnalysis(actionCode=matter-health-synthesis) → GroundingVerify → UpdateRecord → ReturnInsightArtifact; with DeclineToFind branch</step>
+    <step order="4" name="Wire DeclineToFind">When EvidenceSufficiency fails</step>
+    <step order="5" name="Validate JSON against schema">jps-validate skill</step>
+    <step order="6" name="Save playbook file">canonical Playbooks/ directory</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/matter-health-single.playbook.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">jps-validate skill passes</criterion>
+    <criterion testable="true">No `@v` substring anywhere in file</criterion>
+    <criterion testable="true">All referenced actionCodes resolve to existing sprk_analysisaction rows</criterion>
+    <criterion testable="true">All referenced executor types exist in ActionType enum</criterion>
+    <criterion testable="true">DeclineToFind branch covers EvidenceSufficiency failure path</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-10. File `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/matter-health-single.playbook.json` created (8 nodes). Q-U1 owner ban respected: zero `@v` in identifier/name/value/description/criteria fields; `$comment*` narrative keys reference r2's pre-existing `@v1`-suffixed action rows as data of record (they are not r1 identifiers — Deploy-Playbook.ps1 will resolve action-row FKs via the bare actionCode strings, with deploy-time aliasing/re-keying decisions noted inline at each $comment-actionCode for Wave 1B task 023). FR-11 executor coverage: LiveFact=80 (queryMatterContext), QueryDataverse=51 (queryKpiAssessments — KPI fetch via fetchXml across all 3 Performance Areas per FR-13), IndexRetrieve=90 (retrieveObservations — graceful empty per FR-11), EvidenceSufficiency=100 (checkSufficiency — kpiAssessments.min=2 per design.md §4.4), AgentService=60 (synthesize — references Task 020 actionCode `matter-health-synthesis` row 5981632e-4165-f111-ab0c-7ced8ddc4cc6 per audit DR-007), GroundingVerify=70 (groundCitations), ReturnInsightArtifact=120 (ReturnInsightArtifactNode literal name preserved per InsightsPlaybookExecutionCache.cs:59), DeclineToFind=110 (declineInsufficient dependsOn:[checkSufficiency], wired via checkSufficiency.insufficientBranch). UpdateRecord persistence to sprk_matter.sprk_performancesummary is intentionally deferred to sibling task 022 per `$comment-updateRecord-note` in the playbook JSON. JSON parses cleanly via python json.load; all 8 actionType values resolve to ActionType enum entries in INodeExecutor.cs.
+  </notes>
+</task>

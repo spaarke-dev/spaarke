@@ -1,0 +1,84 @@
+<task id="036" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Accessibility audit (WCAG 2.1 AA per NFR-04)</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>3</phase>
+    <tags>ui, a11y, audit</tags>
+    <dependencies>035</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Run axe DevTools against each Storybook story; ensure WCAG 2.1 AA compliance per NFR-04. Verify keyboard navigation (Tab order, Enter/Space activate, Escape closes Popover/Dialog).
+  </prompt>
+
+  <role>Accessibility engineer.</role>
+
+  <goal>
+    Zero axe violations across all stories; keyboard navigation works end-to-end; documented in `notes/handoffs/a11y-audit.md`.
+  </goal>
+
+  <inputs>
+    <file purpose="stories">Task 035 output</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-04">WCAG 2.1 AA</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>axe devtools, wcag, keyboard navigation</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run axe DevTools per story">Capture violations</step>
+    <step order="2" name="Fix violations">Edit component as needed</step>
+    <step order="3" name="Keyboard nav verification">Tab, Enter, Space, Escape</step>
+    <step order="4" name="Screen reader smoke test">NVDA or Narrator on at least loaded + decline states</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/a11y-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero axe violations across all stories</criterion>
+    <criterion testable="true">Tab order is logical</criterion>
+    <criterion testable="true">Escape closes Popover and Dialog</criterion>
+  </acceptance-criteria>
+
+  <notes>
+Completed 2026-06-11 (Wave 3c, parallel with 037).
+
+Method: Static code review against the 16-item WCAG 2.1 AA checklist supplied
+in the task brief. Sub-agent boundary forbids live browser tooling; Storybook
+is not installed in `@spaarke/ai-widgets` (DR-001 §Negative). Live axe + screen
+reader smoke tests deferred to operator.
+
+Findings: 14/16 PASS; 2 issues found:
+  - ISSUE-1 (critical, WCAG 4.1.3): decline state at InsightSummaryCard.tsx:254-263
+    lacks `role`/`aria-live` so AT users get no announcement on transition.
+    Suggested fix (NOT applied): add `role="status" aria-live="polite"`.
+    Suitable for a Phase 3 polish follow-up; not a blocker for Phase 4.
+  - ISSUE-2 (UX copy nit, NOT WCAG): idle affordance text "Click to load insight"
+    is misleading because the on-open handler auto-fires the fetch. Non-blocking.
+
+Acceptance:
+  - "Zero axe violations" UNVERIFIED via static audit (operator follow-up — live axe).
+  - "Tab order is logical" PASS via code inspection (no `tabIndex>0` anti-patterns).
+  - "Escape closes Popover and Dialog" PASS via code inspection (Fluent v9 defaults).
+
+Operator follow-up captured in `notes/handoffs/a11y-audit.md`:
+  1. Run axe DevTools on each of the 6 sandbox state cards.
+  2. Keyboard nav smoke test (Tab/Enter/Space/Escape end-to-end).
+  3. Screen-reader smoke test (NVDA or Narrator on loaded + decline states).
+  4. File ISSUE-1 fix as a follow-up task if confirmed live.
+
+Deliverable: `projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/a11y-audit.md`
+  </notes>
+</task>

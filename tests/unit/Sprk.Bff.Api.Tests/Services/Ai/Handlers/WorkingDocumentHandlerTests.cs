@@ -101,7 +101,7 @@ public sealed class WorkingDocumentHandlerTests : TypedToolHandlerTestFixture
                       _capturedEvents.Add(evt);
                       return Task.CompletedTask;
                   }
-                : null
+            : null
         };
     }
 

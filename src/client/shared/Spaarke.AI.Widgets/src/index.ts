@@ -514,6 +514,30 @@ export { AI_SESSION_CHAT_SESSION_KEY, AI_SESSION_PLAYBOOK_KEY } from './provider
 export { useAiSession } from './providers/useAiSession';
 
 // ---------------------------------------------------------------------------
+// Components: InsightSummaryCard (Insights Engine Widgets r1 — Task 030 scaffold)
+//
+// Per-record AI insight surface composed of a Fluent v9 Card (inline) with an
+// optional manual modal expand (Dialog — wired in Task 031). FR-01 contract:
+//   { topic, subject, mode?, parameters?, kpiSlot?, onCitationClick? }
+//
+// Q-U3 (owner deferral): NO `onFeedback` prop. Feedback affordance deferred to
+// r2+ pending AIPU2 Cosmos `feedback` container landing on master (ADR-015).
+//
+// See projects/ai-spaarke-insights-engine-widgets-r1/decisions/DR-001-component-reuse.md
+// for the package-home + reuse-anchors rationale (ratified 2026-06-10).
+// ---------------------------------------------------------------------------
+
+export { InsightSummaryCard } from './components/InsightSummaryCard';
+export type { InsightSummaryCardProps, InsightCitationRef } from './components/InsightSummaryCard';
+
+// Task 035 — SC-01 dev sandbox (Storybook-equivalent). Renders all 6 FR-06
+// states in a responsive grid with a light/dark theme toggle and an inline
+// props table. Importable by any host (dev playground, internal admin page).
+// See src/components/InsightSummaryCard/README.md for the "why no Storybook"
+// rationale (DR-001 §Negative).
+export { InsightSummaryCardSandbox } from './components/InsightSummaryCard';
+
+// ---------------------------------------------------------------------------
 // Components: ConfidenceIndicator (AIPU2-091)
 //
 // Per-response confidence bar rendered below AI messages. Driven by the safety

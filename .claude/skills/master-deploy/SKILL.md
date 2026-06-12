@@ -167,21 +167,25 @@ The user should hard-refresh **`spaarkedev1`** in Incognito to verify SpaarkeAi 
 
 ### F-2: `Build-AllClientComponents.ps1` reports all Vite solutions FAILED
 
-**Cause**: The PS1 batch builder hits some install/cache state issue where every solution fails (observed 2026-06-10) even though each builds individually. Root cause not fully diagnosed; likely a stale node_modules + npm install race when run in batch.
+**Cause**: PowerShell captured npm/Rollup stderr warnings (`/* #__PURE__ */`) via `2>&1` into a variable. Under script-level `$ErrorActionPreference = "Stop"`, those stderr lines became terminating error records — the catch marked every build FAILED even though `$LASTEXITCODE` was 0.
 
-**Fix**: Use `node scripts/master-deploy/build-all-vite-solutions.mjs` instead. It calls `npm run build` in each solution serially using the existing `node_modules` (no install). Verified working 2026-06-10.
+**Root-cause fix landed 2026-06-11**: localized `$ErrorActionPreference = 'Continue'` inside script blocks that invoke npm install + npm run build. Failure detection now relies on `$LASTEXITCODE` only. The script's outer Stop discipline is preserved for all other operations.
+
+**Fallback** (Node script remains a safety net): `node scripts/master-deploy/build-all-vite-solutions.mjs` — calls `npm run build` per solution serially. Use if the PS1 ever exhibits new failure modes.
 
 ### F-3: `dotnet publish --no-restore` fails inside `Deploy-BffApi.ps1`
 
-**Cause**: The script's Step 1 runs `dotnet publish ... --no-restore` but no `dotnet restore` step precedes it. If the bin/obj are stale, publish fails with exit 1.
+**Cause**: Script Step 1 ran `dotnet publish ... --no-restore` with no preceding `dotnet restore`. Fresh checkouts failed with exit 1.
 
-**Fix**: Pre-publish manually before calling the skill (see Step 6).
+**Root-cause fix landed 2026-06-11**: explicit `dotnet restore --verbosity minimal` step added immediately before publish. No more manual pre-publish needed before invoking `/bff-deploy`.
 
 ### F-4: Reporting deploy fails with `NativeCommandError` on Rollup warning
 
-**Cause**: `Deploy-ReportingCodePage.ps1` invokes `npm run build` which emits `/* #__PURE__ */` warnings to stderr. PowerShell's `$ErrorActionPreference = "Stop"` treats stderr from native commands as fatal errors.
+**Cause**: `Deploy-ReportingCodePage.ps1`'s npm install + npm run build calls inherited script-level `$ErrorActionPreference = "Stop"`. Rollup `/* #__PURE__ */` warnings on stderr became terminating error records.
 
-**Fix**: Use the Node fetch-based deploy in Step 5.
+**Root-cause fix landed 2026-06-11**: same localized `$ErrorActionPreference = 'Continue'` pattern as F-2. The PS1 script now deploys cleanly without falling back to the Node helper.
+
+**Fallback** (Node script remains a safety net): `node scripts/master-deploy/deploy-webresource-inline.mjs sprk_reporting src/solutions/Reporting/dist/index.html` — fetch-based upload bypassing the PS1 entirely. Use if the PS1 ever exhibits new failure modes.
 
 ### F-5: `execSync` ENOBUFS on Dataverse Web API responses
 

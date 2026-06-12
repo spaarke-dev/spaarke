@@ -1,11 +1,14 @@
+using System.Diagnostics;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Api.Insights;
 
@@ -103,6 +106,22 @@ public static class InsightEndpoints
     private const string MatterSubjectPrefix = "matter:";
 
     /// <summary>
+    /// Default <c>topic</c> dimension for the InsightSummaryCard widget invocation
+    /// telemetry path. r1 Matter Health is the only registered topic in
+    /// <c>sprk_aitopicregistry</c> (per task 050 <see cref="InsightWidgetsTelemetry"/>
+    /// ValidTopics enum + project spec FR-04). When future topics ship, this default
+    /// becomes a per-request dimension derived from the topic registry — for r1 a single
+    /// constant is sufficient and cardinality-safe.
+    /// </summary>
+    private const string DefaultTopic = "matter-health";
+
+    /// <summary>
+    /// Default <c>mode</c> dimension for the r1 widget invocation path. Matter Health
+    /// ships as single-subject mode only; multi / cohort are framework-shaped for r2+.
+    /// </summary>
+    private const string DefaultMode = "single";
+
+    /// <summary>
     /// POST /api/insights/ask
     /// </summary>
     private static async Task<IResult> Ask(
@@ -110,6 +129,7 @@ public static class InsightEndpoints
         HttpContext httpContext,
         IInsightsAi insightsAi,
         IOptionsSnapshot<InsightsPlaybookNameMapOptions> nameMapOptions,
+        InsightWidgetsTelemetry widgetTelemetry,
         ILogger<InsightAskRequest> logger,
         CancellationToken ct)
     {
@@ -243,6 +263,26 @@ public static class InsightEndpoints
             TenantId: tenantId,
             AccessibleScopeHash: accessibleScopeHash);
 
+        // ---------------------------------------------------------------
+        // Widget telemetry (NFR-06 / task 051):
+        //   - Activity span carries high-cardinality dims (subject GUID, correlationId,
+        //     tenantId) per ADR-014/015 cardinality discipline (subject is span-only).
+        //   - Stopwatch measures end-to-end (cache lookup + playbook + serialisation) and
+        //     is the value recorded on the duration histogram. result.ProcessingTimeMs
+        //     is orchestrator-internal and continues to surface on the X-Insights-Elapsed-Ms
+        //     header for backward compatibility.
+        //   - RecordInvocation emits the counter + histogram with the BOUNDED dim set
+        //     (topic, mode, outcome, cacheHit, tenant.id). The outcome dim is set on each
+        //     of the four exit paths (kill_switched / failed / success+cache_hit / success).
+        // ---------------------------------------------------------------
+        using var widgetActivity = widgetTelemetry.StartActivity(
+            operationName: "InsightSummaryCard.Invoke",
+            tenantId: tenantId,
+            subject: request.Subject,
+            correlationId: httpContext.TraceIdentifier);
+
+        var widgetStopwatch = Stopwatch.StartNew();
+
         InsightsAgentResult result;
         try
         {
@@ -250,22 +290,53 @@ public static class InsightEndpoints
         }
         catch (OperationCanceledException)
         {
-            // Caller cancelled or request aborted — propagate so Kestrel records it
-            // accurately rather than returning a synthetic 500.
+            // Caller cancelled or request aborted — no widget event emitted (cancellation
+            // is not an invocation outcome). Propagate so Kestrel records it accurately
+            // rather than returning a synthetic 500.
             throw;
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // ADR-018/032 kill-switch path. Record telemetry BEFORE returning 503 so the
+            // kill_switched outcome shows up in App Insights for ops dashboards (spec NFR-06
+            // outcome enum + task 050 RecordInvocation outcome dimension).
+            widgetStopwatch.Stop();
+            widgetTelemetry.RecordInvocation(
+                topic: DefaultTopic,
+                mode: DefaultMode,
+                outcome: "kill_switched",
+                cacheHit: false,
+                durationMs: widgetStopwatch.Elapsed.TotalMilliseconds,
+                tenantId: tenantId);
+
+            logger.LogDebug(
+                "[INSIGHTS-ASK] AI feature disabled. ErrorCode={ErrorCode} TenantId={TenantId} Subject={Subject}",
+                ex.ErrorCode, tenantId, request.Subject);
+
+            return ex.AsFeatureDisabled503();
         }
         catch (ArgumentException ex)
         {
             // The facade contract throws ArgumentException for validation faults that
-            // slipped past our pre-checks (e.g., a future facade-side rule we don't yet
-            // mirror here). Surface as 400 with the message — facade messages are
-            // designed to be user-safe per ADR-019 (no content leakage).
+            // slipped past our pre-checks. NOT recorded as a widget invocation because
+            // the playbook never ran (treat as 400 validation, not an invocation outcome).
             return BadRequest(ex.Message);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Per ADR-019: never leak document content / prompts / model output. Generic
             // 500 with correlation id; details are in the structured log.
+            // Telemetry: emit failed outcome BEFORE returning so dashboards can track
+            // invocation failure rate (spec NFR-06 outcome enum).
+            widgetStopwatch.Stop();
+            widgetTelemetry.RecordInvocation(
+                topic: DefaultTopic,
+                mode: DefaultMode,
+                outcome: "failed",
+                cacheHit: false,
+                durationMs: widgetStopwatch.Elapsed.TotalMilliseconds,
+                tenantId: tenantId);
+
             logger.LogError(ex,
                 "[INSIGHTS-ASK] AnswerQuestionAsync failed for playbook {PlaybookId} subject {Subject} tenant {TenantId} caller {CallerOid}",
                 playbookId, request.Subject, tenantId, callerOid);
@@ -281,6 +352,20 @@ public static class InsightEndpoints
                     ["correlationId"] = httpContext.TraceIdentifier
                 });
         }
+
+        widgetStopwatch.Stop();
+
+        // Successful playbook execution (Artifact OR Decline both count as success — the
+        // playbook produced a structured result). cacheHit is a separate dimension; when
+        // true, the spec NFR-06 outcome enum prefers "cache_hit" over "success" so cache
+        // hit-rate dashboards work without joining two dimensions.
+        widgetTelemetry.RecordInvocation(
+            topic: DefaultTopic,
+            mode: DefaultMode,
+            outcome: result.CacheHit ? "cache_hit" : "success",
+            cacheHit: result.CacheHit,
+            durationMs: widgetStopwatch.Elapsed.TotalMilliseconds,
+            tenantId: tenantId);
 
         // ---------------------------------------------------------------
         // Observability headers — set BEFORE writing the response body.

@@ -1,0 +1,53 @@
+<task id="062" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Decline rendering UAT (SC-07)</title>
+    <status>completed</status>
+    <estimated-effort>1h</estimated-effort>
+    <phase>6</phase>
+    <tags>uat, decline, sc-07</tags>
+    <dependencies>060</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Execute Scenario B on a Matter with &lt;2 assessments OR empty Notes. Verify FR-24 / SC-07 — card shows "Insufficient data is available to provide Insights Analysis" with recommended action; no error state.
+  </prompt>
+
+  <role>UAT executor (decline scenarios).</role>
+
+  <goal>
+    Decline state rendered correctly; SC-07 pass; documented.
+  </goal>
+
+  <inputs>
+    <file purpose="scenario">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-scenarios.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-24">Owner-confirmed decline text exact wording</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>decline state, evidence sufficiency</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Identify low-data Matter">Or create with seed</step>
+    <step order="2" name="Click sparkle">Verify decline state appears</step>
+    <step order="3" name="Verify exact decline text">"Insufficient data is available to provide Insights Analysis"</step>
+    <step order="4" name="Verify no error state">No exception thrown</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-results/scenario-b-decline.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Decline state with exact text</criterion>
+    <criterion testable="true">No error UI</criterion>
+  </acceptance-criteria>
+</task>

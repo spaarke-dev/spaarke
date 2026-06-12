@@ -23,7 +23,9 @@
     "allowSyntheticDefaultImports": true,
     "paths": {
       "@spaarke/ai-outputs": ["../Spaarke.AI.Outputs/dist/index.d.ts"],
+      "@spaarke/ai-outputs/*": ["../Spaarke.AI.Outputs/dist/*"],
       "@spaarke/ui-components": ["../Spaarke.UI.Components/dist/index.d.ts"],
+      "@spaarke/ui-components/*": ["../Spaarke.UI.Components/dist/*"],
       "@spaarke/legal-workspace": ["../../../solutions/LegalWorkspace/src/index.d.ts"],
       "@spaarke/auth": ["../Spaarke.Auth/dist/index.d.ts"],
       "@spaarke/ai-context": ["../Spaarke.AI.Context/dist/index.d.ts"]

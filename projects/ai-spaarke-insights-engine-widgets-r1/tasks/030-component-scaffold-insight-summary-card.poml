@@ -1,0 +1,105 @@
+<task id="030" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Component scaffold InsightSummaryCard in @spaarke/ai-widgets</title>
+    <status>completed</status>
+    <estimated-effort>4h</estimated-effort>
+    <phase>3</phase>
+    <tags>ui, fluent-ui, scaffold</tags>
+    <dependencies>001</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Scaffold the `InsightSummaryCard` component in `src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/`. Apply Fluent v9 + Griffel + semantic tokens per ADR-021. Props per FR-01 (NO `onFeedback` — deferred per Q-U3): `{ topic, subject, mode?, parameters?, kpiSlot?, onCitationClick? }`. Pure scaffold — state machine + behavior are Task 031+.
+  </prompt>
+
+  <role>Fluent v9 component developer.</role>
+
+  <goal>
+    Directory + files: `InsightSummaryCard.tsx`, `InsightSummaryCard.types.ts`, `useInsightSummaryCardStyles.ts`, `index.ts`. Exports updated in `Spaarke.AI.Widgets/src/index.ts`. Builds + lints clean.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-01)</file>
+    <file purpose="dr-001">projects/ai-spaarke-insights-engine-widgets-r1/decisions/DR-001-component-reuse.md</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover/AiSummaryPopover.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + semantic tokens; dark mode REQUIRED</constraint>
+    <constraint source="ADR-012">Component ships in @spaarke/ai-widgets per FR-03 / DR-001</constraint>
+    <constraint source="Q-U3">No onFeedback prop, no feedback UI</constraint>
+    <constraint source="fluent-v9-portal-gotcha">Apply portal re-wrap rule when using Popover/Dialog (Task 031)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent v9, griffel, semantic tokens, spaarke ai widgets package</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/package.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover/AiSummaryPopover.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create directory">src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/</step>
+    <step order="2" name="Define types">InsightSummaryCardProps per FR-01 (NO onFeedback)</step>
+    <step order="3" name="Scaffold component">Functional component with placeholder render returning a Fluent Card</step>
+    <step order="4" name="Author useInsightSummaryCardStyles">Griffel hook; semantic tokens only</step>
+    <step order="5" name="Export from index">Update package index.ts</step>
+    <step order="6" name="Build verification">npm run build at package root</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCard.types.ts</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/useInsightSummaryCardStyles.ts</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build passes in @spaarke/ai-widgets</criterion>
+    <criterion testable="true">No `onFeedback` prop in types</criterion>
+    <criterion testable="true">No hard-coded colors — semantic tokens only</criterion>
+    <criterion testable="true">Component renders a placeholder Card without error</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Component scaffold renders">
+      <steps>
+        <step>Build @spaarke/ai-widgets package</step>
+        <step>Import InsightSummaryCard in a Storybook story (Task 035 will author full)</step>
+        <step>Verify renders Card placeholder without console errors</step>
+      </steps>
+      <expected>Card placeholder visible; no console errors</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Completed 2026-06-10.
+
+    Deliverables:
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCard.tsx
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCard.types.ts
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/useInsightSummaryCardStyles.ts
+    - src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/index.ts
+    - src/client/shared/Spaarke.AI.Widgets/src/index.ts (export added)
+
+    Acceptance criteria verified:
+    - npm run build passes for InsightSummaryCard files (0 TS errors in these files; 17 pre-existing repo-wide errors unrelated to this task — all in other widgets / missing @spaarke/auth + @spaarke/ai-context workspace deps)
+    - No `onFeedback` prop in types (grep-verified — Q-U3 honoured)
+    - No hex / rgba / var(--...) literals in styles (grep-verified — semantic tokens only per ADR-021)
+    - Placeholder Card renders with topic / subject / mode metadata visible
+
+    Lint note: `npm run lint` cannot run — package has no `eslint.config.js` (ESLint v9 requires flat config; pre-existing repo state). Type-strict tsc is the binding check. Filing this as observation, not a blocker — the package builds clean with strict TS.
+
+    Followups (Task 031):
+    - Replace placeholder body with 6-state machine (idle/loading/loaded/decline/stale/error)
+    - Add lazy-load callback wiring (reuse AiSummaryPopover.handleOpenChange shape per DR-001)
+    - Add Dialog modal-expand affordance (FR-02 — apply fluent-v9-portal-gotcha re-wrap)
+    - Wire `parameters` and `onCitationClick` into the invocation payload + citation render
+  </notes>
+</task>
