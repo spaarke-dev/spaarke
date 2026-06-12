@@ -1,11 +1,11 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-11 (Wave B complete; 081 POML stale-state fix-up)
+> **Last Updated**: 2026-06-12 (094 grep gate ✅; PR #384 merged 2026-06-11; branch re-synced with master)
 > **Branch**: `work/smart-todo-r4-wave2`
 > **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
-> **Status**: 🔲 4 not-started · 🔄 0 in-progress · ✅ 27 complete · ❌ 0 blocked
-> **Active wave**: none — Wave A ✅ + Wave B ✅ + Wave C ✅ (all build-verified); remaining: Phase 3 (092 deferred / 093 / 094) + Phase 4 (098)
+> **Status**: 🔲 3 not-started · 🔄 0 in-progress · ✅ 28 complete · ❌ 0 blocked
+> **Active wave**: none — Waves A + B + C MERGED to master via PR #384; remaining: 093 (UI tests), 092 (master-side deploy — now actionable post-merge), 098 (wrap-up)
 
 ---
 
@@ -150,7 +150,7 @@
 |:---:|:---|---|---|:---:|---|---|
 | 🔲 | [092](092-deploy-all-affected-solutions.poml) | Deploy all affected solutions to spaarkedev1 | deploy, smoke-test | ❌ | all 020-084 | 093, 094 |
 | 🔲 | [093](093-ui-test-suite-nfr-validation.poml) | UI test suite for NFR-05 / NFR-07 / NFR-08 | ui-test, a11y, performance | ❌ | 092 | 098 |
-| 🔲 | [094](094-grep-sweep-sprk-todoflag.poml) | Final grep sweep: 0 `sprk_todoflag` hits | regression, grep | ❌ | 092 | 098 |
+| ✅ | [094](094-grep-sweep-sprk-todoflag.poml) | Final grep sweep: 0 functional `sprk_todoflag` hits (2026-06-12; 45 comment/guard lines classified; stale SpeDocumentViewer bundle.js flagged → follow-up #6) | regression, grep | ❌ | ~~092~~ (re-sequenced first per user decision) | 098 |
 
 ---
 
@@ -257,6 +257,7 @@ G4 Wrap-up
 | 3 | **PR #376 overlap**: `WidgetErrorBoundary.tsx` rewrite (17 add / 35 del) on `feature/ai-workspace-ui-r1-followups` — R4-020 LW shim consumes WidgetErrorBoundary | external PR | **Monitor** — open, not merged today | Re-verify usage when #376 merges |
 | 4 | **SmartTodo test runner**: pre-existing — no vitest/jest. 22 useLaunchContext tests are executable-spec shims | R4-034 / pre-existing | Low | ~2hr to wire vitest |
 | 5 | **LW Kanban rich-feature hoist**: 13-file subtree NOT hoisted into `@spaarke/smart-todo-components` 0.1.0 | R4-020 deliberate | Medium — future widget consumers need it; LW shim ships full features today | In R4-020 deliverable comments |
+| 6 | **Stale SpeDocumentViewer solution bundle**: checked-in `solution/.../bundle.js` (v1.0.16, built 2026-05-11) embeds pre-R3 legacy code incl. live `entity['sprk_todoflag'] = true` write path; deployed v1.0.16 carries same latent code | R4-094 sweep finding | **Medium-High** — rebuild + version-bump + repack against current shared libs in R4-092 master-side deploy (or verify legacy To Do wizard path unreachable) | `notes/grep-sweep-result.md` §3 |
 
 ---
 

@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-11 (post-Wave-C; 27/31 ✅; 4 remaining; 092 deploy deferred)
+> **Last Updated**: 2026-06-12 (task 094 in-progress; PR #384 MERGED; branch re-synced with master)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -12,11 +12,13 @@
 | **Project** | smart-todo-r4 — 7 workstreams (A-G), 31 tasks total |
 | **Status** | **27 of 31 tasks ✅** (87% by count; all implementation waves complete) |
 | **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
-| **Worktree branch** | `work/smart-todo-r4-wave2` @ `2ff4d9b75` (Wave A + B + C: +14 tasks) — pushed to origin |
-| **Active task** | none; 4 tasks remain |
-| **Working tree** | clean |
-| **Next Action** | Choice of: (a) **094** final `sprk_todoflag` grep gate (~15 min, mechanical — strict gate per graduation criterion 12); (b) **093** UI test suite (NFR-05 latency, NFR-07 a11y, NFR-08 orientation switch — requires deployed bits or live `npm run dev` smoke); (c) **098** wrap-up + open combined PR. 092 deploy plan is DEFERRED per user instruction (master-only deploy happens after PR merge, NOT as a branch task). |
-| **PR strategy** | User chose to bundle Wave A + B + C on same branch (`work/smart-todo-r4-wave2`). After 093 + 094 + 098 land, open ONE combined PR for the entire `wave2` branch (14 + ~3 = ~17 tasks). |
+| **PR #384** | ✅ MERGED to master 2026-06-11 (Waves A + B + C; 14 tasks) — earlier than the original 094→093→098→PR plan |
+| **Worktree branch** | `work/smart-todo-r4-wave2` @ `651426d6` (origin/master merged in 2026-06-12) — pushed to origin |
+| **Active task** | none — next up: **093** UI test suite (NFR-05 latency, NFR-07 a11y, NFR-08 orientation; `npm run dev` smoke OK, no deploy needed) |
+| **Working tree** | 094 outputs pending commit (grep-sweep-result.md + POML + TASK-INDEX + this file) |
+| **Status update** | **28 of 31 ✅** — 094 grep gate PASSED 2026-06-12 (0 functional hits; graduation criterion 12 MET). ⚠️ New follow-up #6: stale SpeDocumentViewer solution bundle.js (v1.0.16) embeds pre-R3 `sprk_todoflag` write path — fold rebuild into 092 deploy. See `notes/grep-sweep-result.md` §3. |
+| **Next Action** | **093** UI test suite, then **092** master-side deploy (actionable — PR #384 merged; include SpeDocumentViewer rebuild per follow-up #6), then **098** wrap-up |
+| **PR strategy** | Waves A + B + C already merged via PR #384. Remaining 093/094/098 outputs go in a small follow-up PR from `work/smart-todo-r4-wave2`. |
 
 ### Critical context for resume
 
