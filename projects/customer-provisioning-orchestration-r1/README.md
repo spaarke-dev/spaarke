@@ -1,6 +1,6 @@
 # customer-provisioning-orchestration-r1
 
-> **Status**: Design engagement (Phase 0 — Discovery)
+> **Status**: Design engagement (Phase 0 complete, design.md written)
 > **Worktree**: `C:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
 > **Branch**: `work/customer-provisioning-orchestration-r1` (off master)
 > **Created**: 2026-06-13
@@ -21,16 +21,22 @@ When a paying customer is approved, an orchestrated process provisions a dedicat
 
 Claude Code is an authorized internal MCP client of the control plane — never a runtime product component, never customer-facing.
 
-## Engagement deliverables (this engagement — NO implementation code)
+## Engagement deliverables
 
 | Phase | Deliverable | Path | Status |
 |-------|-------------|------|--------|
-| 0 | Discovery report | `discovery/phase-0-discovery-report.md` | ✅ written |
-| 1 | Draft ADR (three-layer orchestration + managed-solutions) | `design/ADR-DRAFT-customer-provisioning-orchestration.md` | ⛔ gated on Phase 0 review |
-| 1 | Design specs (handler catalog, control-plane API + MCP surface, data model, parameter model) | `design/` | ⛔ gated on Phase 0 review |
+| 0 | Discovery report | `discovery/phase-0-discovery-report.md` | Complete |
+| 0.5 | Resource review + ADR constraint analysis | `design.md` sections 5, 7 | Complete |
+| 1 | Design specification | `design.md` | Written, pending owner review |
+| 1 | Open questions (Q1-Q6) | `design.md` section 12 | Awaiting owner answers |
 
-**Hard gate**: Phase 1 does not begin until the Phase 0 discovery report is written to disk **and reviewed by the owner**.
+**Next step**: Owner reviews `design.md` + answers Q1-Q6, then `/design-to-spec` -> `/project-pipeline`.
+
+## Key documents
+
+- [Design Specification](design.md) — full design with architecture, handler catalog, data model, ADR analysis, risk register, phasing
+- [Phase 0 Discovery Report](discovery/phase-0-discovery-report.md) — asset inventory, dispositions, open questions (inputs to design.md)
 
 ## Locked decisions (do not relitigate)
 
-See `discovery/phase-0-discovery-report.md` §1. Summary: managed solutions for customer envs (unmanaged stays dev-only); one package / two targets (Spaarke tenant | customer tenant); no shared resources between customers (one BFF per customer env; dedicated OpenAI/Search/DocIntel/ServiceBus/Redis/KeyVault/AppInsights); Azure subscription per customer (SpaarkeOwned default | CustomerOwned via Lighthouse); Spaarke buys licenses; two identity presets (B2BGuest | NativeAccount); consumption SKUs; model versions pinned per ADR-020; gates verified not inferred; ProvisioningRun is system of record; every step idempotent and resumable.
+See `design.md` section 3. Summary: managed solutions for customer envs (unmanaged stays dev-only); one package / two targets (Spaarke tenant | customer tenant); no shared resources between customers (one BFF per customer env; dedicated OpenAI/Search/DocIntel/ServiceBus/Redis/KeyVault/AppInsights); Azure subscription per customer (SpaarkeOwned default | CustomerOwned via Lighthouse); Spaarke buys licenses; two identity presets (B2BGuest | NativeAccount); consumption SKUs; model versions pinned per ADR-020; gates verified not inferred; ProvisioningRun is system of record; every step idempotent and resumable.
