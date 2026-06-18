@@ -55,6 +55,22 @@ public static class AnalysisServicesModule
         // expectations + Dataverse Web API client lifetime).
         services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
 
+        // R6 Pillar 7 (task 065, D-C-18) — IPinnedContextRepository.
+        // **Hotfix moved out of compound (Analysis:Enabled && DocumentIntelligence:Enabled) gate**
+        // for asymmetric-registration compliance (CLAUDE.md §10 F.1). MapPinnedMemoryEndpoints
+        // (EndpointMappingExtensions.cs) registers /api/memory/pins UNCONDITIONALLY at startup; if
+        // IPinnedContextRepository is missing from the service collection at endpoint-registration
+        // time, Minimal API parameter-binding inference treats the parameter as a body candidate,
+        // and GET/DELETE handlers fail with "Body was inferred but the method does not allow inferred
+        // body parameters" — which crashes host startup and fails every WebApplicationFactory
+        // integration test (observed in PR #395 CI run).
+        // Dependencies (CosmosClient + IConfiguration) are unconditionally registered upstream,
+        // so this registration is safe outside the gate. The repository only does work when an
+        // authenticated request actually hits the endpoints (rate-limit + auth filter unchanged).
+        // Lifetime: Scoped (matches the WorkspaceStateService precedent in Pillar 6a).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IPinnedContextRepository,
+                           Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRepository>();
+
         // multi-container-multi-index-r1 Phase G (task 102) — TRULY UNCONDITIONAL.
         // IAllowedIndexesProvider is consumed by KnowledgeDeploymentService (registered behind
         // the AI-Search-keys sub-gate in AddRagServices) to validate caller-supplied indexNames
@@ -542,9 +558,18 @@ public static class AnalysisServicesModule
         //
         // Lifetime: Scoped — matches the WorkspaceStateService precedent (R6 Pillar 6a).
         // CosmosClient itself is Singleton (injected); the scoped wrapper is stateless.
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IPinnedContextRepository,
-                           Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRepository>();
-        Console.WriteLine("✓ R6 Pillar 7 PinnedContextRepository registered (task 065, D-C-18; user-curated memory anchors foundation)");
+        //
+        // **PR #395 HOTFIX 2026-06-18**: the actual AddScoped registration was MOVED to the top
+        // of this module (above the compound gate) to satisfy CLAUDE.md §10 F.1 asymmetric-
+        // registration compliance. MapPinnedMemoryEndpoints (EndpointMappingExtensions.cs) is
+        // unconditional; if the repository were registered only inside this gate, Minimal API
+        // parameter-binding inference would treat IPinnedContextRepository as a body candidate
+        // at endpoint-registration time when flags are OFF — crashing host startup with
+        // "Body was inferred but the method does not allow inferred body parameters" on the
+        // GET / DELETE handlers, which fails every WebApplicationFactory integration test.
+        // The registration moved upward is unchanged in shape (same Scoped lifetime, same
+        // interface→impl mapping); only the location changed.
+        Console.WriteLine("✓ R6 Pillar 7 PinnedContextRepository registered earlier in module (unconditional; hotfix per PR #395)");
 
         // R6 Pillar 7 (task 066, D-C-19) — PinnedContextRecallService. Embedding-based
         // selective recall: ranks the user's pinned-context items by cosine similarity of
