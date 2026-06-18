@@ -154,7 +154,7 @@ public class SprkChatAgentFactoryTests
         // Router returns "uncertain" for a simple hello message — no capability matched.
         var routerMock = new Mock<ICapabilityRouter>();
         routerMock
-            .Setup(r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(CapabilityRoutingResult.Uncertain(0.0, layer: 1, latencyMs: 0));
 
         var contextProviderMock = new Mock<IChatContextProvider>();
@@ -174,7 +174,7 @@ public class SprkChatAgentFactoryTests
         // Assert — agent created successfully, router was called
         agent.Should().NotBeNull();
         routerMock.Verify(
-            r => r.RouteAsync("Hello", It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            r => r.RouteAsync("Hello", It.IsAny<string?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()),
             Times.Once);
     }
 
@@ -192,7 +192,7 @@ public class SprkChatAgentFactoryTests
 
         var routerMock = new Mock<ICapabilityRouter>();
         routerMock
-            .Setup(r => r.RouteAsync(documentAnalysisMessage, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RouteAsync(documentAnalysisMessage, It.IsAny<string?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(CapabilityRoutingResult.Confident(
                 selectedCapabilities: ["analyze"],
                 confidence: 0.92,
@@ -216,7 +216,7 @@ public class SprkChatAgentFactoryTests
         // Assert — agent created successfully, router was called with the exact user message
         agent.Should().NotBeNull();
         routerMock.Verify(
-            r => r.RouteAsync(documentAnalysisMessage, It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            r => r.RouteAsync(documentAnalysisMessage, It.IsAny<string?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()),
             Times.Once);
     }
 
@@ -247,7 +247,7 @@ public class SprkChatAgentFactoryTests
         // Assert — router never called for null message
         agent.Should().NotBeNull();
         routerMock.Verify(
-            r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()),
             Times.Never);
     }
 
@@ -267,7 +267,7 @@ public class SprkChatAgentFactoryTests
         // so tool filtering leaves full set in place. The capability_change event is
         // triggered by comparing current tools against previousTurnToolNames.
         routerMock
-            .Setup(r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(CapabilityRoutingResult.Uncertain(0.0, layer: 1, latencyMs: 0));
 
         var contextProviderMock = new Mock<IChatContextProvider>();

@@ -142,9 +142,9 @@
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
 | 080 | D-G1 | `CommandRouter.ts` parser (D-D-01) — Pillar 8 closed vocabulary (6 hard + 4 soft + 3 ref); pure parser; 36 tests green; wired into `ConversationPane.handleBeforeSendMessage` (capture-only); NFR-11 regression locked; `notes/task-080-evidence.md` | ✅ | FULL | true | 079 |
-| 081 | D-G1 | Hard slashes (6: /clear, /new-session, /help, /export, /save-to-matter, /pin) (D-D-02) | 🔲 | FULL | true | 080 |
-| 082 | D-G1 | Soft slashes (4: /summarize, /draft, /extract-entities, /analyze) (D-D-03) | 🔲 | FULL | true | 080 |
-| 083 | D-G1 | References resolver (#scope/@entity/#filename) (D-D-04) | 🔲 | FULL | true | 080 |
+| 081 | D-G1 | Hard slashes (6: /clear, /new-session, /help, /export, /save-to-matter, /pin) (D-D-02) — `HardSlashExecutor.ts` + `CommandHelpPanel.tsx` + 53 tests green (43 executor + 10 help panel); all 6 commands measured <100ms in mocked-BFF; ADR-015 telemetry audit PASS (no user text in payloads); ADR-021 dark-mode parity PASS (renders under webLightTheme + webDarkTheme); BFF publish-size delta = 0 MB (frontend-only; reuses existing endpoints `/api/ai/chat/sessions/{id}` DELETE, `/api/ai/chat/sessions` POST, `/api/memory/pins` POST, `/api/ai/chat/sessions/{id}/tabs` PATCH); ConversationPane.tsx integration deferred to main session (parallel coordination with 082/083); `notes/task-081-evidence.md` | ✅ | FULL | true | 080 |
+| 082 | D-G1 | Soft slashes (4: /summarize, /draft, /extract-entities, /analyze) (D-D-03) — `SoftSlashRouter.ts` (38 tests green) + CapabilityRouter Layer 0.5 pre-pass (18 BFF tests green); BFF publish-size delta ≈ 0 MB; ConversationPane.tsx integration deferred to main session (parallel coordination); `notes/task-082-evidence.md` | ✅ | FULL | true | 080 |
+| 083 | D-G1 | References resolver (#scope/@entity/#filename) (D-D-04) — `ReferenceResolver.ts` + 27 tests green; 3 resolver types wired (scope/entity/file); ADR-014 tenantId cache keys; NFR-01 non-blocking; in-flight de-dup; integration handoff in `notes/task-083-evidence.md`; ConversationPane.tsx integration deferred to main session (parallel coordination with 081/082) | ✅ | FULL | true | 080 |
 | 084 | D-G2 | Composition integration tests (D-D-05) | 🔲 | STANDARD | true | 081, 082, 083 |
 | 085 | D-G2 | `/help` UI affordance (D-D-06) | 🔲 | STANDARD | true | 081 |
 | 086 | D-G2 | Natural language regression test (NFR-11 backward compat) (D-D-07) | 🔲 | STANDARD | true | 080 |

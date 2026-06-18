@@ -670,6 +670,56 @@ export interface ISprkChatProps {
    * routing decisions) and consults its own helpers (`routeSummarizeIntent`).
    */
   onBeforeSendMessage?: (messageText: string) => void;
+
+  /**
+   * Outbound-body decoration hook — R6 task 080+ Pillar 8 (Command Router)
+   * integration point. Fires BETWEEN body construction and `startStream`.
+   *
+   * The host receives the base outbound body (`{ message, documentId, attachments? }`)
+   * and MAY return:
+   *   - the body unchanged (no decoration);
+   *   - a NEW body with additional fields (e.g. `commandIntent`, `resolvedReferences`);
+   *   - `null` to CANCEL the BFF send (hard-slash commands like `/clear`, `/help`,
+   *     `/export` are dispatched client-side and produce no LLM round-trip).
+   *
+   * The hook is async-capable: implementations awaiting reference resolution
+   * (e.g. `@matter`, `#contract.pdf`) return a `Promise`. SprkChat awaits the
+   * result before starting the stream.
+   *
+   * ADR-012 invariant: SprkChat is context-agnostic. The shared lib applies the
+   * returned body verbatim; it has no knowledge of Pillar 8 vocabulary. The host
+   * (ConversationPane in SpaarkeAi) owns CommandRouter, HardSlashExecutor,
+   * SoftSlashRouter, and ReferenceResolver. This prop is the single, generic
+   * integration seam.
+   *
+   * Failure handling: if the hook throws or rejects, SprkChat logs and falls
+   * back to the undecorated base body (send proceeds). Host failures must not
+   * break the send lifecycle.
+   *
+   * @example Hard-slash cancel (client-side dispatch only)
+   * onDecorateOutboundBody={async (body) => {
+   *   const intent = parse(body.message as string);
+   *   if (intent.isHardSlash) {
+   *     await executeHardSlash(intent, ctx);
+   *     return null;  // cancel BFF send
+   *   }
+   *   return body;
+   * }}
+   *
+   * @example Soft-slash + reference decoration
+   * onDecorateOutboundBody={async (body) => {
+   *   const intent = parse(body.message as string);
+   *   let decorated = decorateBody(intent, body);
+   *   if (intent.references.length > 0) {
+   *     const resolved = await ReferenceResolver.resolveAll(intent.references, ctx);
+   *     decorated = { ...decorated, resolvedReferences: resolved };
+   *   }
+   *   return decorated;
+   * }}
+   */
+  onDecorateOutboundBody?: (
+    body: Record<string, unknown>
+  ) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
 }
 
 /** Props for SprkChatMessage sub-component. */
