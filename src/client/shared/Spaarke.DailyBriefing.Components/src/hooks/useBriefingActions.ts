@@ -34,13 +34,11 @@
  */
 
 import { useState, useCallback } from "react";
-import type {
-  IWebApi,
-} from "../../../../../solutions/DailyBriefing/src/types/notifications";
+import type { IWebApi } from "../types/notifications";
 import {
   markNotificationRead,
   markAllNotificationsRead,
-} from "../../../../../solutions/DailyBriefing/src/services/notificationService";
+} from "../services/notificationService";
 
 // ---------------------------------------------------------------------------
 // Hook return type

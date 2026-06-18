@@ -53,7 +53,7 @@ import type {
   IWebApi,
   NotificationItem,
   NotificationPriority,
-} from "../../../../../solutions/DailyBriefing/src/types/notifications";
+} from "../types/notifications";
 
 // ---------------------------------------------------------------------------
 // Types

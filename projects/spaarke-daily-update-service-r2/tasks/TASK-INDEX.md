@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 19 / 36 complete; 1 deferred (Waves 1–4: + 014, 055 — FR-21 spec assumption falsified, acceptance relaxed per notes/runtime-config-divergence.md)
+> **Status**: 20 / 36 complete; 1 deferred (Waves 1–5: + 015 — hoisted types/notifications + 2 services + utils + @spaarke/auth peer dep; zero solution-local imports in new package)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -19,7 +19,7 @@
 | 012 | Hoist `briefingService` (BFF `/narrate` client) | P2 | ✅ | 010 | A | FULL |
 | 013 | Hoist existing hooks (`useInlineTodoCreate`, `useBriefingNarration`) | P2 | ✅ | 010 | A | FULL |
 | 014 | Decompose `useNotificationData` → `useBriefingNotifications` + `useBriefingPreferences` + `useBriefingActions` | P2 | ✅ | 011,012,013 | — | FULL |
-| 015 | Abstract dependencies — props/parameters; remove solution-local imports | P2 | 🔲 | 014 | — | FULL |
+| 015 | Abstract dependencies — props/parameters; remove solution-local imports | P2 | ✅ | 014 | — | FULL |
 | 016 | Subpath exports contract (`./components`, `./widgets`, `./hooks`, `./services`, `./types`) | P2 | 🔲 | 015 | — | FULL |
 | 017 | Shrink standalone code page to thin host shell | P2 | 🔲 | 016 | B | FULL |
 | 018 | Replace LegalWorkspace `dailyBriefing` registration with thin shim | P2 | 🔲 | 016 | B | FULL |

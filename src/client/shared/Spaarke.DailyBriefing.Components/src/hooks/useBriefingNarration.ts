@@ -27,7 +27,7 @@ import { useState, useEffect, useRef } from "react";
 import type {
   ChannelFetchResult,
   LoadingState,
-} from "../../../../../solutions/DailyBriefing/src/types/notifications";
+} from "../types/notifications";
 import type {
   TldrResult,
   ChannelNarrationResult,

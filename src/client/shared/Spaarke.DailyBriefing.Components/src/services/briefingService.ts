@@ -10,39 +10,26 @@
  *   - MUST extend BFF for AI briefing — no separate service (ADR-013)
  *   - Graceful fallback when AI is unavailable (503, circuit breaker)
  *
- * Hoist note (R2 task 012 / FR-09):
+ * Hoist note (R2 task 012 / FR-09 — finalized in task 015):
  *   Originally lived at `src/solutions/DailyBriefing/src/services/briefingService.ts`.
  *   Hoisted to `@spaarke/daily-briefing-components/services` per Calendar
  *   (`@spaarke/events-components`) precedent — BFF client lives package-local.
  *   Logic is preserved verbatim — request shape, error handling, telemetry.
  *
- *   Two import paths were adjusted at hoist time:
- *     1. `authenticatedFetch` now comes from `@spaarke/auth` (canonical Spaarke
- *        Auth v2 entry point per ADR-028). The previous indirection through
- *        `./authInit` (a thin wrapper around `createCodePageAuthInitializer`)
- *        is no longer needed for the package-local copy — consumers still go
- *        through their host's auth-initializer factory before any call here
- *        fires (`main.tsx`'s `bootstrapAuth()` for the standalone code page,
- *        the SpaarkeAi embed's bootstrap for the widget).
- *     2. `ChannelFetchResult` is imported via a relative path back to the
- *        DailyBriefing solution's `types/notifications.ts` until that types
- *        file is hoisted (a later task — out of R2 task 012 scope, which owns
- *        only the `services/` subpath).
- *   Original location becomes a re-export shim (cleaned up in task 017/018).
+ *   `authenticatedFetch` is now imported from the canonical `@spaarke/auth`
+ *   entry point per ADR-028 (task 015 added `@spaarke/auth` as a peer dep on
+ *   the package). Consumers still go through their host's auth-initializer
+ *   factory before any call here fires (`main.tsx`'s `bootstrapAuth()` for the
+ *   standalone code page, the SpaarkeAi embed's bootstrap for the widget).
+ *
+ *   `ChannelFetchResult` is now imported intra-package from
+ *   `../types/notifications` (task 015 hoisted the notifications types file
+ *   so the package no longer reaches back across the solution boundary).
+ *   Original location becomes a re-export shim.
  */
 
-// NOTE on import paths (R2 task 012 / FR-09 hoist):
-//   `@spaarke/auth` is the canonical Spaarke Auth v2 entry point per ADR-028.
-//   Task 010 scaffolded `@spaarke/daily-briefing-components` but did not yet
-//   add `@spaarke/auth` to its package.json (deferred to a subsequent task
-//   that touches the package.json so this hoist can proceed without crossing
-//   the Wave-3 file-overlap boundary). Until then we reach the canonical
-//   export via a relative path; the resolved module is identical to
-//   `@spaarke/auth/authenticatedFetch`. Same rationale for the
-//   `ChannelFetchResult` type — its types file will be hoisted in a later
-//   task; this import preserves verbatim shape semantics meanwhile.
-import { authenticatedFetch } from "../../../Spaarke.Auth/src";
-import type { ChannelFetchResult } from "../../../../../solutions/DailyBriefing/src/types/notifications";
+import { authenticatedFetch } from "@spaarke/auth";
+import type { ChannelFetchResult } from "../types/notifications";
 
 // ---------------------------------------------------------------------------
 // Request / Response DTOs (mirror DailyBriefingEndpoints.cs)

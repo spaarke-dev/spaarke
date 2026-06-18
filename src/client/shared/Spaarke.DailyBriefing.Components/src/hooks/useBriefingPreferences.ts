@@ -29,12 +29,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type {
   IWebApi,
   DailyDigestPreferences,
-} from "../../../../../solutions/DailyBriefing/src/types/notifications";
-import { DEFAULT_DAILY_DIGEST_PREFERENCES } from "../../../../../solutions/DailyBriefing/src/types/notifications";
+} from "../types/notifications";
+import { DEFAULT_DAILY_DIGEST_PREFERENCES } from "../types/notifications";
 import {
   fetchDigestPreferences,
   saveDigestPreferences,
-} from "../../../../../solutions/DailyBriefing/src/services/preferencesService";
+} from "../services/preferencesService";
 
 // ---------------------------------------------------------------------------
 // Hook return type

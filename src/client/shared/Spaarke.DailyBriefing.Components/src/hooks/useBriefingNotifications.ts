@@ -36,8 +36,8 @@ import type {
   IWebApi,
   ChannelFetchResult,
   LoadingState,
-} from "../../../../../solutions/DailyBriefing/src/types/notifications";
-import { fetchAndGroupNotifications } from "../../../../../solutions/DailyBriefing/src/services/notificationService";
+} from "../types/notifications";
+import { fetchAndGroupNotifications } from "../services/notificationService";
 
 // ---------------------------------------------------------------------------
 // Hook return type

@@ -49,11 +49,11 @@ import {
   useBriefingPreferences,
   useBriefingActions,
 } from "../hooks";
-import { TOASTER_ID } from "../../../../../solutions/DailyBriefing/src/utils/toastUtils";
+import { TOASTER_ID } from "../utils/toastUtils";
 import type {
   IWebApi,
   ChannelFetchResult,
-} from "../../../../../solutions/DailyBriefing/src/types/notifications";
+} from "../types/notifications";
 
 const useStyles = makeStyles({
   container: {

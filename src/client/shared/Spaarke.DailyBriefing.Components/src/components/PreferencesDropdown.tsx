@@ -53,8 +53,8 @@ import type {
   DueWindowDays,
   TimeWindow,
   AiConfidenceThreshold,
-} from "../../../../../solutions/DailyBriefing/src/types/notifications";
-import { CHANNEL_REGISTRY } from "../../../../../solutions/DailyBriefing/src/types/notifications";
+} from "../types/notifications";
+import { CHANNEL_REGISTRY } from "../types/notifications";
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 design tokens — ADR-021)
