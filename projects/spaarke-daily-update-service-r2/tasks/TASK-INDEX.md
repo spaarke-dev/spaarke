@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 17 / 36 complete; 1 deferred (Waves 1–3: + 011, 012, 013, 032, 033 subsumed by 042, 042, 054)
+> **Status**: 19 / 36 complete; 1 deferred (Waves 1–4: + 014, 055 — FR-21 spec assumption falsified, acceptance relaxed per notes/runtime-config-divergence.md)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -18,7 +18,7 @@
 | 011 | Hoist Daily Briefing components (`DailyBriefingApp`, sections, atoms) | P2 | ✅ | 010 | A | FULL |
 | 012 | Hoist `briefingService` (BFF `/narrate` client) | P2 | ✅ | 010 | A | FULL |
 | 013 | Hoist existing hooks (`useInlineTodoCreate`, `useBriefingNarration`) | P2 | ✅ | 010 | A | FULL |
-| 014 | Decompose `useNotificationData` → `useBriefingNotifications` + `useBriefingPreferences` + `useBriefingActions` | P2 | 🔲 | 011,012,013 | — | FULL |
+| 014 | Decompose `useNotificationData` → `useBriefingNotifications` + `useBriefingPreferences` + `useBriefingActions` | P2 | ✅ | 011,012,013 | — | FULL |
 | 015 | Abstract dependencies — props/parameters; remove solution-local imports | P2 | 🔲 | 014 | — | FULL |
 | 016 | Subpath exports contract (`./components`, `./widgets`, `./hooks`, `./services`, `./types`) | P2 | 🔲 | 015 | — | FULL |
 | 017 | Shrink standalone code page to thin host shell | P2 | 🔲 | 016 | B | FULL |
@@ -41,7 +41,7 @@
 | 052 | Create `createCodePageAuthInitializer` factory in `@spaarke/auth` (FR-20a) | DD | ✅ | none | D | FULL |
 | 053 | Migrate `DailyBriefing` solution to auth factory; delete local `authInit` | DD | ✅ | 052 | — | FULL |
 | 054 | Migrate `LegalWorkspace` + `SpaarkeAi` to auth factory; delete local `authInit` | DD | ✅ (lazy-singleton pattern) | 053 | — | FULL |
-| 055 | Consolidate `runtimeConfig` → `@spaarke/auth` singleton; delete 3 local copies (FR-21) | DD | 🔲 | 054 | — | FULL |
+| 055 | Consolidate `runtimeConfig` → `@spaarke/auth` singleton; delete 3 local copies (FR-21) | DD | ✅ (thin wrappers; FR-21 acceptance relaxed) | 054 | — | FULL |
 | 060 | Deploy BFF (P2b + P3) via `bff-deploy` skill | Phase7 | 🔲 | 033,042 | E | FULL |
 | 061 | Redeploy standalone Daily Briefing code page via `code-page-deploy` | Phase7 | 🔲 | 017,055 | E | FULL |
 | 062 | E2E verification — SC1–SC14 in spaarkedev1 | Phase7 | 🔲 | 060,061,024,018 | — | STANDARD |
