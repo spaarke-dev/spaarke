@@ -4,7 +4,7 @@
     <phase>5</phase>
     <tags>docs, cleanup</tags>
     <estimate>30m</estimate>
-    <status>pending</status>
+    <status>completed</status>
     <dependencies>040</dependencies>
     <parallel-safe>false</parallel-safe>
   </metadata>
@@ -43,4 +43,12 @@
     <criterion>Lessons-learned documented</criterion>
     <criterion>Repo passes cleanup audit</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-12. README status Complete with graduation criteria dispositioned
+    (9/10 met; criterion "remove Azure Environments config" carried to r2 — blocked by
+    DemoExpirationService). notes/lessons-learned.md written (5 lessons + 6 carry-overs).
+    Hygiene check: working tree contains only intended files; deploy/api-publish output is
+    gitignored. Carry-overs feed the environment-factory-r1 design.
+  </notes>
 </task>
