@@ -38,7 +38,7 @@
 import * as React from "react";
 import { Button, Tooltip, makeStyles, tokens } from "@fluentui/react-components";
 import { SendRegular } from "@fluentui/react-icons";
-import { useDispatchPaneEvent } from "@spaarke/ai-widgets";
+import { useDispatchPaneEvent } from "@spaarke/ai-widgets/events";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)

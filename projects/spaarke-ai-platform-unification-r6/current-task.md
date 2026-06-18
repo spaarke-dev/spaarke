@@ -1,169 +1,77 @@
-# Current Task State — R6 (Wave C-G3 WIP checkpoint for laptop handoff)
+# Current Task State — R6 (Wave C-G3 partial closeout — task 063 only outstanding)
 
-> **Last Updated**: 2026-06-11 (user traveling; pushed WIP checkpoint for laptop continuation)
-> **Recovery**: Read "Quick Recovery" + "Wave C-G3 partial-state inventory" + "CRITICAL: Restart instructions" sections
-> **Mode**: AUTONOMOUS — user authorized "run autonomously"; bash only; skip approvals
-> **Branch**: `work/spaarke-ai-platform-unification-r6` — pushed to origin including this WIP commit
-
----
-
-## Quick Recovery (READ THIS FIRST)
-
-| Field | Value |
-|-------|-------|
-| **Phase** | C (tri-directional workspace + memory + visibility) |
-| **Build state** | 0 errors (verified before commit) |
-| **Last clean commit** | `25fe5292e` (Wave C-G2 complete: tasks 054 + 055 + 056 + 061 + 064 + 065) |
-| **WIP checkpoint** | This commit — Wave C-G3 partial (057 + 058 + 062 + 063 + 066, mostly incomplete) |
-| **Phase A + B + 053 + Wave C-G2** | ✅ All in master (via PR #375) or this branch |
-| **Wave C-G3 status** | All 5 sub-agents either rate-limited, stream-stalled, or stopped by main session; partial code on disk |
-
-### What the WIP commit contains
-All partial work from the Wave C-G3 sub-agents. **Compiles clean. Tests not run. Evidence notes mostly missing.** This is checkpoint state for cross-machine handoff, NOT a Wave C-G3 closeout.
+> **Last Updated**: 2026-06-11 (post C-G3 gap-fill agent dispatch)
+> **Mode**: Wave C-G3 4-of-5 tasks closed; task 063 outstanding
+> **Branch**: `work/spaarke-ai-platform-unification-r6`
 
 ---
 
-## 🚨 CRITICAL: Restart instructions for laptop session
+## Wave C-G3 closeout summary
 
-When resuming on the laptop, follow these in order. Pay attention to the bolded warnings.
+| Task | Status | Title | Tests | Evidence note |
+|------|--------|-------|-------|---------------|
+| 057 | ✅ | User affordances (Send / AddToAssistant / PinToMatter) (D-C-08/09/10) | 27 / 27 passing | [task-057-evidence.md](notes/task-057-evidence.md) |
+| 058 | ✅ | Conflict resolution implementation (Q8 USER WINS) (D-C-11) | 3 / 3 integration + 5 / 5 unit regression | [task-058-evidence.md](notes/task-058-evidence.md) |
+| 062 | ✅ | Register trace widget with ContextWidgetRegistry (D-C-15) | 5 / 5 passing (narrow contract); 110-case serialize-restore blocked on pre-existing d3-force ESM infra gap | [task-062-evidence.md](notes/task-062-evidence.md) |
+| 063 | 🔲 | Emit context.* events from chat agent + playbook (D-C-16) | NOT STARTED — punted | [task-063-partial-evidence.md](notes/task-063-partial-evidence.md) (handoff brief) |
+| 066 | ✅ | Selective recall via embedding similarity (D-C-19) | 21 / 21 passing | [task-066-evidence.md](notes/task-066-evidence.md) (Verification section appended) |
 
-### Step 1 — Verify state
+**Build status**: BFF clean (0 errors, 16 pre-existing warnings). Integration
+tests project clean. Unit tests clean.
 
-```bash
-cd c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r6
-git pull origin work/spaarke-ai-platform-unification-r6
-git log --oneline -3
-# Expect to see the WIP commit on top of 25fe5292e
+**Wave C-G3 status**: 4 of 5 tasks closed; task 063 outstanding and BLOCKS the
+end-to-end Pillar 6c trace pipeline (widget infra exists client-side; BFF
+emissions are the missing half).
 
-git status --short
-# Should be clean
+## Outstanding: task 063
 
-dotnet build src/server/api/Sprk.Bff.Api/ -nologo -v q | tail -3
-# Expect: 0 errors
-```
+See [`notes/task-063-partial-evidence.md`](notes/task-063-partial-evidence.md)
+for the verbatim next-agent handoff brief. Summary:
 
-### Step 2 — DO NOT re-dispatch sub-agents blindly
+- 4 emission categories to wire: tool-call events (SprkChatAgent), knowledge
+  retrieval + decision events (CapabilityRouter), playbook node lifecycle
+  (PlaybookExecutionEngine wrapper — NFR-08 BINDING: NOT inside the 11
+  executors).
+- Unit test file: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Telemetry/ContextEventEmissionTests.cs` (NEW).
+- Audit note: `notes/task-063-adr015-emission-audit.md` (NEW; per-site
+  payload-construction audit).
+- ADR-015 BINDING: deterministic IDs ONLY in every emission payload. Never
+  user message text, tool body content, or LLM response text.
+- POML reference: `tasks/063-emit-context-events-from-agent-and-playbook.poml`.
 
-**The Wave C-G3 first dispatch had a scope-mismatch failure** on task 058 — my brief described client-side work but the POML is server-side. The sub-agent correctly stop-and-surfaced. Lesson:
+Recommended dispatch: fresh sub-agent with the partial-evidence note as primary
+brief + the POML + the 057/058/062/066 evidence notes for pattern reference.
 
-**Before dispatching any task, READ THE POML at `projects/spaarke-ai-platform-unification-r6/tasks/{NNN}-*.poml` FIRST and use its `<outputs>` + `<steps>` as the canonical scope.** Do not freelance the brief from memory.
+## Wave C-G3 test-infrastructure heals (in scope, completed)
 
-For the autonomous mode the user wants, the dispatch pattern is:
-1. Read the POML
-2. Write the agent brief based on the POML (copy `<outputs>` + `<steps>` verbatim)
-3. Verify your brief doesn't contradict any file paths or "MUST touch" lists in the POML
-4. Dispatch
+Two pre-existing SpaarkeAi-workspace test-infra blockers were fixed as a
+prerequisite to verifying the 057 tests. Both are documented in
+`task-057-evidence.md`:
 
-### Step 3 — Wave C-G3 partial-state inventory
+1. Added `@spaarke/sdap-client` mock (`src/solutions/SpaarkeAi/src/__mocks__/sdap-client.ts`)
+   + moduleNameMapper entry in `jest.config.ts`.
+2. Rewired the 3 affordance components + their tests from the
+   `@spaarke/ai-widgets` barrel to the `@spaarke/ai-widgets/events` subpath
+   to avoid pulling in the workspace-widget side-effect chain that needs
+   `@spaarke/ui-components/components/CreateMatterWizard` (a heavier
+   dependency).
 
-Each task below has source files already on disk in the WIP commit. **Most need tests + evidence notes to complete.** Read the POML before extending each.
+These heals are net-positive for the SpaarkeAi workspace test suite — they
+unblock any new component test that only needs the PaneEventBus surface.
 
-#### Task 057 — User affordances (Pillar 6b)
-- POML: `tasks/057-user-affordances-workspace-actions.poml`
-- ✅ ON DISK: `src/solutions/SpaarkeAi/src/components/workspace/SendToWorkspaceButton.tsx`
-- ✅ ON DISK: `src/solutions/SpaarkeAi/src/components/workspace/AddToAssistantToggle.tsx`
-- ✅ ON DISK: `src/solutions/SpaarkeAi/src/components/workspace/PinToMatterButton.tsx`
-- ✅ ON DISK: `__tests__/SendToWorkspaceButton.test.tsx`
-- ✅ ON DISK: `__tests__/AddToAssistantToggle.test.tsx`
-- ❌ MISSING: `__tests__/PinToMatterButton.test.tsx`
-- ❌ MISSING: evidence note `notes/task-057-evidence.md`
-- ❌ MISSING: verify all 3 tests pass
+## Reminders for resume
 
-#### Task 058 — Q8 conflict resolution server-side wiring
-- POML: `tasks/058-conflict-resolution-implementation.poml`
-- **WARNING**: my initial brief was wrong (described client-side; POML is server-side). The retry agent also timed out. Stick to the POML.
-- POML deliverables:
-  1. Persona instruction snippet (Pillar 1 SYS- persona row update) telling the agent the stale-read → re-read → re-attempt loop
-  2. Telemetry counter `workspace.conflict_refused` at the stale-read refusal point in `UpdateWorkspaceTabHandler.cs`
-  3. Integration test `tests/integration/Spe.Integration.Tests/Workspace/ConflictResolutionTests.cs`
-- 🟡 PARTIAL ON DISK: `UpdateWorkspaceTabHandler.cs` MODIFIED — check `git diff` to see if telemetry counter was added
-- ❌ MISSING: persona row update
-- ❌ MISSING: integration test file
-- ❌ MISSING: evidence note `notes/task-058-evidence.md`
-- **NOTE for resume**: the task-055 handler returns `ToolResult.Ok` with `Status: "stale_read"` (NOT `ToolResult.Failure`). Use that exact response shape in the integration test setup.
-
-#### Task 062 — Register ExecutionTraceWidget
-- POML: `tasks/062-register-trace-widget.poml`
-- 🟡 PARTIAL ON DISK: `src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts` MODIFIED — check `git diff` to see if ExecutionTraceWidget registration was added
-- ✅ ON DISK: `src/client/shared/Spaarke.AI.Widgets/src/registry/__tests__/register-execution-trace-widget.test.ts`
-- ❌ MISSING: verify tests pass
-- ❌ MISSING: evidence note `notes/task-062-evidence.md`
-
-#### Task 063 — Emit `context.*` events from BFF
-- POML: `tasks/063-emit-context-events.poml`
-- 🟡 PARTIAL ON DISK: `src/client/shared/Spaarke.AI.Widgets/src/__tests__/widget-serialize-restore.test.ts` was modified — that's unusual for a BFF-emit task; verify whether this is real or noise via `git diff`
-- ❌ MISSING: nearly everything — SSE event-emission hooks in SprkChatAgentFactory + PlaybookExecutionEngine
-- ❌ MISSING: tests
-- ❌ MISSING: evidence note `notes/task-063-evidence.md`
-- **Recommendation**: re-dispatch this one fresh (the partial work appears minimal/possibly accidental)
-
-#### Task 066 — Pinned context recall via embedding similarity
-- POML: `tasks/066-selective-recall-embedding.poml`
-- ✅ ON DISK: `src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IPinnedContextRecallService.cs`
-- ✅ ON DISK: `src/server/api/Sprk.Bff.Api/Services/Ai/Memory/PinnedContextRecallService.cs`
-- ✅ ON DISK: `src/server/api/Sprk.Bff.Api/Services/Ai/Memory/PinnedContextRecallOptions.cs`
-- ✅ ON DISK: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/PinnedContextRecallServiceTests.cs`
-- ✅ ON DISK: `projects/spaarke-ai-platform-unification-r6/notes/task-066-evidence.md`
-- 🟡 ON DISK: `Infrastructure/DI/AnalysisServicesModule.cs` MODIFIED — verify registration is correct via `git diff`
-- ❌ MISSING: just verify build + tests pass (most likely complete)
-
-### Step 4 — Recommended laptop resumption order
-
-1. **Build verify**: `dotnet build src/server/api/Sprk.Bff.Api/ -nologo -v q | tail -3` → expect 0 errors
-2. **Test the partial wave**: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~PinnedContextRecall" --logger "console;verbosity=minimal"` — confirm task 066 is green
-3. **Single focused gap-fill sub-agent** (mirror what worked for Wave C-G2 closeout): give it the inventory above + POML paths, ask it to: write missing tests + complete partial files + write all missing evidence notes + run verifications. Tight scope = high success rate.
-4. **After gap-fill returns**: build verify, run all unit tests, update TASK-INDEX (057, 058, 062, 063, 066 → ✅), commit as `feat(r6): Wave C-G3 closeout`, push
-5. **Then proceed with Wave C-G4** (task 067)
-
----
-
-## Wave Cascade (after C-G3 closeout)
-
-### Wave C-G4
-- 067 Hierarchical memory composition — depends on 064 + 065 + 066
-
-### Wave C-G5
-- 068 Activate MatterMemoryService + token budget tracker — depends on 067
-
-### Wave C-G6 (parallel)
-- 069 Remember/forget/always recognition — depends on 065 + 068
-- 070 Q7 EXPANSION: Pinned Memory CRUD + Visualization UI — depends on 065 + 069
-
-### Pillar 9 (parallel-safe with C-G3+)
-- 072 widget visibility contract per-widget implementations
-- 073 prompt-builder gathering visible state
-- 074 refine task 053's workspace block with `getAgentVisibleState()`
-
-### Phase C exit
-- 079 Phase C integration test
-
-### Phase D
-- 080-089 Pillar 8 (command router) + integration + eval baseline
-
-### Wrap-up
-- 090
-
----
-
-## Sub-agent dispatch lessons learned (READ before dispatching)
-
-1. **Always read the POML first** and quote its `<outputs>` + `<steps>` in your brief
-2. **Tasks 40+ tool uses long are at risk** of stream-idle-timeout — break large tasks into smaller agents
-3. **5/6 agents failed in C-G2 first attempt; 3/5 failed in C-G3**. After failures, gap-fill via ONE focused agent worked for C-G2; same pattern likely works for C-G3
-4. **Sub-agents CAN modify `UpdateWorkspaceTabHandler.cs`** for task 058 (telemetry counter). My earlier brief incorrectly forbade this. The POML is the source of truth.
-
----
-
-## R7 Backlog Carried Forward
-
-- Followup-card playbook orchestration (B12b)
-- Deploy-SpaarkeAi.ps1 stale-bundle check
-- Persona seed-row directive consolidation
-- B-G10b compact-formatting → persona seed-row
-- Matter-prefill technical-debt sweep
-- Memory UI revisits (Q7) — partially addressed by task 070
-- AI.Widgets subpath imports tsconfig fix
-
----
-
-*Source of truth for resuming autonomous work after any context boundary (including cross-machine handoff).*
+- The repo-wide `widget-serialize-restore.test.ts` (110 cases, in
+  `Spaarke.AI.Widgets`) is blocked on a pre-existing d3-force ESM gap. NOT
+  introduced by R6 or this gap-fill. The narrow `register-execution-trace-widget.test.ts`
+  is the authoritative FR-36 verification.
+- The 058 persona snippet is DATA — `scripts/Seed-AiPersonaDefault.ps1` was
+  extended in this pass but NOT executed against any Dataverse environment.
+  User to run the script when ready (idempotent: PATCHes on drift).
+- The 5 affordance / event-type tasks (057/058/062/066) closed in this pass do
+  NOT modify any production node executor. NFR-08 binding preserved.
+- All changes compile clean and tests pass (or pre-existing infra gap
+  documented). No CVE / publish-size deltas measured in this pass (the changes
+  are pure-BCL telemetry adds + persona-data extensions + frontend component
+  additions); the 063 follow-up agent should run `dotnet publish` + CVE check
+  per POML 063 step 9.

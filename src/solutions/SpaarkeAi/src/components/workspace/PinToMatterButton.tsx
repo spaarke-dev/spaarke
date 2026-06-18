@@ -47,7 +47,7 @@
 import * as React from "react";
 import { ToggleButton, Tooltip, makeStyles, tokens } from "@fluentui/react-components";
 import { PinRegular, PinFilled } from "@fluentui/react-icons";
-import { useDispatchPaneEvent } from "@spaarke/ai-widgets";
+import { useDispatchPaneEvent } from "@spaarke/ai-widgets/events";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)

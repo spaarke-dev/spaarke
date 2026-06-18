@@ -36,21 +36,36 @@ jest.mock(
   { virtual: false }
 );
 
-import {
-  clearContextRegistry,
-  getAllContextWidgetTypes,
-  hasContextWidget,
-  resolveContextWidget,
-} from '../ContextWidgetRegistry';
+// NOTE: do NOT statically import from '../ContextWidgetRegistry' at the top
+// of the test file. The side-effect file `../register-context-widgets`
+// imports the registry as a top-level binding; if jest.resetModules() runs
+// (we need it so the side-effects re-fire each test), the side-effect file
+// gets a FRESH `ContextWidgetRegistry` instance with its own private
+// `_registry` Map — invisible to a statically-imported reader. Every reader
+// call must `require()` ContextWidgetRegistry from inside `jest.isolateModules`
+// so they share the same module instance as the side-effect file.
 
-// ---------------------------------------------------------------------------
-// Setup / teardown
-// ---------------------------------------------------------------------------
-
-beforeEach(() => {
-  clearContextRegistry();
-  jest.resetModules();
-});
+// Helper: requires the registry-side file (side effect: registers widgets)
+// and returns the registry reader fns from the SAME isolated module graph.
+function loadRegistryWithSideEffects(): {
+  hasContextWidget: (type: string) => boolean;
+  resolveContextWidget: (
+    type: string
+  ) => Promise<((...args: unknown[]) => unknown) | null>;
+  getAllContextWidgetTypes: () => string[];
+  clearContextRegistry: () => void;
+} {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let api: any;
+  jest.isolateModules(() => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    api = require('../ContextWidgetRegistry');
+    // Side-effect import — registers widgets into THIS module instance's _registry.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../register-context-widgets');
+  });
+  return api;
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -58,33 +73,25 @@ beforeEach(() => {
 
 describe('register-context-widgets — execution-trace (R6 task 062)', () => {
   it('registers the "execution-trace" widget type at module load', () => {
-    // Importing the registry-side file triggers the top-level side-effect
-    // registrations. We `require` so the mocked `safeRegister` is in scope.
-    require('../register-context-widgets');
-
+    const { hasContextWidget } = loadRegistryWithSideEffects();
     expect(hasContextWidget('execution-trace')).toBe(true);
   });
 
   it('resolves "execution-trace" to a non-null component (lazy factory loads)', async () => {
-    require('../register-context-widgets');
-
+    const { resolveContextWidget } = loadRegistryWithSideEffects();
     const component = await resolveContextWidget('execution-trace');
-
     expect(component).not.toBeNull();
     expect(typeof component).toBe('function');
   });
 
   it('is included in the full list of registered context widget types', () => {
-    require('../register-context-widgets');
-
+    const { getAllContextWidgetTypes } = loadRegistryWithSideEffects();
     const types = getAllContextWidgetTypes();
-
     expect(types).toContain('execution-trace');
   });
 
   it('registers alongside the other side-effect context widgets (no displacement)', () => {
-    require('../register-context-widgets');
-
+    const { getAllContextWidgetTypes } = loadRegistryWithSideEffects();
     const types = getAllContextWidgetTypes();
 
     // The registry-side file registers 6 widgets after task 062:
@@ -105,16 +112,33 @@ describe('register-context-widgets — execution-trace (R6 task 062)', () => {
   });
 
   it('idempotent: re-requiring the module does not throw or duplicate', () => {
-    require('../register-context-widgets');
-    const firstCount = getAllContextWidgetTypes().length;
+    // `loadRegistryWithSideEffects` uses jest.isolateModules so two calls
+    // would each create their OWN isolated graph (not exercise idempotency
+    // of the production module-cached behaviour). Instead, drive idempotency
+    // by requiring `register-context-widgets` twice INSIDE a single isolated
+    // module graph and asserting the registry state stays the same.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let result: any;
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const registry = require('../ContextWidgetRegistry');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../register-context-widgets');
+      const firstCount = registry.getAllContextWidgetTypes().length;
+      // Second require hits the module cache and is a no-op for side effects
+      // (production behaviour: top-level registrations execute exactly once
+      // per module-graph instance). Idempotency: count stays the same.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../register-context-widgets');
+      const secondCount = registry.getAllContextWidgetTypes().length;
+      result = {
+        firstCount,
+        secondCount,
+        hasExecutionTrace: registry.hasContextWidget('execution-trace'),
+      };
+    });
 
-    // jest.resetModules() in beforeEach already isolates each test; for
-    // belt-and-braces verify a duplicate require inside the same test is
-    // also a no-op (registry is first-wins).
-    require('../register-context-widgets');
-    const secondCount = getAllContextWidgetTypes().length;
-
-    expect(secondCount).toBe(firstCount);
-    expect(hasContextWidget('execution-trace')).toBe(true);
+    expect(result.secondCount).toBe(result.firstCount);
+    expect(result.hasExecutionTrace).toBe(true);
   });
 });

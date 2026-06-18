@@ -19,11 +19,14 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
+// Import from the `events` subpath (not the barrel) — see test 057
+// PinToMatterButton.test.tsx for the rationale.
+// (R6 Wave C-G3 gap-fill, 2026-06-11.)
 import {
   PaneEventBus,
   PaneEventBusProvider,
   type WorkspacePaneEvent,
-} from '@spaarke/ai-widgets';
+} from '@spaarke/ai-widgets/events';
 
 import { AddToAssistantToggle } from '../AddToAssistantToggle';
 

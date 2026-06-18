@@ -49,7 +49,7 @@ import {
   tokens,
   Label,
 } from "@fluentui/react-components";
-import { useDispatchPaneEvent } from "@spaarke/ai-widgets";
+import { useDispatchPaneEvent } from "@spaarke/ai-widgets/events";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)

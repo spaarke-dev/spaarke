@@ -96,8 +96,8 @@
 | 054 | C-G5 | `send_workspace_artifact` chat tool (D-C-05) | ✅ | FULL | true | 053 |
 | 055 | C-G5 | `update_workspace_tab` chat tool (Q8 conflict-check) (D-C-06) | ✅ | FULL | true | 053 |
 | 056 | C-G5 | `close_workspace_tab` chat tool (D-C-07) | ✅ | FULL | true | 053 |
-| 057 | C-G6 | User affordances (Send to Workspace + Add to Assistant + Pin to Matter) (D-C-08/09/10) | 🔲 | FULL | false | 054, 055, 056 |
-| 058 | C-G7 | Conflict resolution implementation (Q8 user wins) (D-C-11) | 🔲 | FULL | false | 055 |
+| 057 | C-G6 | User affordances (Send to Workspace + Add to Assistant + Pin to Matter) (D-C-08/09/10) | ✅ | FULL | false | 054, 055, 056 |
+| 058 | C-G7 | Conflict resolution implementation (Q8 user wins) (D-C-11) | ✅ | FULL | false | 055 |
 
 #### Sub-phase 6c — Trace widget + PaneEventBus events (parallel with 6b/7/9)
 
@@ -106,7 +106,7 @@
 | 059 | C-G5 | Additive `context.*` PaneEventBus event types (ADR-015 binding) (D-C-12) | ✅ | FULL | true | 053 |
 | 060 | C-G5 | Additive `workspace.*` PaneEventBus event types (D-C-13) — TS via timed-out sub-agent; closeout 2026-06-09 main session | ✅ | FULL | true | 053 |
 | 061 | C-G8 | `ExecutionTraceWidget.tsx` (Context-pane; ordered timeline) (D-C-14) | ✅ | FULL | false | 059 |
-| 062 | C-G9 | Register trace widget with `ContextWidgetRegistry` (D-C-15) | 🔲 | STANDARD | false | 061 |
+| 062 | C-G9 | Register trace widget with `ContextWidgetRegistry` (D-C-15) | ✅ | STANDARD | false | 061 |
 | 063 | C-G10 | Emit `context.*` events from chat agent + playbook execution (D-C-16) | 🔲 | FULL | false | 059 |
 
 #### Sub-phase 7 — Memory + Q7 expansion
@@ -115,7 +115,7 @@
 |----|------|-------|--------|-------|---------------|--------------|
 | 064 | C-G5 | Summarization compression service (D-C-17) | ✅ | FULL | true | 053 |
 | 065 | C-G5 | Pinned-context entity in Cosmos `memory` container (D-C-18) | ✅ | FULL | true | 053 |
-| 066 | C-G11 | Selective recall via embedding similarity (D-C-19) | 🔲 | FULL | false | 064 |
+| 066 | C-G11 | Selective recall via embedding similarity (D-C-19) | ✅ | FULL | false | 064 |
 | 067 | C-G12 | Hierarchical memory composition (D-C-20) | 🔲 | FULL | false | 064, 065, 066 |
 | 068 | C-G13 | Activate `MatterMemoryService` + shared token budget tracker (D-C-21/22) | 🔲 | FULL | false | 067 |
 | 069 | C-G14 | "Remember/forget/always" recognition via CapabilityRouter (D-C-23) | 🔲 | FULL | false | 065, 068 |

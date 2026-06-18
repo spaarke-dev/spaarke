@@ -99,6 +99,28 @@ public sealed class UpdateWorkspaceTabHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(UpdateWorkspaceTabHandler);
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Telemetry (R6 task 058 / Q8 conflict resolution)
+    //
+    // A single static Meter wired with a deterministic counter
+    // `workspace.conflict_refused` emitted at the stale-read refusal point. Per
+    // ADR-015 BINDING: dimensions are deterministic IDs ONLY (tenantId,
+    // sessionId, tabId, decision discriminator). NEVER user message text,
+    // widget body content, or LLM response text. The values flowing in
+    // (TenantId, ChatSessionId, TabId) are caller-supplied opaque identifiers
+    // already audited as Tier-1 telemetry-safe by ADR-013 / ADR-015.
+    //
+    // Meter name follows the existing Sprk.Bff.Api.* convention. Static so the
+    // counter survives handler instance churn (handlers are Scoped); the OTel
+    // SDK picks up the Meter once at startup.
+    // ─────────────────────────────────────────────────────────────────────────
+    internal const string MeterName = "Sprk.Bff.Api.Workspace";
+    private static readonly Meter _meter = new(MeterName, "1.0.0");
+    private static readonly Counter<long> _conflictRefusedCounter = _meter.CreateCounter<long>(
+        name: "workspace.conflict_refused",
+        unit: "{refusal}",
+        description: "Number of update_workspace_tab calls refused because the agent's view was stale (Q8 USER WINS).");
+
     /// <summary>
     /// Structured-payload status discriminator for the stale-read refusal path. Documented in
     /// the handler description so the agent can pattern-match on the value in its next-turn
@@ -379,6 +401,18 @@ public sealed class UpdateWorkspaceTabHandler : IToolHandler
                 _logger.LogInformation(
                     "UpdateWorkspaceTabHandler ({Correlation}) refused_stale_read tabId={TabId} in {Duration}ms",
                     correlationLogId, args.TabId, stopwatch.ElapsedMilliseconds);
+
+                // ADR-015 BINDING: deterministic IDs + decision discriminator ONLY.
+                // No widget body / message content / timestamp values are attached as
+                // tag dimensions. The `decision` tag enables aggregation by refusal
+                // category in Application Insights (future: refused_not_found /
+                // refused_not_editable can share the same counter with different
+                // decisions if value-add emerges).
+                _conflictRefusedCounter.Add(1,
+                    new KeyValuePair<string, object?>("tenantId", context.TenantId),
+                    new KeyValuePair<string, object?>("sessionId", sessionId),
+                    new KeyValuePair<string, object?>("tabId", args.TabId),
+                    new KeyValuePair<string, object?>("decision", StatusStaleRead));
 
                 // Q8 structured stale-read response. The LLM is instructed (via the persona
                 // snippet wired by task 058) to re-read the tab and re-attempt in a later turn.

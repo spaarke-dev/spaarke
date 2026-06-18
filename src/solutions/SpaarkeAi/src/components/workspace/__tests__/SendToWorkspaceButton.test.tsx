@@ -18,11 +18,17 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
+// Import from the `events` subpath (not the barrel) — see test 057
+// PinToMatterButton.test.tsx for the rationale (workspace-widget side-effect
+// chain pulls `@spaarke/ui-components/components/CreateMatterWizard` →
+// `@spaarke/sdap-client` which isn't resolvable from SpaarkeAi). The
+// affordance only needs the bus + provider + event-type.
+// (R6 Wave C-G3 gap-fill, 2026-06-11.)
 import {
   PaneEventBus,
   PaneEventBusProvider,
   type WorkspacePaneEvent,
-} from '@spaarke/ai-widgets';
+} from '@spaarke/ai-widgets/events';
 
 import { SendToWorkspaceButton } from '../SendToWorkspaceButton';
 
@@ -54,7 +60,10 @@ describe('SendToWorkspaceButton', () => {
   });
 
   it('is disabled when content is whitespace only', () => {
-    renderWithBus(<SendToWorkspaceButton content="   \n\t  " />);
+    // JSX attribute strings do NOT interpret backslash escapes — use a JS
+    // expression so \n / \t become actual whitespace characters. The component
+    // calls content.trim().length === 0 to detect "only whitespace".
+    renderWithBus(<SendToWorkspaceButton content={'   \n\t  '} />);
     const button = screen.getByRole('button', { name: /send to workspace/i });
     expect(button).toBeDisabled();
   });

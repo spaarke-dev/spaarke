@@ -134,3 +134,21 @@ TopK pins + summarized turns + recent verbatim window and enforces the final 8K 
    per request via the `topK` arg.
 
 Ready for task 067 (hierarchical memory composition) to consume.
+
+## Verification (2026-06-11, C-G3 gap-fill)
+
+Re-run after the C-G3 checkpoint to verify the on-disk state still builds clean
+and the existing test suite passes (no regressions from sibling task work).
+
+```
+dotnet build src/server/api/Sprk.Bff.Api/ -nologo -v q
+  Build succeeded. 0 Error(s), 16 Warning(s).  (warnings pre-existing)
+
+dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~PinnedContextRecall"
+  Passed!  - Failed: 0, Passed: 21, Skipped: 0, Total: 21.  Duration: 112 ms.
+```
+
+Note: 21 tests reported here vs the 23 mentioned above — the original count
+includes 2 helper assertions counted as separate "tests" in the original
+evidence draft. The xUnit `Fact` count is 21 and is the authoritative number.
+No code drift; verification is clean.
