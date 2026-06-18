@@ -1,77 +1,53 @@
-# Current Task State — R6 (Wave C-G3 partial closeout — task 063 only outstanding)
+# Current Task State — R6 (Wave C-G4 closeout — task 067 complete)
 
-> **Last Updated**: 2026-06-11 (post C-G3 gap-fill agent dispatch)
-> **Mode**: Wave C-G3 4-of-5 tasks closed; task 063 outstanding
+> **Last Updated**: 2026-06-18 (Wave C-G4 closeout)
+> **Mode**: Wave C-G4 (Pillar 7 hierarchical memory composition) — closed
 > **Branch**: `work/spaarke-ai-platform-unification-r6`
 
 ---
 
-## Wave C-G3 closeout summary
+## Wave C-G4 closeout summary
 
 | Task | Status | Title | Tests | Evidence note |
 |------|--------|-------|-------|---------------|
-| 057 | ✅ | User affordances (Send / AddToAssistant / PinToMatter) (D-C-08/09/10) | 27 / 27 passing | [task-057-evidence.md](notes/task-057-evidence.md) |
-| 058 | ✅ | Conflict resolution implementation (Q8 USER WINS) (D-C-11) | 3 / 3 integration + 5 / 5 unit regression | [task-058-evidence.md](notes/task-058-evidence.md) |
-| 062 | ✅ | Register trace widget with ContextWidgetRegistry (D-C-15) | 5 / 5 passing (narrow contract); 110-case serialize-restore blocked on pre-existing d3-force ESM infra gap | [task-062-evidence.md](notes/task-062-evidence.md) |
-| 063 | 🔲 | Emit context.* events from chat agent + playbook (D-C-16) | NOT STARTED — punted | [task-063-partial-evidence.md](notes/task-063-partial-evidence.md) (handoff brief) |
-| 066 | ✅ | Selective recall via embedding similarity (D-C-19) | 21 / 21 passing | [task-066-evidence.md](notes/task-066-evidence.md) (Verification section appended) |
+| 067 | ✅ | Hierarchical memory composition (D-C-20) | 34 / 34 MemoryComposition + 91 / 91 broader Memory regression | [task-067-evidence.md](notes/task-067-evidence.md) |
 
-**Build status**: BFF clean (0 errors, 16 pre-existing warnings). Integration
-tests project clean. Unit tests clean.
+**Build status**: BFF clean (0 errors, 16 pre-existing warnings).
+**Publish-size**: 44.71 MB compressed (+0.03 MB vs 44.68 MB baseline).
+**CVE**: no new vulnerabilities; pre-existing Kiota Abstractions 1.21.2 HIGH unchanged.
 
-**Wave C-G3 status**: 4 of 5 tasks closed; task 063 outstanding and BLOCKS the
-end-to-end Pillar 6c trace pipeline (widget infra exists client-side; BFF
-emissions are the missing half).
+**Wave C-G4 status**: 1 of 1 tasks closed. Pillar 7 composition surface is now
+the canonical integration point for task 068 (SprkChatAgentFactory wiring).
 
-## Outstanding: task 063
+## What Wave C-G4 produced (binding contract for task 068)
 
-See [`notes/task-063-partial-evidence.md`](notes/task-063-partial-evidence.md)
-for the verbatim next-agent handoff brief. Summary:
+`IMemoryCompositionService.ComposeAsync(request, ct) → MemoryComposition`:
+- **4 tagged layers**: `RecentVerbatim` / `CompressedMid` / `RetrievedOld` /
+  `Pinned` (dict keyed by `PinType`).
+- **Budget enforcement**: `TotalTokenBudget` default 8K per NFR-10; drop
+  priority retrieved-old → compressed-mid → recent oldest-first; **pinned NEVER
+  dropped** (FR-42 invariant).
+- **Soft-failure posture**: kill switch off → `MemoryComposition.Empty`;
+  per-primitive failures degrade gracefully; `OperationCanceledException`
+  re-raised.
+- **DI**: `AddScoped<IMemoryCompositionService, MemoryCompositionService>()` in
+  `AnalysisServicesModule.AddAnalysisServices` (ZERO new Program.cs lines per
+  ADR-010).
 
-- 4 emission categories to wire: tool-call events (SprkChatAgent), knowledge
-  retrieval + decision events (CapabilityRouter), playbook node lifecycle
-  (PlaybookExecutionEngine wrapper — NFR-08 BINDING: NOT inside the 11
-  executors).
-- Unit test file: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Telemetry/ContextEventEmissionTests.cs` (NEW).
-- Audit note: `notes/task-063-adr015-emission-audit.md` (NEW; per-site
-  payload-construction audit).
-- ADR-015 BINDING: deterministic IDs ONLY in every emission payload. Never
-  user message text, tool body content, or LLM response text.
-- POML reference: `tasks/063-emit-context-events-from-agent-and-playbook.poml`.
-
-Recommended dispatch: fresh sub-agent with the partial-evidence note as primary
-brief + the POML + the 057/058/062/066 evidence notes for pattern reference.
-
-## Wave C-G3 test-infrastructure heals (in scope, completed)
-
-Two pre-existing SpaarkeAi-workspace test-infra blockers were fixed as a
-prerequisite to verifying the 057 tests. Both are documented in
-`task-057-evidence.md`:
-
-1. Added `@spaarke/sdap-client` mock (`src/solutions/SpaarkeAi/src/__mocks__/sdap-client.ts`)
-   + moduleNameMapper entry in `jest.config.ts`.
-2. Rewired the 3 affordance components + their tests from the
-   `@spaarke/ai-widgets` barrel to the `@spaarke/ai-widgets/events` subpath
-   to avoid pulling in the workspace-widget side-effect chain that needs
-   `@spaarke/ui-components/components/CreateMatterWizard` (a heavier
-   dependency).
-
-These heals are net-positive for the SpaarkeAi workspace test suite — they
-unblock any new component test that only needs the PaneEventBus surface.
+See [`notes/task-067-evidence.md`](notes/task-067-evidence.md) for the full
+acceptance-criteria verification matrix + governance audit.
 
 ## Reminders for resume
 
-- The repo-wide `widget-serialize-restore.test.ts` (110 cases, in
-  `Spaarke.AI.Widgets`) is blocked on a pre-existing d3-force ESM gap. NOT
-  introduced by R6 or this gap-fill. The narrow `register-execution-trace-widget.test.ts`
-  is the authoritative FR-36 verification.
-- The 058 persona snippet is DATA — `scripts/Seed-AiPersonaDefault.ps1` was
-  extended in this pass but NOT executed against any Dataverse environment.
-  User to run the script when ready (idempotent: PATCHes on drift).
-- The 5 affordance / event-type tasks (057/058/062/066) closed in this pass do
-  NOT modify any production node executor. NFR-08 binding preserved.
-- All changes compile clean and tests pass (or pre-existing infra gap
-  documented). No CVE / publish-size deltas measured in this pass (the changes
-  are pure-BCL telemetry adds + persona-data extensions + frontend component
-  additions); the 063 follow-up agent should run `dotnet publish` + CVE check
-  per POML 063 step 9.
+- Task 068 (C-G13 — `MatterMemoryService` activation + shared token budget
+  tracker) is now unblocked. It is the integration call site that wires the
+  composition output into `SprkChatAgentFactory.CreateAgentAsync`'s per-turn
+  system-prompt assembly.
+- Task 063 (Wave C-G3 outstanding — context.* event emission) is still pending;
+  see [`notes/task-063-partial-evidence.md`](notes/task-063-partial-evidence.md)
+  for the handoff brief. Independent of Pillar 7; can be dispatched in parallel
+  with 068 if desired.
+- The 4 layers of composition are CONTRACT — Pillar 7 downstream consumers
+  (task 068, task 069 "remember/forget/always" recognition, task 070 Q7 Pinned
+  Memory UI) all read these fields. Drift here breaks 069/070; sign-off
+  required before any field rename / removal.

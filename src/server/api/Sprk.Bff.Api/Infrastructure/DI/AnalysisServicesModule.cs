@@ -573,6 +573,50 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRecallService>();
         Console.WriteLine("✓ R6 Pillar 7 PinnedContextRecallService registered (task 066, D-C-19; embedding-based selective recall over pinned items)");
 
+        // R6 Pillar 7 (task 067, D-C-20) — MemoryCompositionService. Hierarchical
+        // memory composition orchestrator: produces a single tagged four-layer memory
+        // block (recent verbatim / compressed mid-distance / retrieved old via
+        // similarity / pinned context grouped by pinType) consumed by the chat
+        // prompt-assembly path (task 068). Composes the three Pillar 7 primitives:
+        //   - ISummarizationCompressionService (task 064) for the mid-distance summary
+        //   - IPinnedContextRepository (task 065) for the always-included pinned tier
+        //   - IPinnedContextRecallService (task 066) for the relevance-ranked
+        //     retrieved-old tier
+        // under the NFR-10 8K total budget. Layer drop priority on overflow:
+        //   retrieved-old → compressed-mid → recent-verbatim oldest-first
+        // Pinned tier is NEVER dropped (FR-42 invariant); when pinned alone exceeds
+        // the budget, the service returns pinned-only and logs a warning so the
+        // chat prompt builder (task 068) can apply the final hard guard.
+        //
+        // §F.1 asymmetric-registration audit: this registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate matching the
+        // surrounding Memory services (SummarizationCompressionService,
+        // PinnedContextRepository, PinnedContextRecallService). The only consumer in
+        // R6 is task 068's SprkChatAgentFactory wiring, itself inside the same
+        // compound gate via the unconditional NullSprkChatAgentFactory peer (B2
+        // pattern). The Null-Object kill-switch posture is intrinsic to the service:
+        // it returns MemoryComposition.Empty (P2 Quiet) when
+        // MemoryComposition:Enabled=false or when both the conversation and the pin
+        // set are empty. No separate Null peer needed at the DI layer.
+        //
+        // Options binding uses BindConfiguration; the B-G11 hardening pattern means
+        // the options class does NOT decorate use-site-conditional fields with
+        // [Required], so an app start with no MemoryComposition section in
+        // appsettings is allowed (defaults take over, kill switch defaults to true,
+        // total budget defaults to 8000 per NFR-10).
+        //
+        // Placement (CLAUDE.md §10 / ADR-013): memory plumbing only. NO PublicContracts
+        // facade because the only consumers are AI-internal callers per the refined
+        // 2026-05-20 ADR-013 boundary rule.
+        //
+        // Lifetime: Scoped — matches the SummarizationCompressionService (task 064)
+        // and PinnedContextRecallService (task 066) precedents it depends on.
+        services.AddOptions<Sprk.Bff.Api.Services.Ai.Memory.MemoryCompositionOptions>()
+            .BindConfiguration(Sprk.Bff.Api.Services.Ai.Memory.MemoryCompositionOptions.SectionName);
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IMemoryCompositionService,
+                           Sprk.Bff.Api.Services.Ai.Memory.MemoryCompositionService>();
+        Console.WriteLine("✓ R6 Pillar 7 MemoryCompositionService registered (task 067, D-C-20; hierarchical 4-layer memory composition with NFR-10 budget enforcement)");
+
         // --- InvokeInsightsQueryTool typed HttpClient ---
         // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): the specialized
         // InvokeInsightsQueryTool C# bridge class was deleted in favor of the generic

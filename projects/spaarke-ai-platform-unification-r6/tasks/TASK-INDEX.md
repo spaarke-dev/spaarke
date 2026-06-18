@@ -116,7 +116,7 @@
 | 064 | C-G5 | Summarization compression service (D-C-17) | ✅ | FULL | true | 053 |
 | 065 | C-G5 | Pinned-context entity in Cosmos `memory` container (D-C-18) | ✅ | FULL | true | 053 |
 | 066 | C-G11 | Selective recall via embedding similarity (D-C-19) | ✅ | FULL | false | 064 |
-| 067 | C-G12 | Hierarchical memory composition (D-C-20) | 🔲 | FULL | false | 064, 065, 066 |
+| 067 | C-G12 | Hierarchical memory composition (D-C-20) | ✅ | FULL | false | 064, 065, 066 |
 | 068 | C-G13 | Activate `MatterMemoryService` + shared token budget tracker (D-C-21/22) | 🔲 | FULL | false | 067 |
 | 069 | C-G14 | "Remember/forget/always" recognition via CapabilityRouter (D-C-23) | 🔲 | FULL | false | 065, 068 |
 | 070 | C-G15 | **Q7 EXPANSION: Pinned Memory CRUD + Visualization UI** (D-C-24/25) | 🔲 | FULL | false | 065, 069 |
