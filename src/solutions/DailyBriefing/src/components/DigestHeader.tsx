@@ -1,112 +1,21 @@
 /**
- * DigestHeader — Header bar for the Daily Briefing digest.
+ * DigestHeader — re-export shim.
  *
- * Shows the title, unread count, refresh button, and a slot for
- * the preferences dropdown.
+ * The canonical `DigestHeader` was hoisted to the new shared package
+ * `@spaarke/daily-briefing-components/components` in R2 task 011 (FR-04)
+ * per Calendar (`@spaarke/events-components`) precedent — Daily Briefing
+ * UI components live package-local in their dual-use widget package.
  *
- * ADR-021: Uses Fluent v9 tokens for all styling; supports dark mode.
+ * This shim preserves the original import paths from this Code Page's
+ * components/App.tsx so they continue to build during the hoist transition.
+ * Cleanup (replace consumer imports with the canonical package path, then
+ * delete this shim) is tracked by R2 task 017.
+ *
+ * DO NOT add new code here. New work lives in
+ * `src/client/shared/Spaarke.DailyBriefing.Components/src/components/DigestHeader.tsx`.
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Title2,
-  Text,
-  Button,
-  Tooltip,
-} from "@fluentui/react-components";
-import {
-  AlertRegular,
-  ArrowClockwiseRegular,
-} from "@fluentui/react-icons";
-
-// ---------------------------------------------------------------------------
-// Styles (Fluent v9 semantic tokens only — ADR-021)
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  root: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    paddingBottom: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalM,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  icon: {
-    fontSize: "24px",
-    color: tokens.colorBrandForeground1,
-    flexShrink: 0,
-  },
-  titleGroup: {
-    flex: 1,
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-  },
-  unreadCount: {
-    color: tokens.colorNeutralForeground3,
-  },
-  actions: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalXS,
-    flexShrink: 0,
-  },
-});
-
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
-
-export interface DigestHeaderProps {
-  /** Total number of unread notifications across all channels. */
-  totalUnreadCount: number;
-  /** Called when the user clicks the refresh button. */
-  onRefresh?: () => void;
-  /** Slot for the preferences dropdown (rendered in the actions area). */
-  preferencesSlot?: React.ReactNode;
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
-export const DigestHeader: React.FC<DigestHeaderProps> = ({
-  totalUnreadCount,
-  onRefresh,
-  preferencesSlot,
-}) => {
-  const styles = useStyles();
-
-  return (
-    <div className={styles.root}>
-      <AlertRegular className={styles.icon} />
-      <div className={styles.titleGroup}>
-        <Title2>Daily Briefing</Title2>
-        {totalUnreadCount > 0 && (
-          <Text size={200} className={styles.unreadCount}>
-            {totalUnreadCount} unread
-          </Text>
-        )}
-      </div>
-      <div className={styles.actions}>
-        {onRefresh && (
-          <Tooltip content="Refresh notifications" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<ArrowClockwiseRegular />}
-              onClick={onRefresh}
-              aria-label="Refresh notifications"
-            />
-          </Tooltip>
-        )}
-        {preferencesSlot}
-      </div>
-    </div>
-  );
-};
+export {
+  DigestHeader,
+  type DigestHeaderProps,
+} from "@spaarke/daily-briefing-components/components";

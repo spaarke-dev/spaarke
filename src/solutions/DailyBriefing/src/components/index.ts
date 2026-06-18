@@ -1,5 +1,10 @@
 /**
  * Barrel exports for DailyBriefing components.
+ *
+ * Re-export shim (R2 task 011): the canonical implementations live in
+ * `@spaarke/daily-briefing-components/components`. This barrel keeps the
+ * existing call sites in `src/solutions/DailyBriefing/src/` building during
+ * the hoist transition. Cleanup tracked by R2 task 017.
  */
 
 export { DigestHeader } from "./DigestHeader";

@@ -10,14 +10,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 041 — Unit tests for visible vs hidden toasttype paths (FR-18) |
-| **Step** | 6 of 6 — Tests added, build green, 4/4 new tests pass (20/20 total in file) |
-| **Status** | completed (modulo parent Wave 2b boundary handling: no commit, no push, no TASK-INDEX update per orchestrator deviation) |
-| **Next Action** | Hand back to Wave 2b orchestrator; task 042 (P3 publish-size + E2E note) unblocked |
-| **Rigor Level** | FULL (bff-api tag, .cs modifications) |
-| **Knowledge loaded** | bff-extensions.md (F.2), spec.md FR-18, CreateNotificationNodeExecutor.cs (full), existing CreateNotificationNodeExecutorTests.cs (canonical fixture), tests/CLAUDE.md, src/server/api/Sprk.Bff.Api/CLAUDE.md, project CLAUDE.md |
-| **Files modified** | tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs (extended existing file with 4 tests + 2 helpers) |
-| **Test results** | `--filter ~CreateNotificationNodeExecutorTests` → Passed 20, Failed 0; `--filter ~Toast` → Passed 4, Failed 0 |
+| **Task** | 054 — Migrate LegalWorkspace + SpaarkeAi to auth factory; thin-wrap authInit.ts |
+| **Step** | 4 of 7 complete (5-7 skipped per task constraints: no smoke test stub, no commit, no TASK-INDEX) |
+| **Status** | completed (task work) — handoff to Wave 3 orchestrator |
+| **Next Action** | Hand back to Wave 3 orchestrator; task 055 (runtimeConfig consolidation) unblocked |
+| **Rigor Level** | FULL (auth tag, .ts modifications, ADR-028) |
+| **Knowledge loaded** | task POML 054, auth-init-divergence.md, task-053-factory-config-timing.md, createCodePageAuthInitializer.ts, both main.tsx, both authInit.ts, both runtimeConfig.ts, Spaarke.Auth/index.ts, DailyBriefing/authInit.ts (task 053 reference impl) |
+| **Files modified** | `src/solutions/LegalWorkspace/src/services/authInit.ts` (86→85 LOC, divergent logic → factory consumer); `src/solutions/SpaarkeAi/src/services/authInit.ts` (88→91 LOC, divergent logic → factory consumer); main.tsx in both solutions UNCHANGED (preserved consumer-import surface) |
+| **Pattern chosen** | Thin-wrapper lazy-singleton (task 053 pattern). LW has 22 consumers; SpaarkeAi has 1. Both use lazy because runtime config is `setRuntimeConfig`-after-`resolveRuntimeConfig` (NOT available at module load). Direct destructure would throw "Runtime config not initialized" at import time. |
+| **Build verification** | LegalWorkspace: `npm run build` → vite built in 13.29s, 2253 KB output (green). SpaarkeAi: surface-owned TS errors = 0; tsc-surface-gate ✓; Vite failure at `@spaarke/sdap-client` is pre-existing (documented in task 001 session note), unrelated to authInit migration. |
+| **Seam preservation** | SpaarkeAi `loadSpaarkeAiNotificationContext` is defined in `services/notificationContextLoader.ts` but NOT imported anywhere (task 002 deferred). No scaffolding to preserve in main.tsx; trivially satisfied by zero-touch. |
 
 ### Files Modified This Session
 

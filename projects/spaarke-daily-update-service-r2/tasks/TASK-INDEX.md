@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 10 / 36 complete; 1 deferred (Waves 1–2b: 001, 010, 030, 031, 040, 041, 050, 051, 052, 053; 002 deferred — re-sequenced after 018)
+> **Status**: 17 / 36 complete; 1 deferred (Waves 1–3: + 011, 012, 013, 032, 033 subsumed by 042, 042, 054)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -15,9 +15,9 @@
 | 002 | Wire `loadSpaarkeAiNotificationContext` injection in SpaarkeAi `main.tsx` | P1 | ⏸ | **018** (was 001) | — | FULL |
 | 003 | P1 verification — SpaarkeAi pane renders bullets in spaarkedev1 (smoke) | P1 | ⏸ | 002 | — | STANDARD |
 | 010 | Scaffold new `@spaarke/daily-briefing-components` package | P2 | ✅ | **none** (was 003) | — | FULL |
-| 011 | Hoist Daily Briefing components (`DailyBriefingApp`, sections, atoms) | P2 | 🔲 | 010 | A | FULL |
-| 012 | Hoist `briefingService` (BFF `/narrate` client) | P2 | 🔲 | 010 | A | FULL |
-| 013 | Hoist existing hooks (`useInlineTodoCreate`, `useBriefingNarration`) | P2 | 🔲 | 010 | A | FULL |
+| 011 | Hoist Daily Briefing components (`DailyBriefingApp`, sections, atoms) | P2 | ✅ | 010 | A | FULL |
+| 012 | Hoist `briefingService` (BFF `/narrate` client) | P2 | ✅ | 010 | A | FULL |
+| 013 | Hoist existing hooks (`useInlineTodoCreate`, `useBriefingNarration`) | P2 | ✅ | 010 | A | FULL |
 | 014 | Decompose `useNotificationData` → `useBriefingNotifications` + `useBriefingPreferences` + `useBriefingActions` | P2 | 🔲 | 011,012,013 | — | FULL |
 | 015 | Abstract dependencies — props/parameters; remove solution-local imports | P2 | 🔲 | 014 | — | FULL |
 | 016 | Subpath exports contract (`./components`, `./widgets`, `./hooks`, `./services`, `./types`) | P2 | 🔲 | 015 | — | FULL |
@@ -31,16 +31,16 @@
 | 024 | P2a unit + visual tests + dark-mode parity check | P2a | 🔲 | 021,022,023 | — | STANDARD |
 | 030 | `BuildChannelNarrationPrompt` emits `regardingId` per item + updated rule list (FR-15, FR-16) | P2b | ✅ | none | D | FULL |
 | 031 | `ParseChannelBullets` validates `primaryEntityId`; nulls invalid + logs (FR-17) | P2b | ✅ | 030 | — | FULL |
-| 032 | Unit tests (prompt content + validation logic) | P2b | 🔲 | 031 | — | STANDARD |
-| 033 | BFF publish-size delta + CVE verification (P2b) | P2b | 🔲 | 032 | — | STANDARD |
+| 032 | Unit tests (prompt content + validation logic) | P2b | ✅ | 031 | — | STANDARD |
+| 033 | BFF publish-size delta + CVE verification (P2b) | P2b | ✅ subsumed by 042 | 032 | — | STANDARD |
 | 040 | `CreateNotificationNodeExecutor` populates `data.actions[]` for visible-toasttype (FR-18) | P3 | ✅ | none | D | FULL |
 | 041 | Unit tests for visible vs hidden toasttype paths | P3 | ✅ | 040 | — | STANDARD |
-| 042 | BFF publish-size verification + E2E manual MDA bell test note | P3 | 🔲 | 041 | — | STANDARD |
+| 042 | BFF publish-size verification + E2E manual MDA bell test note | P3 | ✅ +0.00 MB delta | 041 | — | STANDARD |
 | 050 | Hoist `MicrosoftToDoIcon` to `@spaarke/ui-components/src/icons/` (FR-19a) | DD | ✅ | none | D | FULL |
 | 051 | Delete 3 solution-local `MicrosoftToDoIcon` copies; update imports (FR-19b) | DD | ✅ | 050 | — | FULL |
 | 052 | Create `createCodePageAuthInitializer` factory in `@spaarke/auth` (FR-20a) | DD | ✅ | none | D | FULL |
 | 053 | Migrate `DailyBriefing` solution to auth factory; delete local `authInit` | DD | ✅ | 052 | — | FULL |
-| 054 | Migrate `LegalWorkspace` + `SpaarkeAi` to auth factory; delete local `authInit` | DD | 🔲 | 053 | — | FULL |
+| 054 | Migrate `LegalWorkspace` + `SpaarkeAi` to auth factory; delete local `authInit` | DD | ✅ (lazy-singleton pattern) | 053 | — | FULL |
 | 055 | Consolidate `runtimeConfig` → `@spaarke/auth` singleton; delete 3 local copies (FR-21) | DD | 🔲 | 054 | — | FULL |
 | 060 | Deploy BFF (P2b + P3) via `bff-deploy` skill | Phase7 | 🔲 | 033,042 | E | FULL |
 | 061 | Redeploy standalone Daily Briefing code page via `code-page-deploy` | Phase7 | 🔲 | 017,055 | E | FULL |
