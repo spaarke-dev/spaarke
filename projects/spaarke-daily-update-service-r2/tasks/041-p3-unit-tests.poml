@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Unit tests for visible vs hidden toasttype paths</title>
+    <phase>P3: MDA Bell Deep-Links</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>042</blocks>
+    <tags>bff-api, testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test creation; closes BFF §10 test obligation for P3</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 040</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add unit tests for `CreateNotificationNodeExecutor` covering: (a) visible-toasttype notification has `data.actions[0].data.url == customData.actionUrl`; (b) hidden-toasttype notification has `data.actions` null/absent; (c) `customData.actionUrl` populated in both cases. Cover both `iterateItems` and standard paths.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in xUnit + `Sprk.Bff.Api.Tests` fixture patterns + Dataverse schema mocking.</role>
+
+  <goal>Three unit tests exist and pass; BFF §10 bullet 6 test obligation satisfied for P3.</goal>
+
+  <context>
+    <background>
+      Per BFF §10 bullet 6 (binding): PRs modifying `Services/` MUST add/update tests.
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">CLAUDE.md §10 bullet 6.</constraint>
+    <constraint source="project">Tests in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate or create `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs`.</step>
+    <step order="2">Test 1: visible-toasttype → assert `data.actions[0].data.url == customData.actionUrl`.</step>
+    <step order="3">Test 2: hidden-toasttype → assert `data.actions` is null/absent.</step>
+    <step order="4">Test 3: both cases → `customData.actionUrl` populated.</step>
+    <step order="5">Run `dotnet test`; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: change task 041 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test .NET project.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 3 tests exist and pass.</criterion>
+    <criterion testable="true">Both `iterateItems` + standard paths covered.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If fixture for `CreateNotificationNodeExecutor` doesn't exist yet, follow BFF F.2 inspection protocol when creating it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

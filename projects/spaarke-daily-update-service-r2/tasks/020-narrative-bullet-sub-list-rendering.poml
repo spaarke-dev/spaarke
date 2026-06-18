@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>`NarrativeBullet` renders per-item sub-list when `itemIds.length > 1` (FR-11)</title>
+    <phase>P2a: Hybrid Aggregation UX</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>021, 022, 023</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New UX feature; component change; blocks 021/022/023</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Lays sub-list skeleton; 021/022/023 fill in sub-row behaviors</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Enhance `NarrativeBullet` in `@spaarke/daily-briefing-components/components/` to render a per-item sub-list when `itemIds.length &gt; 1`. Sub-list is compact indented rows beneath the narrative line. This task establishes the rendering skeleton + visual layout; the three per-row controls (link, To-Do, Dismiss) are implemented in tasks 021/022/023.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 component composition, Griffel + semantic tokens, and React 19 conditional rendering.</role>
+
+  <goal>Aggregated bullets (N&gt;1 items) render an always-visible sub-list with N indented rows. Single-item bullets (N=1) render unchanged.</goal>
+
+  <context>
+    <background>
+      Per spec FR-11 and design.md §D4: AI-aggregated "Multiple X" bullets currently hide the underlying action items. The hybrid UX adds a per-item sub-list under the narrative.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + semantic tokens; assume `fontSizeBase200` + `spacingVerticalS` for sub-list density (spec assumption — may tune in review).</constraint>
+    <constraint source="project">FR-11: sub-list rendered ONLY when `itemIds.length &gt; 1`. Single-item bullets render unchanged.</constraint>
+    <constraint source="project">Per-row controls (link, To-Do, Dismiss) are added in tasks 021/022/023. This task lays skeleton + slots.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-021-fluent-ui-v9-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current `NarrativeBullet.tsx` — understand the single-line render path.</step>
+    <step order="2">Add conditional: when `itemIds.length &gt; 1`, render a sub-list container beneath the narrative line.</step>
+    <step order="3">For each item in `items` (the underlying `NotificationItem[]` corresponding to `itemIds`), render an indented row with three slots: (a) per-item entity link slot (task 021); (b) Add-to-To-Do button slot (task 022); (c) Dismiss button slot (task 023). For this task, render placeholders.</step>
+    <step order="4">Apply Griffel + semantic tokens (`fontSizeBase200`, `spacingVerticalS`, `colorNeutralForeground2` for sub-row text).</step>
+    <step order="5">Verify single-item bullets (N=1) render unchanged (no sub-list).</step>
+    <step order="6">Verify dark-mode parity.</step>
+    <step order="7">Run `npm run build` + dev serve; smoke test visually.</step>
+    <step order="8">Update TASK-INDEX.md: change task 020 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev server.</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Aggregated bullet renders sub-list (FR-11)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_dailyupdate</url>
+      <steps>
+        <step>Open Daily Briefing as user with at least one aggregated bullet (`itemIds.length &gt; 1`)</step>
+        <step>Verify the aggregated bullet shows narrative line</step>
+        <step>Verify sub-list with N rows renders beneath</step>
+        <step>Verify single-item bullets (N=1) render unchanged (no sub-list)</step>
+      </steps>
+      <expected>Sub-list shows N rows for aggregated bullets; single-item bullets unaffected</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Verify sub-list rows adapt</step>
+      </steps>
+      <expected>All colors use semantic tokens; no hard-coded values</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">When `itemIds.length &gt; 1`, sub-list with N rows renders beneath narrative.</criterion>
+    <criterion testable="true">When `itemIds.length === 1`, sub-list is NOT rendered.</criterion>
+    <criterion testable="true">Sub-row slots exist for tasks 021/022/023 to populate.</criterion>
+    <criterion testable="true">Dark mode parity preserved.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The three slot positions need to be addressable by tasks 021/022/023. Use clear named slots or a per-row component contract so the subsequent tasks know exactly where to plug in.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

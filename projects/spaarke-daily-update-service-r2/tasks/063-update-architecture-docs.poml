@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Update architecture docs (SC14)</title>
+    <phase>Phase7: Deployment + Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation-only; SC14 closure</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential; coordinates with SC14 verification</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update three architecture docs to reflect the new `@spaarke/daily-briefing-components` package + Pattern D dual-use shape:
+    - `docs/architecture/SPAARKEAI-COMPONENT-MODEL.md` — add the new package to the inventory + describe its role
+    - `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` — refresh the Daily Briefing section to reference the new package + the P1 seam
+    - `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` — update the dual-use widget table to list Daily Briefing alongside Calendar + Smart Todo
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in architecture documentation conventions.</role>
+
+  <goal>All three docs updated; SC14 verifiable.</goal>
+
+  <context>
+    <background>
+      Per SC14: architecture docs must reflect the new package and dual-use pattern.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">SC14: 3 docs updated.</constraint>
+    <constraint source="ADR-012">Pattern D dual-use documented.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update `SPAARKEAI-COMPONENT-MODEL.md` — add `@spaarke/daily-briefing-components` to the inventory table; describe its role (Pattern D dual-use; consumed by standalone code page + SpaarkeAi widget).</step>
+    <step order="2">Update `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` — refresh the Daily Briefing section to reference the new package + the `loadNotificationContext` factory option seam.</step>
+    <step order="3">Update `BUILD-A-NEW-WORKSPACE-WIDGET.md` — add Daily Briefing to the dual-use widget table (alongside Calendar + Smart Todo).</step>
+    <step order="4">Cross-check internal links remain valid.</step>
+    <step order="5">Update TASK-INDEX.md: change task 063 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File ops.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</output>
+    <output type="docs">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</output>
+    <output type="docs">docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 3 docs updated.</criterion>
+    <criterion testable="true">Daily Briefing listed in BUILD-A-NEW-WORKSPACE-WIDGET dual-use widget table.</criterion>
+    <criterion testable="true">Cross-references resolve.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec NFR-07 + CLAUDE.md doc-drift-audit: keep doc updates concise. Don't re-author the entire architecture doc; insert/update the Daily Briefing section only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>
