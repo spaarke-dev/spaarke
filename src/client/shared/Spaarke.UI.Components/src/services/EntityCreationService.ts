@@ -43,12 +43,13 @@ import { SdapApiClient, type IndexFileRequest, type IndexFileResult } from '@spa
  *
  * Per spaarke-multi-container-multi-index-r1 spec (FR-WIZ-01..05) the 5 parent-record
  * wizards (Matter, Project, Invoice, WorkAssignment, Event) and DocumentUploadWizard
- * cascade two fields from `businessunit` onto the create payload:
+ * cascade three fields from `businessunit` onto the create payload:
  *
  *   - `sprk_containerid` — SPE container/drive ID
- *   - `sprk_searchindexname` — Azure AI Search index name
+ *   - `sprk_searchindexname` — Azure AI Search index name (text, soak-only — Phase G/110 drop)
+ *   - `sprk_ai_search_index` — `sprk_aisearchindex` lookup (canonical Phase G post-2026-06-10)
  *
- * Both fields are OPTIONAL on `businessunit`. When unset on the BU, the helpers
+ * All three fields are OPTIONAL on `businessunit`. When unset on the BU, the helpers
  * leave the corresponding payload field untouched and the BFF tenant-default
  * chain (or downstream backfill) takes over server-side.
  */
@@ -57,6 +58,12 @@ export interface IUserBuCascadeDefaults {
   containerId?: string;
   /** `businessunit.sprk_searchindexname` for the current user's owning BU, or undefined if unset. */
   searchIndexName?: string;
+  /**
+   * GUID of `businessunit.sprk_ai_search_index` lookup target for the current user's owning BU,
+   * or undefined if unset. Phase G canonical field — wizards bind this as `sprk_aisearchindexes(<guid>)`
+   * via `@odata.bind` on the child entity's `sprk_AI_Search_Index` nav property.
+   */
+  searchIndexId?: string;
   /** GUID of the user's owning Business Unit (always set when the lookup succeeded). */
   businessUnitId?: string;
 }
@@ -392,7 +399,7 @@ export class EntityCreationService {
     const buRecord = await webApi.retrieveRecord(
       'businessunit',
       buId,
-      '?$select=sprk_containerid,sprk_searchindexname'
+      '?$select=sprk_containerid,sprk_searchindexname,_sprk_ai_search_index_value'
     );
 
     const normalize = (v: unknown): string | undefined => {
@@ -405,6 +412,7 @@ export class EntityCreationService {
       businessUnitId: buId,
       containerId: normalize(buRecord['sprk_containerid']),
       searchIndexName: normalize(buRecord['sprk_searchindexname']),
+      searchIndexId: normalize(buRecord['_sprk_ai_search_index_value']),
     };
   }
 

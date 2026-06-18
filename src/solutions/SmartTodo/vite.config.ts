@@ -79,6 +79,15 @@ export default defineConfig({
       "@spaarke/ui-components/utils": path.resolve(sharedLibRoot, "utils/index.ts"),
       "@spaarke/ui-components": path.resolve(sharedLibRoot, "index.ts"),
       "@spaarke/auth": authLibRoot,
+      // @spaarke/sdap-client — pulled in transitively via
+      // @spaarke/ui-components/services/EntityCreationService.ts (Phase G of
+      // multi-container-multi-index-r1). Matches the resolver used by the
+      // CreateMatter/Project/Event/WorkAssignmentWizard solutions. Source-
+      // resolves rather than dist-resolves so no pre-build is required.
+      "@spaarke/sdap-client": path.resolve(
+        __dirname,
+        "../../client/shared/Spaarke.SdapClient/src",
+      ),
     },
     // Ensure shared lib imports resolve from SmartTodo's node_modules
     dedupe: ["react", "react-dom", "@fluentui/react-components", "@fluentui/react-icons"],

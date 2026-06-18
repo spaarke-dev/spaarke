@@ -1,7 +1,7 @@
 # Task Index — spaarke-environment-provisioning-app
 
 > **Total Tasks**: 17
-> **Last Updated**: 2026-04-06
+> **Last Updated**: 2026-06-12
 
 ## Status Overview
 
@@ -27,8 +27,8 @@
 | 030 | Remove Environments from Options | 4 | ✅ | 016 |
 | 031 | Refactor RegistrationDataverseService URL | 4 | ✅ | 030 |
 | 032 | Update Documentation | 4 | ✅ | 031 |
-| 040 | E2E Testing Checklist | 5 | 🔲 | 032 |
-| 090 | Project Wrap-Up | 5 | 🔲 | 040 |
+| 040 | E2E Testing Checklist | 5 | ✅ | 032 |
+| 090 | Project Wrap-Up | 5 | ✅ | 040 |
 
 ## Parallel Execution Groups
 

@@ -275,4 +275,64 @@ describe('RegardingResolverApp', () => {
 
     expect(screen.getByText(/v1\.0\.0/)).toBeInTheDocument();
   });
+
+  // -------------------------------------------------------------------------
+  // FR-24 — R4-052: read-only mode MUST NOT trigger any write path
+  // -------------------------------------------------------------------------
+
+  test('FR-24 R4-052 — read-only mode renders no Select Record button (no write path reachable)', () => {
+    const { context, updateRecordMock } = buildContext();
+    const onRecordTypeChanged = jest.fn();
+    renderWithProvider(
+      <RegardingResolverApp
+        context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+        readOnly={true}
+        onRecordTypeChanged={onRecordTypeChanged}
+        version="1.0.0"
+      />
+    );
+
+    // The edit-mode CTA must be absent — there is no UI path to a write.
+    expect(screen.queryByTestId('regarding-resolver-select-record-button')).not.toBeInTheDocument();
+    // And no write has been issued during render.
+    expect(updateRecordMock).not.toHaveBeenCalled();
+    expect(onRecordTypeChanged).not.toHaveBeenCalled();
+  });
+
+  test('FR-24 R4-052 — read-only mode does NOT populate __sprk_regarding_pending__ on render', () => {
+    // Defensive: ensure no stale CREATE-mode bridge from a prior render leaks in.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).__sprk_regarding_pending__;
+
+    const { context } = buildContext();
+    renderWithProvider(
+      <RegardingResolverApp
+        context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+        readOnly={true}
+        onRecordTypeChanged={() => undefined}
+        version="1.0.0"
+      />
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((window as any).__sprk_regarding_pending__).toBeUndefined();
+  });
+
+  test('FR-24 R4-052 — read-only mode shows bound link without Clear affordance', () => {
+    const { context } = buildContext({
+      boundLookup: { id: 'rt-matter', name: 'Matter' },
+    });
+    renderWithProvider(
+      <RegardingResolverApp
+        context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+        readOnly={true}
+        onRecordTypeChanged={() => undefined}
+        version="1.0.0"
+      />
+    );
+
+    expect(screen.getByText('Matter')).toBeInTheDocument();
+    // No edit affordances — no Clear button reachable from the read-only branch.
+    expect(screen.queryByRole('button', { name: /Clear/i })).not.toBeInTheDocument();
+  });
 });

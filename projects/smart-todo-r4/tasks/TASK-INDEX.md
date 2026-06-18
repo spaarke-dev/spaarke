@@ -1,11 +1,11 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-10 (Wave G0 complete + new task 034 registered)
-> **Branch**: `work/smart-todo-r4`
-> **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
-> **Status**: 🔲 18 not-started · 🔄 0 in-progress · ✅ 13 complete · ❌ 0 blocked
-> **Active wave**: none — Wave G1+2a-followups ✅ complete (build-verified)
+> **Last Updated**: 2026-06-18 (Wave E ✅ COMPLETE — 102 + 103 + 104 all landed; awaiting PR + redeploy)
+> **Branch**: `work/smart-todo-r4-wave2`
+> **Total Tasks**: 37 (was 34; +102/103/104 Wave E widget/app parity from 2026-06-18 UAT round 2 — see [e-widget-app-parity-audit-2026-06-18.md](../notes/e-widget-app-parity-audit-2026-06-18.md))
+> **Status**: 🔲 2 not-started · 🔄 1 in-progress (092 awaiting UAT sign-off) · ✅ 34 complete · ❌ 0 blocked
+> **Active wave**: **Wave E ✅ COMPLETE** (102 widget Kanban hoist + 103 widget toolbar polish + 104 app chrome consolidation all landed). Remaining: 092 (Wave D deploy session, awaiting UAT sign-off — will need re-deploy after Wave E PR merges to master), 093 (UI test suite — superseded by iterative UAT), 098 (project wrap-up, HELD until UAT acceptance).
 
 ---
 
@@ -99,9 +99,9 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [031](031-B-assigned-to-me-filter.poml) | B — "Assigned to Me" filter mode (drop "My Tasks") | smart-todo, filter | ✅ (with 032, 033) | 030 | — |
-| 🔲 | [032](032-B-selection-aware-toolbar-actions.poml) | B — Selection-aware toolbar actions (Open / Delete / Email / Pin) | smart-todo, toolbar | ✅ (with 031, 033) | 012, 030 | 040 (Open action) |
-| 🔲 | [033](033-B-list-card-view-toggle.poml) | B — List / Card view toggle with persistence | smart-todo, user-preference | ✅ (with 031, 032) | 012, 030 | — |
+| ✅ | [031](031-B-assigned-to-me-filter.poml) | B — "Assigned to Me" is now the sole filter mode. Header.tsx Row 3 renders a single non-dismissible `<Tag>Assigned to Me</Tag>`; `MyTasksFilter.tsx` deleted; `TodoFilterMode` + `MyTasksFilterMode` types removed; `buildTodoItemsQuery(userId)` bakes `_sprk_assignedto_value eq ${userId}` into the filter unconditionally; useUserPreferences drops the `myTasksFilterMode` field (backwards-compatible on read). TypeScript clean across all 9 touched files. | smart-todo, filter | ✅ (with 032, 033) | 030 | — |
+| ✅ | [032](032-B-selection-aware-toolbar-actions.poml) | B — Selection-aware toolbar actions (Open / Delete / Email / Pin) — wired via `createToolbarActions` from new `components/Toolbar/`; Open dispatches `sprk-smarttodo:open-todos` window event (task 040 listener); Delete confirms + parallel `Xrm.WebApi.deleteRecord`; Email composes mailto:; Pin any-unpinned ⇒ pin-all, all-pinned ⇒ unpin-all per spec FR-08; 20+ executable-spec test cases (no runner yet) | smart-todo, toolbar | ✅ (with 031, 033) | 012, 030 | 040 (Open action) |
+| ✅ | [033](033-B-list-card-view-toggle.poml) | B — List/Card view toggle wired. New ListView + Header `viewMode` props consuming hoisted `<ViewToggle>`; persisted via `viewMode` field on `useUserPreferences` JSON envelope (preferencetype 100000000, no new optionset). Default = card. `npm run build` 3,274 modules 8.29s clean. | smart-todo, user-preference | ✅ (with 031, 032) | 012, 030 | — |
 | ✅ | [034](034-B-extend-useLaunchContext.poml) | B — Extended useLaunchContext (235→471 LOC, 22 tests) **(NEW from Phase 0)** + parseDataParams extended | smart-todo, hook, url-params | ✅ | — | 081, 082, 083, 084 |
 
 #### D sub-tasks (serial after 050)
@@ -109,7 +109,7 @@
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
 | ✅ | [051](051-D-add-to-todo-main-form.poml) | D — JS Web Resource `sprk_todo_regarding_presave.js` (347 LOC) + 9-section form-bind instructions doc. Live form-designer steps deferred to user. **PCF enhancement follow-up flagged** (see Wave outcomes below) | dataverse, form-designer, deploy | ❌ (after 050 ✅) | 050 ✅ | 081-084 |
-| 🔲 | [052](052-D-read-only-mode.poml) | D — Read-only mode for view-only roles | regarding, security | ❌ (after 051) | 050, 051 | — |
+| ✅ | [052](052-D-read-only-mode.poml) | D — Read-only mode verified + hardened. RegardingResolverHost already detects `context.mode.isControlDisabled` (lines 38-44); added defensive write-gates in `handleSelectRecord` + `handleClear` (early-return if `readOnly`); pre-save handler skips `formType === 3/4`; +3 unit tests (23 passing); PCF v1.0.0 → v1.1.0; webpack alias stubs `@spaarke/sdap-client` (PR #369 cascade workaround). Prod bundle 1.57 MiB (+10 KiB vs 050) | regarding, security | ❌ (after 051) | 050, 051 | — |
 
 ---
 
@@ -119,17 +119,17 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [040](040-C-wire-smarttodo-modal.poml) | C — Wire SmartTodo card-open to `<RecordNavigationModalShell>` with iframe | modal, iframe, smart-todo | ⚠️ | 010, 030 | 041, 042 |
-| 🔲 | [060](060-E-card-affordances.poml) | E — Card affordances (Open icon, double-click, selection checkbox) | smart-todo, ui | ⚠️ | 012, 030, 040 | — |
-| 🔲 | [070](070-F-vertical-kanban-orientation.poml) | F — Vertical Kanban orientation toggle | smart-todo, ui, layout | ⚠️ | 012, 030 | 071 |
+| ✅ | [040](040-C-wire-smarttodo-modal.poml) | C — Wire SmartTodo card-open to `<RecordNavigationModalShell>` with iframe | modal, iframe, smart-todo | ⚠️ | 010, 030 | 041, 042 |
+| ✅ | [060](060-E-card-affordances.poml) | E — Card affordances (Open icon, double-click, selection checkbox) | smart-todo, ui | ⚠️ | 012, 030, 040 | — |
+| ✅ | [070](070-F-vertical-kanban-orientation.poml) | F — Vertical Kanban orientation toggle (CSS transform-only, no DOM reflow) | smart-todo, ui, layout | ⚠️ | 012, 030 | 071 |
 
 #### Sub-tasks (serial after parents)
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [041](041-C-dirty-check-cross-frame-messaging.poml) | C — Cross-frame dirty-check postMessage protocol | cross-frame-messaging, dataverse-form | ❌ | 010, 040 | — |
-| 🔲 | [042](042-C-retire-TodoDetailPanel.poml) | C — Retire TodoDetailPanel side-pane | cleanup | ❌ | 040 | — |
-| 🔲 | [071](071-F-orientation-persistence.poml) | F — Persist orientation via sprk_userpreference | user-preference | ❌ | 070 | — |
+| ✅ | [041](041-C-dirty-check-cross-frame-messaging.poml) | C — Cross-frame dirty-check postMessage protocol (Wave C — JS web resource + shell + bind instructions doc) | cross-frame-messaging, dataverse-form | ❌ | 010, 040 | — |
+| ✅ | [042](042-C-retire-TodoDetailPanel.poml) | C — Retire TodoDetailPanel side-pane | cleanup | ❌ | 040 | — |
+| ✅ | [071](071-F-orientation-persistence.poml) | F — Persist orientation via sprk_userpreference | user-preference | ❌ | 070 | — |
 
 ---
 
@@ -137,10 +137,10 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [081](081-G-visualhost-on-matter-form.poml) | G — Visual Host on Matter main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
-| 🔲 | [082](082-G-visualhost-on-project-form.poml) | G — Visual Host on Project main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
-| 🔲 | [083](083-G-visualhost-on-invoice-form.poml) | G — Visual Host on Invoice main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
-| 🔲 | [084](084-G-visualhost-on-workassignment-form.poml) | G — Visual Host on WorkAssignment main form | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [081](081-G-visualhost-on-matter-form.poml) | G — Visual Host on Matter main form (10-section maker doc — Wave A) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [082](082-G-visualhost-on-project-form.poml) | G — Visual Host on Project main form (instructions doc — Wave B parallel) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [083](083-G-visualhost-on-invoice-form.poml) | G — Visual Host on Invoice main form → 10-section maker doc cloned from 081 template with Invoice substitutions | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
+| ✅ | [084](084-G-visualhost-on-workassignment-form.poml) | G — Visual Host on WorkAssignment main form (instructions doc — Wave B parallel) | dataverse, form-designer | ✅ | 051, 080, **034** | 092 |
 
 ---
 
@@ -148,9 +148,9 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [092](092-deploy-all-affected-solutions.poml) | Deploy all affected solutions to spaarkedev1 | deploy, smoke-test | ❌ | all 020-084 | 093, 094 |
+| 🔄 | [092](092-deploy-all-affected-solutions.poml) | Deploy all affected solutions to spaarkedev1 — **IN PROGRESS** (2026-06-16: SmartTodo + SpaarkeAi + RegardingResolver v1.1.0 + dirty-check JS deployed; golden-path smoke test pending) | deploy, smoke-test | ❌ | all 020-084 | 093, 094 |
 | 🔲 | [093](093-ui-test-suite-nfr-validation.poml) | UI test suite for NFR-05 / NFR-07 / NFR-08 | ui-test, a11y, performance | ❌ | 092 | 098 |
-| 🔲 | [094](094-grep-sweep-sprk-todoflag.poml) | Final grep sweep: 0 `sprk_todoflag` hits | regression, grep | ❌ | 092 | 098 |
+| ✅ | [094](094-grep-sweep-sprk-todoflag.poml) | Final grep sweep: 0 functional `sprk_todoflag` hits (2026-06-12; 45 comment/guard lines classified; stale SpeDocumentViewer bundle.js flagged → follow-up #6) | regression, grep | ❌ | ~~092~~ (re-sequenced first per user decision) | 098 |
 
 ---
 
@@ -158,7 +158,31 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [098](098-project-wrap-up.poml) | Project wrap-up — lessons-learned, README, repo-cleanup, PR | wrap-up, docs, pr | ❌ | 092, 093, 094 | — |
+| 🔲 | [098](098-project-wrap-up.poml) | Project wrap-up — lessons-learned, README, repo-cleanup, PR | wrap-up, docs, pr | ❌ | 092, 093, 094, **099, 100, 101, 102, 103, 104** | — |
+
+---
+
+### Wave D — Widget parity follow-up (post-PR-384 UAT, 2026-06-18)
+
+UAT screenshot 2026-06-18 surfaced 6 widget issues; diagnostic + plan in [d-widget-parity-audit-2026-06-18.md](../notes/d-widget-parity-audit-2026-06-18.md). All three land in ONE PR; widget feature parity is the user-facing acceptance criterion. **098 wrap-up depends on Wave D complete.**
+
+| Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
+|:---:|:---|---|---|:---:|---|---|
+| ✅ | [099](099-W1-widget-chrome-pattern-d.poml) | W-1 — Widget chrome consolidation + Pattern D alignment shipped. LW shim collapsed to Calendar shape (structural-only: no section toolbar; `title: "Smart To Do"` only). Widget `<PaneHeader>` removed; single `<Toolbar>` with `[SearchBox, +, Open, refresh]` in that order. Local debounced (150 ms) in-memory search across `sprk_name + sprk_description`; clears restore full list. Single-select `selectedId` powers selection-aware Open (disabled until 1 card selected). Co-exists cleanly with R4-101's grouped rendering (shared `filteredItems`). Builds: peer tsc 0 err; LegalWorkspace Vite 3,312 modules 13.51s 2,252 kB. Closes UAT 2 + 3 + 5. | widget, pattern-d, fluent-v9 | ✅ (parallel with 101) | 020, 030 | 100 |
+| ✅ | [100](100-W2-open-to-form-refetch.poml) | W-2 — Open-to-form launch protocol + post-wizard-close refetch (closes UAT 1/4: `useLaunchContext.openTodo` discriminator auto-mounts `<SmartTodoModal>`; BroadcastChannel `sprk_todo:created` wires refetch on wizard close) | widget, code-page, launch-context, modal | ❌ (serial after 099 on `todo.registration.ts`) | 099, 034, 040 | 098 |
+| ✅ | [101](101-W3-grouping-hoist.poml) | W-3 — Today/Tomorrow/Future grouping shipped. Hoisted `useKanbanColumns` into `@spaarke/smart-todo-components` (~340 LOC hook + `bucketTodoItems` pure helper + `IKanbanTodoLike`/`IKanbanDataverseService` types). Code Page consumer swapped to `@spaarke/smart-todo-components` import + passes `dataverseService: serviceRef.current` (structurally compatible). Widget renders 3 grouped sections via `bucketTodoItems(filteredItems, 60, 30)` with R4-099's single-select `selectedId` carried across groups. Builds: peer tsc 0 err; SmartTodo 3,279 modules 1,745 kB; LegalWorkspace 3,312 modules 2,252 kB. R4-020 deferred 13-file follow-up closed at hook-scope (full Kanban hoist still future work if surfaced). | widget, peer-package, hoist, fluent-v9 | ✅ (parallel with 099) | 020, 030 | 098 |
+
+---
+
+### Wave E — Widget/App parity round 2 (post-Wave-D UAT, 2026-06-18)
+
+UAT round 2 (post-Wave-D deploy) surfaced 11 functional gaps: 7 on the widget (drag-drop + multi-select + orientation + column colors + capital-case + search-as-icon + quick-add + always-on Open) and 4 on the app (consolidated chrome + smaller quick-create + 3-col default + single toolbar). Diagnostic + plan in [e-widget-app-parity-audit-2026-06-18.md](../notes/e-widget-app-parity-audit-2026-06-18.md). All three land in ONE PR; full widget/app parity is the user-facing acceptance criterion. **098 wrap-up depends on Wave E complete.**
+
+| Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
+|:---:|:---|---|---|:---:|---|---|
+| ✅ | [102](102-E1-widget-kanban-hoist.poml) | E-1 — Widget Kanban hoist shipped. Created `components/KanbanCard/` (368 LOC hoisted card, bit-for-bit visual + interaction parity with app) + `components/SmartTodoKanban/` (197 LOC domain composer wrapping `<KanbanBoard>` + `useKanbanColumns` + `<KanbanCard>` with drag-end / pin handlers) + `utils/todoScoring.ts` (shared score + due-label helpers) in `@spaarke/smart-todo-components`. Widget swapped grouped lists → `<SmartTodoKanban>`; selection model upgraded from `string\|null` → `Set<string>`; `<OrientationToggle>` added to toolbar with local state; built `dataverseService` adapter wrapping `webApi.updateRecord` for drag-drop + pin persistence. Code Page: import-source swap only (`./KanbanCard` → peer package); local `KanbanCard.tsx` (565 LOC) deleted. DnD lib clarified — `@hello-pangea/dnd` (not react-dnd) added as peerDep. SpaarkeAi vite.config added `@spaarke/sdap-client` workaround alias (7th surface; pre-existing PR #369 cascade — broke on master before this task too). Builds: peer pkg tsc clean; SmartTodo 1.75 MB / 475 KB gzip; LegalWorkspace 2.26 MB / 627 KB gzip; SpaarkeAi 3.85 MB / 1.05 MB gzip — all 4 green. Closes R4-020 deferred 13-file rich-feature subtree follow-up. | widget, peer-package, hoist, hello-pangea-dnd, kanban | ✅ (parallel with 104) | 020, 099, 101 | 103, 098 |
+| ✅ | [103](103-E2-widget-toolbar-polish.poml) | E-2 — Widget toolbar polish shipped. Toolbar reorganised to `[+ wizard][QuickAdd Input][Add btn] \| (spacer) \| [Open][Refresh][Orient][Search icon]`. Search becomes `<ToggleButton>` (Search20Regular icon, right-aligned) — toggling expands a SearchBox row BELOW the toolbar with autofocus; toggling OFF clears the query so filter and search-visibility stay coupled. Open is ALWAYS-ENABLED: 0 selected → `onOpenTodo()` no-arg → LW shim opens SmartTodo Code Page with NO launch data → app renders default Kanban view; 1+ → `onOpenTodo(first)` → existing R4-100 `openTodo` envelope path → auto-mounts modal. Open tooltip switches text by selection count. Column tints (UAT 5): `IKanbanColumn<T>` extended with optional `tintColor`; `bucketTodoItems` sets `colorPaletteRedBackground1`/`YellowBackground1`/`GreenBackground1`; `KanbanBoard.tsx` composes inline `style` from `accentColor` (top-border, existing) + `tintColor` (bg, new) — both backwards-compatible. Capital Case labels: already correct at `bucketTodoItems` source; `KanbanBoard.columnTitle` has no text-transform; widget's legacy `groupTitle` (with uppercase) is now dead code preserved for back-compat. Quick-add (UAT 7): inline Input + Add btn in left toolbar slot; Enter/click calls `webApi.createRecord('sprk_todo', {sprk_name: title})`; success clears + refetches; failure surfaces `<MessageBar intent="warning">` with `<Link>` "Open full wizard" recovery delegating to existing `onAddTodo`. `IWebApi` extended with optional `createRecord` — legacy hosts that omit it auto-suppress the QuickAdd group. LW shim's `handleOpenTodo` widened to `(todoId?: string) => void` (passes undefined data when no todoId). All 4 builds green: peer pkg tsc clean; SmartTodo 1.74 MB / 475 KB gzip; LegalWorkspace 2.27 MB / 628 KB gzip; SpaarkeAi 3.85 MB / 1.05 MB gzip. ADR-021 binding: semantic tokens only (no hex), Griffel for all static rules, runtime-data-driven inline styles only for tint/accent (established pattern). | widget, fluent-v9, toolbar, ux-polish | ❌ (serial after 102 — uses hoisted Kanban container's column-style hook points) | 099, 102 | 098 |
+| ✅ | [104](104-E3-app-chrome-consolidation.poml) | E-3 — App chrome consolidation shipped. Header.tsx rewritten as single Fluent v9 `<Toolbar>` landmark (was R4-030 4-row): `[ToDoIcon + "Smart To Do"] [QuickAdd Input + Add] | (spacer) | [Refresh + ViewToggle + OrientationToggle? + Settings + SearchBox]` — OR — selection-mode `[SelectionAwareToolbar + SearchBox]` when count > 0. QuickAdd dispatches new `QUICK_ADD_TODO_EVENT` window event consumed by SmartToDo (single-source handleAdd). SmartToDo gained `hideHeader` + `onSettingsOpenerReady` props so the consolidated Header owns chrome and the inner KanbanHeader is suppressed; threshold popover stays mounted (hidden anchor) so the gear button can open it via callback. Orientation hoisted to App-level via existing useUserPreferences envelope. viewMode default unchanged (`'card'` already maps to 3-col Kanban — audit's "rename to kanban" turned out functionally no-op). All Wave 2a/2b features preserved (R4-031/032/033/070/040). Build: SmartTodo Vite 3,286 modules / 1,753 kB / 476 kB gzip clean; LegalWorkspace Vite 3,319 modules / 2,259 kB clean. | code-page, fluent-v9, header, toolbar, ux-polish | ✅ (parallel with 102) | 030, 033, 099 | 098 |
 
 ---
 
@@ -176,7 +200,11 @@
 | **G2b-after** | 041, 042, 071 | 010 + 040 (for 041, 042); 070 (for 071) | 3 | Serial after their parent tasks |
 | **G2c — Parent forms** | 081, 082, 083, 084 | 051 + 080 | 4 | Each touches a different form |
 | **G3 — Deploy + Test** | 092 → 093 + 094 | All G2 complete | 1 then 2 | 093 + 094 parallel after 092 |
-| **G4 — Wrap-up** | 098 | G3 complete | 1 | Final task |
+| **GD-1 — Widget parity parallel** | 099, 101 | 020 + 030 (both ✅) | 2 | Disjoint files: 099 = shim + widget chrome; 101 = peer package hook hoist + widget rendering |
+| **GD-2 — Widget parity serial** | 100 | 099 + 034 + 040 (all ✅ after 099 lands) | 1 | Touches `todo.registration.ts` after 099's cleanup; serial dependency |
+| **GE-1 — Widget/app parity parallel** | 102, 104 | 099 + 101 (both ✅) | 2 | Disjoint files: 102 = peer package full Kanban hoist + widget consumer; 104 = app Header collapse + viewMode default |
+| **GE-2 — Widget toolbar polish serial** | 103 | 102 ✅ (uses hoisted Kanban container's column-style hook points) | 1 | Serial after 102; same widget files |
+| **G4 — Wrap-up** | 098 | G3 + GD + GE complete | 1 | Final task — also depends on Wave E |
 
 **Max-concurrency rule** (from project-pipeline skill): **6 agents per wave hard limit**. G2a + G2a-B (4 + 3 = 7) requires staging or single-agent fallback for the last task.
 
@@ -209,8 +237,18 @@ G2b SmartTodo Code Page (after G1, G2a-B)
 G3 Deployment (after everything)
   092 ← all 020-084 → 093, 094 (parallel)
 
+GD Widget parity (post-PR-384 UAT 2026-06-18)
+  099 ← 020, 030 (chrome + Pattern D alignment)
+  101 ← 020, 030 (grouping hoist) — parallel with 099
+  100 ← 099, 034, 040 (open + refetch) — serial after 099
+
+GE Widget/App parity round 2 (post-Wave-D UAT 2026-06-18)
+  102 ← 020, 099, 101 (full Kanban hoist + drag-drop + multi-select + orientation + pin)
+  104 ← 030, 033, 099 (app chrome consolidation + 3-col default) — parallel with 102
+  103 ← 099, 102 (toolbar polish + search-icon + always-Open + column colors + Capital case + quick-add) — serial after 102
+
 G4 Wrap-up
-  098 ← 092, 093, 094
+  098 ← 092, 093, 094, 099, 100, 101, 102, 103, 104
 ```
 
 ---
@@ -257,6 +295,7 @@ G4 Wrap-up
 | 3 | **PR #376 overlap**: `WidgetErrorBoundary.tsx` rewrite (17 add / 35 del) on `feature/ai-workspace-ui-r1-followups` — R4-020 LW shim consumes WidgetErrorBoundary | external PR | **Monitor** — open, not merged today | Re-verify usage when #376 merges |
 | 4 | **SmartTodo test runner**: pre-existing — no vitest/jest. 22 useLaunchContext tests are executable-spec shims | R4-034 / pre-existing | Low | ~2hr to wire vitest |
 | 5 | **LW Kanban rich-feature hoist**: 13-file subtree NOT hoisted into `@spaarke/smart-todo-components` 0.1.0 | R4-020 deliberate | Medium — future widget consumers need it; LW shim ships full features today | In R4-020 deliverable comments |
+| 6 | **Stale SpeDocumentViewer solution bundle**: checked-in `solution/.../bundle.js` (v1.0.16, built 2026-05-11) embeds pre-R3 legacy code incl. live `entity['sprk_todoflag'] = true` write path; deployed v1.0.16 carries same latent code | R4-094 sweep finding | **Medium-High** — rebuild + version-bump + repack against current shared libs in R4-092 master-side deploy (or verify legacy To Do wizard path unreachable) | `notes/grep-sweep-result.md` §3 |
 
 ---
 

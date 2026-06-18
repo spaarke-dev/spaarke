@@ -87,9 +87,9 @@ export interface IThresholdSettingsProps {
    * Called when user saves new thresholds.
    *
    * Receives only the threshold fields — the consumer is expected to merge
-   * with any other preference fields (R3 FR-12 added `myTasksFilterMode` to
-   * the same JSON record). `updatePreferences` accepts a Partial, so passing
-   * just the threshold pair is correct.
+   * with any other preference fields the JSON record may carry (e.g. future
+   * additions). `updatePreferences` accepts a Partial, so passing just the
+   * threshold pair is correct.
    */
   onSave: (prefs: Pick<ITodoKanbanPreferences, 'todayThreshold' | 'tomorrowThreshold'>) => void;
   /** The trigger element (settings button). */

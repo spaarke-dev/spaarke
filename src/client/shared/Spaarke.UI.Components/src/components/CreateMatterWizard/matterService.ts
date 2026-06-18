@@ -301,6 +301,17 @@ export class MatterService {
         guid: form.assignedOutsideCounselId,
       });
 
+    // Phase G (spaarke-multi-container-multi-index-r1): cascade BU's `sprk_ai_search_index`
+    // lookup onto the new Matter. Nav-prop discovered as `sprk_AI_Search_Index` (PascalCase).
+    // INV-5 moot — Matter create form has no field for the user to override this.
+    if (cascadeDefaults?.searchIndexId) {
+      lookups.push({
+        col: 'sprk_ai_search_index',
+        entitySet: 'sprk_aisearchindexes',
+        guid: cascadeDefaults.searchIndexId,
+      });
+    }
+
     for (const lk of lookups) {
       const navProp = navPropMap[lk.col] ?? lk.col;
       entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${lk.guid})`;

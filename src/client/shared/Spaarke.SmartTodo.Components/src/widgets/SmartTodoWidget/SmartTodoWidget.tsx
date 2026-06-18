@@ -1,27 +1,69 @@
 /**
  * SmartTodoWidget — host-agnostic SpaarkeAi workspace widget for sprk_todo.
  *
+ * R4 task 103 (E-2 — toolbar polish, 2026-06-18):
+ *   - SEARCH AS ICON (UAT 1): The toolbar SearchBox is replaced with a
+ *     `<ToggleButton>` (Search20Regular icon, right-aligned with the other
+ *     action icons). When the user toggles ON, a horizontal SearchBox row
+ *     renders BELOW the toolbar; toggling OFF collapses it AND clears the
+ *     query so the next open starts fresh.
+ *   - OPEN ALWAYS-ENABLED (UAT 2): The Open button is no longer disabled by
+ *     selection count. Behaviour:
+ *       * 0 selected → `onOpenTodo()` called with NO todoId → host shim
+ *         opens the SmartTodo Code Page at its DEFAULT view (3-col Kanban,
+ *         no auto-modal). `useLaunchContext` returns `undefined` for the
+ *         landing URL since no recognised launch action is present.
+ *       * 1+ selected → `onOpenTodo(firstSelectedId)` → host shim dispatches
+ *         the existing `openTodo` launch context, app auto-mounts the modal.
+ *   - COLUMN TINTS + CAPITAL CASE LABELS (UAT 5): Today/Tomorrow/Future
+ *     columns now carry a light Fluent v9 background tint
+ *     (`colorPaletteRedBackground1` / `YellowBackground1` / `GreenBackground1`)
+ *     in addition to their existing top-border accent. Labels are already
+ *     Capital Case in `bucketTodoItems()`; the `<KanbanBoard>` columnTitle
+ *     style does NOT apply text-transform, so they render verbatim.
+ *   - INLINE QUICK-ADD (UAT 7): The toolbar's left slot now contains
+ *     `[+ wizard] [QuickAdd Input] [Add btn]`. Typing a title + clicking Add
+ *     (or pressing Enter) calls `webApi.createRecord('sprk_todo', { sprk_name })`
+ *     directly — no wizard, no modal, no roundtrip to a separate Code Page.
+ *     On success: clear input + refetch. On error: surface a MessageBar with
+ *     a "Open full wizard" link that delegates to the existing `onAddTodo`
+ *     callback (the full wizard handles required fields the bare title can't).
+ *
+ * R4 task 099 (W-1 — widget chrome consolidation + Pattern D alignment, 2026-06-18):
+ *   - REMOVED `<PaneHeader>` entirely. Per the 2026-06-18 widget-parity audit,
+ *     the widget's PaneHeader was rendering a SECOND title bar on top of the
+ *     SectionPanel title that the LegalWorkspace shim already provides (mirrors
+ *     Calendar's canonical Pattern D — Calendar widget has no header of its own).
+ *   - ADDED a single `<Toolbar>` row containing `[SearchBox, +, Open, refresh]`
+ *     (audit issue 5 + 3). This is the widget's SOLE chrome row. (R4-103
+ *     later reorganised this to `[+ wizard] [QuickAdd] [Add] | (spacer) |
+ *     [Open] [Refresh] [Orient] [Search icon]` per UAT round 2.)
+ *   - ADDED SearchBox with local debounced state — filters items in-memory by
+ *     case-insensitive substring match against `sprk_name` and `sprk_description`.
+ *     No OData round-trip (sufficient for the widget's bounded result set).
+ *   - ADDED single-card selection state so the Open button is selection-aware
+ *     (disabled when 0 selected; enabled when 1 selected — mirrors the Code Page
+ *     `SelectionAwareToolbar` pattern at a smaller scope). (R4-103 made Open
+ *     always-enabled per UAT 2.)
+ *   - RENAMED default `title` prop from "My To Do List" to "Smart To Do".
+ *     Title is now used only for `aria-label` on the root region — the visible
+ *     title comes from the host's SectionPanel (LegalWorkspace shim) or, in
+ *     Direct widget mounts without a SectionPanel, the consumer must provide
+ *     their own title chrome around the widget.
+ *
  * R4 task 020 (Pattern D dual-use rebuild — 2026-06-10):
- *   - Replaces the stale deployed bundle that queried `sprk_event.sprk_todoflag`
- *     (retired in R3 FR-29 / OS-1). This rebuild queries `sprk_todo` directly.
- *   - Host-agnostic: ZERO subscription to LegalWorkspace-internal contexts
- *     (e.g., FeedTodoSyncContext). Cross-block sync is wired by the host shim
- *     via the `feedSync` prop (see types/todo.ts IFeedSyncBridge).
+ *   - Initial host-agnostic widget. ZERO subscription to LegalWorkspace-internal
+ *     contexts (e.g., FeedTodoSyncContext). Cross-block sync is wired by the host
+ *     shim via the `feedSync` prop (see types/todo.ts IFeedSyncBridge).
  *   - Mirrors the proven `CalendarWorkspaceWidget` Pattern D structure from
  *     `@spaarke/events-components` (R3 task 115).
  *
  * Query (spec.md FR-02):
  *   - Entity: `sprk_todo`
  *   - Filter: statecode eq 0 AND (statuscode eq 1 or statuscode eq 659490001)
- *     — Open (1) + In Progress (659490001) per R3 task 009.
- *   - Optional regarding filter: `_sprk_regarding<X>_value eq <recordId>` when
- *     `regardingContext` is supplied (LW host injects current workspace's lookup).
- *   - Optional owner clause: when `userId` is supplied AND no regardingContext,
- *     falls back to `_ownerid_value eq <userId>` so the widget renders the
- *     current user's active todos. Mirrors LW `buildOwnerFilter` shape.
+ *   - Optional regarding filter; owner fallback when no regarding context.
  *
  * 6-layout compatibility (spec.md FR-04):
- *   - Uses `PaneHeader` from @spaarke/ui-components for consistent header.
  *   - Body flexes with no fixed widths; cards stack vertically; truncation
  *     handles narrow panes.
  *   - All colors via Fluent v9 semantic tokens (light / dark / high-contrast
@@ -39,24 +81,39 @@
  *   - spec.md FR-04 (mounts cleanly under all 6 workspace layouts)
  *
  * See also:
+ *   - `projects/smart-todo-r4/notes/d-widget-parity-audit-2026-06-18.md` — W-1 audit
  *   - `projects/smart-todo-r4/notes/widget-surface-audit.md` — R4-001 audit
  *   - `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx`
  *     — canonical Pattern D worked example (R3 task 115 / R4 task 033b).
  */
 
 import * as React from 'react';
-import { Body1, Button, MessageBar, MessageBarBody, Spinner, Text } from '@fluentui/react-components';
-import { ArrowClockwiseRegular, TaskListAdd24Regular } from '@fluentui/react-icons';
-
-// Cross-package source import — same pattern as Calendar widget importing
-// DataGrid from Spaarke.UI.Components source. PaneHeader is a shared primitive
-// hoisted under ADR-012; importing the source path (rather than the package
-// root) keeps this peer package's tsc check from pulling the PCF-framework
-// surface (DatasetGrid, UniversalDatasetGrid, etc.) into compilation.
-import { PaneHeader } from '../../../../Spaarke.UI.Components/src/components/PaneHeader/PaneHeader';
+import {
+  Body1,
+  Button,
+  Input,
+  Link,
+  MessageBar,
+  MessageBarBody,
+  SearchBox,
+  Spinner,
+  Text,
+  ToggleButton,
+  Toolbar,
+  Tooltip,
+  type SearchBoxChangeEvent,
+  type InputOnChangeData,
+} from '@fluentui/react-components';
+import { ArrowClockwiseRegular, Add20Regular, Open20Regular, Search20Regular } from '@fluentui/react-icons';
+import {
+  OrientationToggle,
+  type Orientation,
+} from '../../../../Spaarke.UI.Components/src/components/OrientationToggle';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
+import type { IKanbanDataverseService } from '../../types/kanban';
+import { SmartTodoKanban } from '../../components/SmartTodoKanban';
 
 // ---------------------------------------------------------------------------
 // Public statuscode constants (R3 task 009 / OS-1)
@@ -66,6 +123,15 @@ export const TODO_STATUSCODE_OPEN = 1 as const;
 export const TODO_STATUSCODE_IN_PROGRESS = 659490001 as const;
 export const TODO_STATUSCODE_COMPLETED = 2 as const;
 export const TODO_STATUSCODE_DISMISSED = 659490002 as const;
+
+// ---------------------------------------------------------------------------
+// Search debounce — local SearchBox text is held by `searchQuery` state and
+// flushed to the filter applied to the rendered list after this delay. 150ms
+// is short enough that the user perceives results as live but long enough to
+// skip per-keystroke filter recomputes on long lists.
+// ---------------------------------------------------------------------------
+
+const SEARCH_DEBOUNCE_MS = 150;
 
 // ---------------------------------------------------------------------------
 // OData query builder — host-agnostic; takes the inputs the host injects.
@@ -166,17 +232,6 @@ function entityLogicalNameToLookup(entityLogicalName: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Due-date formatter (lightweight; full LW formatter stays in LW utils for now)
-// ---------------------------------------------------------------------------
-
-function formatDue(iso?: string): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -196,20 +251,45 @@ export interface SmartTodoWidgetProps {
    * FeedTodoSyncContext; SpaarkeAi Direct-widget consumers may omit it.
    */
   feedSync?: IFeedSyncBridge;
-  /** Title shown in the widget header. Default: "My To Do List". */
+  /**
+   * Title used for the root region's `aria-label`. Defaults to "Smart To Do".
+   *
+   * Post-099 (Pattern D consolidation): the widget no longer renders a visible
+   * title bar — the host (LegalWorkspace SectionPanel or Direct-widget caller)
+   * owns the visible title. This prop survives for accessibility only.
+   */
   title?: string;
   /** Notify the host of the active count (for badge / tab counter). */
   onBadgeCountChange?: (count: number) => void;
   /** Expose the refetch trigger to the host (for header refresh button). */
   onRefetchReady?: (refetch: () => void) => void;
   /**
-   * Open handler for a clicked todo. Hosts wire to their navigation surface
-   * (e.g., `Xrm.Navigation.navigateTo({pageType: 'webresource', webresourceName: 'sprk_smarttodo', data: 'eventId=<id>'})`
-   * or, in R4 C work, the new `<RecordNavigationModalShell>` per FR-16).
+   * Open handler — called when the user clicks the Open button OR a card's
+   * Open icon. Hosts wire to their navigation surface.
+   *
+   * R4 task 103 (E-2, 2026-06-18) — UAT 2 made Open always-enabled. When
+   * called with NO `todoId` (toolbar Open with 0 cards selected), the host
+   * shim should open the SmartTodo Code Page at its DEFAULT view (no
+   * `openTodo` launch discriminator → `useLaunchContext` returns undefined
+   * → app renders the Kanban). When called WITH a `todoId` (1+ selected, or
+   * per-card Open icon), the shim dispatches the existing `openTodo` launch
+   * context so the app auto-mounts `<SmartTodoModal>` on that record.
+   *
+   * Hosts must accept the no-`todoId` case; passing the param through `undefined`
+   * to the existing `openTodo`-launch URL construction is the correct behavior
+   * (the Code Page's `useLaunchContext` returns `undefined` for missing keys
+   * — see `parseLaunchContextFromSearch` in `useLaunchContext.ts`).
    */
-  onOpenTodo?: (todoId: string) => void;
+  onOpenTodo?: (todoId?: string) => void;
   /** Optional "+ New" handler — opens the host's CreateTodoWizard. */
   onAddTodo?: () => void;
+  /**
+   * Optional placeholder for the inline QuickAdd Input. Defaults to
+   * "Quick add a to-do…". Hosts can override for localised UX or to
+   * emphasise the quick-add affordance differently in standalone vs
+   * embedded mounts.
+   */
+  quickAddPlaceholder?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,11 +303,12 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   scope,
   businessUnitId,
   feedSync,
-  title = 'My To Do List',
+  title = 'Smart To Do',
   onBadgeCountChange,
   onRefetchReady,
   onOpenTodo,
   onAddTodo,
+  quickAddPlaceholder = 'Quick add a to-do…',
 }) => {
   const styles = useSmartTodoWidgetStyles();
 
@@ -236,10 +317,63 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   const [error, setError] = React.useState<string | null>(null);
   const [fetchKey, setFetchKey] = React.useState(0);
 
+  // R4 task 102 (E-1, 2026-06-18) — selection model upgraded from single
+  // (`string | null`) to MULTI (`Set<string>`) per UAT issue 6 (cards need
+  // multi-select parity with the app's `<KanbanCard>`). The hoisted
+  // `<KanbanCard>` (via `<SmartTodoKanban>`) renders a per-card checkbox
+  // bound to this Set + the `toggleSelect` callback. The Open button is
+  // enabled when at least one card is selected (any of N opens the modal on
+  // the FIRST id — matches app's selection-aware toolbar pattern).
+  const [selectedIds, setSelectedIds] = React.useState<ReadonlySet<string>>(() => new Set());
+
+  // R4 task 102 (E-1, 2026-06-18) — local orientation state. Kept WIDGET-LOCAL
+  // (not persisted via `useUserPreferences`) because the widget mounts in
+  // multiple workspace contexts and forcing per-context Dataverse round-trips
+  // would inflate cold-start time. The Code Page (which is the user's "Smart
+  // To Do home") persists orientation via `useUserPreferences` (R4-071) —
+  // that's the canonical persistence point. Default 'horizontal' matches the
+  // Code Page default + the original app behaviour.
+  const [orientation, setOrientation] = React.useState<Orientation>('horizontal');
+
+  // SearchBox — local controlled value debounced into `appliedQuery` which
+  // drives the in-memory filter.
+  const [searchQuery, setSearchQuery] = React.useState<string>('');
+  const [appliedQuery, setAppliedQuery] = React.useState<string>('');
+
+  // R4 task 103 (E-2, 2026-06-18) — search expand/collapse state (UAT 1).
+  // The search icon toggles this; when true, the SearchBox renders in a row
+  // BELOW the toolbar (not in the toolbar itself). Toggling OFF clears the
+  // query so the next open starts fresh — keeps "search" and "filter is
+  // active" perceptually coupled. Default closed for low visual weight.
+  const [isSearchExpanded, setIsSearchExpanded] = React.useState<boolean>(false);
+
+  // R4 task 103 (E-2, 2026-06-18) — inline quick-add state (UAT 7).
+  // Title typed into the toolbar's QuickAdd Input. Submitted on Enter or
+  // Add-button click. After successful create, the field clears + the widget
+  // refetches. On error (missing required fields, etc.), `quickAddError`
+  // surfaces a MessageBar with a "Open full wizard" link.
+  const [quickAddValue, setQuickAddValue] = React.useState<string>('');
+  const [quickAddError, setQuickAddError] = React.useState<string | null>(null);
+  const [isQuickAdding, setIsQuickAdding] = React.useState<boolean>(false);
+
   // Stable refetch — bumps the fetchKey so the effect re-runs.
   const refetch = React.useCallback(() => {
     setFetchKey(k => k + 1);
   }, []);
+
+  // -------------------------------------------------------------------------
+  // Search debounce — flush `searchQuery` to `appliedQuery` after a short
+  // delay so we don't re-filter on every keystroke. 150ms feels live but
+  // skips redundant work for fast typers.
+  // -------------------------------------------------------------------------
+
+  React.useEffect(() => {
+    if (searchQuery === appliedQuery) return;
+    const handle = window.setTimeout(() => {
+      setAppliedQuery(searchQuery);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
+  }, [searchQuery, appliedQuery]);
 
   // -------------------------------------------------------------------------
   // Query effect
@@ -326,53 +460,311 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   }, [items.length, onBadgeCountChange]);
 
   // -------------------------------------------------------------------------
-  // Render
+  // In-memory search filter — case-insensitive substring match across
+  // `sprk_name` (subject) and `sprk_description`. Cheap to include both
+  // since `description` is already in the $select.
   // -------------------------------------------------------------------------
 
-  const handleCardClick = React.useCallback(
-    (todoId: string) => {
-      onOpenTodo?.(todoId);
+  const filteredItems = React.useMemo(() => {
+    const q = appliedQuery.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(item => {
+      const name = (item.sprk_name ?? '').toLowerCase();
+      const desc = (item.sprk_description ?? '').toLowerCase();
+      return name.includes(q) || desc.includes(q);
+    });
+  }, [items, appliedQuery]);
+
+  // Prune stale selections when the visible list changes (search filter,
+  // refetch removed an item) so the multi-select Set never holds ids that
+  // aren't currently rendered.
+  React.useEffect(() => {
+    setSelectedIds(prev => {
+      if (prev.size === 0) return prev;
+      const visibleIds = new Set(filteredItems.map(t => t.sprk_todoid));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (visibleIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [filteredItems]);
+
+  // -------------------------------------------------------------------------
+  // Handlers
+  // -------------------------------------------------------------------------
+
+  const handleSearchChange = React.useCallback((_e: SearchBoxChangeEvent, data: InputOnChangeData) => {
+    setSearchQuery(data.value);
+  }, []);
+
+  // R4 task 102 (E-1, 2026-06-18) — multi-select toggle. The hoisted
+  // `<KanbanCard>` checkbox dispatches this for every check/uncheck. The
+  // resulting Set drives both the card's selection state AND the Open button's
+  // enabled state.
+  const handleToggleSelect = React.useCallback((todoId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(todoId)) {
+        next.delete(todoId);
+      } else {
+        next.add(todoId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleOpenSelected = React.useCallback(() => {
+    if (!onOpenTodo) return;
+    // R4 task 103 (E-2, 2026-06-18) — UAT 2 made Open always-enabled:
+    //   - 0 selected → call onOpenTodo() with NO todoId — host shim opens
+    //     the SmartTodo Code Page at its default Kanban view (no openTodo
+    //     launch discriminator → useLaunchContext returns undefined).
+    //   - 1+ selected → call onOpenTodo(first) — host shim dispatches the
+    //     existing openTodo launch context (R4-100), app auto-mounts modal.
+    if (selectedIds.size === 0) {
+      onOpenTodo();
+      return;
+    }
+    const first = selectedIds.values().next().value;
+    if (first) {
+      onOpenTodo(first);
+    }
+  }, [selectedIds, onOpenTodo]);
+
+  // R4 task 103 (E-2, 2026-06-18) — search expand toggle handler (UAT 1).
+  // Toggling OFF clears both the live and applied query so the filter resets
+  // — visible "search is closed" === "no filter active".
+  const handleToggleSearch = React.useCallback(() => {
+    setIsSearchExpanded(prev => {
+      const next = !prev;
+      if (!next) {
+        setSearchQuery('');
+        setAppliedQuery('');
+      }
+      return next;
+    });
+  }, []);
+
+  // R4 task 103 (E-2, 2026-06-18) — quick-add handlers (UAT 7).
+  const handleQuickAddChange = React.useCallback(
+    (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
+      setQuickAddValue(data.value);
+      // Clearing the input also clears any prior error so the next attempt
+      // starts fresh visually.
+      if (quickAddError) setQuickAddError(null);
     },
-    [onOpenTodo]
+    [quickAddError]
   );
 
-  const renderItem = (item: ITodoRecord) => {
-    const due = formatDue(item.sprk_duedate);
-    const status = item.statuscode === TODO_STATUSCODE_IN_PROGRESS ? 'In progress' : 'Open';
-    return (
-      <div
-        key={item.sprk_todoid}
-        className={styles.todoCard}
-        role="button"
-        tabIndex={0}
-        onClick={() => handleCardClick(item.sprk_todoid)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            handleCardClick(item.sprk_todoid);
+  const submitQuickAdd = React.useCallback(async () => {
+    const title = quickAddValue.trim();
+    if (!title) return;
+    if (!webApi.createRecord) {
+      // Defensive guard — the toolbar suppresses the QuickAdd group when
+      // createRecord isn't wired, so this branch should be unreachable. Log
+      // a warning if it does fire so the wiring gap is visible.
+      // eslint-disable-next-line no-console
+      console.warn('[SmartTodoWidget] quickAdd invoked without webApi.createRecord — input ignored.');
+      return;
+    }
+    setIsQuickAdding(true);
+    setQuickAddError(null);
+    try {
+      await webApi.createRecord('sprk_todo', { sprk_name: title });
+      setQuickAddValue('');
+      refetch();
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : 'Could not create the to-do.';
+      // eslint-disable-next-line no-console
+      console.warn('[SmartTodoWidget] quickAdd create failed:', err);
+      setQuickAddError(message);
+    } finally {
+      setIsQuickAdding(false);
+    }
+  }, [quickAddValue, webApi, refetch]);
+
+  const handleQuickAddClick = React.useCallback(() => {
+    void submitQuickAdd();
+  }, [submitQuickAdd]);
+
+  const handleQuickAddKeyDown = React.useCallback(
+    (ev: React.KeyboardEvent<HTMLInputElement>) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        void submitQuickAdd();
+      }
+    },
+    [submitQuickAdd]
+  );
+
+  // "Open full wizard" recovery link in the quick-add error MessageBar
+  // delegates to the existing wizard launcher. Closes the error UX loop —
+  // user is never stuck if Dataverse rejects the bare-title create.
+  const handleOpenWizardFromError = React.useCallback(() => {
+    setQuickAddError(null);
+    setQuickAddValue('');
+    onAddTodo?.();
+  }, [onAddTodo]);
+
+  // -------------------------------------------------------------------------
+  // R4 task 102 (E-1, 2026-06-18) — Dataverse service adapter for the hoisted
+  // Kanban hook's column / pin persistence path. Wraps the host-injected
+  // `webApi.updateRecord` (when available) so drag-drop and pin toggles
+  // persist to `sprk_todo`. When `updateRecord` isn't provided (legacy host),
+  // the hook falls back to local-only mutations + a console warning — drag is
+  // still visually responsive, just non-durable.
+  //
+  // The adapter is memoised on `webApi` so the hook's persistence callbacks
+  // keep stable identity across renders.
+  // -------------------------------------------------------------------------
+
+  const dataverseService = React.useMemo<IKanbanDataverseService | undefined>(() => {
+    if (!webApi.updateRecord) return undefined;
+    const update = webApi.updateRecord.bind(webApi);
+    return {
+      async updateEventColumn(todoId, column) {
+        try {
+          await update('sprk_todo', todoId, { sprk_todocolumn: column });
+          return { success: true };
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[SmartTodoWidget] updateEventColumn failed', err);
+          return { success: false };
+        }
+      },
+      async updateEventPinned(todoId, pinned) {
+        try {
+          await update('sprk_todo', todoId, { sprk_todopinned: pinned });
+          return { success: true };
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[SmartTodoWidget] updateEventPinned failed', err);
+          return { success: false };
+        }
+      },
+      async batchUpdateEventColumns(updates) {
+        let allOk = true;
+        for (const u of updates) {
+          try {
+            await update('sprk_todo', u.eventId, { sprk_todocolumn: u.column });
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn('[SmartTodoWidget] batchUpdateEventColumns row failed', err);
+            allOk = false;
           }
-        }}
-        aria-label={`${item.sprk_name}${due ? `, due ${due}` : ''}, ${status}`}
-      >
-        <span className={styles.cardTitle}>{item.sprk_name || 'Untitled to-do'}</span>
-        <span className={styles.cardMeta}>
-          {due && <Text size={200}>{due}</Text>}
-          <span className={styles.statusBadge}>{status}</span>
-        </span>
-      </div>
-    );
-  };
+        }
+        return { success: allOk };
+      },
+    };
+  }, [webApi]);
+
+  // -------------------------------------------------------------------------
+  // R4 task 103 (E-2, 2026-06-18) — Open is ALWAYS-ENABLED (UAT 2). Wave D
+  // (R4-099) made it selection-aware (disabled when 0 selected); R4-102 made
+  // it permissive (1..N); R4-103 removes the disable entirely so users can
+  // always "just open the app" — with no selection, the app lands on its
+  // default Kanban view; with selection, on the first selected record's
+  // modal. See `handleOpenSelected` for the branching.
+  // -------------------------------------------------------------------------
+
+  // Tooltip text reflects which mode Open will use, so the affordance is
+  // never opaque even when the button is always live.
+  const openTooltip =
+    selectedIds.size === 0
+      ? 'Open Smart To Do'
+      : selectedIds.size === 1
+        ? 'Open selected to-do'
+        : `Open first selected to-do (${selectedIds.size} selected)`;
+
+  // QuickAdd is only available when the host's webApi exposes createRecord.
+  // When absent (legacy hosts, read-only mounts), the QuickAdd Input + Add
+  // button are suppressed; the `+` wizard button remains as the only create
+  // affordance.
+  const quickAddAvailable = typeof webApi.createRecord === 'function';
+  const quickAddDisabled = quickAddValue.trim().length === 0 || isQuickAdding;
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
 
   return (
     <div
       className={styles.root}
       role="region"
-      aria-label={`${title}, ${items.length} item${items.length === 1 ? '' : 's'}`}
+      aria-label={`${title}, ${filteredItems.length} item${filteredItems.length === 1 ? '' : 's'}`}
     >
-      <PaneHeader
-        title={items.length > 0 ? `${title} (${items.length})` : title}
-        rightSlot={
-          <>
+      {/*
+        R4 task 103 (E-2, 2026-06-18) — toolbar layout reorganised to:
+          LEFT:  [+ wizard] [QuickAdd Input] [Add btn]
+          (spacer)
+          RIGHT: [Open] [Refresh] [Orient] [Search icon toggle]
+
+        Tab order matches visual order. All icon-only buttons carry both an
+        `aria-label` AND a `<Tooltip relationship="label">` per Fluent v9
+        accessibility conventions.
+      */}
+      <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
+        {/* ── LEFT: wizard + QuickAdd ─────────────────────────────────── */}
+        <div className={styles.toolbarLeft}>
+          {onAddTodo && (
+            <Tooltip content="New to-do (full form)" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Add20Regular />}
+                onClick={onAddTodo}
+                aria-label="New to-do (full form)"
+              />
+            </Tooltip>
+          )}
+          {quickAddAvailable && (
+            <>
+              <Input
+                size="small"
+                value={quickAddValue}
+                placeholder={quickAddPlaceholder}
+                onChange={handleQuickAddChange}
+                onKeyDown={handleQuickAddKeyDown}
+                aria-label="Quick add a new to-do"
+                disabled={isQuickAdding}
+                className={styles.quickAddInput}
+              />
+              <Tooltip content="Add to-do (Enter)" relationship="label">
+                <Button
+                  appearance="primary"
+                  size="small"
+                  onClick={handleQuickAddClick}
+                  disabled={quickAddDisabled}
+                  aria-label="Add to-do"
+                >
+                  Add
+                </Button>
+              </Tooltip>
+            </>
+          )}
+        </div>
+
+        {/* ── SPACER ──────────────────────────────────────────────────── */}
+        <div className={styles.toolbarSpacer} />
+
+        {/* ── RIGHT: actions + search icon ────────────────────────────── */}
+        <div className={styles.toolbarActions}>
+          <Tooltip content={openTooltip} relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Open20Regular />}
+              onClick={handleOpenSelected}
+              aria-label={openTooltip}
+            />
+          </Tooltip>
+          <Tooltip content="Refresh to-do list" relationship="label">
             <Button
               appearance="subtle"
               size="small"
@@ -380,18 +772,66 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
               onClick={refetch}
               aria-label="Refresh to-do list"
             />
-            {onAddTodo && (
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<TaskListAdd24Regular />}
-                onClick={onAddTodo}
-                aria-label="Add new to-do"
-              />
-            )}
-          </>
-        }
-      />
+          </Tooltip>
+          {/* R4 task 102 (E-1, 2026-06-18) — orientation toggle. Mirrors the
+              Code Page's `<OrientationToggle>` so the widget can flip between
+              horizontal columns (default) and vertical stacked sections.
+              Local-only state — see `useState` block above for rationale. */}
+          <OrientationToggle orientation={orientation} onChange={setOrientation} />
+          {/* R4 task 103 (E-2, 2026-06-18) — search-as-icon (UAT 1). The
+              SearchBox lives in an expandable row BELOW this toolbar; this
+              ToggleButton controls its visibility. Right-aligned with the
+              other action icons so search reads as one of several tools
+              rather than a permanently-occupied lane. */}
+          <Tooltip content={isSearchExpanded ? 'Close search' : 'Search to-dos'} relationship="label">
+            <ToggleButton
+              appearance="subtle"
+              size="small"
+              icon={<Search20Regular />}
+              checked={isSearchExpanded}
+              onClick={handleToggleSearch}
+              aria-label={isSearchExpanded ? 'Close search' : 'Open search'}
+              aria-expanded={isSearchExpanded}
+            />
+          </Tooltip>
+        </div>
+      </Toolbar>
+
+      {/* ── Expanded search row (R4-103, UAT 1) ─────────────────────────
+          Conditionally rendered so it doesn't reserve vertical space when
+          collapsed. Layout sits between the toolbar and the error/body so
+          the SearchBox always reads as a contiguous extension of the chrome
+          rather than floating above the cards. */}
+      {isSearchExpanded && (
+        <div className={styles.searchRow}>
+          <div className={styles.searchWrap}>
+            <SearchBox
+              value={searchQuery}
+              placeholder="Search to-dos…"
+              onChange={handleSearchChange}
+              aria-label="Search to-dos"
+              size="small"
+              autoFocus
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Quick-add error (R4-103, UAT 7) ───────────────────────────── */}
+      {quickAddError && (
+        <div className={styles.errorWithLink}>
+          <MessageBar intent="warning" layout="multiline">
+            <MessageBarBody>
+              {quickAddError}{' '}
+              {onAddTodo && (
+                <Link as="button" onClick={handleOpenWizardFromError} inline>
+                  Open full wizard
+                </Link>
+              )}
+            </MessageBarBody>
+          </MessageBar>
+        </div>
+      )}
 
       {/* Error banner */}
       {error && (
@@ -415,6 +855,13 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
           </div>
         )}
 
+        {!isLoading && !error && filteredItems.length === 0 && items.length > 0 && (
+          <div className={styles.emptyContainer} role="status" aria-live="polite">
+            <Body1>No matches</Body1>
+            <Text size={200}>No to-dos match &quot;{appliedQuery}&quot;.</Text>
+          </div>
+        )}
+
         {!isLoading && !error && items.length === 0 && (
           <div className={styles.emptyContainer} role="status" aria-live="polite">
             <Body1>All caught up</Body1>
@@ -422,7 +869,27 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
           </div>
         )}
 
-        {!isLoading && !error && items.length > 0 && <div className={styles.cardList}>{items.map(renderItem)}</div>}
+        {/* R4 task 102 (E-1, 2026-06-18) — full Kanban replaces the R4-101
+            grouped lists. `<SmartTodoKanban>` consumes the same hoisted
+            `useKanbanColumns` hook internally + renders cards via the hoisted
+            `<KanbanCard>` — ONE source of truth shared with the Code Page.
+            Drag-drop column changes + pin toggles persist through the
+            `dataverseService` adapter built above (when the host's `webApi`
+            exposes `updateRecord`). Multi-select state lives in this widget
+            and threads through to per-card checkboxes. */}
+        {!isLoading && !error && filteredItems.length > 0 && (
+          <div className={styles.kanbanContainer}>
+            <SmartTodoKanban<ITodoRecord>
+              items={filteredItems}
+              dataverseService={dataverseService}
+              selectedIds={selectedIds}
+              onToggleSelect={handleToggleSelect}
+              onOpenTodo={onOpenTodo}
+              orientation={orientation}
+              ariaLabel={`${title} Kanban board`}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

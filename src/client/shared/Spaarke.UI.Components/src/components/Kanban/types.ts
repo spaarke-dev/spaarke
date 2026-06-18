@@ -33,6 +33,18 @@ export interface IKanbanColumn<T> {
   items: T[];
   /** Optional CSS colour for the column's top accent border. */
   accentColor?: string;
+  /**
+   * Optional CSS background colour applied to the column container as a
+   * gentle wash behind cards (R4 task 103 — UAT 5).
+   *
+   * Recommended: use the lightest Fluent v9 semantic palette tokens
+   * (`tokens.colorPalette<Hue>Background1`) so the tint never competes with
+   * card content and dark/HC mode adapt automatically.
+   *
+   * Coexists with `accentColor` (the top border accent). Both can be set on
+   * the same column for a layered "border accent + background wash" treatment.
+   */
+  tintColor?: string;
 }
 
 /**
@@ -46,6 +58,19 @@ export type KanbanColumn<T> = IKanbanColumn<T>;
 // ---------------------------------------------------------------------------
 // IKanbanBoardProps — props for the generic KanbanBoard component
 // ---------------------------------------------------------------------------
+
+/**
+ * Board layout orientation.
+ *
+ * - `horizontal` (default) — columns flow side-by-side (classic Kanban).
+ * - `vertical`             — columns stack top-to-bottom as collapsible
+ *                            sections; cards stack within each section.
+ *
+ * Implemented as a CSS-only swap (`flex-direction: row` ↔ `column`) — no
+ * React tree re-creation, so cards keep their state across an orientation
+ * change (smart-todo-r4 spec NFR-08: <300ms switch, no jank).
+ */
+export type KanbanOrientation = 'horizontal' | 'vertical';
 
 /** Props for the generic KanbanBoard component. */
 export interface IKanbanBoardProps<T> {
@@ -63,6 +88,14 @@ export interface IKanbanBoardProps<T> {
   collapsedColumns?: ReadonlySet<string>;
   /** Called when a column header is clicked to toggle collapse. */
   onToggleCollapse?: (columnId: string) => void;
+  /**
+   * Board flow direction. Defaults to `'horizontal'` (backwards-compatible).
+   * Setting this to `'vertical'` swaps the CSS layout only — same React
+   * tree, no card-state loss. See {@link KanbanOrientation}.
+   *
+   * smart-todo-r4 spec FR-28 / FR-29 / NFR-08.
+   */
+  orientation?: KanbanOrientation;
 }
 
 // ---------------------------------------------------------------------------

@@ -136,12 +136,16 @@ jobs:
   client-quality:
     name: Client Quality (Prettier + ESLint)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Auto-format push-back on PRs
     steps:
       - name: Configure git line endings
         run: git config --global core.autocrlf true
 
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -165,22 +169,55 @@ jobs:
             ${{ runner.os }}-npm-pcf-
 
       - name: Install root dependencies (Prettier)
-        run: npm ci --ignore-scripts
+        # `npm install` instead of `npm ci` per root CLAUDE.md §11 Node Installs:
+        # this repo's lockfiles drift frequently; strict `npm ci` blocks CI on
+        # transitive churn that's harmless at install time. `npm install` reads
+        # the lockfile as hints but does not enforce strict sync.
+        # Established pattern across ~14 Vite solutions + Build-AllClientComponents.ps1.
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+
+      - name: Prettier auto-fix
+        run: npx prettier --write "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
+
+      - name: Push Prettier fixes
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ -n "$(git diff --name-only)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -u
+            git commit -m "style: auto-format Prettier (CI)"
+            git push
+            echo "::notice::Prettier fixes auto-committed and pushed to PR branch."
+          fi
 
       - name: Prettier format check
         run: npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
 
       - name: Install PCF dependencies (ESLint)
         working-directory: src/client/pcf
-        run: npm ci --ignore-scripts
+        # Same `npm install` pattern as the root step above — see comment there.
+        # PCF lockfile drifts on dev-dep bumps (e.g. eslint 9.39.4 was a
+        # transitive of @microsoft/eslint-plugin-power-apps that broke `npm ci`
+        # on 2026-06-18 / PR #391).
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
       - name: ESLint check
         # --max-warnings 0 dropped: pre-existing baseline has 186 warnings
         # (window.top usage in Power Apps integration code, unused-vars in catch blocks).
         # Mirrors the WarningsNotAsErrors policy applied to C# (visible but non-blocking).
         # Follow-on cleanup tracked per docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+        #
+        # `node_modules/.bin/eslint` instead of `npx eslint` per PR #393 root-cause
+        # fix (2026-06-18): `npx eslint` silently auto-fetches `eslint` from the
+        # registry when the local copy is missing, masking install bugs. Using the
+        # local path forces resolution from the just-installed node_modules — if
+        # eslint is ever missing again, this step fails loudly with "ENOENT" rather
+        # than confusing `Cannot find module 'eslint/package.json'` errors deep in
+        # an ESLint plugin's require chain. See d-widget-parity-audit-2026-06-18.md
+        # follow-up + PR #393 commit message for the full root-cause analysis.
         working-directory: src/client/pcf
-        run: npx eslint .
+        run: node_modules/.bin/eslint .
 
       # Spaarke.AI.Widgets tsc gate (R4 task 061 / B-2 / NFR-05)
       # AI.Widgets tsconfig path-maps four @spaarke/* sibling packages to their
@@ -201,6 +238,14 @@ jobs:
 
       - name: Build Spaarke.AI.Context (declarations required by Widgets typecheck)
         working-directory: src/client/shared/Spaarke.AI.Context
+        run: npx tsc
+
+      - name: Install Spaarke.SdapClient deps
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.SdapClient (declarations required by UI.Components typecheck)
+        working-directory: src/client/shared/Spaarke.SdapClient
         run: npx tsc
 
       - name: Install Spaarke.UI.Components deps
@@ -231,10 +276,14 @@ jobs:
     name: Code Quality
     runs-on: windows-latest
     needs: build-test
+    permissions:
+      contents: write   # Auto-format push-back on PRs
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref || github.ref }}
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
@@ -243,6 +292,23 @@ jobs:
 
       - name: Restore dependencies
         run: dotnet restore --verbosity minimal
+
+      - name: Auto-fix whitespace formatting
+        run: dotnet format whitespace --verbosity minimal
+
+      - name: Push dotnet format fixes
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          git pull --rebase || true
+          if [ -n "$(git diff --name-only)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -u
+            git commit -m "style: auto-format dotnet whitespace (CI)"
+            git push
+            echo "::notice::dotnet format fixes auto-committed and pushed to PR branch."
+          fi
 
       - name: Format verification
         # `dotnet format whitespace` restricts to whitespace-only checks; excludes

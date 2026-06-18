@@ -1,114 +1,134 @@
 /**
- * SmartTodo Header — styles (Griffel makeStyles + Fluent v9 semantic tokens).
+ * SmartTodo Header — styles for the SINGLE-ROW consolidated toolbar
+ * (R4-104 / Wave E-3 — 2026-06-18).
  *
- * Per ADR-021: no hard-coded colors, no inline `style={}` props, no CSS modules.
- * Visual reference: `SemanticSearchControl.tsx` `header`/`titleRow`/`searchRow`
- * rules (R4 FR-06 — pixel-comparable 4-row layout).
+ * COLLAPSED from the prior R4-030 4-row layout (titleRow + searchRow +
+ * filterRow + toolbarRow) to a single Fluent v9 `<Toolbar>` row mirroring
+ * the SmartTodoWidget chrome (R4-099). All hard-coded colors and inline
+ * styles are forbidden per ADR-021 — every visual property below is a
+ * Fluent v9 semantic token.
+ *
+ * Layout zones (left → right within the single row):
+ *   - `titleGroup`     : Microsoft To Do icon + "Smart To Do" text
+ *   - `quickAddGroup`  : compact Input + Add button + optional "+ New" wizard
+ *   - `spacer`         : flex-grow gap that pushes the right cluster to the edge
+ *   - `rightGroup`     : selection-aware actions (when count > 0) OR default
+ *                        action cluster (Refresh, ViewToggle, OrientationToggle,
+ *                        Settings, SearchBox)
  *
  * @see ADR-021 Fluent UI v9 design system
- * @see smart-todo-r4 spec FR-06
+ * @see R4-104 audit notes/e-widget-app-parity-audit-2026-06-18.md
  */
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 
 export const useHeaderStyles = makeStyles({
   /**
-   * Header container — vertical stack of the 4 rows (title + search/actions +
-   * filter bar + selection-aware toolbar slot). Matches SemanticSearchControl's
-   * `styles.header` rule (column flex, padded, subtle bottom border).
+   * Single toolbar landmark — flex row, full width, sticky height. Mirrors
+   * the SmartTodoWidget `toolbar` rule so the two surfaces feel like one
+   * product (UAT 8 + 11). `flexWrap: 'wrap'` lets the right cluster drop
+   * to a second line on very narrow viewports without breaking layout.
    */
-  root: {
+  toolbar: {
+    flexShrink: 0,
     display: 'flex',
-    flexDirection: 'column',
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    columnGap: tokens.spacingHorizontalM,
+    rowGap: tokens.spacingVerticalXS,
+    ...shorthands.padding(
+      tokens.spacingVerticalS,
+      tokens.spacingHorizontalM,
+      tokens.spacingVerticalS,
+      tokens.spacingHorizontalM,
+    ),
     backgroundColor: tokens.colorNeutralBackground2,
     ...shorthands.borderBottom(
       tokens.strokeWidthThin,
       'solid',
       tokens.colorNeutralStroke1,
     ),
+    minHeight: '44px',
+    boxSizing: 'border-box',
   },
 
-  /**
-   * Row 1 — Page title row. Matches SemanticSearchControl `titleRow`:
-   * <Text size={300}> aligned left, modest bottom spacing.
-   */
-  titleRow: {
+  /** Brand title cluster (icon + text). Flex-shrink: 0 to keep title intact. */
+  titleGroup: {
     display: 'flex',
-    alignItems: 'center',
-    ...shorthands.padding(
-      tokens.spacingVerticalS,
-      tokens.spacingHorizontalM,
-      '0',
-      tokens.spacingHorizontalM,
-    ),
-  },
-
-  /**
-   * Row 2 — Search + Refresh + "+ New". Matches SemanticSearchControl
-   * `searchRow`: flex, search wraps grow, action icons trail.
-   */
-  searchRow: {
-    display: 'flex',
+    flexDirection: 'row',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    ...shorthands.padding(
-      tokens.spacingVerticalS,
-      tokens.spacingHorizontalM,
-    ),
+    flexShrink: 0,
   },
 
-  /** Search box wrapper — flex-grows so the SearchBox fills available width. */
-  searchInputWrap: {
-    flexGrow: 1,
-    minWidth: 0,
-  },
-
-  /** Inline icon buttons in Row 2 — match SemanticSearchControl visual. */
-  inlineToolbarButton: {
-    minWidth: 'auto',
-    ...shorthands.padding('0px'),
+  /** Title text — color from token; trailing margin handled by gap. */
+  title: {
+    color: tokens.colorNeutralForeground1,
+    whiteSpace: 'nowrap',
   },
 
   /**
-   * Row 3 — Filter bar (facets + Clear). Matches SemanticSearchControl
-   * `emptyStateToolbar`: subtle bottom border, medium horizontal gap.
-   * When there are no active filters and no Clear shown, the row collapses
-   * to its empty padding so the layout stays a stable 4-row hierarchy
-   * (FR-06 — 4 rows present even when populated lazily).
+   * QuickAdd cluster — compact input + Add button + optional "+ New" wizard.
+   * `flex: '1 1 auto'` lets the input expand to fill spare width without
+   * pushing the right cluster off-screen. `minWidth: 0` allows the input to
+   * shrink below its intrinsic content width in narrow viewports.
+   * `maxWidth` caps the QuickAdd at a reasonable max so the right cluster
+   * doesn't get crowded on wide screens.
    */
-  filterRow: {
+  quickAddGroup: {
     display: 'flex',
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    minHeight: '36px',
-    ...shorthands.padding(
-      tokens.spacingVerticalXS,
-      tokens.spacingHorizontalM,
-    ),
-    ...shorthands.borderTop(
-      tokens.strokeWidthThin,
-      'solid',
-      tokens.colorNeutralStroke2,
-    ),
+    gap: tokens.spacingHorizontalS,
+    flex: '1 1 auto',
+    minWidth: 0,
+    maxWidth: '420px',
   },
 
-  /** Facets pill group — wraps to a new line on narrow screens. */
-  facetGroup: {
+  /**
+   * QuickAdd Input — flex-grow within the QuickAdd cluster. `width: '100%'`
+   * is required because `<Input>` from Fluent v9 has a default intrinsic
+   * width that wouldn't fill the slot otherwise.
+   */
+  quickAddInput: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    width: '100%',
+  },
+
+  /**
+   * Flex spacer — pushes the right cluster to the trailing edge of the row.
+   * `flex: '1 1 0'` (vs auto) means it absorbs leftover space without
+   * fighting the QuickAdd for room.
+   */
+  spacer: {
+    flex: '1 1 0',
+    minWidth: 0,
+  },
+
+  /**
+   * Right cluster — either the selection-aware toolbar (when count > 0) or
+   * the default action cluster (Refresh / ViewToggle / OrientationToggle /
+   * Settings / SearchBox). `flexShrink: 0` so buttons stay visible even
+   * when the QuickAdd input compresses.
+   */
+  rightGroup: {
     display: 'flex',
+    flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalXS,
-    flexGrow: 1,
-    minWidth: 0,
+    flexShrink: 0,
   },
 
   /**
-   * Row 4 — Selection-aware toolbar slot. The slot itself has zero padding;
-   * `<SelectionAwareToolbar>` brings its own subtle background + border per
-   * its own Griffel styles. When `selectedCount === 0` the primitive renders
-   * `null`, which leaves Row 4 visually collapsed (FR-06 — selection-aware).
+   * SearchBox wrapper — fixed-ish width so the search input has predictable
+   * sizing without stealing space from the action buttons. `minWidth: 0` is
+   * defensive for very narrow viewports.
    */
-  toolbarRow: {
+  searchWrap: {
+    minWidth: 0,
+    maxWidth: '220px',
     display: 'flex',
-    flexDirection: 'column',
+    alignItems: 'center',
   },
 });

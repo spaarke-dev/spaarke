@@ -38,6 +38,14 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter,
             Sprk.Bff.Api.Services.Ai.Telemetry.ContextEventEmitter>();
 
+        // Insights Engine Widgets r1 telemetry (project ai-spaarke-insights-engine-widgets-r1 task 050).
+        // Meter "Sprk.Bff.Api.InsightWidgets" per Q-U8 evidence resolution (matches all 9 existing BFF
+        // meter `Sprk.Bff.Api.<Feature>` convention). Unconditional registration mirrors R5SummarizeTelemetry
+        // precedent above — telemetry surface is harmless when unused and avoids the asymmetric-registration
+        // anti-pattern (CLAUDE.md §10 F.1). Task 051 injects this singleton at the /api/insights/ask
+        // invocation path and calls RecordInvocation with bounded tags {topic, mode, outcome, cacheHit, tenantId}.
+        services.AddSingleton<Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry>();
+
         // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — TRULY UNCONDITIONAL.
         // ISearchIndexNameResolver is consumed by RagIndexingJobHandler / BulkRagIndexingJobHandler /
         // IndexingWorkerHostedService — all 3 are registered unconditionally as scoped IJobHandler / IHostedService.
@@ -887,6 +895,15 @@ public static class AnalysisServicesModule
     private static void AddInsightsCache(IServiceCollection services)
     {
         services.AddSingleton<InsightsCacheMetrics>();
+
+        // r1 Insights Widgets task 052 / FR-21: per-topic TTL plumbing. In-process mirror
+        // of sprk_aitopicregistry rows that supplies sprk_cachettlminutes to the cache when
+        // the per-call Ttl override is null. NOT a new interface seam (audit DR-002 / ADR-010);
+        // registered as a singleton POCO alongside the cache so the Endpoint↔DI Symmetry rule
+        // (audit DR-008) holds — both inside the compound-AI-ON gate that wraps AddInsightsCache.
+        // Dependencies (IDataverseService, IOptionsMonitor<InsightsPlaybookNameMapOptions>) are
+        // both Singleton; lifetime parity verified.
+        services.AddSingleton<TopicRegistryTtlLookup>();
         services.AddSingleton<IInsightsPlaybookExecutionCache, InsightsPlaybookExecutionCache>();
     }
 

@@ -3,7 +3,7 @@
     <title>F — Persist orientation preference via sprk_userpreference</title>
     <phase>Phase 2: Wave 2b</phase>
     <workstream>F</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>0.5 day</estimated-effort>
     <tags>smart-todo, dataverse, user-preference, react</tags>
     <parallel-safe>false</parallel-safe>

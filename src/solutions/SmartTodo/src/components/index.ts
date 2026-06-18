@@ -6,21 +6,30 @@
  *
  * Per R3 task 020 / OS-1, the legacy single-row `TodoItem` and the standalone
  * `TodoDetailPane` (R1 list-view detail) were removed when the kanban path
- * repointed at `sprk_todo`. The active detail surface is `TodoDetailPanel.tsx`
- * which wraps the shared `@spaarke/ui-components` `TodoDetail`.
+ * repointed at `sprk_todo`. Per R4 task 042 / FR-18, the R3 `TodoDetailPanel`
+ * side-pane is also retired; to-do detail editing is handled by the hybrid
+ * `<SmartTodoModal>` (R4 task 040 — see `./Modal/`) which embeds the OOB MDA
+ * main form in an iframe.
  */
 
 export { SmartToDo } from './SmartToDo';
 export type { ISmartToDoProps } from './SmartToDo';
 
-export { KanbanCard } from './KanbanCard';
-export type { IKanbanCardProps } from './KanbanCard';
+// R4 task 102 (E-1, 2026-06-18) — `KanbanCard` was hoisted into the
+// `@spaarke/smart-todo-components` peer package so the workspace widget can
+// reuse the same SmartTodo-shaped card. Re-export the hoisted symbols from
+// the barrel so existing local consumers (e.g., `SmartToDo.tsx` neighbours,
+// tests) continue to resolve `from './components'` without source-path churn.
+export { KanbanCard } from '@spaarke/smart-todo-components';
+export type { IKanbanCardProps } from '@spaarke/smart-todo-components';
 
 export { KanbanHeader } from './KanbanHeader';
 export type { IKanbanHeaderProps } from './KanbanHeader';
 
-export { MyTasksFilter, MY_TASKS_FILTER_MODES } from './MyTasksFilter';
-export type { IMyTasksFilterProps } from './MyTasksFilter';
+// R4 task 031 / FR-07 / OD-2 — the R3 `MyTasksFilter` three-mode radio group
+// is removed. "Assigned to Me" is the SOLE filter mode for the SmartTodo Code
+// Page; the scope is rendered as a single non-dismissible Tag in the Header
+// Row 3 filter bar (see `components/Header/Header.tsx`).
 
 export { ThresholdSettingsPopover } from './ThresholdSettings';
 export type { IThresholdSettingsProps } from './ThresholdSettings';

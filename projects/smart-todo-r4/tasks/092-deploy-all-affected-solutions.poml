@@ -3,7 +3,7 @@
     <title>Phase 3 — Build + deploy all affected solutions to spaarkedev1</title>
     <phase>Phase 3: Deployment</phase>
     <workstream>cross-cutting</workstream>
-    <status>not-started</status>
+    <status>in-progress</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>deploy, dataverse, smoke-test, build, solutions</tags>
     <parallel-safe>false</parallel-safe>
@@ -95,4 +95,46 @@ Build + deploy every affected solution to spaarkedev1. Confirm zero `sprk_todofl
     <criterion testable="true">Golden-path smoke test passes</criterion>
     <criterion testable="true">PR description lists all deployed surfaces + smoke-test result</criterion>
   </acceptance-criteria>
+
+  <notes>
+## Deploy session 2026-06-18 (Wave D)
+
+Post-PR #391 (Wave D widget parity) + PR #392 (CI hardening) — both merged to master at e4e91a3ec + a93fbebf6 respectively. This deploy supersedes the in-flight 2026-06-18 pre-Wave-D deploy logged in commit c5b5938bd (that session deployed 6 surfaces but did NOT include Wave D widget changes).
+
+### Surfaces deployed (3)
+
+| Surface | Web Resource | Bundle | Why |
+|---|---|---|---|
+| SmartTodo Code Page | `sprk_smarttodo` | 1706 KB | Carries Wave D changes to SmartTodoApp.tsx + useLaunchContext.ts (R4-100 openTodo auto-mount) |
+| SpaarkeAi workspace (embeds LW workspace shell) | `sprk_spaarkeai` | 3752 KB | Carries Wave D LW shim changes (R4-099 chrome consolidation + R4-100 onOpenTodo rewrite + R4-101 grouped widget). LW Code Page is RETIRED per OC-R4-05; SpaarkeAi is the deployable for LW-embedded UI. |
+| CreateTodoWizard Code Page | `sprk_createtodowizard` | 1620 KB | Carries R4-100 BroadcastChannel producer (`sprk_todo:created` channel). Required for UAT issue 1 (refetch after wizard close). Deploy-WizardCodePages.ps1 republished all 12 wizards as a batch — no harm; sprk_createtodowizard is the only one with Wave D delta. |
+
+### Surfaces NOT deployed (intentional)
+
+- **RegardingResolver PCF v1.1.0** — untouched in Wave D; v1.1.0 from prior 2026-06-18 deploy stays
+- **sprk_todo_dirty_check.js web resource** — untouched in Wave D; from R4-041, already on master from PR #384
+- **BFF API** — untouched in Wave D
+- **CorporateWorkspace** (`sprk_corporateworkspace`) — RETIRED per OC-R4-05; Deploy-CorporateWorkspace.ps1 is now a no-op skip
+
+### Pre-deploy verification
+
+- All builds green on the local main repo on master tip e4e91a3ec → a93fbebf6
+- npm install with `--legacy-peer-deps --no-audit --no-fund` (matches CI's new pattern per PR #392)
+- DATAVERSE_URL = https://spaarkedev1.crm.dynamics.com; az auth valid (ralph.schroeder@spaarke.com / Spaarke Devlopment Environment)
+
+### Deploy results
+
+All 3 deploy scripts reported `Publishing customizations... Published`. No errors. Total deploy session ~5 minutes wall-clock for build + deploy + publish across all 3 surfaces.
+
+### Acceptance criteria status
+
+- [x] All affected solutions deployed to spaarkedev1 (3/3)
+- [x] sprk_todoflag in source: 0 functional hits (confirmed R4-094 grep gate 2026-06-12)
+- [ ] Golden-path smoke test — DELEGATED to user UAT checklist; awaiting sign-off
+- [ ] PR description — Wave D landed via PR #391; CI hardening via PR #392; runbook recorded in commit 44fcffc21 + this notes block
+
+### Status
+
+`in-progress` until user UAT sign-off confirms golden-path. Per user instruction "do not close the PR or project until testing and acceptance are signed off on" — R4-092 stays open; R4-098 wrap-up is held; PR-close is held.
+  </notes>
 </task>

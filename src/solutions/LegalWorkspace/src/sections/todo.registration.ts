@@ -1,62 +1,103 @@
 /**
- * todo.registration.ts — SectionRegistration for the "My To Do List" section.
+ * todo.registration.ts — SectionRegistration for the "Smart To Do" section.
+ *
+ * R4 task 100 (W-2 — Open-to-form launch protocol + post-wizard-close refetch, 2026-06-18):
+ *   - Rewrote `handleOpenTodo` to use the new `openTodo` launch-context
+ *     discriminator (`?action=openTodo&todoId=<guid>`). When the user clicks
+ *     Open on a widget card, the SmartTodo Code Page now auto-mounts
+ *     `<SmartTodoModal>` on the specific record (closes UAT issue 4 — Open
+ *     previously showed the bare Kanban, NOT the To Do main form).
+ *   - Added a BroadcastChannel subscriber that listens for `sprk_todo:created`
+ *     events emitted by the `CreateTodoWizard` Code Page. On receipt the shim
+ *     invokes its captured `refetch` ref so the widget refreshes after the
+ *     wizard closes — closes UAT issue 1 (new To Dos created via `+` didn't
+ *     appear without a page refresh).
+ *
+ *   Refetch mechanism choice (BroadcastChannel over the alternatives):
+ *     - BroadcastChannel — works cross-tab/cross-iframe; widely supported
+ *       in modern Chromium-based MDA clients; cheap to wire; no MDA-specific
+ *       coupling. The CreateTodoWizard Code Page wraps its `dataService` to
+ *       post on `sprk_todo:created` after a successful create.
+ *     - Rejected — Xrm.App event stream: MDA-specific, not portable to
+ *       Code-Page-only contexts, and the `notifyEvent` payload is heavier
+ *       than needed for a refetch trigger.
+ *     - Rejected — visibilitychange polling: fragile (assumes refocus
+ *       semantics); refetches even on unrelated focus changes.
+ *
+ * R4 task 099 (W-1 — widget chrome consolidation + Pattern D alignment, 2026-06-18):
+ *   The shim is now STRUCTURAL-ONLY — it collapses to the canonical Pattern D
+ *   shape mirroring `calendar.registration.ts`. Per the 2026-06-18 widget-parity
+ *   audit (`projects/smart-todo-r4/notes/d-widget-parity-audit-2026-06-18.md`),
+ *   the pre-099 shim added a SECOND title bar (`title: "My To Do List"`) and a
+ *   SECOND toolbar (Add + Open buttons) on top of the widget's own PaneHeader
+ *   chrome — visible as a duplicate-chrome anti-pattern in UAT screenshots.
+ *
+ *   Calendar's shim has zero section-level chrome; the widget owns 100%. The
+ *   SmartTodo shim now does the same:
+ *     - NO `title` on the section config
+ *     - NO `toolbar` on the section config
+ *     - All user-facing chrome (title "Smart To Do", `[SearchBox, +, Open,
+ *       refresh]` toolbar) lives inside `<SmartTodoWidget>`'s PaneHeader.
+ *
+ *   The shim's remaining job is to bridge LW-internal coupling that does NOT
+ *   belong in any shared lib:
+ *     - Subscribe to `FeedTodoSyncContext` and forward via the `feedSync` prop.
+ *     - Wire host callbacks (`onOpenWizard`) so `+` and Open invoke the host's
+ *       navigation surface.
+ *     - Subscribe to the post-wizard-close `sprk_todo:created` BroadcastChannel
+ *       so the widget refetches after `+` creates a new record (R4-100).
+ *     - Catch render-time errors with `<WidgetErrorBoundary>`.
  *
  * R4 task 020 (Pattern D dual-use rebuild — 2026-06-10):
- *   The shim now renders the host-agnostic `<SmartTodoWidget>` from the new
- *   `@spaarke/smart-todo-components` peer package, wrapped in
- *   `<WidgetErrorBoundary>` (PR #372 addition). This shim is the canonical
- *   "Pattern D LegalWorkspace section shim" — modeled on the Calendar widget
- *   pattern from R3 task 115 (see widget-surface-audit.md §5).
- *
- *   Key responsibilities (kept in the shim, NOT in the shared-lib widget):
- *     - Subscribe to `FeedTodoSyncContext` (LW-internal context that does not
- *       belong in any shared lib).
- *     - Forward cross-block lifecycle events to the widget via the `feedSync`
- *       prop bridge (per the user-decided binding decision in widget-surface-
- *       audit.md §7 OQ-1 option b).
- *     - Provide a toolbar with refresh + add + open actions wired to the
- *       host's PCF context (Xrm.WebApi, onOpenWizard).
- *     - Catch render-time errors with `<WidgetErrorBoundary>` so a bad
- *       widget mount surfaces an inline error card rather than blanking
- *       the whole SpaarkeAi workspace surface.
- *
- *   Why this rebuild fixes the runtime issue:
- *     The stale deployed bundle for the LegalWorkspace embedded SmartToDo
- *     section queried the long-retired `sprk_event.sprk_todoflag` shape.
- *     `<SmartTodoWidget>` queries `sprk_todo` directly with statuscode
- *     filter in {Open=1, In Progress=659490001} per spec.md FR-02.
- *     A rebuild of the LegalWorkspace bundle (or the SpaarkeAi consumer
- *     bundle that embeds LW) is sufficient to clear the OData error.
- *
- *   Tradeoff (deferred, by design):
- *     The richer LW SmartToDo Kanban (13-file subtree with score cards,
- *     dismissed section, threshold settings, AI summary dialog, etc.) is
- *     NOT hoisted in this initial 0.1.0 release of `@spaarke/smart-todo-
- *     components`. That hoist is a follow-up task. The widget rendered
- *     here is the minimal, host-agnostic version that satisfies FR-02 +
- *     FR-04 — sized to position the surface for future Direct widget
- *     registration (see Spaarke.AI.Widgets/workspace/register-workspace-
- *     widgets.ts) without disrupting the section's render path today.
+ *   Original shim that wired the shared-lib widget into the LW host. See git
+ *   history for the pre-099 version that carried section title + toolbar.
  *
  * Standards: ADR-012 (shared component peer package), ADR-021 (Fluent v9).
  */
 
 import * as React from "react";
-import { Button } from "@fluentui/react-components";
-import {
-  CheckmarkCircleRegular,
-  AddRegular,
-  OpenRegular,
-} from "@fluentui/react-icons";
 import type {
   SectionRegistration,
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
 import { WidgetErrorBoundary } from "@spaarke/ui-components";
+import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { SmartTodoWidget } from "@spaarke/smart-todo-components";
 import type { IFeedSyncBridge, SmartTodoWidgetProps } from "@spaarke/smart-todo-components";
 import { useFeedTodoSync } from "../hooks/useFeedTodoSync";
+
+// ---------------------------------------------------------------------------
+// R4 task 100 (W-2) — post-wizard-close refetch BroadcastChannel contract.
+//
+// The CreateTodoWizard Code Page (src/solutions/CreateTodoWizard/src/main.tsx)
+// posts a `{ type: SPRK_TODO_CREATED }` message on the SPRK_TODO_CHANNEL_NAME
+// channel after each successful `sprk_todo` create. This shim listens and
+// invokes the widget's captured `refetch` ref so the list refreshes within
+// ~150ms of wizard close (no page refresh required).
+//
+// MUST stay in lockstep with the wizard wrapper's matching constants — they
+// are intentionally inlined on both sides (no shared module) because the
+// wizard Code Page does not depend on `@spaarke/smart-todo-components`.
+// Keep the values stable; bumping either constant requires a coordinated
+// edit to both files.
+// ---------------------------------------------------------------------------
+
+const SPRK_TODO_CHANNEL_NAME = "sprk_todo:lifecycle";
+const SPRK_TODO_CREATED = "sprk_todo:created";
+
+// ---------------------------------------------------------------------------
+// R4 task 100 (W-2) — Open-to-form launch contract constants.
+//
+// MUST stay in lockstep with `src/solutions/SmartTodo/src/hooks/useLaunchContext.ts`
+// (the parser side). Inlined here rather than imported because LegalWorkspace
+// does not (and should not) depend on the SmartTodo Code Page's package.
+// ---------------------------------------------------------------------------
+
+const SMART_TODO_CODE_PAGE_NAME = "sprk_smarttodo";
+const LAUNCH_PARAM_ACTION = "action";
+const LAUNCH_PARAM_TODO_ID = "todoId";
+const LAUNCH_ACTION_OPEN_TODO = "openTodo";
 
 // ---------------------------------------------------------------------------
 // FeedSync bridge — subscribes to LW-internal FeedTodoSyncContext and forwards
@@ -69,10 +110,9 @@ import { useFeedTodoSync } from "../hooks/useFeedTodoSync";
 
 interface IFeedSyncBridgeHostProps {
   ctx: SectionFactoryContext;
-  refetchRef: React.MutableRefObject<(() => void) | undefined>;
 }
 
-const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx, refetchRef }) => {
+const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
   // Subscribe to LW's FeedTodoSyncContext. The hook returns a NOOP fallback
   // when no provider is mounted (e.g., a future SpaarkeAi consumer that
   // doesn't host FeedTodoSyncContext) — so the widget renders cleanly there
@@ -87,14 +127,30 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx, refetchRe
     [notifyTodoChange, subscribe],
   );
 
-  // Open handler routes through the host's onOpenWizard so the SmartTodo
-  // Code Page opens with the clicked todo's id (legacy `eventId` param name
-  // is preserved at the wire for SmartTodo Code Page compatibility; the
-  // value carried is a `sprk_todoid` GUID post R3 FR-29).
+  // R4 task 100 (W-2) — Open handler now passes the `openTodo` launch
+  // discriminator so the SmartTodo Code Page auto-mounts <SmartTodoModal>
+  // on the clicked record. Pre-R4-100 it used `eventId=<guid>` which the
+  // Code Page ignored (defaulting to Kanban) — UAT issue 4.
+  //
+  // R4 task 103 (E-2, 2026-06-18) — UAT 2 made the widget's Open button
+  // ALWAYS-ENABLED. The `todoId` arg is now OPTIONAL:
+  //   - present → dispatch openTodo launch (existing behaviour, auto-mount modal)
+  //   - absent  → open the SmartTodo Code Page with NO launch data → the
+  //     app's `useLaunchContext` returns undefined → app renders its default
+  //     3-col Kanban view (no auto-modal). This satisfies "user wants to just
+  //     open the app" without forcing a card selection first.
+  //
+  // Wire format: `action=openTodo&todoId=<guid>` — Dataverse URL-encodes the
+  // entire string as `?data=<envelope>` per the parseDataParams convention
+  // (ADR-026). `useLaunchContext.parseLaunchContextFromSearch` handles BOTH
+  // wire formats so test URLs (raw query) work without an MDA host too.
   const handleOpenTodo = React.useCallback(
-    (todoId: string) => {
-      const data = `eventId=${encodeURIComponent(todoId)}`;
-      ctx.onOpenWizard("sprk_smarttodo", data, {
+    (todoId?: string) => {
+      const data = todoId
+        ? `${LAUNCH_PARAM_ACTION}=${LAUNCH_ACTION_OPEN_TODO}` +
+          `&${LAUNCH_PARAM_TODO_ID}=${encodeURIComponent(todoId)}`
+        : undefined;
+      ctx.onOpenWizard(SMART_TODO_CODE_PAGE_NAME, data, {
         width: { value: 85, unit: "%" },
         height: { value: 85, unit: "%" },
       });
@@ -106,13 +162,67 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx, refetchRe
     ctx.onOpenWizard("sprk_createtodowizard");
   }, [ctx]);
 
+  // R4 task 100 (W-2) — capture the widget's refetch trigger in a ref so the
+  // BroadcastChannel listener below can fire it on `sprk_todo:created`. We
+  // ALSO forward the refetch up to the host via `ctx.onRefetchReady` so the
+  // host's global refresh affordance keeps working.
+  const refetchRef = React.useRef<(() => void) | null>(null);
   const handleRefetchReady = React.useCallback(
     (refetch: () => void) => {
       refetchRef.current = refetch;
       ctx.onRefetchReady(refetch);
     },
-    [ctx, refetchRef],
+    [ctx],
   );
+
+  // R4 task 100 (W-2) — listen for post-wizard-close create broadcasts.
+  //
+  // The CreateTodoWizard Code Page posts on this channel after a successful
+  // `sprk_todo` create. The wizard runs in a separate iframe/window, so
+  // BroadcastChannel is the appropriate cross-context transport.
+  //
+  // Defensive: BroadcastChannel may be unavailable in some sandboxed
+  // contexts (old MDA flavors, restrictive iframes). When unavailable the
+  // subscription silently no-ops — the host's manual refresh still works.
+  React.useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return undefined;
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel(SPRK_TODO_CHANNEL_NAME);
+    } catch (err) {
+      // Non-fatal — proceed without the auto-refetch (manual refresh still works)
+      console.warn(
+        "[LegalWorkspace.todo] BroadcastChannel unavailable; skipping post-wizard-close refetch wiring",
+        err,
+      );
+      return undefined;
+    }
+
+    const handleMessage = (ev: MessageEvent) => {
+      const data = ev?.data;
+      if (
+        data &&
+        typeof data === "object" &&
+        (data as { type?: unknown }).type === SPRK_TODO_CREATED
+      ) {
+        // Fire-and-forget — the widget refetch is an OData read with its
+        // own debounce/cancellation; safe to invoke multiple times if
+        // several creates broadcast in succession.
+        refetchRef.current?.();
+      }
+    };
+
+    channel.addEventListener("message", handleMessage);
+    return () => {
+      try {
+        channel?.removeEventListener("message", handleMessage);
+        channel?.close();
+      } catch {
+        // BroadcastChannel cleanup is best-effort.
+      }
+    };
+  }, []);
 
   const widgetElement = React.createElement(SmartTodoWidget, {
     webApi: ctx.webApi as SmartTodoWidgetProps["webApi"],
@@ -138,102 +248,27 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx, refetchRe
 };
 
 // ---------------------------------------------------------------------------
-// Toolbar divider — thin vertical separator between toolbar button groups.
-// Preserved from the pre-R4 shim to keep visual parity in the section header.
-// ---------------------------------------------------------------------------
-
-const ToolbarDivider: React.FC = () =>
-  React.createElement("span", {
-    "aria-hidden": "true",
-    style: {
-      width: "1px",
-      height: "20px",
-      backgroundColor: "var(--colorNeutralStroke2)",
-      marginLeft: "2px",
-      marginRight: "2px",
-      flexShrink: 0,
-      display: "inline-block",
-    },
-  });
-
-// ---------------------------------------------------------------------------
-// Registration
+// Registration — Pattern D structural-only shim (mirrors calendar.registration.ts)
 // ---------------------------------------------------------------------------
 
 export const todoRegistration: SectionRegistration = {
   id: "todo",
-  label: "My To Do List",
+  label: "Smart To Do",
   description: "Embedded smart to-do list with cross-block sync (R4 Pattern D).",
   icon: CheckmarkCircleRegular,
   category: "productivity",
   defaultHeight: "560px",
 
   factory(ctx: SectionFactoryContext): ContentSectionConfig {
-    // -----------------------------------------------------------------------
-    // Refetch holder — captured by toolbar closure, written by the widget
-    // via FeedSyncBridgeHost during its first render cycle.
-    // -----------------------------------------------------------------------
-
-    const refetchRef: { current: (() => void) | undefined } = { current: undefined };
-
-    // -----------------------------------------------------------------------
-    // Toolbar — preserved from pre-R4 shim:
-    //   refresh (left, marginRight: auto) | divider | add + open (right, 15px gap)
-    //
-    // The widget's own PaneHeader has refresh / add actions too; the section
-    // toolbar adds the "Open full Code Page" affordance (which the widget
-    // can't own host-agnostically).
-    // -----------------------------------------------------------------------
-
-    const toolbar = React.createElement(
-      React.Fragment,
-      null,
-      // Add + Open button group (right-aligned, 15px gap)
-      React.createElement(
-        "div",
-        {
-          style: {
-            display: "flex",
-            flexDirection: "row" as const,
-            alignItems: "center",
-            gap: "15px",
-            marginLeft: "auto",
-          },
-        },
-        React.createElement(Button, {
-          appearance: "subtle",
-          size: "small",
-          icon: React.createElement(AddRegular),
-          onClick: () => ctx.onOpenWizard("sprk_createtodowizard"),
-          "aria-label": "Create new to do",
-        }),
-        React.createElement(Button, {
-          appearance: "subtle",
-          size: "small",
-          icon: React.createElement(OpenRegular),
-          onClick: () =>
-            ctx.onOpenWizard("sprk_smarttodo", undefined, {
-              width: { value: 85, unit: "%" },
-              height: { value: 85, unit: "%" },
-            }),
-          "aria-label": "Open full To Do list",
-        }),
-      ),
-    );
-
-    // Reference ToolbarDivider to satisfy the no-unused-vars rule even though
-    // the divider is not currently rendered in the new toolbar (kept available
-    // for future toolbar evolutions).
-    void ToolbarDivider;
-
+    // Structural-only — no section title, no section toolbar.
+    // The widget (`SmartTodoWidget`) owns 100% of user-facing chrome via
+    // its own `<PaneHeader title="Smart To Do" rightSlot={...} />`.
     return {
       id: "todo",
       type: "content",
-      title: "My To Do List",
-      toolbar,
-      style: {},
-      renderContent: () =>
-        React.createElement(FeedSyncBridgeHost, { ctx, refetchRef }),
+      title: "Smart To Do",
+      style: { overflow: "hidden" },
+      renderContent: () => React.createElement(FeedSyncBridgeHost, { ctx }),
     };
   },
 };

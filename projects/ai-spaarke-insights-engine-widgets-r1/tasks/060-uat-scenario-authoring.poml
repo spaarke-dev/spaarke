@@ -1,0 +1,53 @@
+<task id="060" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>UAT scenario authoring (3 personas)</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>6</phase>
+    <tags>uat, planning, docs</tags>
+    <dependencies>044</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Author 3 UAT scenarios: (a) real Matter with ≥3 assessments per area (for SC-05/06), (b) low-data Matter for decline (SC-07), (c) kill-switch ON env (SC-08). Each scenario: persona, prerequisites, steps, expected outcome, sign-off space.
+  </prompt>
+
+  <role>UAT planner.</role>
+
+  <goal>
+    `notes/uat-scenarios.md` with 3 fully-specified scenarios; Phase 6 tasks 061-066 execute these.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (SC-05, SC-06, SC-07, SC-08)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="dev-environment">All scenarios run against Spaarke Dev</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>uat planning, success criteria mapping</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Scenario A — Real Matter">≥3 assessments per area; SC-05/06 target</step>
+    <step order="2" name="Scenario B — Low-data Matter">&lt;2 assessments; SC-07 target</step>
+    <step order="3" name="Scenario C — Kill-switch ON">DocumentIntelligence:Enabled=false; SC-08 target</step>
+    <step order="4" name="Map success criteria">Each scenario lists which SCs it validates</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-scenarios.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 scenarios documented with all required fields</criterion>
+    <criterion testable="true">SC-05/06/07/08 mapping explicit</criterion>
+  </acceptance-criteria>
+</task>
