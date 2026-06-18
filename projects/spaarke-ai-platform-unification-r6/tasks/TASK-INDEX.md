@@ -135,7 +135,7 @@
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
 | 078 | C-G19 | Phase C cross-pillar integration test — composed evidence (per-task tests) + 6 NEW cross-pillar tests in `tests/integration/Spe.Integration.Tests/PhaseC/`; see `notes/phase-c-integration-results.md` | ✅ | STANDARD | false | 057, 058, 062, 063, 070, 074 |
-| 079 | C-G20 | Phase C exit-gate validation | 🔲 | MINIMAL | false | 078 |
+| 079 | C-G20 | Phase C exit-gate validation | ✅ | MINIMAL | false | 078 |
 
 ### Phase D — Command Router + Integration + Closeout (Week 6–7, 10 tasks)
 
