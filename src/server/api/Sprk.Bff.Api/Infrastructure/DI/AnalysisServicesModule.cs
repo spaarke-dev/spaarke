@@ -617,6 +617,29 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.Memory.MemoryCompositionService>();
         Console.WriteLine("✓ R6 Pillar 7 MemoryCompositionService registered (task 067, D-C-20; hierarchical 4-layer memory composition with NFR-10 budget enforcement)");
 
+        // R6 Pillar 7 (task 068, D-C-22 / FR-46) — PromptBudgetTracker. Shared per-turn
+        // token-budget tracker that centralises the NFR-10 8K system-prompt budget across
+        // the four chat prompt-assembly subsystems (factory blocks, document context,
+        // knowledge inline content, memory composition). Each subsystem calls
+        // TryReserve(layer, requestedTokens, sessionId, tenantId) before appending its
+        // fragment; truncation telemetry is emitted on the `false` path so operators see
+        // which layers were truncated and why. Reads its budget ceiling from
+        // MemoryCompositionOptions.TotalTokenBudget (same 8K physical ceiling per NFR-10).
+        //
+        // §F.1 asymmetric-registration audit: registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate matching the surrounding
+        // Memory services. The Null-Object kill-switch posture is intrinsic: when the
+        // compound AI gate is OFF, the tracker is never resolved because the chat factory
+        // itself is the NullSprkChatAgentFactory. No separate Null peer needed at the DI
+        // layer.
+        //
+        // Lifetime: Scoped — one tracker per HTTP request / per chat turn. Singleton
+        // lifetime would leak budget across requests and is structurally wrong. Matches
+        // the surrounding Pillar 7 services (MemoryCompositionService, recall, etc.).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IPromptBudgetTracker,
+                           Sprk.Bff.Api.Services.Ai.Memory.PromptBudgetTracker>();
+        Console.WriteLine("✓ R6 Pillar 7 PromptBudgetTracker registered (task 068, D-C-22; shared 8K system-prompt budget across factory / document / knowledge / memory subsystems)");
+
         // --- InvokeInsightsQueryTool typed HttpClient ---
         // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): the specialized
         // InvokeInsightsQueryTool C# bridge class was deleted in favor of the generic

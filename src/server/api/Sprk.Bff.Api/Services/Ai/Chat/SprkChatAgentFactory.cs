@@ -16,6 +16,7 @@ using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.Foundry;
 using Sprk.Bff.Api.Models.Workspace;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Services.Workspace;
@@ -227,11 +228,30 @@ public class SprkChatAgentFactory
 
             if (!ReferenceEquals(enrichedPrompt, context.SystemPrompt))
             {
-                context = context with { SystemPrompt = enrichedPrompt };
-                _logger.LogDebug(
-                    "Enriched system prompt with Active Capabilities section ({CommandCount} scope commands)",
-                    commands.Count(c => !string.Equals(c.Category, "system", StringComparison.OrdinalIgnoreCase)
-                                     && !string.Equals(c.Category, "playbook", StringComparison.OrdinalIgnoreCase)));
+                // R6 task 068 — Active Capabilities block participates in the shared 8K
+                // budget tracker. We resolve the tracker lazily here (it lives later in
+                // the prompt-assembly path below; this is a no-op when null).
+                var capabilitiesAddition = enrichedPrompt.Length > context.SystemPrompt.Length
+                    ? enrichedPrompt[context.SystemPrompt.Length..]
+                    : string.Empty;
+                var lazyTracker = scope.ServiceProvider.GetService<IPromptBudgetTracker>();
+                var lazySessionGuid = Guid.TryParse(sessionId, out var pg) ? pg : (Guid?)null;
+                if (TryReservePromptBudget(
+                        lazyTracker, "active-capabilities", capabilitiesAddition,
+                        lazySessionGuid, tenantId))
+                {
+                    context = context with { SystemPrompt = enrichedPrompt };
+                    _logger.LogDebug(
+                        "Enriched system prompt with Active Capabilities section ({CommandCount} scope commands)",
+                        commands.Count(c => !string.Equals(c.Category, "system", StringComparison.OrdinalIgnoreCase)
+                                         && !string.Equals(c.Category, "playbook", StringComparison.OrdinalIgnoreCase)));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "R6 task 068: Active Capabilities block denied by shared prompt budget tracker (sessionId={SessionId}); omitting",
+                        sessionId);
+                }
             }
         }
         catch (Exception ex)
@@ -266,10 +286,25 @@ public class SprkChatAgentFactory
                 var manifestSuffix = BuildSessionFilesManifestSuffix(files);
                 if (!string.IsNullOrEmpty(manifestSuffix))
                 {
-                    context = context with { SystemPrompt = context.SystemPrompt + manifestSuffix };
-                    _logger.LogInformation(
-                        "R5 task 033: appended Session Files manifest to system prompt — sessionId={SessionId}, fileCount={FileCount}",
-                        sessionId, files.Count);
+                    // R6 task 068 — session-files manifest participates in the shared 8K
+                    // budget tracker (manifest only — fileId + fileName + count; ADR-015).
+                    var lazyTracker = scope.ServiceProvider.GetService<IPromptBudgetTracker>();
+                    var lazySessionGuid = Guid.TryParse(sessionId, out var pg) ? pg : (Guid?)null;
+                    if (TryReservePromptBudget(
+                            lazyTracker, "session-files-manifest", manifestSuffix,
+                            lazySessionGuid, tenantId))
+                    {
+                        context = context with { SystemPrompt = context.SystemPrompt + manifestSuffix };
+                        _logger.LogInformation(
+                            "R5 task 033: appended Session Files manifest to system prompt — sessionId={SessionId}, fileCount={FileCount}",
+                            sessionId, files.Count);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "R6 task 068: Session Files manifest denied by shared prompt budget tracker — sessionId={SessionId}, fileCount={FileCount}; omitting",
+                            sessionId, files.Count);
+                    }
                 }
             }
             catch (Exception ex)
@@ -299,6 +334,22 @@ public class SprkChatAgentFactory
         context = context with { SystemPrompt = context.SystemPrompt + BuildCompactFormattingDirective() };
         // === End R6 Hotfix Wave B-G10b =========================================
 
+        // === R6 task 068 — Shared prompt budget tracker (Pillar 7 / FR-46) =====
+        // Resolve the shared 8K system-prompt budget tracker from the per-turn scope.
+        // Scoped lifetime — one tracker per HTTP request / per chat turn — so accounting
+        // reflects only this turn. When the tracker is unavailable (pre-task-068 envs),
+        // the factory falls back to per-block local budget checks (workspace block already
+        // does this via length-truncation in BuildWorkspaceStateBlock).
+        //
+        // ADR-015: tracker emits truncation telemetry with deterministic IDs only
+        // (layer name, token counts, sessionId, tenantId, decision enum). Never fragment
+        // bodies. The tracker's tag-set + log-prefix is `[ADR-015][memory.prompt_budget_*]`.
+        var promptBudgetTracker = scope.ServiceProvider.GetService<IPromptBudgetTracker>();
+        var sessionGuid = Guid.TryParse(sessionId, out var parsedSessionGuid)
+            ? parsedSessionGuid
+            : (Guid?)null;
+        // === End R6 task 068 — tracker resolution ==============================
+
         // === R6 task 053 — Workspace State block (Pillar 6a / FR-34) ===========
         // Per-turn snapshot of currently open workspace tabs the user has marked
         // visible to the assistant. Lets the LLM answer questions like "what's
@@ -312,7 +363,9 @@ public class SprkChatAgentFactory
         // ADR-015: block carries widget type + matterName + isPinned flags ONLY —
         // never raw user message text from prior turns.
         // NFR-10: workspace block truncates after ~500 chars to preserve the 8K
-        // system prompt budget; truncation emits telemetry.
+        // system prompt budget; truncation emits telemetry. R6 task 068 wires the
+        // shared budget tracker so the workspace block participates in the same
+        // 8K accounting as document context + knowledge + memory composition.
         try
         {
             var workspaceService = scope.ServiceProvider.GetService<IWorkspaceStateService>();
@@ -322,10 +375,21 @@ public class SprkChatAgentFactory
                 var workspaceBlock = BuildWorkspaceStateBlock(tabs, sessionId);
                 if (!string.IsNullOrEmpty(workspaceBlock))
                 {
-                    context = context with { SystemPrompt = context.SystemPrompt + workspaceBlock };
-                    _logger.LogDebug(
-                        "R6 task 053: appended Workspace State block to system prompt — sessionId={SessionId}, blockLength={BlockLength}",
-                        sessionId, workspaceBlock.Length);
+                    if (TryReservePromptBudget(
+                            promptBudgetTracker, "workspace-state", workspaceBlock,
+                            sessionGuid, tenantId))
+                    {
+                        context = context with { SystemPrompt = context.SystemPrompt + workspaceBlock };
+                        _logger.LogDebug(
+                            "R6 task 053: appended Workspace State block to system prompt — sessionId={SessionId}, blockLength={BlockLength}",
+                            sessionId, workspaceBlock.Length);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "R6 task 068: workspace-state block denied by shared prompt budget tracker — sessionId={SessionId}, blockLength={BlockLength}; omitting",
+                            sessionId, workspaceBlock.Length);
+                    }
                 }
             }
         }
@@ -2633,5 +2697,44 @@ public class SprkChatAgentFactory
             DocumentContextService.MaxTokenBudget, result.AnyTruncated);
 
         return context with { DocumentSummary = enrichedSummary };
+    }
+
+    /// <summary>
+    /// R6 task 068 (D-C-22 / FR-46) — shared-tracker budget-reservation helper. When
+    /// <paramref name="tracker"/> is null (pre-task-068 environments), returns true so
+    /// behaviour is unchanged. When wired, estimates token cost of
+    /// <paramref name="fragment"/> and attempts to reserve via the tracker; truncation
+    /// telemetry is emitted by the tracker on denial.
+    /// </summary>
+    /// <remarks>
+    /// Uses the SAME conservative whitespace-word-count estimate as
+    /// <see cref="PlaybookChatContextProvider"/>'s EstimateTokenCount: word_count * 1.3.
+    /// Keeps accounting consistent across the four prompt-assembly subsystems.
+    /// </remarks>
+    internal static bool TryReservePromptBudget(
+        Sprk.Bff.Api.Services.Ai.Memory.IPromptBudgetTracker? tracker,
+        string layer,
+        string fragment,
+        Guid? sessionId,
+        string? tenantId)
+    {
+        if (tracker is null)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrEmpty(fragment))
+        {
+            return true;
+        }
+
+        var wordCount = fragment.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        var tokens = (int)Math.Ceiling(wordCount * 1.3);
+        if (tokens <= 0)
+        {
+            return true;
+        }
+
+        return tracker.TryReserve(layer, tokens, sessionId, tenantId);
     }
 }
