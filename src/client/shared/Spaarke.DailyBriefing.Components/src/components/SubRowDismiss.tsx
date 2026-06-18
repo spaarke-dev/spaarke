@@ -2,19 +2,29 @@
  * SubRowDismiss -- per-item Dismiss slot for the NarrativeBullet sub-list (FR-14).
  *
  * Used by `NarrativeBullet` when `itemIds.length > 1` to render the rightmost
- * slot of each indented sub-row. This file is the placeholder created in task
- * 020 (Wave 8); the real per-item dismissal behavior is implemented in task
- * 023 (Wave 9 -- marks only the specific underlying `appnotification` row as
- * read; sub-row fades/hides on success; aggregated-bullet Dismiss button
- * cascades per FR-14a).
+ * slot of each indented sub-row. Implemented in task 023 (Wave 9).
+ *
+ * Behavior (FR-14):
+ *   - On click, invokes `onDismiss(item.id)` -- the parent wires this to
+ *     `useBriefingActions.markAsRead(item.id)` which marks ONLY the specific
+ *     underlying `appnotification` row as read.
+ *   - Optimistic UI: the sub-row fades immediately on click (the button hides;
+ *     parent listens to the consumer's refetch loop to remove the row entirely
+ *     on the next render cycle).
+ *   - On failure (callback returns `false`), the optimistic fade is reverted
+ *     so the user can retry. The parent surfaces a toast.
+ *   - Disabled while a previous click is in flight (prevents double-fire).
+ *
+ * Cascade behavior (FR-14a) is owned upstream at `DailyBriefingApp.handleDismiss`,
+ * which iterates `itemIds[]` and calls `markAsRead(id)` for each when the
+ * AGGREGATED Dismiss button on `NarrativeBullet` is clicked. NarrativeBullet
+ * itself is not touched by this task -- the cascade was already implemented
+ * via the existing `onDismiss(itemIds)` contract at the consumer layer.
  *
  * Constraints:
  *   - ADR-021: Fluent v9 semantic tokens only, dark-mode parity.
  *   - FR-14: Sub-row Dismiss MUST mark only the specific `appnotification`
  *     as read; sibling sub-rows remain visible.
- *   - FR-14a: The aggregated-bullet Dismiss button (already present on
- *     NarrativeBullet) MUST cascade to all `itemIds[]` -- that behavior is
- *     tuned in task 023 as well.
  *
  * Parallel-edit contract:
  *   Task 023 owns this file. Tasks 021 (SubRowLink) and 022 (SubRowTodo) own
@@ -23,7 +33,7 @@
  */
 
 import * as React from "react";
-import { makeStyles, tokens, Button } from "@fluentui/react-components";
+import { makeStyles, mergeClasses, tokens, Button, Tooltip } from "@fluentui/react-components";
 import { DismissRegular } from "@fluentui/react-icons";
 import type { NotificationItem } from "../types/notifications";
 
@@ -35,6 +45,16 @@ const useStyles = makeStyles({
   iconDefault: {
     color: tokens.colorNeutralForeground3,
   },
+  // Optimistic fade applied to the entire button container while the
+  // markAsRead is in flight. On failure we revert to full opacity so the
+  // user can retry; on success the parent refetch removes the row.
+  fading: {
+    opacity: 0.35,
+    pointerEvents: "none",
+    transitionProperty: "opacity",
+    transitionDuration: tokens.durationNormal,
+    transitionTimingFunction: tokens.curveEasyEase,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -44,27 +64,69 @@ const useStyles = makeStyles({
 export interface SubRowDismissProps {
   /** The underlying notification item this sub-row represents. */
   item: NotificationItem;
-  /** Callback to dismiss this single item. Task 023 wires real behavior. */
-  onDismiss?: (itemId: string) => void;
+  /**
+   * Callback invoked with the underlying notification ID when the user clicks
+   * Dismiss. The parent typically wires this to
+   * `useBriefingActions.markAsRead(item.id)`.
+   *
+   * Should return a Promise<boolean>: `true` on success, `false` on failure.
+   * When `false` (or the Promise rejects), the optimistic fade is reverted so
+   * the user can retry. The parent is responsible for surfacing a toast on
+   * failure.
+   *
+   * If omitted, the button is rendered disabled.
+   */
+  onDismiss?: (itemId: string) => Promise<boolean> | boolean | void;
 }
 
 // ---------------------------------------------------------------------------
-// Component (placeholder -- task 023 fills in per-item dismissal)
+// Component
 // ---------------------------------------------------------------------------
 
 export const SubRowDismiss: React.FC<SubRowDismissProps> = ({ item, onDismiss }) => {
   const styles = useStyles();
 
-  // Placeholder: render a disabled small Dismiss button. Task 023 wires
-  // per-item appnotification.isread update per FR-14.
+  // Local optimistic state: while `pending` is true, the button fades and
+  // is disabled. On success we keep it faded (parent removes the row via
+  // refetch). On failure we revert.
+  const [pending, setPending] = React.useState(false);
+  const [dismissed, setDismissed] = React.useState(false);
+
+  const handleClick = React.useCallback(async () => {
+    if (!onDismiss || pending || dismissed) return;
+    setPending(true);
+    try {
+      const result = onDismiss(item.id);
+      const ok =
+        typeof result === "boolean"
+          ? result
+          : result && typeof (result as Promise<boolean>).then === "function"
+          ? await result
+          : true; // void callbacks treated as success (optimistic)
+      if (ok) {
+        setDismissed(true);
+      } else {
+        // Revert optimistic fade so user can retry.
+        setPending(false);
+      }
+    } catch {
+      setPending(false);
+    }
+  }, [onDismiss, pending, dismissed, item.id]);
+
+  const isFaded = pending || dismissed;
+
   return (
-    <Button
-      appearance="subtle"
-      size="small"
-      icon={<DismissRegular className={styles.iconDefault} />}
-      aria-label="Dismiss"
-      disabled={!onDismiss}
-      onClick={() => onDismiss?.(item.id)}
-    />
+    <Tooltip content="Dismiss" relationship="label">
+      <Button
+        appearance="subtle"
+        size="small"
+        icon={<DismissRegular className={styles.iconDefault} />}
+        className={mergeClasses(isFaded && styles.fading)}
+        aria-label="Dismiss"
+        disabled={!onDismiss || pending || dismissed}
+        onClick={handleClick}
+      />
+    </Tooltip>
   );
 };

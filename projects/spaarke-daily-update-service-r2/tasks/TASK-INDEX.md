@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 27 / 36 complete; 0 deferred (Waves 1–8: + 002 module-mutation seam + 020 slot-pattern skeleton; 021/022/023 now parallel-safe)
+> **Status**: 30 / 36 complete; 0 deferred (Waves 1–9: + 021 SubRowLink + 022 SubRowTodo + 023 SubRowDismiss true-parallel via slot pattern; 19 tests still pass)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -25,9 +25,9 @@
 | 018 | Replace LegalWorkspace `dailyBriefing` registration with thin shim | P2 | ✅ 79-LOC shim | 016 | B | FULL |
 | 019 | Unit tests for 3 split hooks + smoke test mounting `DailyBriefingApp` | P2 | ✅ Jest 30, 19/19 pass | 014,011 | — | STANDARD |
 | 020 | `NarrativeBullet` renders per-item sub-list when `itemIds.length > 1` (FR-11) | P2a | ✅ slot pattern | 016 | — | FULL |
-| 021 | Sub-row entity link via supplied `regardingId` + `Xrm.Navigation.navigateTo` (FR-12) | P2a | 🔲 | 020 | **C (now parallel-safe)** | FULL |
-| 022 | Sub-row Add-to-To-Do uses `useInlineTodoCreate` (FR-13) | P2a | 🔲 | 020 | **C (now parallel-safe)** | FULL |
-| 023 | Sub-row Dismiss + aggregated cascade Dismiss (FR-14, FR-14a) | P2a | 🔲 | 020 | **C (now parallel-safe)** | FULL |
+| 021 | Sub-row entity link via supplied `regardingId` + `Xrm.Navigation.navigateTo` (FR-12) | P2a | ✅ SubRowLink.tsx | 020 | C (parallel) | FULL |
+| 022 | Sub-row Add-to-To-Do uses `useInlineTodoCreate` (FR-13) | P2a | ✅ SubRowTodo.tsx | 020 | C (parallel) | FULL |
+| 023 | Sub-row Dismiss + aggregated cascade Dismiss (FR-14, FR-14a) | P2a | ✅ SubRowDismiss + FR-14a cascade pre-existing | 020 | C (parallel) | FULL |
 | 024 | P2a unit + visual tests + dark-mode parity check | P2a | 🔲 | 021,022,023 | — | STANDARD |
 | 030 | `BuildChannelNarrationPrompt` emits `regardingId` per item + updated rule list (FR-15, FR-16) | P2b | ✅ | none | D | FULL |
 | 031 | `ParseChannelBullets` validates `primaryEntityId`; nulls invalid + logs (FR-17) | P2b | ✅ | 030 | — | FULL |

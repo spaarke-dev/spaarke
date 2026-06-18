@@ -3,7 +3,7 @@
   <metadata>
     <title>Sub-row entity link via supplied `regardingId` + `Xrm.Navigation.navigateTo` (FR-12)</title>
     <phase>P2a: Hybrid Aggregation UX</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>024</blocks>
@@ -86,6 +86,18 @@
 
   <notes>
     If task 020 used a clearly-separated slot file or sub-component, you can run this in parallel with 022/023. Default: serial after 020.
+
+    Completion (2026-06-18, Wave 9 parallel batch):
+    - Implemented in `src/client/shared/Spaarke.DailyBriefing.Components/src/components/SubRowLink.tsx` (NOT NarrativeBullet.tsx — task 020's Wave-8 refactor introduced the slot pattern, so this task fills only the SubRowLink slot file; zero overlap with parallel tasks 022/SubRowTodo + 023/SubRowDismiss).
+    - Fluent v9 `Link` component when target available; falls back to `Text` plain-text rendering when `regardingEntityType` or `regardingId` is missing.
+    - Click handler resolves `Xrm` via `window`/`window.parent`/`window.top` (mirrors NarrativeBullet host-context fallback); calls `Xrm.Navigation.navigateTo({ pageType: "entityrecord", entityName: item.regardingEntityType, entityId: item.regardingId }, { target: 2, width: { value: 80, unit: "%" }, height: { value: 80, unit: "%" } })`. Promise `.catch` swallows user-cancelled navigations.
+    - Guarded against `window.Xrm?.Navigation?.navigateTo` undefined (test + standalone environments).
+    - Display text: `item.title || item.regardingName || "(untitled)"`; ARIA label + title attribute for accessibility.
+    - Keyboard support: Enter / Space invokes the same handler.
+    - ADR-021 semantic tokens (`colorBrandForeground1`, `colorNeutralForeground2`, `fontSizeBase200`, `lineHeightBase200`); dark-mode parity via tokens.
+    - Build: `npm run build` — SubRowLink.tsx compiles with zero errors. The 4 module-resolution errors in NarrativeBullet/SubRowTodo/useInlineTodoCreate/briefingService are PRE-EXISTING (verified by stash + rebuild on baseline) and unrelated to this task's scope.
+    - Tests: `npm test` — all 19 tests pass across 4 suites.
+    - TASK-INDEX.md update: deferred per Wave-9 orchestrator instructions (orchestrator owns the index update after the parallel batch completes).
   </notes>
 
   <execution>
