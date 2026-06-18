@@ -455,6 +455,8 @@ public static class DailyBriefingEndpoints
 
     /// <summary>
     /// Build a prompt for narrating a single channel's items into grouped narrative bullets.
+    /// Emits `regardingId=` per item line (FR-15) and instructs the LLM to source `primaryEntityId`
+    /// from supplied IDs only (FR-16) — see project R2 spec.md §P2b.
     /// </summary>
     internal static string BuildChannelNarrationPrompt(ChannelNarrationInput channel)
     {
@@ -465,6 +467,7 @@ public static class DailyBriefingEndpoints
         sb.AppendLine("- Write each bullet in natural prose (not a raw title)");
         sb.AppendLine("- Include entity names and dates where available");
         sb.AppendLine("- Lead with the most urgent item");
+        sb.AppendLine("- Set `primaryEntityType` to the regarding entity type of the most relevant supplied item. Set `primaryEntityId` to the matching `regardingId` of the most relevant supplied item. Do NOT use the `[id=...]` notification ID. Do NOT invent IDs.");
         sb.AppendLine("- Return ONLY a JSON array (no markdown, no code fences). Each element must have:");
         sb.AppendLine("  { \"narrative\": \"...\", \"itemIds\": [\"id1\", ...], \"primaryEntityType\": \"...\", \"primaryEntityId\": \"...\", \"primaryEntityName\": \"...\" }");
         sb.AppendLine();
@@ -483,7 +486,14 @@ public static class DailyBriefingEndpoints
             if (item.Priority != "normal")
                 parts.Add($"priority: {item.Priority}");
 
-            sb.AppendLine($"- [id={item.Id}] {string.Join(" | ", parts)}");
+            // FR-15: emit regardingId per item line so the LLM has a real ID to return as primaryEntityId.
+            // Omit the `regardingId=` token entirely when the source item has no regarding (avoid sending
+            // empty IDs that the LLM might echo back as the literal string "").
+            var idPrefix = string.IsNullOrEmpty(item.RegardingId)
+                ? $"[id={item.Id}]"
+                : $"[id={item.Id} regardingId={item.RegardingId}]";
+
+            sb.AppendLine($"- {idPrefix} {string.Join(" | ", parts)}");
         }
 
         sb.AppendLine();

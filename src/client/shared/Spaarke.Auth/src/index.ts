@@ -41,3 +41,13 @@ export type { UseAuthResult } from './useAuth';
 
 // Synchronous tenant ID resolution (for click handlers — cannot await async getTenantId)
 export { resolveTenantIdSync } from './resolveTenantIdSync';
+
+// Code Page auth initializer factory (FR-20a / ADR-028) — canonical consumption
+// pattern that replaces the 3 byte-similar solution-local `authInit.ts` copies.
+// See projects/spaarke-daily-update-service-r2/notes/auth-init-divergence.md
+// for the divergence analysis informing the config shape.
+export { createCodePageAuthInitializer } from './createCodePageAuthInitializer';
+export type {
+  CodePageAuthInitConfig,
+  CodePageAuthInitializer,
+} from './createCodePageAuthInitializer';

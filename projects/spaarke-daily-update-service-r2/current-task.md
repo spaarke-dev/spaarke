@@ -10,23 +10,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (pre-implementation) |
-| **Step** | 0 of N: Awaiting `task-create` decomposition |
-| **Status** | none |
-| **Next Action** | Run `task-create projects/spaarke-daily-update-service-r2` to generate POML task files |
+| **Task** | 001 — Add `loadNotificationContext` factory option to dailyBriefingRegistration |
+| **Step** | 6 of 8 — Build verification complete |
+| **Status** | completed-no-op (option already implemented in prior task 086/Round 4 Fix 3) |
+| **Next Action** | Parent (Wave 1 orchestrator) decides commit; task 002 is unblocked |
 
 ### Files Modified This Session
 
-- `projects/spaarke-daily-update-service-r2/README.md` — Created — Project overview + graduation criteria
-- `projects/spaarke-daily-update-service-r2/plan.md` — Created — 6-workstream WBS
-- `projects/spaarke-daily-update-service-r2/CLAUDE.md` — Created — AI context + applicable ADRs
-- `projects/spaarke-daily-update-service-r2/current-task.md` — Created — This file
-- `projects/spaarke-daily-update-service-r2/notes/bff-baseline.md` — Pending (Step D)
-- `projects/spaarke-daily-update-service-r2/tasks/TASK-INDEX.md` — Pending (Step C / `task-create`)
+- None for task 001 — the `loadNotificationContext?: () => Promise<NarrateRequest | null>` option was already added to `dailyBriefing.registration.ts`, `DailyBriefingSection.tsx`, and `useDailyBriefing.ts` in a prior project (task 086 / Round 4 Fix 3, per file headers). All FR-01 acceptance criteria are already met on the current `work/spaarke-daily-update-service-r2` branch.
 
 ### Critical Context
 
-Project initialization session (2026-06-18). `project-pipeline` ran Steps A–B in this session and will run Steps C–E next. No tasks exist yet. Branch is `work/spaarke-daily-update-service-r2` (already created prior to this session). BFF builds clean (warnings only, all pre-existing).
+Wave 1 orchestrated execution. Task 001 = pre-existing no-op: the seam already exists. Required types (`NarrateRequest`, `CreateDailyBriefingRegistrationOptions`) are exported from `@spaarke/ui-components` via `src/components/WorkspaceShell/index.ts`. Build verification (npm run build) passes on the three dailyBriefing files in isolation; an unrelated `@spaarke/sdap-client` resolution error in `EntityCreationService.ts` is pre-existing and outside task 001 scope. Task 002 (SpaarkeAi main.tsx) can proceed.
 
 ---
 
@@ -34,12 +29,13 @@ Project initialization session (2026-06-18). `project-pipeline` ran Steps A–B 
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | Pre-Phase P1 |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 001 |
+| **Task File** | tasks/001-add-load-notification-context-factory-option.poml |
+| **Title** | Add `loadNotificationContext` factory option to dailyBriefingRegistration |
+| **Phase** | P1: Wiring Seam Fix |
+| **Status** | completed-no-op (already implemented) |
+| **Started** | 2026-06-18 (Wave 1 parallel batch) |
+| **Rigor Level** | FULL (per `<rigor-hint>FULL</rigor-hint>`; tags include `frontend/react/fluent-ui`; downstream blocks 002/003/010) |
 
 ---
 

@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 0 / 36 complete (pre-implementation)
+> **Status**: 3 / 36 complete (Wave 1: 001, 030, 052)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -11,7 +11,7 @@
 
 | ID | Title | Phase | Status | Dependencies | Parallel | Rigor |
 |----|-------|-------|--------|--------------|----------|-------|
-| 001 | Add `loadNotificationContext` factory option to dailyBriefingRegistration | P1 | 🔲 | none | — | FULL |
+| 001 | Add `loadNotificationContext` factory option to dailyBriefingRegistration | P1 | ✅ | none | — | FULL |
 | 002 | Wire `loadSpaarkeAiNotificationContext` injection in SpaarkeAi `main.tsx` | P1 | 🔲 | 001 | — | FULL |
 | 003 | P1 verification — SpaarkeAi pane renders bullets in spaarkedev1 (smoke) | P1 | 🔲 | 002 | — | STANDARD |
 | 010 | Scaffold new `@spaarke/daily-briefing-components` package | P2 | 🔲 | 003 | — | FULL |
@@ -29,7 +29,7 @@
 | 022 | Sub-row Add-to-To-Do uses `useInlineTodoCreate` (FR-13) | P2a | 🔲 | 020 | C | FULL |
 | 023 | Sub-row Dismiss + aggregated cascade Dismiss (FR-14, FR-14a) | P2a | 🔲 | 020 | C | FULL |
 | 024 | P2a unit + visual tests + dark-mode parity check | P2a | 🔲 | 021,022,023 | — | STANDARD |
-| 030 | `BuildChannelNarrationPrompt` emits `regardingId` per item + updated rule list (FR-15, FR-16) | P2b | 🔲 | none | D | FULL |
+| 030 | `BuildChannelNarrationPrompt` emits `regardingId` per item + updated rule list (FR-15, FR-16) | P2b | ✅ | none | D | FULL |
 | 031 | `ParseChannelBullets` validates `primaryEntityId`; nulls invalid + logs (FR-17) | P2b | 🔲 | 030 | — | FULL |
 | 032 | Unit tests (prompt content + validation logic) | P2b | 🔲 | 031 | — | STANDARD |
 | 033 | BFF publish-size delta + CVE verification (P2b) | P2b | 🔲 | 032 | — | STANDARD |
@@ -38,7 +38,7 @@
 | 042 | BFF publish-size verification + E2E manual MDA bell test note | P3 | 🔲 | 041 | — | STANDARD |
 | 050 | Hoist `MicrosoftToDoIcon` to `@spaarke/ui-components/src/icons/` (FR-19a) | DD | 🔲 | none | D | FULL |
 | 051 | Delete 3 solution-local `MicrosoftToDoIcon` copies; update imports (FR-19b) | DD | 🔲 | 050 | — | FULL |
-| 052 | Create `createCodePageAuthInitializer` factory in `@spaarke/auth` (FR-20a) | DD | 🔲 | none | D | FULL |
+| 052 | Create `createCodePageAuthInitializer` factory in `@spaarke/auth` (FR-20a) | DD | ✅ | none | D | FULL |
 | 053 | Migrate `DailyBriefing` solution to auth factory; delete local `authInit` | DD | 🔲 | 052 | — | FULL |
 | 054 | Migrate `LegalWorkspace` + `SpaarkeAi` to auth factory; delete local `authInit` | DD | 🔲 | 053 | — | FULL |
 | 055 | Consolidate `runtimeConfig` → `@spaarke/auth` singleton; delete 3 local copies (FR-21) | DD | 🔲 | 054 | — | FULL |
