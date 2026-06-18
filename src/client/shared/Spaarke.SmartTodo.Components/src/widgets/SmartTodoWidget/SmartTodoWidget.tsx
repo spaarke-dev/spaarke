@@ -1,27 +1,38 @@
 /**
  * SmartTodoWidget — host-agnostic SpaarkeAi workspace widget for sprk_todo.
  *
+ * R4 task 099 (W-1 — widget chrome consolidation + Pattern D alignment, 2026-06-18):
+ *   - REMOVED `<PaneHeader>` entirely. Per the 2026-06-18 widget-parity audit,
+ *     the widget's PaneHeader was rendering a SECOND title bar on top of the
+ *     SectionPanel title that the LegalWorkspace shim already provides (mirrors
+ *     Calendar's canonical Pattern D — Calendar widget has no header of its own).
+ *   - ADDED a single `<Toolbar>` row containing `[SearchBox, +, Open, refresh]`
+ *     (audit issue 5 + 3). This is the widget's SOLE chrome row.
+ *   - ADDED SearchBox with local debounced state — filters items in-memory by
+ *     case-insensitive substring match against `sprk_name` and `sprk_description`.
+ *     No OData round-trip (sufficient for the widget's bounded result set).
+ *   - ADDED single-card selection state so the Open button is selection-aware
+ *     (disabled when 0 selected; enabled when 1 selected — mirrors the Code Page
+ *     `SelectionAwareToolbar` pattern at a smaller scope).
+ *   - RENAMED default `title` prop from "My To Do List" to "Smart To Do".
+ *     Title is now used only for `aria-label` on the root region — the visible
+ *     title comes from the host's SectionPanel (LegalWorkspace shim) or, in
+ *     Direct widget mounts without a SectionPanel, the consumer must provide
+ *     their own title chrome around the widget.
+ *
  * R4 task 020 (Pattern D dual-use rebuild — 2026-06-10):
- *   - Replaces the stale deployed bundle that queried `sprk_event.sprk_todoflag`
- *     (retired in R3 FR-29 / OS-1). This rebuild queries `sprk_todo` directly.
- *   - Host-agnostic: ZERO subscription to LegalWorkspace-internal contexts
- *     (e.g., FeedTodoSyncContext). Cross-block sync is wired by the host shim
- *     via the `feedSync` prop (see types/todo.ts IFeedSyncBridge).
+ *   - Initial host-agnostic widget. ZERO subscription to LegalWorkspace-internal
+ *     contexts (e.g., FeedTodoSyncContext). Cross-block sync is wired by the host
+ *     shim via the `feedSync` prop (see types/todo.ts IFeedSyncBridge).
  *   - Mirrors the proven `CalendarWorkspaceWidget` Pattern D structure from
  *     `@spaarke/events-components` (R3 task 115).
  *
  * Query (spec.md FR-02):
  *   - Entity: `sprk_todo`
  *   - Filter: statecode eq 0 AND (statuscode eq 1 or statuscode eq 659490001)
- *     — Open (1) + In Progress (659490001) per R3 task 009.
- *   - Optional regarding filter: `_sprk_regarding<X>_value eq <recordId>` when
- *     `regardingContext` is supplied (LW host injects current workspace's lookup).
- *   - Optional owner clause: when `userId` is supplied AND no regardingContext,
- *     falls back to `_ownerid_value eq <userId>` so the widget renders the
- *     current user's active todos. Mirrors LW `buildOwnerFilter` shape.
+ *   - Optional regarding filter; owner fallback when no regarding context.
  *
  * 6-layout compatibility (spec.md FR-04):
- *   - Uses `PaneHeader` from @spaarke/ui-components for consistent header.
  *   - Body flexes with no fixed widths; cards stack vertically; truncation
  *     handles narrow panes.
  *   - All colors via Fluent v9 semantic tokens (light / dark / high-contrast
@@ -39,24 +50,31 @@
  *   - spec.md FR-04 (mounts cleanly under all 6 workspace layouts)
  *
  * See also:
+ *   - `projects/smart-todo-r4/notes/d-widget-parity-audit-2026-06-18.md` — W-1 audit
  *   - `projects/smart-todo-r4/notes/widget-surface-audit.md` — R4-001 audit
  *   - `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx`
  *     — canonical Pattern D worked example (R3 task 115 / R4 task 033b).
  */
 
 import * as React from 'react';
-import { Body1, Button, MessageBar, MessageBarBody, Spinner, Text } from '@fluentui/react-components';
-import { ArrowClockwiseRegular, TaskListAdd24Regular } from '@fluentui/react-icons';
-
-// Cross-package source import — same pattern as Calendar widget importing
-// DataGrid from Spaarke.UI.Components source. PaneHeader is a shared primitive
-// hoisted under ADR-012; importing the source path (rather than the package
-// root) keeps this peer package's tsc check from pulling the PCF-framework
-// surface (DatasetGrid, UniversalDatasetGrid, etc.) into compilation.
-import { PaneHeader } from '../../../../Spaarke.UI.Components/src/components/PaneHeader/PaneHeader';
+import {
+  Body1,
+  Button,
+  MessageBar,
+  MessageBarBody,
+  SearchBox,
+  Spinner,
+  Text,
+  Toolbar,
+  Tooltip,
+  type SearchBoxChangeEvent,
+  type InputOnChangeData,
+} from '@fluentui/react-components';
+import { ArrowClockwiseRegular, Add20Regular, Open20Regular } from '@fluentui/react-icons';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
+import { bucketTodoItems, DEFAULT_TODAY_THRESHOLD, DEFAULT_TOMORROW_THRESHOLD } from '../../hooks/useKanbanColumns';
 
 // ---------------------------------------------------------------------------
 // Public statuscode constants (R3 task 009 / OS-1)
@@ -66,6 +84,15 @@ export const TODO_STATUSCODE_OPEN = 1 as const;
 export const TODO_STATUSCODE_IN_PROGRESS = 659490001 as const;
 export const TODO_STATUSCODE_COMPLETED = 2 as const;
 export const TODO_STATUSCODE_DISMISSED = 659490002 as const;
+
+// ---------------------------------------------------------------------------
+// Search debounce — local SearchBox text is held by `searchQuery` state and
+// flushed to the filter applied to the rendered list after this delay. 150ms
+// is short enough that the user perceives results as live but long enough to
+// skip per-keystroke filter recomputes on long lists.
+// ---------------------------------------------------------------------------
+
+const SEARCH_DEBOUNCE_MS = 150;
 
 // ---------------------------------------------------------------------------
 // OData query builder — host-agnostic; takes the inputs the host injects.
@@ -196,7 +223,13 @@ export interface SmartTodoWidgetProps {
    * FeedTodoSyncContext; SpaarkeAi Direct-widget consumers may omit it.
    */
   feedSync?: IFeedSyncBridge;
-  /** Title shown in the widget header. Default: "My To Do List". */
+  /**
+   * Title used for the root region's `aria-label`. Defaults to "Smart To Do".
+   *
+   * Post-099 (Pattern D consolidation): the widget no longer renders a visible
+   * title bar — the host (LegalWorkspace SectionPanel or Direct-widget caller)
+   * owns the visible title. This prop survives for accessibility only.
+   */
   title?: string;
   /** Notify the host of the active count (for badge / tab counter). */
   onBadgeCountChange?: (count: number) => void;
@@ -205,7 +238,8 @@ export interface SmartTodoWidgetProps {
   /**
    * Open handler for a clicked todo. Hosts wire to their navigation surface
    * (e.g., `Xrm.Navigation.navigateTo({pageType: 'webresource', webresourceName: 'sprk_smarttodo', data: 'eventId=<id>'})`
-   * or, in R4 C work, the new `<RecordNavigationModalShell>` per FR-16).
+   * or, in R4 W-2 work, the new `openTodo` discriminator that auto-mounts
+   * `<SmartTodoModal>` on the clicked record).
    */
   onOpenTodo?: (todoId: string) => void;
   /** Optional "+ New" handler — opens the host's CreateTodoWizard. */
@@ -223,7 +257,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   scope,
   businessUnitId,
   feedSync,
-  title = 'My To Do List',
+  title = 'Smart To Do',
   onBadgeCountChange,
   onRefetchReady,
   onOpenTodo,
@@ -236,10 +270,33 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   const [error, setError] = React.useState<string | null>(null);
   const [fetchKey, setFetchKey] = React.useState(0);
 
+  // Selection model — single-select (0..1). The Open button is enabled only
+  // when one card is selected; clicking a card toggles its selection.
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+
+  // SearchBox — local controlled value debounced into `appliedQuery` which
+  // drives the in-memory filter.
+  const [searchQuery, setSearchQuery] = React.useState<string>('');
+  const [appliedQuery, setAppliedQuery] = React.useState<string>('');
+
   // Stable refetch — bumps the fetchKey so the effect re-runs.
   const refetch = React.useCallback(() => {
     setFetchKey(k => k + 1);
   }, []);
+
+  // -------------------------------------------------------------------------
+  // Search debounce — flush `searchQuery` to `appliedQuery` after a short
+  // delay so we don't re-filter on every keystroke. 150ms feels live but
+  // skips redundant work for fast typers.
+  // -------------------------------------------------------------------------
+
+  React.useEffect(() => {
+    if (searchQuery === appliedQuery) return;
+    const handle = window.setTimeout(() => {
+      setAppliedQuery(searchQuery);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
+  }, [searchQuery, appliedQuery]);
 
   // -------------------------------------------------------------------------
   // Query effect
@@ -326,25 +383,62 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   }, [items.length, onBadgeCountChange]);
 
   // -------------------------------------------------------------------------
-  // Render
+  // In-memory search filter — case-insensitive substring match across
+  // `sprk_name` (subject) and `sprk_description`. Cheap to include both
+  // since `description` is already in the $select.
   // -------------------------------------------------------------------------
 
-  const handleCardClick = React.useCallback(
-    (todoId: string) => {
-      onOpenTodo?.(todoId);
-    },
-    [onOpenTodo]
-  );
+  const filteredItems = React.useMemo(() => {
+    const q = appliedQuery.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(item => {
+      const name = (item.sprk_name ?? '').toLowerCase();
+      const desc = (item.sprk_description ?? '').toLowerCase();
+      return name.includes(q) || desc.includes(q);
+    });
+  }, [items, appliedQuery]);
+
+  // Clear stale selection when the visible list changes such that the
+  // currently-selected id is no longer rendered (search filter, refetch).
+  React.useEffect(() => {
+    if (selectedId && !filteredItems.some(t => t.sprk_todoid === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [filteredItems, selectedId]);
+
+  // -------------------------------------------------------------------------
+  // Handlers
+  // -------------------------------------------------------------------------
+
+  const handleSearchChange = React.useCallback((_e: SearchBoxChangeEvent, data: InputOnChangeData) => {
+    setSearchQuery(data.value);
+  }, []);
+
+  const handleCardClick = React.useCallback((todoId: string) => {
+    setSelectedId(prev => (prev === todoId ? null : todoId));
+  }, []);
+
+  const handleOpenSelected = React.useCallback(() => {
+    if (selectedId && onOpenTodo) {
+      onOpenTodo(selectedId);
+    }
+  }, [selectedId, onOpenTodo]);
+
+  // -------------------------------------------------------------------------
+  // Render helpers
+  // -------------------------------------------------------------------------
 
   const renderItem = (item: ITodoRecord) => {
     const due = formatDue(item.sprk_duedate);
     const status = item.statuscode === TODO_STATUSCODE_IN_PROGRESS ? 'In progress' : 'Open';
+    const isSelected = selectedId === item.sprk_todoid;
     return (
       <div
         key={item.sprk_todoid}
-        className={styles.todoCard}
+        className={isSelected ? styles.todoCardSelected : styles.todoCard}
         role="button"
         tabIndex={0}
+        aria-pressed={isSelected}
         onClick={() => handleCardClick(item.sprk_todoid)}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -363,16 +457,75 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     );
   };
 
+  // Open is enabled only when a single card is selected.
+  const openDisabled = selectedId === null;
+
+  // -------------------------------------------------------------------------
+  // Today / Tomorrow / Future grouped sections (R4 task 101 / W-3, 2026-06-18).
+  // Uses the hoisted `bucketTodoItems` pure helper from the peer package's
+  // hooks barrel — the same logic that drives the Code Page's full-Kanban
+  // `useKanbanColumns` (one source of truth, satisfying UAT issue 6).
+  //
+  // Thresholds: widget uses the package defaults (60 / 30 — matching
+  // `useUserPreferences`'s `DEFAULT_TODAY_THRESHOLD` / `_TOMORROW_THRESHOLD`).
+  // Per-user threshold prefs are intentionally NOT pulled into the widget
+  // here (would require a Dataverse round-trip on every widget mount across
+  // every workspace tab — disproportionate to the visual benefit). If a
+  // future task surfaces a clear need, the widget can accept a
+  // `thresholds?: { today: number; tomorrow: number }` prop and the host
+  // shim can fetch + pass them.
+  // -------------------------------------------------------------------------
+
+  const groupedColumns = React.useMemo(
+    () => bucketTodoItems(filteredItems, DEFAULT_TODAY_THRESHOLD, DEFAULT_TOMORROW_THRESHOLD),
+    [filteredItems]
+  );
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
   return (
     <div
       className={styles.root}
       role="region"
-      aria-label={`${title}, ${items.length} item${items.length === 1 ? '' : 's'}`}
+      aria-label={`${title}, ${filteredItems.length} item${filteredItems.length === 1 ? '' : 's'}`}
     >
-      <PaneHeader
-        title={items.length > 0 ? `${title} (${items.length})` : title}
-        rightSlot={
-          <>
+      {/* ── Sole chrome row — Toolbar: [SearchBox, +, Open, refresh] ──── */}
+      <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
+        <div className={styles.searchWrap}>
+          <SearchBox
+            value={searchQuery}
+            placeholder="Search to-dos…"
+            onChange={handleSearchChange}
+            aria-label="Search to-dos"
+            size="small"
+          />
+        </div>
+
+        <div className={styles.toolbarActions}>
+          {onAddTodo && (
+            <Tooltip content="Add new to-do" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Add20Regular />}
+                onClick={onAddTodo}
+                aria-label="Add new to-do"
+              />
+            </Tooltip>
+          )}
+          <Tooltip content={openDisabled ? 'Select a to-do to open' : 'Open selected to-do'} relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Open20Regular />}
+              onClick={handleOpenSelected}
+              disabled={openDisabled}
+              aria-label="Open selected to-do"
+            />
+          </Tooltip>
+          <Tooltip content="Refresh to-do list" relationship="label">
             <Button
               appearance="subtle"
               size="small"
@@ -380,18 +533,9 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
               onClick={refetch}
               aria-label="Refresh to-do list"
             />
-            {onAddTodo && (
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<TaskListAdd24Regular />}
-                onClick={onAddTodo}
-                aria-label="Add new to-do"
-              />
-            )}
-          </>
-        }
-      />
+          </Tooltip>
+        </div>
+      </Toolbar>
 
       {/* Error banner */}
       {error && (
@@ -415,6 +559,13 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
           </div>
         )}
 
+        {!isLoading && !error && filteredItems.length === 0 && items.length > 0 && (
+          <div className={styles.emptyContainer} role="status" aria-live="polite">
+            <Body1>No matches</Body1>
+            <Text size={200}>No to-dos match &quot;{appliedQuery}&quot;.</Text>
+          </div>
+        )}
+
         {!isLoading && !error && items.length === 0 && (
           <div className={styles.emptyContainer} role="status" aria-live="polite">
             <Body1>All caught up</Body1>
@@ -422,7 +573,28 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
           </div>
         )}
 
-        {!isLoading && !error && items.length > 0 && <div className={styles.cardList}>{items.map(renderItem)}</div>}
+        {!isLoading && !error && filteredItems.length > 0 && (
+          <div className={styles.groupList}>
+            {groupedColumns.map(col => (
+              <section key={col.id} className={styles.groupSection} aria-label={`${col.title} (${col.items.length})`}>
+                <header
+                  className={styles.groupHeader}
+                  style={col.accentColor ? { borderLeftColor: col.accentColor } : undefined}
+                >
+                  <span className={styles.groupTitle}>{col.title}</span>
+                  <span className={styles.groupCount}>{col.items.length}</span>
+                </header>
+                {col.items.length === 0 ? (
+                  <div className={styles.groupEmpty} role="status">
+                    <Text size={200}>No items</Text>
+                  </div>
+                ) : (
+                  <div className={styles.cardList}>{col.items.map(renderItem)}</div>
+                )}
+              </section>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

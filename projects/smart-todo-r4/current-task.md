@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-11 (post-Wave-C; 27/31 ✅; 4 remaining; 092 deploy deferred)
+> **Last Updated**: 2026-06-18 (Wave D ✅ complete: widget parity 099/100/101 all landed; ready for next PR cycle)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,14 +9,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Project** | smart-todo-r4 — 7 workstreams (A-G), 31 tasks total |
-| **Status** | **27 of 31 tasks ✅** (87% by count; all implementation waves complete) |
+| **Project** | smart-todo-r4 — 7 workstreams (A-G), 34 tasks total (31 baseline + 3 Wave D widget-parity adds) |
+| **Status** | **31 of 34 tasks ✅** (91% by count; all implementation waves + widget parity complete) |
 | **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
-| **Worktree branch** | `work/smart-todo-r4-wave2` @ `2ff4d9b75` (Wave A + B + C: +14 tasks) — pushed to origin |
-| **Active task** | none; 4 tasks remain |
+| **PR #384** | ✅ MERGED to master 2026-06-11 (Waves A + B + C; 14 tasks) |
+| **Wave D** | ✅ COMPLETE on branch (NOT yet on master): 099 widget chrome + Pattern D, 101 useKanbanColumns hoist, 100 openTodo launch + BroadcastChannel refetch. 4 commits on branch (`c50690be8` planning + `6074d42b9` 099 + `afb6ac6cc` 101 + `f593292c2` 100). Closes UAT issues 1-6 from 2026-06-18 screenshot. |
+| **Worktree branch** | `work/smart-todo-r4-wave2` @ `f593292c2` — pushed to origin; 0 behind master |
+| **Active task** | none — Wave D closeout done |
 | **Working tree** | clean |
-| **Next Action** | Choice of: (a) **094** final `sprk_todoflag` grep gate (~15 min, mechanical — strict gate per graduation criterion 12); (b) **093** UI test suite (NFR-05 latency, NFR-07 a11y, NFR-08 orientation switch — requires deployed bits or live `npm run dev` smoke); (c) **098** wrap-up + open combined PR. 092 deploy plan is DEFERRED per user instruction (master-only deploy happens after PR merge, NOT as a branch task). |
-| **PR strategy** | User chose to bundle Wave A + B + C on same branch (`work/smart-todo-r4-wave2`). After 093 + 094 + 098 land, open ONE combined PR for the entire `wave2` branch (14 + ~3 = ~17 tasks). |
+| **Next Action** | **Three remaining tasks**, recommended order: (a) push 092 to ✅ — golden-path smoke test on spaarkedev1 of the 2026-06-18 deploy (still actionable; the new Wave D code is NOT in that deploy though, so a re-deploy will be required after Wave D merges); (b) 093 UI tests (can use `npm run dev` smoke; some Wave D tests in the new POMLs need real deploy); (c) 098 wrap-up + open follow-up PR. Could also open the Wave D PR now and let 092 redeploy happen after. |
+| **PR strategy** | PR #384 already covered Waves A+B+C. Wave D + 092 + 093 + 098 should land in a SINGLE follow-up PR titled "Wave D widget parity + Phase 3/4 closeout" (or two PRs: Wave D parity first, then a 098 close-out PR after). User to decide. |
 
 ### Critical context for resume
 
@@ -38,6 +40,7 @@
 | **Wave A (post-/compact)** | 031, 032, 033, 040, 070, 081 | 6 parallel agents on `work/smart-todo-r4-wave2`. All returned clean with builds green. 031 "Assigned to Me" filter + MyTasksFilter deletion; 032 selection-aware toolbar (Open/Delete/Email/Pin); 033 List/Card view toggle + persistence; 040 SmartTodo modal wire-up (`<RecordNavigationModalShell>` + iframe OOB form); 070 vertical Kanban orientation (CSS flex-direction); 081 Matter form Visual Host instructions doc. Main-session reconciliation: deduped `OPEN_TODOS_EVENT` between 032 + 040 (032 canonical); added `@spaarke/sdap-client` vite alias to LegalWorkspace (PR #369 cascade unblock). Commit `54fb0d541`. |
 | **Wave B** | 042, 052, 060, 082, 083, 084 | 6 parallel agents. All returned clean. 042 retired `TodoDetailPanel` side-pane (FR-18; deleted `TodoDetailPanel.tsx` + `todoDetailService.ts`); 060 card affordances (Open icon + Checkbox + double-click on KanbanCard; reused Wave A `OPEN_TODOS_EVENT`); 052 RegardingResolver PCF read-only mode + pre-save handler formType 3/4 skip (PCF version bump 1.0.0 → 1.1.0, +3 tests = 23/23 pass, added PCF-side webpack alias for PR #369 cascade); 082/083/084 Visual Host instructions docs for Project/Invoice/WorkAssignment (clones of 081 template per §10 substitution table). 042 + 060 successfully merged on `SmartTodoApp.tsx` without write-race losses. Commit `0c2dd15da`. |
 | **Wave C** | 041, 071 | 2 parallel agents. 071 returned clean (orientation persistence via `useUserPreferences` envelope extension mirroring 033's `viewMode` pattern; 13-assertion executable-spec test; back-compat with pre-071 records). 041 produced its on-disk artifacts (318-LOC `sprk_todo_dirty_check.js` web resource with `request-dirty-check`/`dirty-check-result` correlationId handshake + origin allow-list; 359-LOC test suite at `iframeDirtyCheckScript.test.ts`; 298-LOC bind instructions doc at `notes/c-dirty-check-bind-instructions.md`; shell README protocol section) but its final response was rate-limited before TASK-INDEX bump — main session fixed up row + counter. Commit `2ff4d9b75`. |
+| **Wave D (post-PR-384 widget parity, 2026-06-18)** | 099, 101, 100 | 3 tasks closing 6 UAT issues from 2026-06-18 widget screenshot. Wave D-1 = 099 + 101 parallel; Wave D-2 = 100 serial after 099. **099** collapsed LW shim to Calendar canonical (kept section title, removed widget PaneHeader); widget gained `<Toolbar>` with `[SearchBox, +, Open, refresh]`; single-select state; in-memory search filter with 150ms debounce; title became "Smart To Do" (commit `6074d42b9`). **101** hoisted `useKanbanColumns` into `@spaarke/smart-todo-components` peer package (~340 LOC; generic on `T extends IKanbanTodoLike`); widget renders 3 grouped sections via `bucketTodoItems(items, 60, 30)`; Code Page consumer's import swapped + local hook deleted (commit `afb6ac6cc`). **100** extended `useLaunchContext` with `openTodo` discriminator (handles both raw query + envelope); SmartTodoApp auto-mounts `<SmartTodoModal>` on `openTodo`; shim's `handleOpenTodo` swapped from legacy `eventId` envelope to `action=openTodo&todoId=<guid>`; BroadcastChannel `sprk_todo:created` chosen for post-wizard-close refetch (producer in CreateTodoWizard `main.tsx`; consumer in shim); added `@spaarke/sdap-client` alias to CreateTodoWizard `vite.config.ts` (6th code-page receiving the PR #369 cascade workaround) (commit `f593292c2`). All builds green: SmartTodo 1.74 MB / 474 KB gzip, LegalWorkspace 2.25 MB / 624 KB gzip, CreateTodoWizard 1.66 MB / 451 KB gzip, RegardingResolver PCF 1.57 MiB. Wave D includes audit-findings note `notes/d-widget-parity-audit-2026-06-18.md` + 3 POMLs. |
 
 ---
 

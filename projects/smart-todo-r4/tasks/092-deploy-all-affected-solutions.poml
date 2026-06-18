@@ -3,7 +3,7 @@
     <title>Phase 3 — Build + deploy all affected solutions to spaarkedev1</title>
     <phase>Phase 3: Deployment</phase>
     <workstream>cross-cutting</workstream>
-    <status>not-started</status>
+    <status>in-progress</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>deploy, dataverse, smoke-test, build, solutions</tags>
     <parallel-safe>false</parallel-safe>

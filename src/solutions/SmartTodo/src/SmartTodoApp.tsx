@@ -126,14 +126,49 @@ function SmartTodoLayout(): React.ReactElement {
   //
   // `modalTodoId` is the GUID of the to-do currently rendered inside the
   // <SmartTodoModal>. `null` means the modal is closed. Setting it (via the
-  // `OPEN_TODOS_EVENT` window listener below) mounts the modal; the modal's
-  // `<` / `>` nav writes back to update the iframe src.
+  // `OPEN_TODOS_EVENT` window listener below OR the R4-100 `openTodo` launch
+  // context auto-mount) mounts the modal; the modal's `<` / `>` nav writes
+  // back to update the iframe src.
   //
   // Spec FR-16 / FR-17 — the hybrid modal works in BOTH MDA context (this
   // Code Page launched from a parent-form subgrid / Visual Host
   // drill-through) AND Code Page context (standalone Code Page). The shell
   // is host-agnostic by construction (no MDA-only API calls).
   const [modalTodoId, setModalTodoId] = React.useState<string | null>(null);
+
+  // ── R4 task 100 / W-2 — openTodo launch-context auto-mount ───────────────
+  //
+  // When the LegalWorkspace SmartTodo widget's Open button launches this Code
+  // Page with `?action=openTodo&todoId=<guid>`, `useLaunchContext` returns the
+  // `openTodo` discriminator. We project that into `modalTodoId` so the modal
+  // auto-mounts on the requested record (closes UAT issue 4 from the 2026-06-18
+  // widget-parity audit — clicking Open must show the To Do main form, NOT the
+  // bare Kanban).
+  //
+  // Coexistence with `LaunchCreateTodoWizardHost` (below): both consumers of
+  // `useLaunchContext` are safe to run in parallel. The hook's `useMemo` reads
+  // `window.location.search` once per consumer on first render (so both see
+  // the SAME URL state); the `useEffect` clear is idempotent (no-op when the
+  // keys are already gone). createTodo and openTodo are mutually exclusive
+  // launch actions (different `action` discriminator values), so each branch
+  // only fires for its own action.
+  //
+  // Regression-safety with the R4-040 OPEN_TODOS_EVENT path (Code Page direct
+  // entry → toolbar Open / card double-click): both paths converge on
+  // `setModalTodoId`. Order of operations on first render:
+  //   1. `useLaunchContext` runs in render → returns `{action: 'openTodo', todoId}`.
+  //   2. This effect runs after commit → calls `setModalTodoId(todoId)`.
+  //   3. OPEN_TODOS_EVENT listener (below) is also installed in commit — it
+  //      stays dormant until a user-initiated event fires. No race.
+  const launchContext = useLaunchContext();
+  React.useEffect(() => {
+    if (launchContext?.action === 'openTodo') {
+      setModalTodoId(launchContext.todoId);
+    }
+    // Run once on mount — `launchContext` is memoised by the hook for the
+    // component's lifetime and won't change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── R4 task 040 — Filter-set projection for modal navigation ─────────────
   // The modal's `<` / `>` nav walks the CURRENT filter set — the items array

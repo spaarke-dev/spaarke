@@ -51,7 +51,14 @@ import { KanbanHeader } from "./KanbanHeader";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";
 import { DismissedSection } from "./DismissedSection";
 import { useTodoItems } from "../hooks/useTodoItems";
-import { useKanbanColumns } from "../hooks/useKanbanColumns";
+// R4 task 101 (W-3, 2026-06-18) — `useKanbanColumns` was hoisted into the
+// `@spaarke/smart-todo-components` peer package so the workspace widget can
+// reuse the same Today/Tomorrow/Future bucketing. The Code Page now imports
+// the hoisted hook and supplies its concrete `DataverseService` via the
+// optional `dataverseService` prop (kept structurally compatible — the
+// service's three Kanban methods already return `IResult<...>` with
+// `{ success: boolean }` matching `IKanbanDataverseService`).
+import { useKanbanColumns } from "@spaarke/smart-todo-components";
 import { useUserPreferences } from "../hooks/useUserPreferences";
 import { DataverseService } from "../services/DataverseService";
 import { ITodo } from "../types/entities";
@@ -461,8 +468,11 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     items: displayItems,
     todayThreshold: preferences.todayThreshold,
     tomorrowThreshold: preferences.tomorrowThreshold,
-    webApi,
-    userId,
+    // R4 task 101 — hoisted hook accepts `dataverseService` (interface) instead
+    // of the prior `webApi` + `userId` pair. Our `DataverseService` is
+    // structurally compatible because its 3 Kanban methods return
+    // `IResult<...>` which carries `success: boolean`.
+    dataverseService: serviceRef.current,
   });
 
   // -------------------------------------------------------------------------

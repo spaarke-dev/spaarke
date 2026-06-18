@@ -9,7 +9,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./widgets": "./src/widgets/index.ts",
-    "./types": "./src/types/index.ts"
+    "./types": "./src/types/index.ts",
+    "./hooks": "./src/hooks/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
