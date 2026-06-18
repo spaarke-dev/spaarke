@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 3 / 36 complete (Wave 1: 001, 030, 052)
+> **Status**: 5 / 36 complete (Waves 1+1b: 001, 030, 040, 050, 052)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -33,10 +33,10 @@
 | 031 | `ParseChannelBullets` validates `primaryEntityId`; nulls invalid + logs (FR-17) | P2b | 🔲 | 030 | — | FULL |
 | 032 | Unit tests (prompt content + validation logic) | P2b | 🔲 | 031 | — | STANDARD |
 | 033 | BFF publish-size delta + CVE verification (P2b) | P2b | 🔲 | 032 | — | STANDARD |
-| 040 | `CreateNotificationNodeExecutor` populates `data.actions[]` for visible-toasttype (FR-18) | P3 | 🔲 | none | D | FULL |
+| 040 | `CreateNotificationNodeExecutor` populates `data.actions[]` for visible-toasttype (FR-18) | P3 | ✅ | none | D | FULL |
 | 041 | Unit tests for visible vs hidden toasttype paths | P3 | 🔲 | 040 | — | STANDARD |
 | 042 | BFF publish-size verification + E2E manual MDA bell test note | P3 | 🔲 | 041 | — | STANDARD |
-| 050 | Hoist `MicrosoftToDoIcon` to `@spaarke/ui-components/src/icons/` (FR-19a) | DD | 🔲 | none | D | FULL |
+| 050 | Hoist `MicrosoftToDoIcon` to `@spaarke/ui-components/src/icons/` (FR-19a) | DD | ✅ | none | D | FULL |
 | 051 | Delete 3 solution-local `MicrosoftToDoIcon` copies; update imports (FR-19b) | DD | 🔲 | 050 | — | FULL |
 | 052 | Create `createCodePageAuthInitializer` factory in `@spaarke/auth` (FR-20a) | DD | ✅ | none | D | FULL |
 | 053 | Migrate `DailyBriefing` solution to auth factory; delete local `authInit` | DD | 🔲 | 052 | — | FULL |
