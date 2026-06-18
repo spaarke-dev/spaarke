@@ -1,11 +1,11 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-18 (Wave D ✅ complete: 099 + 101 + 100 all ✅; widget parity closeout done)
+> **Last Updated**: 2026-06-18 (Wave D ✅ deployed; **Wave E queued** with 3 new widget/app parity tasks 102/103/104 per UAT round 2)
 > **Branch**: `work/smart-todo-r4-wave2`
-> **Total Tasks**: 34 (was 31; +099/100/101 widget parity from 2026-06-18 UAT — see [d-widget-parity-audit-2026-06-18.md](../notes/d-widget-parity-audit-2026-06-18.md))
-> **Status**: 🔲 3 not-started · 🔄 0 in-progress · ✅ 31 complete · ❌ 0 blocked
-> **Active wave**: none — **Wave D ✅ complete** (099 + 101 parallel + 100 serial all landed). Remaining: 092 (deploy session in-flight; golden-path smoke pending), 093 (UI tests), 098 (wrap-up).
+> **Total Tasks**: 37 (was 34; +102/103/104 Wave E widget/app parity from 2026-06-18 UAT round 2 — see [e-widget-app-parity-audit-2026-06-18.md](../notes/e-widget-app-parity-audit-2026-06-18.md))
+> **Status**: 🔲 5 not-started · 🔄 1 in-progress (092 awaiting UAT sign-off) · ✅ 31 complete · ❌ 0 blocked
+> **Active wave**: Wave D ✅ complete + deployed; **Wave E queued** (102 Kanban hoist + 103 toolbar polish + 104 app chrome). Remaining besides Wave E: 092 (Wave D deploy session, awaiting UAT sign-off — will need re-deploy after Wave E), 093 (UI test suite — superseded by iterative UAT), 098 (project wrap-up, HELD until UAT acceptance).
 
 ---
 
@@ -158,7 +158,7 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [098](098-project-wrap-up.poml) | Project wrap-up — lessons-learned, README, repo-cleanup, PR | wrap-up, docs, pr | ❌ | 092, 093, 094, **099, 100, 101** | — |
+| 🔲 | [098](098-project-wrap-up.poml) | Project wrap-up — lessons-learned, README, repo-cleanup, PR | wrap-up, docs, pr | ❌ | 092, 093, 094, **099, 100, 101, 102, 103, 104** | — |
 
 ---
 
@@ -171,6 +171,18 @@ UAT screenshot 2026-06-18 surfaced 6 widget issues; diagnostic + plan in [d-widg
 | ✅ | [099](099-W1-widget-chrome-pattern-d.poml) | W-1 — Widget chrome consolidation + Pattern D alignment shipped. LW shim collapsed to Calendar shape (structural-only: no section toolbar; `title: "Smart To Do"` only). Widget `<PaneHeader>` removed; single `<Toolbar>` with `[SearchBox, +, Open, refresh]` in that order. Local debounced (150 ms) in-memory search across `sprk_name + sprk_description`; clears restore full list. Single-select `selectedId` powers selection-aware Open (disabled until 1 card selected). Co-exists cleanly with R4-101's grouped rendering (shared `filteredItems`). Builds: peer tsc 0 err; LegalWorkspace Vite 3,312 modules 13.51s 2,252 kB. Closes UAT 2 + 3 + 5. | widget, pattern-d, fluent-v9 | ✅ (parallel with 101) | 020, 030 | 100 |
 | ✅ | [100](100-W2-open-to-form-refetch.poml) | W-2 — Open-to-form launch protocol + post-wizard-close refetch (closes UAT 1/4: `useLaunchContext.openTodo` discriminator auto-mounts `<SmartTodoModal>`; BroadcastChannel `sprk_todo:created` wires refetch on wizard close) | widget, code-page, launch-context, modal | ❌ (serial after 099 on `todo.registration.ts`) | 099, 034, 040 | 098 |
 | ✅ | [101](101-W3-grouping-hoist.poml) | W-3 — Today/Tomorrow/Future grouping shipped. Hoisted `useKanbanColumns` into `@spaarke/smart-todo-components` (~340 LOC hook + `bucketTodoItems` pure helper + `IKanbanTodoLike`/`IKanbanDataverseService` types). Code Page consumer swapped to `@spaarke/smart-todo-components` import + passes `dataverseService: serviceRef.current` (structurally compatible). Widget renders 3 grouped sections via `bucketTodoItems(filteredItems, 60, 30)` with R4-099's single-select `selectedId` carried across groups. Builds: peer tsc 0 err; SmartTodo 3,279 modules 1,745 kB; LegalWorkspace 3,312 modules 2,252 kB. R4-020 deferred 13-file follow-up closed at hook-scope (full Kanban hoist still future work if surfaced). | widget, peer-package, hoist, fluent-v9 | ✅ (parallel with 099) | 020, 030 | 098 |
+
+---
+
+### Wave E — Widget/App parity round 2 (post-Wave-D UAT, 2026-06-18)
+
+UAT round 2 (post-Wave-D deploy) surfaced 11 functional gaps: 7 on the widget (drag-drop + multi-select + orientation + column colors + capital-case + search-as-icon + quick-add + always-on Open) and 4 on the app (consolidated chrome + smaller quick-create + 3-col default + single toolbar). Diagnostic + plan in [e-widget-app-parity-audit-2026-06-18.md](../notes/e-widget-app-parity-audit-2026-06-18.md). All three land in ONE PR; full widget/app parity is the user-facing acceptance criterion. **098 wrap-up depends on Wave E complete.**
+
+| Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
+|:---:|:---|---|---|:---:|---|---|
+| 🔲 | [102](102-E1-widget-kanban-hoist.poml) | E-1 — Widget Kanban hoist (closes UAT 3/4/6: drag-drop + orientation + multi-select + card tools + pin all hoisted from app into peer package; widget renders full Kanban not just grouped lists; closes the R4-020 deferred 13-file rich-feature subtree) | widget, peer-package, hoist, react-dnd, kanban | ✅ (parallel with 104) | 020, 099, 101 | 103, 098 |
+| 🔲 | [103](103-E2-widget-toolbar-polish.poml) | E-2 — Widget toolbar polish (closes UAT 1/2/5/7: search-as-icon expand/collapse + Open always-enabled + column light bg shades [Today=red/Tomorrow=yellow/Future=green] + Capital Case labels + inline quick-add field) | widget, fluent-v9, toolbar, ux-polish | ❌ (serial after 102 — uses hoisted Kanban container's column-style hook points) | 099, 102 | 098 |
+| 🔲 | [104](104-E3-app-chrome-consolidation.poml) | E-3 — App chrome consolidation (closes UAT 8/9/10/11: ONE "Smart To Do" title + reduce quick-create field size + default 3-col layout + collapse 4-row Header to single toolbar) | code-page, fluent-v9, header, toolbar, ux-polish | ✅ (parallel with 102) | 030, 033, 099 | 098 |
 
 ---
 
@@ -190,7 +202,9 @@ UAT screenshot 2026-06-18 surfaced 6 widget issues; diagnostic + plan in [d-widg
 | **G3 — Deploy + Test** | 092 → 093 + 094 | All G2 complete | 1 then 2 | 093 + 094 parallel after 092 |
 | **GD-1 — Widget parity parallel** | 099, 101 | 020 + 030 (both ✅) | 2 | Disjoint files: 099 = shim + widget chrome; 101 = peer package hook hoist + widget rendering |
 | **GD-2 — Widget parity serial** | 100 | 099 + 034 + 040 (all ✅ after 099 lands) | 1 | Touches `todo.registration.ts` after 099's cleanup; serial dependency |
-| **G4 — Wrap-up** | 098 | G3 + GD complete | 1 | Final task — also depends on Wave D |
+| **GE-1 — Widget/app parity parallel** | 102, 104 | 099 + 101 (both ✅) | 2 | Disjoint files: 102 = peer package full Kanban hoist + widget consumer; 104 = app Header collapse + viewMode default |
+| **GE-2 — Widget toolbar polish serial** | 103 | 102 ✅ (uses hoisted Kanban container's column-style hook points) | 1 | Serial after 102; same widget files |
+| **G4 — Wrap-up** | 098 | G3 + GD + GE complete | 1 | Final task — also depends on Wave E |
 
 **Max-concurrency rule** (from project-pipeline skill): **6 agents per wave hard limit**. G2a + G2a-B (4 + 3 = 7) requires staging or single-agent fallback for the last task.
 
@@ -228,8 +242,13 @@ GD Widget parity (post-PR-384 UAT 2026-06-18)
   101 ← 020, 030 (grouping hoist) — parallel with 099
   100 ← 099, 034, 040 (open + refetch) — serial after 099
 
+GE Widget/App parity round 2 (post-Wave-D UAT 2026-06-18)
+  102 ← 020, 099, 101 (full Kanban hoist + drag-drop + multi-select + orientation + pin)
+  104 ← 030, 033, 099 (app chrome consolidation + 3-col default) — parallel with 102
+  103 ← 099, 102 (toolbar polish + search-icon + always-Open + column colors + Capital case + quick-add) — serial after 102
+
 G4 Wrap-up
-  098 ← 092, 093, 094, 099, 100, 101
+  098 ← 092, 093, 094, 099, 100, 101, 102, 103, 104
 ```
 
 ---

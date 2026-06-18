@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-18 (Wave D ✅ complete: widget parity 099/100/101 all landed; ready for next PR cycle)
+> **Last Updated**: 2026-06-18 (Wave D ✅ deployed; Wave E queued — 3 new widget/app parity tasks 102/103/104 per UAT round 2)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -14,11 +14,11 @@
 | **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
 | **PR #384** | ✅ MERGED to master 2026-06-11 (Waves A + B + C; 14 tasks) |
 | **Wave D** | ✅ COMPLETE on branch (NOT yet on master): 099 widget chrome + Pattern D, 101 useKanbanColumns hoist, 100 openTodo launch + BroadcastChannel refetch. 4 commits on branch (`c50690be8` planning + `6074d42b9` 099 + `afb6ac6cc` 101 + `f593292c2` 100). Closes UAT issues 1-6 from 2026-06-18 screenshot. |
-| **Worktree branch** | `work/smart-todo-r4-wave2` — synced to master tip `a93fbebf6` (post-PR-391 + PR-392) |
-| **Active task** | **R4-092 deploy** — IN-PROGRESS (Wave D + CI hardening deployed to spaarkedev1 2026-06-18; awaiting user UAT sign-off on golden-path) |
-| **Working tree** | clean (Wave D POMLs all ✅; 092 has detailed notes block; CI hardening landed via PR #392) |
-| **Next Action** | **User UAT**: walk the 6 widget-parity acceptance points (issues 1-6 from `notes/d-widget-parity-audit-2026-06-18.md`) against the live spaarkedev1 deploy. After sign-off: flip R4-092 to ✅, run R4-093 (UI test suite) if desired, then proceed to R4-098 wrap-up. |
-| **PR strategy** | Wave D shipped via PR #391 (merge commit `e4e91a3ec`); CI hardening shipped via PR #392 (`a93fbebf6`). Remaining 092 closeout + 093 + 098 will be one final PR after UAT sign-off. R4-098 wrap-up + PR-close HELD until UAT acceptance per user instruction. |
+| **Worktree branch** | `work/smart-todo-r4-wave2` — synced to master + Wave E queued (POMLs filed, awaiting agent dispatch) |
+| **Active task** | **Wave E queued** (R4-102 + R4-103 + R4-104 per 2026-06-18 UAT round 2; widget/app full parity). R4-092 deploy stays IN-PROGRESS until UAT sign-off (Wave E will require re-deploy after merge). |
+| **Working tree** | Wave E planning artifacts staged (audit note + 3 POMLs + TASK-INDEX updates); awaiting commit + agent dispatch |
+| **Next Action** | **Dispatch Wave E-1**: R4-102 (Kanban hoist) + R4-104 (app chrome) in parallel via Agent tool. After R4-102 lands, dispatch R4-103 serially. Then open PR, master-deploy, hold for UAT round 3. |
+| **PR strategy** | Wave D shipped via PR #391 (`e4e91a3ec`); CI hardening shipped via PR #392 (`a93fbebf6`) + PR #393 (eslint root-cause; auto-merge enabled, awaiting CI green). Wave E ships as one follow-up PR after 3 tasks complete + redeploy. R4-098 wrap-up + project-close still HELD until final UAT acceptance per durable user instruction. |
 
 ### Critical context for resume
 

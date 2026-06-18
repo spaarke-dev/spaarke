@@ -1,0 +1,155 @@
+<task id="R4-104" project="smart-todo-r4">
+  <metadata>
+    <title>E-3 — App chrome consolidation (one title + smaller quick-create + 3-col default + one toolbar)</title>
+    <phase>Phase 2: Wave E (post-Wave-D widget/app parity)</phase>
+    <workstream>B</workstream>
+    <status>not-started</status>
+    <estimated-effort>1-1.5 days</estimated-effort>
+    <tags>code-page, smart-todo, fluent-v9, header, toolbar, ux-polish</tags>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel with R4-102 + R4-103 — different files (app SmartTodoApp.tsx + Header.tsx vs widget + peer package)</parallel-reason>
+    <dependencies>R4-030 (Header exists), R4-033 (viewMode preference), R4-099 (widget pattern reference)</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/SmartTodoApp.tsx (collapse layout)</file>
+      <file>src/solutions/SmartTodo/src/components/Header/Header.tsx (4-row collapse)</file>
+      <file>src/solutions/SmartTodo/src/components/Header/ (sibling files if any)</file>
+      <file>src/solutions/SmartTodo/src/hooks/useUserPreferences.ts (default viewMode change)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Close UAT items 8 + 9 + 10 + 11 from the 2026-06-18 widget/app parity audit. Consolidate the SmartTodo app's chrome to match the widget's cleaner pattern: ONE "Smart To Do" title (with icon); reduce the quick-create field size + use the same compact layout the widget uses for quick-add; default layout shows all 3 columns (Today/Tomorrow/Future) at first load; collapse the 4-row Header to ONE toolbar row.
+  </prompt>
+
+  <role>
+React + Fluent v9 engineer familiar with the app's R4-030 Header (4-row layout) and R4-033 view-mode preference.
+  </role>
+
+  <goal>
+The SmartTodo Code Page has ONE chrome row: a single toolbar containing title ("Smart To Do" with icon) + quick-create input + Add button + view controls + facet/filter + search icon + other actions consolidated into one logical strip. The compact quick-create matches the widget's UX. Default view on first visit shows 3 Kanban columns (Today/Tomorrow/Future) visible side-by-side without horizontal scrolling at typical viewport widths. Existing R4-033 user preferences (saved viewMode = "list" if user previously chose it) are preserved — only first-time defaults change.
+  </goal>
+
+  <inputs>
+    <file purpose="audit-findings">projects/smart-todo-r4/notes/e-widget-app-parity-audit-2026-06-18.md</file>
+    <file purpose="app-host">src/solutions/SmartTodo/src/SmartTodoApp.tsx</file>
+    <file purpose="header">src/solutions/SmartTodo/src/components/Header/Header.tsx</file>
+    <file purpose="prefs">src/solutions/SmartTodo/src/hooks/useUserPreferences.ts</file>
+    <file purpose="widget-pattern-reference">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</file>
+    <file purpose="pattern">.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel `makeStyles` + semantic tokens mandatory</constraint>
+    <constraint source="ADR-012">Reuse shared lib primitives where possible (Toolbar, Button, Input from @fluentui/react-components OR @spaarke/ui-components)</constraint>
+    <constraint source="UAT 11">ONE toolbar row — collapse Header's 4 rows from R4-030</constraint>
+    <constraint source="No regression">R4-031 (Assigned to Me filter), R4-032 (selection-aware toolbar), R4-033 (view toggle), R4-070 (orientation toggle) — all preserved; they just relocate to the single consolidated toolbar</constraint>
+    <constraint source="Preserve user choice">Existing useUserPreferences.viewMode values are honored. Only NEW users get the new default. Migration: if preference record absent OR has the prior default "card", treat as "kanban" first-load (the new default).</constraint>
+    <constraint source="durable user instruction">spaarkedev1 deploys are master-only; do NOT propose a branch deploy</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code Page chrome consolidation</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Toolbar/ (R4-012 SelectionAwareToolbar — usable here)</file>
+    </files>
+    <patterns>
+      <pattern name="Widget toolbar pattern (R4-099 + R4-103)" location="src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx">
+        The widget's compact single-toolbar layout is the design reference. App's consolidated toolbar should mirror its visual hierarchy + spacing.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT 2026-06-18 noted that the app has duplicate chrome (multiple titles + 4-row Header from R4-030) compared to the widget's clean single-toolbar pattern from Wave D. The user wants the two surfaces to feel like one product. The "default 3-col view" item (UAT 10) is about first-impression: today the app may default to a different viewMode or render only populated columns; the user wants ALL three buckets visible from the get-go (empty buckets included).
+    </background>
+    <dependencies>
+      <dependency task="R4-030" status="must-complete">Header exists (this task collapses its 4 rows)</dependency>
+      <dependency task="R4-033" status="must-complete">useUserPreferences.viewMode exists (this task changes the default)</dependency>
+      <dependency task="R4-099" status="must-complete">Widget chrome design baseline (visual reference)</dependency>
+    </dependencies>
+    <related-work>
+      <item>R4-102 (E-1) is parallel-safe with this task — different files</item>
+      <item>R4-103 (E-2) is parallel-safe with this task — different files</item>
+      <item>UAT items here mirror UAT items 1, 2, 5, 7 on the widget side (R4-103) — keep visual language consistent (e.g. quick-add field height, button styling, color tints)</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">Confirm context &lt; 70%. Read the audit-findings note.</step>
+    <step order="1" name="Read current Header structure">Read Header.tsx end-to-end. Map the 4 rows: which controls are in each row (R4-030 facets, R4-031 filter, R4-032 toolbar actions, R4-033 view toggle, R4-070 orientation, search, quick-create, title).</step>
+    <step order="2" name="Read SmartTodoApp.tsx for App-level wiring">Map the state plumbing: searchQuery, selectedIds Set, viewMode, modalTodoId, plus the Header → context wiring.</step>
+    <step order="3" name="Design consolidated single toolbar">Sketch the single-row layout: `[Smart To Do icon + title] [QuickAdd input] [Add btn] [+ wizard] | (gap) | [Selection-aware toolbar actions] [View toggle] [Orient toggle] [Facet filter] [Search icon]`. Use Fluent v9 `<Toolbar>` landmark. Verify all R4-030/031/032/033/070 functionality is preserved.</step>
+    <step order="4" name="Replace Header.tsx with collapsed version">Refactor Header.tsx to render the single toolbar. Remove the 4-row layout. Title becomes "Smart To Do" with icon (any decorative React component — pick a Fluent v9 icon that semantically fits). Move every existing control into the new toolbar.</step>
+    <step order="5" name="Reduce quick-create field (UAT 9)">If today's quick-create field is a large textbox or multi-line, reduce to a single-line compact Input matching the widget's R4-103 quick-add pattern. Same Add button styling. Same Xrm.WebApi create call.</step>
+    <step order="6" name="Default 3-col layout (UAT 10)">In useUserPreferences.ts, change the default viewMode for a NEW user (no saved preference) from current value to "kanban". For existing users, honor their saved preference. Verify that the kanban view renders ALL three columns (Today/Tomorrow/Future) — including empty buckets — at typical viewport widths without horizontal scroll. If horizontal scroll is unavoidable, document the trade-off.</step>
+    <step order="7" name="Smoke test layout collapse">Manually verify (or via npm run dev): app renders single chrome row; all controls accessible; tab order correct; keyboard nav works; viewport responsive (no overflow at common widths).</step>
+    <step order="8" name="Build">`npm run build` in SmartTodo Vite. Must build green.</step>
+    <step order="9" name="Quality gates">Run `code-review` + `adr-check` on modified files per task-execute Step 9.5.</step>
+    <step order="10" name="Update task status">Flip POML to complete. Update TASK-INDEX.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build (Vite on SmartTodo)</tool>
+    <tool name="git">Stage + commit (main session pushes)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Modified: src/solutions/SmartTodo/src/components/Header/Header.tsx (4-row → single toolbar)</output>
+    <output type="code">Modified: src/solutions/SmartTodo/src/SmartTodoApp.tsx (Header consumer; possibly state model adjustments)</output>
+    <output type="code">Modified: src/solutions/SmartTodo/src/hooks/useUserPreferences.ts (default viewMode change for new users)</output>
+    <output type="docs">Commit message references UAT items 8, 9, 10, 11</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="One title + one toolbar (UAT 8, 11)">
+      <steps>
+        <step>Open SmartTodo Code Page</step>
+        <step>Verify ONE title bar reading "Smart To Do" (with icon)</step>
+        <step>Verify ONE toolbar row containing all controls (no 4-row Header)</step>
+      </steps>
+      <expected>Single chrome row; matches widget's visual rhythm</expected>
+    </test>
+    <test name="Compact quick-create (UAT 9)">
+      <steps>
+        <step>Find quick-create input in the toolbar</step>
+        <step>Verify height matches widget's quick-add Input (compact, single-line)</step>
+        <step>Type + click Add — verify a new sprk_todo created</step>
+      </steps>
+      <expected>Quick-create matches widget's compact pattern</expected>
+    </test>
+    <test name="Default 3-col layout (UAT 10)">
+      <steps>
+        <step>Clear browser localStorage + any cached user preferences for this user</step>
+        <step>Load the SmartTodo Code Page fresh</step>
+        <step>Verify the Kanban renders ALL three columns (Today/Tomorrow/Future) visible side-by-side at default viewport</step>
+        <step>Empty columns render with "No items" placeholder (R4-101 pattern)</step>
+      </steps>
+      <expected>First-load shows 3-column Kanban; existing user prefs honored separately</expected>
+    </test>
+    <test name="No regressions (R4-030/031/032/033/070)">
+      <steps>
+        <step>Verify Assigned to Me filter (R4-031) still works</step>
+        <step>Verify selection-aware toolbar actions (R4-032) still trigger Open/Delete/Email/Pin</step>
+        <step>Verify view toggle (R4-033) switches kanban ↔ list</step>
+        <step>Verify orientation toggle (R4-070) works in kanban view</step>
+      </steps>
+      <expected>All Wave 2a/2b features preserved after Header collapse</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Code Page renders ONE title bar "Smart To Do" with icon (UAT 8)</criterion>
+    <criterion testable="true">Code Page renders ONE toolbar row (collapsed from R4-030's 4 rows) (UAT 11)</criterion>
+    <criterion testable="true">Quick-create input matches widget's compact pattern (UAT 9)</criterion>
+    <criterion testable="true">First-load default = 3-column Kanban view (UAT 10); existing user prefs honored</criterion>
+    <criterion testable="true">All prior features preserved: R4-031 facets, R4-032 selection-aware actions, R4-033 view toggle, R4-070 orientation toggle</criterion>
+    <criterion testable="true">A11y: single Toolbar landmark; tab order matches visual order; keyboard nav works</criterion>
+    <criterion testable="true">No Fluent v8; no inline styles; Griffel + tokens throughout</criterion>
+    <criterion testable="true">SmartTodo Vite build passes</criterion>
+    <criterion testable="true">POML + TASK-INDEX updated</criterion>
+  </acceptance-criteria>
+</task>
