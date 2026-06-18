@@ -104,13 +104,11 @@ import {
   type SearchBoxChangeEvent,
   type InputOnChangeData,
 } from '@fluentui/react-components';
+import { ArrowClockwiseRegular, Add20Regular, Open20Regular, Search20Regular } from '@fluentui/react-icons';
 import {
-  ArrowClockwiseRegular,
-  Add20Regular,
-  Open20Regular,
-  Search20Regular,
-} from '@fluentui/react-icons';
-import { OrientationToggle, type Orientation } from '../../../../Spaarke.UI.Components/src/components/OrientationToggle';
+  OrientationToggle,
+  type Orientation,
+} from '../../../../Spaarke.UI.Components/src/components/OrientationToggle';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
@@ -681,8 +679,8 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     selectedIds.size === 0
       ? 'Open Smart To Do'
       : selectedIds.size === 1
-      ? 'Open selected to-do'
-      : `Open first selected to-do (${selectedIds.size} selected)`;
+        ? 'Open selected to-do'
+        : `Open first selected to-do (${selectedIds.size} selected)`;
 
   // QuickAdd is only available when the host's webApi exposes createRecord.
   // When absent (legacy hosts, read-only mounts), the QuickAdd Input + Add
@@ -785,10 +783,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
               ToggleButton controls its visibility. Right-aligned with the
               other action icons so search reads as one of several tools
               rather than a permanently-occupied lane. */}
-          <Tooltip
-            content={isSearchExpanded ? 'Close search' : 'Search to-dos'}
-            relationship="label"
-          >
+          <Tooltip content={isSearchExpanded ? 'Close search' : 'Search to-dos'} relationship="label">
             <ToggleButton
               appearance="subtle"
               size="small"

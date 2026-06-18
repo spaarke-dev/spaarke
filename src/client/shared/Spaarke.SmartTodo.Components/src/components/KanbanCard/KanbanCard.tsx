@@ -200,7 +200,7 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
         onPinToggle(todo.sprk_todoid);
       }
     },
-    [onPinToggle, todo.sprk_todoid],
+    [onPinToggle, todo.sprk_todoid]
   );
 
   const handleCardClick = React.useCallback(() => {
@@ -216,7 +216,7 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
         handleCardClick();
       }
     },
-    [handleCardClick],
+    [handleCardClick]
   );
 
   // Open icon click (trailing edge). Stops propagation so the card body's
@@ -229,7 +229,7 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
         onOpen(todo.sprk_todoid);
       }
     },
-    [onOpen, todo.sprk_todoid],
+    [onOpen, todo.sprk_todoid]
   );
 
   // Double-click anywhere on the card body opens the modal (FR-26). Defensive
@@ -245,7 +245,7 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
         onOpen(todo.sprk_todoid);
       }
     },
-    [onOpen, todo.sprk_todoid],
+    [onOpen, todo.sprk_todoid]
   );
 
   // Selection checkbox toggle (FR-27). Stops propagation so the click does
@@ -258,7 +258,7 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
         onToggleSelect(todo.sprk_todoid);
       }
     },
-    [onToggleSelect, todo.sprk_todoid],
+    [onToggleSelect, todo.sprk_todoid]
   );
 
   // The Fluent v9 Checkbox wraps its input in a label; the click on the
@@ -288,17 +288,11 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
   // Class composition
   // -------------------------------------------------------------------------
 
-  const cardClassName = [
-    styles.card,
-    isSelected ? styles.cardSelected : '',
-    isCompleted ? styles.cardCompleted : '',
-  ]
+  const cardClassName = [styles.card, isSelected ? styles.cardSelected : '', isCompleted ? styles.cardCompleted : '']
     .filter(Boolean)
     .join(' ');
 
-  const titleClassName = [styles.title, isCompleted ? styles.titleCompleted : '']
-    .filter(Boolean)
-    .join(' ');
+  const titleClassName = [styles.title, isCompleted ? styles.titleCompleted : ''].filter(Boolean).join(' ');
 
   // Score circle colour: red (≥60), yellow (30–59), green (<30).
   const scoreCircleStyle: React.CSSProperties =
@@ -348,11 +342,7 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
           <Checkbox
             checked={isMultiSelected}
             onChange={handleSelectChange}
-            aria-label={
-              isMultiSelected
-                ? `Deselect "${todo.sprk_name}"`
-                : `Select "${todo.sprk_name}"`
-            }
+            aria-label={isMultiSelected ? `Deselect "${todo.sprk_name}"` : `Select "${todo.sprk_name}"`}
           />
         </div>
       )}
@@ -386,11 +376,7 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
             {dueLabel.urgency !== 'none' && (
               <>
                 {dueDateFormatted && (
-                  <Text
-                    as="span"
-                    size={200}
-                    style={{ color: tokens.colorNeutralForeground3 }}
-                  >
+                  <Text as="span" size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                     {'·'}
                   </Text>
                 )}
@@ -444,7 +430,7 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
  * and the widget's `ITodoRecord` flow through without a transform.
  */
 export const KanbanCard = React.memo(KanbanCardInner) as <T extends IKanbanCardTodo = IKanbanCardTodo>(
-  props: IKanbanCardProps<T>,
+  props: IKanbanCardProps<T>
 ) => React.ReactElement;
 
 // Display-name set on the underlying inner function for React DevTools.

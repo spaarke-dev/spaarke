@@ -56,12 +56,7 @@ import { KanbanBoard } from '../../../../Spaarke.UI.Components/src/components/Ka
 import { useKanbanColumns } from '../../hooks/useKanbanColumns';
 import { KanbanCard } from '../KanbanCard';
 import { DEFAULT_TODAY_THRESHOLD, DEFAULT_TOMORROW_THRESHOLD } from '../../hooks/useKanbanColumns';
-import type {
-  IKanbanCardTodo,
-  IKanbanDataverseService,
-  KanbanOrientation,
-  TodoColumn,
-} from '../../types/kanban';
+import type { IKanbanCardTodo, IKanbanDataverseService, KanbanOrientation, TodoColumn } from '../../types/kanban';
 
 // ---------------------------------------------------------------------------
 // Column id ↔ TodoColumn map — the generic `<KanbanBoard>` uses string ids
@@ -206,7 +201,7 @@ export function SmartTodoKanban<T extends IKanbanCardTodo>({
         }
       }
     },
-    [moveItem, reorderInColumn],
+    [moveItem, reorderInColumn]
   );
 
   // -------------------------------------------------------------------------
@@ -217,7 +212,7 @@ export function SmartTodoKanban<T extends IKanbanCardTodo>({
     (todoId: string) => {
       togglePin(todoId);
     },
-    [togglePin],
+    [togglePin]
   );
 
   // -------------------------------------------------------------------------
@@ -227,7 +222,7 @@ export function SmartTodoKanban<T extends IKanbanCardTodo>({
 
   const renderCard = React.useCallback(
     (item: T, _index: number, columnId: string) => {
-      const col = columns.find((c) => c.id === columnId);
+      const col = columns.find(c => c.id === columnId);
       return (
         <KanbanCard<T>
           todo={item}
@@ -241,7 +236,7 @@ export function SmartTodoKanban<T extends IKanbanCardTodo>({
         />
       );
     },
-    [columns, handlePinToggle, onCardClick, selectedCardId, onOpenTodo, selectedIds, onToggleSelect],
+    [columns, handlePinToggle, onCardClick, selectedCardId, onOpenTodo, selectedIds, onToggleSelect]
   );
 
   const getItemId = React.useCallback((item: T) => item.sprk_todoid, []);
