@@ -5,6 +5,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -303,7 +304,11 @@ public class SprkChatAgentFactoryPersonaTests
             _scopeResolverMock.Object,
             _playbookServiceMock.Object,
             _dataverseServiceMock.Object,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            // R6 task 069 follow-up housekeeping: task 068 made IMatterMemoryService a
+            // required ctor param without migrating this fixture. Pass a default mock so
+            // the matter-memory append path is a no-op for these tests.
+            new Mock<IMatterMemoryService>().Object);
 
     /// <summary>
     /// Normalize line endings to LF so cross-host (Windows CRLF, Linux LF) FR-04

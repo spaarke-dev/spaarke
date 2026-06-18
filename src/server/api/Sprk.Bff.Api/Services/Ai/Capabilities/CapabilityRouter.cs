@@ -73,6 +73,40 @@ public sealed class CapabilityRouter : ICapabilityRouter
     /// </summary>
     private const long ClassifyWarningThresholdMs = 10;
 
+    // ── Layer 0: voice command pre-pass (R6 Pillar 7 / task 069 / FR-47) ─────
+    //
+    // BEFORE the keyword classifier runs, we match three deterministic voice
+    // patterns ("remember X", "forget X", "always X") and short-circuit to a
+    // synthetic `manage_pinned_context` capability. This biases the LLM toward
+    // invoking the ManagePinnedContextHandler tool (registered via the
+    // sprk_analysistool seed row) for memory voice commands. Patterns are
+    // anchored at the start of the message (with optional leading whitespace)
+    // and required to be followed by a word boundary so words like "remembered"
+    // and "forgetfulness" do not false-fire.
+    //
+    // ADR-015 audit: the pre-pass returns a SYNTHETIC capability name (a config
+    // identifier — Tier-1 safe). It NEVER captures the matched user text into a
+    // span tag, log line, or counter dimension.
+    //
+    // NFR-03 budget: three pre-compiled regex matches per turn — empirically
+    // sub-millisecond on a 50-message corpus. The Layer 1 hard limit of 50ms
+    // remains the binding budget; Layer 0 sits well inside it.
+
+    /// <summary>Synthetic capability name returned when a voice command is recognised.</summary>
+    internal const string VoiceMemoryCapabilityName = "manage_pinned_context";
+
+    /// <summary>Decision discriminator emitted by the context.decision_made event for the Layer 0 short-circuit path.</summary>
+    internal const string VoiceMemoryDecisionConfident = "voice_memory";
+
+    /// <summary>
+    /// Compiled regex matching the three voice command openers ("remember", "forget", "always")
+    /// at the start of the trimmed user message. Capture group 1 carries the trigger word so
+    /// telemetry can record which voice opener fired without recording the user-supplied tail.
+    /// </summary>
+    private static readonly Regex VoiceMemoryRegex = new(
+        @"^\s*(remember|forget|always)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     /// <summary>
     /// Metric instrument name for Layer 1 hit counter (OTEL).
     /// </summary>
@@ -165,6 +199,21 @@ public sealed class CapabilityRouter : ICapabilityRouter
     /// <inheritdoc />
     public CapabilityRoutingResult RouteSync(string userMessage, string? activePlaybookName)
     {
+        // R6 Pillar 7 / task 069 / FR-47 — Layer 0 voice command pre-pass.
+        //
+        // Match BEFORE Layer 1 keyword scoring so the synthetic
+        // manage_pinned_context capability is recognised for "remember X" /
+        // "forget X" / "always X" regardless of the manifest's current
+        // keyword-hint coverage. Layer 0 short-circuits with a Confident
+        // result selecting only the voice-memory capability. ADR-015: the
+        // matched user text is never logged or tagged; only the trigger word
+        // (one of the three deterministic openers) appears.
+        var voiceMemoryResult = TryClassifyVoiceMemory(userMessage);
+        if (voiceMemoryResult is not null)
+        {
+            return voiceMemoryResult;
+        }
+
         // Start OTEL activity for this routing pass.
         using var activity = AiTelemetry.ActivitySource.StartActivity(
             "capability_router.layer1", ActivityKind.Internal);
@@ -238,6 +287,69 @@ public sealed class CapabilityRouter : ICapabilityRouter
             // Re-throw — endpoint error handler produces ProblemDetails (ADR-019).
             throw;
         }
+    }
+
+    // ── Layer 0: voice command pre-pass (R6 Pillar 7 / task 069 / FR-47) ─────
+
+    /// <summary>
+    /// Layer 0 pre-pass for the "remember X" / "forget X" / "always X" voice memory
+    /// commands. Returns a <see cref="CapabilityRoutingResult.Confident"/> result selecting
+    /// the synthetic <see cref="VoiceMemoryCapabilityName"/> capability when the message
+    /// starts with one of the three trigger words; returns <c>null</c> otherwise to let
+    /// Layer 1 keyword scoring run normally.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ADR-015 audit: the matched user-message text is NEVER captured into log lines,
+    /// span tags, or counter dimensions. The only telemetry surface is (a) the synthetic
+    /// capability name (a config identifier — Tier-1 safe) and (b) the
+    /// <c>context.decision_made</c> emission with <c>decision = "voice_memory"</c> +
+    /// <c>capabilityName = "manage_pinned_context"</c>. Both are deterministic strings.
+    /// </para>
+    /// <para>
+    /// NFR-03 budget: one pre-compiled regex match per turn; well inside the 50ms hard
+    /// limit. We deliberately do NOT start a Stopwatch / OTEL activity here — the
+    /// downstream Layer 1 path picks up the latency budget when this returns null, and
+    /// the short-circuit path emits a single decision_made event without per-call
+    /// activity overhead.
+    /// </para>
+    /// </remarks>
+    private CapabilityRoutingResult? TryClassifyVoiceMemory(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+        {
+            return null;
+        }
+
+        var match = VoiceMemoryRegex.Match(userMessage);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        // Emit context.decision_made for the Layer 0 short-circuit. ADR-015 audit:
+        // capabilityName = synthetic name (config identifier); decision =
+        // "voice_memory" enum; no user message text. The session/tenant fields are
+        // left null at this site — the router does not have them and the downstream
+        // chat agent emits its own per-tool-call telemetry with full identity.
+        _contextEventEmitter?.DecisionMade(
+            layer: "layer0",
+            decision: VoiceMemoryDecisionConfident,
+            capabilityName: VoiceMemoryCapabilityName,
+            sessionId: null,
+            tenantId: null);
+
+        _logger.LogDebug(
+            "CapabilityRouter.Layer0: voice memory pre-pass matched — capability={Capability}, trigger={Trigger}.",
+            VoiceMemoryCapabilityName,
+            match.Groups[1].Value.ToLowerInvariant());
+
+        return CapabilityRoutingResult.Confident(
+            selectedCapabilities: new[] { VoiceMemoryCapabilityName },
+            confidence: 1.0,
+            layer: 0,
+            latencyMs: 0,
+            selectedPlaybookId: null);
     }
 
     // ── Classification engine ─────────────────────────────────────────────────

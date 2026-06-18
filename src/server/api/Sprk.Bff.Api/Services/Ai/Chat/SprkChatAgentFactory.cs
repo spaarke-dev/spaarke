@@ -1465,11 +1465,19 @@ public class SprkChatAgentFactory
                     // metadata. The adapter calls this per LLM invocation to get a fresh
                     // decision id (Guid.NewGuid per call).
                     var sessionIdGuid = TryParseChatSessionId(sessionId);
+                    // R6 Pillar 7 / task 069 (FR-47) — capture the principal oid claim once at
+                    // factory time and forward it through the per-call ChatInvocationContext so
+                    // user-scoped chat handlers (ManagePinnedContextHandler) see the owning user.
+                    // ADR-015: deterministic identifier only; never user message text. Null when
+                    // standalone chat (no authenticated user) or when the oid claim is missing.
+                    var oidClaim = httpContext?.User?.FindFirst("oid")?.Value
+                        ?? httpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
                     Func<ChatInvocationContext> contextFactory = () => new ChatInvocationContext
                     {
                         ChatSessionId = sessionIdGuid,
                         TenantId = tenantId,
                         MatterId = TryParseMatterId(knowledgeScope),
+                        UserId = string.IsNullOrWhiteSpace(oidClaim) ? null : oidClaim,
                         // R6 Wave 7c: forward the playbook's knowledge scope so chat-side
                         // handlers (KnowledgeRetrievalHandler etc.) can filter their queries
                         // to the playbook's knowledge sources without taking a separate DI

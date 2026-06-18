@@ -177,6 +177,16 @@ $RowFiles = @{
     # (intentional — default user affordance available in every chat session; handler-side
     # gates supply the authorization surface). sprk_availableincontexts = Chat (100000001).
     "UPDATE-WORKSPACE-TAB"             = "$RepoRoot/infra/dataverse/sprk_analysistool-update-workspace-tab-row.json"
+    # R6 Pillar 7 / D-C-23 / task 069 — ManagePinnedContextHandler: single row exposing the
+    # manage_pinned_context(action, pinType, title, content?) chat tool. Creates or deletes
+    # PinnedContextItem rows via IPinnedContextRepository. Voice command surface (FR-47):
+    # 'remember X' → create user-preference; 'always X' → create system-rule;
+    # 'forget X' → delete by (pinType, title) case-insensitive match. CapabilityRouter Layer 0
+    # voice command pre-pass (added in task 069) recognises the three patterns and biases the
+    # LLM toward this tool. sprk_requiredcapability = null (intentional — default voice
+    # affordance available in every chat session). sprk_availableincontexts = Chat (100000001).
+    # ADR-015 BINDING: handler logs title length + content presence only — never the bodies.
+    "MANAGE-PINNED-CONTEXT"            = "$RepoRoot/infra/dataverse/sprk_analysistool-manage-pinned-context-row.json"
 }
 
 # -----------------------------------------------------------------------------
