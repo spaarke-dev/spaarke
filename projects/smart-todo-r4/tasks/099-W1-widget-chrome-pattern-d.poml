@@ -3,7 +3,7 @@
     <title>W-1 — Widget chrome consolidation + Pattern D alignment</title>
     <phase>Phase 2: Wave D (post-PR-384 widget parity)</phase>
     <workstream>W</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>0.5-1 day</estimated-effort>
     <tags>widget, smart-todo, pattern-d, fluent-v9, dataverse, spaarkeai, legalworkspace</tags>
     <parallel-safe>true</parallel-safe>
@@ -157,4 +157,50 @@ The SmartTodo workspace widget renders ONE title bar ("Smart To Do") and ONE too
     <criterion testable="true">A11y: Toolbar landmark present; tab order matches visual order; ARIA labels match Calendar widget convention</criterion>
     <criterion testable="true">POML status flipped to complete; TASK-INDEX.md row + header counts updated</criterion>
   </acceptance-criteria>
+
+  <notes>
+**Completed 2026-06-18 (Wave D-1 parallel agent for R4-099).**
+
+### Pattern D shape resolution
+
+The audit note's "Calendar shim has zero chrome" was reconciled with the source: Calendar's shim DOES pass `title: "Calendar"` to its `ContentSectionConfig` (calendar.registration.ts:55), which renders via `SectionPanel.titleBar`. The "zero widget chrome" claim refers to the CalendarWorkspaceWidget itself having NO `<PaneHeader>` of its own — the SectionPanel title from the shim is the SOLE title bar. SmartTodo previously violated this by having BOTH a SectionPanel title ("My To Do List") AND a widget-internal `<PaneHeader title="My To Do List">`, hence the duplicate-title-bar in the 2026-06-18 UAT screenshot.
+
+Resolution applied: shim provides `title: "Smart To Do"` (mirrors Calendar); widget's `<PaneHeader>` removed entirely and replaced by a single `<Toolbar>` row carrying `[SearchBox, +, Open, refresh]`. The widget's `title` prop survives ONLY for `aria-label` on the root region.
+
+### Implementation summary
+
+**Modified files (3):**
+1. `src/solutions/LegalWorkspace/src/sections/todo.registration.ts` — collapsed to structural-only shape. `title: "Smart To Do"`; NO `toolbar` prop; `WidgetErrorBoundary` retained; `FeedSyncBridgeHost` simplified (refetchRef field deleted — host bus already captures via `ctx.onRefetchReady`). Imports trimmed: removed `Button`, `AddRegular`, `OpenRegular`, `ToolbarDivider` (defunct after toolbar removal).
+2. `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx` — `<PaneHeader>` removed; single `<Toolbar size="small" aria-label="Smart To Do toolbar">` added containing `[SearchBox, Add, Open, Refresh]` in that exact order. New state: `selectedId: string | null` (single-select), `searchQuery + appliedQuery: string` (debounced 150ms). New `filteredItems` useMemo for in-memory substring filter against `sprk_name + sprk_description`. Stale-selection guard clears `selectedId` if the selected card is filtered out. Default `title` prop renamed "My To Do List" → "Smart To Do". Card rendering uses `todoCardSelected` class when selected (brand-tinted border + background).
+3. `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts` — added `toolbar` (sole chrome row), `searchWrap` (flex-grow left half), `toolbarActions` (flex-shrink-0 right half), `todoCardSelected` (brand-tinted selected variant).
+
+**Coexists cleanly with R4-101 (parallel agent for W-3):** the styles file ended up with my 4 classes + R4-101's 6 group-* classes; widget body uses R4-101's `groupedColumns` rendering loop (Today/Tomorrow/Future sections), inheriting my Toolbar + selection state seamlessly.
+
+### Build verification
+
+- `@spaarke/smart-todo-components` `tsc --noEmit`: clean (0 errors)
+- `LegalWorkspace` Vite production build: 3,312 modules in 13.51s, single-file 2,252 KB / gzip 623.88 KB (~+3 KB vs pre-099 baseline from R4-101's grouping code)
+- `SmartTodo` Code Page Vite build: 3,279 modules in 6.00s, single-file 1,744 KB / gzip 474 KB (R4-101 hook hoist verified end-to-end)
+
+### Acceptance criteria
+
+All 8 criteria PASSED:
+1. ✅ Shim mirrors Calendar shape (`title` on config, NO `toolbar`)
+2. ✅ Single title bar ("Smart To Do" via SectionPanel) + single toolbar (`[SearchBox, +, Open, refresh]`)
+3. ✅ SearchBox debounces 150ms → in-memory filter; clearing restores
+4. ✅ Open selection-aware (`disabled={selectedId === null}`)
+5. ✅ Zero v8 imports, zero inline styles in our code (R4-101's `borderLeftColor` inline is theirs, documented in their styles comment)
+6. ✅ Both `npm run build`s clean
+7. ✅ A11y: `<Toolbar aria-label="…">` landmark, tab order = visual order, `aria-label` on every button, `aria-pressed` on selected cards, `aria-live` on empty/match-empty states
+8. ✅ POML status `complete` + TASK-INDEX row + header counts updated
+
+### UAT tests deferred to live deployment
+
+The 4 `<ui-tests>` blocks in this POML require a deployed environment (spaarkedev1 SpaarkeAi workspace). Per the durable user instruction, no branch deploy was attempted — these tests will be run after the main session pushes Wave D-1 (099+101) into master and the master-deploy re-pushes spaarkedev1.
+
+### Carry-forward findings (for R4-100)
+
+- R4-100's "Open-to-form launch protocol" will further modify `todo.registration.ts` — specifically the `handleOpenTodo` callback (currently still using the legacy `eventId=…` data envelope at lines 75-86 of the rewritten shim) needs to swap to the `openTodo` discriminator. The pre-099 `data = `eventId=…`` comment is preserved in the rewritten file as a hint for R4-100.
+- R4-101's grouping sees ALL items in their respective buckets and the widget toolbar's `+` button (my Add) is wired to R4-101's grouped rendering correctly because both consume `filteredItems` (search-filtered) and group it.
+  </notes>
 </task>
