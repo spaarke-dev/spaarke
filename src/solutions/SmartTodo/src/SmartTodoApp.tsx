@@ -8,10 +8,13 @@
  * is retired per R4 FR-18 / task 042 (UAT OD-4: no save + Completed broken
  * were inherent to the side-pane pattern).
  *
- * Layout:
+ * Layout (R4-104 — single consolidated chrome row, was R4-030's 4-row):
  *   TodoProvider (shared state)
- *     ├── Header (4-row, R4 task 030)
- *     └── SmartToDo (Kanban) OR ListView (toggled via header view-mode, FR-09)
+ *     ├── Header (R4-104 single-row Toolbar with title + QuickAdd + view
+ *     │           toggles + selection-aware actions)
+ *     └── SmartToDo (Kanban, with `hideHeader` so inner KanbanHeader is
+ *           suppressed — chrome lives in the consolidated Header above)
+ *         OR ListView (toggled via header view-mode, FR-09)
  *
  * Modal:
  *   <SmartTodoModal> mounts only when `modalTodoId !== null`. Open is driven
@@ -23,7 +26,7 @@
 import * as React from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
 import { CreateTodoWizard } from "@spaarke/ui-components";
-import type { ToolbarAction } from "@spaarke/ui-components";
+import type { Orientation, ToolbarAction } from "@spaarke/ui-components";
 import {
   createXrmDataService,
   createXrmNavigationService,
@@ -84,24 +87,51 @@ function SmartTodoLayout(): React.ReactElement {
   const styles = useStyles();
   const { selectedEventId, refetch, items, selectItem } = useTodoContext();
 
-  // ── R4 task 033 — Persisted list/card view mode (FR-09) ──────────────────
+  // ── R4 task 033 + R4-104 — Persisted view-mode + orientation (FR-09 + FR-28) ──
   //
-  // The view mode round-trips through `useUserPreferences` (extended in this
-  // task to carry a `viewMode` field on the existing kanban-prefs JSON
-  // envelope — see `hooks/useUserPreferences.ts`). Default = "card" on first
-  // visit (no preference record). The SmartToDo Kanban surface ALSO calls
-  // `useUserPreferences` for its threshold + filter-mode round-trip; both
-  // hook instances read the same preferencetype record, so the next fetch on
-  // either surface sees the latest viewMode persisted here.
+  // viewMode + orientation both round-trip through `useUserPreferences` — the
+  // hook extends the kanban-prefs JSON envelope so all view-shape preferences
+  // share a single Dataverse record (preference-type 100000000, no new
+  // optionset values). The inner SmartToDo also calls `useUserPreferences` for
+  // its threshold logic; both hook instances read/write the SAME record so the
+  // next fetch on either surface sees the latest persisted state.
+  //
+  // R4-104 (UAT 10): Default viewMode = "kanban" for NEW users (no preference
+  // record). Existing users keep their saved choice — see
+  // `hooks/useUserPreferences.ts::DEFAULT_SMART_TODO_VIEW_MODE`.
+  //
+  // R4-104: Orientation is hoisted to App-level so the consolidated Header
+  // can render `<OrientationToggle>` alongside the ViewToggle (the inner
+  // KanbanHeader is suppressed via `hideHeader`).
   const { preferences: viewPrefs, updatePreferences: updateViewPrefs } =
     useUserPreferences({ webApi: getWebApi(), userId: getUserId() });
   const viewMode = viewPrefs.viewMode;
+  const orientation = viewPrefs.orientation;
   const handleViewModeChange = React.useCallback(
     (mode: SmartTodoViewMode) => {
       void updateViewPrefs({ viewMode: mode });
     },
     [updateViewPrefs],
   );
+  const handleOrientationChange = React.useCallback(
+    (next: Orientation) => {
+      void updateViewPrefs({ orientation: next });
+    },
+    [updateViewPrefs],
+  );
+
+  // R4-104 — Settings opener callback ref. The inner `<SmartToDo>` exposes
+  // its threshold-settings popover trigger via `onSettingsOpenerReady`; we
+  // capture it here so the consolidated Header's Settings button can open
+  // the popover. The popover anchor (a hidden span) stays mounted inside
+  // SmartToDo regardless of hideHeader.
+  const settingsOpenerRef = React.useRef<(() => void) | null>(null);
+  const handleSettingsOpenerReady = React.useCallback((open: () => void) => {
+    settingsOpenerRef.current = open;
+  }, []);
+  const handleOpenSettings = React.useCallback(() => {
+    settingsOpenerRef.current?.();
+  }, []);
 
   // ── R4 task 030 — Header state (App-level, per task brief) ───────────────
   //
@@ -338,13 +368,17 @@ function SmartTodoLayout(): React.ReactElement {
     refetch();
   }, [refetch]);
 
-  // "+ New" — stub for task 040. The CreateTodoWizard host already handles
-  // the Outlook ribbon `createTodo` launch path (see LaunchCreateTodoWizardHost
-  // below); the toolbar "+ New" button will reuse that wizard in a later
-  // task. For task 030 we log + leave the wiring open.
-  const handleCreateTodo = React.useCallback(() => {
-    console.log("[SmartTodo] + New clicked — wired by task 040");
-  }, []);
+  // R4-104 (Wave E-3) — The consolidated Header's primary add path is the
+  // inline QuickAdd input (single-line title → dispatches QUICK_ADD_TODO_EVENT
+  // → SmartToDo's handleAdd). The "+ New" wizard button is intentionally
+  // omitted from the Header in standalone Code Page mode because:
+  //   1. The QuickAdd input already satisfies UAT 9 (compact, in-toolbar add)
+  //   2. The richer CreateTodoWizard path remains active via Outlook ribbon
+  //      + parent-form ribbon launches (LaunchCreateTodoWizardHost, below)
+  //   3. Adding a wizard launcher here would re-introduce the duplicate-chrome
+  //      affordance the consolidation aims to eliminate
+  // If a future UAT round requests an in-toolbar wizard launcher, pass
+  // `onOpenWizard` to <Header /> with imperative wizard-open logic.
 
   // ── R4 task 042 (FR-18) — TodoDetailPanel side-pane retired ──────────────
   // The R3 two-pane layout (kanban + collapsible TodoDetailPanel separated by
@@ -355,16 +389,32 @@ function SmartTodoLayout(): React.ReactElement {
 
   return (
     <div className={styles.page}>
-      {/* ── R4 task 030 — 4-row header (FR-06) ──────────────────────────── */}
+      {/* ── R4-104 (Wave E-3) — Consolidated single-row Header (UAT 8/9/10/11)
+            ──────────────────────────────────────────────────────────────────
+            Replaces the R4-030 4-row layout. The inner `<KanbanHeader>` is
+            suppressed via `<SmartToDo hideHeader />` to eliminate the
+            duplicate-chrome the prior layout produced.
+            All Wave 2a/2b functionality is preserved by relocating the
+            controls into this single Toolbar landmark:
+              - R4-031 Assigned-to-Me — already query-baked, no UI here
+              - R4-032 Selection-aware Open/Delete/Email/Pin — embedded
+                <SelectionAwareToolbar> renders when selectedCount > 0
+              - R4-033 List/Card view toggle — <ViewToggle>
+              - R4-070 Kanban orientation toggle — <OrientationToggle>
+                (suppressed in list view where orientation is meaningless)
+            QuickAdd dispatches QUICK_ADD_TODO_EVENT → SmartToDo subscribes
+            and routes through its existing handleAdd (single-source). */}
       <Header
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onRefresh={handleRefresh}
-        onCreateTodo={handleCreateTodo}
+        onOpenSettings={handleOpenSettings}
         selectedCount={selectedIds.size}
         toolbarActions={toolbarActions}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
+        orientation={orientation}
+        onOrientationChange={handleOrientationChange}
       />
 
       {/* ── Primary surface — Kanban Board (default) OR List View (R4 task 033 / FR-09) ── */}
@@ -383,6 +433,12 @@ function SmartTodoLayout(): React.ReactElement {
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
             onOpenTodo={handleCardOpen}
+            // R4-104 (Wave E-3) — Suppress inner KanbanHeader (chrome lives
+            // in the consolidated <Header /> above) + expose Settings opener
+            // so the Header's gear button can trigger the threshold popover
+            // that's still anchored inside SmartToDo.
+            hideHeader
+            onSettingsOpenerReady={handleSettingsOpenerReady}
           />
         )}
       </div>

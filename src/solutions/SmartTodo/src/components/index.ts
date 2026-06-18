@@ -15,8 +15,13 @@
 export { SmartToDo } from './SmartToDo';
 export type { ISmartToDoProps } from './SmartToDo';
 
-export { KanbanCard } from './KanbanCard';
-export type { IKanbanCardProps } from './KanbanCard';
+// R4 task 102 (E-1, 2026-06-18) — `KanbanCard` was hoisted into the
+// `@spaarke/smart-todo-components` peer package so the workspace widget can
+// reuse the same SmartTodo-shaped card. Re-export the hoisted symbols from
+// the barrel so existing local consumers (e.g., `SmartToDo.tsx` neighbours,
+// tests) continue to resolve `from './components'` without source-path churn.
+export { KanbanCard } from '@spaarke/smart-todo-components';
+export type { IKanbanCardProps } from '@spaarke/smart-todo-components';
 
 export { KanbanHeader } from './KanbanHeader';
 export type { IKanbanHeaderProps } from './KanbanHeader';

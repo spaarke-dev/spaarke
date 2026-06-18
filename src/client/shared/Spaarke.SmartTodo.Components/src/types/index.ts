@@ -5,4 +5,11 @@
  */
 
 export type { ITodoRecord, IRegardingContext, IFeedSyncBridge, IWebApi } from './todo';
-export type { TodoColumn, IKanbanTodoLike, IKanbanColumn, IKanbanDataverseService } from './kanban';
+export type {
+  TodoColumn,
+  IKanbanTodoLike,
+  IKanbanCardTodo,
+  IKanbanColumn,
+  IKanbanDataverseService,
+  KanbanOrientation,
+} from './kanban';

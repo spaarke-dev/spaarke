@@ -153,6 +153,17 @@ export default defineConfig({
       // (FR-25 / NFR-10 — only NEW exports added to LegalWorkspace).
       "@spaarke/legal-workspace/src": path.resolve(__dirname, "../LegalWorkspace/src"),
       "@spaarke/legal-workspace": path.resolve(__dirname, "../LegalWorkspace/src"),
+      // R4 task 102 (E-1, 2026-06-18): @spaarke/sdap-client — pulled in
+      // transitively via @spaarke/ui-components/services/EntityCreationService.ts
+      // (Phase G of multi-container-multi-index-r1 / PR #369). Mirrors the
+      // alias already present in CreateMatter/Project/Event/WorkAssignmentWizard
+      // + SmartTodo + LegalWorkspace + CreateTodoWizard. SpaarkeAi is the
+      // 7th surface needing this workaround; the project-wide tsconfig refs
+      // fix is tracked in `current-task.md` follow-ups (deferred to task 092/098).
+      "@spaarke/sdap-client": path.resolve(
+        __dirname,
+        "../../client/shared/Spaarke.SdapClient/src",
+      ),
     },
     // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
     // .gitignore) never silently shadow source. See Task 112 (2026-05-22).

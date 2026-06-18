@@ -19,19 +19,27 @@
  *   - PaneHeader removed from widget; the host SectionPanel provides the title.
  *
  * R4 task 101 (W-3 — Today/Tomorrow/Future grouping, 2026-06-18):
- *   - Added `groupList` (vertical stack of grouped sections, gap between).
- *   - Added `groupSection` (single bucket's container — header + list).
- *   - Added `groupHeader` (column-name + count strip with accent-colored left
- *     border; the accent color comes from `bucketTodoItems()` via inline
- *     `style.borderLeftColor` — the only place inline style is allowed,
- *     because Griffel cannot author dynamic per-rule colors from runtime
- *     values; the rest of the style is fully Griffel/token).
- *   - Added `groupTitle` + `groupCount` (header text composition).
- *   - Added `groupEmpty` (placeholder shown when a bucket has zero items so
- *     the user can always see the grouping structure — closes the audit's
- *     "empty buckets visible" requirement at the section-list level).
+ *   - Added `groupList` / `groupSection` / `groupHeader` / `groupTitle` /
+ *     `groupCount` / `groupEmpty` (now legacy — superseded by R4-102 full
+ *     `<SmartTodoKanban>` rendering; preserved for back-compat / no-regret
+ *     removal in a future hoist task).
  *
- * For Pattern D rationale see `@spaarke/smart-todo-components/README.md`.
+ * R4 task 103 (E-2 — toolbar polish, 2026-06-18):
+ *   - Reorganised `toolbar` to a left/spacer/right layout matching the app's
+ *     R4-104 Header pattern. Left slot holds the `+` wizard button + inline
+ *     QuickAdd (Input + Add btn). Right slot holds the action cluster (Open /
+ *     Refresh / Orient / Search toggle).
+ *   - Added `searchRow` — the expand-on-toggle SearchBox row that renders
+ *     BELOW the toolbar when the search icon is active. Slides in / out via
+ *     state (no animation lib — just conditional render). Carries its own
+ *     border + padding so it visually nests with the toolbar.
+ *   - Added `quickAddGroup` + `quickAddInput` for the inline quick-add layout
+ *     (mirrors app Header pattern from R4-104).
+ *   - Added `errorWithLink` — surfaces the "open full wizard" recovery link
+ *     when quick-add fails (UAT 7).
+ *   - Removed `searchWrap` flex-growth on the toolbar (search moved to its own
+ *     expanded row); kept the class as a tighter wrapper for the expanded
+ *     SearchBox.
  */
 
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
@@ -51,12 +59,13 @@ export const useSmartTodoWidgetStyles = makeStyles({
   },
 
   /**
-   * Sole chrome row — single `<Toolbar>` containing [SearchBox, +, Open, refresh].
+   * Sole chrome row — single `<Toolbar>` with left (wizard + QuickAdd),
+   * spacer, right (action cluster + search icon toggle). R4-103 reorganised
+   * from R4-099's [SearchBox left | actions right] layout.
    *
-   * Layout: SearchBox grows on the left; action buttons cluster on the right.
-   * Uses `justifyContent: space-between` via flex; no fixed widths so the
-   * SearchBox shrinks gracefully in narrow panes (mobile-narrow layout
-   * compatibility per spec FR-04).
+   * Layout: left group sits left, spacer grows, right group sits right.
+   * No fixed widths so the QuickAdd input shrinks gracefully in narrow panes
+   * (mobile-narrow layout compatibility per spec FR-04).
    */
   toolbar: {
     flexShrink: 0,
@@ -78,10 +87,58 @@ export const useSmartTodoWidgetStyles = makeStyles({
   },
 
   /**
-   * Left half of the toolbar — SearchBox container. Grows to fill available
-   * width; `minWidth: 0` lets it shrink below its intrinsic content width
-   * in narrow panes (preventing toolbar overflow).
+   * Left half of the toolbar (R4-103) — `[+ wizard] [QuickAdd Input] [Add btn]`.
+   * Mirrors the app's R4-104 Header `quickAddGroup` pattern so widget + app
+   * feel like one product. `minWidth: 0` lets the Input shrink in narrow panes.
    */
+  toolbarLeft: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalXS),
+  },
+
+  /** QuickAdd Input — grows to fill the left slot; min-width keeps it usable. */
+  quickAddInput: {
+    flex: '1 1 auto',
+    minWidth: '120px',
+  },
+
+  /**
+   * Spacer — flex grow with no content so the right group anchors to the
+   * right edge regardless of left group content width.
+   */
+  toolbarSpacer: {
+    flex: '0 1 auto',
+    minWidth: tokens.spacingHorizontalS,
+  },
+
+  /**
+   * Search row — appears BELOW the toolbar when the user toggles the search
+   * icon ON. Conditionally rendered (not always present) so it doesn't reserve
+   * vertical space when collapsed. Carries its own subtle border + padding so
+   * it reads as a contiguous extension of the toolbar.
+   */
+  searchRow: {
+    flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalS),
+    ...shorthands.padding(
+      tokens.spacingVerticalXS,
+      tokens.spacingHorizontalM,
+      tokens.spacingVerticalXS,
+      tokens.spacingHorizontalM
+    ),
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+
+  /** Wrapper for the (now-expanded) SearchBox — grows to fill the row. */
   searchWrap: {
     flex: '1 1 auto',
     minWidth: 0,
@@ -90,8 +147,8 @@ export const useSmartTodoWidgetStyles = makeStyles({
   },
 
   /**
-   * Right half of the toolbar — action button cluster. `flexShrink: 0` so
-   * buttons stay visible even when the SearchBox compresses.
+   * Right half of the toolbar — action button cluster + search toggle.
+   * `flexShrink: 0` so buttons stay visible even when the left group compresses.
    */
   toolbarActions: {
     flexShrink: 0,
@@ -101,12 +158,46 @@ export const useSmartTodoWidgetStyles = makeStyles({
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
 
+  /**
+   * Quick-add error row — surfaces graceful errors when Dataverse rejects
+   * the title-only create (e.g., other required fields). The error text
+   * carries a link "Open full wizard" that dispatches the full wizard via
+   * `onAddTodo` so the user is never stuck. Sits below the toolbar / above
+   * the body so it's visible without scrolling.
+   */
+  errorWithLink: {
+    flexShrink: 0,
+    ...shorthands.padding(
+      tokens.spacingVerticalXS,
+      tokens.spacingHorizontalM,
+      tokens.spacingVerticalXS,
+      tokens.spacingHorizontalM
+    ),
+  },
+
   /** Scrollable body — owns internal scroll for the cards list. */
   body: {
     flex: '1 1 auto',
     minHeight: 0,
     overflowY: 'auto',
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
+  },
+
+  /**
+   * R4 task 102 (E-1, 2026-06-18) — container that hosts the full
+   * `<SmartTodoKanban>`. Replaces the R4-101 `groupList` section stack with
+   * a flex column that gives the Kanban board its own minimum height + lets
+   * the inner `<KanbanBoard>` own the row/column flex layout.
+   *
+   * `minHeight: 0` is essential — without it the parent's `flex: 1 1 auto`
+   * body wins the height race and the inner card list cannot scroll.
+   */
+  kanbanContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 auto',
+    minHeight: 0,
+    minWidth: 0,
   },
 
   /** Empty-state container — centered, soft tone. */

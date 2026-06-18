@@ -3,5 +3,5 @@
  *
  * @see ./Header.tsx for the component + full layout contract.
  */
-export { Header } from './Header';
-export type { HeaderProps, FacetChip } from './Header';
+export { Header, QUICK_ADD_TODO_EVENT } from './Header';
+export type { HeaderProps, QuickAddTodoEventDetail } from './Header';
