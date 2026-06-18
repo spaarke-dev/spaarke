@@ -324,7 +324,13 @@ describe('tableWidgetVisibility', () => {
     expect(typeof typed.selectedRows).toBe('number');
 
     // FR-57 shape conformance.
-    expect(Object.keys(typed).sort()).toEqual(['filteredColumns', 'rowCount', 'selectedRows', 'sortColumn', 'widgetType']);
+    expect(Object.keys(typed).sort()).toEqual([
+      'filteredColumns',
+      'rowCount',
+      'selectedRows',
+      'sortColumn',
+      'widgetType',
+    ]);
   });
 
   test('NEVER exposes row IDs (ADR-015 binding — selectedRows is cardinality only)', () => {
@@ -349,9 +355,7 @@ describe('tableWidgetVisibility', () => {
       filteredColumns: ['status'],
       selectedRows: ['guid-1'],
       // Pretend the upstream stuffed cell content; we must NEVER pass it.
-      rows: [
-        { id: 'guid-1', name: 'Acme Holdings', amount: 12_345_678, ssn: '999-99-9999' },
-      ],
+      rows: [{ id: 'guid-1', name: 'Acme Holdings', amount: 12_345_678, ssn: '999-99-9999' }],
       data: { sensitive: 'should-not-appear' },
     });
     const typed = result as SerializedTableState;

@@ -51,11 +51,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import type { PinDto, PinType, PinUpsertRequest } from './pinned-memory-contracts';
-import {
-  MAX_PIN_CONTENT_LENGTH,
-  MAX_PIN_TITLE_LENGTH,
-  PIN_TYPES,
-} from './pinned-memory-contracts';
+import { MAX_PIN_CONTENT_LENGTH, MAX_PIN_TITLE_LENGTH, PIN_TYPES } from './pinned-memory-contracts';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -175,10 +171,7 @@ interface ValidationErrors {
 }
 
 /** Build the initial form state for a given mode + initial pin. */
-function buildInitialState(
-  mode: PinnedMemoryEditDialogMode,
-  initial?: PinDto
-): FormState {
+function buildInitialState(mode: PinnedMemoryEditDialogMode, initial?: PinDto): FormState {
   if (mode === 'edit' && initial) {
     return {
       title: initial.title,
@@ -276,40 +269,28 @@ export const PinnedMemoryEditDialog: React.FC<PinnedMemoryEditDialogProps> = ({
   // before returning.
 
   // ── Field handlers ──────────────────────────────────────────────────────
-  const handleTitleChange = useCallback(
-    (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
-      setState(prev => ({ ...prev, title: data.value }));
-    },
-    []
-  );
+  const handleTitleChange = useCallback((_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
+    setState(prev => ({ ...prev, title: data.value }));
+  }, []);
 
-  const handleContentChange = useCallback(
-    (_e: React.ChangeEvent<HTMLTextAreaElement>, data: { value: string }) => {
-      setState(prev => ({ ...prev, content: data.value }));
-    },
-    []
-  );
+  const handleContentChange = useCallback((_e: React.ChangeEvent<HTMLTextAreaElement>, data: { value: string }) => {
+    setState(prev => ({ ...prev, content: data.value }));
+  }, []);
 
-  const handlePinTypeChange = useCallback(
-    (_e: unknown, data: { value: string }) => {
-      const next = data.value as PinType;
-      setState(prev => ({
-        ...prev,
-        pinType: next,
-        // Clearing matterId when leaving matter-fact mode keeps the request
-        // body honest — only the matter-fact branch carries a matterId.
-        matterId: next === 'matter-fact' ? prev.matterId : '',
-      }));
-    },
-    []
-  );
+  const handlePinTypeChange = useCallback((_e: unknown, data: { value: string }) => {
+    const next = data.value as PinType;
+    setState(prev => ({
+      ...prev,
+      pinType: next,
+      // Clearing matterId when leaving matter-fact mode keeps the request
+      // body honest — only the matter-fact branch carries a matterId.
+      matterId: next === 'matter-fact' ? prev.matterId : '',
+    }));
+  }, []);
 
-  const handleMatterIdChange = useCallback(
-    (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
-      setState(prev => ({ ...prev, matterId: data.value }));
-    },
-    []
-  );
+  const handleMatterIdChange = useCallback((_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
+    setState(prev => ({ ...prev, matterId: data.value }));
+  }, []);
 
   // ── Submit / cancel ─────────────────────────────────────────────────────
   const handleSubmit = useCallback(() => {
@@ -326,10 +307,7 @@ export const PinnedMemoryEditDialog: React.FC<PinnedMemoryEditDialogProps> = ({
       // Only attach matterId when matter-fact; the backend rejects matterId
       // for other pin types as part of its validation. Empty-string guard
       // mirrors the backend's null-or-omitted treatment.
-      matterId:
-        state.pinType === 'matter-fact' && state.matterId.trim().length > 0
-          ? state.matterId.trim()
-          : undefined,
+      matterId: state.pinType === 'matter-fact' && state.matterId.trim().length > 0 ? state.matterId.trim() : undefined,
     };
     onSubmit(req);
   }, [isSubmitting, onSubmit, state]);
@@ -475,11 +453,7 @@ export const PinnedMemoryEditDialog: React.FC<PinnedMemoryEditDialogProps> = ({
 
               {/* Server error */}
               {serverError && (
-                <Text
-                  className={styles.serverError}
-                  role="alert"
-                  data-testid="pinned-memory-edit-server-error"
-                >
+                <Text className={styles.serverError} role="alert" data-testid="pinned-memory-edit-server-error">
                   {serverError}
                 </Text>
               )}

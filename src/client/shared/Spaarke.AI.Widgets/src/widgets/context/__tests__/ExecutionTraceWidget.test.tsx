@@ -26,10 +26,7 @@ import { act, render, screen, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBus } from '../../../events/PaneEventBus';
 import { PaneEventBusProvider } from '../../../events/PaneEventBusContext';
-import ExecutionTraceWidget, {
-  MAX_TRACE_ENTRIES,
-  type ExecutionTraceData,
-} from '../ExecutionTraceWidget';
+import ExecutionTraceWidget, { MAX_TRACE_ENTRIES, type ExecutionTraceData } from '../ExecutionTraceWidget';
 import type { ContextPaneEvent } from '../../../events/PaneEventTypes';
 import type { ContextWidgetProps } from '../../../types/widget-types';
 
@@ -93,9 +90,7 @@ describe('ExecutionTraceWidget — empty state', () => {
   it('renders the "No execution trace yet" hint when no events have arrived', () => {
     renderWidget();
     expect(screen.getByText('No execution trace yet')).toBeInTheDocument();
-    expect(
-      screen.getByText(/Agent activity will appear here/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Agent activity will appear here/i)).toBeInTheDocument();
   });
 
   it('renders the widget region with the correct accessible name', () => {
@@ -177,9 +172,7 @@ describe('ExecutionTraceWidget — single event', () => {
     });
     const row = screen.getByTestId('execution-trace-row');
     expect(within(row).getByText('Node: extract-entities')).toBeInTheDocument();
-    expect(
-      within(row).getByText('Playbook: summarize-document-for-chat@v1')
-    ).toBeInTheDocument();
+    expect(within(row).getByText('Playbook: summarize-document-for-chat@v1')).toBeInTheDocument();
   });
 
   it('renders a playbook_node_completed event with success + duration detail', () => {
@@ -216,9 +209,7 @@ describe('ExecutionTraceWidget — single event', () => {
     });
     const row = screen.getByTestId('execution-trace-row');
     expect(within(row).getByText('Decision: route:summarize')).toBeInTheDocument();
-    expect(
-      within(row).getByText('capability-router:summarize-intent-matched')
-    ).toBeInTheDocument();
+    expect(within(row).getByText('capability-router:summarize-intent-matched')).toBeInTheDocument();
   });
 
   it('renders a failed tool_call_completed event with (failed) suffix', () => {
@@ -247,18 +238,9 @@ describe('ExecutionTraceWidget — chronological order', () => {
   it('renders dispatched events in dispatch order (oldest first, newest at bottom)', () => {
     const { bus } = renderWidget();
     act(() => {
-      bus.dispatch(
-        'context',
-        makeEvent({ type: 'tool_call_started', toolName: 'alpha' })
-      );
-      bus.dispatch(
-        'context',
-        makeEvent({ type: 'tool_call_started', toolName: 'bravo' })
-      );
-      bus.dispatch(
-        'context',
-        makeEvent({ type: 'tool_call_started', toolName: 'charlie' })
-      );
+      bus.dispatch('context', makeEvent({ type: 'tool_call_started', toolName: 'alpha' }));
+      bus.dispatch('context', makeEvent({ type: 'tool_call_started', toolName: 'bravo' }));
+      bus.dispatch('context', makeEvent({ type: 'tool_call_started', toolName: 'charlie' }));
     });
     const rows = screen.getAllByTestId('execution-trace-row');
     expect(rows).toHaveLength(3);
@@ -319,10 +301,7 @@ describe('ExecutionTraceWidget — FIFO cap', () => {
     // be evicted, so the visible rows are `tool-1` .. `tool-50`.
     act(() => {
       for (let i = 0; i <= MAX_TRACE_ENTRIES; i++) {
-        bus.dispatch(
-          'context',
-          makeEvent({ type: 'tool_call_started', toolName: `tool-${i}` })
-        );
+        bus.dispatch('context', makeEvent({ type: 'tool_call_started', toolName: `tool-${i}` }));
       }
     });
     const rows = screen.getAllByTestId('execution-trace-row');
@@ -357,15 +336,12 @@ describe('ExecutionTraceWidget — event filtering', () => {
   it('drops events that arrive without a timestamp (defense in depth)', () => {
     const { bus } = renderWidget();
     act(() => {
-      bus.dispatch(
-        'context',
-        {
-          type: 'tool_call_started',
-          toolName: 'no-ts',
-          sessionId: 'session-test-1',
-          // timestamp intentionally absent.
-        } as ContextPaneEvent
-      );
+      bus.dispatch('context', {
+        type: 'tool_call_started',
+        toolName: 'no-ts',
+        sessionId: 'session-test-1',
+        // timestamp intentionally absent.
+      } as ContextPaneEvent);
     });
     expect(screen.queryAllByTestId('execution-trace-row')).toHaveLength(0);
   });

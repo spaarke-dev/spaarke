@@ -298,9 +298,7 @@ export function getWorkspaceWidgetMetadata(type: string): WidgetMetadata | undef
  * @returns The registration's `getVisibleState` if registered AND opted in,
  *          otherwise `undefined`.
  */
-export function getWorkspaceWidgetVisibleStateFn(
-  type: string
-): RegistryGetAgentVisibleState | undefined {
+export function getWorkspaceWidgetVisibleStateFn(type: string): RegistryGetAgentVisibleState | undefined {
   return _registry.get(type)?.getVisibleState;
 }
 

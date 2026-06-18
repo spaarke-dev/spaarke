@@ -102,15 +102,9 @@ export type PinnedMemoryListWidgetProps = ContextWidgetProps<PinnedMemoryListDat
 
 type PinTypeFilter = 'all' | PinType;
 
-type DialogState =
-  | { kind: 'closed' }
-  | { kind: 'create' }
-  | { kind: 'edit'; pin: PinDto };
+type DialogState = { kind: 'closed' } | { kind: 'create' } | { kind: 'edit'; pin: PinDto };
 
-type DeleteState =
-  | { kind: 'idle' }
-  | { kind: 'confirm'; pin: PinDto }
-  | { kind: 'deleting'; pin: PinDto };
+type DeleteState = { kind: 'idle' } | { kind: 'confirm'; pin: PinDto } | { kind: 'deleting'; pin: PinDto };
 
 interface LoadState {
   isLoading: boolean;
@@ -313,11 +307,7 @@ const useStyles = makeStyles({
 // Pin-type display metadata (group headings)
 // ---------------------------------------------------------------------------
 
-const PIN_TYPE_GROUP_ORDER: readonly PinType[] = [
-  'user-preference',
-  'system-rule',
-  'matter-fact',
-];
+const PIN_TYPE_GROUP_ORDER: readonly PinType[] = ['user-preference', 'system-rule', 'matter-fact'];
 
 const PIN_TYPE_GROUP_LABELS: Record<PinType, string> = {
   'user-preference': 'User preferences',
@@ -450,10 +440,7 @@ const PinnedMemoryListWidget: React.FC<PinnedMemoryListWidgetProps> = ({
       setDialogServerError(null);
       try {
         const isCreate = dialog.kind === 'create';
-        const url = buildBffApiUrl(
-          bffBaseUrl,
-          isCreate ? buildListPath() : buildPinPath(dialog.pin.pinId)
-        );
+        const url = buildBffApiUrl(bffBaseUrl, isCreate ? buildListPath() : buildPinPath(dialog.pin.pinId));
         const response = await authenticatedFetch(url, {
           method: isCreate ? 'POST' : 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -607,9 +594,7 @@ const PinnedMemoryListWidget: React.FC<PinnedMemoryListWidgetProps> = ({
     return (
       <div className={styles.centerState} role="status">
         <PinRegular className={styles.emptyIcon} aria-hidden="true" />
-        <Text className={styles.emptyTitle}>
-          {hasUserFilter ? 'No matching pins' : 'No pinned memory yet'}
-        </Text>
+        <Text className={styles.emptyTitle}>{hasUserFilter ? 'No matching pins' : 'No pinned memory yet'}</Text>
         <Text className={styles.emptyBody}>
           {hasUserFilter
             ? 'Try clearing the search or changing the pin-type filter.'
@@ -660,9 +645,7 @@ const PinnedMemoryListWidget: React.FC<PinnedMemoryListWidgetProps> = ({
             New pin
           </Button>
         </div>
-        <Text className={styles.headerSubtitle}>
-          {totalShown === 1 ? '1 pin shown' : `${totalShown} pins shown`}
-        </Text>
+        <Text className={styles.headerSubtitle}>{totalShown === 1 ? '1 pin shown' : `${totalShown} pins shown`}</Text>
         <div className={styles.controlsRow}>
           <Input
             className={styles.searchInput}
@@ -725,20 +708,10 @@ const PinnedMemoryListWidget: React.FC<PinnedMemoryListWidgetProps> = ({
               const group = groupedPins[pt];
               if (group.length === 0) return null;
               return (
-                <div
-                  key={pt}
-                  className={styles.groupBlock}
-                  data-testid="pinned-memory-group"
-                  data-group-type={pt}
-                >
+                <div key={pt} className={styles.groupBlock} data-testid="pinned-memory-group" data-group-type={pt}>
                   <div className={styles.groupHeaderRow}>
                     <Text className={styles.groupHeaderTitle}>{PIN_TYPE_GROUP_LABELS[pt]}</Text>
-                    <Badge
-                      className={styles.groupHeaderBadge}
-                      appearance="outline"
-                      color="informative"
-                      size="small"
-                    >
+                    <Badge className={styles.groupHeaderBadge} appearance="outline" color="informative" size="small">
                       {group.length}
                     </Badge>
                   </div>

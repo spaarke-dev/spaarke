@@ -49,9 +49,7 @@ jest.mock(
 // and returns the registry reader fns from the SAME isolated module graph.
 function loadRegistryWithSideEffects(): {
   hasContextWidget: (type: string) => boolean;
-  resolveContextWidget: (
-    type: string
-  ) => Promise<((...args: unknown[]) => unknown) | null>;
+  resolveContextWidget: (type: string) => Promise<((...args: unknown[]) => unknown) | null>;
   getAllContextWidgetTypes: () => string[];
   clearContextRegistry: () => void;
 } {

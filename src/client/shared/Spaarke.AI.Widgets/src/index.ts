@@ -128,10 +128,7 @@ export {
 } from './registry/WorkspaceWidgetRegistry';
 
 // Task 072 (D-C-27) — Pillar 9 visibility extension.
-export type {
-  WorkspaceWidgetRegistration,
-  RegistryGetAgentVisibleState,
-} from './registry/WorkspaceWidgetRegistry';
+export type { WorkspaceWidgetRegistration, RegistryGetAgentVisibleState } from './registry/WorkspaceWidgetRegistry';
 
 // ContextWidgetRegistry — lazy-load with null-return for unknown types
 export {
@@ -504,14 +501,8 @@ registerContextWidget('file-preview', {
 // ---------------------------------------------------------------------------
 
 export { default as ExecutionTraceWidget } from './widgets/context/ExecutionTraceWidget';
-export type {
-  ExecutionTraceData,
-  ExecutionTraceWidgetProps,
-} from './widgets/context/ExecutionTraceWidget';
-export {
-  EXECUTION_TRACE_WIDGET_TYPE,
-  MAX_TRACE_ENTRIES,
-} from './widgets/context/ExecutionTraceWidget';
+export type { ExecutionTraceData, ExecutionTraceWidgetProps } from './widgets/context/ExecutionTraceWidget';
+export { EXECUTION_TRACE_WIDGET_TYPE, MAX_TRACE_ENTRIES } from './widgets/context/ExecutionTraceWidget';
 
 // R6 task 062 / D-C-15: register the widget so the SpaarkeAi shell can mount it
 // as the Context-pane primary widget via `resolveContextWidget('execution-trace')`.

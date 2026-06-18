@@ -124,10 +124,7 @@ function tooltipFor(source: PinSource): string {
  * @example
  * <PinnedMemoryProvenanceBadge source="chat" />
  */
-export const PinnedMemoryProvenanceBadge: React.FC<PinnedMemoryProvenanceBadgeProps> = ({
-  source,
-  className,
-}) => {
+export const PinnedMemoryProvenanceBadge: React.FC<PinnedMemoryProvenanceBadgeProps> = ({ source, className }) => {
   const styles = useStyles();
   // STUB: until `PinDto.source` lands, callers won't pass `source`, and we
   // default to "ui". TODO(R7) — see file-header caveat.

@@ -42,9 +42,7 @@ describe('PinnedMemoryDeleteConfirmation', () => {
       />
     );
     expect(screen.getByTestId('pinned-memory-delete-impact')).toBeInTheDocument();
-    expect(
-      screen.getByText(/shared across all your chat sessions/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/shared across all your chat sessions/i)).toBeInTheDocument();
     expect(screen.getByText(/This action affects every chat session\./i)).toBeInTheDocument();
   });
 
@@ -65,12 +63,7 @@ describe('PinnedMemoryDeleteConfirmation', () => {
     const user = userEvent.setup();
     const onConfirm = jest.fn();
     renderWithTheme(
-      <PinnedMemoryDeleteConfirmation
-        open={true}
-        pinTitle="X"
-        onConfirm={onConfirm}
-        onCancel={() => undefined}
-      />
+      <PinnedMemoryDeleteConfirmation open={true} pinTitle="X" onConfirm={onConfirm} onCancel={() => undefined} />
     );
     await user.click(screen.getByTestId('pinned-memory-delete-confirm'));
     expect(onConfirm).toHaveBeenCalledTimes(1);
@@ -80,12 +73,7 @@ describe('PinnedMemoryDeleteConfirmation', () => {
     const user = userEvent.setup();
     const onCancel = jest.fn();
     renderWithTheme(
-      <PinnedMemoryDeleteConfirmation
-        open={true}
-        pinTitle="X"
-        onConfirm={() => undefined}
-        onCancel={onCancel}
-      />
+      <PinnedMemoryDeleteConfirmation open={true} pinTitle="X" onConfirm={() => undefined} onCancel={onCancel} />
     );
     await user.click(screen.getByTestId('pinned-memory-delete-cancel'));
     expect(onCancel).toHaveBeenCalledTimes(1);

@@ -16,11 +16,7 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import {
-  FluentProvider,
-  webDarkTheme,
-  webLightTheme,
-} from '@fluentui/react-components';
+import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
 import PinnedMemoryProvenanceBadge from '../PinnedMemoryProvenanceBadge';
 

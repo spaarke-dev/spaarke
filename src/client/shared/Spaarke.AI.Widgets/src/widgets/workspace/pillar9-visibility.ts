@@ -342,9 +342,8 @@ export const dashboardWidgetVisibility: RegistryGetAgentVisibleState = (
   if (dashboardNameRaw.length === 0) return null;
 
   const lastViewedSectionRaw = widgetData.lastViewedSection;
-  const lastViewedSection = isString(lastViewedSectionRaw) && lastViewedSectionRaw.length > 0
-    ? lastViewedSectionRaw
-    : undefined;
+  const lastViewedSection =
+    isString(lastViewedSectionRaw) && lastViewedSectionRaw.length > 0 ? lastViewedSectionRaw : undefined;
 
   const result: SerializedDashboardState = {
     widgetType: 'Dashboard',

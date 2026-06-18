@@ -50,14 +50,7 @@
  */
 
 import React, { useCallback, useRef, useState, useEffect, useMemo } from 'react';
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-  Divider,
-  Spinner,
-} from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens, Text, Divider, Spinner } from '@fluentui/react-components';
 import {
   WrenchRegular,
   CheckmarkCircleRegular,
@@ -376,19 +369,13 @@ function formatScore(score?: number): string {
  * Pick a Fluent v9 icon for a trace entry based on its event type and (for
  * completion events) success outcome.
  */
-function pickIcon(
-  entry: TraceEntry,
-  styles: ReturnType<typeof useStyles>
-): React.ReactElement {
+function pickIcon(entry: TraceEntry, styles: ReturnType<typeof useStyles>): React.ReactElement {
   switch (entry.type) {
     case 'tool_call_started':
       return <WrenchRegular className={styles.entryIcon} aria-hidden="true" />;
     case 'tool_call_completed':
       return entry.success === false ? (
-        <ErrorCircleRegular
-          className={mergeClasses(styles.entryIcon, styles.entryIconError)}
-          aria-hidden="true"
-        />
+        <ErrorCircleRegular className={mergeClasses(styles.entryIcon, styles.entryIconError)} aria-hidden="true" />
       ) : (
         <CheckmarkCircleRegular
           className={mergeClasses(styles.entryIcon, styles.entryIconSuccess)}
@@ -401,10 +388,7 @@ function pickIcon(
       return <FlowRegular className={styles.entryIcon} aria-hidden="true" />;
     case 'playbook_node_completed':
       return entry.success === false ? (
-        <ErrorCircleRegular
-          className={mergeClasses(styles.entryIcon, styles.entryIconError)}
-          aria-hidden="true"
-        />
+        <ErrorCircleRegular className={mergeClasses(styles.entryIcon, styles.entryIconError)} aria-hidden="true" />
       ) : (
         <CheckmarkCircleRegular
           className={mergeClasses(styles.entryIcon, styles.entryIconSuccess)}
@@ -563,11 +547,7 @@ const ExecutionTraceEmpty: React.FC<{ styles: ReturnType<typeof useStyles> }> = 
  * @see ContextWidgetProps
  * @see ExecutionTraceData
  */
-const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({
-  data,
-  isLoading,
-  className,
-}) => {
+const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoading, className }) => {
   const styles = useStyles();
   const sessionFilter = data?.sessionId ?? '';
 

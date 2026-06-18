@@ -26,11 +26,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {
-  FluentProvider,
-  webDarkTheme,
-  webLightTheme,
-} from '@fluentui/react-components';
+import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
 import type { PinDto } from '../../../components/memory/pinned-memory-contracts';
 
@@ -137,13 +133,9 @@ beforeEach(() => {
 
 describe('PinnedMemoryListWidget — render + grouping (POML test #1)', () => {
   it('renders 6 mock items grouped by pinType (2 per group)', async () => {
-    mockAuthenticatedFetch.mockResolvedValueOnce(
-      jsonResponse(200, { items: SIX_PINS, count: SIX_PINS.length })
-    );
+    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { items: SIX_PINS, count: SIX_PINS.length }));
 
-    renderWithTheme(
-      <PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />
-    );
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
 
     // Wait for the initial GET to settle.
     await screen.findByTestId('pinned-memory-groups');
@@ -173,13 +165,9 @@ describe('PinnedMemoryListWidget — render + grouping (POML test #1)', () => {
 describe('PinnedMemoryListWidget — filter by pinType (POML test #2)', () => {
   it('shows only system-rule pins when the filter is set to system-rule', async () => {
     const user = userEvent.setup();
-    mockAuthenticatedFetch.mockResolvedValueOnce(
-      jsonResponse(200, { items: SIX_PINS, count: SIX_PINS.length })
-    );
+    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { items: SIX_PINS, count: SIX_PINS.length }));
 
-    renderWithTheme(
-      <PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />
-    );
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
 
     await screen.findByTestId('pinned-memory-groups');
 
@@ -212,13 +200,9 @@ describe('PinnedMemoryListWidget — filter by pinType (POML test #2)', () => {
 describe('PinnedMemoryListWidget — search by title (POML test #3)', () => {
   it('matches title text case-insensitively', async () => {
     const user = userEvent.setup();
-    mockAuthenticatedFetch.mockResolvedValueOnce(
-      jsonResponse(200, { items: SIX_PINS, count: SIX_PINS.length })
-    );
+    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { items: SIX_PINS, count: SIX_PINS.length }));
 
-    renderWithTheme(
-      <PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />
-    );
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
 
     await screen.findByTestId('pinned-memory-groups');
 
@@ -247,13 +231,9 @@ describe('PinnedMemoryListWidget — create flow (POML test #4)', () => {
     const user = userEvent.setup();
     // Initial GET returns one pin so we can verify the create result is prepended.
     const existing = [SIX_PINS[0]];
-    mockAuthenticatedFetch.mockResolvedValueOnce(
-      jsonResponse(200, { items: existing, count: 1 })
-    );
+    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { items: existing, count: 1 }));
 
-    renderWithTheme(
-      <PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />
-    );
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
 
     await screen.findByTestId('pinned-memory-groups');
 
@@ -302,13 +282,9 @@ describe('PinnedMemoryListWidget — create flow (POML test #4)', () => {
 describe('PinnedMemoryListWidget — edit flow (POML test #5)', () => {
   it('updates a pin via PUT and reflects the result in the list', async () => {
     const user = userEvent.setup();
-    mockAuthenticatedFetch.mockResolvedValueOnce(
-      jsonResponse(200, { items: [SIX_PINS[0]], count: 1 })
-    );
+    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { items: [SIX_PINS[0]], count: 1 }));
 
-    renderWithTheme(
-      <PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />
-    );
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
 
     await screen.findByText(SIX_PINS[0].title);
 
@@ -343,13 +319,9 @@ describe('PinnedMemoryListWidget — edit flow (POML test #5)', () => {
 describe('PinnedMemoryListWidget — delete flow (POML test #6)', () => {
   it('shows confirmation, DELETEs the pin, and removes it from the list', async () => {
     const user = userEvent.setup();
-    mockAuthenticatedFetch.mockResolvedValueOnce(
-      jsonResponse(200, { items: [SIX_PINS[0], SIX_PINS[1]], count: 2 })
-    );
+    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { items: [SIX_PINS[0], SIX_PINS[1]], count: 2 }));
 
-    renderWithTheme(
-      <PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />
-    );
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
 
     await screen.findByText(SIX_PINS[0].title);
 
@@ -385,14 +357,9 @@ describe('PinnedMemoryListWidget — delete flow (POML test #6)', () => {
 
 describe('PinnedMemoryListWidget — dark mode (POML test #7, ADR-021)', () => {
   it('renders inside webDarkTheme without throwing and content is visible', async () => {
-    mockAuthenticatedFetch.mockResolvedValueOnce(
-      jsonResponse(200, { items: [SIX_PINS[0]], count: 1 })
-    );
+    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { items: [SIX_PINS[0]], count: 1 }));
 
-    renderWithTheme(
-      <PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />,
-      true
-    );
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />, true);
 
     await screen.findByText(SIX_PINS[0].title);
     // Header + ARIA region are present.

@@ -39,12 +39,7 @@ const samplePin: PinDto = {
 describe('PinnedMemoryEditDialog (create)', () => {
   it('renders empty form with "Create pin" submit label', () => {
     renderWithTheme(
-      <PinnedMemoryEditDialog
-        open={true}
-        mode="create"
-        onSubmit={() => undefined}
-        onCancel={() => undefined}
-      />
+      <PinnedMemoryEditDialog open={true} mode="create" onSubmit={() => undefined} onCancel={() => undefined} />
     );
     expect(screen.getByText('New pinned memory')).toBeInTheDocument();
     expect(screen.getByText('Create pin')).toBeInTheDocument();
@@ -56,12 +51,7 @@ describe('PinnedMemoryEditDialog (create)', () => {
     const user = userEvent.setup();
     const onSubmit = jest.fn();
     renderWithTheme(
-      <PinnedMemoryEditDialog
-        open={true}
-        mode="create"
-        onSubmit={onSubmit}
-        onCancel={() => undefined}
-      />
+      <PinnedMemoryEditDialog open={true} mode="create" onSubmit={onSubmit} onCancel={() => undefined} />
     );
     // Note: we use fireEvent.change rather than user.type because Fluent v9
     // Input + React 19 controlled-input reconciliation races user.type's
@@ -88,12 +78,7 @@ describe('PinnedMemoryEditDialog (create)', () => {
     const user = userEvent.setup();
     const onSubmit = jest.fn();
     renderWithTheme(
-      <PinnedMemoryEditDialog
-        open={true}
-        mode="create"
-        onSubmit={onSubmit}
-        onCancel={() => undefined}
-      />
+      <PinnedMemoryEditDialog open={true} mode="create" onSubmit={onSubmit} onCancel={() => undefined} />
     );
     // Try to submit without filling anything.
     await user.click(screen.getByTestId('pinned-memory-edit-submit'));
@@ -105,12 +90,7 @@ describe('PinnedMemoryEditDialog (create)', () => {
     const user = userEvent.setup();
     const onSubmit = jest.fn();
     renderWithTheme(
-      <PinnedMemoryEditDialog
-        open={true}
-        mode="create"
-        onSubmit={onSubmit}
-        onCancel={() => undefined}
-      />
+      <PinnedMemoryEditDialog open={true} mode="create" onSubmit={onSubmit} onCancel={() => undefined} />
     );
     fireEvent.change(screen.getByTestId('pinned-memory-edit-title'), {
       target: { value: 'X' },
@@ -125,21 +105,14 @@ describe('PinnedMemoryEditDialog (create)', () => {
     await user.click(radioInput);
     await user.click(screen.getByTestId('pinned-memory-edit-submit'));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(
-      screen.getByText('Matter is required when pin type is "Matter fact".')
-    ).toBeInTheDocument();
+    expect(screen.getByText('Matter is required when pin type is "Matter fact".')).toBeInTheDocument();
   });
 
   it('fires onCancel when the Cancel button is clicked', async () => {
     const user = userEvent.setup();
     const onCancel = jest.fn();
     renderWithTheme(
-      <PinnedMemoryEditDialog
-        open={true}
-        mode="create"
-        onSubmit={() => undefined}
-        onCancel={onCancel}
-      />
+      <PinnedMemoryEditDialog open={true} mode="create" onSubmit={() => undefined} onCancel={onCancel} />
     );
     await user.click(screen.getByTestId('pinned-memory-edit-cancel'));
     expect(onCancel).toHaveBeenCalledTimes(1);
