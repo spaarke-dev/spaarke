@@ -207,8 +207,17 @@ jobs:
         # (window.top usage in Power Apps integration code, unused-vars in catch blocks).
         # Mirrors the WarningsNotAsErrors policy applied to C# (visible but non-blocking).
         # Follow-on cleanup tracked per docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+        #
+        # `node_modules/.bin/eslint` instead of `npx eslint` per PR #393 root-cause
+        # fix (2026-06-18): `npx eslint` silently auto-fetches `eslint` from the
+        # registry when the local copy is missing, masking install bugs. Using the
+        # local path forces resolution from the just-installed node_modules — if
+        # eslint is ever missing again, this step fails loudly with "ENOENT" rather
+        # than confusing `Cannot find module 'eslint/package.json'` errors deep in
+        # an ESLint plugin's require chain. See d-widget-parity-audit-2026-06-18.md
+        # follow-up + PR #393 commit message for the full root-cause analysis.
         working-directory: src/client/pcf
-        run: npx eslint .
+        run: node_modules/.bin/eslint .
 
       # Spaarke.AI.Widgets tsc gate (R4 task 061 / B-2 / NFR-05)
       # AI.Widgets tsconfig path-maps four @spaarke/* sibling packages to their

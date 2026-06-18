@@ -14,11 +14,11 @@
 | **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
 | **PR #384** | ✅ MERGED to master 2026-06-11 (Waves A + B + C; 14 tasks) |
 | **Wave D** | ✅ COMPLETE on branch (NOT yet on master): 099 widget chrome + Pattern D, 101 useKanbanColumns hoist, 100 openTodo launch + BroadcastChannel refetch. 4 commits on branch (`c50690be8` planning + `6074d42b9` 099 + `afb6ac6cc` 101 + `f593292c2` 100). Closes UAT issues 1-6 from 2026-06-18 screenshot. |
-| **Worktree branch** | `work/smart-todo-r4-wave2` @ `f593292c2` — pushed to origin; 0 behind master |
-| **Active task** | none — Wave D closeout done |
-| **Working tree** | clean |
-| **Next Action** | **Three remaining tasks**, recommended order: (a) push 092 to ✅ — golden-path smoke test on spaarkedev1 of the 2026-06-18 deploy (still actionable; the new Wave D code is NOT in that deploy though, so a re-deploy will be required after Wave D merges); (b) 093 UI tests (can use `npm run dev` smoke; some Wave D tests in the new POMLs need real deploy); (c) 098 wrap-up + open follow-up PR. Could also open the Wave D PR now and let 092 redeploy happen after. |
-| **PR strategy** | PR #384 already covered Waves A+B+C. Wave D + 092 + 093 + 098 should land in a SINGLE follow-up PR titled "Wave D widget parity + Phase 3/4 closeout" (or two PRs: Wave D parity first, then a 098 close-out PR after). User to decide. |
+| **Worktree branch** | `work/smart-todo-r4-wave2` — synced to master tip `a93fbebf6` (post-PR-391 + PR-392) |
+| **Active task** | **R4-092 deploy** — IN-PROGRESS (Wave D + CI hardening deployed to spaarkedev1 2026-06-18; awaiting user UAT sign-off on golden-path) |
+| **Working tree** | clean (Wave D POMLs all ✅; 092 has detailed notes block; CI hardening landed via PR #392) |
+| **Next Action** | **User UAT**: walk the 6 widget-parity acceptance points (issues 1-6 from `notes/d-widget-parity-audit-2026-06-18.md`) against the live spaarkedev1 deploy. After sign-off: flip R4-092 to ✅, run R4-093 (UI test suite) if desired, then proceed to R4-098 wrap-up. |
+| **PR strategy** | Wave D shipped via PR #391 (merge commit `e4e91a3ec`); CI hardening shipped via PR #392 (`a93fbebf6`). Remaining 092 closeout + 093 + 098 will be one final PR after UAT sign-off. R4-098 wrap-up + PR-close HELD until UAT acceptance per user instruction. |
 
 ### Critical context for resume
 
