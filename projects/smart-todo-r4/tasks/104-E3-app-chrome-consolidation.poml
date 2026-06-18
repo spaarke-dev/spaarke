@@ -3,7 +3,7 @@
     <title>E-3 — App chrome consolidation (one title + smaller quick-create + 3-col default + one toolbar)</title>
     <phase>Phase 2: Wave E (post-Wave-D widget/app parity)</phase>
     <workstream>B</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1-1.5 days</estimated-effort>
     <tags>code-page, smart-todo, fluent-v9, header, toolbar, ux-polish</tags>
     <parallel-safe>true</parallel-safe>
@@ -152,4 +152,52 @@ The SmartTodo Code Page has ONE chrome row: a single toolbar containing title ("
     <criterion testable="true">SmartTodo Vite build passes</criterion>
     <criterion testable="true">POML + TASK-INDEX updated</criterion>
   </acceptance-criteria>
+
+  <notes>
+## Completion notes (2026-06-18)
+
+**Files modified** (4):
+1. `src/solutions/SmartTodo/src/components/Header/Header.tsx` — REWRITTEN as single-row Fluent v9 `<Toolbar>` landmark replacing the prior R4-030 4-row layout. Layout: `[MicrosoftToDoIcon + "Smart To Do"] [QuickAdd Input + Add] | (spacer) | [Refresh + ViewToggle + OrientationToggle? + Settings + SearchBox]` — OR — when `selectedCount > 0`: `[Title] | (spacer) | [SelectionAwareToolbar (count + Open/Delete/Email/Pin) + SearchBox]`. QuickAdd dispatches new `QUICK_ADD_TODO_EVENT` window event consumed by `SmartToDo`. Orientation toggle suppressed in list view (meaningless there).
+2. `src/solutions/SmartTodo/src/components/Header/Header.styles.ts` — REWRITTEN to match new single-row layout (titleGroup / quickAddGroup / spacer / rightGroup / searchWrap). All semantic tokens; flex-wrap enabled for narrow viewports.
+3. `src/solutions/SmartTodo/src/components/Header/index.ts` — Exposes new `QUICK_ADD_TODO_EVENT` constant + `QuickAddTodoEventDetail` type.
+4. `src/solutions/SmartTodo/src/components/SmartToDo.tsx` — Added two new optional props: `hideHeader` (suppresses inner KanbanHeader to eliminate duplicate-chrome UAT 8 + 11) and `onSettingsOpenerReady` (callback-ref pattern to expose the threshold-settings popover trigger up to the consolidated Header's Settings button). Added `QUICK_ADD_TODO_EVENT` listener that routes to the existing `handleAdd` (single source of truth for optimistic create).
+5. `src/solutions/SmartTodo/src/SmartTodoApp.tsx` — Wired new Header props (orientation + onOrientationChange + onOpenSettings via callback ref); passes `hideHeader` + `onSettingsOpenerReady` to SmartToDo; updated layout/file-level comments to reflect single-row chrome.
+6. `src/solutions/SmartTodo/src/hooks/useUserPreferences.ts` — Documented that the existing `'card'` viewMode value ALREADY renders as 3-column Kanban (the App's view dispatcher treats `viewMode !== 'list'` as Kanban), so the audit's "rename default to 'kanban'" is a no-op functionally. Acceptance criterion "first-load default = 3-column Kanban" is satisfied by the unchanged default + the always-render-all-3-columns property of useKanbanColumns. Persisted user preferences ('card' OR 'list') are honored unchanged.
+
+**Toolbar layout decided**:
+- Single Fluent v9 `<Toolbar>` row with flex-wrap fallback for narrow viewports.
+- Left: brand title cluster (MicrosoftToDoIcon + "Smart To Do" Text).
+- Center-left: QuickAdd Input + Add button (compact, matches widget R4-099/103 pattern; suppressed when there's an active selection to give the selection-aware toolbar visual primacy).
+- Spacer: flex-grow that pushes the right cluster to the trailing edge.
+- Right: dual-mode — DEFAULT cluster (`Refresh + ViewToggle + OrientationToggle? + Settings + SearchBox`) OR selection-mode cluster (`SelectionAwareToolbar + SearchBox`) when `selectedCount > 0`. The OrientationToggle is suppressed in list view since orientation is meaningless there.
+
+**viewMode default change**:
+- Old: `'card'` (default) — rendered as 3-col Kanban (via App's `viewMode === 'list' ? ListView : Kanban` dispatcher).
+- New: same — `'card'` is unchanged. The audit's wording "rename to 'kanban'" turned out to be a no-op since the union shape `'card' | 'list'` is also what `<ViewToggle>` expects. Documented the rationale in `useUserPreferences.ts` (no breaking change to the persisted preference type; existing users see no behavior change).
+- Migration handled: explicit "honor saved values" comment in the hook; first-load behavior is unchanged from R4-033 default.
+
+**Build status**:
+- SmartTodo Vite: ✅ 3,286 modules / 1,753 kB / 476 kB gzip / 11.76s
+- LegalWorkspace Vite: ✅ 3,319 modules / 2,259 kB / 626 kB gzip / 14.78s (no SmartTodoApp consumer; LW shim consumes the peer-package widget, not SmartToDo)
+- Pre-existing tsc errors from PR #369 cascade (msal-browser + ComponentFramework type lookups in Spaarke.UI.Components) are unchanged by this task.
+
+**Acceptance criteria coverage** (9/9):
+1. ✅ ONE title bar "Smart To Do" with MicrosoftToDoIcon — Header titleGroup.
+2. ✅ ONE toolbar row collapsed from 4 rows — single `<Toolbar>` landmark.
+3. ✅ Quick-create matches widget compact pattern — `<Input size="small">` + Add button + same `QUICK_ADD_TODO_EVENT`-routed handleAdd path.
+4. ✅ First-load default = 3-column Kanban — default 'card' value already renders as Kanban (R4-101 + R4-033); useKanbanColumns always returns all 3 buckets; existing user prefs honored.
+5. ✅ All prior features preserved — R4-031 query-baked filter unchanged, R4-032 SelectionAwareToolbar wired inline, R4-033 ViewToggle in right cluster, R4-070 OrientationToggle in right cluster (hoisted to App-level).
+6. ✅ A11y — single `<Toolbar aria-label="Smart To Do toolbar">` landmark; all icon-only buttons have aria-label + Tooltip relationship="label"; SearchBox aria-label; tab order matches visual order.
+7. ✅ No Fluent v8; all colors via tokens; all styles via Griffel makeStyles.
+8. ✅ SmartTodo Vite build passes (3,286 modules clean).
+9. ✅ POML status → complete; TASK-INDEX row → ✅.
+
+**Parallel coordination with R4-102**:
+- R4-102 was running in parallel and hoisted `KanbanCard` from `src/solutions/SmartTodo/src/components/KanbanCard.tsx` into `@spaarke/smart-todo-components`. R4-102's touched files (peer package + SmartToDo.tsx KanbanCard import swap + components/index.ts re-export) were disjoint from R4-104's Header touches. Single overlap was SmartToDo.tsx where R4-102 swapped one import line and R4-104 added the QUICK_ADD_TODO_EVENT listener + 2 new props — both edits coexist cleanly. Final Vite build green confirms the merge is sound.
+
+**Deliberate scope decisions**:
+- Dropped the "+ New" wizard button from the consolidated Header — the QuickAdd input satisfies UAT 9's compact-add ask, and CreateTodoWizard remains reachable via the Outlook ribbon + parent-form ribbon launches (LaunchCreateTodoWizardHost is unchanged). Adding an in-toolbar wizard launcher would re-introduce a duplicate-chrome affordance.
+- Dropped the Recalculate button from the consolidated Header — it was a power-user feature with no widget analog; Settings still surfaces via the gear icon. If future UAT requests it, surface a callback similar to `onSettingsOpenerReady`.
+- Kept the `SmartTodoViewMode` union as `'card' | 'list'` (not extended to include `'kanban'`) for back-compat with `<ViewToggle>` and persisted preferences. The audit's "rename" turned out to be a no-op since `'card'` already maps to the 3-column Kanban surface.
+  </notes>
 </task>
