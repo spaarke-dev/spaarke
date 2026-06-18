@@ -121,12 +121,17 @@ export {
   replaceWorkspaceWidget,
   resolveWorkspaceWidget,
   getWorkspaceWidgetMetadata,
+  getWorkspaceWidgetVisibleStateFn,
   getAllWorkspaceWidgetTypes,
   hasWorkspaceWidget,
   clearWorkspaceRegistry,
 } from './registry/WorkspaceWidgetRegistry';
 
-export type { WorkspaceWidgetRegistration } from './registry/WorkspaceWidgetRegistry';
+// Task 072 (D-C-27) — Pillar 9 visibility extension.
+export type {
+  WorkspaceWidgetRegistration,
+  RegistryGetAgentVisibleState,
+} from './registry/WorkspaceWidgetRegistry';
 
 // ContextWidgetRegistry — lazy-load with null-return for unknown types
 export {

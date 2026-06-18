@@ -1,22 +1,22 @@
-# Current Task State — R6 (Wave C-G15 task 070 — PART A + PART B done)
+# Current Task State — R6 (Wave C-G16/C-G17 tasks 072 + 073 — done)
 
-> **Last Updated**: 2026-06-18 (task 070 PART B — frontend Fluent v9 component suite closed)
-> **Mode**: Wave C-G15 (Q7 Pinned Memory CRUD + Visualization UI) — COMPLETE
+> **Last Updated**: 2026-06-18 (Pillar 9 visibility extension + per-widget impls landed)
+> **Mode**: Wave C-G16 + C-G17 (Pillar 9 widget visibility contract) — COMPLETE
 > **Branch**: `work/spaarke-ai-platform-unification-r6`
 
 ---
 
-## Task 070 — full closeout
+## Tasks 072 + 073 — combined closeout
 
-| PART | Scope | Status | Evidence note |
+| Task | Scope | Status | Evidence note |
 |------|-------|--------|---------------|
-| A | BFF endpoint pair (`/api/memory/pins` GET/POST/PUT/DELETE) + repository extension + 15 endpoint tests | ✅ | `notes/task-070-partA-evidence.md` |
-| B | Four Fluent v9 components in `@spaarke/ai-widgets` + registry update + 27 UI tests | ✅ | `notes/task-070-partB-evidence.md` |
+| 072 | `WorkspaceWidgetRegistry` extended with optional `getVisibleState?: (widgetData: unknown) => SerializedWidgetState \| null` + `getWorkspaceWidgetVisibleStateFn` accessor + barrel re-exports | ✅ | `notes/task-072-evidence.md` |
+| 073 | Per-category `getAgentVisibleState()` derivations for Summary / DocumentViewer / Dashboard / Table + wired into 8 widget registrations + 29-test suite | ✅ | `notes/task-073-evidence.md` |
 
-Task 070 represents the Q7 scope expansion (Pinned Memory CRUD + visualization UI in R6; was R7-deferred). TASK-INDEX 070 flipped 🟡 → ✅.
+Task 074 (Pillar 9 prompt builder — per-turn agent prompt gathers visible state) is the next consumer of these surfaces. TASK-INDEX 072 + 073 flipped 🔲 → ✅.
 
 ---
 
 ## Next task
 
-Wave C-G15 task 070 was the last open C-G15 entry. Resume the next pending task per `TASK-INDEX.md`.
+Wave C-G17 task 073 closed. The next pending entry per `TASK-INDEX.md` is task **074** (D-C-29/30 — Pillar 9 prompt builder gathers visible state per turn). Resume there.
