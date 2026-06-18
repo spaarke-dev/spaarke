@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 22 / 36 complete; 1 deferred (Waves 1–6: + 016 verified-no-op + 019 with Jest 30 + 19 passing tests)
+> **Status**: 25 / 36 complete; 1 deferred (Waves 1–7: + 017 standalone shrink, 18 shims deleted + 018 LegalWorkspace 79-LOC shim + 063 docs; 002 now UNBLOCKED)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -12,7 +12,7 @@
 | ID | Title | Phase | Status | Dependencies | Parallel | Rigor |
 |----|-------|-------|--------|--------------|----------|-------|
 | 001 | Add `loadNotificationContext` factory option to dailyBriefingRegistration | P1 | ✅ | none | — | FULL |
-| 002 | Wire `loadSpaarkeAiNotificationContext` injection in SpaarkeAi `main.tsx` | P1 | ⏸ | **018** (was 001) | — | FULL |
+| 002 | Wire `loadSpaarkeAiNotificationContext` injection in SpaarkeAi `main.tsx` | P1 | 🔲 unblocked (018 done) | 018 (was 001) | — | FULL |
 | 003 | P1 verification — SpaarkeAi pane renders bullets in spaarkedev1 (smoke) | P1 | ⏸ | 002 | — | STANDARD |
 | 010 | Scaffold new `@spaarke/daily-briefing-components` package | P2 | ✅ | **none** (was 003) | — | FULL |
 | 011 | Hoist Daily Briefing components (`DailyBriefingApp`, sections, atoms) | P2 | ✅ | 010 | A | FULL |
@@ -21,8 +21,8 @@
 | 014 | Decompose `useNotificationData` → `useBriefingNotifications` + `useBriefingPreferences` + `useBriefingActions` | P2 | ✅ | 011,012,013 | — | FULL |
 | 015 | Abstract dependencies — props/parameters; remove solution-local imports | P2 | ✅ | 014 | — | FULL |
 | 016 | Subpath exports contract (`./components`, `./widgets`, `./hooks`, `./services`, `./types`) | P2 | ✅ no-op (finalized 010/015) | 015 | — | FULL |
-| 017 | Shrink standalone code page to thin host shell | P2 | 🔲 | 016 | B | FULL |
-| 018 | Replace LegalWorkspace `dailyBriefing` registration with thin shim | P2 | 🔲 | 016 | B | FULL |
+| 017 | Shrink standalone code page to thin host shell | P2 | ✅ 18 shims deleted | 016 | B | FULL |
+| 018 | Replace LegalWorkspace `dailyBriefing` registration with thin shim | P2 | ✅ 79-LOC shim | 016 | B | FULL |
 | 019 | Unit tests for 3 split hooks + smoke test mounting `DailyBriefingApp` | P2 | ✅ Jest 30, 19/19 pass | 014,011 | — | STANDARD |
 | 020 | `NarrativeBullet` renders per-item sub-list when `itemIds.length > 1` (FR-11) | P2a | 🔲 | 016 | — | FULL |
 | 021 | Sub-row entity link via supplied `regardingId` + `Xrm.Navigation.navigateTo` (FR-12) | P2a | 🔲 | 020 | C | FULL |
@@ -45,7 +45,7 @@
 | 060 | Deploy BFF (P2b + P3) via `bff-deploy` skill | Phase7 | 🔲 | 033,042 | E | FULL |
 | 061 | Redeploy standalone Daily Briefing code page via `code-page-deploy` | Phase7 | 🔲 | 017,055 | E | FULL |
 | 062 | E2E verification — SC1–SC14 in spaarkedev1 | Phase7 | 🔲 | 060,061,024,018 | — | STANDARD |
-| 063 | Update architecture docs (SPAARKEAI-COMPONENT-MODEL, SPAARKEAI-WORKSPACE-ARCHITECTURE, BUILD-A-NEW-WORKSPACE-WIDGET) | Phase7 | 🔲 | 016 | — | MINIMAL |
+| 063 | Update architecture docs (SPAARKEAI-COMPONENT-MODEL, SPAARKEAI-WORKSPACE-ARCHITECTURE, BUILD-A-NEW-WORKSPACE-WIDGET) | Phase7 | ✅ 3 docs + cross-ref fix | 016 | — | MINIMAL |
 | 090 | Project wrap-up (code-review + adr-check + repo-cleanup + README status + lessons-learned) | Phase8 | 🔲 | 062,063 | — | FULL |
 
 ---

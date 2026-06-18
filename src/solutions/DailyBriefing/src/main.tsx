@@ -27,9 +27,9 @@ if (_appInsightsKey) {
 }
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
+import { DailyBriefingApp } from "@spaarke/daily-briefing-components/components";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
-import { App } from "./App";
 
 /**
  * Bootstrap auth (config + MSAL + tenant ID). Non-blocking — called from
@@ -66,7 +66,7 @@ function Root() {
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
       <AppErrorBoundary surfaceName="Daily Briefing">
-        <App params={params} />
+        <DailyBriefingApp params={params} />
       </AppErrorBoundary>
     </FluentProvider>
   );

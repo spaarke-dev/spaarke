@@ -3,7 +3,7 @@
   <metadata>
     <title>Shrink standalone code page to thin host shell (FR-08)</title>
     <phase>P2: Pattern D Hoist</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>016</dependencies>
     <blocks>061</blocks>
@@ -112,6 +112,17 @@
 
   <notes>
     Don't delete `MicrosoftToDoIcon.tsx`, `authInit.ts`, `runtimeConfig.ts` here — those go in DD tasks 050, 053, 055. This task is hoist-cleanup only.
+
+    **Completion (2026-06-18 — Wave 7 parallel batch)**:
+    - Deleted 18 shim files (9 components + channelIcons + components/index.ts + 2 hooks + 3 services + types/notifications.ts + utils/toastUtils.ts + App.tsx) and 4 now-empty directories (components/, hooks/, types/, utils/).
+    - Preserved 4 host-shell files: main.tsx (modified), vite-env.d.ts, config/runtimeConfig.ts (task 055 factory consumer), services/authInit.ts (task 053 factory consumer).
+    - main.tsx: imports `DailyBriefingApp` from `@spaarke/daily-briefing-components/components` directly; removed `import { App } from "./App"`; mounts `&lt;DailyBriefingApp params={params} /&gt;`.
+    - package.json: added `@spaarke/auth`, `@spaarke/daily-briefing-components`, `@spaarke/ui-components` as `file:` deps (EventsPage precedent).
+    - tsconfig.json: added `@spaarke/daily-briefing-components` + `/*` paths.
+    - vite.config.ts: added `@spaarke/daily-briefing-components` to sharedLibPaths (resolveSharedLibDeps), React plugin include globs, and resolve.alias.
+    - Grep verification: `grep -rE "function|const.*=.*=>" src/solutions/DailyBriefing/src/*.tsx` returns only 3 matches in main.tsx (`bootstrapAuth`, `Root`, `parseDataParams()` in `useMemo`). All host-binding; no component/hook/service definitions.
+    - Build verification: `tsc-surface-gate` reports "Surface-owned: 0" errors. Pre-existing `@spaarke/sdap-client` Vite resolution error in cross-package `EntityCreationService.ts` persists (out-of-scope per task brief). `tsc --noEmit` on solution-local files: zero errors.
+    - NO commit, NO push, NO TASK-INDEX update per orchestrator directive.
   </notes>
 
   <execution>

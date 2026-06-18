@@ -7,6 +7,8 @@
       "@/*": ["src/*"],
       "@spaarke/auth": ["../../client/shared/Spaarke.Auth/src/index.ts"],
       "@spaarke/auth/*": ["../../client/shared/Spaarke.Auth/src/*"],
+      "@spaarke/daily-briefing-components": ["../../client/shared/Spaarke.DailyBriefing.Components/src/index.ts"],
+      "@spaarke/daily-briefing-components/*": ["../../client/shared/Spaarke.DailyBriefing.Components/src/*"],
       "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src/index.ts"],
       "@spaarke/ui-components/*": ["../../client/shared/Spaarke.UI.Components/src/*"]
     }
