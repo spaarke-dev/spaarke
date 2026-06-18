@@ -14,11 +14,11 @@
 | **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
 | **PR #384** | ✅ MERGED to master 2026-06-11 (Waves A + B + C; 14 tasks) |
 | **Wave D** | ✅ COMPLETE on branch (NOT yet on master): 099 widget chrome + Pattern D, 101 useKanbanColumns hoist, 100 openTodo launch + BroadcastChannel refetch. 4 commits on branch (`c50690be8` planning + `6074d42b9` 099 + `afb6ac6cc` 101 + `f593292c2` 100). Closes UAT issues 1-6 from 2026-06-18 screenshot. |
-| **Worktree branch** | `work/smart-todo-r4-wave2` — synced to master + Wave E queued (POMLs filed, awaiting agent dispatch) |
-| **Active task** | **Wave E queued** (R4-102 + R4-103 + R4-104 per 2026-06-18 UAT round 2; widget/app full parity). R4-092 deploy stays IN-PROGRESS until UAT sign-off (Wave E will require re-deploy after merge). |
-| **Working tree** | Wave E planning artifacts staged (audit note + 3 POMLs + TASK-INDEX updates); awaiting commit + agent dispatch |
-| **Next Action** | **Dispatch Wave E-1**: R4-102 (Kanban hoist) + R4-104 (app chrome) in parallel via Agent tool. After R4-102 lands, dispatch R4-103 serially. Then open PR, master-deploy, hold for UAT round 3. |
-| **PR strategy** | Wave D shipped via PR #391 (`e4e91a3ec`); CI hardening shipped via PR #392 (`a93fbebf6`) + PR #393 (eslint root-cause; auto-merge enabled, awaiting CI green). Wave E ships as one follow-up PR after 3 tasks complete + redeploy. R4-098 wrap-up + project-close still HELD until final UAT acceptance per durable user instruction. |
+| **Worktree branch** | `work/smart-todo-r4-wave2` — synced to master tip `3d02a3d38` (post-PR-394 Wave E merge) |
+| **Active task** | **R4-092 deploy** (in-progress) — Wave D + Wave E both deployed to spaarkedev1; awaiting user UAT round 3 sign-off on the 11 widget/app parity items |
+| **Working tree** | clean (Wave E POMLs all ✅; 092 has 2 deploy-session notes blocks — Wave D + Wave E) |
+| **Next Action** | **User UAT round 3**: walk the 11 widget/app parity items from `notes/e-widget-app-parity-audit-2026-06-18.md` against live spaarkedev1. After sign-off: flip R4-092 + R4-093 to ✅, proceed to R4-098 wrap-up + final PR-close. |
+| **PR strategy** | Wave D shipped via PR #391 (`e4e91a3ec`); CI hardening shipped via PR #392 (`a93fbebf6`) + PR #393 (`a93fbebf6`); Wave E shipped via PR #394 (`3d02a3d38`, merged 2026-06-18T21:03:49Z). R4-098 wrap-up + project-close still HELD until final UAT acceptance per durable user instruction. |
 
 ### Critical context for resume
 
