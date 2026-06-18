@@ -3,7 +3,7 @@
     <title>W-2 — Open-to-form launch protocol + post-wizard-close refetch</title>
     <phase>Phase 2: Wave D (post-PR-384 widget parity)</phase>
     <workstream>W</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>widget, smart-todo, code-page, launch-context, modal, dataverse, spaarkeai</tags>
     <parallel-safe>false</parallel-safe>

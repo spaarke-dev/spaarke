@@ -1,11 +1,11 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-18 (Wave D-1 complete: 099 + 101 both ✅; 100 queued post-099)
+> **Last Updated**: 2026-06-18 (Wave D ✅ complete: 099 + 101 + 100 all ✅; widget parity closeout done)
 > **Branch**: `work/smart-todo-r4-wave2`
 > **Total Tasks**: 34 (was 31; +099/100/101 widget parity from 2026-06-18 UAT — see [d-widget-parity-audit-2026-06-18.md](../notes/d-widget-parity-audit-2026-06-18.md))
-> **Status**: 🔲 4 not-started · 🔄 0 in-progress · ✅ 30 complete · ❌ 0 blocked
-> **Active wave**: Wave D-1 ✅ complete (099 + 101 both landed in parallel). Remaining besides Wave D: 092 (deploy session in-flight; golden-path smoke pending), 093 (UI tests), 098 (wrap-up). Wave D-2 = 100 (serial after 099 lands — now unblocked).
+> **Status**: 🔲 3 not-started · 🔄 0 in-progress · ✅ 31 complete · ❌ 0 blocked
+> **Active wave**: none — **Wave D ✅ complete** (099 + 101 parallel + 100 serial all landed). Remaining: 092 (deploy session in-flight; golden-path smoke pending), 093 (UI tests), 098 (wrap-up).
 
 ---
 
@@ -169,7 +169,7 @@ UAT screenshot 2026-06-18 surfaced 6 widget issues; diagnostic + plan in [d-widg
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
 | ✅ | [099](099-W1-widget-chrome-pattern-d.poml) | W-1 — Widget chrome consolidation + Pattern D alignment shipped. LW shim collapsed to Calendar shape (structural-only: no section toolbar; `title: "Smart To Do"` only). Widget `<PaneHeader>` removed; single `<Toolbar>` with `[SearchBox, +, Open, refresh]` in that order. Local debounced (150 ms) in-memory search across `sprk_name + sprk_description`; clears restore full list. Single-select `selectedId` powers selection-aware Open (disabled until 1 card selected). Co-exists cleanly with R4-101's grouped rendering (shared `filteredItems`). Builds: peer tsc 0 err; LegalWorkspace Vite 3,312 modules 13.51s 2,252 kB. Closes UAT 2 + 3 + 5. | widget, pattern-d, fluent-v9 | ✅ (parallel with 101) | 020, 030 | 100 |
-| 🔲 | [100](100-W2-open-to-form-refetch.poml) | W-2 — Open-to-form launch protocol + post-wizard-close refetch (closes UAT 1/4: `useLaunchContext.openTodo` discriminator auto-mounts `<SmartTodoModal>`; shim wires refetch on wizard close) | widget, code-page, launch-context, modal | ❌ (serial after 099 on `todo.registration.ts`) | 099, 034, 040 | 098 |
+| ✅ | [100](100-W2-open-to-form-refetch.poml) | W-2 — Open-to-form launch protocol + post-wizard-close refetch (closes UAT 1/4: `useLaunchContext.openTodo` discriminator auto-mounts `<SmartTodoModal>`; BroadcastChannel `sprk_todo:created` wires refetch on wizard close) | widget, code-page, launch-context, modal | ❌ (serial after 099 on `todo.registration.ts`) | 099, 034, 040 | 098 |
 | ✅ | [101](101-W3-grouping-hoist.poml) | W-3 — Today/Tomorrow/Future grouping shipped. Hoisted `useKanbanColumns` into `@spaarke/smart-todo-components` (~340 LOC hook + `bucketTodoItems` pure helper + `IKanbanTodoLike`/`IKanbanDataverseService` types). Code Page consumer swapped to `@spaarke/smart-todo-components` import + passes `dataverseService: serviceRef.current` (structurally compatible). Widget renders 3 grouped sections via `bucketTodoItems(filteredItems, 60, 30)` with R4-099's single-select `selectedId` carried across groups. Builds: peer tsc 0 err; SmartTodo 3,279 modules 1,745 kB; LegalWorkspace 3,312 modules 2,252 kB. R4-020 deferred 13-file follow-up closed at hook-scope (full Kanban hoist still future work if surfaced). | widget, peer-package, hoist, fluent-v9 | ✅ (parallel with 099) | 020, 030 | 098 |
 
 ---
