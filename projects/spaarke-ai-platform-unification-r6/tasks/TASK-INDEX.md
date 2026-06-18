@@ -141,7 +141,7 @@
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 080 | D-G1 | `CommandRouter.ts` parser (D-D-01) | 🔲 | FULL | true | 079 |
+| 080 | D-G1 | `CommandRouter.ts` parser (D-D-01) — Pillar 8 closed vocabulary (6 hard + 4 soft + 3 ref); pure parser; 36 tests green; wired into `ConversationPane.handleBeforeSendMessage` (capture-only); NFR-11 regression locked; `notes/task-080-evidence.md` | ✅ | FULL | true | 079 |
 | 081 | D-G1 | Hard slashes (6: /clear, /new-session, /help, /export, /save-to-matter, /pin) (D-D-02) | 🔲 | FULL | true | 080 |
 | 082 | D-G1 | Soft slashes (4: /summarize, /draft, /extract-entities, /analyze) (D-D-03) | 🔲 | FULL | true | 080 |
 | 083 | D-G1 | References resolver (#scope/@entity/#filename) (D-D-04) | 🔲 | FULL | true | 080 |

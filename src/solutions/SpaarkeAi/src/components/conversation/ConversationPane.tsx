@@ -101,6 +101,14 @@ import { HistoryMenu } from "./HistoryOverlay";
 // /documents promotion + /summarize SSE streaming + PaneEventBus bridging.
 // See notes/task-036-design-2026-06-05.md for design rationale.
 import { matchIntent } from "./intentMatcher";
+// R6 task 080 / D-D-01 (Pillar 8 foundation): CommandRouter parser is wired
+// into the send-message boundary so downstream Phase D tasks (081 hard-slash
+// executor, 082 soft-slash agent routing, 083 reference resolver) can fan out.
+// This wire-up is INTENT-CAPTURE ONLY — no behavior branch lands here per the
+// POML acceptance criteria. NFR-11 binding: natural-language input still falls
+// through to the existing CapabilityRouter path unchanged (parse() returns
+// command:null for any non-slash input).
+import { parse as parseCommandIntent } from "./CommandRouter";
 import {
   executeSummarizeIntent,
   type HeldFile,
@@ -1083,6 +1091,21 @@ export function ConversationPane(): React.JSX.Element {
       // This is the chat-pane half of the FR-03 / task-036 contract. The
       // workspace-pane half (structured output → Summary tab) lives in
       // tasks 037 + 038; this task is the publisher (PaneEventBus events).
+
+      // ── R6 task 080 / D-D-01 (Pillar 8 foundation) ──────────────────────
+      // Capture the structured CommandRouter Intent at the send-message
+      // boundary. The Intent is currently CAPTURE-ONLY — there is NO
+      // behavior branch here. Downstream Phase D tasks (081 hard-slash
+      // executor, 082 soft-slash agent routing, 083 reference resolver)
+      // will read this Intent and dispatch. NFR-11 binding: when the user
+      // typed natural language (no slash), `commandIntent.command === null`
+      // and the existing R5-task-036 matcher + SprkChat send funnel runs
+      // UNCHANGED. See projects/.../CLAUDE.md §Pillar 8 + spec FR-48.
+      // void-cast suppresses the "declared but never read" lint until tasks
+      // 081/082/083 wire branching behavior to this value.
+      const commandIntent = parseCommandIntent(messageText);
+      void commandIntent;
+
       const readyChips = attachmentChips.filter(c => c.status === "ready");
       const intent = matchIntent(messageText, readyChips.length > 0, undefined);
       // R6 Hotfix Wave B-G9c3 (B9) — slash-to-NL rewire (2026-06-10):
