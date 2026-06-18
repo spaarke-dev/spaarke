@@ -128,7 +128,7 @@
 | 071 | C-G5 | `getAgentVisibleState()` TypeScript interface (D-C-26) | ✅ | FULL | true | 053 |
 | 072 | C-G16 | Extend `WorkspaceWidgetRegistry` with `getVisibleState?` (D-C-27) | ✅ | STANDARD | false | 071 |
 | 073 | C-G17 | Implement `getAgentVisibleState()` per widget type (D-C-28) | ✅ | FULL | false | 072 |
-| 074 | C-G18 | Per-turn agent prompt builder gathers visible state (D-C-29/30) | 🔲 | FULL | false | 053, 073 |
+| 074 | C-G18 | Per-turn agent prompt builder gathers visible state (D-C-29/30) | ✅ | FULL | false | 053, 073 |
 
 #### Integration + exit
 
