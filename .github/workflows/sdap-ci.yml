@@ -169,7 +169,12 @@ jobs:
             ${{ runner.os }}-npm-pcf-
 
       - name: Install root dependencies (Prettier)
-        run: npm ci --ignore-scripts
+        # `npm install` instead of `npm ci` per root CLAUDE.md §11 Node Installs:
+        # this repo's lockfiles drift frequently; strict `npm ci` blocks CI on
+        # transitive churn that's harmless at install time. `npm install` reads
+        # the lockfile as hints but does not enforce strict sync.
+        # Established pattern across ~14 Vite solutions + Build-AllClientComponents.ps1.
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
       - name: Prettier auto-fix
         run: npx prettier --write "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
@@ -191,7 +196,11 @@ jobs:
 
       - name: Install PCF dependencies (ESLint)
         working-directory: src/client/pcf
-        run: npm ci --ignore-scripts
+        # Same `npm install` pattern as the root step above — see comment there.
+        # PCF lockfile drifts on dev-dep bumps (e.g. eslint 9.39.4 was a
+        # transitive of @microsoft/eslint-plugin-power-apps that broke `npm ci`
+        # on 2026-06-18 / PR #391).
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
       - name: ESLint check
         # --max-warnings 0 dropped: pre-existing baseline has 186 warnings

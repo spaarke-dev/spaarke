@@ -59,6 +59,18 @@
 
 ---
 
+## CI hardening (2026-06-18 — systemic fix)
+
+PR #391 surfaced the SECOND CI failure of the kind "lockfile/format drift blocks a Wave that was otherwise green locally" (PR #384 was Prettier; PR #391 was `npm ci` in `src/client/pcf` failing on `eslint@9.39.4` missing from lockfile). Per user direction "we need to fix these so that we do not continuously run into these issues":
+
+- `.github/workflows/sdap-ci.yml` lines 172 + 194 (the 2 `npm ci --ignore-scripts` steps in the Client Quality job) **changed to** `npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts`. Rationale: aligns CI with the project's established convention per root CLAUDE.md §11 Node Installs section (Vite solutions + Build-AllClientComponents.ps1 already use this pattern; CI was the holdout). Strict `npm ci` blocks CI on transitive churn that's harmless at install time; `npm install` reads the lockfile as hints but doesn't enforce strict sync.
+- `src/client/pcf/package-lock.json` regenerated against current `package.json` (587 → 643 packages; pulls in resolved `eslint@9.39.4` + 6 other `@humanfs/*` / `@humanwhocodes/*` transitives that were missing).
+- Prettier auto-fix step in CI ("Prettier auto-fix" + "Push Prettier fixes") **already exists** as a self-healing layer for prettier drift on PRs — that's why PR #384's prettier issue was a one-time annoyance, not a recurring class. The `npm ci` issue had no equivalent self-heal; this change is the equivalent for install-step drift.
+
+**What this fix prevents going forward**: any future task that bumps a package.json (dev-dep version, new transitive, package addition/removal) will not break CI just because the local lockfile regeneration was forgotten. CI will resolve dependencies on-the-fly via `npm install`. Reproducibility-critical paths (the master-deploy scripts) already use the same `--legacy-peer-deps --no-audit --no-fund` pattern.
+
+---
+
 ## Follow-ups Surfaced (Not Yet Filed As Tasks)
 
 See [`tasks/TASK-INDEX.md` Follow-ups Surfaced section](tasks/TASK-INDEX.md#follow-ups-surfaced-not-yet-filed-as-tasks). Summary:
