@@ -3,7 +3,7 @@
   <metadata>
     <title>Delete 3 solution-local `MicrosoftToDoIcon` copies; update imports (FR-19b)</title>
     <phase>DD: De-Duplication</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>050</dependencies>
     <blocks>062</blocks>
@@ -75,6 +75,15 @@
 
   <notes>
     If a consumer was using a divergent custom prop or variant, surface in `notes/` and reconcile to the canonical version.
+
+    Completion (2026-06-18, Wave 2b sub-agent):
+    - Deleted 3 byte-identical copies (verified vs canonical pre-delete).
+    - Rewrote 3 consumer imports to `import { MicrosoftToDoIcon } from "@spaarke/ui-components"` (root subpath; canonical convention; the lib re-exports via src/index.ts -> ./icons).
+    - `find src/solutions -name "MicrosoftToDoIcon.tsx"` returns zero (Glob verified).
+    - `npm run build` blocked by environmental issues unrelated to this change: SmartTodo + LegalWorkspace lack `node_modules` ('vite' not on PATH); DailyBriefing fails on pre-existing `@spaarke/sdap-client` resolver error (called out as acceptable in Wave 2b ground rules).
+    - Fallback verification: `npx tsc --noEmit` in all 3 solutions; zero errors mention `MicrosoftToDoIcon`, `@spaarke/ui-components`, or the modified consumer import lines. All emitted errors are pre-existing infrastructure noise (missing react/@fluentui type decls because node_modules absent; ComponentFramework namespace gaps in shared lib).
+    - No consumer used a divergent prop — all 3 used `<MicrosoftToDoIcon size={20} active />` or `<MicrosoftToDoIcon ... />` against the same {size, active, className} contract. No reconciliation needed.
+    - Per Wave 2b ground rules: TASK-INDEX.md update + git commit deferred to main session at wave boundary.
   </notes>
 
   <execution>

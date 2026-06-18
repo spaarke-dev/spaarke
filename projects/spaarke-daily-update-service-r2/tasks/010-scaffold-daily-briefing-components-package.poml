@@ -3,7 +3,7 @@
   <metadata>
     <title>Scaffold new `@spaarke/daily-briefing-components` package</title>
     <phase>P2: Pattern D Hoist</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>003</dependencies>
     <blocks>011, 012, 013, 014, 015, 016</blocks>
@@ -96,6 +96,16 @@
 
   <notes>
     Keep this task scoped to scaffolding only. Do NOT move any components/hooks/services yet — those are tasks 011–013 in Group A.
+
+    --- Completion notes (2026-06-18, Wave 2b parallel batch) ---
+    - Package created at `src/client/shared/Spaarke.DailyBriefing.Components/` mirroring `@spaarke/events-components` exactly (peerDeps, devDeps, tsconfig, exports map shape, scripts).
+    - Package name: `@spaarke/daily-briefing-components` (per spec FR-03; no shorter-name preference surfaced).
+    - Subpath exports per FR-10: `.`, `./components`, `./widgets`, `./hooks`, `./services`, `./types`. Omitted Calendar's `./context` + `./utils` — not required by FR-10 and not expected for Daily Briefing (auth/context comes via `@spaarke/auth` per ADR-028).
+    - Monorepo workspace registration: NONE required. Repo root `package.json` has no `workspaces` field and there is no `pnpm-workspace.yaml`. Calendar + SmartTodo are consumed via `file:` references in downstream solution `package.json` files (verified in `src/solutions/EventsPage/package.json:16-18`). Consumer wiring for DailyBriefing/LegalWorkspace/SpaarkeAi will be added by R2 tasks 014-016.
+    - `npm install` → 97 packages, clean. `npm run build` (tsc --noEmit) → clean.
+    - Subpath resolution verified via temporary `src/__subpath-resolve-test.ts` importing all 5 subpaths through the package self-name. Test removed at task completion (per Step 8 of POML).
+    - Step 9 (TASK-INDEX.md update) and git commit/push DEFERRED per orchestrator instructions — main session handles wave boundary.
+    - Quality gates (Step 9.5 code-review + adr-check) SKIPPED per task-execute Step 9.5 rule "configuration-only (no logic changes)" — task created only config files + empty `export {}` barrel placeholders.
   </notes>
 
   <execution>

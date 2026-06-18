@@ -20,7 +20,7 @@ import {
   Spinner,
 } from "@fluentui/react-components";
 import { DismissRegular } from "@fluentui/react-icons";
-import { MicrosoftToDoIcon } from "../icons/MicrosoftToDoIcon";
+import { MicrosoftToDoIcon } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)

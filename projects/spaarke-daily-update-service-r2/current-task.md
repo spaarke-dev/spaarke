@@ -10,10 +10,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 001 — Add `loadNotificationContext` factory option to dailyBriefingRegistration |
-| **Step** | 6 of 8 — Build verification complete |
-| **Status** | completed-no-op (option already implemented in prior task 086/Round 4 Fix 3) |
-| **Next Action** | Parent (Wave 1 orchestrator) decides commit; task 002 is unblocked |
+| **Task** | 041 — Unit tests for visible vs hidden toasttype paths (FR-18) |
+| **Step** | 6 of 6 — Tests added, build green, 4/4 new tests pass (20/20 total in file) |
+| **Status** | completed (modulo parent Wave 2b boundary handling: no commit, no push, no TASK-INDEX update per orchestrator deviation) |
+| **Next Action** | Hand back to Wave 2b orchestrator; task 042 (P3 publish-size + E2E note) unblocked |
+| **Rigor Level** | FULL (bff-api tag, .cs modifications) |
+| **Knowledge loaded** | bff-extensions.md (F.2), spec.md FR-18, CreateNotificationNodeExecutor.cs (full), existing CreateNotificationNodeExecutorTests.cs (canonical fixture), tests/CLAUDE.md, src/server/api/Sprk.Bff.Api/CLAUDE.md, project CLAUDE.md |
+| **Files modified** | tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs (extended existing file with 4 tests + 2 helpers) |
+| **Test results** | `--filter ~CreateNotificationNodeExecutorTests` → Passed 20, Failed 0; `--filter ~Toast` → Passed 4, Failed 0 |
 
 ### Files Modified This Session
 
