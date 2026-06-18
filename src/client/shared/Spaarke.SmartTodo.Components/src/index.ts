@@ -10,3 +10,4 @@
 
 export * from './widgets';
 export * from './types';
+export * from './hooks';

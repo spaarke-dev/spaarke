@@ -3,7 +3,7 @@
     <title>W-3 — Today/Tomorrow/Future grouping (useKanbanColumns hoist)</title>
     <phase>Phase 2: Wave D (post-PR-384 widget parity)</phase>
     <workstream>W</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>widget, smart-todo, peer-package, hoist, react, fluent-v9</tags>
     <parallel-safe>true</parallel-safe>
@@ -152,4 +152,40 @@ Widget renders 3 grouped sections — "Today", "Tomorrow", "Future" — with ite
     <criterion testable="true">No Fluent v8 components introduced; no inline styles; Griffel + tokens used throughout</criterion>
     <criterion testable="true">POML status flipped to complete; TASK-INDEX.md row + header counts updated; R4-020 deferred-hoist follow-up closed</criterion>
   </acceptance-criteria>
+
+  <notes>
+    ## Completion notes (2026-06-18)
+
+    Status: complete. Wave D-1 dispatched 099 + 101 in parallel; 101 completed without write-race losses.
+
+    ### Files
+
+    - **NEW** `src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts` — full hoisted hook (~340 LOC), generic on `T extends IKanbanTodoLike`, optional `dataverseService` injection. Pure score + bucketing helpers (`computeTodoScore`, `assignColumnByScore`, `bucketTodoItems`) live alongside the hook in the same file so the widget can call `bucketTodoItems` without invoking the stateful hook.
+    - **NEW** `src/client/shared/Spaarke.SmartTodo.Components/src/hooks/index.ts` — hooks barrel.
+    - **NEW** `src/client/shared/Spaarke.SmartTodo.Components/src/types/kanban.ts` — `TodoColumn`, `IKanbanTodoLike`, re-exported `IKanbanColumn`, `IKanbanDataverseService`.
+    - **MODIFIED** `src/client/shared/Spaarke.SmartTodo.Components/src/types/index.ts` — export new kanban types.
+    - **MODIFIED** `src/client/shared/Spaarke.SmartTodo.Components/src/index.ts` — barrel re-exports hooks.
+    - **MODIFIED** `src/client/shared/Spaarke.SmartTodo.Components/package.json` — added `./hooks` exports entry.
+    - **MODIFIED** `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx` — replaced flat `renderItem` loop with grouped sections via `bucketTodoItems(filteredItems, 60, 30)`; reused R4-099's `selectedId` single-select state across groups.
+    - **MODIFIED** `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts` — added `groupList`, `groupSection`, `groupHeader`, `groupTitle`, `groupCount`, `groupEmpty` Griffel rules.
+    - **MODIFIED** `src/solutions/SmartTodo/src/components/SmartToDo.tsx` — import source swapped to `@spaarke/smart-todo-components`; passes `dataverseService: serviceRef.current` (structurally compatible — `DataverseService` returns `IResult<...>` carrying `success: boolean`).
+    - **DELETED** `src/solutions/SmartTodo/src/hooks/useKanbanColumns.ts` — single Code Page consumer now imports from peer package.
+
+    ### Build results (Step 7)
+
+    - `@spaarke/smart-todo-components` tsc: clean (0 errors).
+    - `src/solutions/SmartTodo` Vite: 3,279 modules, 1,744.88 kB (1.74 MB inlined HTML), 10.24s. Build clean — Kanban Code Page consumer compiles + renders unchanged (regression-safe).
+    - `src/solutions/LegalWorkspace` Vite: 3,312 modules, 2,252 kB (2.25 MB inlined HTML), 9.16s. Build clean — widget hosted by LW shim picks up grouped rendering.
+
+    ### Out-of-scope intentionally deferred (NOT this task)
+
+    - Per-user threshold prefs in the widget (would require Dataverse round-trip on every widget mount — disproportionate). Future task can add a `thresholds?` prop and host shim wiring if surfaced as a real need.
+    - `src/solutions/LegalWorkspace/src/hooks/useKanbanColumns.ts` (a separate local copy used by the retired standalone LW SmartToDo Code Page per LEGALWORKSPACE-RETIREMENT.md) — untouched. Cleanup belongs in the LW retirement closeout, not here.
+    - Full Kanban drag-drop in the widget (POML widget-scope guardrail explicitly limits to grouped lists; react-dnd NOT hoisted).
+
+    ### Cross-task coordination
+
+    - **R4-099 (Wave D-1 parallel partner)**: R4-099 owns the widget chrome region (PaneHeader removal + Toolbar + selection state). Wrote `todo.registration.ts` + widget chrome lines + styles for selected card. 101 wrote the rendering region + new section styles + peer-package hoist. No write-race conflicts — both agents touched different regions of the widget files. The R4-099 single-select `selectedId` state works across grouped sections at zero additional cost (grouped rendering reads the same flat selection key).
+    - **R4-099 closes UAT issues 2/3/5**; **R4-101 closes UAT issue 6**. UAT issues 1/4 are left for R4-100 (serial after both Wave D-1 tasks land).
+  </notes>
 </task>
