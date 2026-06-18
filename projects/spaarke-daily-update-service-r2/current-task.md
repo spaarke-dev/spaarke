@@ -10,11 +10,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 020 — `NarrativeBullet` renders per-item sub-list when `itemIds.length > 1` (FR-11) |
-| **Step** | Wave 8 parallel batch; designing slot pattern for Wave 9 parallelization |
-| **Status** | in-progress |
-| **Next Action** | Implement SubRow + 3 slot files; wire skeleton into NarrativeBullet |
-| **Rigor Level** | FULL (.tsx modification; ADR-021; blocks 021/022/023) |
+| **Task** | 024 — P2a unit + visual tests + dark-mode parity check (NarrativeBullet sub-list + SubRow*) |
+| **Step** | COMPLETE — 7 cases pass; 5 suites / 26 tests total |
+| **Status** | completed (no commit per task constraints; TASK-INDEX update deferred) |
+| **Next Action** | Awaiting orchestrator instruction for next task |
+| **Rigor Level** | FULL (.tsx test file, ADR-021 dark-mode, 7 test cases, mocks Xrm + callbacks) |
 | **Slot pattern** | 3 separate slot files (`SubRowLink.tsx`, `SubRowTodo.tsx`, `SubRowDismiss.tsx`) — enables Wave 9 parallel edits |
 | **Rigor Level** | FULL (refactoring tag, .ts modifications across 14 files, ADR-012 + ADR-024 + ADR-028) |
 | **Knowledge loaded** | task POML 015, project CLAUDE.md, project spec.md (FR-07), all 11 files in new package src/, source types/notifications.ts + notificationService.ts + preferencesService.ts + toastUtils.ts in solutions/DailyBriefing/, Spaarke.Auth/package.json (peer dep target), package.json of new package, sibling shared-lib tsconfigs (Smart Todo + Events for pattern parity) |
