@@ -5,17 +5,29 @@
  * the entity in a Dataverse dialog, and two action buttons: "Add to To Do"
  * and "Dismiss".
  *
+ * Aggregation UX (FR-11): when `itemIds.length > 1` and the optional `items`
+ * prop is supplied, an indented per-item sub-list is rendered beneath the
+ * narrative line. Each sub-row composes three slot sub-components:
+ *
+ *   - <SubRowLink />    -- per-item entity link (task 021, FR-12)
+ *   - <SubRowTodo />    -- per-item Add-to-To-Do (task 022, FR-13)
+ *   - <SubRowDismiss /> -- per-item Dismiss     (task 023, FR-14)
+ *
+ * Single-item bullets (`itemIds.length === 1`) render UNCHANGED -- no
+ * sub-list -- preserving the existing UX.
+ *
  * Constraints:
  *   - ADR-021: Fluent v9 tokens only, dark mode via semantic tokens
- *   - Opens records via Xrm.Navigation.openForm
+ *   - Opens records via Xrm.Navigation.navigateTo
  *
  * Hoisted into `@spaarke/daily-briefing-components/components` by R2 task 011
  * (Wave 3 / Group A). Source of truth; the original-location file at
  * `src/solutions/DailyBriefing/src/components/NarrativeBullet.tsx` is now a
  * re-export shim pending full cleanup in R2 task 017.
  *
- * NOTE: Existing logic preserved verbatim. The P2a sub-list rendering
- * enhancement (FR-11..FR-14) is task 020 — do NOT preempt here.
+ * Task 020 (Wave 8): adds sub-list rendering skeleton + slot wiring. The 3
+ * per-row controls (link, To-Do, Dismiss) are real-implemented by tasks
+ * 021/022/023 (Wave 9, parallel-safe -- each task edits its own slot file).
  */
 
 import * as React from "react";
@@ -29,6 +41,8 @@ import {
 } from "@fluentui/react-components";
 import { DismissRegular } from "@fluentui/react-icons";
 import { MicrosoftToDoIcon } from "@spaarke/ui-components";
+import type { NotificationItem } from "../types/notifications";
+import { SubRow } from "./SubRow";
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -77,6 +91,19 @@ const useStyles = makeStyles({
   todoIconActive: {
     color: tokens.colorBrandForeground1,
   },
+  // FR-11: per-item sub-list (rendered only when itemIds.length > 1).
+  subList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+    // Indent under the narrative + entity-link column.
+    marginTop: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    // Subtle left border for visual grouping (semantic token).
+    borderLeftWidth: "2px",
+    borderLeftStyle: "solid",
+    borderLeftColor: tokens.colorNeutralStroke2,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -104,6 +131,37 @@ export interface NarrativeBulletProps {
   isTodoPending: boolean;
   /** Error message from a failed To Do creation. */
   todoError?: string;
+  /**
+   * Underlying notification items corresponding to `itemIds` (FR-11).
+   *
+   * When `itemIds.length > 1` AND `items` is supplied, an indented per-item
+   * sub-list is rendered beneath the narrative line. When omitted or when
+   * `itemIds.length === 1`, the sub-list is NOT rendered (existing UX
+   * preserved).
+   *
+   * Items SHOULD be passed in the same order as `itemIds`. Each sub-row's
+   * 3 slot sub-components (link / To-Do / Dismiss) use the `NotificationItem`
+   * verbatim per FR-12/FR-13/FR-14 -- no AI involvement on the sub-row data.
+   *
+   * Wired by tasks 021/022/023 (Wave 9) into the slot components.
+   */
+  items?: NotificationItem[];
+  /**
+   * Optional per-item Add-to-To-Do callback (FR-13, task 022).
+   *
+   * Distinct from `onAddToTodo` (the aggregated callback). When provided,
+   * each sub-row's To-Do slot becomes active; task 022 wires
+   * `useInlineTodoCreate` with the specific underlying `NotificationItem`.
+   */
+  onAddToTodoItem?: (itemId: string) => void;
+  /**
+   * Optional per-item Dismiss callback (FR-14, task 023).
+   *
+   * Distinct from `onDismiss` (the aggregated callback, which cascades per
+   * FR-14a). When provided, each sub-row's Dismiss slot becomes active and
+   * marks only the specific `appnotification` row as read.
+   */
+  onDismissItem?: (itemId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,8 +179,17 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   isTodoCreated,
   isTodoPending,
   todoError,
+  items,
+  onAddToTodoItem,
+  onDismissItem,
 }) => {
   const styles = useStyles();
+
+  // FR-11: render sub-list only for aggregated bullets (itemIds.length > 1)
+  // AND only when the underlying `items` are supplied. Single-item bullets
+  // render unchanged. If `items` is omitted (back-compat with existing
+  // consumers), the sub-list is suppressed.
+  const showSubList = itemIds.length > 1 && Array.isArray(items) && items.length > 0;
 
   const handleLinkClick = () => {
     if (!primaryEntityType || !primaryEntityId) return;
@@ -181,6 +248,24 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
           >
             {primaryEntityName} &#8599;
           </Text>
+        )}
+        {/* FR-11: per-item sub-list for aggregated bullets (itemIds.length > 1). */}
+        {showSubList && (
+          <div
+            className={styles.subList}
+            role="list"
+            aria-label={`${items!.length} underlying notifications`}
+          >
+            {items!.map((item) => (
+              <div key={item.id} role="listitem">
+                <SubRow
+                  item={item}
+                  onAddToTodoItem={onAddToTodoItem}
+                  onDismissItem={onDismissItem}
+                />
+              </div>
+            ))}
+          </div>
         )}
       </div>
       <div className={styles.actions}>

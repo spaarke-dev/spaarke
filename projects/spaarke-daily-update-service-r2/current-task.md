@@ -10,10 +10,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 015 — Abstract dependencies; remove solution-local back-pointers (FR-07) |
-| **Step** | 6 of 6 task POML steps complete (step 7 TASK-INDEX update skipped per orchestrator: "NO commit. NO push. NO TASK-INDEX update") |
-| **Status** | completed (task work) — handoff to Wave 5 orchestrator |
-| **Next Action** | Hand back to Wave 5 orchestrator; task 016 (Pattern D registration shim) unblocked |
+| **Task** | 020 — `NarrativeBullet` renders per-item sub-list when `itemIds.length > 1` (FR-11) |
+| **Step** | Wave 8 parallel batch; designing slot pattern for Wave 9 parallelization |
+| **Status** | in-progress |
+| **Next Action** | Implement SubRow + 3 slot files; wire skeleton into NarrativeBullet |
+| **Rigor Level** | FULL (.tsx modification; ADR-021; blocks 021/022/023) |
+| **Slot pattern** | 3 separate slot files (`SubRowLink.tsx`, `SubRowTodo.tsx`, `SubRowDismiss.tsx`) — enables Wave 9 parallel edits |
 | **Rigor Level** | FULL (refactoring tag, .ts modifications across 14 files, ADR-012 + ADR-024 + ADR-028) |
 | **Knowledge loaded** | task POML 015, project CLAUDE.md, project spec.md (FR-07), all 11 files in new package src/, source types/notifications.ts + notificationService.ts + preferencesService.ts + toastUtils.ts in solutions/DailyBriefing/, Spaarke.Auth/package.json (peer dep target), package.json of new package, sibling shared-lib tsconfigs (Smart Todo + Events for pattern parity) |
 | **Files hoisted (3 new in package)** | `src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts` (323 LOC); `services/notificationService.ts` (330 LOC); `services/preferencesService.ts` (176 LOC); `utils/toastUtils.ts` (15 LOC) + `utils/index.ts` barrel |

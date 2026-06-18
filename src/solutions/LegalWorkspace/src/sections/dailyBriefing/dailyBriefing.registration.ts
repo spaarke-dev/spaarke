@@ -48,6 +48,60 @@ function routeRateLimitTelemetry(properties: Record<string, unknown>): void {
   trackEvent(TELEMETRY_EVENT_DAILY_BRIEFING_429, stringProps);
 }
 
+// ---------------------------------------------------------------------------
+// Module-mutable notification-loader slot (R2 task 002 — FR-01 / FR-02).
+//
+// Why a module slot?
+//   `sectionRegistry.ts` consumes `dailyBriefingRegistration` as a STATIC
+//   `readonly` array entry built at module-load time. The default factory
+//   below runs ONCE at module-load with no loader. SpaarkeAi's `main.tsx`
+//   needs to inject `loadSpaarkeAiNotificationContext` AFTER bootstrap
+//   without rewriting `sectionRegistry.ts` (FR-25 / NFR-10 — standalone
+//   LegalWorkspace bundle byte-identical).
+//
+// Pattern (mirrors `setDefaultWorkspaceRenderer` from @spaarke/ui-components):
+//   - SpaarkeAi `main.tsx` calls `setLegalWorkspaceDailyBriefingNotificationLoader(loader)`
+//     before React renders.
+//   - The default registration's factory forwards a STABLE function reference
+//     to the shared factory that reads `_globalNotificationLoader` at
+//     call-time (per render fetch). The shared factory's closure captures
+//     this reference once, but the function itself is a thin lookup against
+//     the mutable slot — so the loader is "late-bound" at fetch time.
+//
+// Standalone LegalWorkspace + standalone Daily Briefing Code Page do NOT
+// call the setter — the slot stays `null`, the wrapper returns `null`,
+// `useDailyBriefing` falls back to the empty-payload contract (BFF returns
+// empty bullets → empty-state UI). FR-25 / NFR-10 preserved.
+// ---------------------------------------------------------------------------
+
+let _globalNotificationLoader:
+  | (() => Promise<NarrateRequest | null>)
+  | null = null;
+
+/**
+ * Set the global notification-context loader for the DEFAULT Daily Briefing
+ * registration consumed by `sectionRegistry.ts`. Call this BEFORE rendering
+ * any tree that mounts `WorkspaceGrid` so the first fetch picks up the loader.
+ *
+ * Used by SpaarkeAi `main.tsx` to inject `loadSpaarkeAiNotificationContext`
+ * (R2 task 002 — FR-02). Standalone LegalWorkspace does NOT call this.
+ */
+export function setLegalWorkspaceDailyBriefingNotificationLoader(
+  loader: (() => Promise<NarrateRequest | null>) | null,
+): void {
+  _globalNotificationLoader = loader;
+}
+
+/**
+ * Late-bound loader passed to the shared factory. The shared `useDailyBriefing`
+ * hook calls `loadNotificationContext()` at fetch time — by then the SpaarkeAi
+ * bootstrap has already set `_globalNotificationLoader`. Returns `null` when
+ * no loader is configured (preserves empty-payload contract for standalone).
+ */
+function lateBoundNotificationLoader(): Promise<NarrateRequest | null> {
+  return _globalNotificationLoader ? _globalNotificationLoader() : Promise.resolve(null);
+}
+
 /**
  * Create a Daily Briefing `SectionRegistration` bound to LegalWorkspace-local
  * auth + telemetry, with optional consumer-supplied notification loader.
@@ -66,12 +120,19 @@ export function createLegalWorkspaceDailyBriefingRegistration(
 }
 
 /**
- * Default LegalWorkspace registration: standalone path with NO notification
- * loader (empty-payload contract; preserves pre-R2 behavior). Consumed by
- * `sectionRegistry.ts` unchanged.
+ * Default LegalWorkspace registration: standalone path uses a late-bound
+ * loader that reads from the module-mutable slot above. When the slot is
+ * unset (standalone LegalWorkspace + standalone Daily Briefing), the wrapper
+ * returns `null` → empty-payload contract preserved. When SpaarkeAi sets
+ * the slot at bootstrap, the wrapper forwards to the supplied loader →
+ * Daily Briefing renders real bullets on cold load (FR-02).
+ *
+ * Consumed by `sectionRegistry.ts` unchanged.
  */
 export const dailyBriefingRegistration: SectionRegistration =
-  createLegalWorkspaceDailyBriefingRegistration();
+  createLegalWorkspaceDailyBriefingRegistration({
+    loadNotificationContext: lateBoundNotificationLoader,
+  });
 
 export default dailyBriefingRegistration;
 

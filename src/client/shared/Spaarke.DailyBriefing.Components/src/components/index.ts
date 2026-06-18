@@ -44,4 +44,20 @@ export type { ChannelHeadingProps } from "./ChannelHeading";
 export { NarrativeBullet } from "./NarrativeBullet";
 export type { NarrativeBulletProps } from "./NarrativeBullet";
 
+// Sub-list slot components (FR-11..FR-14). Task 020 (Wave 8) lays the
+// skeleton + slot files; tasks 021/022/023 (Wave 9) implement per-row
+// link / To-Do / Dismiss behavior. Slots are exported here so consumers
+// (tests, future shells) can target each individually.
+export { SubRow } from "./SubRow";
+export type { SubRowProps } from "./SubRow";
+
+export { SubRowLink } from "./SubRowLink";
+export type { SubRowLinkProps } from "./SubRowLink";
+
+export { SubRowTodo } from "./SubRowTodo";
+export type { SubRowTodoProps } from "./SubRowTodo";
+
+export { SubRowDismiss } from "./SubRowDismiss";
+export type { SubRowDismissProps } from "./SubRowDismiss";
+
 export { getChannelIcon } from "./channelIcons";

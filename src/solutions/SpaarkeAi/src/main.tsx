@@ -60,7 +60,18 @@ import type { IRuntimeConfig } from "@spaarke/auth";
 import {
   LegalWorkspaceRenderer,
   setLegalWorkspaceRuntimeConfig,
+  // R2 task 002 (FR-01 / FR-02): inject SpaarkeAi's notification-context loader
+  // into the LegalWorkspace Daily Briefing registration consumed by
+  // SECTION_REGISTRY. Without this, the embedded Daily Briefing fetches with
+  // an empty payload and renders the "Nothing to see right now" empty state.
+  setLegalWorkspaceDailyBriefingNotificationLoader,
 } from "@spaarke/legal-workspace";
+// R2 task 002 (FR-02): loadSpaarkeAiNotificationContext queries `appnotification`
+// via Xrm.WebApi and builds the populated NarrateRequest envelope (categories +
+// priorityItems + channels) the BFF /narrate endpoint expects to produce real
+// TL;DR + channel bullets. Mirrors the standalone Daily Briefing Code Page
+// data path (see file header for cross-reference).
+import { loadSpaarkeAiNotificationContext } from "./services/notificationContextLoader";
 // R4 task 052 (C-4): register LegalWorkspaceApp as the default workspace
 // renderer. `WorkspaceLayoutWidget` in `@spaarke/ai-widgets` consults this
 // slot at render time instead of importing `@spaarke/legal-workspace` directly.
@@ -214,6 +225,20 @@ async function bootstrap(): Promise<void> {
   // Zero behavioural change vs pre-C-4 (Risk R-4): `LegalWorkspaceRenderer`
   // IS `LegalWorkspaceApp` — the rename is a typed re-export, not a wrapper.
   setDefaultWorkspaceRenderer(LegalWorkspaceRenderer);
+
+  // R2 task 002 (FR-01 / FR-02): inject SpaarkeAi's notification-context loader
+  // into the LegalWorkspace Daily Briefing registration BEFORE rendering the
+  // React tree. The default `dailyBriefingRegistration` (built at module-load
+  // with a late-bound loader wrapper) reads this slot at fetch time. Without
+  // this call the wrapper returns null → useDailyBriefing falls back to the
+  // empty-payload contract → operator sees "Nothing to see right now" instead
+  // of real bullets.
+  //
+  // FR-25 / NFR-10 preserved: standalone LegalWorkspace + standalone Daily
+  // Briefing Code Page do NOT call this setter (their bundles never import
+  // this module), so the slot stays unset there and the empty-payload
+  // contract is preserved for those surfaces.
+  setLegalWorkspaceDailyBriefingNotificationLoader(loadSpaarkeAiNotificationContext);
 
   // -------------------------------------------------------------------------
   // 1. Resolve runtime config
