@@ -367,7 +367,14 @@ public static class DailyBriefingEndpoints
                 maxOutputTokens: 300,
                 cancellationToken: cancellationToken);
 
+            // FR-17 (task 031): Defense-in-depth — even with FR-15/FR-16 prompt improvements,
+            // the LLM may still hallucinate `primaryEntityId`. Build the allow-set of supplied
+            // `regardingId` values for this channel, then validate each parsed bullet's
+            // `primaryEntityId` against it. Invalid bullets get their primaryEntity* fields
+            // nulled out so the client renders no broken link.
+            var allowedRegardingIds = BuildAllowedRegardingIdSet(channel);
             var bullets = ParseChannelBullets(responseJson, logger);
+            bullets = ValidateBulletPrimaryEntityIds(bullets, allowedRegardingIds, channel, logger);
 
             return new ChannelNarrationResult
             {
@@ -534,6 +541,93 @@ public static class DailyBriefingEndpoints
             logger.LogWarning(ex, "Failed to parse channel narration JSON. Response={Response}", json);
             return [];
         }
+    }
+
+    /// <summary>
+    /// FR-17 (task 031): Build the set of valid `regardingId` values supplied for a channel,
+    /// used to validate LLM-returned `primaryEntityId` values against the source of truth.
+    /// Normalizes to lowercase invariant strings so case-insensitive Guid string comparisons
+    /// match regardless of how the LLM formats the GUID it echoes back.
+    /// </summary>
+    internal static HashSet<string> BuildAllowedRegardingIdSet(ChannelNarrationInput channel)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in channel.Items)
+        {
+            if (!string.IsNullOrWhiteSpace(item.RegardingId))
+            {
+                set.Add(item.RegardingId.Trim());
+            }
+        }
+        return set;
+    }
+
+    /// <summary>
+    /// FR-17 (task 031): Defense-in-depth validation pass over parsed bullets.
+    /// For each bullet with a non-empty <see cref="NarrativeBulletDto.PrimaryEntityId"/> that
+    /// is NOT in the supplied <paramref name="allowedRegardingIds"/> set: null out
+    /// PrimaryEntityType + PrimaryEntityId + PrimaryEntityName (frontend renders no link)
+    /// and emit a structured warning log including the offending bullet content + the
+    /// hallucinated ID + the channel context (for App Insights / monitoring).
+    ///
+    /// This complements task 030's prompt-side improvements (FR-15: `regardingId=` per item;
+    /// FR-16: explicit "Do NOT invent IDs" rule). The prompt nudges the LLM; this guarantees
+    /// no hallucinated ID reaches the client.
+    /// </summary>
+    internal static NarrativeBulletDto[] ValidateBulletPrimaryEntityIds(
+        NarrativeBulletDto[] bullets,
+        HashSet<string> allowedRegardingIds,
+        ChannelNarrationInput channel,
+        ILogger logger)
+    {
+        if (bullets.Length == 0)
+        {
+            return bullets;
+        }
+
+        var validated = new NarrativeBulletDto[bullets.Length];
+        for (var i = 0; i < bullets.Length; i++)
+        {
+            var bullet = bullets[i];
+
+            if (string.IsNullOrWhiteSpace(bullet.PrimaryEntityId))
+            {
+                // No ID claimed → nothing to validate.
+                validated[i] = bullet;
+                continue;
+            }
+
+            if (allowedRegardingIds.Contains(bullet.PrimaryEntityId.Trim()))
+            {
+                // ID matches a supplied regardingId → keep as-is.
+                validated[i] = bullet;
+                continue;
+            }
+
+            // Hallucinated ID: null out the primaryEntity* trio + log structured warning.
+            logger.LogWarning(
+                "FR-17 validation: LLM returned hallucinated primaryEntityId not in supplied regardingId set. " +
+                "Nulling primaryEntityType/Id/Name. " +
+                "Channel={Channel} ChannelLabel={ChannelLabel} HallucinatedId={HallucinatedId} " +
+                "HallucinatedType={HallucinatedType} HallucinatedName={HallucinatedName} " +
+                "Narrative={Narrative} AllowedIdCount={AllowedIdCount}",
+                channel.Category,
+                channel.Label,
+                bullet.PrimaryEntityId,
+                bullet.PrimaryEntityType,
+                bullet.PrimaryEntityName,
+                bullet.Narrative,
+                allowedRegardingIds.Count);
+
+            validated[i] = bullet with
+            {
+                PrimaryEntityType = string.Empty,
+                PrimaryEntityId = string.Empty,
+                PrimaryEntityName = string.Empty
+            };
+        }
+
+        return validated;
     }
 }
 

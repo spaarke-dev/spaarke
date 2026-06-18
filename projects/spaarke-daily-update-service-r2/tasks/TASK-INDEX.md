@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 5 / 36 complete (Waves 1+1b: 001, 030, 040, 050, 052)
+> **Status**: 7 / 36 complete; 1 deferred (Waves 1+1b+2a: 001, 030, 031, 040, 050, 052, 053; 002 deferred — re-sequenced after 018)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -12,9 +12,9 @@
 | ID | Title | Phase | Status | Dependencies | Parallel | Rigor |
 |----|-------|-------|--------|--------------|----------|-------|
 | 001 | Add `loadNotificationContext` factory option to dailyBriefingRegistration | P1 | ✅ | none | — | FULL |
-| 002 | Wire `loadSpaarkeAiNotificationContext` injection in SpaarkeAi `main.tsx` | P1 | 🔲 | 001 | — | FULL |
-| 003 | P1 verification — SpaarkeAi pane renders bullets in spaarkedev1 (smoke) | P1 | 🔲 | 002 | — | STANDARD |
-| 010 | Scaffold new `@spaarke/daily-briefing-components` package | P2 | 🔲 | 003 | — | FULL |
+| 002 | Wire `loadSpaarkeAiNotificationContext` injection in SpaarkeAi `main.tsx` | P1 | ⏸ | **018** (was 001) | — | FULL |
+| 003 | P1 verification — SpaarkeAi pane renders bullets in spaarkedev1 (smoke) | P1 | ⏸ | 002 | — | STANDARD |
+| 010 | Scaffold new `@spaarke/daily-briefing-components` package | P2 | 🔲 | **none** (was 003) | — | FULL |
 | 011 | Hoist Daily Briefing components (`DailyBriefingApp`, sections, atoms) | P2 | 🔲 | 010 | A | FULL |
 | 012 | Hoist `briefingService` (BFF `/narrate` client) | P2 | 🔲 | 010 | A | FULL |
 | 013 | Hoist existing hooks (`useInlineTodoCreate`, `useBriefingNarration`) | P2 | 🔲 | 010 | A | FULL |
@@ -30,7 +30,7 @@
 | 023 | Sub-row Dismiss + aggregated cascade Dismiss (FR-14, FR-14a) | P2a | 🔲 | 020 | C | FULL |
 | 024 | P2a unit + visual tests + dark-mode parity check | P2a | 🔲 | 021,022,023 | — | STANDARD |
 | 030 | `BuildChannelNarrationPrompt` emits `regardingId` per item + updated rule list (FR-15, FR-16) | P2b | ✅ | none | D | FULL |
-| 031 | `ParseChannelBullets` validates `primaryEntityId`; nulls invalid + logs (FR-17) | P2b | 🔲 | 030 | — | FULL |
+| 031 | `ParseChannelBullets` validates `primaryEntityId`; nulls invalid + logs (FR-17) | P2b | ✅ | 030 | — | FULL |
 | 032 | Unit tests (prompt content + validation logic) | P2b | 🔲 | 031 | — | STANDARD |
 | 033 | BFF publish-size delta + CVE verification (P2b) | P2b | 🔲 | 032 | — | STANDARD |
 | 040 | `CreateNotificationNodeExecutor` populates `data.actions[]` for visible-toasttype (FR-18) | P3 | ✅ | none | D | FULL |
@@ -39,7 +39,7 @@
 | 050 | Hoist `MicrosoftToDoIcon` to `@spaarke/ui-components/src/icons/` (FR-19a) | DD | ✅ | none | D | FULL |
 | 051 | Delete 3 solution-local `MicrosoftToDoIcon` copies; update imports (FR-19b) | DD | 🔲 | 050 | — | FULL |
 | 052 | Create `createCodePageAuthInitializer` factory in `@spaarke/auth` (FR-20a) | DD | ✅ | none | D | FULL |
-| 053 | Migrate `DailyBriefing` solution to auth factory; delete local `authInit` | DD | 🔲 | 052 | — | FULL |
+| 053 | Migrate `DailyBriefing` solution to auth factory; delete local `authInit` | DD | ✅ | 052 | — | FULL |
 | 054 | Migrate `LegalWorkspace` + `SpaarkeAi` to auth factory; delete local `authInit` | DD | 🔲 | 053 | — | FULL |
 | 055 | Consolidate `runtimeConfig` → `@spaarke/auth` singleton; delete 3 local copies (FR-21) | DD | 🔲 | 054 | — | FULL |
 | 060 | Deploy BFF (P2b + P3) via `bff-deploy` skill | Phase7 | 🔲 | 033,042 | E | FULL |
@@ -47,6 +47,16 @@
 | 062 | E2E verification — SC1–SC14 in spaarkedev1 | Phase7 | 🔲 | 060,061,024,018 | — | STANDARD |
 | 063 | Update architecture docs (SPAARKEAI-COMPONENT-MODEL, SPAARKEAI-WORKSPACE-ARCHITECTURE, BUILD-A-NEW-WORKSPACE-WIDGET) | Phase7 | 🔲 | 016 | — | MINIMAL |
 | 090 | Project wrap-up (code-review + adr-check + repo-cleanup + README status + lessons-learned) | Phase8 | 🔲 | 062,063 | — | FULL |
+
+---
+
+## Re-sequencing Decisions (Wave 2a 2026-06-18)
+
+**Task 002 deferred → depends on 018 (was 001)**. Reason: the `loadNotificationContext` factory option exists in the shared-lib `dailyBriefing.registration.ts`, but the LegalWorkspace consumer `src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts` is a STATIC `SectionRegistration` const that does NOT invoke the factory — so wiring `main.tsx` alone has no effect. Task 018 (LegalWorkspace shim replacement) is the natural unblocker: after 018 lands, the registration consumes the factory, and task 002 becomes a trivial `loadNotificationContext: loadSpaarkeAiNotificationContext` arg pass. Full analysis in `notes/task-002-blocker.md`. Task 003 (P1 smoke verification) is chained behind 002.
+
+**Task 010 unblocked → deps cleared (was 003)**. Reason: scaffolding the new `@spaarke/daily-briefing-components` package has no functional dependency on P1 verification. P2 hoist can proceed in parallel with the P1 deferral.
+
+**Task 053 acceptance interpreted, not literal**. The DailyBriefing solution's `authInit.ts` was REWRITTEN as a thin factory consumer with lazy-singleton wrapping (49 LOC) rather than deleted outright — the JSDoc canonical example pattern keeps `services/authInit.ts` as the encapsulation point. The spirit of FR-20 is met: no per-solution auth init *logic* remains; only a thin call-site wrapper. Lazy-singleton needed because DailyBriefing's runtime-config getters aren't available at module load (`setRuntimeConfig` must fire first). Task 054 should verify whether LegalWorkspace + SpaarkeAi need the same pattern (likely don't). See `notes/task-053-factory-config-timing.md`.
 
 ---
 
