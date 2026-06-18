@@ -14,9 +14,9 @@
 | **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
 | **PR #384** | ✅ MERGED to master 2026-06-11 (Waves A + B + C; 14 tasks) — earlier than the original 094→093→098→PR plan |
 | **Worktree branch** | `work/smart-todo-r4-wave2` @ `651426d6` (origin/master merged in 2026-06-12) — pushed to origin |
-| **Active task** | none — next up: **093** UI test suite (NFR-05 latency, NFR-07 a11y, NFR-08 orientation; `npm run dev` smoke OK, no deploy needed) |
+| **Active task** | **092** deploy — IN PROGRESS (2026-06-16: 4 surfaces deployed to spaarkedev1; golden-path smoke test pending) |
 | **Working tree** | 094 outputs pending commit (grep-sweep-result.md + POML + TASK-INDEX + this file) |
-| **Status update** | **28 of 31 ✅** — 094 grep gate PASSED 2026-06-12 (0 functional hits; graduation criterion 12 MET). ⚠️ New follow-up #6: stale SpeDocumentViewer solution bundle.js (v1.0.16) embeds pre-R3 `sprk_todoflag` write path — fold rebuild into 092 deploy. See `notes/grep-sweep-result.md` §3. |
+| **Status update** | **28 of 31 ✅ + 092 in-progress** — 2026-06-16 deploy session: SmartTodo (1,699 KB), SpaarkeAi (3,742 KB), RegardingResolver PCF v1.1.0 (1.57 MiB), sprk_todo_dirty_check.js (14 KB) deployed to spaarkedev1. sprk_todoflag: 0 functional hits in source + 0 in deployed bundles. PCF manifest fix applied (apostrophe in description-key). Golden-path smoke test pending. |
 | **Next Action** | **093** UI test suite, then **092** master-side deploy (actionable — PR #384 merged; include SpeDocumentViewer rebuild per follow-up #6), then **098** wrap-up |
 | **PR strategy** | Waves A + B + C already merged via PR #384. Remaining 093/094/098 outputs go in a small follow-up PR from `work/smart-todo-r4-wave2`. |
 

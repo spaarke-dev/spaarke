@@ -148,7 +148,7 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [092](092-deploy-all-affected-solutions.poml) | Deploy all affected solutions to spaarkedev1 | deploy, smoke-test | ❌ | all 020-084 | 093, 094 |
+| 🔄 | [092](092-deploy-all-affected-solutions.poml) | Deploy all affected solutions to spaarkedev1 — **IN PROGRESS** (2026-06-16: SmartTodo + SpaarkeAi + RegardingResolver v1.1.0 + dirty-check JS deployed; golden-path smoke test pending) | deploy, smoke-test | ❌ | all 020-084 | 093, 094 |
 | 🔲 | [093](093-ui-test-suite-nfr-validation.poml) | UI test suite for NFR-05 / NFR-07 / NFR-08 | ui-test, a11y, performance | ❌ | 092 | 098 |
 | ✅ | [094](094-grep-sweep-sprk-todoflag.poml) | Final grep sweep: 0 functional `sprk_todoflag` hits (2026-06-12; 45 comment/guard lines classified; stale SpeDocumentViewer bundle.js flagged → follow-up #6) | regression, grep | ❌ | ~~092~~ (re-sequenced first per user decision) | 098 |
 
