@@ -51,3 +51,15 @@ export type {
   CodePageAuthInitConfig,
   CodePageAuthInitializer,
 } from './createCodePageAuthInitializer';
+
+// Code Page runtime-config store factory (FR-21 / ADR-028) — canonical
+// consumption pattern that consolidates the 3 byte-similar solution-local
+// `config/runtimeConfig.ts` copies (DailyBriefing, LegalWorkspace, SpaarkeAi).
+// See projects/spaarke-daily-update-service-r2/notes/runtime-config-divergence.md
+// for the divergence analysis informing the config shape.
+export { createRuntimeConfigStore } from './createRuntimeConfigStore';
+export type {
+  RuntimeConfigStore,
+  RuntimeConfigStoreOptions,
+  RuntimeConfigLazyTenantResolvePayload,
+} from './createRuntimeConfigStore';

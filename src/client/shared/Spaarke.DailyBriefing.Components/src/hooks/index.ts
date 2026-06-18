@@ -10,10 +10,14 @@
  *    resolution per ADR-024 (TODO_REGARDING_CATALOG + applyResolverFields
  *    preserved verbatim from the original location).
  *
- * To be populated by R2 task 014 (FR-06 split of `useNotificationData`):
- *  - `useBriefingNotifications`
- *  - `useBriefingPreferences`
- *  - `useBriefingActions`
+ * Populated by R2 task 014 (FR-06 split of `useNotificationData`):
+ *  - `useBriefingNotifications` — fetches + groups appnotification records.
+ *  - `useBriefingPreferences` — fetches + persists Daily Digest user preferences.
+ *  - `useBriefingActions` — mark-as-read / mark-all-as-read / dismiss-all / refresh.
+ *
+ * Cross-hook coordination (e.g., "refetch notifications when preferences change")
+ * happens at the CONSUMER layer via effects (Option A per FR-06 / design.md).
+ * The three hooks intentionally share NO internal state, NO singleton, NO context.
  */
 
 export { useInlineTodoCreate } from "./useInlineTodoCreate";
@@ -21,3 +25,12 @@ export type { UseInlineTodoCreateResult } from "./useInlineTodoCreate";
 
 export { useBriefingNarration } from "./useBriefingNarration";
 export type { UseBriefingNarrationResult } from "./useBriefingNarration";
+
+export { useBriefingNotifications } from "./useBriefingNotifications";
+export type { UseBriefingNotificationsResult } from "./useBriefingNotifications";
+
+export { useBriefingPreferences } from "./useBriefingPreferences";
+export type { UseBriefingPreferencesResult } from "./useBriefingPreferences";
+
+export { useBriefingActions } from "./useBriefingActions";
+export type { UseBriefingActionsResult } from "./useBriefingActions";

@@ -11,16 +11,18 @@
  * at `src/solutions/DailyBriefing/src/App.tsx` is now a re-export shim
  * pending full cleanup in R2 task 017.
  *
- * INTERIM IMPORT NOTES (R2 task 011 only):
- *   - `hooks/*` still live in the standalone DailyBriefing solution. They
- *     will be hoisted in R2 task 013 (Wave 3 sibling task) — this file
- *     intentionally does NOT consume the hoisted hook barrel yet so that
- *     this task and task 013 can land independently. Cleanup in task 017.
+ * INTERIM IMPORT NOTES (post-task 014):
+ *   - `hooks/*` are now consumed from the hoisted barrel `../hooks`.
+ *   - Notification data is composed from three independent hooks per FR-06:
+ *     `useBriefingNotifications` + `useBriefingPreferences` + `useBriefingActions`.
+ *     Cross-hook coordination happens at THIS consumer via effects (Option A —
+ *     see effect-coordination block below). The hooks themselves share NO
+ *     internal state; this is intentional per FR-06.
  *   - `types/notifications` and `utils/toastUtils` will be hoisted in
- *     R2 task 014/015.
+ *     R2 task 015 (toastUtils) / task 016 (types/utils consolidation).
  *   - Until then, this component reaches back across the package boundary
- *     via a relative path — intentional, temporary debt documented in the
- *     task POML step 3.
+ *     via a relative path for `types/notifications` and `utils/toastUtils` —
+ *     intentional, temporary debt cleaned up in task 015/016.
  */
 
 import * as React from "react";
@@ -40,11 +42,18 @@ import { TldrSection } from "./TldrSection";
 import { ActivityNotesSection } from "./ActivityNotesSection";
 import { CaughtUpFooter } from "./CaughtUpFooter";
 import { PreferencesDropdown } from "./PreferencesDropdown";
-import { useBriefingNarration } from "../../../../../solutions/DailyBriefing/src/hooks/useBriefingNarration";
-import { useInlineTodoCreate } from "../../../../../solutions/DailyBriefing/src/hooks/useInlineTodoCreate";
-import { useNotificationData } from "../../../../../solutions/DailyBriefing/src/hooks/useNotificationData";
+import {
+  useBriefingNarration,
+  useInlineTodoCreate,
+  useBriefingNotifications,
+  useBriefingPreferences,
+  useBriefingActions,
+} from "../hooks";
 import { TOASTER_ID } from "../../../../../solutions/DailyBriefing/src/utils/toastUtils";
-import type { IWebApi } from "../../../../../solutions/DailyBriefing/src/types/notifications";
+import type {
+  IWebApi,
+  ChannelFetchResult,
+} from "../../../../../solutions/DailyBriefing/src/types/notifications";
 
 const useStyles = makeStyles({
   container: {
@@ -133,10 +142,71 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     }
   }, [xrm]);
 
-  const { channels, totalUnreadCount, preferences, loadingState, actions } =
-    useNotificationData({ webApi, userId });
+  // ---------------------------------------------------------------------------
+  // Notification data — composed from three independent hooks per FR-06.
+  //
+  // Cross-hook coordination (Option A — consumer-layer effect-based):
+  //   - When `preferences.disabledChannels` changes, refetch notifications so
+  //     the filtered set is in sync.
+  //   - When `actionsRefresh` bumps (any successful mark-read / mark-all-read /
+  //     dismiss), refetch notifications so the rendered state matches Dataverse.
+  //
+  // The three hooks intentionally share NO internal state. Channel filtering
+  // by `disabledChannels` happens HERE at the consumer (downstream of fetch).
+  // See task 014 / FR-06 / spec.md.
+  // ---------------------------------------------------------------------------
+  const {
+    channels: allChannels,
+    loadingState,
+    refetch,
+  } = useBriefingNotifications(webApi);
+  const { preferences, updatePreferences } = useBriefingPreferences(webApi, userId);
+  const {
+    markAsRead,
+    refresh: actionsRefresh,
+  } = useBriefingActions(webApi);
 
-  const { markAsRead, refresh, updatePreferences } = actions;
+  // Effect 1: refetch when disabled-channels set changes.
+  // Cross-hook coordination at the consumer (per FR-06 Option A).
+  React.useEffect(() => {
+    refetch();
+    // We deliberately omit `refetch` from deps: it's a stable useCallback
+    // reference from useBriefingNotifications, and including it would only
+    // re-trigger when the hook itself re-mounts, which already triggers fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferences.disabledChannels]);
+
+  // Effect 2: refetch after any mutation action (mark-read / mark-all / dismiss).
+  React.useEffect(() => {
+    if (actionsRefresh === 0) return; // skip initial render
+    refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionsRefresh]);
+
+  // Apply `disabledChannels` filter at the consumer (was previously inside
+  // useNotificationData). Errors always show through regardless of filter.
+  const channels: ChannelFetchResult[] = React.useMemo(
+    () =>
+      allChannels.filter((ch) => {
+        if (ch.status !== "success") return true; // always show errors
+        return !preferences.disabledChannels.includes(ch.group.meta.category);
+      }),
+    [allChannels, preferences.disabledChannels]
+  );
+
+  // Total unread count after filtering.
+  const totalUnreadCount = React.useMemo(
+    () =>
+      channels.reduce((sum, ch) => {
+        if (ch.status === "success") {
+          return sum + ch.group.unreadCount;
+        }
+        return sum;
+      }, 0),
+    [channels]
+  );
+
+  const refresh = refetch;
 
   // AI narration — fetches TL;DR + per-channel narrative bullets from BFF
   const {
