@@ -23,12 +23,12 @@
  *   unless layout (gap, alignment) changes -- which would be a follow-up task.
  */
 
-import * as React from "react";
-import { makeStyles, tokens } from "@fluentui/react-components";
-import type { NotificationItem } from "../types/notifications";
-import { SubRowLink } from "./SubRowLink";
-import { SubRowTodo } from "./SubRowTodo";
-import { SubRowDismiss } from "./SubRowDismiss";
+import * as React from 'react';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import type { NotificationItem } from '../types/notifications';
+import { SubRowLink } from './SubRowLink';
+import { SubRowTodo } from './SubRowTodo';
+import { SubRowDismiss } from './SubRowDismiss';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -36,8 +36,8 @@ import { SubRowDismiss } from "./SubRowDismiss";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     paddingTop: tokens.spacingVerticalXXS,
     paddingBottom: tokens.spacingVerticalXXS,
@@ -48,21 +48,21 @@ const useStyles = makeStyles({
   },
   bullet: {
     flexShrink: 0,
-    width: "12px",
+    width: '12px',
     color: tokens.colorNeutralForeground3,
-    userSelect: "none",
+    userSelect: 'none',
     fontSize: tokens.fontSizeBase200,
     lineHeight: tokens.lineHeightBase200,
   },
   linkSlot: {
     flex: 1,
     minWidth: 0,
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
   },
   actions: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
     flexShrink: 0,
   },
@@ -85,11 +85,7 @@ export interface SubRowProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export const SubRow: React.FC<SubRowProps> = ({
-  item,
-  onAddToTodoItem,
-  onDismissItem,
-}) => {
+export const SubRow: React.FC<SubRowProps> = ({ item, onAddToTodoItem, onDismissItem }) => {
   const styles = useStyles();
 
   return (

@@ -20,22 +20,13 @@
  * temporary debt documented in the task POML step 3.
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Skeleton,
-  SkeletonItem,
-} from "@fluentui/react-components";
-import { CHANNEL_REGISTRY } from "../types/notifications";
-import type {
-  ChannelFetchResult,
-  NotificationCategory,
-} from "../types/notifications";
-import { getChannelIcon } from "./channelIcons";
-import { ChannelHeading } from "./ChannelHeading";
-import { NarrativeBullet } from "./NarrativeBullet";
+import * as React from 'react';
+import { makeStyles, tokens, Text, Skeleton, SkeletonItem } from '@fluentui/react-components';
+import { CHANNEL_REGISTRY } from '../types/notifications';
+import type { ChannelFetchResult, NotificationCategory } from '../types/notifications';
+import { getChannelIcon } from './channelIcons';
+import { ChannelHeading } from './ChannelHeading';
+import { NarrativeBullet } from './NarrativeBullet';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -43,7 +34,7 @@ import { NarrativeBullet } from "./NarrativeBullet";
 
 const useStyles = makeStyles({
   heading: {
-    marginTop: "0",
+    marginTop: '0',
     marginBottom: tokens.spacingVerticalXXL,
   },
   channelSection: {
@@ -53,23 +44,23 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalXXL,
   },
   skeletonHeading: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     paddingBottom: tokens.spacingVerticalS,
     marginBottom: tokens.spacingVerticalM,
   },
   skeletonBullet: {
-    display: "flex",
-    alignItems: "flex-start",
+    display: 'flex',
+    alignItems: 'flex-start',
     gap: tokens.spacingHorizontalS,
     marginBottom: tokens.spacingVerticalL,
   },
   skeletonBulletLines: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
 });
@@ -122,7 +113,7 @@ export interface ActivityNotesSectionProps {
  */
 function resolveChannelIcon(category: string): React.ReactElement {
   const meta = CHANNEL_REGISTRY[category as NotificationCategory];
-  const IconComponent = getChannelIcon(meta?.iconName ?? "Info");
+  const IconComponent = getChannelIcon(meta?.iconName ?? 'Info');
   return React.createElement(IconComponent);
 }
 
@@ -154,27 +145,22 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
   if (isLoading) {
     return (
       <div>
-        <Text
-          as="h2"
-          size={500}
-          weight="semibold"
-          className={styles.heading}
-        >
+        <Text as="h2" size={500} weight="semibold" className={styles.heading}>
           Activity Notes
         </Text>
         <Skeleton aria-label="Loading activity notes">
-          {[0, 1, 2].map((sectionIdx) => (
+          {[0, 1, 2].map(sectionIdx => (
             <div key={sectionIdx} className={styles.skeletonSection}>
               <div className={styles.skeletonHeading}>
                 <SkeletonItem shape="circle" size={20} />
-                <SkeletonItem size={16} style={{ width: "140px" }} />
+                <SkeletonItem size={16} style={{ width: '140px' }} />
               </div>
-              {[0, 1].map((bulletIdx) => (
+              {[0, 1].map(bulletIdx => (
                 <div key={bulletIdx} className={styles.skeletonBullet}>
                   <SkeletonItem shape="circle" size={8} />
                   <div className={styles.skeletonBulletLines}>
-                    <SkeletonItem size={16} style={{ width: "100%" }} />
-                    <SkeletonItem size={12} style={{ width: "120px" }} />
+                    <SkeletonItem size={16} style={{ width: '100%' }} />
+                    <SkeletonItem size={12} style={{ width: '120px' }} />
                   </div>
                 </div>
               ))}
@@ -186,9 +172,7 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
   }
 
   // Filter out "system" category — not actionable for users
-  const filteredNarratives = channelNarratives.filter(
-    (cn) => cn.category !== "system"
-  );
+  const filteredNarratives = channelNarratives.filter(cn => cn.category !== 'system');
 
   // No narratives
   if (filteredNarratives.length === 0) {
@@ -197,15 +181,10 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
 
   return (
     <div>
-      <Text
-        as="h2"
-        size={500}
-        weight="semibold"
-        className={styles.heading}
-      >
+      <Text as="h2" size={500} weight="semibold" className={styles.heading}>
         Activity Notes
       </Text>
-      {filteredNarratives.map((channel) => (
+      {filteredNarratives.map(channel => (
         <div key={channel.category} className={styles.channelSection}>
           <ChannelHeading
             icon={resolveChannelIcon(channel.category)}
@@ -214,7 +193,7 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
           />
           {channel.bullets.map((bullet, idx) => {
             // Determine todo/dismiss state from the first item ID
-            const firstItemId = bullet.itemIds[0] ?? "";
+            const firstItemId = bullet.itemIds[0] ?? '';
 
             return (
               <NarrativeBullet

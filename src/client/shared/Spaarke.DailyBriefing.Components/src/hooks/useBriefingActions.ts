@@ -33,12 +33,9 @@
  *   record as dismissed.
  */
 
-import { useState, useCallback } from "react";
-import type { IWebApi } from "../types/notifications";
-import {
-  markNotificationRead,
-  markAllNotificationsRead,
-} from "../services/notificationService";
+import { useState, useCallback } from 'react';
+import type { IWebApi } from '../types/notifications';
+import { markNotificationRead, markAllNotificationsRead } from '../services/notificationService';
 
 // ---------------------------------------------------------------------------
 // Hook return type
@@ -82,13 +79,11 @@ export interface UseBriefingActionsResult {
  *                 Null while Xrm is still resolving — actions become no-ops
  *                 that resolve to `false`.
  */
-export function useBriefingActions(
-  webApi: IWebApi | null
-): UseBriefingActionsResult {
+export function useBriefingActions(webApi: IWebApi | null): UseBriefingActionsResult {
   const [refresh, setRefresh] = useState<number>(0);
 
   const bump = useCallback(() => {
-    setRefresh((k) => k + 1);
+    setRefresh(k => k + 1);
   }, []);
 
   const markAsRead = useCallback(
@@ -96,10 +91,7 @@ export function useBriefingActions(
       if (!webApi) return false;
       const result = await markNotificationRead(webApi, notificationId);
       if (!result.success) {
-        console.error(
-          "[DailyBriefing] Failed to mark read:",
-          result.error.message
-        );
+        console.error('[DailyBriefing] Failed to mark read:', result.error.message);
         return false;
       }
       bump();
@@ -112,10 +104,7 @@ export function useBriefingActions(
     if (!webApi) return false;
     const result = await markAllNotificationsRead(webApi);
     if (!result.success) {
-      console.error(
-        "[DailyBriefing] Failed to mark all read:",
-        result.error.message
-      );
+      console.error('[DailyBriefing] Failed to mark all read:', result.error.message);
       return false;
     }
     bump();

@@ -47,10 +47,7 @@ export { resolveTenantIdSync } from './resolveTenantIdSync';
 // See projects/spaarke-daily-update-service-r2/notes/auth-init-divergence.md
 // for the divergence analysis informing the config shape.
 export { createCodePageAuthInitializer } from './createCodePageAuthInitializer';
-export type {
-  CodePageAuthInitConfig,
-  CodePageAuthInitializer,
-} from './createCodePageAuthInitializer';
+export type { CodePageAuthInitConfig, CodePageAuthInitializer } from './createCodePageAuthInitializer';
 
 // Code Page runtime-config store factory (FR-21 / ADR-028) — canonical
 // consumption pattern that consolidates the 3 byte-similar solution-local

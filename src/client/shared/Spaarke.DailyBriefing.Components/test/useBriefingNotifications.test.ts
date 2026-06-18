@@ -13,20 +13,17 @@
  * constraint: "Each hook test uses independent mocks").
  */
 
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { useBriefingNotifications } from "../src/hooks/useBriefingNotifications";
-import type {
-  ChannelFetchResult,
-  IWebApi,
-} from "../src/types/notifications";
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { useBriefingNotifications } from '../src/hooks/useBriefingNotifications';
+import type { ChannelFetchResult, IWebApi } from '../src/types/notifications';
 
 // Mock the notificationService module.
-jest.mock("../src/services/notificationService", () => ({
+jest.mock('../src/services/notificationService', () => ({
   fetchAndGroupNotifications: jest.fn(),
   // Other exports kept untouched (only fetchAndGroupNotifications is used here).
 }));
 
-import { fetchAndGroupNotifications } from "../src/services/notificationService";
+import { fetchAndGroupNotifications } from '../src/services/notificationService';
 
 // Helper: build a fresh, independent webApi mock per test.
 function makeWebApi(): IWebApi {
@@ -39,34 +36,34 @@ function makeWebApi(): IWebApi {
   };
 }
 
-describe("useBriefingNotifications", () => {
+describe('useBriefingNotifications', () => {
   beforeEach(() => {
     (fetchAndGroupNotifications as jest.Mock).mockReset();
   });
 
-  it("stays idle when webApi is null", () => {
+  it('stays idle when webApi is null', () => {
     const { result } = renderHook(() => useBriefingNotifications(null));
-    expect(result.current.loadingState).toBe("idle");
+    expect(result.current.loadingState).toBe('idle');
     expect(result.current.channels).toEqual([]);
     expect(result.current.totalUnreadCount).toBe(0);
     expect(fetchAndGroupNotifications).not.toHaveBeenCalled();
   });
 
-  it("fetches and groups notifications when webApi is provided", async () => {
+  it('fetches and groups notifications when webApi is provided', async () => {
     const webApi = makeWebApi();
     const fakeChannels: ChannelFetchResult[] = [
       {
-        status: "success",
+        status: 'success',
         group: {
-          meta: { category: "new-emails", label: "New Emails", iconName: "Mail", order: 4 },
+          meta: { category: 'new-emails', label: 'New Emails', iconName: 'Mail', order: 4 },
           items: [],
           unreadCount: 5,
         },
       },
       {
-        status: "success",
+        status: 'success',
         group: {
-          meta: { category: "tasks-overdue", label: "Overdue Tasks", iconName: "Warning", order: 1 },
+          meta: { category: 'tasks-overdue', label: 'Overdue Tasks', iconName: 'Warning', order: 1 },
           items: [],
           unreadCount: 3,
         },
@@ -77,7 +74,7 @@ describe("useBriefingNotifications", () => {
     const { result } = renderHook(() => useBriefingNotifications(webApi));
 
     await waitFor(() => {
-      expect(result.current.loadingState).toBe("loaded");
+      expect(result.current.loadingState).toBe('loaded');
     });
 
     expect(result.current.channels).toEqual(fakeChannels);
@@ -85,55 +82,53 @@ describe("useBriefingNotifications", () => {
     expect(result.current.error).toBeUndefined();
   });
 
-  it("ignores per-channel errors when computing totalUnreadCount", async () => {
+  it('ignores per-channel errors when computing totalUnreadCount', async () => {
     const webApi = makeWebApi();
     const fakeChannels: ChannelFetchResult[] = [
       {
-        status: "success",
+        status: 'success',
         group: {
-          meta: { category: "new-emails", label: "New Emails", iconName: "Mail", order: 4 },
+          meta: { category: 'new-emails', label: 'New Emails', iconName: 'Mail', order: 4 },
           items: [],
           unreadCount: 7,
         },
       },
-      { status: "error", category: "matter-activity", error: "channel timeout" },
+      { status: 'error', category: 'matter-activity', error: 'channel timeout' },
     ];
     (fetchAndGroupNotifications as jest.Mock).mockResolvedValue(fakeChannels);
 
     const { result } = renderHook(() => useBriefingNotifications(webApi));
 
     await waitFor(() => {
-      expect(result.current.loadingState).toBe("loaded");
+      expect(result.current.loadingState).toBe('loaded');
     });
 
     expect(result.current.totalUnreadCount).toBe(7);
     expect(result.current.channels).toHaveLength(2);
   });
 
-  it("surfaces error state when fetch rejects", async () => {
+  it('surfaces error state when fetch rejects', async () => {
     const webApi = makeWebApi();
-    (fetchAndGroupNotifications as jest.Mock).mockRejectedValue(
-      new Error("Dataverse exploded")
-    );
+    (fetchAndGroupNotifications as jest.Mock).mockRejectedValue(new Error('Dataverse exploded'));
 
     const { result } = renderHook(() => useBriefingNotifications(webApi));
 
     await waitFor(() => {
-      expect(result.current.loadingState).toBe("error");
+      expect(result.current.loadingState).toBe('error');
     });
 
-    expect(result.current.error).toBe("Dataverse exploded");
+    expect(result.current.error).toBe('Dataverse exploded');
     expect(result.current.channels).toEqual([]);
   });
 
-  it("refetch() triggers a second call to fetchAndGroupNotifications", async () => {
+  it('refetch() triggers a second call to fetchAndGroupNotifications', async () => {
     const webApi = makeWebApi();
     (fetchAndGroupNotifications as jest.Mock).mockResolvedValue([]);
 
     const { result } = renderHook(() => useBriefingNotifications(webApi));
 
     await waitFor(() => {
-      expect(result.current.loadingState).toBe("loaded");
+      expect(result.current.loadingState).toBe('loaded');
     });
     expect(fetchAndGroupNotifications).toHaveBeenCalledTimes(1);
 

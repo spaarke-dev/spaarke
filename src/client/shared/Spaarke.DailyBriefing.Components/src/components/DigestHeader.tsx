@@ -12,19 +12,9 @@
  * re-export shim pending full cleanup in R2 task 017.
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Title2,
-  Text,
-  Button,
-  Tooltip,
-} from "@fluentui/react-components";
-import {
-  AlertRegular,
-  ArrowClockwiseRegular,
-} from "@fluentui/react-icons";
+import * as React from 'react';
+import { makeStyles, tokens, Title2, Text, Button, Tooltip } from '@fluentui/react-components';
+import { AlertRegular, ArrowClockwiseRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only — ADR-021)
@@ -32,8 +22,8 @@ import {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalL,
@@ -42,22 +32,22 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   icon: {
-    fontSize: "24px",
+    fontSize: '24px',
     color: tokens.colorBrandForeground1,
     flexShrink: 0,
   },
   titleGroup: {
     flex: 1,
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   unreadCount: {
     color: tokens.colorNeutralForeground3,
   },
   actions: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
@@ -80,11 +70,7 @@ export interface DigestHeaderProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export const DigestHeader: React.FC<DigestHeaderProps> = ({
-  totalUnreadCount,
-  onRefresh,
-  preferencesSlot,
-}) => {
+export const DigestHeader: React.FC<DigestHeaderProps> = ({ totalUnreadCount, onRefresh, preferencesSlot }) => {
   const styles = useStyles();
 
   return (

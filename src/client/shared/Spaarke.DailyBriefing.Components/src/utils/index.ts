@@ -6,4 +6,4 @@
  * into the standalone DailyBriefing solution).
  */
 
-export { TOASTER_ID } from "./toastUtils";
+export { TOASTER_ID } from './toastUtils';

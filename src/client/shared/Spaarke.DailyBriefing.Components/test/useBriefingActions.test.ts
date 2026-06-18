@@ -14,20 +14,17 @@
  * constraint).
  */
 
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { useBriefingActions } from "../src/hooks/useBriefingActions";
-import type { IWebApi } from "../src/types/notifications";
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { useBriefingActions } from '../src/hooks/useBriefingActions';
+import type { IWebApi } from '../src/types/notifications';
 
 // Mock the notificationService functions used by useBriefingActions.
-jest.mock("../src/services/notificationService", () => ({
+jest.mock('../src/services/notificationService', () => ({
   markNotificationRead: jest.fn(),
   markAllNotificationsRead: jest.fn(),
 }));
 
-import {
-  markNotificationRead,
-  markAllNotificationsRead,
-} from "../src/services/notificationService";
+import { markNotificationRead, markAllNotificationsRead } from '../src/services/notificationService';
 
 function makeWebApi(): IWebApi {
   return {
@@ -39,19 +36,19 @@ function makeWebApi(): IWebApi {
   };
 }
 
-describe("useBriefingActions", () => {
+describe('useBriefingActions', () => {
   beforeEach(() => {
     (markNotificationRead as jest.Mock).mockReset();
     (markAllNotificationsRead as jest.Mock).mockReset();
     // Silence console.error noise from the hook's failure logging path
-    jest.spyOn(console, "error").mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it("returns false from all actions when webApi is null", async () => {
+  it('returns false from all actions when webApi is null', async () => {
     const { result } = renderHook(() => useBriefingActions(null));
     expect(result.current.refresh).toBe(0);
 
@@ -59,7 +56,7 @@ describe("useBriefingActions", () => {
     let r2: boolean | undefined;
     let r3: boolean | undefined;
     await act(async () => {
-      r1 = await result.current.markAsRead("n-1");
+      r1 = await result.current.markAsRead('n-1');
       r2 = await result.current.markAllAsRead();
       r3 = await result.current.dismissAll();
     });
@@ -72,7 +69,7 @@ describe("useBriefingActions", () => {
     expect(result.current.refresh).toBe(0);
   });
 
-  it("markAsRead succeeds and bumps refresh", async () => {
+  it('markAsRead succeeds and bumps refresh', async () => {
     const webApi = makeWebApi();
     (markNotificationRead as jest.Mock).mockResolvedValue({
       success: true,
@@ -83,35 +80,35 @@ describe("useBriefingActions", () => {
 
     let ok: boolean | undefined;
     await act(async () => {
-      ok = await result.current.markAsRead("n-1");
+      ok = await result.current.markAsRead('n-1');
     });
 
     expect(ok).toBe(true);
-    expect(markNotificationRead).toHaveBeenCalledWith(webApi, "n-1");
+    expect(markNotificationRead).toHaveBeenCalledWith(webApi, 'n-1');
     await waitFor(() => {
       expect(result.current.refresh).toBe(1);
     });
   });
 
-  it("markAsRead returns false when service fails — refresh does NOT bump", async () => {
+  it('markAsRead returns false when service fails — refresh does NOT bump', async () => {
     const webApi = makeWebApi();
     (markNotificationRead as jest.Mock).mockResolvedValue({
       success: false,
-      error: { code: "X", message: "fail" },
+      error: { code: 'X', message: 'fail' },
     });
 
     const { result } = renderHook(() => useBriefingActions(webApi));
 
     let ok: boolean | undefined;
     await act(async () => {
-      ok = await result.current.markAsRead("n-2");
+      ok = await result.current.markAsRead('n-2');
     });
 
     expect(ok).toBe(false);
     expect(result.current.refresh).toBe(0);
   });
 
-  it("markAllAsRead succeeds and bumps refresh", async () => {
+  it('markAllAsRead succeeds and bumps refresh', async () => {
     const webApi = makeWebApi();
     (markAllNotificationsRead as jest.Mock).mockResolvedValue({
       success: true,
@@ -132,7 +129,7 @@ describe("useBriefingActions", () => {
     });
   });
 
-  it("dismissAll delegates to markAllAsRead", async () => {
+  it('dismissAll delegates to markAllAsRead', async () => {
     const webApi = makeWebApi();
     (markAllNotificationsRead as jest.Mock).mockResolvedValue({
       success: true,
@@ -151,7 +148,7 @@ describe("useBriefingActions", () => {
     expect(markNotificationRead).not.toHaveBeenCalled();
   });
 
-  it("refresh bumps monotonically across successful mutations", async () => {
+  it('refresh bumps monotonically across successful mutations', async () => {
     const webApi = makeWebApi();
     (markNotificationRead as jest.Mock).mockResolvedValue({
       success: true,
@@ -161,13 +158,13 @@ describe("useBriefingActions", () => {
     const { result } = renderHook(() => useBriefingActions(webApi));
 
     await act(async () => {
-      await result.current.markAsRead("a");
+      await result.current.markAsRead('a');
     });
     await act(async () => {
-      await result.current.markAsRead("b");
+      await result.current.markAsRead('b');
     });
     await act(async () => {
-      await result.current.markAsRead("c");
+      await result.current.markAsRead('c');
     });
 
     await waitFor(() => {

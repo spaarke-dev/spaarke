@@ -30,17 +30,13 @@
  *     jest.config moduleNameMapper to a no-op SVG stub.
  */
 
-import * as React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 
-import { NarrativeBullet } from "../src/components/NarrativeBullet";
-import type { NarrativeBulletProps } from "../src/components/NarrativeBullet";
-import type { NotificationItem } from "../src/types/notifications";
+import { NarrativeBullet } from '../src/components/NarrativeBullet';
+import type { NarrativeBulletProps } from '../src/components/NarrativeBullet';
+import type { NotificationItem } from '../src/types/notifications';
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -48,15 +44,15 @@ import type { NotificationItem } from "../src/types/notifications";
 
 function makeItem(overrides: Partial<NotificationItem> = {}): NotificationItem {
   return {
-    id: "n-1",
-    title: "Review motion to dismiss",
-    body: "Motion is overdue.",
-    category: "tasks-overdue",
-    priority: "high",
-    actionUrl: "/main.aspx?etc=1&id=abc",
-    regardingName: "Acme Matter",
-    regardingEntityType: "sprk_matter",
-    regardingId: "11111111-1111-1111-1111-111111111111",
+    id: 'n-1',
+    title: 'Review motion to dismiss',
+    body: 'Motion is overdue.',
+    category: 'tasks-overdue',
+    priority: 'high',
+    actionUrl: '/main.aspx?etc=1&id=abc',
+    regardingName: 'Acme Matter',
+    regardingEntityType: 'sprk_matter',
+    regardingId: '11111111-1111-1111-1111-111111111111',
     isRead: false,
     isAiGenerated: false,
     createdOn: new Date().toISOString(),
@@ -64,15 +60,13 @@ function makeItem(overrides: Partial<NotificationItem> = {}): NotificationItem {
   };
 }
 
-function baseProps(
-  overrides: Partial<NarrativeBulletProps> = {}
-): NarrativeBulletProps {
+function baseProps(overrides: Partial<NarrativeBulletProps> = {}): NarrativeBulletProps {
   return {
-    narrative: "Review motion to dismiss for Acme Matter.",
-    primaryEntityName: "Acme Matter",
-    primaryEntityType: "sprk_matter",
-    primaryEntityId: "11111111-1111-1111-1111-111111111111",
-    itemIds: ["n-1"],
+    narrative: 'Review motion to dismiss for Acme Matter.',
+    primaryEntityName: 'Acme Matter',
+    primaryEntityType: 'sprk_matter',
+    primaryEntityId: '11111111-1111-1111-1111-111111111111',
+    itemIds: ['n-1'],
     onAddToTodo: jest.fn(),
     onDismiss: jest.fn(),
     isTodoCreated: false,
@@ -81,10 +75,7 @@ function baseProps(
   };
 }
 
-function renderWith(
-  props: NarrativeBulletProps,
-  theme = webLightTheme
-): ReturnType<typeof render> {
+function renderWith(props: NarrativeBulletProps, theme = webLightTheme): ReturnType<typeof render> {
   return render(
     <FluentProvider theme={theme}>
       <NarrativeBullet {...props} />
@@ -114,7 +105,7 @@ function uninstallXrm(): void {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", () => {
+describe('NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)', () => {
   afterEach(() => {
     uninstallXrm();
   });
@@ -123,18 +114,18 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
   // Case 1: itemIds.length === 1 → no sub-list rendered.
   // -------------------------------------------------------------------------
 
-  it("Case 1: does NOT render the sub-list when itemIds.length === 1", () => {
+  it('Case 1: does NOT render the sub-list when itemIds.length === 1', () => {
     const props = baseProps({
-      itemIds: ["n-1"],
+      itemIds: ['n-1'],
       // items provided, but length-1 short-circuit MUST suppress the sub-list.
-      items: [makeItem({ id: "n-1" })],
+      items: [makeItem({ id: 'n-1' })],
     });
     renderWith(props);
 
     // No role=list (the sub-list container uses role=list).
-    expect(screen.queryByRole("list")).toBeNull();
+    expect(screen.queryByRole('list')).toBeNull();
     // No listitems either.
-    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0);
     // Single-bullet UX still renders the narrative + entity link.
     expect(screen.getByText(/Review motion to dismiss/i)).toBeInTheDocument();
   });
@@ -143,33 +134,30 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
   // Case 2: itemIds.length > 1 → sub-list with N rows + ARIA roles rendered.
   // -------------------------------------------------------------------------
 
-  it("Case 2: renders the sub-list with role=list and N listitems when itemIds.length > 1", () => {
+  it('Case 2: renders the sub-list with role=list and N listitems when itemIds.length > 1', () => {
     const items = [
-      makeItem({ id: "n-1", title: "First overdue motion" }),
-      makeItem({ id: "n-2", title: "Second overdue motion" }),
-      makeItem({ id: "n-3", title: "Third overdue motion" }),
+      makeItem({ id: 'n-1', title: 'First overdue motion' }),
+      makeItem({ id: 'n-2', title: 'Second overdue motion' }),
+      makeItem({ id: 'n-3', title: 'Third overdue motion' }),
     ];
     const props = baseProps({
-      itemIds: ["n-1", "n-2", "n-3"],
+      itemIds: ['n-1', 'n-2', 'n-3'],
       items,
     });
     renderWith(props);
 
     // Exactly one sub-list container with role=list.
-    const list = screen.getByRole("list");
+    const list = screen.getByRole('list');
     expect(list).toBeInTheDocument();
     // ARIA label reflects the count for screen readers.
-    expect(list).toHaveAttribute(
-      "aria-label",
-      expect.stringMatching(/3 underlying notifications/i)
-    );
+    expect(list).toHaveAttribute('aria-label', expect.stringMatching(/3 underlying notifications/i));
     // N listitems = N items.
-    const rows = screen.getAllByRole("listitem");
+    const rows = screen.getAllByRole('listitem');
     expect(rows).toHaveLength(3);
     // Each item's title (SubRowLink display text) is visible.
-    expect(screen.getByText("First overdue motion")).toBeInTheDocument();
-    expect(screen.getByText("Second overdue motion")).toBeInTheDocument();
-    expect(screen.getByText("Third overdue motion")).toBeInTheDocument();
+    expect(screen.getByText('First overdue motion')).toBeInTheDocument();
+    expect(screen.getByText('Second overdue motion')).toBeInTheDocument();
+    expect(screen.getByText('Third overdue motion')).toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------
@@ -181,26 +169,26 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     const navigateTo = installXrm();
     const items = [
       makeItem({
-        id: "n-1",
-        title: "Matter A link",
-        regardingEntityType: "sprk_matter",
-        regardingId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        id: 'n-1',
+        title: 'Matter A link',
+        regardingEntityType: 'sprk_matter',
+        regardingId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       }),
       makeItem({
-        id: "n-2",
-        title: "Contact B link",
-        regardingEntityType: "contact",
-        regardingId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        id: 'n-2',
+        title: 'Contact B link',
+        regardingEntityType: 'contact',
+        regardingId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
       }),
     ];
     const props = baseProps({
-      itemIds: ["n-1", "n-2"],
+      itemIds: ['n-1', 'n-2'],
       items,
     });
     renderWith(props);
 
     // Click the second sub-row link (Contact B).
-    const link = screen.getByRole("link", { name: /Open Contact B link/i });
+    const link = screen.getByRole('link', { name: /Open Contact B link/i });
     fireEvent.click(link);
 
     expect(navigateTo).toHaveBeenCalledTimes(1);
@@ -208,15 +196,15 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     // FR-12: target uses the SUPPLIED item.regardingEntityType + regardingId
     // (NOT the primaryEntityType/primaryEntityId on the parent bullet).
     expect(pageInput).toEqual({
-      pageType: "entityrecord",
-      entityName: "contact",
-      entityId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      pageType: 'entityrecord',
+      entityName: 'contact',
+      entityId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
     });
     // Modal dialog options (target 2 + 80/80) per the SubRowLink contract.
     expect(navOptions).toMatchObject({
       target: 2,
-      width: { value: 80, unit: "%" },
-      height: { value: 80, unit: "%" },
+      width: { value: 80, unit: '%' },
+      height: { value: 80, unit: '%' },
     });
   });
 
@@ -225,15 +213,15 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
   //         item's id (FR-13).
   // -------------------------------------------------------------------------
 
-  it("Case 4: sub-row Add-to-To-Do click invokes onAddToTodoItem with item.id (FR-13)", () => {
+  it('Case 4: sub-row Add-to-To-Do click invokes onAddToTodoItem with item.id (FR-13)', () => {
     const onAddToTodoItem = jest.fn();
     const onAddToTodo = jest.fn();
     const items = [
-      makeItem({ id: "n-1", title: "First todo target" }),
-      makeItem({ id: "n-2", title: "Second todo target" }),
+      makeItem({ id: 'n-1', title: 'First todo target' }),
+      makeItem({ id: 'n-2', title: 'Second todo target' }),
     ];
     const props = baseProps({
-      itemIds: ["n-1", "n-2"],
+      itemIds: ['n-1', 'n-2'],
       items,
       onAddToTodo,
       onAddToTodoItem,
@@ -246,10 +234,8 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     // filter for buttons whose closest [role=listitem] ancestor exists —
     // i.e., buttons that live inside a sub-row. This is the canonical way
     // to assert sub-row-only behavior without DOM-order coupling.
-    const allTodoButtons = screen.getAllByRole("button", { name: /Add to To Do/i });
-    const subRowTodoButtons = allTodoButtons.filter(
-      (btn) => btn.closest('[role="listitem"]') !== null
-    );
+    const allTodoButtons = screen.getAllByRole('button', { name: /Add to To Do/i });
+    const subRowTodoButtons = allTodoButtons.filter(btn => btn.closest('[role="listitem"]') !== null);
     expect(subRowTodoButtons).toHaveLength(2);
 
     // Click each sub-row To-Do button and assert it fires with the matching
@@ -259,8 +245,8 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     fireEvent.click(subRowTodoButtons[1]); // second sub-row → n-2
 
     expect(onAddToTodoItem).toHaveBeenCalledTimes(2);
-    expect(onAddToTodoItem).toHaveBeenNthCalledWith(1, "n-1");
-    expect(onAddToTodoItem).toHaveBeenNthCalledWith(2, "n-2");
+    expect(onAddToTodoItem).toHaveBeenNthCalledWith(1, 'n-1');
+    expect(onAddToTodoItem).toHaveBeenNthCalledWith(2, 'n-2');
     // The aggregated callback was NOT fired by sub-row clicks.
     expect(onAddToTodo).not.toHaveBeenCalled();
   });
@@ -270,16 +256,16 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
   //         (FR-14).
   // -------------------------------------------------------------------------
 
-  it("Case 5: sub-row Dismiss click invokes onDismissItem(item.id) for that single id (FR-14)", async () => {
+  it('Case 5: sub-row Dismiss click invokes onDismissItem(item.id) for that single id (FR-14)', async () => {
     // onDismissItem is awaited inside SubRowDismiss; return true to simulate
     // a successful markAsRead.
     const onDismissItem = jest.fn().mockResolvedValue(true);
     const items = [
-      makeItem({ id: "n-1", title: "First dismissable" }),
-      makeItem({ id: "n-2", title: "Second dismissable" }),
+      makeItem({ id: 'n-1', title: 'First dismissable' }),
+      makeItem({ id: 'n-2', title: 'Second dismissable' }),
     ];
     const props = baseProps({
-      itemIds: ["n-1", "n-2"],
+      itemIds: ['n-1', 'n-2'],
       items,
       // NarrativeBullet.SubRowProps expects `onDismissItem?: (itemId) => void`;
       // SubRowDismiss accepts (itemId) => Promise<boolean> | boolean | void.
@@ -294,10 +280,8 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     // SubRowDismiss uses aria-label="Dismiss". Filter for buttons inside a
     // sub-row (role=listitem) so we don't accidentally click the aggregated
     // Dismiss button — same canonical pattern as Case 4.
-    const allDismissButtons = screen.getAllByRole("button", { name: /^Dismiss$/i });
-    const subRowDismissButtons = allDismissButtons.filter(
-      (btn) => btn.closest('[role="listitem"]') !== null
-    );
+    const allDismissButtons = screen.getAllByRole('button', { name: /^Dismiss$/i });
+    const subRowDismissButtons = allDismissButtons.filter(btn => btn.closest('[role="listitem"]') !== null);
     expect(subRowDismissButtons).toHaveLength(2);
 
     // Click the FIRST sub-row Dismiss button → should fire onDismissItem("n-1").
@@ -310,7 +294,7 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     });
 
     expect(onDismissItem).toHaveBeenCalledTimes(1);
-    expect(onDismissItem).toHaveBeenCalledWith("n-1");
+    expect(onDismissItem).toHaveBeenCalledWith('n-1');
   });
 
   // -------------------------------------------------------------------------
@@ -318,15 +302,11 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
   //         itemIds[] array (FR-14a cascade prop contract).
   // -------------------------------------------------------------------------
 
-  it("Case 6: aggregated (top-level) Dismiss invokes onDismiss with the full itemIds[] array (FR-14a contract)", () => {
+  it('Case 6: aggregated (top-level) Dismiss invokes onDismiss with the full itemIds[] array (FR-14a contract)', () => {
     const onDismiss = jest.fn();
-    const items = [
-      makeItem({ id: "n-1" }),
-      makeItem({ id: "n-2" }),
-      makeItem({ id: "n-3" }),
-    ];
+    const items = [makeItem({ id: 'n-1' }), makeItem({ id: 'n-2' }), makeItem({ id: 'n-3' })];
     const props = baseProps({
-      itemIds: ["n-1", "n-2", "n-3"],
+      itemIds: ['n-1', 'n-2', 'n-3'],
       items,
       onDismiss,
     });
@@ -338,36 +318,37 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     // accessibility tree because… actually, the sub-list is rendered inside
     // `content` which precedes `actions`. To avoid order coupling, we filter
     // for the button NOT inside a role=listitem (i.e., the aggregated one).
-    const allDismiss = screen.getAllByRole("button", { name: /^Dismiss$/i });
-    const aggregated = allDismiss.find(
-      (btn) => btn.closest('[role="listitem"]') === null
-    );
+    const allDismiss = screen.getAllByRole('button', { name: /^Dismiss$/i });
+    const aggregated = allDismiss.find(btn => btn.closest('[role="listitem"]') === null);
     expect(aggregated).toBeDefined();
     fireEvent.click(aggregated!);
 
     expect(onDismiss).toHaveBeenCalledTimes(1);
     // FR-14a: cascade contract — parent receives the FULL itemIds[] array.
     // DailyBriefingApp.handleDismiss iterates and markAsRead's each id.
-    expect(onDismiss).toHaveBeenCalledWith(["n-1", "n-2", "n-3"]);
+    expect(onDismiss).toHaveBeenCalledWith(['n-1', 'n-2', 'n-3']);
   });
 
   // -------------------------------------------------------------------------
   // Case 7: dark-mode rendering — semantic tokens (ADR-021).
   // -------------------------------------------------------------------------
 
-  it("Case 7: dark-mode renders via semantic tokens (no hard-coded colors in component source) (ADR-021)", () => {
-    const items = [makeItem({ id: "n-1", title: "Dark mode row 1" }), makeItem({ id: "n-2", title: "Dark mode row 2" })];
+  it('Case 7: dark-mode renders via semantic tokens (no hard-coded colors in component source) (ADR-021)', () => {
+    const items = [
+      makeItem({ id: 'n-1', title: 'Dark mode row 1' }),
+      makeItem({ id: 'n-2', title: 'Dark mode row 2' }),
+    ];
     const props = baseProps({
-      itemIds: ["n-1", "n-2"],
+      itemIds: ['n-1', 'n-2'],
       items,
     });
     const { container } = renderWith(props, webDarkTheme);
 
     // Sanity: the sub-list rendered under webDarkTheme.
-    expect(screen.getByRole("list")).toBeInTheDocument();
-    expect(screen.getAllByRole("listitem")).toHaveLength(2);
-    expect(screen.getByText("Dark mode row 1")).toBeInTheDocument();
-    expect(screen.getByText("Dark mode row 2")).toBeInTheDocument();
+    expect(screen.getByRole('list')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByText('Dark mode row 1')).toBeInTheDocument();
+    expect(screen.getByText('Dark mode row 2')).toBeInTheDocument();
     expect(container.firstChild).not.toBeNull();
 
     // ADR-021 semantic-token parity check, two-pronged.
@@ -385,16 +366,10 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     // 2) FluentProvider sanity: at least one <style> tag was injected by
     //    Griffel (proving the dark theme was applied via the v9 token
     //    system, not by-passed).
-    const fs = require("fs") as typeof import("fs");
-    const path = require("path") as typeof import("path");
-    const componentsDir = path.resolve(__dirname, "../src/components");
-    const filesToScan = [
-      "NarrativeBullet.tsx",
-      "SubRow.tsx",
-      "SubRowLink.tsx",
-      "SubRowTodo.tsx",
-      "SubRowDismiss.tsx",
-    ];
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const componentsDir = path.resolve(__dirname, '../src/components');
+    const filesToScan = ['NarrativeBullet.tsx', 'SubRow.tsx', 'SubRowLink.tsx', 'SubRowTodo.tsx', 'SubRowDismiss.tsx'];
 
     // Hex color literal: # followed by 3, 4, 6, or 8 hex digits, where the
     // PRECEDING character is a quote / colon / whitespace / open-paren.
@@ -404,11 +379,11 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     const offenders: string[] = [];
     for (const file of filesToScan) {
       const full = path.join(componentsDir, file);
-      const source = fs.readFileSync(full, "utf8");
+      const source = fs.readFileSync(full, 'utf8');
       // Strip comments before scanning so doc strings can mention hex codes.
       const codeOnly = source
-        .replace(/\/\*[\s\S]*?\*\//g, "") // block comments
-        .replace(/(^|[^:])\/\/.*$/gm, "$1"); // line comments
+        .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+        .replace(/(^|[^:])\/\/.*$/gm, '$1'); // line comments
       const m = codeOnly.match(hexColorRe);
       if (m) {
         offenders.push(`${file}: found ${m[0]}`);
@@ -419,7 +394,7 @@ describe("NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)", 
     expect(offenders).toEqual([]);
 
     // Sanity: FluentProvider injected styles into the JSDOM document.
-    const styleTags = document.querySelectorAll("style");
+    const styleTags = document.querySelectorAll('style');
     expect(styleTags.length).toBeGreaterThan(0);
   });
 });

@@ -28,8 +28,8 @@
  *   Original location becomes a re-export shim.
  */
 
-import { authenticatedFetch } from "@spaarke/auth";
-import type { ChannelFetchResult } from "../types/notifications";
+import { authenticatedFetch } from '@spaarke/auth';
+import type { ChannelFetchResult } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
 // Request / Response DTOs (mirror DailyBriefingEndpoints.cs)
@@ -63,9 +63,9 @@ export interface DailyBriefingSummaryResponse {
 
 /** Result of an AI briefing fetch attempt. */
 export type BriefingResult =
-  | { status: "success"; data: DailyBriefingSummaryResponse }
-  | { status: "unavailable"; reason: string }
-  | { status: "error"; message: string };
+  | { status: 'success'; data: DailyBriefingSummaryResponse }
+  | { status: 'unavailable'; reason: string }
+  | { status: 'error'; message: string };
 
 // ---------------------------------------------------------------------------
 // Narration DTOs (mirror DailyBriefingNarrationEndpoints.cs)
@@ -123,9 +123,9 @@ export interface NarrativeBulletResult {
 
 /** Result of a narration fetch attempt. */
 export type NarrationResult =
-  | { status: "success"; data: NarrateResponse }
-  | { status: "unavailable"; reason: string }
-  | { status: "error"; message: string };
+  | { status: 'success'; data: NarrateResponse }
+  | { status: 'unavailable'; reason: string }
+  | { status: 'error'; message: string };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -141,7 +141,7 @@ function buildRequest(channels: ChannelFetchResult[]): DailyBriefingSummaryReque
   let totalCount = 0;
 
   for (const ch of channels) {
-    if (ch.status !== "success") continue;
+    if (ch.status !== 'success') continue;
 
     const { meta, items, unreadCount } = ch.group;
     categories.push({
@@ -153,10 +153,7 @@ function buildRequest(channels: ChannelFetchResult[]): DailyBriefingSummaryReque
 
     // Collect high/urgent priority items (max 5 across all channels)
     for (const item of items) {
-      if (
-        (item.priority === "high" || item.priority === "urgent") &&
-        priorityItems.length < 5
-      ) {
+      if ((item.priority === 'high' || item.priority === 'urgent') && priorityItems.length < 5) {
         priorityItems.push({
           category: meta.label,
           title: item.title,
@@ -183,25 +180,23 @@ function buildRequest(channels: ChannelFetchResult[]): DailyBriefingSummaryReque
  *
  * @param channels Channel fetch results from useNotificationData
  */
-export async function fetchAiBriefing(
-  channels: ChannelFetchResult[]
-): Promise<BriefingResult> {
+export async function fetchAiBriefing(channels: ChannelFetchResult[]): Promise<BriefingResult> {
   const request = buildRequest(channels);
 
   // Skip if no data to summarize
   if (request.categories.length === 0 && request.priorityItems.length === 0) {
-    return { status: "unavailable", reason: "No notification data to summarize." };
+    return { status: 'unavailable', reason: 'No notification data to summarize.' };
   }
 
   try {
-    const response = await authenticatedFetch("/api/ai/daily-briefing/summarize", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const response = await authenticatedFetch('/api/ai/daily-briefing/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     });
 
     const data = (await response.json()) as DailyBriefingSummaryResponse;
-    return { status: "success", data };
+    return { status: 'success', data };
   } catch (err: unknown) {
     // authenticatedFetch throws ApiError for non-2xx responses
     const error = err as { statusCode?: number; message?: string };
@@ -210,23 +205,23 @@ export async function fetchAiBriefing(
     // 429 = rate limited
     if (error.statusCode === 503 || error.statusCode === 429) {
       return {
-        status: "unavailable",
-        reason: "AI briefing service is temporarily unavailable.",
+        status: 'unavailable',
+        reason: 'AI briefing service is temporarily unavailable.',
       };
     }
 
     // 401 = auth issue (already retried by authenticatedFetch)
     if (error.statusCode === 401) {
       return {
-        status: "unavailable",
-        reason: "Authentication required for AI briefing.",
+        status: 'unavailable',
+        reason: 'Authentication required for AI briefing.',
       };
     }
 
-    console.error("[DailyBriefing] AI briefing fetch failed:", err);
+    console.error('[DailyBriefing] AI briefing fetch failed:', err);
     return {
-      status: "error",
-      message: error.message ?? "Failed to generate briefing.",
+      status: 'error',
+      message: error.message ?? 'Failed to generate briefing.',
     };
   }
 }
@@ -246,7 +241,7 @@ function buildNarrationRequest(channels: ChannelFetchResult[]): NarrateRequest {
   let totalCount = 0;
 
   for (const ch of channels) {
-    if (ch.status !== "success") continue;
+    if (ch.status !== 'success') continue;
 
     const { meta, items, unreadCount } = ch.group;
     categories.push({
@@ -258,10 +253,7 @@ function buildNarrationRequest(channels: ChannelFetchResult[]): NarrateRequest {
 
     // Collect high/urgent priority items (max 5 across all channels)
     for (const item of items) {
-      if (
-        (item.priority === "high" || item.priority === "urgent") &&
-        priorityItems.length < 5
-      ) {
+      if ((item.priority === 'high' || item.priority === 'urgent') && priorityItems.length < 5) {
         priorityItems.push({
           category: meta.label,
           title: item.title,
@@ -274,7 +266,7 @@ function buildNarrationRequest(channels: ChannelFetchResult[]): NarrateRequest {
     channelInputs.push({
       category: meta.category,
       label: meta.label,
-      items: items.map((item) => ({
+      items: items.map(item => ({
         id: item.id,
         title: item.title,
         body: item.body,
@@ -309,25 +301,23 @@ function buildNarrationRequest(channels: ChannelFetchResult[]): NarrateRequest {
  *
  * @param channels Channel fetch results from useNotificationData
  */
-export async function fetchBriefingNarration(
-  channels: ChannelFetchResult[]
-): Promise<NarrationResult> {
+export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Promise<NarrationResult> {
   const request = buildNarrationRequest(channels);
 
   // Skip if no data to narrate
   if (request.categories.length === 0 && request.channels.length === 0) {
-    return { status: "unavailable", reason: "No notification data to narrate." };
+    return { status: 'unavailable', reason: 'No notification data to narrate.' };
   }
 
   try {
-    const response = await authenticatedFetch("/api/ai/daily-briefing/narrate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const response = await authenticatedFetch('/api/ai/daily-briefing/narrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     });
 
     const data = (await response.json()) as NarrateResponse;
-    return { status: "success", data };
+    return { status: 'success', data };
   } catch (err: unknown) {
     // authenticatedFetch throws ApiError for non-2xx responses
     const error = err as { statusCode?: number; message?: string };
@@ -336,23 +326,23 @@ export async function fetchBriefingNarration(
     // 429 = rate limited
     if (error.statusCode === 503 || error.statusCode === 429) {
       return {
-        status: "unavailable",
-        reason: "AI narration service is temporarily unavailable.",
+        status: 'unavailable',
+        reason: 'AI narration service is temporarily unavailable.',
       };
     }
 
     // 401 = auth issue (already retried by authenticatedFetch)
     if (error.statusCode === 401) {
       return {
-        status: "unavailable",
-        reason: "Authentication required for AI narration.",
+        status: 'unavailable',
+        reason: 'Authentication required for AI narration.',
       };
     }
 
-    console.error("[DailyBriefing] AI narration fetch failed:", err);
+    console.error('[DailyBriefing] AI narration fetch failed:', err);
     return {
-      status: "error",
-      message: error.message ?? "Failed to generate narration.",
+      status: 'error',
+      message: error.message ?? 'Failed to generate narration.',
     };
   }
 }

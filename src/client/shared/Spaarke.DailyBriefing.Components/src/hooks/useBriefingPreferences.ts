@@ -25,16 +25,10 @@
  *   useEffect(() => { refetch(); }, [preferences.disabledChannels]);
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import type {
-  IWebApi,
-  DailyDigestPreferences,
-} from "../types/notifications";
-import { DEFAULT_DAILY_DIGEST_PREFERENCES } from "../types/notifications";
-import {
-  fetchDigestPreferences,
-  saveDigestPreferences,
-} from "../services/preferencesService";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { IWebApi, DailyDigestPreferences } from '../types/notifications';
+import { DEFAULT_DAILY_DIGEST_PREFERENCES } from '../types/notifications';
+import { fetchDigestPreferences, saveDigestPreferences } from '../services/preferencesService';
 
 // ---------------------------------------------------------------------------
 // Hook return type
@@ -65,13 +59,8 @@ export interface UseBriefingPreferencesResult {
  *                 Null while Xrm is still resolving — hook stays idle.
  * @param userId - The current user's systemuser GUID (stripped of braces).
  */
-export function useBriefingPreferences(
-  webApi: IWebApi | null,
-  userId: string
-): UseBriefingPreferencesResult {
-  const [preferences, setPreferences] = useState<DailyDigestPreferences>(
-    DEFAULT_DAILY_DIGEST_PREFERENCES
-  );
+export function useBriefingPreferences(webApi: IWebApi | null, userId: string): UseBriefingPreferencesResult {
+  const [preferences, setPreferences] = useState<DailyDigestPreferences>(DEFAULT_DAILY_DIGEST_PREFERENCES);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -89,7 +78,7 @@ export function useBriefingPreferences(
     setError(undefined);
 
     fetchDigestPreferences(webApi, userId)
-      .then((result) => {
+      .then(result => {
         if (cancelled) return;
         if (result.success) {
           setPreferences(result.data.preferences);
@@ -101,9 +90,9 @@ export function useBriefingPreferences(
       .catch((err: unknown) => {
         if (cancelled) return;
         const message =
-          err && typeof err === "object" && "message" in err
+          err && typeof err === 'object' && 'message' in err
             ? String((err as { message: unknown }).message)
-            : "Failed to load preferences.";
+            : 'Failed to load preferences.';
         setError(message);
         setIsLoading(false);
       });
@@ -125,20 +114,12 @@ export function useBriefingPreferences(
       // Optimistic update
       setPreferences(merged);
 
-      const result = await saveDigestPreferences(
-        webApi,
-        userId,
-        merged,
-        preferenceRecordIdRef.current
-      );
+      const result = await saveDigestPreferences(webApi, userId, merged, preferenceRecordIdRef.current);
 
       if (result.success) {
         preferenceRecordIdRef.current = result.data;
       } else {
-        console.error(
-          "[DailyBriefing] Failed to save preferences:",
-          result.error.message
-        );
+        console.error('[DailyBriefing] Failed to save preferences:', result.error.message);
         setError(result.error.message);
       }
     },

@@ -42,24 +42,20 @@
  *   re-export shim (cleaned up in task 017/018).
  */
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback } from 'react';
 import {
   applyResolverFields,
   TODO_REGARDING_CATALOG,
   type INavPropEntry,
   type IPolymorphicWebApi,
-} from "@spaarke/ui-components/services";
-import type {
-  IWebApi,
-  NotificationItem,
-  NotificationPriority,
-} from "../types/notifications";
+} from '@spaarke/ui-components/services';
+import type { IWebApi, NotificationItem, NotificationPriority } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type TodoCreateStatus = "pending" | "created" | "error";
+type TodoCreateStatus = 'pending' | 'created' | 'error';
 
 export interface UseInlineTodoCreateResult {
   /** Create a new `sprk_todo` from a notification item. */
@@ -92,13 +88,13 @@ const STATUSCODE_OPEN = 1;
  */
 function mapPriorityToScore(priority: NotificationPriority): number {
   switch (priority) {
-    case "urgent":
+    case 'urgent':
       return 90;
-    case "high":
+    case 'high':
       return 70;
-    case "normal":
+    case 'normal':
       return 50;
-    case "low":
+    case 'low':
       return 20;
     default:
       return 50;
@@ -112,9 +108,7 @@ function mapPriorityToScore(priority: NotificationPriority): number {
 /** Page-session cache of discovered ManyToOne nav-props, keyed by entity name. */
 const _navPropCache: Record<string, INavPropEntry[]> = {};
 
-async function _discoverNavProps(
-  entityLogicalName: string
-): Promise<INavPropEntry[]> {
+async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEntry[]> {
   if (_navPropCache[entityLogicalName]) {
     return _navPropCache[entityLogicalName];
   }
@@ -124,11 +118,9 @@ async function _discoverNavProps(
       `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
       `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
 
-    const resp = await fetch(url, { credentials: "include" });
+    const resp = await fetch(url, { credentials: 'include' });
     if (!resp.ok) {
-      console.warn(
-        `[useInlineTodoCreate] Nav-prop discovery failed for ${entityLogicalName}: HTTP ${resp.status}`
-      );
+      console.warn(`[useInlineTodoCreate] Nav-prop discovery failed for ${entityLogicalName}: HTTP ${resp.status}`);
       return [];
     }
 
@@ -140,7 +132,7 @@ async function _discoverNavProps(
       }>;
     };
 
-    const entries: INavPropEntry[] = (json.value ?? []).map((r) => ({
+    const entries: INavPropEntry[] = (json.value ?? []).map(r => ({
       columnName: r.ReferencingAttribute,
       navPropName: r.ReferencingEntityNavigationPropertyName,
       referencedEntity: r.ReferencedEntity,
@@ -149,10 +141,7 @@ async function _discoverNavProps(
     _navPropCache[entityLogicalName] = entries;
     return entries;
   } catch (err) {
-    console.warn(
-      `[useInlineTodoCreate] Nav-prop discovery error for ${entityLogicalName}:`,
-      err
-    );
+    console.warn(`[useInlineTodoCreate] Nav-prop discovery error for ${entityLogicalName}:`, err);
     return [];
   }
 }
@@ -168,22 +157,20 @@ async function _discoverNavProps(
  * @returns Object with createTodo, isCreated, isPending, getError functions.
  */
 export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreateResult {
-  const [statusMap, setStatusMap] = useState<Map<string, TodoCreateStatus>>(
-    () => new Map()
-  );
+  const [statusMap, setStatusMap] = useState<Map<string, TodoCreateStatus>>(() => new Map());
   const errorsRef = useRef<Map<string, string>>(new Map());
 
   const createTodo = useCallback(
     async (item: NotificationItem): Promise<void> => {
       if (!webApi) {
-        console.error("[useInlineTodoCreate] webApi not available");
+        console.error('[useInlineTodoCreate] webApi not available');
         return;
       }
 
       // Optimistic: set to pending
-      setStatusMap((prev) => {
+      setStatusMap(prev => {
         const next = new Map(prev);
-        next.set(item.id, "pending");
+        next.set(item.id, 'pending');
         return next;
       });
 
@@ -200,7 +187,7 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
         if (item.body) {
           // sprk_notes is the rich-text/long-text body field on sprk_todo
           // (replaces the legacy sprk_event.sprk_description path).
-          record["sprk_notes"] = item.body;
+          record['sprk_notes'] = item.body;
         }
 
         // 2. Apply regarding (multi-entity resolution per ADR-024) — only when
@@ -218,7 +205,7 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
                 webApi.retrieveMultipleRecords(entityLogicalName, query),
             };
 
-            const navProps = await _discoverNavProps("sprk_todo");
+            const navProps = await _discoverNavProps('sprk_todo');
 
             // Notification carries the parent's display name in `regardingName`.
             await applyResolverFields(
@@ -228,7 +215,7 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
               catalogEntry.entityType,
               catalogEntry.entitySet,
               item.regardingId,
-              item.regardingName ?? "",
+              item.regardingName ?? '',
               catalogEntry.navPropHint
             );
           } else {
@@ -243,32 +230,32 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
         }
 
         // 3. Create the sprk_todo record (NEVER sprk_event).
-        await webApi.createRecord("sprk_todo", record);
+        await webApi.createRecord('sprk_todo', record);
 
         // Success
-        setStatusMap((prev) => {
+        setStatusMap(prev => {
           const next = new Map(prev);
-          next.set(item.id, "created");
+          next.set(item.id, 'created');
           return next;
         });
       } catch (e: unknown) {
         // Failure
-        let message = "Failed to create To Do. Please try again.";
-        if (e && typeof e === "object") {
+        let message = 'Failed to create To Do. Please try again.';
+        if (e && typeof e === 'object') {
           const err = e as Record<string, unknown>;
-          if (typeof err["message"] === "string") {
-            message = err["message"];
+          if (typeof err['message'] === 'string') {
+            message = err['message'];
           }
-        } else if (typeof e === "string") {
+        } else if (typeof e === 'string') {
           message = e;
         }
 
         errorsRef.current.set(item.id, message);
-        console.error("[useInlineTodoCreate] Failed to create To Do:", message, e);
+        console.error('[useInlineTodoCreate] Failed to create To Do:', message, e);
 
-        setStatusMap((prev) => {
+        setStatusMap(prev => {
           const next = new Map(prev);
-          next.set(item.id, "error");
+          next.set(item.id, 'error');
           return next;
         });
       }
@@ -276,15 +263,9 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
     [webApi]
   );
 
-  const isCreated = useCallback(
-    (itemId: string): boolean => statusMap.get(itemId) === "created",
-    [statusMap]
-  );
+  const isCreated = useCallback((itemId: string): boolean => statusMap.get(itemId) === 'created', [statusMap]);
 
-  const isPending = useCallback(
-    (itemId: string): boolean => statusMap.get(itemId) === "pending",
-    [statusMap]
-  );
+  const isPending = useCallback((itemId: string): boolean => statusMap.get(itemId) === 'pending', [statusMap]);
 
   const getError = useCallback(
     (itemId: string): string | undefined => errorsRef.current.get(itemId),

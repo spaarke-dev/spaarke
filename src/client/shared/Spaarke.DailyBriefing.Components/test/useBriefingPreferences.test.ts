@@ -14,24 +14,21 @@
  * constraint).
  */
 
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { useBriefingPreferences } from "../src/hooks/useBriefingPreferences";
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { useBriefingPreferences } from '../src/hooks/useBriefingPreferences';
 import {
   DEFAULT_DAILY_DIGEST_PREFERENCES,
   type DailyDigestPreferences,
   type IWebApi,
-} from "../src/types/notifications";
+} from '../src/types/notifications';
 
 // Mock the preferencesService module.
-jest.mock("../src/services/preferencesService", () => ({
+jest.mock('../src/services/preferencesService', () => ({
   fetchDigestPreferences: jest.fn(),
   saveDigestPreferences: jest.fn(),
 }));
 
-import {
-  fetchDigestPreferences,
-  saveDigestPreferences,
-} from "../src/services/preferencesService";
+import { fetchDigestPreferences, saveDigestPreferences } from '../src/services/preferencesService';
 
 function makeWebApi(): IWebApi {
   return {
@@ -43,45 +40,41 @@ function makeWebApi(): IWebApi {
   };
 }
 
-const USER_ID = "00000000-0000-0000-0000-000000000001";
+const USER_ID = '00000000-0000-0000-0000-000000000001';
 
-describe("useBriefingPreferences", () => {
+describe('useBriefingPreferences', () => {
   beforeEach(() => {
     (fetchDigestPreferences as jest.Mock).mockReset();
     (saveDigestPreferences as jest.Mock).mockReset();
   });
 
-  it("stays idle and uses defaults when webApi is null", () => {
-    const { result } = renderHook(() =>
-      useBriefingPreferences(null, USER_ID)
-    );
+  it('stays idle and uses defaults when webApi is null', () => {
+    const { result } = renderHook(() => useBriefingPreferences(null, USER_ID));
     expect(result.current.preferences).toEqual(DEFAULT_DAILY_DIGEST_PREFERENCES);
     expect(result.current.isLoading).toBe(false);
     expect(fetchDigestPreferences).not.toHaveBeenCalled();
   });
 
-  it("stays idle when userId is empty", () => {
+  it('stays idle when userId is empty', () => {
     const webApi = makeWebApi();
-    const { result } = renderHook(() => useBriefingPreferences(webApi, ""));
+    const { result } = renderHook(() => useBriefingPreferences(webApi, ''));
     expect(result.current.preferences).toEqual(DEFAULT_DAILY_DIGEST_PREFERENCES);
     expect(fetchDigestPreferences).not.toHaveBeenCalled();
   });
 
-  it("loads preferences from Dataverse on mount", async () => {
+  it('loads preferences from Dataverse on mount', async () => {
     const webApi = makeWebApi();
     const remotePrefs: DailyDigestPreferences = {
       ...DEFAULT_DAILY_DIGEST_PREFERENCES,
-      disabledChannels: ["system"],
+      disabledChannels: ['system'],
       dueWithinDays: 7,
     };
     (fetchDigestPreferences as jest.Mock).mockResolvedValue({
       success: true,
-      data: { preferences: remotePrefs, recordId: "rec-1" },
+      data: { preferences: remotePrefs, recordId: 'rec-1' },
     });
 
-    const { result } = renderHook(() =>
-      useBriefingPreferences(webApi, USER_ID)
-    );
+    const { result } = renderHook(() => useBriefingPreferences(webApi, USER_ID));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -90,16 +83,14 @@ describe("useBriefingPreferences", () => {
     expect(fetchDigestPreferences).toHaveBeenCalledWith(webApi, USER_ID);
   });
 
-  it("keeps defaults when fetch returns failure (non-fatal)", async () => {
+  it('keeps defaults when fetch returns failure (non-fatal)', async () => {
     const webApi = makeWebApi();
     (fetchDigestPreferences as jest.Mock).mockResolvedValue({
       success: false,
-      error: { code: "X", message: "no record" },
+      error: { code: 'X', message: 'no record' },
     });
 
-    const { result } = renderHook(() =>
-      useBriefingPreferences(webApi, USER_ID)
-    );
+    const { result } = renderHook(() => useBriefingPreferences(webApi, USER_ID));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -107,20 +98,18 @@ describe("useBriefingPreferences", () => {
     expect(result.current.preferences).toEqual(DEFAULT_DAILY_DIGEST_PREFERENCES);
   });
 
-  it("updatePreferences optimistically merges and persists", async () => {
+  it('updatePreferences optimistically merges and persists', async () => {
     const webApi = makeWebApi();
     (fetchDigestPreferences as jest.Mock).mockResolvedValue({
       success: true,
-      data: { preferences: DEFAULT_DAILY_DIGEST_PREFERENCES, recordId: "rec-1" },
+      data: { preferences: DEFAULT_DAILY_DIGEST_PREFERENCES, recordId: 'rec-1' },
     });
     (saveDigestPreferences as jest.Mock).mockResolvedValue({
       success: true,
-      data: "rec-1",
+      data: 'rec-1',
     });
 
-    const { result } = renderHook(() =>
-      useBriefingPreferences(webApi, USER_ID)
-    );
+    const { result } = renderHook(() => useBriefingPreferences(webApi, USER_ID));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -135,24 +124,22 @@ describe("useBriefingPreferences", () => {
       webApi,
       USER_ID,
       expect.objectContaining({ autoPopup: false }),
-      "rec-1"
+      'rec-1'
     );
   });
 
-  it("updatePreferences surfaces error when save fails", async () => {
+  it('updatePreferences surfaces error when save fails', async () => {
     const webApi = makeWebApi();
     (fetchDigestPreferences as jest.Mock).mockResolvedValue({
       success: true,
-      data: { preferences: DEFAULT_DAILY_DIGEST_PREFERENCES, recordId: "rec-1" },
+      data: { preferences: DEFAULT_DAILY_DIGEST_PREFERENCES, recordId: 'rec-1' },
     });
     (saveDigestPreferences as jest.Mock).mockResolvedValue({
       success: false,
-      error: { code: "Y", message: "save failed" },
+      error: { code: 'Y', message: 'save failed' },
     });
 
-    const { result } = renderHook(() =>
-      useBriefingPreferences(webApi, USER_ID)
-    );
+    const { result } = renderHook(() => useBriefingPreferences(webApi, USER_ID));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -162,6 +149,6 @@ describe("useBriefingPreferences", () => {
       await result.current.updatePreferences({ dueWithinDays: 5 });
     });
 
-    expect(result.current.error).toBe("save failed");
+    expect(result.current.error).toBe('save failed');
   });
 });

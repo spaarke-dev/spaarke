@@ -16,30 +16,22 @@
  *   imports from `../types/notifications` now resolve intra-package.
  */
 
-import type {
-  IWebApi,
-  WebApiEntity,
-  DailyDigestPreferences,
-} from "../types/notifications";
-import {
-  DEFAULT_DAILY_DIGEST_PREFERENCES,
-  PREFERENCE_TYPE_DAILY_DIGEST,
-  tryCatch,
-} from "../types/notifications";
-import type { IResult } from "../types/notifications";
+import type { IWebApi, WebApiEntity, DailyDigestPreferences } from '../types/notifications';
+import { DEFAULT_DAILY_DIGEST_PREFERENCES, PREFERENCE_TYPE_DAILY_DIGEST, tryCatch } from '../types/notifications';
+import type { IResult } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const PREFERENCE_SELECT = [
-  "sprk_userpreferenceid",
-  "sprk_preferencetype",
-  "sprk_preferencevalue",
-  "_sprk_user_value",
-  "createdon",
-  "modifiedon",
-].join(",");
+  'sprk_userpreferenceid',
+  'sprk_preferencetype',
+  'sprk_preferencevalue',
+  '_sprk_user_value',
+  'createdon',
+  'modifiedon',
+].join(',');
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -57,16 +49,11 @@ export async function fetchDigestPreferences(
   webApi: IWebApi,
   userId: string
 ): Promise<IResult<{ preferences: DailyDigestPreferences; recordId: string | undefined }>> {
-  const filter =
-    `_sprk_user_value eq ${userId} and sprk_preferencetype eq ${PREFERENCE_TYPE_DAILY_DIGEST}`;
+  const filter = `_sprk_user_value eq ${userId} and sprk_preferencetype eq ${PREFERENCE_TYPE_DAILY_DIGEST}`;
   const query = `?$select=${PREFERENCE_SELECT}&$filter=${filter}&$top=1`;
 
   return tryCatch(async () => {
-    const result = await webApi.retrieveMultipleRecords(
-      "sprk_userpreference",
-      query,
-      1
-    );
+    const result = await webApi.retrieveMultipleRecords('sprk_userpreference', query, 1);
 
     if (result.entities.length === 0) {
       return {
@@ -76,8 +63,8 @@ export async function fetchDigestPreferences(
     }
 
     const record = result.entities[0];
-    const recordId = record["sprk_userpreferenceid"] as string;
-    const rawValue = record["sprk_preferencevalue"] as string | undefined;
+    const recordId = record['sprk_userpreferenceid'] as string;
+    const rawValue = record['sprk_preferencevalue'] as string | undefined;
 
     if (!rawValue) {
       return {
@@ -93,13 +80,13 @@ export async function fetchDigestPreferences(
         recordId,
       };
     } catch {
-      console.warn("[DailyBriefing] Failed to parse preference JSON, using defaults");
+      console.warn('[DailyBriefing] Failed to parse preference JSON, using defaults');
       return {
         preferences: { ...DEFAULT_DAILY_DIGEST_PREFERENCES },
         recordId,
       };
     }
-  }, "PREFERENCES_FETCH_ERROR");
+  }, 'PREFERENCES_FETCH_ERROR');
 }
 
 /**
@@ -123,22 +110,22 @@ export async function saveDigestPreferences(
   // Update existing record
   if (existingRecordId) {
     return tryCatch(async () => {
-      await webApi.updateRecord("sprk_userpreference", existingRecordId, {
+      await webApi.updateRecord('sprk_userpreference', existingRecordId, {
         sprk_preferencevalue: jsonValue,
       });
       return existingRecordId;
-    }, "PREFERENCES_SAVE_ERROR");
+    }, 'PREFERENCES_SAVE_ERROR');
   }
 
   // Check if a record already exists (in case recordId was lost)
   const existing = await fetchDigestPreferences(webApi, userId);
   if (existing.success && existing.data.recordId) {
     return tryCatch(async () => {
-      await webApi.updateRecord("sprk_userpreference", existing.data.recordId!, {
+      await webApi.updateRecord('sprk_userpreference', existing.data.recordId!, {
         sprk_preferencevalue: jsonValue,
       });
       return existing.data.recordId!;
-    }, "PREFERENCES_SAVE_ERROR");
+    }, 'PREFERENCES_SAVE_ERROR');
   }
 
   // Create new preference record
@@ -146,11 +133,11 @@ export async function saveDigestPreferences(
     const record: WebApiEntity = {
       sprk_preferencetype: PREFERENCE_TYPE_DAILY_DIGEST,
       sprk_preferencevalue: jsonValue,
-      "sprk_User@odata.bind": `/systemusers(${userId})`,
+      'sprk_User@odata.bind': `/systemusers(${userId})`,
     };
-    const result = await webApi.createRecord("sprk_userpreference", record);
+    const result = await webApi.createRecord('sprk_userpreference', record);
     return result.id;
-  }, "PREFERENCES_CREATE_ERROR");
+  }, 'PREFERENCES_CREATE_ERROR');
 }
 
 // ---------------------------------------------------------------------------
@@ -160,24 +147,21 @@ export async function saveDigestPreferences(
 /**
  * Merge partial preferences with defaults, ensuring all fields have valid values.
  */
-function mergeWithDefaults(
-  partial: Partial<DailyDigestPreferences>
-): DailyDigestPreferences {
+function mergeWithDefaults(partial: Partial<DailyDigestPreferences>): DailyDigestPreferences {
   return {
     disabledChannels: Array.isArray(partial.disabledChannels)
       ? partial.disabledChannels
       : DEFAULT_DAILY_DIGEST_PREFERENCES.disabledChannels,
-    dueWithinDays: typeof partial.dueWithinDays === "number"
-      ? partial.dueWithinDays
-      : DEFAULT_DAILY_DIGEST_PREFERENCES.dueWithinDays,
-    timeWindow: typeof partial.timeWindow === "string"
-      ? partial.timeWindow
-      : DEFAULT_DAILY_DIGEST_PREFERENCES.timeWindow,
-    minConfidence: typeof partial.minConfidence === "number"
-      ? partial.minConfidence
-      : DEFAULT_DAILY_DIGEST_PREFERENCES.minConfidence,
-    autoPopup: typeof partial.autoPopup === "boolean"
-      ? partial.autoPopup
-      : DEFAULT_DAILY_DIGEST_PREFERENCES.autoPopup,
+    dueWithinDays:
+      typeof partial.dueWithinDays === 'number'
+        ? partial.dueWithinDays
+        : DEFAULT_DAILY_DIGEST_PREFERENCES.dueWithinDays,
+    timeWindow:
+      typeof partial.timeWindow === 'string' ? partial.timeWindow : DEFAULT_DAILY_DIGEST_PREFERENCES.timeWindow,
+    minConfidence:
+      typeof partial.minConfidence === 'number'
+        ? partial.minConfidence
+        : DEFAULT_DAILY_DIGEST_PREFERENCES.minConfidence,
+    autoPopup: typeof partial.autoPopup === 'boolean' ? partial.autoPopup : DEFAULT_DAILY_DIGEST_PREFERENCES.autoPopup,
   };
 }

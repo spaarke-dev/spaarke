@@ -31,13 +31,9 @@
  * the three hooks are independent; cross-hook concerns live at the consumer.
  */
 
-import { useState, useEffect, useCallback } from "react";
-import type {
-  IWebApi,
-  ChannelFetchResult,
-  LoadingState,
-} from "../types/notifications";
-import { fetchAndGroupNotifications } from "../services/notificationService";
+import { useState, useEffect, useCallback } from 'react';
+import type { IWebApi, ChannelFetchResult, LoadingState } from '../types/notifications';
+import { fetchAndGroupNotifications } from '../services/notificationService';
 
 // ---------------------------------------------------------------------------
 // Hook return type
@@ -66,39 +62,37 @@ export interface UseBriefingNotificationsResult {
  * @param webApi - Xrm.WebApi reference (from xrmProvider.getWebApi()).
  *                 Null while Xrm is still resolving — hook stays idle.
  */
-export function useBriefingNotifications(
-  webApi: IWebApi | null
-): UseBriefingNotificationsResult {
+export function useBriefingNotifications(webApi: IWebApi | null): UseBriefingNotificationsResult {
   const [channels, setChannels] = useState<ChannelFetchResult[]>([]);
-  const [loadingState, setLoadingState] = useState<LoadingState>("idle");
+  const [loadingState, setLoadingState] = useState<LoadingState>('idle');
   const [error, setError] = useState<string | undefined>(undefined);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!webApi) {
-      setLoadingState("idle");
+      setLoadingState('idle');
       return;
     }
 
     let cancelled = false;
-    setLoadingState("loading");
+    setLoadingState('loading');
     setError(undefined);
 
     fetchAndGroupNotifications(webApi)
-      .then((results) => {
+      .then(results => {
         if (cancelled) return;
         setChannels(results);
-        setLoadingState("loaded");
+        setLoadingState('loaded');
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         const message =
-          err && typeof err === "object" && "message" in err
+          err && typeof err === 'object' && 'message' in err
             ? String((err as { message: unknown }).message)
-            : "Failed to load notifications.";
+            : 'Failed to load notifications.';
         setError(message);
         setChannels([]);
-        setLoadingState("error");
+        setLoadingState('error');
       });
 
     return () => {
@@ -108,14 +102,14 @@ export function useBriefingNotifications(
 
   // Computed: total unread count across successful channels
   const totalUnreadCount = channels.reduce((sum, ch) => {
-    if (ch.status === "success") {
+    if (ch.status === 'success') {
       return sum + ch.group.unreadCount;
     }
     return sum;
   }, 0);
 
   const refetch = useCallback(() => {
-    setRefreshKey((k) => k + 1);
+    setRefreshKey(k => k + 1);
   }, []);
 
   return {

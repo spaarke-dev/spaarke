@@ -38,26 +38,16 @@ import type {
   NotificationPriority,
   ChannelGroup,
   ChannelFetchResult,
-} from "../types/notifications";
-import {
-  CHANNEL_REGISTRY,
-  tryCatch,
-} from "../types/notifications";
-import type { IResult } from "../types/notifications";
+} from '../types/notifications';
+import { CHANNEL_REGISTRY, tryCatch } from '../types/notifications';
+import type { IResult } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 /** OData columns to select from appnotification. */
-const NOTIFICATION_SELECT = [
-  "appnotificationid",
-  "title",
-  "body",
-  "data",
-  "toasttype",
-  "createdon",
-].join(",");
+const NOTIFICATION_SELECT = ['appnotificationid', 'title', 'body', 'data', 'toasttype', 'createdon'].join(',');
 
 /** Maximum notifications to fetch per query (unread, recent). */
 const MAX_NOTIFICATIONS = 200;
@@ -80,30 +70,28 @@ function parseNotificationData(raw: unknown): {
   isAiGenerated: boolean;
   aiConfidence?: number;
 } | null {
-  if (!raw || typeof raw !== "string") return null;
+  if (!raw || typeof raw !== 'string') return null;
 
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
 
     // Support both flat format (NotificationService) and nested customData format (playbooks)
-    const customData = (parsed["customData"] as Record<string, unknown>) ?? parsed;
+    const customData = (parsed['customData'] as Record<string, unknown>) ?? parsed;
 
     return {
-      category: (customData["category"] as NotificationCategory) ??
-                (customData["channel"] as NotificationCategory) ?? "system",
-      priority: (customData["priority"] as NotificationPriority) ?? "normal",
-      actionUrl: (customData["actionUrl"] as string) ?? (parsed["actionUrl"] as string) ?? "",
-      regardingName: (customData["regardingName"] as string) ?? "",
-      regardingEntityType: (customData["regardingEntityType"] as string) ??
-                           (customData["regardingType"] as string) ?? "",
-      regardingId: (customData["regardingId"] as string) ?? (parsed["regardingId"] as string) ?? "",
-      isAiGenerated: (customData["isAiGenerated"] as boolean) ?? false,
-      aiConfidence: typeof customData["aiConfidence"] === "number"
-        ? (customData["aiConfidence"] as number)
-        : undefined,
+      category:
+        (customData['category'] as NotificationCategory) ?? (customData['channel'] as NotificationCategory) ?? 'system',
+      priority: (customData['priority'] as NotificationPriority) ?? 'normal',
+      actionUrl: (customData['actionUrl'] as string) ?? (parsed['actionUrl'] as string) ?? '',
+      regardingName: (customData['regardingName'] as string) ?? '',
+      regardingEntityType:
+        (customData['regardingEntityType'] as string) ?? (customData['regardingType'] as string) ?? '',
+      regardingId: (customData['regardingId'] as string) ?? (parsed['regardingId'] as string) ?? '',
+      isAiGenerated: (customData['isAiGenerated'] as boolean) ?? false,
+      aiConfidence: typeof customData['aiConfidence'] === 'number' ? (customData['aiConfidence'] as number) : undefined,
     };
   } catch {
-    console.warn("[DailyBriefing] Failed to parse notification data JSON");
+    console.warn('[DailyBriefing] Failed to parse notification data JSON');
     return null;
   }
 }
@@ -113,26 +101,26 @@ function parseNotificationData(raw: unknown): {
  * Returns null if the record cannot be parsed.
  */
 function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
-  const id = entity["appnotificationid"] as string | undefined;
-  const title = entity["title"] as string | undefined;
+  const id = entity['appnotificationid'] as string | undefined;
+  const title = entity['title'] as string | undefined;
   if (!id || !title) return null;
 
-  const customData = parseNotificationData(entity["data"]);
+  const customData = parseNotificationData(entity['data']);
 
   return {
     id,
     title,
-    body: (entity["body"] as string) ?? "",
-    category: customData?.category ?? "system",
-    priority: customData?.priority ?? "normal",
-    actionUrl: customData?.actionUrl ?? "",
-    regardingName: customData?.regardingName ?? "",
-    regardingEntityType: customData?.regardingEntityType ?? "",
-    regardingId: customData?.regardingId ?? "",
-    isRead: (entity["toasttype"] as number) === 200000000, // 200000000 = Dismissed (treated as "read")
+    body: (entity['body'] as string) ?? '',
+    category: customData?.category ?? 'system',
+    priority: customData?.priority ?? 'normal',
+    actionUrl: customData?.actionUrl ?? '',
+    regardingName: customData?.regardingName ?? '',
+    regardingEntityType: customData?.regardingEntityType ?? '',
+    regardingId: customData?.regardingId ?? '',
+    isRead: (entity['toasttype'] as number) === 200000000, // 200000000 = Dismissed (treated as "read")
     isAiGenerated: customData?.isAiGenerated ?? false,
     aiConfidence: customData?.aiConfidence,
-    createdOn: (entity["createdon"] as string) ?? new Date().toISOString(),
+    createdOn: (entity['createdon'] as string) ?? new Date().toISOString(),
   };
 }
 
@@ -159,23 +147,15 @@ export async function fetchNotifications(
   const unreadOnly = options.unreadOnly ?? false;
 
   // Build OData query — appnotification is automatically scoped to the current user
-  let filter = "";
+  let filter = '';
   if (unreadOnly) {
-    filter = "&$filter=toasttype ne 200000000"; // Exclude dismissed notifications
+    filter = '&$filter=toasttype ne 200000000'; // Exclude dismissed notifications
   }
 
-  const query =
-    `?$select=${NOTIFICATION_SELECT}` +
-    filter +
-    `&$orderby=createdon desc` +
-    `&$top=${top}`;
+  const query = `?$select=${NOTIFICATION_SELECT}` + filter + `&$orderby=createdon desc` + `&$top=${top}`;
 
   return tryCatch(async () => {
-    const result = await webApi.retrieveMultipleRecords(
-      "appnotification",
-      query,
-      top
-    );
+    const result = await webApi.retrieveMultipleRecords('appnotification', query, top);
 
     const items: NotificationItem[] = [];
     for (const entity of result.entities) {
@@ -186,7 +166,7 @@ export async function fetchNotifications(
     }
 
     return items;
-  }, "NOTIFICATIONS_FETCH_ERROR");
+  }, 'NOTIFICATIONS_FETCH_ERROR');
 }
 
 /**
@@ -210,13 +190,11 @@ export function groupByCategory(items: NotificationItem[]): ChannelGroup[] {
 
   const channelGroups: ChannelGroup[] = [];
   for (const [category, categoryItems] of groups) {
-    const meta = CHANNEL_REGISTRY[category] ?? CHANNEL_REGISTRY["system"];
+    const meta = CHANNEL_REGISTRY[category] ?? CHANNEL_REGISTRY['system'];
     channelGroups.push({
       meta,
-      items: categoryItems.sort(
-        (a, b) => new Date(b.createdOn).getTime() - new Date(a.createdOn).getTime()
-      ),
-      unreadCount: categoryItems.filter((i) => !i.isRead).length,
+      items: categoryItems.sort((a, b) => new Date(b.createdOn).getTime() - new Date(a.createdOn).getTime()),
+      unreadCount: categoryItems.filter(i => !i.isRead).length,
     });
   }
 
@@ -233,17 +211,15 @@ export function groupByCategory(items: NotificationItem[]): ChannelGroup[] {
  * @param webApi - Xrm.WebApi reference
  * @returns ChannelFetchResult[] — one entry per category that has notifications
  */
-export async function fetchAndGroupNotifications(
-  webApi: IWebApi
-): Promise<ChannelFetchResult[]> {
+export async function fetchAndGroupNotifications(webApi: IWebApi): Promise<ChannelFetchResult[]> {
   const result = await fetchNotifications(webApi);
 
   if (!result.success) {
     // Total failure — return a single error entry
     return [
       {
-        status: "error",
-        category: "system",
+        status: 'error',
+        category: 'system',
         error: result.error.message,
       },
     ];
@@ -256,26 +232,26 @@ export async function fetchAndGroupNotifications(
   // to future async per-channel enrichment like AI summaries).
   const channelPromises = groups.map(async (group): Promise<ChannelFetchResult> => {
     try {
-      return { status: "success", group };
+      return { status: 'success', group };
     } catch (err) {
       return {
-        status: "error",
+        status: 'error',
         category: group.meta.category,
-        error: err instanceof Error ? err.message : "Unknown error",
+        error: err instanceof Error ? err.message : 'Unknown error',
       };
     }
   });
 
   const settled = await Promise.allSettled(channelPromises);
 
-  return settled.map((result) => {
-    if (result.status === "fulfilled") {
+  return settled.map(result => {
+    if (result.status === 'fulfilled') {
       return result.value;
     }
     return {
-      status: "error" as const,
-      category: "system" as NotificationCategory,
-      error: result.reason instanceof Error ? result.reason.message : "Unknown error",
+      status: 'error' as const,
+      category: 'system' as NotificationCategory,
+      error: result.reason instanceof Error ? result.reason.message : 'Unknown error',
     };
   });
 }
@@ -287,15 +263,12 @@ export async function fetchAndGroupNotifications(
  * @param notificationId - The appnotificationid GUID
  * @returns IResult<void>
  */
-export async function markNotificationRead(
-  webApi: IWebApi,
-  notificationId: string
-): Promise<IResult<void>> {
+export async function markNotificationRead(webApi: IWebApi, notificationId: string): Promise<IResult<void>> {
   return tryCatch(async () => {
-    await webApi.updateRecord("appnotification", notificationId, {
+    await webApi.updateRecord('appnotification', notificationId, {
       toasttype: 200000000, // Dismissed
     });
-  }, "NOTIFICATION_MARK_READ_ERROR");
+  }, 'NOTIFICATION_MARK_READ_ERROR');
 }
 
 /**
@@ -319,13 +292,11 @@ export async function markAllNotificationsRead(
 
     // Use Promise.allSettled for parallel mark-read operations
     const results = await Promise.allSettled(
-      unread.data.map((item) =>
-        webApi.updateRecord("appnotification", item.id, { isread: true })
-      )
+      unread.data.map(item => webApi.updateRecord('appnotification', item.id, { isread: true }))
     );
 
     for (const r of results) {
-      if (r.status === "fulfilled") {
+      if (r.status === 'fulfilled') {
         succeeded++;
       } else {
         failed++;
@@ -333,5 +304,5 @@ export async function markAllNotificationsRead(
     }
 
     return { succeeded, failed };
-  }, "NOTIFICATION_MARK_ALL_READ_ERROR");
+  }, 'NOTIFICATION_MARK_ALL_READ_ERROR');
 }

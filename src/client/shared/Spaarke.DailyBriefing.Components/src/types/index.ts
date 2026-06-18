@@ -16,7 +16,7 @@
 
 // Re-export the notifications data-model surface so consumers can take a
 // single dep on the package's types barrel.
-export * from "./notifications";
+export * from './notifications';
 
 // ---------------------------------------------------------------------------
 // BriefingDependencies — runtime dependency-injection interface (FR-07)
@@ -29,16 +29,13 @@ export * from "./notifications";
  * dependency on `@spaarke/auth` for type-only callers — runtime callers still
  * resolve `@spaarke/auth` per ADR-028.
  */
-export type AuthenticatedFetch = (
-  input: RequestInfo | URL,
-  init?: RequestInit
-) => Promise<Response>;
+export type AuthenticatedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /**
  * Minimal `IWebApi` surface from `./notifications` is the binding shape for
  * webApi-injecting consumers. Re-exported here for ergonomic discovery.
  */
-export type { IWebApi } from "./notifications";
+export type { IWebApi } from './notifications';
 
 /**
  * Runtime dependencies consumed by `DailyBriefingApp` and any hook called
@@ -63,7 +60,7 @@ export interface BriefingDependencies {
    * timing); the SpaarkeAi widget receives it from the workspace shell.
    * Used by notification + preference hooks.
    */
-  webApi: import("./notifications").IWebApi;
+  webApi: import('./notifications').IWebApi;
   /**
    * Current user's systemuser GUID (stripped of braces). Used by
    * `useBriefingPreferences` to filter `sprk_userpreference` records.
@@ -86,9 +83,5 @@ export interface BriefingDependencies {
    * preview, side pane, full-page open). Defaults to `actionUrl` navigation
    * when omitted.
    */
-  onRecordOpen?: (info: {
-    entityType: string;
-    entityId: string;
-    entityName?: string;
-  }) => void;
+  onRecordOpen?: (info: { entityType: string; entityId: string; entityName?: string }) => void;
 }

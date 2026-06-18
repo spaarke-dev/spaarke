@@ -17,47 +17,47 @@
  * (carries the original `getChannelIcon` export contract).
  */
 
-export { DailyBriefingApp } from "./DailyBriefingApp";
-export type { DailyBriefingAppProps } from "./DailyBriefingApp";
+export { DailyBriefingApp } from './DailyBriefingApp';
+export type { DailyBriefingAppProps } from './DailyBriefingApp';
 
-export { DigestHeader } from "./DigestHeader";
-export type { DigestHeaderProps } from "./DigestHeader";
+export { DigestHeader } from './DigestHeader';
+export type { DigestHeaderProps } from './DigestHeader';
 
-export { EmptyState } from "./EmptyState";
-export type { EmptyStateProps } from "./EmptyState";
+export { EmptyState } from './EmptyState';
+export type { EmptyStateProps } from './EmptyState';
 
-export { TldrSection } from "./TldrSection";
-export type { TldrSectionProps } from "./TldrSection";
+export { TldrSection } from './TldrSection';
+export type { TldrSectionProps } from './TldrSection';
 
-export { ActivityNotesSection } from "./ActivityNotesSection";
-export type { ActivityNotesSectionProps } from "./ActivityNotesSection";
+export { ActivityNotesSection } from './ActivityNotesSection';
+export type { ActivityNotesSectionProps } from './ActivityNotesSection';
 
-export { CaughtUpFooter } from "./CaughtUpFooter";
-export type { CaughtUpFooterProps } from "./CaughtUpFooter";
+export { CaughtUpFooter } from './CaughtUpFooter';
+export type { CaughtUpFooterProps } from './CaughtUpFooter';
 
-export { PreferencesDropdown } from "./PreferencesDropdown";
-export type { PreferencesDropdownProps } from "./PreferencesDropdown";
+export { PreferencesDropdown } from './PreferencesDropdown';
+export type { PreferencesDropdownProps } from './PreferencesDropdown';
 
-export { ChannelHeading } from "./ChannelHeading";
-export type { ChannelHeadingProps } from "./ChannelHeading";
+export { ChannelHeading } from './ChannelHeading';
+export type { ChannelHeadingProps } from './ChannelHeading';
 
-export { NarrativeBullet } from "./NarrativeBullet";
-export type { NarrativeBulletProps } from "./NarrativeBullet";
+export { NarrativeBullet } from './NarrativeBullet';
+export type { NarrativeBulletProps } from './NarrativeBullet';
 
 // Sub-list slot components (FR-11..FR-14). Task 020 (Wave 8) lays the
 // skeleton + slot files; tasks 021/022/023 (Wave 9) implement per-row
 // link / To-Do / Dismiss behavior. Slots are exported here so consumers
 // (tests, future shells) can target each individually.
-export { SubRow } from "./SubRow";
-export type { SubRowProps } from "./SubRow";
+export { SubRow } from './SubRow';
+export type { SubRowProps } from './SubRow';
 
-export { SubRowLink } from "./SubRowLink";
-export type { SubRowLinkProps } from "./SubRowLink";
+export { SubRowLink } from './SubRowLink';
+export type { SubRowLinkProps } from './SubRowLink';
 
-export { SubRowTodo } from "./SubRowTodo";
-export type { SubRowTodoProps } from "./SubRowTodo";
+export { SubRowTodo } from './SubRowTodo';
+export type { SubRowTodoProps } from './SubRowTodo';
 
-export { SubRowDismiss } from "./SubRowDismiss";
-export type { SubRowDismissProps } from "./SubRowDismiss";
+export { SubRowDismiss } from './SubRowDismiss';
+export type { SubRowDismissProps } from './SubRowDismiss';
 
-export { getChannelIcon } from "./channelIcons";
+export { getChannelIcon } from './channelIcons';

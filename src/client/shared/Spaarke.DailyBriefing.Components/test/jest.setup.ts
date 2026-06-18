@@ -6,11 +6,11 @@
  *   - Wires `@testing-library/jest-dom` matchers (toBeInTheDocument, etc.).
  */
 
-import "@testing-library/jest-dom";
+import '@testing-library/jest-dom';
 
 // matchMedia polyfill — Fluent v9 uses it in some render paths.
-if (typeof window !== "undefined" && !window.matchMedia) {
-  Object.defineProperty(window, "matchMedia", {
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: (query: string) => ({
       matches: false,

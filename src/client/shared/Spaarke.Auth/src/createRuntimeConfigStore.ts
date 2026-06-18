@@ -36,8 +36,8 @@
  * @module createRuntimeConfigStore
  */
 
-import type { IRuntimeConfig } from "./resolveRuntimeConfig";
-import { resolveTenantIdSync } from "./resolveTenantIdSync";
+import type { IRuntimeConfig } from './resolveRuntimeConfig';
+import { resolveTenantIdSync } from './resolveTenantIdSync';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -217,7 +217,7 @@ export function createRuntimeConfigStore(options: RuntimeConfigStoreOptions): Ru
   // first setRuntimeConfig); the gate is essentially a no-op for consumers that
   // don't await it.
   let _resolveReady: (() => void) | undefined;
-  const _readyPromise = new Promise<void>((resolve) => {
+  const _readyPromise = new Promise<void>(resolve => {
     _resolveReady = resolve;
   });
   // When the gate is disabled, immediately resolve so awaiting it never blocks.
@@ -227,7 +227,7 @@ export function createRuntimeConfigStore(options: RuntimeConfigStoreOptions): Ru
 
   function setRuntimeConfig(config: IRuntimeConfig): void {
     _config = config;
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__SPAARKE_BFF_BASE_URL__ = config.bffBaseUrl;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -247,7 +247,7 @@ export function createRuntimeConfigStore(options: RuntimeConfigStoreOptions): Ru
     if (!_config) {
       throw new Error(
         `[${errorLabel}] Runtime config not initialized. ` +
-          "Call setRuntimeConfig() in main.tsx before using config getters."
+          'Call setRuntimeConfig() in main.tsx before using config getters.'
       );
     }
     return _config;
@@ -271,7 +271,7 @@ export function createRuntimeConfigStore(options: RuntimeConfigStoreOptions): Ru
 
     if (!lazyTenantResolveWithTelemetry) {
       // Simple-read mode: return empty string when stored value is empty.
-      return "";
+      return '';
     }
 
     // Lazy-resolve mode: try resolveTenantIdSync() and cache the result.
@@ -284,8 +284,8 @@ export function createRuntimeConfigStore(options: RuntimeConfigStoreOptions): Ru
       try {
         onLazyTenantResolve({
           resolved: String(!!resolved),
-          storedWasEmpty: "true",
-          caller: new Error().stack?.split("\n")[2]?.trim().substring(0, 100) ?? "unknown",
+          storedWasEmpty: 'true',
+          caller: new Error().stack?.split('\n')[2]?.trim().substring(0, 100) ?? 'unknown',
         });
       } catch {
         /* never let a telemetry callback break the getter */

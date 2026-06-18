@@ -25,7 +25,7 @@ export {
   type TldrResult,
   type ChannelNarrationResult,
   type NarrativeBulletResult,
-} from "./briefingService";
+} from './briefingService';
 
 export {
   fetchNotifications,
@@ -33,9 +33,6 @@ export {
   groupByCategory,
   markNotificationRead,
   markAllNotificationsRead,
-} from "./notificationService";
+} from './notificationService';
 
-export {
-  fetchDigestPreferences,
-  saveDigestPreferences,
-} from "./preferencesService";
+export { fetchDigestPreferences, saveDigestPreferences } from './preferencesService';

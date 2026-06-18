@@ -40,16 +40,10 @@
  *   each owns a distinct file -- no NarrativeBullet.tsx race.
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Tooltip,
-  Spinner,
-} from "@fluentui/react-components";
-import { MicrosoftToDoIcon } from "@spaarke/ui-components";
-import type { NotificationItem } from "../types/notifications";
+import * as React from 'react';
+import { makeStyles, tokens, Button, Tooltip, Spinner } from '@fluentui/react-components';
+import { MicrosoftToDoIcon } from '@spaarke/ui-components';
+import type { NotificationItem } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021; dark-mode parity)
@@ -120,9 +114,9 @@ export const SubRowTodo: React.FC<SubRowTodoProps> = ({
 
   // Tooltip content surfaces state without crowding the sub-row.
   // Priority: error > created > default.
-  let tooltipContent = "Add to To Do";
+  let tooltipContent = 'Add to To Do';
   if (error) tooltipContent = error;
-  else if (isCreated) tooltipContent = "Added to To Do";
+  else if (isCreated) tooltipContent = 'Added to To Do';
 
   const handleClick = React.useCallback(() => {
     // Guard rails: no-op when the per-item creation is in-flight or already
@@ -140,11 +134,7 @@ export const SubRowTodo: React.FC<SubRowTodoProps> = ({
   const icon = isPending ? (
     <Spinner size="tiny" />
   ) : (
-    <MicrosoftToDoIcon
-      size={14}
-      active={isCreated}
-      className={isCreated ? styles.iconActive : styles.iconDefault}
-    />
+    <MicrosoftToDoIcon size={14} active={isCreated} className={isCreated ? styles.iconActive : styles.iconDefault} />
   );
 
   return (

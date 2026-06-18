@@ -136,18 +136,8 @@ export interface CodePageAuthInitializer {
  *   });
  * ```
  */
-export function createCodePageAuthInitializer(
-  config: CodePageAuthInitConfig,
-): CodePageAuthInitializer {
-  const {
-    clientId,
-    bffBaseUrl,
-    bffApiScope,
-    tenantId,
-    proactiveRefresh = true,
-    logLabel,
-    beforeInit,
-  } = config;
+export function createCodePageAuthInitializer(config: CodePageAuthInitConfig): CodePageAuthInitializer {
+  const { clientId, bffBaseUrl, bffApiScope, tenantId, proactiveRefresh = true, logLabel, beforeInit } = config;
 
   let _initPromise: Promise<void> | null = null;
 
@@ -178,10 +168,7 @@ export function createCodePageAuthInitializer(
     return _initPromise;
   }
 
-  async function authenticatedFetch(
-    url: string,
-    init?: RequestInit,
-  ): Promise<Response> {
+  async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
     await ensureAuthInitialized();
     return sharedAuthFetch(url, init);
   }

@@ -20,17 +20,17 @@
  * The three hooks intentionally share NO internal state, NO singleton, NO context.
  */
 
-export { useInlineTodoCreate } from "./useInlineTodoCreate";
-export type { UseInlineTodoCreateResult } from "./useInlineTodoCreate";
+export { useInlineTodoCreate } from './useInlineTodoCreate';
+export type { UseInlineTodoCreateResult } from './useInlineTodoCreate';
 
-export { useBriefingNarration } from "./useBriefingNarration";
-export type { UseBriefingNarrationResult } from "./useBriefingNarration";
+export { useBriefingNarration } from './useBriefingNarration';
+export type { UseBriefingNarrationResult } from './useBriefingNarration';
 
-export { useBriefingNotifications } from "./useBriefingNotifications";
-export type { UseBriefingNotificationsResult } from "./useBriefingNotifications";
+export { useBriefingNotifications } from './useBriefingNotifications';
+export type { UseBriefingNotificationsResult } from './useBriefingNotifications';
 
-export { useBriefingPreferences } from "./useBriefingPreferences";
-export type { UseBriefingPreferencesResult } from "./useBriefingPreferences";
+export { useBriefingPreferences } from './useBriefingPreferences';
+export type { UseBriefingPreferencesResult } from './useBriefingPreferences';
 
-export { useBriefingActions } from "./useBriefingActions";
-export type { UseBriefingActionsResult } from "./useBriefingActions";
+export { useBriefingActions } from './useBriefingActions';
+export type { UseBriefingActionsResult } from './useBriefingActions';

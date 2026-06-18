@@ -19,7 +19,7 @@ export const authenticatedFetch: jest.Mock = jest.fn(() =>
         channelNarratives: [],
         generatedAtUtc: new Date().toISOString(),
       }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
     )
   )
 );

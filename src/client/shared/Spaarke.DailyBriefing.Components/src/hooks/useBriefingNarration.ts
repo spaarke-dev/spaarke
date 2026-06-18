@@ -23,17 +23,10 @@
  *   (cleaned up in task 017/018).
  */
 
-import { useState, useEffect, useRef } from "react";
-import type {
-  ChannelFetchResult,
-  LoadingState,
-} from "../types/notifications";
-import type {
-  TldrResult,
-  ChannelNarrationResult,
-  NarrativeBulletResult,
-} from "../services/briefingService";
-import { fetchBriefingNarration } from "../services/briefingService";
+import { useState, useEffect, useRef } from 'react';
+import type { ChannelFetchResult, LoadingState } from '../types/notifications';
+import type { TldrResult, ChannelNarrationResult, NarrativeBulletResult } from '../services/briefingService';
+import { fetchBriefingNarration } from '../services/briefingService';
 
 // ---------------------------------------------------------------------------
 // Hook return type
@@ -65,21 +58,17 @@ export interface UseBriefingNarrationResult {
  * Used when AI narration is unavailable so channel components still render
  * the same ChannelNarrationResult shape.
  */
-function buildTemplateFallback(
-  channels: ChannelFetchResult[]
-): ChannelNarrationResult[] {
+function buildTemplateFallback(channels: ChannelFetchResult[]): ChannelNarrationResult[] {
   const results: ChannelNarrationResult[] = [];
 
   for (const ch of channels) {
-    if (ch.status !== "success") continue;
+    if (ch.status !== 'success') continue;
 
     const { meta, items } = ch.group;
     if (items.length === 0) continue;
 
-    const bullets: NarrativeBulletResult[] = items.map((item) => ({
-      narrative: item.body
-        ? `${item.title} \u2014 ${item.body}`
-        : item.title,
+    const bullets: NarrativeBulletResult[] = items.map(item => ({
+      narrative: item.body ? `${item.title} \u2014 ${item.body}` : item.title,
       itemIds: [item.id],
       primaryEntityType: item.regardingEntityType,
       primaryEntityId: item.regardingId,
@@ -111,14 +100,10 @@ export function useBriefingNarration(
   dataLoadingState: LoadingState
 ): UseBriefingNarrationResult {
   const [tldr, setTldr] = useState<TldrResult | null>(null);
-  const [channelNarratives, setChannelNarratives] = useState<
-    ChannelNarrationResult[]
-  >([]);
+  const [channelNarratives, setChannelNarratives] = useState<ChannelNarrationResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUnavailable, setIsUnavailable] = useState(false);
-  const [unavailableReason, setUnavailableReason] = useState<string | null>(
-    null
-  );
+  const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
 
@@ -127,16 +112,16 @@ export function useBriefingNarration(
 
   useEffect(() => {
     // Only fetch once notification data is fully loaded
-    if (dataLoadingState !== "loaded") return;
+    if (dataLoadingState !== 'loaded') return;
 
     // Don't re-fetch if we already have a result
     if (hasFetchedRef.current) return;
 
     // Check if there are any successful channels to narrate
-    const hasData = channels.some((ch) => ch.status === "success");
+    const hasData = channels.some(ch => ch.status === 'success');
     if (!hasData) {
       setIsUnavailable(true);
-      setUnavailableReason("No notification data to narrate.");
+      setUnavailableReason('No notification data to narrate.');
       hasFetchedRef.current = true;
       return;
     }
@@ -147,22 +132,22 @@ export function useBriefingNarration(
     setError(null);
     setIsUnavailable(false);
 
-    fetchBriefingNarration(channels).then((result) => {
+    fetchBriefingNarration(channels).then(result => {
       if (cancelled) return;
 
       switch (result.status) {
-        case "success":
+        case 'success':
           setTldr(result.data.tldr);
           setChannelNarratives(result.data.channelNarratives);
           setGeneratedAt(result.data.generatedAtUtc);
           break;
-        case "unavailable":
+        case 'unavailable':
           setIsUnavailable(true);
           setUnavailableReason(result.reason);
           // Fall back to template-based bullets so channels still render
           setChannelNarratives(buildTemplateFallback(channels));
           break;
-        case "error":
+        case 'error':
           setError(result.message);
           // Fall back to template-based bullets so channels still render
           setChannelNarratives(buildTemplateFallback(channels));

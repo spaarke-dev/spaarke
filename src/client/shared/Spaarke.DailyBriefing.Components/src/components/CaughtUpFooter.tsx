@@ -15,13 +15,9 @@
  * re-export shim pending full cleanup in R2 task 017.
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-} from "@fluentui/react-components";
-import { CheckmarkCircleRegular } from "@fluentui/react-icons";
+import * as React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -36,16 +32,16 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalM,
   },
   content: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   icon: {
     color: tokens.colorPaletteGreenForeground1,
-    fontSize: "20px",
+    fontSize: '20px',
     flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
   },
   text: {
     color: tokens.colorNeutralForeground3,
@@ -65,9 +61,7 @@ export interface CaughtUpFooterProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export const CaughtUpFooter: React.FC<CaughtUpFooterProps> = ({
-  channelLabels,
-}) => {
+export const CaughtUpFooter: React.FC<CaughtUpFooterProps> = ({ channelLabels }) => {
   const styles = useStyles();
 
   // Don't render if there are no zero-item channels
@@ -83,7 +77,7 @@ export const CaughtUpFooter: React.FC<CaughtUpFooterProps> = ({
             <CheckmarkCircleRegular />
           </span>
           <Text size={200} className={styles.text}>
-            You're caught up on: {channelLabels.join(", ")}
+            You're caught up on: {channelLabels.join(', ')}
           </Text>
         </div>
       </div>

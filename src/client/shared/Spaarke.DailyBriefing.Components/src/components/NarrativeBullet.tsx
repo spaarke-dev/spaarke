@@ -30,19 +30,12 @@
  * 021/022/023 (Wave 9, parallel-safe -- each task edits its own slot file).
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  Tooltip,
-  Spinner,
-} from "@fluentui/react-components";
-import { DismissRegular } from "@fluentui/react-icons";
-import { MicrosoftToDoIcon } from "@spaarke/ui-components";
-import type { NotificationItem } from "../types/notifications";
-import { SubRow } from "./SubRow";
+import * as React from 'react';
+import { makeStyles, tokens, Text, Button, Tooltip, Spinner } from '@fluentui/react-components';
+import { DismissRegular } from '@fluentui/react-icons';
+import { MicrosoftToDoIcon } from '@spaarke/ui-components';
+import type { NotificationItem } from '../types/notifications';
+import { SubRow } from './SubRow';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -50,8 +43,8 @@ import { SubRow } from "./SubRow";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    alignItems: "flex-start",
+    display: 'flex',
+    alignItems: 'flex-start',
     gap: tokens.spacingHorizontalS,
     marginBottom: tokens.spacingVerticalL,
   },
@@ -59,12 +52,12 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     flexShrink: 0,
     lineHeight: tokens.lineHeightBase400,
-    userSelect: "none",
+    userSelect: 'none',
   },
   content: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   narrativeText: {
@@ -73,15 +66,15 @@ const useStyles = makeStyles({
   },
   entityLink: {
     color: tokens.colorBrandForeground1,
-    cursor: "pointer",
-    textDecorationLine: "none",
-    ":hover": {
-      textDecorationLine: "underline",
+    cursor: 'pointer',
+    textDecorationLine: 'none',
+    ':hover': {
+      textDecorationLine: 'underline',
     },
   },
   actions: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
@@ -93,15 +86,15 @@ const useStyles = makeStyles({
   },
   // FR-11: per-item sub-list (rendered only when itemIds.length > 1).
   subList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
     // Indent under the narrative + entity-link column.
     marginTop: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     // Subtle left border for visual grouping (semantic token).
-    borderLeftWidth: "2px",
-    borderLeftStyle: "solid",
+    borderLeftWidth: '2px',
+    borderLeftStyle: 'solid',
     borderLeftColor: tokens.colorNeutralStroke2,
   },
 });
@@ -203,12 +196,14 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
     if (!xrm?.Navigation?.navigateTo) return;
     xrm.Navigation.navigateTo(
       {
-        pageType: "entityrecord",
+        pageType: 'entityrecord',
         entityName: primaryEntityType,
         entityId: primaryEntityId,
       },
-      { target: 2, width: { value: 80, unit: "%" }, height: { value: 80, unit: "%" } }
-    ).catch(() => { /* user closed dialog */ });
+      { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+    ).catch(() => {
+      /* user closed dialog */
+    });
   };
 
   const handleAddToTodo = () => {
@@ -222,8 +217,8 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   };
 
   // Determine To Do button tooltip
-  let todoTooltip = "Add to To Do";
-  if (isTodoCreated) todoTooltip = "Added to To Do";
+  let todoTooltip = 'Add to To Do';
+  if (isTodoCreated) todoTooltip = 'Added to To Do';
   if (todoError) todoTooltip = todoError;
 
   return (
@@ -243,7 +238,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
             role="link"
             tabIndex={0}
             onKeyDown={(e: React.KeyboardEvent) => {
-              if (e.key === "Enter" || e.key === " ") handleLinkClick();
+              if (e.key === 'Enter' || e.key === ' ') handleLinkClick();
             }}
           >
             {primaryEntityName} &#8599;
@@ -251,18 +246,10 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         )}
         {/* FR-11: per-item sub-list for aggregated bullets (itemIds.length > 1). */}
         {showSubList && (
-          <div
-            className={styles.subList}
-            role="list"
-            aria-label={`${items!.length} underlying notifications`}
-          >
-            {items!.map((item) => (
+          <div className={styles.subList} role="list" aria-label={`${items!.length} underlying notifications`}>
+            {items!.map(item => (
               <div key={item.id} role="listitem">
-                <SubRow
-                  item={item}
-                  onAddToTodoItem={onAddToTodoItem}
-                  onDismissItem={onDismissItem}
-                />
+                <SubRow item={item} onAddToTodoItem={onAddToTodoItem} onDismissItem={onDismissItem} />
               </div>
             ))}
           </div>
@@ -280,11 +267,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
                 <MicrosoftToDoIcon
                   size={16}
                   active={isTodoCreated}
-                  className={
-                    isTodoCreated
-                      ? styles.todoIconActive
-                      : styles.todoIconDefault
-                  }
+                  className={isTodoCreated ? styles.todoIconActive : styles.todoIconDefault}
                 />
               )
             }

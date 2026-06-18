@@ -32,9 +32,9 @@
  *   each owns a distinct file -- no NarrativeBullet.tsx race.
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Link, Text } from "@fluentui/react-components";
-import type { NotificationItem } from "../types/notifications";
+import * as React from 'react';
+import { makeStyles, tokens, Link, Text } from '@fluentui/react-components';
+import type { NotificationItem } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -48,12 +48,12 @@ const useStyles = makeStyles({
     flex: 1,
     minWidth: 0,
     // Truncate long titles within the sub-row.
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    textDecorationLine: "none",
-    ":hover": {
-      textDecorationLine: "underline",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textDecorationLine: 'none',
+    ':hover': {
+      textDecorationLine: 'underline',
     },
   },
   plain: {
@@ -82,7 +82,7 @@ export const SubRowLink: React.FC<SubRowLinkProps> = ({ item }) => {
   const styles = useStyles();
 
   // Display name: prefer the item's title; fall back to the regarding name.
-  const displayName = item.title || item.regardingName || "(untitled)";
+  const displayName = item.title || item.regardingName || '(untitled)';
 
   // FR-12 graceful degradation: if either the regarding entity type or id is
   // missing, render as plain text -- no clickable link.
@@ -107,14 +107,14 @@ export const SubRowLink: React.FC<SubRowLinkProps> = ({ item }) => {
 
     xrm.Navigation.navigateTo(
       {
-        pageType: "entityrecord",
+        pageType: 'entityrecord',
         entityName: item.regardingEntityType,
         entityId: item.regardingId,
       },
       {
         target: 2,
-        width: { value: 80, unit: "%" },
-        height: { value: 80, unit: "%" },
+        width: { value: 80, unit: '%' },
+        height: { value: 80, unit: '%' },
       }
     ).catch(() => {
       /* user closed dialog or navigation cancelled -- non-fatal */
@@ -140,7 +140,7 @@ export const SubRowLink: React.FC<SubRowLinkProps> = ({ item }) => {
       className={styles.link}
       onClick={handleClick}
       onKeyDown={(e: React.KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
+        if (e.key === 'Enter' || e.key === ' ') {
           handleClick(e);
         }
       }}

@@ -11,7 +11,7 @@
  * re-export shim pending full cleanup in R2 task 017.
  */
 
-import type { FluentIcon } from "@fluentui/react-icons";
+import type { FluentIcon } from '@fluentui/react-icons';
 import {
   WarningRegular,
   ClockRegular,
@@ -21,7 +21,7 @@ import {
   BriefcaseRegular,
   PeopleRegular,
   InfoRegular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-icons';
 
 const ICON_MAP: Record<string, FluentIcon> = {
   Warning: WarningRegular,

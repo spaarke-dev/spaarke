@@ -36,27 +36,13 @@ export interface IWebApi {
     maxPageSize?: number
   ): Promise<RetrieveMultipleResult>;
 
-  retrieveRecord(
-    entityLogicalName: string,
-    id: string,
-    options?: string
-  ): Promise<WebApiEntity>;
+  retrieveRecord(entityLogicalName: string, id: string, options?: string): Promise<WebApiEntity>;
 
-  createRecord(
-    entityLogicalName: string,
-    data: WebApiEntity
-  ): Promise<{ id: string }>;
+  createRecord(entityLogicalName: string, data: WebApiEntity): Promise<{ id: string }>;
 
-  updateRecord(
-    entityLogicalName: string,
-    id: string,
-    data: WebApiEntity
-  ): Promise<{ id: string }>;
+  updateRecord(entityLogicalName: string, id: string, data: WebApiEntity): Promise<{ id: string }>;
 
-  deleteRecord(
-    entityLogicalName: string,
-    id: string
-  ): Promise<{ id: string }>;
+  deleteRecord(entityLogicalName: string, id: string): Promise<{ id: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,22 +76,19 @@ export function fail(code: string, message: string, raw?: unknown): IFailureResu
   return { success: false, error: { code, message, raw } };
 }
 
-export async function tryCatch<T>(
-  fn: () => Promise<T>,
-  errorCode: string = "UNKNOWN_ERROR"
-): Promise<IResult<T>> {
+export async function tryCatch<T>(fn: () => Promise<T>, errorCode: string = 'UNKNOWN_ERROR'): Promise<IResult<T>> {
   try {
     const data = await fn();
     return ok(data);
   } catch (e: unknown) {
     const raw = e;
-    let message = "An unexpected error occurred.";
-    if (e && typeof e === "object") {
+    let message = 'An unexpected error occurred.';
+    if (e && typeof e === 'object') {
       const err = e as Record<string, unknown>;
-      if (typeof err["message"] === "string") {
-        message = err["message"];
+      if (typeof err['message'] === 'string') {
+        message = err['message'];
       }
-    } else if (typeof e === "string") {
+    } else if (typeof e === 'string') {
       message = e;
     }
     return fail(errorCode, message, raw);
@@ -122,14 +105,14 @@ export async function tryCatch<T>(
  * customData.category by CreateNotificationNodeExecutor.
  */
 export type NotificationCategory =
-  | "tasks-overdue"
-  | "tasks-due-soon"
-  | "new-documents"
-  | "new-emails"
-  | "new-events"
-  | "matter-activity"
-  | "work-assignments"
-  | "system";
+  | 'tasks-overdue'
+  | 'tasks-due-soon'
+  | 'new-documents'
+  | 'new-emails'
+  | 'new-events'
+  | 'matter-activity'
+  | 'work-assignments'
+  | 'system';
 
 /** Display metadata for each notification category/channel. */
 export interface ChannelMeta {
@@ -143,52 +126,52 @@ export interface ChannelMeta {
 
 /** Registry of known notification channels with display metadata. */
 export const CHANNEL_REGISTRY: Record<NotificationCategory, ChannelMeta> = {
-  "tasks-overdue": {
-    category: "tasks-overdue",
-    label: "Overdue Tasks",
-    iconName: "Warning",
+  'tasks-overdue': {
+    category: 'tasks-overdue',
+    label: 'Overdue Tasks',
+    iconName: 'Warning',
     order: 1,
   },
-  "tasks-due-soon": {
-    category: "tasks-due-soon",
-    label: "Tasks Due Soon",
-    iconName: "Clock",
+  'tasks-due-soon': {
+    category: 'tasks-due-soon',
+    label: 'Tasks Due Soon',
+    iconName: 'Clock',
     order: 2,
   },
-  "new-documents": {
-    category: "new-documents",
-    label: "New Documents",
-    iconName: "Document",
+  'new-documents': {
+    category: 'new-documents',
+    label: 'New Documents',
+    iconName: 'Document',
     order: 3,
   },
-  "new-emails": {
-    category: "new-emails",
-    label: "New Emails",
-    iconName: "Mail",
+  'new-emails': {
+    category: 'new-emails',
+    label: 'New Emails',
+    iconName: 'Mail',
     order: 4,
   },
-  "new-events": {
-    category: "new-events",
-    label: "Upcoming Events",
-    iconName: "Calendar",
+  'new-events': {
+    category: 'new-events',
+    label: 'Upcoming Events',
+    iconName: 'Calendar',
     order: 5,
   },
-  "matter-activity": {
-    category: "matter-activity",
-    label: "Matter Activity",
-    iconName: "Briefcase",
+  'matter-activity': {
+    category: 'matter-activity',
+    label: 'Matter Activity',
+    iconName: 'Briefcase',
     order: 6,
   },
-  "work-assignments": {
-    category: "work-assignments",
-    label: "Work Assignments",
-    iconName: "People",
+  'work-assignments': {
+    category: 'work-assignments',
+    label: 'Work Assignments',
+    iconName: 'People',
     order: 7,
   },
   system: {
-    category: "system",
-    label: "System",
-    iconName: "Info",
+    category: 'system',
+    label: 'System',
+    iconName: 'Info',
     order: 99,
   },
 };
@@ -198,7 +181,7 @@ export const CHANNEL_REGISTRY: Record<NotificationCategory, ChannelMeta> = {
 // ---------------------------------------------------------------------------
 
 /** Priority levels for notifications. */
-export type NotificationPriority = "low" | "normal" | "high" | "urgent";
+export type NotificationPriority = 'low' | 'normal' | 'high' | 'urgent';
 
 /**
  * Parsed notification item extracted from an appnotification record.
@@ -257,8 +240,8 @@ export interface ChannelGroup {
  * Allows per-channel error display without crashing the entire digest.
  */
 export type ChannelFetchResult =
-  | { status: "success"; group: ChannelGroup }
-  | { status: "error"; category: NotificationCategory; error: string };
+  | { status: 'success'; group: ChannelGroup }
+  | { status: 'error'; category: NotificationCategory; error: string };
 
 // ---------------------------------------------------------------------------
 // User preferences
@@ -274,7 +257,7 @@ export const PREFERENCE_TYPE_DAILY_DIGEST = 100000002;
 export type DueWindowDays = 1 | 2 | 3 | 5 | 7;
 
 /** Time window options for recency filtering. */
-export type TimeWindow = "12h" | "24h" | "48h" | "7d";
+export type TimeWindow = '12h' | '24h' | '48h' | '7d';
 
 /** AI confidence threshold options (percentage). */
 export type AiConfidenceThreshold = 60 | 75 | 85 | 95;
@@ -302,7 +285,7 @@ export interface DailyDigestPreferences {
 export const DEFAULT_DAILY_DIGEST_PREFERENCES: DailyDigestPreferences = {
   disabledChannels: [],
   dueWithinDays: 3,
-  timeWindow: "24h",
+  timeWindow: '24h',
   minConfidence: 75,
   autoPopup: true,
 };
@@ -312,7 +295,7 @@ export const DEFAULT_DAILY_DIGEST_PREFERENCES: DailyDigestPreferences = {
 // ---------------------------------------------------------------------------
 
 /** Loading states for the notification data hook. */
-export type LoadingState = "idle" | "loading" | "loaded" | "error";
+export type LoadingState = 'idle' | 'loading' | 'loaded' | 'error';
 
 /**
  * Aggregate data returned by useNotificationData() hook.

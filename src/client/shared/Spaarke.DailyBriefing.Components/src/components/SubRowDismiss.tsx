@@ -32,10 +32,10 @@
  *   each owns a distinct file -- no NarrativeBullet.tsx race.
  */
 
-import * as React from "react";
-import { makeStyles, mergeClasses, tokens, Button, Tooltip } from "@fluentui/react-components";
-import { DismissRegular } from "@fluentui/react-icons";
-import type { NotificationItem } from "../types/notifications";
+import * as React from 'react';
+import { makeStyles, mergeClasses, tokens, Button, Tooltip } from '@fluentui/react-components';
+import { DismissRegular } from '@fluentui/react-icons';
+import type { NotificationItem } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -50,8 +50,8 @@ const useStyles = makeStyles({
   // user can retry; on success the parent refetch removes the row.
   fading: {
     opacity: 0.35,
-    pointerEvents: "none",
-    transitionProperty: "opacity",
+    pointerEvents: 'none',
+    transitionProperty: 'opacity',
     transitionDuration: tokens.durationNormal,
     transitionTimingFunction: tokens.curveEasyEase,
   },
@@ -98,11 +98,11 @@ export const SubRowDismiss: React.FC<SubRowDismissProps> = ({ item, onDismiss })
     try {
       const result = onDismiss(item.id);
       const ok =
-        typeof result === "boolean"
+        typeof result === 'boolean'
           ? result
-          : result && typeof (result as Promise<boolean>).then === "function"
-          ? await result
-          : true; // void callbacks treated as success (optimistic)
+          : result && typeof (result as Promise<boolean>).then === 'function'
+            ? await result
+            : true; // void callbacks treated as success (optimistic)
       if (ok) {
         setDismissed(true);
       } else {

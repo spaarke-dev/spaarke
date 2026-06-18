@@ -11,4 +11,4 @@
  *   from the original — no behavior change.
  */
 
-export const TOASTER_ID = "daily-briefing-toaster";
+export const TOASTER_ID = 'daily-briefing-toaster';

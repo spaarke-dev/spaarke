@@ -11,9 +11,13 @@
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface INavPropEntry { [key: string]: any }
+export interface INavPropEntry {
+  [key: string]: any;
+}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface IPolymorphicWebApi { [key: string]: any }
+export interface IPolymorphicWebApi {
+  [key: string]: any;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const TODO_REGARDING_CATALOG: any[] = [];

@@ -25,7 +25,7 @@
  *     intentional, temporary debt cleaned up in task 015/016.
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -35,49 +35,46 @@ import {
   useId,
   Toast,
   ToastTitle,
-} from "@fluentui/react-components";
-import { DigestHeader } from "./DigestHeader";
-import { EmptyState } from "./EmptyState";
-import { TldrSection } from "./TldrSection";
-import { ActivityNotesSection } from "./ActivityNotesSection";
-import { CaughtUpFooter } from "./CaughtUpFooter";
-import { PreferencesDropdown } from "./PreferencesDropdown";
+} from '@fluentui/react-components';
+import { DigestHeader } from './DigestHeader';
+import { EmptyState } from './EmptyState';
+import { TldrSection } from './TldrSection';
+import { ActivityNotesSection } from './ActivityNotesSection';
+import { CaughtUpFooter } from './CaughtUpFooter';
+import { PreferencesDropdown } from './PreferencesDropdown';
 import {
   useBriefingNarration,
   useInlineTodoCreate,
   useBriefingNotifications,
   useBriefingPreferences,
   useBriefingActions,
-} from "../hooks";
-import { TOASTER_ID } from "../utils/toastUtils";
-import type {
-  IWebApi,
-  ChannelFetchResult,
-} from "../types/notifications";
+} from '../hooks';
+import { TOASTER_ID } from '../utils/toastUtils';
+import type { IWebApi, ChannelFetchResult } from '../types/notifications';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    boxSizing: "border-box",
+    boxSizing: 'border-box',
   },
   spinnerContainer: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
     padding: tokens.spacingHorizontalL,
-    boxSizing: "border-box",
-    justifyContent: "center",
-    alignItems: "center",
+    boxSizing: 'border-box',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollContent: {
     padding: tokens.spacingHorizontalL,
-    overflowY: "auto",
+    overflowY: 'auto',
     flex: 1,
   },
   activitySection: {
@@ -124,11 +121,19 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           setXrm(found);
           clearInterval(interval);
         }
-      } catch { /* cross-origin */ }
+      } catch {
+        /* cross-origin */
+      }
     }, 500);
     // Stop polling after 30s
-    const timeout = setTimeout(() => { clearInterval(interval); }, 30000);
-    return () => { cancelled = true; clearInterval(interval); clearTimeout(timeout); };
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+    }, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
   }, [xrm]);
 
   const webApi = React.useMemo<IWebApi | null>(() => xrm?.WebApi ?? null, [xrm]);
@@ -136,9 +141,9 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // Resolve current user ID
   const userId = React.useMemo<string>(() => {
     try {
-      return xrm?.Utility?.getGlobalContext()?.userSettings?.userId?.replace(/[{}]/g, "") ?? "";
+      return xrm?.Utility?.getGlobalContext()?.userSettings?.userId?.replace(/[{}]/g, '') ?? '';
     } catch {
-      return "";
+      return '';
     }
   }, [xrm]);
 
@@ -155,16 +160,9 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // by `disabledChannels` happens HERE at the consumer (downstream of fetch).
   // See task 014 / FR-06 / spec.md.
   // ---------------------------------------------------------------------------
-  const {
-    channels: allChannels,
-    loadingState,
-    refetch,
-  } = useBriefingNotifications(webApi);
+  const { channels: allChannels, loadingState, refetch } = useBriefingNotifications(webApi);
   const { preferences, updatePreferences } = useBriefingPreferences(webApi, userId);
-  const {
-    markAsRead,
-    refresh: actionsRefresh,
-  } = useBriefingActions(webApi);
+  const { markAsRead, refresh: actionsRefresh } = useBriefingActions(webApi);
 
   // Effect 1: refetch when disabled-channels set changes.
   // Cross-hook coordination at the consumer (per FR-06 Option A).
@@ -187,8 +185,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // useNotificationData). Errors always show through regardless of filter.
   const channels: ChannelFetchResult[] = React.useMemo(
     () =>
-      allChannels.filter((ch) => {
-        if (ch.status !== "success") return true; // always show errors
+      allChannels.filter(ch => {
+        if (ch.status !== 'success') return true; // always show errors
         return !preferences.disabledChannels.includes(ch.group.meta.category);
       }),
     [allChannels, preferences.disabledChannels]
@@ -198,7 +196,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   const totalUnreadCount = React.useMemo(
     () =>
       channels.reduce((sum, ch) => {
-        if (ch.status === "success") {
+        if (ch.status === 'success') {
           return sum + ch.group.unreadCount;
         }
         return sum;
@@ -220,8 +218,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   } = useBriefingNarration(channels, loadingState);
 
   // Inline To Do creation from narrative bullets
-  const { createTodo, isCreated, isPending, getError: getTodoError } =
-    useInlineTodoCreate(webApi);
+  const { createTodo, isCreated, isPending, getError: getTodoError } = useInlineTodoCreate(webApi);
 
   // Toaster setup for success/error notifications
   const toasterId = useId(TOASTER_ID);
@@ -235,13 +232,15 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   const handleAddToTodo = React.useCallback(
     async (itemIds: string[]) => {
       for (const ch of channels) {
-        if (ch.status !== "success") continue;
+        if (ch.status !== 'success') continue;
         for (const item of ch.group.items) {
           if (itemIds.includes(item.id)) {
             await createTodo(item);
             dispatchToast(
-              <Toast><ToastTitle>Added to To Do</ToastTitle></Toast>,
-              { intent: "success", timeout: 3000 }
+              <Toast>
+                <ToastTitle>Added to To Do</ToastTitle>
+              </Toast>,
+              { intent: 'success', timeout: 3000 }
             );
             // Also mark notification as read
             markAsRead?.(item.id);
@@ -268,18 +267,12 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // ---------------------------------------------------------------------------
 
   const caughtUpLabels = React.useMemo(() => {
-    const activeCategories = new Set(
-      channelNarratives.map((cn) => cn.category)
-    );
+    const activeCategories = new Set(channelNarratives.map(cn => cn.category));
     return channels
-      .filter(
-        (ch) =>
-          ch.status === "success" &&
-          !activeCategories.has(ch.group.meta.category)
-      )
-      .map((ch) => {
-        if (ch.status === "success") return ch.group.meta.label;
-        return "";
+      .filter(ch => ch.status === 'success' && !activeCategories.has(ch.group.meta.category))
+      .map(ch => {
+        if (ch.status === 'success') return ch.group.meta.label;
+        return '';
       })
       .filter(Boolean);
   }, [channels, channelNarratives]);
@@ -288,7 +281,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // Render
   // ---------------------------------------------------------------------------
 
-  if (loadingState === "loading" || loadingState === "idle") {
+  if (loadingState === 'loading' || loadingState === 'idle') {
     return (
       <div className={styles.spinnerContainer}>
         <Spinner label="Loading daily briefing..." />
@@ -297,22 +290,13 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   }
 
   // All caught up — no unread notifications at all
-  if (
-    totalUnreadCount === 0 &&
-    channels.every((ch) => ch.status === "success") &&
-    !narrationLoading
-  ) {
+  if (totalUnreadCount === 0 && channels.every(ch => ch.status === 'success') && !narrationLoading) {
     return (
       <div className={styles.container}>
         <DigestHeader
           totalUnreadCount={totalUnreadCount}
           onRefresh={refresh}
-          preferencesSlot={
-            <PreferencesDropdown
-              preferences={preferences}
-              onUpdatePreferences={updatePreferences}
-            />
-          }
+          preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
         />
         <div className={styles.scrollContent}>
           <EmptyState />
@@ -328,12 +312,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       <DigestHeader
         totalUnreadCount={totalUnreadCount}
         onRefresh={refresh}
-        preferencesSlot={
-          <PreferencesDropdown
-            preferences={preferences}
-            onUpdatePreferences={updatePreferences}
-          />
-        }
+        preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
       />
       <div className={styles.scrollContent}>
         <TldrSection

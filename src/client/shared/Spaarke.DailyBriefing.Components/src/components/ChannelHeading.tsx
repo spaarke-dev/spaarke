@@ -13,12 +13,8 @@
  * re-export shim pending full cleanup in R2 task 017.
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -26,18 +22,18 @@ import {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     paddingBottom: tokens.spacingVerticalS,
     marginBottom: tokens.spacingVerticalL,
   },
   icon: {
-    fontSize: "20px",
+    fontSize: '20px',
     flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
   },
   label: {
     flex: 1,
@@ -65,11 +61,7 @@ export interface ChannelHeadingProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export const ChannelHeading: React.FC<ChannelHeadingProps> = ({
-  icon,
-  label,
-  itemCount,
-}) => {
+export const ChannelHeading: React.FC<ChannelHeadingProps> = ({ icon, label, itemCount }) => {
   const styles = useStyles();
 
   return (
@@ -79,7 +71,7 @@ export const ChannelHeading: React.FC<ChannelHeadingProps> = ({
         {label}
       </Text>
       <Text size={200} className={styles.count}>
-        {itemCount} {itemCount === 1 ? "item" : "items"}
+        {itemCount} {itemCount === 1 ? 'item' : 'items'}
       </Text>
     </div>
   );
