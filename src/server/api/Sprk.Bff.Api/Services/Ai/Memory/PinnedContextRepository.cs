@@ -197,6 +197,66 @@ public sealed class PinnedContextRepository : IPinnedContextRepository
     }
 
     /// <inheritdoc/>
+    public async Task<PinnedContextItem?> GetByIdAsync(
+        string tenantId,
+        string pinId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pinId);
+
+        var id = BuildDocumentId(tenantId, pinId);
+        try
+        {
+            var response = await _container.ReadItemAsync<PinnedContextItem>(
+                id: id,
+                partitionKey: new PartitionKey(tenantId),
+                cancellationToken: ct);
+            return response.Resource;
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task UpdateAsync(PinnedContextItem pin, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(pin);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pin.Id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pin.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pin.Title);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pin.Content);
+
+        if (pin.Title.Length > MaxTitleLength)
+        {
+            throw new ArgumentException(
+                $"PinnedContextItem.Title length {pin.Title.Length} exceeds the maximum {MaxTitleLength}.",
+                nameof(pin));
+        }
+        if (pin.Content.Length > MaxContentLength)
+        {
+            throw new ArgumentException(
+                $"PinnedContextItem.Content length {pin.Content.Length} exceeds the maximum {MaxContentLength}.",
+                nameof(pin));
+        }
+
+        // ReplaceItemAsync overwrites the document at (id, partitionKey).
+        // Caller is responsible for ownership validation (the endpoint reads via
+        // GetByIdAsync and checks UserId/MatterId access before invoking Update).
+        await _container.ReplaceItemAsync(
+            item: pin,
+            id: pin.Id,
+            partitionKey: new PartitionKey(pin.TenantId),
+            cancellationToken: ct);
+
+        _logger.LogDebug(
+            "PinnedContextRepository: Updated pin {PinId} (tenant={TenantId}, user={UserId}, type={PinType})",
+            pin.Id, pin.TenantId, pin.UserId, pin.PinType);
+    }
+
+    /// <inheritdoc/>
     public async Task DeleteAsync(string tenantId, string pinId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);

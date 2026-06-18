@@ -119,7 +119,7 @@
 | 067 | C-G12 | Hierarchical memory composition (D-C-20) | ✅ | FULL | false | 064, 065, 066 |
 | 068 | C-G13 | Activate `MatterMemoryService` + shared token budget tracker (D-C-21/22) | ✅ | FULL | false | 067 |
 | 069 | C-G14 | "Remember/forget/always" recognition via CapabilityRouter (D-C-23) | ✅ | FULL | false | 065, 068 |
-| 070 | C-G15 | **Q7 EXPANSION: Pinned Memory CRUD + Visualization UI** (D-C-24/25) | 🔲 | FULL | false | 065, 069 |
+| 070 | C-G15 | **Q7 EXPANSION: Pinned Memory CRUD + Visualization UI** (D-C-24/25) — PART A (BFF endpoints) ✅; PART B (frontend) pending | 🟡 | FULL | false | 065, 069 |
 
 #### Sub-phase 9 — Widget visibility contract (parallel with 6b/6c/7)
 

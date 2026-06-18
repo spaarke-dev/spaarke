@@ -1,96 +1,129 @@
-# Current Task State — R6 (Wave C-G6 closeout — task 069 complete)
+# Current Task State — R6 (Wave C-G15 task 070 — PART A done; PART B pending)
 
-> **Last Updated**: 2026-06-18 (Wave C-G6 closeout)
-> **Mode**: Wave C-G6 (Pillar 7 voice command memory primitives) — closed
+> **Last Updated**: 2026-06-18 (task 070 PART A — BFF endpoint pair closed)
+> **Mode**: Wave C-G15 (Q7 Pinned Memory CRUD + Visualization UI) — partially complete
 > **Branch**: `work/spaarke-ai-platform-unification-r6`
 
 ---
 
-## Wave C-G6 closeout summary
+## Task 070 PART A summary
 
-| Task | Status | Title | Tests | Evidence note |
-|------|--------|-------|-------|---------------|
-| 069 | ✅ | "Remember / forget / always" recognition + ManagePinnedContextHandler chat tool (D-C-23 / FR-47) | 16 / 0 ManagePinnedContext + 28 / 0 (1 skip) CapabilityRouterVoiceMemory + 1090 / 0 (4 skipped) broader CapabilityRouter / Handler / Memory regression sweep | [task-069-evidence.md](notes/task-069-evidence.md) |
+Task 070 covers BOTH the BFF endpoint pair AND four Fluent v9 components (per the POML). To keep the work within stream-idle limits the main session split it into two dispatches:
 
-**Build status**: BFF clean (0 errors, 16 pre-existing warnings).
-**Publish-size**: 44.72 MB compressed (+0.01 MB vs task-068 44.71 MB baseline; BCL-only handler + regex pre-pass; no NuGet deps added).
-**CVE**: no new vulnerabilities; pre-existing Kiota Abstractions 1.21.2 HIGH unchanged.
+| PART | Scope | Status |
+|------|-------|--------|
+| **A** | BFF endpoint pair (`PinnedMemoryEndpoints.cs`) + repository extension (`UpdateAsync` + `GetByIdAsync`) + endpoint tests | ✅ this dispatch |
+| **B** | Frontend Fluent v9 components in `@spaarke/ai-widgets`; Context-pane integration | ⏳ pending (separate dispatch) |
 
-**Wave C-G6 status**: 1 of 1 tasks closed. The voice memory primitives ("remember X" / "forget X" / "always X") are now live: the CapabilityRouter Layer 0 pre-pass recognises the three patterns and biases the LLM toward `manage_pinned_context`; the handler creates / deletes `PinnedContextItem` rows via the task-065 repository; the task-067 hierarchical memory composition automatically picks up the new pins on the next chat turn.
+TASK-INDEX shows 070 as 🟡 (partial); will flip to ✅ only after PART B closes.
+
+| Task | PART | Status | Tests | Evidence note |
+|------|------|--------|-------|---------------|
+| 070 | A | 🟡 partial | 15 / 0 PinnedMemoryEndpoints + 160 / 0 (1 skip) PinnedContext/Memory regression sweep | [task-070-partA-evidence.md](notes/task-070-partA-evidence.md) |
+
+**Build status**: BFF clean (0 errors, 16 pre-existing warnings; no new warnings).
+**Publish-size**: 44.71 MB compressed (-0.01 MB vs task 069 44.72 MB baseline; essentially identical — pure BCL endpoint surface, no NuGet additions).
+**CVE**: no new vulnerabilities (no NuGet additions).
 
 ---
 
-## What Wave C-G6 produced
+## What PART A produced
 
-### Sub-task 1 — `ManagePinnedContextHandler` (Pillar 7 / FR-47)
+### Sub-task 1 — `PinnedMemoryEndpoints.cs` (NEW)
 
-NEW chat-only `IToolHandler` exposing a single LLM-facing function:
-`manage_pinned_context(action: "create" | "delete", pinType: "user-preference" | "system-rule" | "matter-fact", title, content?)`.
+Four endpoints under `/api/memory/pins`:
 
-- `action=create` + `pinType=user-preference` ← "remember X" voice mapping
-- `action=create` + `pinType=system-rule` ← "always X" voice mapping
-- `action=delete` ← "forget X" voice mapping (match by case-insensitive title against the user's pins of the same pinType; refused_not_found returns a structured response — not an error — when no match is found)
-- `pinType=matter-fact` exists for completeness but is NOT a voice mapping; task 070's Pinned Memory UI is the canonical matter-fact write surface.
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET | `/api/memory/pins?matterId={matterId?}` | List caller's pinned items (matterId optional filter for matter-fact pins) |
+| POST | `/api/memory/pins` | Create pin (201) |
+| PUT | `/api/memory/pins/{pinId}` | Update pin (200 / 404 / 403 not-owned) |
+| DELETE | `/api/memory/pins/{pinId}` | Delete pin (204 / 404 / 403 not-owned) |
 
-Injects `IPinnedContextRepository` (task 065) directly per ADR-013's 2026-05-20 refined AI-internal collaborator boundary. Auto-discovered via `ToolFrameworkExtensions.AddToolHandlersFromAssembly` per ADR-010 (ZERO new `Program.cs` lines). Seed row: `infra/dataverse/sprk_analysistool-manage-pinned-context-row.json`; registered in `scripts/Seed-TypedHandlers.ps1` (idempotent UPSERT).
+**URL convention**: `/api/memory/pins` (singular "pin" — aligns with task 069's `memory.pin_created` / `memory.pin_deleted` / new `memory.pin_updated` Counter naming on the shared `Sprk.Bff.Api.Memory` Meter).
 
-### Sub-task 2 — `CapabilityRouter` Layer 0 voice command pre-pass
+**Tenant + user scope (NFR-16 BINDING)**: tenant from caller's `tid` claim ONLY; user from caller's `oid` claim ONLY. Neither value is accepted from request body or query string. Cross-tenant reads/writes structurally impossible.
 
-NEW pre-pass in `CapabilityRouter.RouteSync` that matches `^(remember|forget|always)\b` (case-insensitive, compiled regex) BEFORE Layer 1 keyword scoring. On match, returns a Confident result selecting the synthetic `manage_pinned_context` capability + emits a `context.decision_made` event (layer=`layer0`, decision=`voice_memory`). Non-matching messages fall through to Layer 1 unchanged. Word-boundary anchoring prevents `remembered` / `forgetfulness` from false-firing.
+**Q7 ownership invariant (Pillar 7 BINDING)**: PUT/DELETE load pin via `GetByIdAsync`, then compare `pin.UserId` to caller's `oid` — mismatch returns 403. Matter-fact pins share the same UserId-anchored ownership check (richer `AuthorizationService` matter-access check documented as a follow-up).
 
-### Sub-task 3 — `ChatInvocationContext.UserId` additive field
+**ADR-015 telemetry**: three Counters on the `Sprk.Bff.Api.Memory` Meter (`memory.pin_created`, `memory.pin_updated` [NEW], `memory.pin_deleted`). Dimension set: `tenantId`, `userId`, `pinId`, `pinType`, `decision`. NEVER title body. NEVER content body. NEVER request text. Verified by 2 dedicated MeterListener tests (Create + Delete).
 
-NEW optional `string? UserId` field on `ChatInvocationContext` carrying the chat session's principal `oid` claim (Azure AD GUID rendered as string). Required by `ManagePinnedContextHandler` because `PinnedContextItem` is user-scoped (the `IPinnedContextRepository` contract requires non-empty `UserId` on `CreateAsync`). Wired at the existing `SprkChatAgentFactory.ResolveTools` `contextFactory` closure — extracted from `httpContext.User.FindFirst("oid")`. Nullable so back-compat is preserved (existing chat tools that don't read `UserId` are unaffected).
+### Sub-task 2 — `IPinnedContextRepository` extension
 
-### Sub-task 4 — Task 068 follow-up housekeeping
+Two new methods added to interface + implementation:
+- `GetByIdAsync(tenantId, pinId)` — point-read; returns `null` on 404 (idempotent on stale-handle race)
+- `UpdateAsync(pin)` — `ReplaceItemAsync`; caller is responsible for ownership validation upstream
 
-4 pre-existing test files (`PlaybookChatContextProviderTests`, `PlaybookChatContextProviderEnrichmentTests`, `PlaybookChatContextProviderEnrichmentIntegrationTests`, `SprkChatAgentFactoryPersonaTests`) were broken at task-068 closeout because that task made `IMatterMemoryService` a required ctor param on `PlaybookChatContextProvider`. The task-068 evidence note claimed the ctor accepted the new dep as nullable for back-compat, but the actual production ctor sig is non-nullable. Each broken test received a minimal 1-line fix (pass `new Mock<IMatterMemoryService>().Object`) so the test project compiles and the new task-069 tests can run. This is the SAME spirit as the "no backward-compat hacks for small counts" memory — 4 broken tests is well within the migrate-them-now range.
+ADR-013 binding preserved: endpoint consumes repository DIRECTLY (no PublicContracts facade) per the 2026-05-20 refined boundary rule for AI-internal collaborators. Mirrors task 069's direct-injection pattern.
+
+### Sub-task 3 — Endpoint wiring
+
+Single line added to `EndpointMappingExtensions.MapDomainEndpoints` after `MapWorkspaceStateEndpoints()`:
+
+```csharp
+Sprk.Bff.Api.Api.Memory.PinnedMemoryEndpoints.MapPinnedMemoryEndpoints(app);
+```
+
+ZERO new top-level `Program.cs` lines. ZERO new DI registrations.
+
+### Sub-task 4 — DTOs
+
+Five DTOs in `PinnedMemoryEndpoints.cs`:
+- `CreatePinRequest` — `{ title, content, pinType, matterId? }`
+- `UpdatePinRequest` — same shape as Create
+- `PinResponse` — `{ item: PinDto }` (POST 201 + PUT 200)
+- `PinListResponse` — `{ items: PinDto[], count }`
+- `PinDto` — `{ pinId, pinType, title, content, matterId?, createdAt, updatedAt, createdBy }`
+
+`PinDto.pinId` is the wire id (the `{pinId}` portion of the Cosmos doc id), NOT the full document id. Mirrors task 069's `ManagePinnedContextHandler.ExtractPinIdFromDocumentId` pattern.
+
+### Sub-task 5 — Endpoint tests (15 tests)
+
+NEW `tests/unit/Sprk.Bff.Api.Tests/Api/Memory/PinnedMemoryEndpointsTests.cs` — mirrors `WorkspaceStateEndpointsTests` pattern: in-process `WebApplicationFactory<Program>`, fake auth handler emitting `oid` + optional `tid`, mocked `IPinnedContextRepository`. ADR-015 counter verification via MeterListener.
 
 ---
 
 ## ADR governance summary
 
-- **ADR-010**: auto-discovery via assembly scan; ZERO new `Program.cs` lines. `IPinnedContextRepository` already registered in `AiPersistenceModule` (task 065).
-- **ADR-013**: handler injects `IPinnedContextRepository` DIRECTLY (no PublicContracts facade) per the 2026-05-20 refined AI-internal collaborator boundary. Mirrors the same direct-injection rationale that landed in tasks 067 (hierarchical composition) and 068 (matter-memory activation).
-- **ADR-014**: every repository call forwards `context.TenantId`; cross-tenant reads/writes are structurally impossible. Counter dimensions include `tenantId` as deterministic identifier only.
-- **ADR-015 (BINDING)**: telemetry dimensions = handler name + decision + action + pinType + title LENGTH + content PRESENCE + deterministic IDs (tenantId, userId, sessionId, pinId) + duration ONLY. The user-authored title body and content body NEVER touch the telemetry sink. Verified by 2 dedicated tests (`ExecuteChatAsync_Telemetry_Adheres_ToAdr015_OnCreate` + `..._OnDelete`) using the `TypedToolHandlerTestFixture.AssertTelemetryRespectsAdr015` scanner.
-- **ADR-029**: BCL-only implementation; +0.01 MB compressed delta vs task-068 baseline.
-- **NFR-03 (no new ADRs)**: honored — no new ADR introduced. The pre-pass uses an existing pattern (regex + IContextEventEmitter); the field addition uses an existing pattern (additive nullable property mirroring `MatterId` / `AnalysisId`).
-- **NFR-10 (8K budget)**: no impact — the handler does not consume system-prompt budget; pinned items injected by task-067 composition continue to use the existing `IPromptBudgetTracker` `memory-composition` layer tag.
+- **ADR-008**: every endpoint inherits group-level `RequireAuthorization()` + per-handler tid/oid claim extraction.
+- **ADR-010**: ZERO new top-level DI registrations. Single `MapPinnedMemoryEndpoints()` call inside `EndpointMappingExtensions.MapDomainEndpoints`.
+- **ADR-013**: direct `IPinnedContextRepository` injection per the 2026-05-20 refined AI-internal collaborator boundary.
+- **ADR-014**: every repository call forwards `tenantId`; cross-tenant impossible by partition key.
+- **ADR-015 (BINDING)**: telemetry emits `[PINNED-MEMORY]` tag + decision discriminator + deterministic IDs + length-class flags ONLY. NEVER title body. NEVER content body. NEVER request raw text. Verified by 2 dedicated MeterListener tests.
+- **ADR-016**: `ai-context` rate limit (60/min sliding window) at group level.
+- **ADR-029**: BCL-only implementation; +0.00 MB (44.71 vs 44.72 baseline).
+- **NFR-03 (no new ADRs)**: honored — established `WorkspaceStateEndpoints` + task 069 pattern.
+- **NFR-16 (per-tenant isolation)**: tenant from `tid` claim ONLY; verified by `ListPins_ScopesByCallerTidClaim_NeverAcceptsTenantQuery`.
 
 ---
 
 ## Files touched
 
 ### Created
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs`
-- `infra/dataverse/sprk_analysistool-manage-pinned-context-row.json`
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/ManagePinnedContextHandlerTests.cs`
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterVoiceMemoryTests.cs`
-- `projects/spaarke-ai-platform-unification-r6/notes/task-069-evidence.md`
+- `src/server/api/Sprk.Bff.Api/Api/Memory/PinnedMemoryEndpoints.cs`
+- `tests/unit/Sprk.Bff.Api.Tests/Api/Memory/PinnedMemoryEndpointsTests.cs`
+- `projects/spaarke-ai-platform-unification-r6/notes/task-070-partA-evidence.md`
 
 ### Modified
-- `src/server/api/Sprk.Bff.Api/Services/Ai/ChatInvocationContext.cs` — added `string? UserId` field.
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs` — populate `UserId` at the contextFactory closure.
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs` — Layer 0 voice command pre-pass.
-- `scripts/Seed-TypedHandlers.ps1` — added `MANAGE-PINNED-CONTEXT` row entry.
-- `projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md` — 069 🔲 → ✅.
-- `projects/spaarke-ai-platform-unification-r6/current-task.md` — Wave C-G6 closeout entry (this file).
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookChatContextProviderTests.cs` — task 068 follow-up (Mock<IMatterMemoryService>).
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookChatContextProviderEnrichmentTests.cs` — task 068 follow-up.
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookChatContextProviderEnrichmentIntegrationTests.cs` — task 068 follow-up.
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryPersonaTests.cs` — task 068 follow-up.
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IPinnedContextRepository.cs` — added `GetByIdAsync` + `UpdateAsync` to interface.
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Memory/PinnedContextRepository.cs` — added two method implementations (ReadItemAsync 404-idempotent + ReplaceItemAsync with length-cap validation).
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` — single line to wire `MapPinnedMemoryEndpoints(app)`.
+- `projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md` — 070 🔲 → 🟡 (PART A done; PART B frontend pending).
+- `projects/spaarke-ai-platform-unification-r6/current-task.md` — task 070 PART A entry (this file).
 
 ---
 
 ## Outstanding
 
-- **Dataverse deploy is USER ACTION**: the seed script (`scripts/Seed-TypedHandlers.ps1`) is idempotent and now includes the new row. Per project sequencing decision the user deploys separately — main session does NOT run `pac` / `mcp__dataverse__*`.
-- **Task 070** (C-G15 — Q7 expansion: Pinned Memory CRUD + visualization UI) is now unblocked. Task 069's `manage_pinned_context` tool + the task 065 repository surface together cover the chat-side write paths; task 070 owns the user-direct UI write surface + visualization.
-- The four task-068 follow-up test file fixes are minimal (1 line each) and intentionally do not migrate the test fixtures to exercise matter-memory — those tests cover the non-matter-memory enrichment paths and the matter-memory call is a no-op for them (no host context with `EntityType=="matter"` is set up). A more thorough migration could exercise matter-memory directly, but that's a follow-up housekeeping pass and not load-bearing for task 069.
+- **PART B (frontend components)** — separate dispatch. The four Fluent v9 components per POML:
+  - `PinnedMemoryListWidget` (Context pane widget; groups by pinType; filter + search)
+  - `PinnedMemoryEditDialog` (create / edit form)
+  - `PinnedMemoryDeleteConfirmation` (cross-session impact warning)
+  - `PinnedMemoryProvenanceBadge` (chat vs UI source attribution — depends on follow-up data-layer extension; see PART A evidence note for the `source` field design)
+- **Provenance source-field follow-up** — `PinnedContextItem` currently has no `source` discriminator. PART B can either stub the badge ("Created via UI" default) OR a follow-up task adds `source` to the data model + endpoints + chat handler. Documented in PART A evidence note.
 
 ---
 
-## Wave C-G6 → C-G7 transition
+## Wave C-G15 PART A → PART B transition
 
-Task 070 (Wave C-G7, FULL rigor, parallel-safe = false) is the canonical next task. Its dependencies (065, 069) are satisfied.
+PART B (frontend Fluent v9 components) is the canonical next dispatch. BFF contract is fully testable + documented for PART B consumption per the handoff notes in `notes/task-070-partA-evidence.md`.

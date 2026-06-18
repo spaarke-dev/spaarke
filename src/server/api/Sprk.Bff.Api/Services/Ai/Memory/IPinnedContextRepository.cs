@@ -83,4 +83,25 @@ public interface IPinnedContextRepository
     /// Cosmos document id.</param>
     /// <param name="ct">Cancellation token.</param>
     Task DeleteAsync(string tenantId, string pinId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns a single pin by its stable identifier, or <c>null</c> when the pin is not
+    /// found in the supplied tenant partition. Used by the Q7 UI endpoint pair (R6 task 070)
+    /// to fetch a single pin for ownership validation before update/delete operations.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier (partition key).</param>
+    /// <param name="pinId">Stable pin identifier (the <c>{pinId}</c> portion of the
+    /// Cosmos document id).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<PinnedContextItem?> GetByIdAsync(string tenantId, string pinId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Replaces an existing pin document with the supplied <paramref name="pin"/>. Caller MUST
+    /// have already validated that <paramref name="pin"/>'s <see cref="PinnedContextItem.Id"/>
+    /// resolves to an existing document the caller owns; this contract does NOT perform an
+    /// ownership check (the calling endpoint does it via <see cref="GetByIdAsync"/> first).
+    /// </summary>
+    /// <param name="pin">Item to replace.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task UpdateAsync(PinnedContextItem pin, CancellationToken ct = default);
 }
