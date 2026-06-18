@@ -29,6 +29,15 @@ public static class AnalysisServicesModule
         // RecordSummarizeInvocation; task 007 cleanup may call RecordSessionFilesIndexSize.
         services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
 
+        // R6 Pillar 6c (FR-37 / task 063) — IContextEventEmitter for context.* execution-trace
+        // events (tool_call_started/completed, knowledge_retrieved, playbook_node_executing/completed,
+        // decision_made). Registered unconditionally at the top of the module like R5SummarizeTelemetry
+        // so emission sites in CapabilityRouter / PlaybookOrchestrationService / ToolHandlerToAIFunctionAdapter
+        // can resolve it regardless of feature flags. ADR-015 binding: the implementation is structurally
+        // constrained to deterministic IDs only — see ContextEventEmitter.cs class header.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter,
+            Sprk.Bff.Api.Services.Ai.Telemetry.ContextEventEmitter>();
+
         // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — TRULY UNCONDITIONAL.
         // ISearchIndexNameResolver is consumed by RagIndexingJobHandler / BulkRagIndexingJobHandler /
         // IndexingWorkerHostedService — all 3 are registered unconditionally as scoped IJobHandler / IHostedService.

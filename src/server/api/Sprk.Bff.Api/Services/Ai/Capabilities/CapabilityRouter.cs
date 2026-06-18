@@ -7,6 +7,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Capabilities;
 
@@ -99,6 +100,15 @@ public sealed class CapabilityRouter : ICapabilityRouter
     private readonly IChatClient? _rawChatClient;
     private readonly ILogger<CapabilityRouter> _logger;
 
+    /// <summary>
+    /// R6 Pillar 6c (FR-37 / task 063) — optional context.* event emitter for
+    /// <c>context.decision_made</c> emission at Layer 1 / Layer 2 / Layer 3 outcomes.
+    /// ADR-015 audit: payload carries only layer (enum-like), decision (enum-like),
+    /// capability NAME (config identifier, Tier 1 safe), sessionId, tenantId. Never user
+    /// message text. Optional so existing test fixtures construct cleanly.
+    /// </summary>
+    private readonly IContextEventEmitter? _contextEventEmitter;
+
     // ── OTEL instrumentation ──────────────────────────────────────────────────
 
     private static readonly Meter RouterMeter = new("Sprk.Bff.Api.Ai", "1.0.0");
@@ -127,12 +137,14 @@ public sealed class CapabilityRouter : ICapabilityRouter
         ICapabilityManifest manifest,
         IOptions<CapabilityRouterOptions> options,
         [FromKeyedServices("raw")] IChatClient? rawChatClient,
-        ILogger<CapabilityRouter> logger)
+        ILogger<CapabilityRouter> logger,
+        IContextEventEmitter? contextEventEmitter = null)
     {
         _manifest = manifest ?? throw new ArgumentNullException(nameof(manifest));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _rawChatClient = rawChatClient;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _contextEventEmitter = contextEventEmitter;
     }
 
     /// <summary>
@@ -144,7 +156,7 @@ public sealed class CapabilityRouter : ICapabilityRouter
         ICapabilityManifest manifest,
         IOptions<CapabilityRouterOptions> options,
         ILogger<CapabilityRouter> logger)
-        : this(manifest, options, rawChatClient: null, logger)
+        : this(manifest, options, rawChatClient: null, logger, contextEventEmitter: null)
     {
     }
 
@@ -203,6 +215,17 @@ public sealed class CapabilityRouter : ICapabilityRouter
             {
                 Layer1HitCounter.Add(1);
             }
+
+            // R6 Pillar 6c (FR-37 / task 063) — context.decision_made (Layer 1).
+            // ADR-015 audit: layer = "layer1" (enum-like), decision = "confident" or
+            // "uncertain" (enum-like), capabilityName = config identifier (Tier 1 safe).
+            // No user message content, no scores, no payload.
+            _contextEventEmitter?.DecisionMade(
+                layer: "layer1",
+                decision: result.IsConfident ? "confident" : "uncertain",
+                capabilityName: result.SelectedCapabilities.Length > 0 ? result.SelectedCapabilities[0] : null,
+                sessionId: null,
+                tenantId: null);
 
             // Return a copy with accurate latency (ClassifyLayer1 uses 0 internally).
             return result with { LatencyMs = latencyMs };
@@ -650,6 +673,14 @@ public sealed class CapabilityRouter : ICapabilityRouter
             Layer2LatencyHistogram.Record(latencyMs);
             Layer2HitCounter.Add(1);
 
+            // R6 Pillar 6c (FR-37 / task 063) — context.decision_made (Layer 2 confident).
+            _contextEventEmitter?.DecisionMade(
+                layer: "layer2",
+                decision: "confident",
+                capabilityName: top.Name,
+                sessionId: null,
+                tenantId: null);
+
             return CapabilityRoutingResult.Confident(
                 [top.Name],
                 top.Confidence,
@@ -666,6 +697,11 @@ public sealed class CapabilityRouter : ICapabilityRouter
                 _options.Layer2.TimeoutMs);
             Layer2LatencyHistogram.Record(sw.ElapsedMilliseconds);
             activity?.SetTag("timeout", true);
+
+            // R6 Pillar 6c — context.decision_made (Layer 2 timeout).
+            _contextEventEmitter?.DecisionMade(
+                layer: "layer2", decision: "timeout", capabilityName: null, sessionId: null, tenantId: null);
+
             return null;
         }
         catch (Exception ex) when (IsRateLimitException(ex))
@@ -675,6 +711,11 @@ public sealed class CapabilityRouter : ICapabilityRouter
                 "CapabilityRouter.Layer2: rate-limited (HTTP 429) — falling through to Layer 3.");
             Layer2LatencyHistogram.Record(sw.ElapsedMilliseconds);
             activity?.SetTag("rate_limited", true);
+
+            // R6 Pillar 6c — context.decision_made (Layer 2 rate_limited).
+            _contextEventEmitter?.DecisionMade(
+                layer: "layer2", decision: "rate_limited", capabilityName: null, sessionId: null, tenantId: null);
+
             return null;
         }
         catch (Exception ex)
@@ -809,6 +850,11 @@ public sealed class CapabilityRouter : ICapabilityRouter
                 toolNames.Length,
                 _options.DefaultPlaybookId ?? "(none)",
                 sw.ElapsedMilliseconds);
+
+            // R6 Pillar 6c (FR-37 / task 063) — context.decision_made (Layer 3 fallback).
+            // ADR-015 audit: layer/decision are enum-like, no capabilityName (fallback path).
+            _contextEventEmitter?.DecisionMade(
+                layer: "layer3", decision: "fallback", capabilityName: null, sessionId: null, tenantId: null);
 
             return CapabilityRoutingResult.Fallback(
                 fallbackCapabilityNames: [],

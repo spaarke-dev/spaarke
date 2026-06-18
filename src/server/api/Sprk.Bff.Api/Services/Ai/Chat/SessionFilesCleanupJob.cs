@@ -583,7 +583,7 @@ public sealed class SessionFilesCleanupJob : BackgroundService
         long durationMs,
         string status)
     {
-        using var activity = Telemetry.AiTelemetry.ActivitySource.StartActivity(
+        using var activity = global::Sprk.Bff.Api.Telemetry.AiTelemetry.ActivitySource.StartActivity(
             TelemetryEventName,
             ActivityKind.Internal);
 
@@ -610,7 +610,7 @@ public sealed class SessionFilesCleanupJob : BackgroundService
         long durationMs,
         string status)
     {
-        using var activity = Telemetry.AiTelemetry.ActivitySource.StartActivity(
+        using var activity = global::Sprk.Bff.Api.Telemetry.AiTelemetry.ActivitySource.StartActivity(
             TelemetryEventName,
             ActivityKind.Internal);
 

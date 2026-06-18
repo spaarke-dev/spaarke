@@ -107,7 +107,7 @@
 | 060 | C-G5 | Additive `workspace.*` PaneEventBus event types (D-C-13) — TS via timed-out sub-agent; closeout 2026-06-09 main session | ✅ | FULL | true | 053 |
 | 061 | C-G8 | `ExecutionTraceWidget.tsx` (Context-pane; ordered timeline) (D-C-14) | ✅ | FULL | false | 059 |
 | 062 | C-G9 | Register trace widget with `ContextWidgetRegistry` (D-C-15) | ✅ | STANDARD | false | 061 |
-| 063 | C-G10 | Emit `context.*` events from chat agent + playbook execution (D-C-16) | 🔲 | FULL | false | 059 |
+| 063 | C-G10 | Emit `context.*` events from chat agent + playbook execution (D-C-16) | ✅ | FULL | false | 059 |
 
 #### Sub-phase 7 — Memory + Q7 expansion
 

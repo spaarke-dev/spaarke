@@ -46,6 +46,14 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     private readonly IInsightsActionRouter _insightsRouter;
     private readonly ILogger<PlaybookOrchestrationService> _logger;
 
+    /// <summary>
+    /// R6 Pillar 6c (FR-37 / task 063) — optional context.* event emitter for
+    /// <c>context.playbook_node_executing</c> / <c>context.playbook_node_completed</c>
+    /// emission at the orchestration WRAPPER level (NFR-08 BINDING: NOT inside any of the
+    /// 11 production node executors). Optional so existing test fixtures construct cleanly.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? _contextEventEmitter;
+
     // In-memory run tracking (Phase 1) - replaced with Dataverse in Phase 2
     private readonly ConcurrentDictionary<Guid, PlaybookRunContext> _activeRuns = new();
 
@@ -55,7 +63,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         IScopeResolverService scopeResolver,
         IAnalysisOrchestrationService legacyOrchestrator,
         IInsightsActionRouter insightsRouter,
-        ILogger<PlaybookOrchestrationService> logger)
+        ILogger<PlaybookOrchestrationService> logger,
+        Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? contextEventEmitter = null)
     {
         _nodeService = nodeService;
         _executorRegistry = executorRegistry;
@@ -63,6 +72,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         _legacyOrchestrator = legacyOrchestrator;
         _insightsRouter = insightsRouter ?? throw new ArgumentNullException(nameof(insightsRouter));
         _logger = logger;
+        _contextEventEmitter = contextEventEmitter;
     }
 
     /// <inheritdoc />
@@ -875,6 +885,36 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         await writer.WriteAsync(PlaybookStreamEvent.NodeStarted(
             runContext.RunId, runContext.PlaybookId, node.Id, node.Name), cancellationToken);
 
+        // R6 Pillar 6c (FR-37 / task 063) — context.playbook_node_executing emission.
+        // ADR-015 audit: playbookId / nodeId are deterministic GUIDs; nodeType is enum-like.
+        // NFR-08 BINDING: this emission is AT THE WRAPPER LEVEL — the 11 production node
+        // executors are NOT touched. Per-node wrapper timer started here for the matching
+        // completed event below.
+        var nodeStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        _contextEventEmitter?.PlaybookNodeExecuting(
+            playbookId: runContext.PlaybookId,
+            nodeId: node.Id,
+            nodeType: node.NodeType.ToString(),
+            sessionId: null,
+            tenantId: null);
+
+        // R6 Pillar 6c — local helper for context.playbook_node_completed emission.
+        // Called below at each return site (the inner try-catch has multiple return paths;
+        // a finally block on a freshly-opened try would force restructuring the entire
+        // existing try/catch — calling this helper inline keeps the change surgical).
+        // ADR-015 audit: decision is enum-like; durationMs is numeric; no payload.
+        void EmitNodeCompleted(string decision)
+        {
+            nodeStopwatch.Stop();
+            _contextEventEmitter?.PlaybookNodeCompleted(
+                playbookId: runContext.PlaybookId,
+                nodeId: node.Id,
+                decision: decision,
+                durationMs: nodeStopwatch.ElapsedMilliseconds,
+                sessionId: null,
+                tenantId: null);
+        }
+
         try
         {
             // Wave C1 task 020 — Gap #2 patch: branch-aware dependency resolution per design-a5 §7.2.
@@ -929,6 +969,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
 
+                EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063)
+
                 // Return a skip output (treated as success for flow control — matches existing
                 // dependency-failure-skip semantics; downstream nodes see this as "Ok(null)").
                 return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
@@ -952,6 +994,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                         await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
                             runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
+
+                        EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063)
 
                         // Return a skip output (treated as success for flow control)
                         return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
@@ -977,6 +1021,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 await writer.WriteAsync(PlaybookStreamEvent.NodeCompleted(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipOutput), cancellationToken);
+
+                EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063) — Start anchor
 
                 return skipOutput;
             }
@@ -1022,6 +1068,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                         runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
 
+                    EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
+
                     return errorOutput;
                 }
 
@@ -1036,6 +1084,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
 
                 return errorOutput;
             }
@@ -1074,6 +1124,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
 
                 return errorOutput;
             }
@@ -1121,6 +1173,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
 
+                EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063) — Insights L2 gate-fail
+
                 return skipOutput;
             }
 
@@ -1156,6 +1210,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, $"Validation failed: {errors}"), cancellationToken);
 
+                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
+
                 return errorOutput;
             }
 
@@ -1190,11 +1246,16 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     output.ErrorMessage ?? "Unknown error"), cancellationToken);
             }
 
+            // R6 Pillar 6c (FR-37 / task 063) — wrapper-level completion emission.
+            // NFR-08 BINDING: this is at the WRAPPER, not inside the executor.
+            EmitNodeCompleted(output.Success ? "success" : "failed");
+
             return output;
         }
         catch (OperationCanceledException)
         {
             _logger.LogDebug("Node {NodeName} was cancelled", node.Name);
+            EmitNodeCompleted("cancelled"); // R6 Pillar 6c (FR-37 / task 063)
             throw;
         }
         catch (Exception ex)
@@ -1212,6 +1273,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                 runContext.RunId, runContext.PlaybookId, node.Id, node.Name, ex.Message), cancellationToken);
+
+            EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063) — exception path
 
             return errorOutput;
         }

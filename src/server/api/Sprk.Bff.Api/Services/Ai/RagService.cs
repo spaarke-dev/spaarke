@@ -42,6 +42,14 @@ public partial class RagService : IRagService
     private readonly AnalysisOptions _analysisOptions;
     private readonly ILogger<RagService> _logger;
     private readonly AiTelemetry? _telemetry;
+    /// <summary>
+    /// R6 Pillar 6c (FR-37 / task 063) — optional context.* event emitter for
+    /// <c>context.knowledge_retrieved</c> emission after each RAG search completes.
+    /// ADR-015 audit: per-result emission carries deterministic source IDs + relevance score
+    /// + numeric resultCount ONLY. Never document content, never chunk text. Optional so
+    /// existing test fixtures and AI-OFF paths continue to construct cleanly.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? _contextEventEmitter;
     // B8 (task 011 Phase 1b Tier 3, D-09 §2 B8): direct Azure SDK access for knowledge-base
     // index administration. Used only by GetIndexHealthAsync / GetIndexedDocumentsAsync /
     // DeleteIndexedDocumentAsync which absorb the calls previously made by KnowledgeBaseEndpoints.
@@ -77,7 +85,8 @@ public partial class RagService : IRagService
         IOptions<AiSearchOptions> aiSearchOptions,
         ILogger<RagService> logger,
         IResilientSearchClient? resilientClient = null,
-        AiTelemetry? telemetry = null)
+        AiTelemetry? telemetry = null,
+        Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? contextEventEmitter = null)
     {
         _deploymentService = deploymentService;
         _openAiClient = openAiClient;
@@ -89,6 +98,7 @@ public partial class RagService : IRagService
         _aiSearchOptions = (aiSearchOptions ?? throw new ArgumentNullException(nameof(aiSearchOptions))).Value;
         _logger = logger;
         _telemetry = telemetry;
+        _contextEventEmitter = contextEventEmitter;
     }
 
     /// <inheritdoc />
@@ -304,6 +314,30 @@ public partial class RagService : IRagService
                 documentIds: string.Join(",", results.Select(r => r.DocumentId ?? r.Id)),
                 scores: string.Join(",", results.Select(r => r.Score.ToString("F4"))),
                 elapsedMs: totalStopwatch.ElapsedMilliseconds);
+
+            // R6 Pillar 6c (FR-37 / task 063) — context.knowledge_retrieved emission.
+            // ADR-015 audit per emission site (lines below): payload carries
+            //   - DocumentId / Id (deterministic identifier of the chunk; Tier 1 safe)
+            //   - Score (numeric metric)
+            //   - resultCount (numeric metric)
+            //   - tenantId (deterministic identifier)
+            // It DOES NOT carry: result.Content (chunk text), result.Highlights (excerpt text),
+            // result.Metadata (free-form), result.DocumentName (filename — could leak via
+            // ADR-015 amendment Tier 2; intentionally excluded from this event surface to keep
+            // it Tier 1 only). The IContextEventEmitter.KnowledgeRetrieved signature is
+            // structurally constrained — no string/object parameters accept user content.
+            if (_contextEventEmitter is not null)
+            {
+                foreach (var r in results)
+                {
+                    _contextEventEmitter.KnowledgeRetrieved(
+                        knowledgeSourceId: r.DocumentId ?? r.Id ?? string.Empty,
+                        relevanceScore: r.Score,
+                        resultCount: results.Count,
+                        sessionId: null, // R6 task 063: chat session id not threaded into RagService.SearchAsync today; downstream Pillar 6c trace widget correlates by tenantId + timestamp ordering.
+                        tenantId: options.TenantId);
+                }
+            }
 
             _logger.LogInformation(
                 "RAG search completed for tenant {TenantId}: {ResultCount} results in {TotalMs}ms " +
