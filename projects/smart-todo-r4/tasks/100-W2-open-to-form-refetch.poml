@@ -1,0 +1,172 @@
+<task id="R4-100" project="smart-todo-r4">
+  <metadata>
+    <title>W-2 — Open-to-form launch protocol + post-wizard-close refetch</title>
+    <phase>Phase 2: Wave D (post-PR-384 widget parity)</phase>
+    <workstream>W</workstream>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>widget, smart-todo, code-page, launch-context, modal, dataverse, spaarkeai</tags>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `todo.registration.ts` post-R4-099 cleanup; must serialize after R4-099 lands</parallel-reason>
+    <dependencies>R4-099 (shim cleanup), R4-034 (useLaunchContext existing extension), R4-040 (SmartTodoModal component)</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/hooks/useLaunchContext.ts</file>
+      <file>src/solutions/SmartTodo/src/SmartTodoApp.tsx</file>
+      <file>src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx (referenced — auto-mount target)</file>
+      <file>src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx (callbacks)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Close UAT issues 1 + 4 from the 2026-06-18 widget-parity audit. Extend the Code Page's `useLaunchContext` with an `openTodo` launch action; SmartTodoApp auto-mounts `<SmartTodoModal>` when invoked with `?action=openTodo&todoId=<guid>`. Rewrite the LegalWorkspace shim's `onOpenTodo` to invoke the Code Page with that launch param (so Open shows the To Do record's main form via iframe, NOT the Kanban). Add a post-wizard-close refetch wiring so the widget refreshes after `+` creates a new record.
+  </prompt>
+
+  <role>
+React engineer comfortable with `useLaunchContext` discriminated unions, MDA `Xrm.Navigation.navigateTo` semantics, and cross-frame `postMessage` lifecycle events.
+  </role>
+
+  <goal>
+Clicking Open on a widget To Do opens that record's main form in the `<SmartTodoModal>` (iframe-embedded OOB MDA form), NOT the Kanban. Creating a new To Do via the widget's `+` button triggers a refetch when the wizard closes, so the new record appears without a page refresh. The launch protocol is multi-environment portable (no hardcoded URLs, IDs, or container references). Both Code Page direct entry AND launched-with-openTodo entry paths render correctly.
+  </goal>
+
+  <inputs>
+    <file purpose="audit-findings">projects/smart-todo-r4/notes/d-widget-parity-audit-2026-06-18.md</file>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="hook-source">src/solutions/SmartTodo/src/hooks/useLaunchContext.ts</file>
+    <file purpose="auto-mount-host">src/solutions/SmartTodo/src/SmartTodoApp.tsx</file>
+    <file purpose="modal-component">src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx</file>
+    <file purpose="shim">src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+    <file purpose="parse-utility">src/client/shared/Spaarke.UI.Components/src/components/utils/parseDataParams.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-024">If polymorphic regarding logic touched, MUST wrap PolymorphicResolverService.applyResolverFields — no re-implementation of FR-13 mutual-exclusivity</constraint>
+    <constraint source="ADR-021">Fluent v9 + Griffel mandatory if any UI changes (likely minimal in this task)</constraint>
+    <constraint source="ADR-026">Code Page build is Vite + vite-plugin-singlefile + React 19; do not introduce a different build path</constraint>
+    <constraint source="spec FR-14">Cross-frame `postMessage` dirty-check protocol from R4-041 stays intact — auto-mounting the modal must not break the existing dirty-check protocol</constraint>
+    <constraint source="spec NFR-03">Multi-environment portable: no hardcoded MDA URLs, app IDs, container IDs, or chart IDs in source</constraint>
+    <constraint source="spec NFR-09">Rebuild + redeploy from master after R4-099 + R4-100 + R4-101 all land; this task is one of three; do NOT deploy from branch</constraint>
+    <constraint source="durable user instruction">spaarkedev1 deploys are master-only; do NOT propose a branch deploy</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>launch context + modal launch + xrm navigation</topic>
+    <files>
+      <file>src/solutions/SmartTodo/src/hooks/useLaunchContext.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/utils/parseDataParams.ts</file>
+      <file>src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md</file>
+      <file>src/client/webresources/js/sprk_todo_dirty_check.js</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver.md</file>
+      <file>.claude/adr/ADR-026-code-page-build-standard.md</file>
+    </files>
+    <patterns>
+      <pattern name="useLaunchContext existing actions" location="src/solutions/SmartTodo/src/hooks/useLaunchContext.ts">
+        Already supports `createTodo` (R3 task 070b) + `openTodos` (R4-034). This task adds `openTodo` (singular — opens a specific record). Mirror the existing discriminator shape.
+      </pattern>
+      <pattern name="parseDataParams envelope" location="src/client/shared/Spaarke.UI.Components/src/components/utils/parseDataParams.ts">
+        Visual Host wraps params in `?data=<envelope>`. R4-034 extended the parser to handle this. The `openTodo` action should be parseable from BOTH raw query keys (used by the LW shim's onOpenTodo call) AND the envelope form (used by Visual Host drill-through if a future surface needs it).
+      </pattern>
+      <pattern name="Modal auto-mount" location="src/solutions/SmartTodo/src/SmartTodoApp.tsx (search for modalTodoId state)">
+        SmartTodoApp already has `modalTodoId` state and a `useEffect` subscribing to OPEN_TODOS_EVENT (R4-040). The new branch: if `launchContext.action === "openTodo"`, call `setModalTodoId(launchContext.todoId)` on mount.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT screenshot 2026-06-18: clicking Open on a widget To Do opens the SmartTodo Code Page bare, which defaults to Kanban — NOT the To Do record's main form. Root cause: shim's `onOpenTodo` calls `ctx.onOpenWizard("sprk_smarttodo", data, …)` without a launch action that tells the Code Page "auto-mount the modal for this id." Also UAT issue 1: new To Dos created via `+` don't appear after wizard close because the shim never refetches.
+    </background>
+    <dependencies>
+      <dependency task="R4-099" status="must-complete">Shim chrome cleanup lands first (shared file: todo.registration.ts)</dependency>
+      <dependency task="R4-034" status="must-complete">useLaunchContext extension framework exists (parseDataParams + discriminator pattern)</dependency>
+      <dependency task="R4-040" status="must-complete">SmartTodoModal component exists; `modalTodoId` state in SmartTodoApp already wired for OPEN_TODOS_EVENT</dependency>
+    </dependencies>
+    <related-work>
+      <item>R4-041 (cross-frame dirty-check) — the auto-mount path must preserve the dirty-check round-trip; verify by tabbing through the iframe form and triggering a navigation</item>
+      <item>R4-101 (W-3) is parallel-safe with this task — different files (peer package + grouping)</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">Confirm context &lt; 70%. Read the audit-findings note. Verify R4-099 has landed (check `todo.registration.ts` for stripped chrome).</step>
+    <step order="1" name="Read existing launch context">Read `useLaunchContext.ts` to understand the existing discriminated union shape (`createTodo`, `openTodos`). Identify the exact pattern for adding a new action without breaking existing consumers.</step>
+    <step order="2" name="Extend launch context — openTodo action">Add `openTodo` discriminator: `{action:"openTodo", todoId: string}`. Update the parser to recognize `action=openTodo&todoId=<guid>` from BOTH raw query keys AND the parseDataParams envelope form. Add tests at executable-spec shim level (matching the 22 existing useLaunchContext tests).</step>
+    <step order="3" name="Auto-mount in SmartTodoApp">In SmartTodoApp.tsx, add a `useEffect` (or extend the existing launch-context-driven effect) that calls `setModalTodoId(launchContext.todoId)` when `launchContext.action === "openTodo"`. Verify this does not conflict with the existing OPEN_TODOS_EVENT subscriber (R4-040) — both should be able to set `modalTodoId`.</step>
+    <step order="4" name="Rewrite shim onOpenTodo">Update `todo.registration.ts` `onOpenTodo` to invoke the Code Page with `?action=openTodo&todoId=<guid>` as the data param. Use the existing `ctx.onOpenWizard` API. Confirm the modal opens the To Do record (not the Kanban).</step>
+    <step order="5" name="Refetch wiring (issue 1)">Investigate the post-wizard-close listener options. Likely paths: (a) BroadcastChannel keyed to a sprk_todo:created topic that the wizard posts and the shim subscribes; (b) Xrm.App event stream subscription; (c) shim-side polling on visibilitychange. Pick the cleanest; implement; wire `refetchRef.current?.()` to fire on the close event. Add a brief comment justifying the choice for future maintainers.</step>
+    <step order="6" name="Cross-frame protocol preserve check">Verify R4-041's `sprk_todo_dirty_check.js` cross-frame protocol still works in the auto-mount path. Open the modal from the widget (Open action), then attempt to navigate the modal's `&lt;` / `>` controls — dirty check should fire correctly.</step>
+    <step order="7" name="Build">`npm run build` in `src/solutions/SmartTodo` (Vite) + `src/solutions/LegalWorkspace` (Vite). Both must pass clean.</step>
+    <step order="8" name="Quality gates">Run `code-review` + `adr-check` on modified files per task-execute Step 9.5. ADR-024, ADR-026 are the binding ones.</step>
+    <step order="9" name="Update task status">Flip POML status to `complete`. Update TASK-INDEX.md row + header counts. Document the refetch mechanism choice in the commit message.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build (Vite on SmartTodo + LegalWorkspace)</tool>
+    <tool name="git">Stage + commit (main session pushes)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Modified: src/solutions/SmartTodo/src/hooks/useLaunchContext.ts (openTodo discriminator + parser)</output>
+    <output type="code">Modified: src/solutions/SmartTodo/src/SmartTodoApp.tsx (auto-mount branch)</output>
+    <output type="code">Modified: src/solutions/LegalWorkspace/src/sections/todo.registration.ts (onOpenTodo rewrite + refetch listener)</output>
+    <output type="test">Extended useLaunchContext executable-spec tests covering openTodo action (both raw + envelope param forms)</output>
+    <output type="docs">Commit message documents refetch mechanism choice (BroadcastChannel vs Xrm event vs other) with rationale</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Open opens the To Do main form (issue 4)">
+      <url>npm run dev SmartTodo + LegalWorkspace, or post-deploy spaarkedev1 SpaarkeAi workspace</url>
+      <steps>
+        <step>Mount the SmartTodo widget in the workspace</step>
+        <step>Click any To Do card to select it</step>
+        <step>Click Open</step>
+        <step>Verify a dialog opens showing the To Do record's main form (iframe with OOB MDA form chrome — Save, BPF, statuscode dropdown all visible)</step>
+        <step>Verify the URL/launch params contain `action=openTodo&amp;todoId=<guid>`</step>
+        <step>Confirm Kanban is NOT shown — only the modal form</step>
+      </steps>
+      <expected>Clicking Open opens the To Do's main form in &lt;SmartTodoModal&gt;, not the Kanban</expected>
+    </test>
+    <test name="Refetch after create (issue 1)">
+      <steps>
+        <step>Mount the SmartTodo widget; note the current item count</step>
+        <step>Click `+` to open the create wizard</step>
+        <step>Create a new To Do; save</step>
+        <step>Close the wizard</step>
+        <step>Verify the widget refreshes within ~2s and shows the new record without a page refresh</step>
+      </steps>
+      <expected>New record appears in the widget list automatically after wizard close</expected>
+    </test>
+    <test name="Existing OPEN_TODOS_EVENT path still works (regression)">
+      <steps>
+        <step>From the Code Page directly (not via the widget), open the SmartTodo Code Page</step>
+        <step>Use the toolbar Open action (R4-032) — it dispatches OPEN_TODOS_EVENT</step>
+        <step>Verify the modal still opens as before</step>
+      </steps>
+      <expected>R4-040's existing OPEN_TODOS_EVENT path is not broken by the new openTodo launch action</expected>
+    </test>
+    <test name="Dirty-check protocol preserved (R4-041 regression)">
+      <steps>
+        <step>Open the modal from the widget (Open action)</step>
+        <step>Modify a field in the iframe form (mark form dirty)</step>
+        <step>Click the modal's next/prev navigation</step>
+        <step>Verify the dirty-check dialog fires</step>
+      </steps>
+      <expected>R4-041 cross-frame dirty-check protocol still works in the auto-mount path</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">useLaunchContext has an `openTodo` discriminator parseable from BOTH raw query keys AND parseDataParams envelope</criterion>
+    <criterion testable="true">SmartTodoApp auto-mounts &lt;SmartTodoModal&gt; when launched with `action=openTodo&amp;todoId=<guid>`</criterion>
+    <criterion testable="true">LW shim's onOpenTodo invokes the Code Page with the openTodo launch param</criterion>
+    <criterion testable="true">UAT issue 4 closed: clicking Open opens the To Do form, NOT the Kanban</criterion>
+    <criterion testable="true">UAT issue 1 closed: creating a new To Do via the widget's `+` triggers a refetch on wizard close</criterion>
+    <criterion testable="true">R4-040 OPEN_TODOS_EVENT path still works (regression check)</criterion>
+    <criterion testable="true">R4-041 cross-frame dirty-check protocol still works in the auto-mount path (regression check)</criterion>
+    <criterion testable="true">No hardcoded MDA URLs, app IDs, or container IDs introduced (NFR-03)</criterion>
+    <criterion testable="true">`npm run build` passes for both SmartTodo and LegalWorkspace</criterion>
+    <criterion testable="true">POML status flipped to complete; TASK-INDEX.md row + header counts updated</criterion>
+  </acceptance-criteria>
+</task>

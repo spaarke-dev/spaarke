@@ -1,0 +1,155 @@
+<task id="R4-101" project="smart-todo-r4">
+  <metadata>
+    <title>W-3 — Today/Tomorrow/Future grouping (useKanbanColumns hoist)</title>
+    <phase>Phase 2: Wave D (post-PR-384 widget parity)</phase>
+    <workstream>W</workstream>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>widget, smart-todo, peer-package, hoist, react, fluent-v9</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-020 (peer package exists), R4-030 (Code Page Kanban + useKanbanColumns reference)</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/hooks/useKanbanColumns.ts (source of truth — hoist into peer package)</file>
+      <file>src/solutions/SmartTodo/src/hooks/useUserPreferences.ts (threshold prefs — referenced for default values)</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/index.ts (peer package barrel)</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx (rendering change)</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts (grouped-list styles)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Close UAT issue 6 from the 2026-06-18 widget-parity audit. Hoist the `useKanbanColumns` hook from the SmartTodo Code Page into the `@spaarke/smart-todo-components` peer package; render the widget items as Today / Tomorrow / Future grouped sections (NOT a full drag-drop Kanban — just date-bucket headers + flat lists per group). Code Page consumes the hoisted hook from the peer package; no duplication.
+  </prompt>
+
+  <role>
+React engineer comfortable with peer-package hoists (the `@spaarke/ui-components` → `@spaarke/smart-todo-components` style), Fluent v9 styling, and the threshold-based date-bucket logic in `useKanbanColumns`.
+  </role>
+
+  <goal>
+Widget renders 3 grouped sections — "Today", "Tomorrow", "Future" — with items bucketed via the same `useKanbanColumns` logic the Code Page uses. The hook lives in `@spaarke/smart-todo-components` (peer package); the Code Page's local copy is deleted and the import points to the peer package. Empty buckets are visible (with a sensible "No items" state) so users can see the grouping structure even before scrolling. The widget's selection model (from R4-099) carries over — selecting an item in any bucket enables the Open action.
+  </goal>
+
+  <inputs>
+    <file purpose="audit-findings">projects/smart-todo-r4/notes/d-widget-parity-audit-2026-06-18.md</file>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="hook-source">src/solutions/SmartTodo/src/hooks/useKanbanColumns.ts</file>
+    <file purpose="threshold-prefs-reference">src/solutions/SmartTodo/src/hooks/useUserPreferences.ts</file>
+    <file purpose="peer-package-barrel">src/client/shared/Spaarke.SmartTodo.Components/src/index.ts</file>
+    <file purpose="widget">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</file>
+    <file purpose="pattern">.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel `makeStyles` + semantic tokens mandatory; no v8 components, no inline styles</constraint>
+    <constraint source="ADR-012">Shared hook MUST live in `@spaarke/smart-todo-components` peer package — NOT in `src/solutions/SmartTodo/` after hoist</constraint>
+    <constraint source="No regression">Code Page's existing Kanban rendering MUST continue to work after the hoist; the consumer change is a single import-source swap</constraint>
+    <constraint source="Widget scope">Widget renders GROUPED LISTS, NOT a full drag-drop Kanban. Drag-drop is Code Page only; do NOT hoist react-dnd or the column-drop logic.</constraint>
+    <constraint source="spec NFR-09">Rebuild + redeploy from master after R4-099 + R4-100 + R4-101 all land; this task is one of three; do NOT deploy from branch</constraint>
+    <constraint source="durable user instruction">spaarkedev1 deploys are master-only; do NOT propose a branch deploy</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>peer-package hoist + Kanban column bucketing</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>src/solutions/SmartTodo/src/hooks/useKanbanColumns.ts</file>
+      <file>src/solutions/SmartTodo/src/hooks/useUserPreferences.ts</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="Peer-package hoist precedent" location="src/client/shared/Spaarke.SmartTodo.Components (created in R4-020)">
+        The peer package was created in R4-020 to host the widget. Hoisting `useKanbanColumns` into it extends that pattern. Mirror the existing widget's barrel export pattern.
+      </pattern>
+      <pattern name="Code Page consumer pattern" location="src/solutions/SmartTodo/src/components/SmartToDo.tsx">
+        Code Page's Kanban consumer uses `useKanbanColumns(items, userPrefs)`. After hoist, the import source changes from `../hooks/useKanbanColumns` to `@spaarke/smart-todo-components`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT screenshot 2026-06-18 showed the widget rendering a flat list of items with no Today/Tomorrow/Future grouping — but the user expects the same date-bucket organization the Code Page's Kanban provides. The hoist was explicitly deferred from R4-020 (called out as "13-file rich-feature subtree" in the R4-020 closeout). This task is that hoist, scoped to JUST `useKanbanColumns` + grouped list rendering (no drag-drop, no full Kanban).
+    </background>
+    <dependencies>
+      <dependency task="R4-020" status="must-complete">Peer package exists</dependency>
+      <dependency task="R4-030" status="must-complete">Code Page Kanban + useKanbanColumns are the source of truth being hoisted</dependency>
+    </dependencies>
+    <related-work>
+      <item>R4-099 (W-1) is parallel-safe with this task — different files (LW shim + widget chrome vs peer package + widget rendering). Selection state added by R4-099 should remain compatible with grouped rendering.</item>
+      <item>R4-100 (W-2) is parallel-safe with this task — different files (Code Page launch context + shim callbacks vs peer package hook + widget rendering).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">Confirm context &lt; 70%. Read the audit-findings note.</step>
+    <step order="1" name="Read source hook">Read `src/solutions/SmartTodo/src/hooks/useKanbanColumns.ts` end-to-end. Note: signature, dependencies (any imports from `src/solutions/SmartTodo`?), threshold prefs shape, date-bucket logic.</step>
+    <step order="2" name="Identify hoist transitives">Inventory what useKanbanColumns depends on — types (ITodo, KanbanColumn), constants (threshold defaults), utilities (date comparisons). Anything currently in `src/solutions/SmartTodo` that the peer package would need must also move OR be re-exported from the peer package.</step>
+    <step order="3" name="Hoist the hook">Create `src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts` with the same logic. Move (do NOT duplicate) any pure transitive dependencies that the Code Page does not need to retain locally. Add to peer package barrel (`src/index.ts`).</step>
+    <step order="4" name="Update Code Page consumer">In the Code Page (likely `src/solutions/SmartTodo/src/components/SmartToDo.tsx` and any other consumer), change the import source from `../hooks/useKanbanColumns` to `@spaarke/smart-todo-components`. Delete the local `useKanbanColumns.ts` file. Verify Code Page builds + Kanban renders unchanged.</step>
+    <step order="5" name="Widget grouped rendering">In `SmartTodoWidget.tsx`, call `useKanbanColumns(items, prefs)` (where prefs = sensible widget defaults or pulled from `useUserPreferences` if cheap). Replace the flat `renderItem` loop with 3 grouped sections — each section has a header (column label + count) and a list of items. Empty groups render a "No items" placeholder. Selection model from R4-099 continues to work across groups.</step>
+    <step order="6" name="Styles">Update `SmartTodoWidget.styles.ts` with grouped-section styles — section header (subtle background, smaller font), section list (existing card styles), section gap (Fluent v9 spacing tokens).</step>
+    <step order="7" name="Build">`npm run build` (tsc) in `src/client/shared/Spaarke.SmartTodo.Components` + `npm run build` (Vite) in `src/solutions/SmartTodo` + `npm run build` (Vite) in `src/solutions/LegalWorkspace`. All three must pass clean.</step>
+    <step order="8" name="Quality gates">Run `code-review` + `adr-check` on modified files per task-execute Step 9.5. ADR-012 is the binding one (shared-lib hoist rule).</step>
+    <step order="9" name="Update task status">Flip POML status to `complete`. Update TASK-INDEX.md row + header counts. Note the closeout of the "13-file rich-feature subtree" follow-up from R4-020 (this task scope is just the grouping hook; full Kanban hoist remains a future task if ever needed).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build (tsc on peer package; Vite on SmartTodo + LegalWorkspace)</tool>
+    <tool name="git">Stage + commit (main session pushes)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">New: src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts (hoisted hook)</output>
+    <output type="code">Modified: src/client/shared/Spaarke.SmartTodo.Components/src/index.ts (barrel export)</output>
+    <output type="code">Deleted: src/solutions/SmartTodo/src/hooks/useKanbanColumns.ts (after consumer swap)</output>
+    <output type="code">Modified: src/solutions/SmartTodo/src/components/SmartToDo.tsx (import source swap)</output>
+    <output type="code">Modified: src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx (grouped rendering)</output>
+    <output type="code">Modified: src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts (grouped-section styles)</output>
+    <output type="docs">Commit message notes closeout of R4-020 "13-file rich-feature subtree" deferred hoist (scope: hook + grouping only, not full Kanban)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Widget shows 3 grouped sections (issue 6)">
+      <url>npm run dev or post-deploy spaarkedev1 SpaarkeAi workspace</url>
+      <steps>
+        <step>Mount the SmartTodo widget in the workspace</step>
+        <step>Verify 3 section headers: "Today", "Tomorrow", "Future" (or equivalent labels from useKanbanColumns)</step>
+        <step>Verify each section shows item count next to the header</step>
+        <step>Verify items appear under the correct section based on due date (test with at least one item per bucket)</step>
+        <step>Verify an empty section shows a "No items" placeholder</step>
+      </steps>
+      <expected>Widget shows 3 grouped sections with items correctly bucketed; empty sections visible with placeholder</expected>
+    </test>
+    <test name="Code Page Kanban still renders (regression)">
+      <steps>
+        <step>Open the SmartTodo Code Page directly</step>
+        <step>Verify the Kanban still shows 3 columns with items bucketed identically to before the hoist</step>
+        <step>Verify drag-drop still works (Code Page Kanban is unchanged)</step>
+      </steps>
+      <expected>Code Page Kanban is functionally unchanged; only the import source moved</expected>
+    </test>
+    <test name="Selection works across groups (R4-099 compatibility)">
+      <steps>
+        <step>Click an item in "Today" — verify it selects</step>
+        <step>Click an item in "Future" — verify it selects (and the Today selection clears)</step>
+        <step>Click Open — verify the correct item opens via R4-100's launch path</step>
+      </steps>
+      <expected>Selection model from R4-099 works across grouped sections; Open invokes R4-100's launch path with the correct todoId</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">`useKanbanColumns` lives in `@spaarke/smart-todo-components` peer package; deleted from `src/solutions/SmartTodo/src/hooks/`</criterion>
+    <criterion testable="true">Code Page consumer imports from `@spaarke/smart-todo-components`; Kanban renders unchanged (regression-safe)</criterion>
+    <criterion testable="true">Widget renders 3 grouped sections (Today / Tomorrow / Future) with items bucketed via the hoisted hook</criterion>
+    <criterion testable="true">Empty buckets render a "No items" placeholder (group structure always visible)</criterion>
+    <criterion testable="true">Selection state from R4-099 carries across groups (single-select model holds)</criterion>
+    <criterion testable="true">`npm run build` passes for `@spaarke/smart-todo-components`, SmartTodo, and LegalWorkspace</criterion>
+    <criterion testable="true">No drag-drop logic, no react-dnd hoisted (widget scope = grouped lists only)</criterion>
+    <criterion testable="true">No Fluent v8 components introduced; no inline styles; Griffel + tokens used throughout</criterion>
+    <criterion testable="true">POML status flipped to complete; TASK-INDEX.md row + header counts updated; R4-020 deferred-hoist follow-up closed</criterion>
+  </acceptance-criteria>
+</task>

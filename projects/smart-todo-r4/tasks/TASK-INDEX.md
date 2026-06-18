@@ -1,11 +1,11 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-12 (094 grep gate ✅; PR #384 merged 2026-06-11; branch re-synced with master)
+> **Last Updated**: 2026-06-18 (Wave D added: +3 widget parity tasks 099/100/101 per UAT feedback)
 > **Branch**: `work/smart-todo-r4-wave2`
-> **Total Tasks**: 31 (was 30; +034 from Phase 0 aggregation)
-> **Status**: 🔲 3 not-started · 🔄 0 in-progress · ✅ 28 complete · ❌ 0 blocked
-> **Active wave**: none — Waves A + B + C MERGED to master via PR #384; remaining: 093 (UI tests), 092 (master-side deploy — now actionable post-merge), 098 (wrap-up)
+> **Total Tasks**: 34 (was 31; +099/100/101 widget parity from 2026-06-18 UAT — see [d-widget-parity-audit-2026-06-18.md](../notes/d-widget-parity-audit-2026-06-18.md))
+> **Status**: 🔲 6 not-started · 🔄 0 in-progress · ✅ 28 complete · ❌ 0 blocked
+> **Active wave**: none — Waves A + B + C MERGED via PR #384; **Wave D queued (099 + 100 + 101 widget parity)**; remaining besides Wave D: 092 (deploy session in-flight; golden-path smoke pending), 093 (UI tests), 098 (wrap-up)
 
 ---
 
@@ -158,7 +158,19 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔲 | [098](098-project-wrap-up.poml) | Project wrap-up — lessons-learned, README, repo-cleanup, PR | wrap-up, docs, pr | ❌ | 092, 093, 094 | — |
+| 🔲 | [098](098-project-wrap-up.poml) | Project wrap-up — lessons-learned, README, repo-cleanup, PR | wrap-up, docs, pr | ❌ | 092, 093, 094, **099, 100, 101** | — |
+
+---
+
+### Wave D — Widget parity follow-up (post-PR-384 UAT, 2026-06-18)
+
+UAT screenshot 2026-06-18 surfaced 6 widget issues; diagnostic + plan in [d-widget-parity-audit-2026-06-18.md](../notes/d-widget-parity-audit-2026-06-18.md). All three land in ONE PR; widget feature parity is the user-facing acceptance criterion. **098 wrap-up depends on Wave D complete.**
+
+| Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
+|:---:|:---|---|---|:---:|---|---|
+| 🔲 | [099](099-W1-widget-chrome-pattern-d.poml) | W-1 — Widget chrome consolidation + Pattern D alignment (closes UAT 2/3/5: collapses LW shim to Calendar shape; widget gains single toolbar `[SearchBox, +, Open, refresh]`; title becomes "Smart To Do") | widget, pattern-d, fluent-v9 | ✅ (parallel with 101) | 020, 030 | 100 |
+| 🔲 | [100](100-W2-open-to-form-refetch.poml) | W-2 — Open-to-form launch protocol + post-wizard-close refetch (closes UAT 1/4: `useLaunchContext.openTodo` discriminator auto-mounts `<SmartTodoModal>`; shim wires refetch on wizard close) | widget, code-page, launch-context, modal | ❌ (serial after 099 on `todo.registration.ts`) | 099, 034, 040 | 098 |
+| 🔲 | [101](101-W3-grouping-hoist.poml) | W-3 — Today/Tomorrow/Future grouping (`useKanbanColumns` hoist into `@spaarke/smart-todo-components`; widget renders 3 grouped sections; closes the R4-020 deferred 13-file follow-up at hook-level scope) | widget, peer-package, hoist, fluent-v9 | ✅ (parallel with 099) | 020, 030 | 098 |
 
 ---
 
@@ -176,7 +188,9 @@
 | **G2b-after** | 041, 042, 071 | 010 + 040 (for 041, 042); 070 (for 071) | 3 | Serial after their parent tasks |
 | **G2c — Parent forms** | 081, 082, 083, 084 | 051 + 080 | 4 | Each touches a different form |
 | **G3 — Deploy + Test** | 092 → 093 + 094 | All G2 complete | 1 then 2 | 093 + 094 parallel after 092 |
-| **G4 — Wrap-up** | 098 | G3 complete | 1 | Final task |
+| **GD-1 — Widget parity parallel** | 099, 101 | 020 + 030 (both ✅) | 2 | Disjoint files: 099 = shim + widget chrome; 101 = peer package hook hoist + widget rendering |
+| **GD-2 — Widget parity serial** | 100 | 099 + 034 + 040 (all ✅ after 099 lands) | 1 | Touches `todo.registration.ts` after 099's cleanup; serial dependency |
+| **G4 — Wrap-up** | 098 | G3 + GD complete | 1 | Final task — also depends on Wave D |
 
 **Max-concurrency rule** (from project-pipeline skill): **6 agents per wave hard limit**. G2a + G2a-B (4 + 3 = 7) requires staging or single-agent fallback for the last task.
 
@@ -209,8 +223,13 @@ G2b SmartTodo Code Page (after G1, G2a-B)
 G3 Deployment (after everything)
   092 ← all 020-084 → 093, 094 (parallel)
 
+GD Widget parity (post-PR-384 UAT 2026-06-18)
+  099 ← 020, 030 (chrome + Pattern D alignment)
+  101 ← 020, 030 (grouping hoist) — parallel with 099
+  100 ← 099, 034, 040 (open + refetch) — serial after 099
+
 G4 Wrap-up
-  098 ← 092, 093, 094
+  098 ← 092, 093, 094, 099, 100, 101
 ```
 
 ---
