@@ -70,19 +70,11 @@ import {
   type SearchBoxChangeEvent,
   type InputOnChangeData,
 } from '@fluentui/react-components';
-import {
-  ArrowClockwiseRegular,
-  Add20Regular,
-  Open20Regular,
-} from '@fluentui/react-icons';
+import { ArrowClockwiseRegular, Add20Regular, Open20Regular } from '@fluentui/react-icons';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
-import {
-  bucketTodoItems,
-  DEFAULT_TODAY_THRESHOLD,
-  DEFAULT_TOMORROW_THRESHOLD,
-} from '../../hooks/useKanbanColumns';
+import { bucketTodoItems, DEFAULT_TODAY_THRESHOLD, DEFAULT_TOMORROW_THRESHOLD } from '../../hooks/useKanbanColumns';
 
 // ---------------------------------------------------------------------------
 // Public statuscode constants (R3 task 009 / OS-1)
@@ -418,12 +410,9 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // Handlers
   // -------------------------------------------------------------------------
 
-  const handleSearchChange = React.useCallback(
-    (_e: SearchBoxChangeEvent, data: InputOnChangeData) => {
-      setSearchQuery(data.value);
-    },
-    [],
-  );
+  const handleSearchChange = React.useCallback((_e: SearchBoxChangeEvent, data: InputOnChangeData) => {
+    setSearchQuery(data.value);
+  }, []);
 
   const handleCardClick = React.useCallback((todoId: string) => {
     setSelectedId(prev => (prev === todoId ? null : todoId));
@@ -488,13 +477,8 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // -------------------------------------------------------------------------
 
   const groupedColumns = React.useMemo(
-    () =>
-      bucketTodoItems(
-        filteredItems,
-        DEFAULT_TODAY_THRESHOLD,
-        DEFAULT_TOMORROW_THRESHOLD,
-      ),
-    [filteredItems],
+    () => bucketTodoItems(filteredItems, DEFAULT_TODAY_THRESHOLD, DEFAULT_TOMORROW_THRESHOLD),
+    [filteredItems]
   );
 
   // -------------------------------------------------------------------------
@@ -508,11 +492,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
       aria-label={`${title}, ${filteredItems.length} item${filteredItems.length === 1 ? '' : 's'}`}
     >
       {/* ── Sole chrome row — Toolbar: [SearchBox, +, Open, refresh] ──── */}
-      <Toolbar
-        aria-label="Smart To Do toolbar"
-        size="small"
-        className={styles.toolbar}
-      >
+      <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
         <div className={styles.searchWrap}>
           <SearchBox
             value={searchQuery}
@@ -535,10 +515,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
               />
             </Tooltip>
           )}
-          <Tooltip
-            content={openDisabled ? 'Select a to-do to open' : 'Open selected to-do'}
-            relationship="label"
-          >
+          <Tooltip content={openDisabled ? 'Select a to-do to open' : 'Open selected to-do'} relationship="label">
             <Button
               appearance="subtle"
               size="small"
@@ -599,18 +576,10 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
         {!isLoading && !error && filteredItems.length > 0 && (
           <div className={styles.groupList}>
             {groupedColumns.map(col => (
-              <section
-                key={col.id}
-                className={styles.groupSection}
-                aria-label={`${col.title} (${col.items.length})`}
-              >
+              <section key={col.id} className={styles.groupSection} aria-label={`${col.title} (${col.items.length})`}>
                 <header
                   className={styles.groupHeader}
-                  style={
-                    col.accentColor
-                      ? { borderLeftColor: col.accentColor }
-                      : undefined
-                  }
+                  style={col.accentColor ? { borderLeftColor: col.accentColor } : undefined}
                 >
                   <span className={styles.groupTitle}>{col.title}</span>
                   <span className={styles.groupCount}>{col.items.length}</span>

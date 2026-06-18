@@ -45,12 +45,7 @@
 
 import * as React from 'react';
 import { tokens } from '@fluentui/react-components';
-import type {
-  IKanbanColumn,
-  IKanbanDataverseService,
-  IKanbanTodoLike,
-  TodoColumn,
-} from '../types/kanban';
+import type { IKanbanColumn, IKanbanDataverseService, IKanbanTodoLike, TodoColumn } from '../types/kanban';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -123,11 +118,7 @@ function computeTodoScore(todo: IKanbanTodoLike): number {
 // ---------------------------------------------------------------------------
 
 /** Determine which column an unpinned item belongs to based on its To Do Score. */
-function assignColumnByScore(
-  todo: IKanbanTodoLike,
-  todayThreshold: number,
-  tomorrowThreshold: number,
-): TodoColumn {
+function assignColumnByScore(todo: IKanbanTodoLike, todayThreshold: number, tomorrowThreshold: number): TodoColumn {
   const score = computeTodoScore(todo);
   if (score >= todayThreshold) return 'Today';
   if (score >= tomorrowThreshold) return 'Tomorrow';
@@ -152,11 +143,7 @@ function pinnedColumnAsNumber(value: number | string | null | undefined): number
  * - Pinned items: use their stored sprk_todocolumn (fallback to score-based).
  * - Unpinned items: compute from To Do Score + thresholds.
  */
-function resolveColumn(
-  todo: IKanbanTodoLike,
-  todayThreshold: number,
-  tomorrowThreshold: number,
-): TodoColumn {
+function resolveColumn(todo: IKanbanTodoLike, todayThreshold: number, tomorrowThreshold: number): TodoColumn {
   const pinnedChoice = pinnedColumnAsNumber(todo.sprk_todocolumn);
   if (todo.sprk_todopinned && pinnedChoice != null) {
     return CHOICE_TO_COLUMN[pinnedChoice] ?? assignColumnByScore(todo, todayThreshold, tomorrowThreshold);
@@ -171,7 +158,7 @@ function resolveColumn(
 export function bucketTodoItems<T extends IKanbanTodoLike>(
   items: ReadonlyArray<T>,
   todayThreshold = DEFAULT_TODAY_THRESHOLD,
-  tomorrowThreshold = DEFAULT_TOMORROW_THRESHOLD,
+  tomorrowThreshold = DEFAULT_TOMORROW_THRESHOLD
 ): IKanbanColumn<T>[] {
   const today: T[] = [];
   const tomorrow: T[] = [];
@@ -248,7 +235,7 @@ export interface IUseKanbanColumnsResult<T extends IKanbanTodoLike> {
 // ---------------------------------------------------------------------------
 
 export function useKanbanColumns<T extends IKanbanTodoLike>(
-  options: IUseKanbanColumnsOptions<T>,
+  options: IUseKanbanColumnsOptions<T>
 ): IUseKanbanColumnsResult<T> {
   const { items, todayThreshold, tomorrowThreshold, dataverseService } = options;
 
@@ -259,20 +246,18 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
 
   // Local overrides for optimistic column/pin mutations.
   // Key: todoId, Value: { column, pinned } overrides.
-  const [overrides, setOverrides] = React.useState<
-    Record<string, { column?: number; pinned?: boolean }>
-  >({});
+  const [overrides, setOverrides] = React.useState<Record<string, { column?: number; pinned?: boolean }>>({});
 
   // Reconcile overrides when items change (fresh fetch).
   const prevItemsRef = React.useRef(items);
   React.useEffect(() => {
     if (prevItemsRef.current !== items) {
       prevItemsRef.current = items;
-      setOverrides((prev) => {
+      setOverrides(prev => {
         if (Object.keys(prev).length === 0) return prev;
         const remaining: typeof prev = {};
         for (const [todoId, ov] of Object.entries(prev)) {
-          const freshItem = items.find((i) => i.sprk_todoid === todoId);
+          const freshItem = items.find(i => i.sprk_todoid === todoId);
           if (!freshItem) continue;
           const freshColumn = pinnedColumnAsNumber(freshItem.sprk_todocolumn);
           const columnMatch = ov.column == null || freshColumn === ov.column;
@@ -289,7 +274,7 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
   // Apply overrides to items for column computation.
   const effectiveItems = React.useMemo(() => {
     if (Object.keys(overrides).length === 0) return items;
-    return items.map((item) => {
+    return items.map(item => {
       const ov = overrides[item.sprk_todoid];
       if (!ov) return item;
       return {
@@ -305,10 +290,10 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
     const base = bucketTodoItems(effectiveItems, todayThreshold, tomorrowThreshold);
     if (Object.keys(columnOrders).length === 0) return base;
 
-    return base.map((col) => {
+    return base.map(col => {
       const order = columnOrders[col.id];
       if (!order || order.length === 0) return col;
-      const itemMap = new Map(col.items.map((i) => [i.sprk_todoid, i]));
+      const itemMap = new Map(col.items.map(i => [i.sprk_todoid, i]));
       const ordered: T[] = [];
       for (const id of order) {
         const item = itemMap.get(id);
@@ -328,14 +313,14 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
   // ---- reorderInColumn ----
   const reorderInColumn = React.useCallback(
     (columnId: string, fromIndex: number, toIndex: number) => {
-      const col = columns.find((c) => c.id === columnId);
+      const col = columns.find(c => c.id === columnId);
       if (!col) return;
-      const ids = col.items.map((i) => i.sprk_todoid);
+      const ids = col.items.map(i => i.sprk_todoid);
       const [moved] = ids.splice(fromIndex, 1);
       ids.splice(toIndex, 0, moved);
-      setColumnOrders((prev) => ({ ...prev, [columnId]: ids }));
+      setColumnOrders(prev => ({ ...prev, [columnId]: ids }));
     },
-    [columns],
+    [columns]
   );
 
   // ---- moveItem ----
@@ -344,16 +329,14 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
       const choiceValue = COLUMN_TO_CHOICE[targetColumn];
 
       // Optimistic: set column + pin.
-      setOverrides((prev) => ({
+      setOverrides(prev => ({
         ...prev,
         [todoId]: { column: choiceValue, pinned: true },
       }));
 
       if (!dataverseService) {
         // eslint-disable-next-line no-console
-        console.warn(
-          '[useKanbanColumns] moveItem called without a dataverseService — change is local-only.',
-        );
+        console.warn('[useKanbanColumns] moveItem called without a dataverseService — change is local-only.');
         return;
       }
 
@@ -371,19 +354,19 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
         }
       });
     },
-    [dataverseService],
+    [dataverseService]
   );
 
   // ---- togglePin ----
   const togglePin = React.useCallback(
     (todoId: string) => {
-      const item = effectiveItems.find((i) => i.sprk_todoid === todoId);
+      const item = effectiveItems.find(i => i.sprk_todoid === todoId);
       if (!item) return;
 
       const currentPinned = item.sprk_todopinned ?? false;
       const newPinned = !currentPinned;
 
-      setOverrides((prev) => {
+      setOverrides(prev => {
         const existing = prev[todoId] ?? {};
         return {
           ...prev,
@@ -393,20 +376,18 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
 
       if (!dataverseService) {
         // eslint-disable-next-line no-console
-        console.warn(
-          '[useKanbanColumns] togglePin called without a dataverseService — change is local-only.',
-        );
+        console.warn('[useKanbanColumns] togglePin called without a dataverseService — change is local-only.');
         return;
       }
 
-      dataverseService.updateEventPinned(todoId, newPinned).then((result) => {
+      dataverseService.updateEventPinned(todoId, newPinned).then(result => {
         if (!result.success) {
           // eslint-disable-next-line no-console
           console.warn('[useKanbanColumns] togglePin write failed', result);
         }
       });
     },
-    [effectiveItems, dataverseService],
+    [effectiveItems, dataverseService]
   );
 
   // ---- recalculate ----
@@ -433,7 +414,7 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
     }
 
     // Optimistic: apply all column changes locally.
-    setOverrides((prev) => {
+    setOverrides(prev => {
       const next = { ...prev };
       for (const u of updates) {
         const existing = next[u.eventId] ?? {};
@@ -444,21 +425,16 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
 
     if (!dataverseService) {
       // eslint-disable-next-line no-console
-      console.warn(
-        '[useKanbanColumns] recalculate called without a dataverseService — changes are local-only.',
-      );
+      console.warn('[useKanbanColumns] recalculate called without a dataverseService — changes are local-only.');
       setIsRecalculating(false);
       return;
     }
 
-    dataverseService.batchUpdateEventColumns(updates).then((result) => {
+    dataverseService.batchUpdateEventColumns(updates).then(result => {
       if (!result.success) {
         // eslint-disable-next-line no-console
-        console.error(
-          '[useKanbanColumns] recalculate batch write failed, rolling back',
-          result,
-        );
-        setOverrides((prev) => {
+        console.error('[useKanbanColumns] recalculate batch write failed, rolling back', result);
+        setOverrides(prev => {
           const next = { ...prev };
           for (const u of updates) {
             const existing = next[u.eventId];

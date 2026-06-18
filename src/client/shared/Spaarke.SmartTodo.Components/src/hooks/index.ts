@@ -15,7 +15,4 @@ export {
   DEFAULT_TOMORROW_THRESHOLD,
 } from './useKanbanColumns';
 
-export type {
-  IUseKanbanColumnsOptions,
-  IUseKanbanColumnsResult,
-} from './useKanbanColumns';
+export type { IUseKanbanColumnsOptions, IUseKanbanColumnsResult } from './useKanbanColumns';

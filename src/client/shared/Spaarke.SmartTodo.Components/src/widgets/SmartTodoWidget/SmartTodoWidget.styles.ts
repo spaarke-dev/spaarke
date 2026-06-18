@@ -68,7 +68,7 @@ export const useSmartTodoWidgetStyles = makeStyles({
       tokens.spacingVerticalXS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalXS,
-      tokens.spacingHorizontalM,
+      tokens.spacingHorizontalM
     ),
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
@@ -137,7 +137,7 @@ export const useSmartTodoWidgetStyles = makeStyles({
       tokens.spacingVerticalS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalXS,
-      tokens.spacingHorizontalM,
+      tokens.spacingHorizontalM
     ),
     flexShrink: 0,
   },
@@ -185,7 +185,7 @@ export const useSmartTodoWidgetStyles = makeStyles({
       tokens.spacingVerticalXS,
       tokens.spacingHorizontalS,
       tokens.spacingVerticalXS,
-      tokens.spacingHorizontalS,
+      tokens.spacingHorizontalS
     ),
     backgroundColor: tokens.colorNeutralBackground2,
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
@@ -228,7 +228,7 @@ export const useSmartTodoWidgetStyles = makeStyles({
       tokens.spacingVerticalXS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalXS,
-      tokens.spacingHorizontalM,
+      tokens.spacingHorizontalM
     ),
     color: tokens.colorNeutralForeground3,
     fontStyle: 'italic',
@@ -244,7 +244,7 @@ export const useSmartTodoWidgetStyles = makeStyles({
       tokens.spacingVerticalS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalS,
-      tokens.spacingHorizontalM,
+      tokens.spacingHorizontalM
     ),
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.borderWidth('1px'),
@@ -281,7 +281,7 @@ export const useSmartTodoWidgetStyles = makeStyles({
       tokens.spacingVerticalS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalS,
-      tokens.spacingHorizontalM,
+      tokens.spacingHorizontalM
     ),
     backgroundColor: tokens.colorBrandBackground2,
     ...shorthands.borderWidth('1px'),

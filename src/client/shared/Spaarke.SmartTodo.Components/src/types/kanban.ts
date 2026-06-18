@@ -80,7 +80,5 @@ export interface IKanbanDataverseService {
   /** Update sprk_todopinned on a single todo. */
   updateEventPinned(todoId: string, pinned: boolean): Promise<{ success: boolean }>;
   /** Batch-update sprk_todocolumn on many todos (sequential under the hood). */
-  batchUpdateEventColumns(
-    updates: Array<{ eventId: string; column: number }>,
-  ): Promise<{ success: boolean }>;
+  batchUpdateEventColumns(updates: Array<{ eventId: string; column: number }>): Promise<{ success: boolean }>;
 }
