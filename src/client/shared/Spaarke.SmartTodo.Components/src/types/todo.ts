@@ -26,6 +26,20 @@ export interface IWebApi {
     options?: string,
     maxPageSize?: number
   ) => Promise<{ entities: Array<Record<string, unknown>>; nextLink?: string }>;
+  /**
+   * R4 task 102 (E-1, 2026-06-18) — the widget now renders the full Kanban
+   * with drag-drop + pin persistence (`SmartTodoKanban`). Adding
+   * `updateRecord` here lets the widget wrap `webApi` into a minimal
+   * `IKanbanDataverseService` adapter for the hoisted hook's persistence
+   * path. Optional so hosts that only need read-only widget rendering
+   * (pre-102 surfaces) can satisfy the contract with just
+   * `retrieveMultipleRecords`.
+   */
+  updateRecord?: (
+    entityLogicalName: string,
+    id: string,
+    data: Record<string, unknown>
+  ) => Promise<{ id: string; entityType: string }>;
 }
 
 /**

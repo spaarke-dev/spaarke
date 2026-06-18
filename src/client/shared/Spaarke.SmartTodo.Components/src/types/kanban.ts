@@ -53,12 +53,33 @@ export interface IKanbanTodoLike {
 }
 
 /**
+ * Card-side superset of `IKanbanTodoLike` — adds the fields the hoisted
+ * `<KanbanCard>` renders (title, status/state, assigned-to display name).
+ *
+ * Both the Code Page's `ITodo` (`src/solutions/SmartTodo/src/types/entities.ts`)
+ * and the widget's `ITodoRecord` (`./todo.ts`) are structural supertypes of
+ * this contract — the card consumes them without any transform.
+ *
+ * R4 task 102 (E-1, 2026-06-18) — closes UAT issues 3 + 4 + 6.
+ */
+export interface IKanbanCardTodo extends IKanbanTodoLike {
+  /** Required: display title (sprk_name on sprk_todo). */
+  sprk_name: string;
+  /** Optional: Dataverse statecode (0=Active, 1=Inactive). */
+  statecode?: number;
+  /** Optional: Dataverse statuscode (1=Open, 659490001=InProgress, 2=Completed, 659490002=Dismissed). */
+  statuscode?: number;
+  /** Optional: display name from the `_sprk_assignedto_value` systemuser lookup. */
+  assignedToName?: string;
+}
+
+/**
  * Re-exports the `IKanbanColumn<T>` shape from `@spaarke/ui-components` so
  * peer package consumers see one canonical column type without needing to
  * import the UI primitive library directly. Source-path import keeps the
  * dependency narrow (same pattern as `PaneHeader` in `SmartTodoWidget.tsx`).
  */
-export type { IKanbanColumn } from '../../../Spaarke.UI.Components/src/components/Kanban/types';
+export type { IKanbanColumn, KanbanOrientation } from '../../../Spaarke.UI.Components/src/components/Kanban/types';
 
 /**
  * Minimal Dataverse service surface the hoisted hook requires to persist

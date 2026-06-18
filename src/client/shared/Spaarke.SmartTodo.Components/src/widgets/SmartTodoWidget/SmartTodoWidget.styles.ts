@@ -109,6 +109,23 @@ export const useSmartTodoWidgetStyles = makeStyles({
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
   },
 
+  /**
+   * R4 task 102 (E-1, 2026-06-18) — container that hosts the full
+   * `<SmartTodoKanban>`. Replaces the R4-101 `groupList` section stack with
+   * a flex column that gives the Kanban board its own minimum height + lets
+   * the inner `<KanbanBoard>` own the row/column flex layout.
+   *
+   * `minHeight: 0` is essential — without it the parent's `flex: 1 1 auto`
+   * body wins the height race and the inner card list cannot scroll.
+   */
+  kanbanContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 auto',
+    minHeight: 0,
+    minWidth: 0,
+  },
+
   /** Empty-state container — centered, soft tone. */
   emptyContainer: {
     display: 'flex',

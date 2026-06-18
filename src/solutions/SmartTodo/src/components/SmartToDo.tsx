@@ -46,8 +46,18 @@ import {
   MessageBarBody,
 } from "@fluentui/react-components";
 import { KanbanBoard, OrientationToggle, type Orientation } from "@spaarke/ui-components";
-import { KanbanCard } from "./KanbanCard";
+// R4 task 102 (E-1, 2026-06-18) — `KanbanCard` hoisted from this folder into
+// the `@spaarke/smart-todo-components` peer package so the workspace widget
+// can render the IDENTICAL card surface. The Code Page swap is an
+// import-source change only — same visual + interaction behaviour.
+import { KanbanCard } from "@spaarke/smart-todo-components";
 import { KanbanHeader } from "./KanbanHeader";
+// R4-104 (Wave E-3, 2026-06-18) — the consolidated SmartTodoApp Header now
+// owns the QuickAdd input. It dispatches `QUICK_ADD_TODO_EVENT` window events
+// which this component subscribes to and routes through its existing
+// `handleAdd` (single-source optimistic add + Dataverse create logic).
+import { QUICK_ADD_TODO_EVENT } from "./Header";
+import type { QuickAddTodoEventDetail } from "./Header";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";
 import { DismissedSection } from "./DismissedSection";
 import { useTodoItems } from "../hooks/useTodoItems";
@@ -277,6 +287,29 @@ export interface ISmartToDoProps {
    * no-op — back-compat for embedded surfaces (LegalWorkspace dashboard).
    */
   onOpenTodo?: (todoId: string) => void;
+  /**
+   * R4-104 (Wave E-3, 2026-06-18) — when true, the inner `<KanbanHeader>`
+   * is fully suppressed. The consolidated SmartTodoApp Header (R4-104)
+   * relocates the title + QuickAdd + Refresh + Settings + OrientationToggle
+   * into a single Toolbar landmark above the Kanban; rendering KanbanHeader
+   * would create the duplicate-chrome UAT 8 + 11 issues.
+   *
+   * Settings + OrientationToggle stay functional via the callback props
+   * below; QuickAdd routes through the QUICK_ADD_TODO_EVENT listener mounted
+   * in this component. The settings popover stays mounted (anchored to a
+   * hidden trigger) so the consolidated Header can open it via callback.
+   *
+   * Defaults to `false` for back-compat with any embedded consumer that
+   * doesn't yet route its own chrome.
+   */
+  hideHeader?: boolean;
+  /**
+   * R4-104 — Optional callback that exposes the Settings open trigger to a
+   * parent (the consolidated Header). When provided, the parent calls this
+   * to open the threshold-settings popover that is still anchored inside
+   * SmartToDo. Implemented as a callback ref bound on mount.
+   */
+  onSettingsOpenerReady?: (open: () => void) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +327,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   selectedIds,
   onToggleSelect,
   onOpenTodo,
+  hideHeader = false,
+  onSettingsOpenerReady,
 }) => {
   const styles = useStyles();
 
@@ -378,6 +413,15 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
   /** Settings popover state */
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+
+  // R4-104 (Wave E-3) — expose the Settings opener to a parent (the
+  // consolidated SmartTodoApp Header). Runs once on mount. The popover is
+  // anchored to a hidden trigger inside SmartToDo, so opening from outside is
+  // safe.
+  React.useEffect(() => {
+    onSettingsOpenerReady?.(() => setSettingsOpen(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onSettingsOpenerReady]);
 
   /** Collapsed Kanban columns — Future is collapsed by default */
   const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(
@@ -525,6 +569,33 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     },
     [userId, refetch]
   );
+
+  // -------------------------------------------------------------------------
+  // R4-104 (Wave E-3) — QUICK_ADD_TODO_EVENT subscription
+  // -------------------------------------------------------------------------
+  // The consolidated SmartTodoApp Header (R4-104) owns the QuickAdd input but
+  // delegates the actual create to this component (which holds the optimistic
+  // state + Dataverse service). We subscribe at window scope so any future
+  // launcher (keyboard shortcut, Outlook ribbon QuickAdd, etc.) can dispatch
+  // the same event without coupling to React props.
+  //
+  // The handler reads from a ref so the listener identity stays stable across
+  // renders (no thrash on every state change).
+  const handleAddRef = React.useRef(handleAdd);
+  handleAddRef.current = handleAdd;
+
+  React.useEffect(() => {
+    const listener = (ev: Event): void => {
+      const detail = (ev as CustomEvent<QuickAddTodoEventDetail>).detail;
+      if (detail?.title) {
+        void handleAddRef.current(detail.title);
+      }
+    };
+    window.addEventListener(QUICK_ADD_TODO_EVENT, listener);
+    return () => {
+      window.removeEventListener(QUICK_ADD_TODO_EVENT, listener);
+    };
+  }, []);
 
   // -------------------------------------------------------------------------
   // Dismiss handler
@@ -718,22 +789,28 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       role="region"
       aria-label={`Smart To Do Kanban, ${totalCount} item${totalCount === 1 ? "" : "s"}`}
     >
-      {/* ── KanbanHeader ── */}
-      <KanbanHeader
-        totalCount={totalCount}
-        onRecalculate={recalculate}
-        isRecalculating={isRecalculating}
-        onAdd={handleAdd}
-        isAdding={isAdding}
-        onSettingsOpen={() => setSettingsOpen(true)}
-        embedded={embedded}
-        orientationSlot={
-          <OrientationToggle
-            orientation={orientation}
-            onChange={setOrientation}
-          />
-        }
-      />
+      {/* ── KanbanHeader — suppressed when the consolidated SmartTodoApp
+            Header (R4-104) owns the title + QuickAdd + Settings + Orientation
+            chrome. The Settings popover below stays mounted (hidden trigger)
+            so the consolidated Header can open it via the
+            `onSettingsOpenerReady` callback. */}
+      {!hideHeader && (
+        <KanbanHeader
+          totalCount={totalCount}
+          onRecalculate={recalculate}
+          isRecalculating={isRecalculating}
+          onAdd={handleAdd}
+          isAdding={isAdding}
+          onSettingsOpen={() => setSettingsOpen(true)}
+          embedded={embedded}
+          orientationSlot={
+            <OrientationToggle
+              orientation={orientation}
+              onChange={setOrientation}
+            />
+          }
+        />
+      )}
 
       {/* ── Settings popover — anchor to a hidden trigger ──────────────── */}
       <ThresholdSettingsPopover

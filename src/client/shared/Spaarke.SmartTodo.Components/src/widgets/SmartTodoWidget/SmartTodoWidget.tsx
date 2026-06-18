@@ -71,10 +71,12 @@ import {
   type InputOnChangeData,
 } from '@fluentui/react-components';
 import { ArrowClockwiseRegular, Add20Regular, Open20Regular } from '@fluentui/react-icons';
+import { OrientationToggle, type Orientation } from '../../../../Spaarke.UI.Components/src/components/OrientationToggle';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
-import { bucketTodoItems, DEFAULT_TODAY_THRESHOLD, DEFAULT_TOMORROW_THRESHOLD } from '../../hooks/useKanbanColumns';
+import type { IKanbanDataverseService } from '../../types/kanban';
+import { SmartTodoKanban } from '../../components/SmartTodoKanban';
 
 // ---------------------------------------------------------------------------
 // Public statuscode constants (R3 task 009 / OS-1)
@@ -193,17 +195,6 @@ function entityLogicalNameToLookup(entityLogicalName: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Due-date formatter (lightweight; full LW formatter stays in LW utils for now)
-// ---------------------------------------------------------------------------
-
-function formatDue(iso?: string): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -270,9 +261,23 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   const [error, setError] = React.useState<string | null>(null);
   const [fetchKey, setFetchKey] = React.useState(0);
 
-  // Selection model — single-select (0..1). The Open button is enabled only
-  // when one card is selected; clicking a card toggles its selection.
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  // R4 task 102 (E-1, 2026-06-18) — selection model upgraded from single
+  // (`string | null`) to MULTI (`Set<string>`) per UAT issue 6 (cards need
+  // multi-select parity with the app's `<KanbanCard>`). The hoisted
+  // `<KanbanCard>` (via `<SmartTodoKanban>`) renders a per-card checkbox
+  // bound to this Set + the `toggleSelect` callback. The Open button is
+  // enabled when at least one card is selected (any of N opens the modal on
+  // the FIRST id — matches app's selection-aware toolbar pattern).
+  const [selectedIds, setSelectedIds] = React.useState<ReadonlySet<string>>(() => new Set());
+
+  // R4 task 102 (E-1, 2026-06-18) — local orientation state. Kept WIDGET-LOCAL
+  // (not persisted via `useUserPreferences`) because the widget mounts in
+  // multiple workspace contexts and forcing per-context Dataverse round-trips
+  // would inflate cold-start time. The Code Page (which is the user's "Smart
+  // To Do home") persists orientation via `useUserPreferences` (R4-071) —
+  // that's the canonical persistence point. Default 'horizontal' matches the
+  // Code Page default + the original app behaviour.
+  const [orientation, setOrientation] = React.useState<Orientation>('horizontal');
 
   // SearchBox — local controlled value debounced into `appliedQuery` which
   // drives the in-memory filter.
@@ -398,13 +403,25 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     });
   }, [items, appliedQuery]);
 
-  // Clear stale selection when the visible list changes such that the
-  // currently-selected id is no longer rendered (search filter, refetch).
+  // Prune stale selections when the visible list changes (search filter,
+  // refetch removed an item) so the multi-select Set never holds ids that
+  // aren't currently rendered.
   React.useEffect(() => {
-    if (selectedId && !filteredItems.some(t => t.sprk_todoid === selectedId)) {
-      setSelectedId(null);
-    }
-  }, [filteredItems, selectedId]);
+    setSelectedIds(prev => {
+      if (prev.size === 0) return prev;
+      const visibleIds = new Set(filteredItems.map(t => t.sprk_todoid));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (visibleIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [filteredItems]);
 
   // -------------------------------------------------------------------------
   // Handlers
@@ -414,72 +431,93 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     setSearchQuery(data.value);
   }, []);
 
-  const handleCardClick = React.useCallback((todoId: string) => {
-    setSelectedId(prev => (prev === todoId ? null : todoId));
+  // R4 task 102 (E-1, 2026-06-18) — multi-select toggle. The hoisted
+  // `<KanbanCard>` checkbox dispatches this for every check/uncheck. The
+  // resulting Set drives both the card's selection state AND the Open button's
+  // enabled state.
+  const handleToggleSelect = React.useCallback((todoId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(todoId)) {
+        next.delete(todoId);
+      } else {
+        next.add(todoId);
+      }
+      return next;
+    });
   }, []);
 
   const handleOpenSelected = React.useCallback(() => {
-    if (selectedId && onOpenTodo) {
-      onOpenTodo(selectedId);
+    if (selectedIds.size === 0 || !onOpenTodo) return;
+    // Open the FIRST selected id — same semantics as the app's
+    // SelectionAwareToolbar pattern (R4 task 032). Multi-open is not yet
+    // supported by `OPEN_TODOS_EVENT`; opening N modals at once is poor UX.
+    const first = selectedIds.values().next().value;
+    if (first) {
+      onOpenTodo(first);
     }
-  }, [selectedId, onOpenTodo]);
+  }, [selectedIds, onOpenTodo]);
 
   // -------------------------------------------------------------------------
-  // Render helpers
-  // -------------------------------------------------------------------------
-
-  const renderItem = (item: ITodoRecord) => {
-    const due = formatDue(item.sprk_duedate);
-    const status = item.statuscode === TODO_STATUSCODE_IN_PROGRESS ? 'In progress' : 'Open';
-    const isSelected = selectedId === item.sprk_todoid;
-    return (
-      <div
-        key={item.sprk_todoid}
-        className={isSelected ? styles.todoCardSelected : styles.todoCard}
-        role="button"
-        tabIndex={0}
-        aria-pressed={isSelected}
-        onClick={() => handleCardClick(item.sprk_todoid)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            handleCardClick(item.sprk_todoid);
-          }
-        }}
-        aria-label={`${item.sprk_name}${due ? `, due ${due}` : ''}, ${status}`}
-      >
-        <span className={styles.cardTitle}>{item.sprk_name || 'Untitled to-do'}</span>
-        <span className={styles.cardMeta}>
-          {due && <Text size={200}>{due}</Text>}
-          <span className={styles.statusBadge}>{status}</span>
-        </span>
-      </div>
-    );
-  };
-
-  // Open is enabled only when a single card is selected.
-  const openDisabled = selectedId === null;
-
-  // -------------------------------------------------------------------------
-  // Today / Tomorrow / Future grouped sections (R4 task 101 / W-3, 2026-06-18).
-  // Uses the hoisted `bucketTodoItems` pure helper from the peer package's
-  // hooks barrel — the same logic that drives the Code Page's full-Kanban
-  // `useKanbanColumns` (one source of truth, satisfying UAT issue 6).
+  // R4 task 102 (E-1, 2026-06-18) — Dataverse service adapter for the hoisted
+  // Kanban hook's column / pin persistence path. Wraps the host-injected
+  // `webApi.updateRecord` (when available) so drag-drop and pin toggles
+  // persist to `sprk_todo`. When `updateRecord` isn't provided (legacy host),
+  // the hook falls back to local-only mutations + a console warning — drag is
+  // still visually responsive, just non-durable.
   //
-  // Thresholds: widget uses the package defaults (60 / 30 — matching
-  // `useUserPreferences`'s `DEFAULT_TODAY_THRESHOLD` / `_TOMORROW_THRESHOLD`).
-  // Per-user threshold prefs are intentionally NOT pulled into the widget
-  // here (would require a Dataverse round-trip on every widget mount across
-  // every workspace tab — disproportionate to the visual benefit). If a
-  // future task surfaces a clear need, the widget can accept a
-  // `thresholds?: { today: number; tomorrow: number }` prop and the host
-  // shim can fetch + pass them.
+  // The adapter is memoised on `webApi` so the hook's persistence callbacks
+  // keep stable identity across renders.
   // -------------------------------------------------------------------------
 
-  const groupedColumns = React.useMemo(
-    () => bucketTodoItems(filteredItems, DEFAULT_TODAY_THRESHOLD, DEFAULT_TOMORROW_THRESHOLD),
-    [filteredItems]
-  );
+  const dataverseService = React.useMemo<IKanbanDataverseService | undefined>(() => {
+    if (!webApi.updateRecord) return undefined;
+    const update = webApi.updateRecord.bind(webApi);
+    return {
+      async updateEventColumn(todoId, column) {
+        try {
+          await update('sprk_todo', todoId, { sprk_todocolumn: column });
+          return { success: true };
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[SmartTodoWidget] updateEventColumn failed', err);
+          return { success: false };
+        }
+      },
+      async updateEventPinned(todoId, pinned) {
+        try {
+          await update('sprk_todo', todoId, { sprk_todopinned: pinned });
+          return { success: true };
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[SmartTodoWidget] updateEventPinned failed', err);
+          return { success: false };
+        }
+      },
+      async batchUpdateEventColumns(updates) {
+        let allOk = true;
+        for (const u of updates) {
+          try {
+            await update('sprk_todo', u.eventId, { sprk_todocolumn: u.column });
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn('[SmartTodoWidget] batchUpdateEventColumns row failed', err);
+            allOk = false;
+          }
+        }
+        return { success: allOk };
+      },
+    };
+  }, [webApi]);
+
+  // -------------------------------------------------------------------------
+  // R4 task 102 (E-1, 2026-06-18) — Open is enabled when ANY card is
+  // multi-selected (matches the app's selection-aware toolbar pattern from
+  // R4-032). Pre-102 behaviour disabled Open until exactly one card was
+  // selected; the new behaviour is permissive (1..N) and opens the first id.
+  // -------------------------------------------------------------------------
+
+  const openDisabled = selectedIds.size === 0;
 
   // -------------------------------------------------------------------------
   // Render
@@ -525,6 +563,11 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
               aria-label="Open selected to-do"
             />
           </Tooltip>
+          {/* R4 task 102 (E-1, 2026-06-18) — orientation toggle. Mirrors the
+              Code Page's `<OrientationToggle>` so the widget can flip between
+              horizontal columns (default) and vertical stacked sections.
+              Local-only state — see `useState` block above for rationale. */}
+          <OrientationToggle orientation={orientation} onChange={setOrientation} />
           <Tooltip content="Refresh to-do list" relationship="label">
             <Button
               appearance="subtle"
@@ -573,26 +616,25 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
           </div>
         )}
 
+        {/* R4 task 102 (E-1, 2026-06-18) — full Kanban replaces the R4-101
+            grouped lists. `<SmartTodoKanban>` consumes the same hoisted
+            `useKanbanColumns` hook internally + renders cards via the hoisted
+            `<KanbanCard>` — ONE source of truth shared with the Code Page.
+            Drag-drop column changes + pin toggles persist through the
+            `dataverseService` adapter built above (when the host's `webApi`
+            exposes `updateRecord`). Multi-select state lives in this widget
+            and threads through to per-card checkboxes. */}
         {!isLoading && !error && filteredItems.length > 0 && (
-          <div className={styles.groupList}>
-            {groupedColumns.map(col => (
-              <section key={col.id} className={styles.groupSection} aria-label={`${col.title} (${col.items.length})`}>
-                <header
-                  className={styles.groupHeader}
-                  style={col.accentColor ? { borderLeftColor: col.accentColor } : undefined}
-                >
-                  <span className={styles.groupTitle}>{col.title}</span>
-                  <span className={styles.groupCount}>{col.items.length}</span>
-                </header>
-                {col.items.length === 0 ? (
-                  <div className={styles.groupEmpty} role="status">
-                    <Text size={200}>No items</Text>
-                  </div>
-                ) : (
-                  <div className={styles.cardList}>{col.items.map(renderItem)}</div>
-                )}
-              </section>
-            ))}
+          <div className={styles.kanbanContainer}>
+            <SmartTodoKanban<ITodoRecord>
+              items={filteredItems}
+              dataverseService={dataverseService}
+              selectedIds={selectedIds}
+              onToggleSelect={handleToggleSelect}
+              onOpenTodo={onOpenTodo}
+              orientation={orientation}
+              ariaLabel={`${title} Kanban board`}
+            />
           </div>
         )}
       </div>
