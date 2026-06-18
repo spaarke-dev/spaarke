@@ -157,6 +157,10 @@ jest.mock('../widgets/context/FindingsWidget', () => ({
   __esModule: true,
   default: createMockWidget('FindingsWidget'),
 }));
+jest.mock('../widgets/context/PinnedMemoryListWidget', () => ({
+  __esModule: true,
+  default: createMockWidget('PinnedMemoryListWidget'),
+}));
 
 // ---------------------------------------------------------------------------
 // Setup / teardown
@@ -267,6 +271,10 @@ const EXPECTED_CONTEXT_WIDGETS = [
   // R6 task 059 (D-C-12). Per ADR-015 BINDING: renders only typed enumerated
   // fields (tool name + decision + timestamp + numeric metrics).
   'execution-trace',
+  // R6 task 070 / D-C-24 + D-C-25: PinnedMemoryListWidget — Q7 scope expansion
+  // (Pillar 7). Visualises + manages cross-session pinned memory items. Loads
+  // via GET /api/memory/pins and supports create / edit / delete.
+  'pinned-memory-list',
 ] as const;
 
 // ===========================================================================
@@ -345,7 +353,7 @@ describe('Context widget serialize/restore — registration', () => {
     loadContextRegistrations();
   });
 
-  it('registers all 11 context widget types', () => {
+  it('registers all 12 context widget types', () => {
     const types = getAllContextWidgetTypes();
     expect(types).toHaveLength(EXPECTED_CONTEXT_WIDGETS.length);
   });
@@ -396,8 +404,9 @@ describe('Widget registries — cross-registry consistency', () => {
     }
   });
 
-  it('total registered widgets across both registries is 21', () => {
+  it('total registered widgets across both registries is 23', () => {
+    // 11 workspace + 12 context (added pinned-memory-list in R6 task 070).
     const total = getAllWorkspaceWidgetTypes().length + getAllContextWidgetTypes().length;
-    expect(total).toBe(21);
+    expect(total).toBe(23);
   });
 });

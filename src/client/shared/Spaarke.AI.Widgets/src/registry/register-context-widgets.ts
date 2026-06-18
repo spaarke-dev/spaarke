@@ -162,6 +162,33 @@ safeRegisterContext('execution-trace', {
 });
 
 // ---------------------------------------------------------------------------
+// pinned-memory-list (R6 task 070 / D-C-24 + D-C-25, Pillar 7 — Q7 expansion)
+//
+// Widget type: 'pinned-memory-list'
+// Stage:       Active-chat (Context-pane primary widget when the user opens
+//              the Pinned Memory pane). Loads the caller's pinned items via
+//              `GET /api/memory/pins` and surfaces create / edit / delete CRUD.
+// Purpose:     Visualises + manages cross-session pinned memory items (user-
+//              preference / system-rule / matter-fact). Items are composed
+//              into the chat-agent system prompt per R6 task 067 memory
+//              composition, so creating / editing / deleting a pin here
+//              affects every subsequent chat session for the caller.
+// Standards:   ADR-008 + ADR-016 (auth + ai-context rate limit on BFF side),
+//              ADR-012 (Fluent v9 + shared lib), ADR-013 (HTTP-only BFF
+//              consumption), ADR-015 (title / content text NEVER logged in
+//              any telemetry; counts only), ADR-021 (zero hardcoded colours;
+//              semantic tokens only), ADR-028 (function-based auth surface).
+// ---------------------------------------------------------------------------
+
+safeRegisterContext('pinned-memory-list', {
+  factory: () =>
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/PinnedMemoryListWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from shell entry points)
 // ---------------------------------------------------------------------------
 
