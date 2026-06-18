@@ -33,6 +33,18 @@ export interface IKanbanColumn<T> {
   items: T[];
   /** Optional CSS colour for the column's top accent border. */
   accentColor?: string;
+  /**
+   * Optional CSS background colour applied to the column container as a
+   * gentle wash behind cards (R4 task 103 — UAT 5).
+   *
+   * Recommended: use the lightest Fluent v9 semantic palette tokens
+   * (`tokens.colorPalette<Hue>Background1`) so the tint never competes with
+   * card content and dark/HC mode adapt automatically.
+   *
+   * Coexists with `accentColor` (the top border accent). Both can be set on
+   * the same column for a layered "border accent + background wash" treatment.
+   */
+  tintColor?: string;
 }
 
 /**

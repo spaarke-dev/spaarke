@@ -40,6 +40,25 @@ export interface IWebApi {
     id: string,
     data: Record<string, unknown>
   ) => Promise<{ id: string; entityType: string }>;
+  /**
+   * R4 task 103 (E-2, 2026-06-18) — quick-add (UAT 7). The widget's inline
+   * QuickAdd input (toolbar left slot) calls `createRecord('sprk_todo', { sprk_name })`
+   * with just the title. Dataverse defaults populate statecode/statuscode,
+   * and the widget refetches on success.
+   *
+   * On failure (e.g., Dataverse rejects due to other required fields), the
+   * widget surfaces a graceful error with a "Open full wizard" link that
+   * dispatches the host's full `<CreateTodoWizard>` via `onAddTodo`.
+   *
+   * Optional so hosts that wire the widget without quick-add support
+   * (read-only surfaces, future Direct widget mounts in SpaarkeAi that
+   * intentionally omit the field) can satisfy the contract without it.
+   * When absent, the quick-add input row is suppressed.
+   */
+  createRecord?: (
+    entityLogicalName: string,
+    data: Record<string, unknown>
+  ) => Promise<{ id: string; entityType: string }>;
 }
 
 /**

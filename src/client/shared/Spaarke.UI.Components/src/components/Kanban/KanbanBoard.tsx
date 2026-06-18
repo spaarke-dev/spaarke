@@ -195,6 +195,28 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
         {columns.map(column => {
           const isCollapsed = collapsedColumns?.has(column.id) ?? false;
 
+          // R4 task 103 (E-2, 2026-06-18) — column tint + top-border accent
+          // are composed into a single inline style. `tintColor` (UAT 5) sits
+          // behind cards as a gentle wash; `accentColor` remains the sharper
+          // top-border accent rail. Both default to `undefined` for backwards
+          // compatibility with existing consumers (Calendar, future Kanban
+          // surfaces) that don't set either.
+          const columnInlineStyle: React.CSSProperties | undefined = (() => {
+            const hasAccent = !!column.accentColor;
+            const hasTint = !!column.tintColor;
+            if (!hasAccent && !hasTint) return undefined;
+            return {
+              ...(hasAccent
+                ? {
+                    borderTopWidth: '3px',
+                    borderTopStyle: 'solid',
+                    borderTopColor: column.accentColor,
+                  }
+                : {}),
+              ...(hasTint ? { backgroundColor: column.tintColor } : {}),
+            };
+          })();
+
           if (isCollapsed) {
             return (
               <div
@@ -203,11 +225,7 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
                 role="group"
                 aria-label={`${column.title} (collapsed)`}
                 onClick={() => onToggleCollapse?.(column.id)}
-                style={
-                  column.accentColor
-                    ? { borderTopWidth: '3px', borderTopStyle: 'solid', borderTopColor: column.accentColor }
-                    : undefined
-                }
+                style={columnInlineStyle}
               >
                 <div className={styles.columnCollapsedHeader}>
                   <span className={styles.columnCount}>{column.items.length}</span>
@@ -223,11 +241,7 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
               className={columnClassName}
               role="group"
               aria-label={column.title}
-              style={
-                column.accentColor
-                  ? { borderTopWidth: '3px', borderTopStyle: 'solid', borderTopColor: column.accentColor }
-                  : undefined
-              }
+              style={columnInlineStyle}
             >
               {/* Column header */}
               <div

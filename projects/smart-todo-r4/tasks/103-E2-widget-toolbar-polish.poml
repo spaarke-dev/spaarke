@@ -3,7 +3,7 @@
     <title>E-2 — Widget toolbar polish (search-icon + always-Open + column colors + Capital case + quick-add)</title>
     <phase>Phase 2: Wave E (post-Wave-D widget/app parity)</phase>
     <workstream>W</workstream>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>widget, smart-todo, fluent-v9, toolbar, ux-polish</tags>
     <parallel-safe>false</parallel-safe>
@@ -149,4 +149,77 @@ Widget toolbar layout (left → right): `[+ wizard] [QuickAdd input] [Add btn]` 
     <criterion testable="true">All builds pass; no Fluent v8; no inline styles; semantic tokens throughout</criterion>
     <criterion testable="true">POML + TASK-INDEX updated</criterion>
   </acceptance-criteria>
+
+  <notes>
+## Completion notes (2026-06-18)
+
+Wave E-2 closed UAT items 1 + 2 + 5 + 7. All four package builds GREEN.
+
+### Files modified
+
+1. **`src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx`** — primary target. Added Search-as-icon toggle (`ToggleButton` + `Search20Regular`, right-aligned in action cluster, expand/collapse state, clears query on close). Removed Open `disabled` prop (`openTooltip` now switches text based on selection count); `handleOpenSelected` branches: 0 selected → `onOpenTodo()` no-arg; 1+ → `onOpenTodo(first)`. Added inline quick-add (Input + Add button) in left toolbar slot with Enter handler; calls `webApi.createRecord('sprk_todo', { sprk_name })` then refetch on success; on failure shows `<MessageBar intent="warning">` with `<Link>` "Open full wizard" recovery. Toolbar reorganised: `[+ wizard][QuickAdd][Add] | (spacer) | [Open][Refresh][Orient][Search icon]`.
+
+2. **`src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts`** — added `toolbarLeft`, `toolbarSpacer`, `quickAddInput`, `searchRow`, `errorWithLink` Griffel rules. Kept `groupTitle` (text-transform uppercase) as dead code per back-compat (no-regret removal in future hoist).
+
+3. **`src/client/shared/Spaarke.SmartTodo.Components/src/types/todo.ts`** — extended `IWebApi` with optional `createRecord(entityLogicalName, data) => Promise<{id, entityType}>` for quick-add. Optional so legacy hosts that pre-date 103 still satisfy the contract (the toolbar suppresses the QuickAdd group when absent).
+
+4. **`src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts`** — `bucketTodoItems` returns each column with `tintColor` set to the lightest Fluent v9 semantic palette token (`colorPaletteRedBackground1` / `YellowBackground1` / `GreenBackground1`). Labels are already `'Today'`/`'Tomorrow'`/`'Future'` (Capital Case); no app-side change needed (`KanbanBoard.columnTitle` style has no text-transform).
+
+5. **`src/client/shared/Spaarke.UI.Components/src/components/Kanban/types.ts`** — extended `IKanbanColumn<T>` with optional `tintColor?: string` (alongside existing `accentColor`).
+
+6. **`src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx`** — composed `columnInlineStyle` from both `accentColor` (existing top-border) and `tintColor` (new backgroundColor), applied to both collapsed + expanded column variants. Backwards-compatible — `tintColor` absence is identical to pre-103 behaviour.
+
+7. **`src/solutions/LegalWorkspace/src/sections/todo.registration.ts`** — `handleOpenTodo` signature widened to `(todoId?: string) => void`. When `todoId` is undefined, `ctx.onOpenWizard` is called with no `data` argument → app's `useLaunchContext` returns `undefined` → app renders default Kanban view.
+
+### Toolbar final layout
+
+Left: `[+ wizard button] [QuickAdd Input "Quick add a to-do…"] [Add button (primary)]`
+Spacer (flex grow)
+Right: `[Open] [Refresh] [Orientation toggle] [Search icon toggle (ToggleButton)]`
+
+Tab order matches visual order. Open tooltip changes by selection count: "Open Smart To Do" (0), "Open selected to-do" (1), "Open first selected to-do (N selected)" (2+).
+
+### Search-icon expand/collapse pattern
+
+State-driven `<Input>` row rendered BELOW the toolbar (in same flex column as the toolbar but outside the `<Toolbar>` itself). Chosen over inline expanding pane (CSS animations would force shorthand exclusions in Griffel) and over popover (Fluent v9 Popover would float over cards). The row carries its own border-bottom + bg2 so it reads as a contiguous extension of the toolbar chrome. Closing the search clears both `searchQuery` and `appliedQuery` so the filter resets (visible "closed" === "no filter active"). `autoFocus` on the SearchBox once expanded.
+
+### Column tint approach (semantic tokens used)
+
+- `tokens.colorPaletteRedBackground1` → Today
+- `tokens.colorPaletteYellowBackground1` → Tomorrow
+- `tokens.colorPaletteGreenBackground1` → Future
+
+The `Background1` variants are the LIGHTEST palette tints in Fluent v9 — gentle wash backgrounds that don't compete with card content. Coexists with the existing top-border `accentColor` (`Border2` variants); both render via a single composed inline `style` on the column div (data-driven runtime values cannot be Griffel-authored; this is the established pattern alongside `accentColor`). ADR-021 compliant: no hex literals, semantic tokens only, dark/HC mode adapt automatically.
+
+### Capital Case fix location
+
+Labels are already `'Today'`/`'Tomorrow'`/`'Future'` at the `bucketTodoItems` source (peer package `hooks/useKanbanColumns.ts:178+`). The widget renders these via `<KanbanBoard>` whose `columnTitle` Griffel rule does NOT apply text-transform. No app-side change needed — the Code Page consumer of `bucketTodoItems` (`SmartToDo.tsx`) reads the same labels. The widget's legacy `groupTitle` style (with `textTransform: 'uppercase'`) is now dead code from R4-101's grouped-list rendering — preserved in styles for back-compat / no-regret removal.
+
+### Quick-add error handling approach
+
+Try/catch around `webApi.createRecord('sprk_todo', { sprk_name: title })`. On any error: `setQuickAddError(message)` triggers an inline `<MessageBar intent="warning">` with a `<Link as="button">` "Open full wizard" recovery that calls `onAddTodo?.()` (the existing R4-099 + R4-100 path). Loading state via `isQuickAdding` disables both Input and Add button during the await. `quickAddError` clears on next keystroke so the user can retry without dismissing.
+
+### Open behaviour (UAT 2)
+
+`onOpenTodo` prop signature widened from `(todoId: string) => void` to `(todoId?: string) => void`. Widget's `handleOpenSelected`:
+- 0 selected → `onOpenTodo()` (no arg) → LW shim calls `ctx.onOpenWizard(SMART_TODO_CODE_PAGE_NAME, undefined, ...)` → app loads with no launch context → `useLaunchContext` returns undefined → app renders default Kanban view.
+- 1+ selected → `onOpenTodo(first)` → LW shim builds `action=openTodo&todoId=<guid>` envelope → app's `useLaunchContext` returns `openTodo` discriminator → auto-mounts `<SmartTodoModal>` on that record.
+
+### Build status (4 packages)
+
+- `@spaarke/smart-todo-components` peer package: `tsc --noEmit` exit 0 ✅
+- SmartTodo (Vite): 1.74 MB / 475 KB gzip, built in 11.48s ✅
+- LegalWorkspace (Vite): 2.27 MB / 628 KB gzip, built in 11.94s ✅
+- SpaarkeAi (Vite): 3.85 MB / 1.05 MB gzip, built in 13.70s ✅
+
+`@spaarke/ui-components` `tsc` errors with the known pre-existing `@spaarke/sdap-client` rootDir cascade (PR #369; documented in current-task.md "Known pre-existing condition"; project-wide tsconfig refs fix deferred to task 092/098). Vite consumers use the established alias workaround and build cleanly.
+
+### Unexpected obstacles
+
+None. The hoisted `bucketTodoItems` already returned columns with `accentColor`; adding `tintColor` was a clean additive extension. The `IKanbanColumn` type lived in `Spaarke.UI.Components` (not in the peer package's `kanban.ts` which only re-exports it), so the type extension landed in the right place automatically. KanbanBoard's two column branches (collapsed + expanded) had duplicate accent-style logic; the R4-103 change merged them into a single `columnInlineStyle` composer (cleaner outcome).
+
+### POML + TASK-INDEX updates
+
+This file flipped to `complete`. TASK-INDEX.md row updated to ✅ in same commit. Wave E-2 status header updated (Wave E now ✅ complete pending PR / deploy).
+  </notes>
 </task>

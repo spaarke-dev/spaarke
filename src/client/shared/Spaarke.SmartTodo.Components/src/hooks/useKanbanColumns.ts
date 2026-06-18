@@ -171,6 +171,23 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
     else future.push(item);
   }
 
+  // R4 task 103 (E-2, 2026-06-18) — column tints (UAT 5):
+  //   Today    → light red tint   (tokens.colorPaletteRedBackground1)
+  //   Tomorrow → light yellow tint (tokens.colorPaletteYellowBackground1)
+  //   Future   → light green tint  (tokens.colorPaletteGreenBackground1)
+  //
+  // ADR-021 binding: semantic tokens only (no hex). The `Background1` variants
+  // are the LIGHTEST in the Fluent v9 palette and read as gentle wash backgrounds
+  // — not competing with card content while still cueing column identity.
+  // The existing top-border `accentColor` (Border2 variants) stays in place as a
+  // sharper accent rail; the tint sits behind it for visual reinforcement.
+  //
+  // Capital Case labels ('Today'/'Tomorrow'/'Future') are already passed as
+  // column.title strings; the `KanbanBoard` columnTitle style does NOT apply
+  // text-transform, so they render verbatim. (The widget's legacy `groupTitle`
+  // class — which DID have text-transform: uppercase — is no longer referenced
+  // by the post-102 render path; remains in the style sheet for back-compat
+  // but is dead code from R4-101's grouped-list rendering.)
   return [
     {
       id: 'Today',
@@ -178,6 +195,7 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
       subtitle: `Score ≥ ${todayThreshold}`,
       items: today,
       accentColor: tokens.colorPaletteRedBorder2,
+      tintColor: tokens.colorPaletteRedBackground1,
     },
     {
       id: 'Tomorrow',
@@ -185,6 +203,7 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
       subtitle: `Score ${tomorrowThreshold}–${todayThreshold - 1}`,
       items: tomorrow,
       accentColor: tokens.colorPaletteDarkOrangeBorder2,
+      tintColor: tokens.colorPaletteYellowBackground1,
     },
     {
       id: 'Future',
@@ -192,6 +211,7 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
       subtitle: `Score < ${tomorrowThreshold}`,
       items: future,
       accentColor: tokens.colorPaletteGreenBorder2,
+      tintColor: tokens.colorPaletteGreenBackground1,
     },
   ];
 }

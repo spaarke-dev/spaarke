@@ -132,15 +132,24 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
   // on the clicked record. Pre-R4-100 it used `eventId=<guid>` which the
   // Code Page ignored (defaulting to Kanban) — UAT issue 4.
   //
+  // R4 task 103 (E-2, 2026-06-18) — UAT 2 made the widget's Open button
+  // ALWAYS-ENABLED. The `todoId` arg is now OPTIONAL:
+  //   - present → dispatch openTodo launch (existing behaviour, auto-mount modal)
+  //   - absent  → open the SmartTodo Code Page with NO launch data → the
+  //     app's `useLaunchContext` returns undefined → app renders its default
+  //     3-col Kanban view (no auto-modal). This satisfies "user wants to just
+  //     open the app" without forcing a card selection first.
+  //
   // Wire format: `action=openTodo&todoId=<guid>` — Dataverse URL-encodes the
   // entire string as `?data=<envelope>` per the parseDataParams convention
   // (ADR-026). `useLaunchContext.parseLaunchContextFromSearch` handles BOTH
   // wire formats so test URLs (raw query) work without an MDA host too.
   const handleOpenTodo = React.useCallback(
-    (todoId: string) => {
-      const data =
-        `${LAUNCH_PARAM_ACTION}=${LAUNCH_ACTION_OPEN_TODO}` +
-        `&${LAUNCH_PARAM_TODO_ID}=${encodeURIComponent(todoId)}`;
+    (todoId?: string) => {
+      const data = todoId
+        ? `${LAUNCH_PARAM_ACTION}=${LAUNCH_ACTION_OPEN_TODO}` +
+          `&${LAUNCH_PARAM_TODO_ID}=${encodeURIComponent(todoId)}`
+        : undefined;
       ctx.onOpenWizard(SMART_TODO_CODE_PAGE_NAME, data, {
         width: { value: 85, unit: "%" },
         height: { value: 85, unit: "%" },
