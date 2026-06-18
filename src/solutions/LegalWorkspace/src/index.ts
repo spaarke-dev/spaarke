@@ -93,3 +93,19 @@ export const LegalWorkspaceRenderer: WorkspaceRenderer = _LegalWorkspaceApp;
  * byte-identical).
  */
 export { setRuntimeConfig as setLegalWorkspaceRuntimeConfig } from "./config/runtimeConfig";
+
+/**
+ * Daily Briefing notification-loader injection seam (R2 task 002, FR-01 / FR-02).
+ *
+ * SpaarkeAi `main.tsx` calls this at bootstrap with
+ * `loadSpaarkeAiNotificationContext` to flow real notification context into
+ * the BFF `/narrate` envelope. Without this call (standalone LegalWorkspace +
+ * standalone Daily Briefing Code Page), the slot stays unset and the embedded
+ * Daily Briefing falls back to the empty-payload contract.
+ *
+ * Pattern: module-mutable slot — mirrors `setDefaultWorkspaceRenderer` from
+ * `@spaarke/ui-components`. The default `dailyBriefingRegistration` consumed
+ * by `sectionRegistry.ts` uses a late-bound wrapper that reads from this slot
+ * at fetch time, so SECTION_REGISTRY can stay a static `readonly` array.
+ */
+export { setLegalWorkspaceDailyBriefingNotificationLoader } from "./sections/dailyBriefing/dailyBriefing.registration";

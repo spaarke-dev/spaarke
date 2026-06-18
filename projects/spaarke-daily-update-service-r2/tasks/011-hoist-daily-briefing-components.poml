@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Hoist Daily Briefing components (`DailyBriefingApp`, sections, atoms)</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>014, 015, 019</blocks>
+    <tags>frontend, react, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Bulk refactor; multiple .tsx files; touches dual-host paths</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Hoist all Daily Briefing UI components from their current locations (in `Spaarke.UI.Components/.../WorkspaceShell/sections/dailyBriefing/` and `src/solutions/DailyBriefing/src/`) into the new `@spaarke/daily-briefing-components/src/components/` directory. Per FR-04: `DailyBriefingApp` (top-level composer), `TldrSection`, `ActivityNotesSection`, `ChannelHeading`, `NarrativeBullet`, `PreferencesDropdown`, `CaughtUpFooter`, `DigestHeader`, `EmptyState`. Export them from the package's `./components` subpath. Components render identically across both hosts after this hoist.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 component authoring, React 19, and Pattern D component layout.</role>
+
+  <goal>All 9 Daily Briefing components live in `@spaarke/daily-briefing-components/src/components/`; the package builds; visual rendering of the standalone code page is unchanged.</goal>
+
+  <context>
+    <background>
+      Per spec FR-04: hoist canonical UI surface into the new package. The components stay structurally identical (no logic changes); only file location moves. NFR-02 is relaxed — minor visual shifts acceptable but document non-trivial ones in the PR.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/</file>
+      <file>src/solutions/DailyBriefing/src/components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Components live in the dedicated Pattern D package, not in `@spaarke/ui-components`.</constraint>
+    <constraint source="ADR-021">Preserve Fluent v9 semantic tokens; no hard-coded colors introduced; dark mode parity preserved.</constraint>
+    <constraint source="project">Logic-equivalent move — no behavior change in this task. Behavior changes (FR-11..FR-14) come in P2a (tasks 020–023).</constraint>
+    <constraint source="project">Standalone code page and SpaarkeAi widget MUST continue to render via current entry points until task 017/018 redirect them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/adr/ADR-021-fluent-ui-v9-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/</file>
+    </files>
+    <patterns>
+      <pattern name="Pattern D component placement" location="src/client/shared/Spaarke.Events.Components/src/components/">
+        Mirror Calendar's flat-or-grouped layout under `src/components/`. Use the same naming convention.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inventory all Daily Briefing component files currently in `Spaarke.UI.Components/.../dailyBriefing/` and `src/solutions/DailyBriefing/src/`. Cross-check against FR-04 list (9 components).</step>
+    <step order="2">Move each component .tsx + .module.css (if any) to `src/client/shared/Spaarke.DailyBriefing.Components/src/components/`. Preserve filenames.</step>
+    <step order="3">Update internal imports inside each moved component to reference siblings via `./` (intra-package). Update any external imports (e.g., to types or hooks) — temporarily preserve the originals; fix in task 014/015.</step>
+    <step order="4">Export each component from `src/components/index.ts`.</step>
+    <step order="5">In both original locations, replace the component files with re-exports from `@spaarke/daily-briefing-components/components` (interim shim — full removal happens in task 017/018).</step>
+    <step order="6">Run `npm run build` in the new package. Then run `npm run build` in `Spaarke.UI.Components` and `src/solutions/DailyBriefing/`. All must succeed.</step>
+    <step order="7">Visual smoke check: render the standalone code page locally (`npm run dev` in `src/solutions/DailyBriefing/`). Visual diff vs. baseline (last commit) should be null or minor.</step>
+    <step order="8">Update TASK-INDEX.md: change task 011 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript packages.</tool>
+    <tool name="terminal">Run shell + file ops.</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Standalone code page renders post-hoist (FR-04, FR-08 partial)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_dailyupdate</url>
+      <steps>
+        <step>Open Daily Briefing standalone code page</step>
+        <step>Verify TL;DR section renders</step>
+        <step>Verify channel sections render</step>
+        <step>Verify narrative bullets render</step>
+        <step>Verify preferences dropdown opens and behaves identically to pre-hoist baseline</step>
+      </steps>
+      <expected>Visual parity with pre-hoist baseline (minor token shifts acceptable per NFR-02)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Re-open standalone code page</step>
+        <step>Verify all hoisted components adapt</step>
+      </steps>
+      <expected>All colors use semantic tokens; no hard-coded white/black</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/ChannelHeading.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/PreferencesDropdown.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/CaughtUpFooter.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DigestHeader.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/EmptyState.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 9 components from FR-04 list exist in `@spaarke/daily-briefing-components/src/components/`.</criterion>
+    <criterion testable="true">New package builds with no errors.</criterion>
+    <criterion testable="true">Original-location files now re-export from the new package (interim shim — for task 017/018 cleanup).</criterion>
+    <criterion testable="true">Standalone code page renders visually equivalent to pre-hoist baseline (minor shifts acceptable per NFR-02 relaxed).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Don't touch logic. Don't fix the dead-link bug or sub-list rendering here — those are tasks 030+ (BFF prompt) and 020+ (P2a). This task is structural only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

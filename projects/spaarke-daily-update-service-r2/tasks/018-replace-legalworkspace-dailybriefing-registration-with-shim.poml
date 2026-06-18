@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Replace LegalWorkspace `dailyBriefing` registration with thin shim</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>062</blocks>
+    <tags>frontend, react, refactoring, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Restructures SpaarkeAi mount path; must preserve P1 seam wiring</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Replace the static `dailyBriefingRegistration` in `src/solutions/LegalWorkspace/src/sections/dailyBriefing/` with a thin shim that consumes the factory from `@spaarke/daily-briefing-components`. Mirror the 62-line Calendar shim at `src/solutions/LegalWorkspace/src/sections/calendar.registration.ts`. The shim passes through `loadSpaarkeAiNotificationContext` from SpaarkeAi (wired in task 002) so SpaarkeAi continues to render real notifications.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in LegalWorkspace section-shim pattern (Calendar precedent) and SpaarkeAi composition.</role>
+
+  <goal>LegalWorkspace section shim is ≤80 lines; consumes the new package's factory; SpaarkeAi continues to render real notifications via the shim path.</goal>
+
+  <context>
+    <background>
+      Per spec design constraint and the calendar precedent: section-registration shims in LegalWorkspace are thin pass-throughs. After this task, the SpaarkeAi mount goes through the shim → new package factory → DailyBriefingApp.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/sections/dailyBriefing/</file>
+      <file>src/solutions/LegalWorkspace/src/sections/calendar.registration.ts</file>
+      <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shim is a thin pass-through; no business logic; consumes shared package factory.</constraint>
+    <constraint source="project">Must preserve P1 seam: `loadSpaarkeAiNotificationContext` injection from SpaarkeAi `main.tsx` continues to flow through.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>src/solutions/LegalWorkspace/src/sections/calendar.registration.ts</file>
+    </files>
+    <patterns>
+      <pattern name="LegalWorkspace section shim" location="src/solutions/LegalWorkspace/src/sections/calendar.registration.ts">
+        Calendar shim — 62 lines, thin pass-through. Mirror this shape.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `calendar.registration.ts` as the precedent shape.</step>
+    <step order="2">Author `src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts` (or replace the existing file) as a thin shim.</step>
+    <step order="3">Shim imports the factory from `@spaarke/daily-briefing-components` and wraps it with the LegalWorkspace section registration API.</step>
+    <step order="4">Shim passes through the optional `loadNotificationContext` arg so SpaarkeAi's `main.tsx` injection continues to flow.</step>
+    <step order="5">Delete any business logic or component code that was in the old registration location.</step>
+    <step order="6">Verify build green on LegalWorkspace + SpaarkeAi + standalone code page.</step>
+    <step order="7">Smoke test: cold-load SpaarkeAi workspace pane; Daily Briefing renders real notifications (P1 seam preserved).</step>
+    <step order="8">Update TASK-INDEX.md: change task 018 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev server.</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="SpaarkeAi mount path post-shim refactor">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={spaarke-ai-app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Cold-load SpaarkeAi workspace as user with N&gt;0 unread notifications</step>
+        <step>Open Daily Briefing pane</step>
+        <step>Verify TL;DR + bullets render</step>
+        <step>Verify P1 seam preserved (notifications match underlying `appnotification` rows)</step>
+      </steps>
+      <expected>Real notifications render; P1 fix preserved</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">LegalWorkspace dailyBriefing registration is a thin shim (≤80 lines, no business logic).</criterion>
+    <criterion testable="true">Shim consumes `@spaarke/daily-briefing-components` factory.</criterion>
+    <criterion testable="true">SpaarkeAi cold-load still renders real notifications (P1 seam preserved).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Don't touch `MicrosoftToDoIcon`, `authInit`, `runtimeConfig` here — those are DD tasks (050, 054, 055).
+
+    --- Completion (Wave 7, 2026-06-18) ---
+
+    Status: ✅ Completed.
+
+    Shim location: `src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts` (79 lines; well under the ≤80 LOC ceiling; Calendar precedent is 62 lines).
+
+    Factory location verified: `createDailyBriefingRegistration` lives in `@spaarke/ui-components` (NOT in `@spaarke/daily-briefing-components` — the new package only hoisted UI components + hooks + services; the registration factory remains in the shared lib's `WorkspaceShell/sections/dailyBriefing/`). Shim imports from `@spaarke/ui-components`.
+
+    Shim shape (mirrors Calendar precedent):
+      - Imports `createDailyBriefingRegistration` + `TELEMETRY_EVENT_DAILY_BRIEFING_429` + types from `@spaarke/ui-components`.
+      - Imports LegalWorkspace-local `authenticatedFetch` + `getTenantId` from `../../services/authInit`.
+      - Imports LegalWorkspace-local `trackEvent` from `../../services/telemetry`.
+      - Exports `CreateLegalWorkspaceDailyBriefingRegistrationOptions` interface containing the optional `loadNotificationContext?: () => Promise<NarrateRequest | null>` (the P1 seam — FR-01 enabler).
+      - Exports `createLegalWorkspaceDailyBriefingRegistration(options?)` factory wrapping the shared factory with LegalWorkspace-local auth + telemetry closures.
+      - Default export `dailyBriefingRegistration: SectionRegistration` calls the factory with NO loader (standalone path — preserves the empty-payload contract; FR-25 / NFR-10 unchanged).
+      - Re-exports `getTenantId` for future consumers / tests.
+
+    `loadNotificationContext` threading evidence:
+      `options.loadNotificationContext` (factory option) → `loadNotificationContext: options.loadNotificationContext` (forwarded to shared factory call) → shared factory pipes it to `DailyBriefingSection` props → `useDailyBriefing({ ..., loadNotificationContext })` → fetch envelope built from `loadNotificationContext()` return value. Fully plumbed end-to-end.
+
+    Deleted (now-orphaned with the static const replaced):
+      - `src/solutions/LegalWorkspace/src/sections/dailyBriefing/DailyBriefingSection.tsx` (101 LOC) — was the local wrapper that closed over auth + telemetry; that responsibility is now in the registration shim itself.
+      - `src/solutions/LegalWorkspace/src/sections/dailyBriefing/useDailyBriefing.ts` (56 LOC) — local hook wrapper; replaced by direct usage of the shared hook inside the shared section component (no remaining LegalWorkspace consumers of the local hook).
+
+    Build verification:
+      - `npm run build` (Vite production) on `src/solutions/LegalWorkspace/` succeeds (3313 modules transformed; 13.31s). Same baseline as pre-task.
+      - `npx tsc --noEmit` on `src/solutions/LegalWorkspace/` — zero `dailyBriefing`-related errors. Pre-existing TS6133 unused-import warnings in other shared lib files are unchanged baseline (NOT introduced by this task).
+      - SpaarkeAi build failure on `@spaarke/sdap-client` resolution is PRE-EXISTING (verified by stash + rebuild at HEAD); independent of this task. Same baseline as `notes/task-002-blocker.md` captured.
+      - Standalone DailyBriefing code page is owned by concurrent task 017 (Wave 7) — mid-flight; not verified here.
+
+    Acceptance criteria check:
+      ✅ Thin shim (79 lines ≤ 80; no business logic — only factory call + 6-line telemetry adapter).
+      ✅ Shim consumes `createDailyBriefingRegistration` factory.
+      ⏸️ SpaarkeAi cold-load real notifications — cannot verify in this task; requires task 002 (`main.tsx` wires the loader). This task UNBLOCKS that path.
+
+    Next-task readiness:
+      - Task 002 UNBLOCKED. SpaarkeAi `main.tsx` can now import `createLegalWorkspaceDailyBriefingRegistration` (or compose `DailyBriefingApp` directly per task-002-blocker.md Option A) and supply `loadNotificationContext: loadSpaarkeAiNotificationContext`.
+      - Task 062 (P1 smoke verification after main.tsx wires the loader) progresses: the shim's `loadNotificationContext` factory option now flows through to the shared section + hook; once task 002 wires it, P1 smoke tests will see real bullets.
+
+    File-overlap forbidden zones respected:
+      - DailyBriefing solution files: NOT touched (017 owns).
+      - Docs files: NOT touched (063 owns).
+      - BFF files: NOT touched.
+      - `tasks/TASK-INDEX.md`: NOT touched (per orchestrator brief).
+      - New package source (`src/client/shared/Spaarke.DailyBriefing.Components/`): NOT touched.
+
+    NO commit. NO push. NO TASK-INDEX update — per orchestrator brief.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

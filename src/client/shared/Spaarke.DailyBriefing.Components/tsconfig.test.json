@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "isolatedModules": false,
+    "jsx": "react-jsx",
+    "types": ["node", "jest", "@testing-library/jest-dom"],
+    "baseUrl": ".",
+    "paths": {
+      "@spaarke/auth": ["./test/__mocks__/spaarke-auth.ts"],
+      "@spaarke/ui-components": ["./test/__mocks__/spaarke-ui-components.tsx"],
+      "@spaarke/ui-components/services": ["./test/__mocks__/spaarke-ui-components-services.ts"]
+    }
+  },
+  "include": ["src", "test"]
+}

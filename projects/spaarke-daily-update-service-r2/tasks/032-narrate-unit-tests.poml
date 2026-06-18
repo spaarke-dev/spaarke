@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Unit tests for `/narrate` prompt + validation (FR-15, FR-17)</title>
+    <phase>P2b: BFF /narrate Fix</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>033</blocks>
+    <tags>bff-api, testing, unit-test, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test creation; closes BFF §10 bullet 6 test obligation for P2b</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 031</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add unit tests in `tests/unit/Sprk.Bff.Api.Tests/` covering: (a) `BuildChannelNarrationPrompt` output contains `regardingId=` for items that have one (FR-15); (b) mocked LLM returns a hallucinated `primaryEntityId` not in the supplied set → response has nulled `primaryEntityType`/`primaryEntityId`/`primaryEntityName` + warning logged (FR-17).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in xUnit + Sprk.Bff.Api.Tests fixture patterns + mocking LLM responses.</role>
+
+  <goal>Both tests exist and pass; BFF §10 bullet 6 test obligation satisfied for P2b.</goal>
+
+  <context>
+    <background>
+      Per BFF §10 bullet 6 (binding): PRs modifying `Services/` or `Api/` MUST add/update tests. Tasks 030 + 031 modify `Api/Ai/DailyBriefingEndpoints.cs`; this task supplies the tests.
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingEndpointsTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">CLAUDE.md §10 bullet 6 (test update obligation).</constraint>
+    <constraint source="project">Tests live in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate or create `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingEndpointsTests.cs`.</step>
+    <step order="2">Test 1: build a prompt for a channel with items that have `RegardingId`; assert output contains `regardingId={guid}` for each.</step>
+    <step order="3">Test 2: provide items with known `RegardingId` set; mock the LLM to return a bullet with `primaryEntityId` not in the set; assert the response has nulled `primaryEntityType`/`primaryEntityId`/`primaryEntityName`; assert a warning is logged.</step>
+    <step order="4">Test 3 (optional but valuable): mock LLM returning a valid `primaryEntityId` (in the set); assert response retains the fields.</step>
+    <step order="5">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/`; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: change task 032 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test .NET project.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test 1 passes: prompt contains `regardingId=` for items.</criterion>
+    <criterion testable="true">Test 2 passes: hallucinated `primaryEntityId` is nulled server-side; warning logged.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the existing Sprk.Bff.Api.Tests fixture patterns. If the fixture for `DailyBriefingEndpoints` doesn't exist yet, create one following BFF F.2 (fixture-config-FIRST inspection protocol).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

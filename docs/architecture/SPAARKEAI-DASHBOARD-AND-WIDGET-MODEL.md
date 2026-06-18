@@ -24,7 +24,7 @@ SpaarkeAi's three-pane shell is the host for every Spaarke AI experience. Each p
 | **Workspace** | Center | Where work lives — tabs of active workspaces and AI outputs | `workspace` (primary) | `WorkspaceTabManager` (FIFO at 8 tabs), tab strip, the active widget's render area, the workspace dropdown |
 | **Context** | Right | Where context comes from — Get Started cards, playbook gallery, wizards, tool views | `context`, dispatches to `workspace` | Get Started, semantic search, playbook gallery, Context-pane wizards (e.g. Create Project) |
 
-The three surfaces communicate through the typed `PaneEventBus` (see [`SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](./SPAARKEAI-WORKSPACE-ARCHITECTURE.md) §3.3 + [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) §9). The bus is the only mechanism a non-Workspace surface should use to mount a widget into the Workspace pane — direct cross-pane calls are forbidden.
+The three surfaces communicate through the typed `PaneEventBus` (see [`SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](./SPAARKEAI-WORKSPACE-ARCHITECTURE.md) §3.3 + [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) §10). The bus is the only mechanism a non-Workspace surface should use to mount a widget into the Workspace pane — direct cross-pane calls are forbidden.
 
 The Workspace pane is the only surface that mounts widgets. The Assistant and Context surfaces **produce widget-load intents**; they do not host widgets themselves (except for their own pane-local UI like the chat composer or the Get Started panel).
 

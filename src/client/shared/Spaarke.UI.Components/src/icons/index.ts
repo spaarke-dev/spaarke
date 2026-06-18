@@ -3,3 +3,4 @@
  */
 
 export * from './SprkIcons';
+export * from './MicrosoftToDoIcon';

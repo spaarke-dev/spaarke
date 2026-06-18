@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>P1 verification — SpaarkeAi pane renders bullets in spaarkedev1 (smoke)</title>
+    <phase>P1: Wiring Seam Fix</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>010</blocks>
+    <tags>e2e-test, fluent-ui, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification task, no new code; involves manual smoke in spaarkedev1</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>E2E verification; serial after 002</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Verify the P1 fix landed correctly: deploy the SpaarkeAi code page to spaarkedev1 (or use existing dev deploy), open as `ralph.schroeder@spaarke.com`, confirm the Daily Briefing pane in the SpaarkeAi workspace renders real bullets (not the empty state). Capture a screenshot and a brief note for the project record.
+  </prompt>
+
+  <role>SPAARKE platform developer. Performing manual E2E verification of a wiring-seam fix.</role>
+
+  <goal>Documented confirmation that SpaarkeAi's Daily Briefing pane now populates with real notifications, closing FR-01 + FR-02 acceptance.</goal>
+
+  <context>
+    <background>
+      P1 (tasks 001 + 002) added the injection seam and wired SpaarkeAi to use it. This verification ensures the fix actually presents notifications end-to-end before P2 (Pattern D hoist) reshapes the underlying structure.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No code changes; verification only.</constraint>
+    <constraint source="project">Use spaarkedev1 environment per spec dependency list.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">If a deploy is needed, invoke `code-page-deploy` skill for SpaarkeAi (or use existing dev deploy).</step>
+    <step order="2">Sign into spaarkedev1 as `ralph.schroeder@spaarke.com` (or another user with N&gt;0 unread `appnotification`).</step>
+    <step order="3">Open the SpaarkeAi workspace and navigate to the Daily Briefing pane.</step>
+    <step order="4">Verify TL;DR + channel bullets render (not empty state).</step>
+    <step order="5">Compare visible bullets to the standalone code page (`sprk_dailyupdate`) for the same user — both should show the same underlying data (channel breakdown, item counts).</step>
+    <step order="6">Capture a screenshot to `projects/spaarke-daily-update-service-r2/notes/handoffs/p1-smoke-{date}.png` (or markdown note if screenshot infeasible).</step>
+    <step order="7">Update TASK-INDEX.md: change task 003 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands.</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="SpaarkeAi Daily Briefing renders for user with unread notifications">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={spaarke-ai-app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Sign in as a user with at least 1 unread `appnotification` row</step>
+        <step>Open SpaarkeAi workspace; navigate to Daily Briefing pane</step>
+        <step>Wait for `/narrate` request to complete (network panel)</step>
+        <step>Verify pane shows TL;DR section + at least one channel section + at least one bullet</step>
+        <step>Verify NO "no notifications" empty state rendered</step>
+        <step>Open browser console; verify no JavaScript errors</step>
+      </steps>
+      <expected>Pane renders real notifications; matches standalone code page output for same user</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in Dataverse settings</step>
+        <step>Re-open SpaarkeAi workspace</step>
+        <step>Verify Daily Briefing pane background + text + icons adapt</step>
+      </steps>
+      <expected>All colors use Fluent v9 semantic tokens per ADR-021; no hard-coded white/black</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r2/notes/handoffs/p1-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpaarkeAi Daily Briefing pane shows real notifications for a user with N&gt;0 unread rows in spaarkedev1.</criterion>
+    <criterion testable="true">Channel breakdown matches the standalone code page output for the same user.</criterion>
+    <criterion testable="true">Dark mode renders without hard-coded colors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If the smoke test fails, do NOT proceed to task 010. File a defect on the P1 implementation (tasks 001 + 002) and re-execute those.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>
