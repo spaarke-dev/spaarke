@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 20 / 36 complete; 1 deferred (Waves 1–5: + 015 — hoisted types/notifications + 2 services + utils + @spaarke/auth peer dep; zero solution-local imports in new package)
+> **Status**: 22 / 36 complete; 1 deferred (Waves 1–6: + 016 verified-no-op + 019 with Jest 30 + 19 passing tests)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -20,10 +20,10 @@
 | 013 | Hoist existing hooks (`useInlineTodoCreate`, `useBriefingNarration`) | P2 | ✅ | 010 | A | FULL |
 | 014 | Decompose `useNotificationData` → `useBriefingNotifications` + `useBriefingPreferences` + `useBriefingActions` | P2 | ✅ | 011,012,013 | — | FULL |
 | 015 | Abstract dependencies — props/parameters; remove solution-local imports | P2 | ✅ | 014 | — | FULL |
-| 016 | Subpath exports contract (`./components`, `./widgets`, `./hooks`, `./services`, `./types`) | P2 | 🔲 | 015 | — | FULL |
+| 016 | Subpath exports contract (`./components`, `./widgets`, `./hooks`, `./services`, `./types`) | P2 | ✅ no-op (finalized 010/015) | 015 | — | FULL |
 | 017 | Shrink standalone code page to thin host shell | P2 | 🔲 | 016 | B | FULL |
 | 018 | Replace LegalWorkspace `dailyBriefing` registration with thin shim | P2 | 🔲 | 016 | B | FULL |
-| 019 | Unit tests for 3 split hooks + smoke test mounting `DailyBriefingApp` | P2 | 🔲 | 014,011 | — | STANDARD |
+| 019 | Unit tests for 3 split hooks + smoke test mounting `DailyBriefingApp` | P2 | ✅ Jest 30, 19/19 pass | 014,011 | — | STANDARD |
 | 020 | `NarrativeBullet` renders per-item sub-list when `itemIds.length > 1` (FR-11) | P2a | 🔲 | 016 | — | FULL |
 | 021 | Sub-row entity link via supplied `regardingId` + `Xrm.Navigation.navigateTo` (FR-12) | P2a | 🔲 | 020 | C | FULL |
 | 022 | Sub-row Add-to-To-Do uses `useInlineTodoCreate` (FR-13) | P2a | 🔲 | 020 | C | FULL |

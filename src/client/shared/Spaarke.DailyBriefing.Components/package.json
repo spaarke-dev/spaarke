@@ -17,7 +17,11 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --maxWorkers=2"
   },
   "peerDependencies": {
     "@fluentui/react-components": "^9.0.0",
@@ -29,11 +33,18 @@
   "devDependencies": {
     "@fluentui/react-components": "^9.46.2",
     "@fluentui/react-icons": "^2.0.200",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.4.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.19.19",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "ts-jest": "^29.4.4",
     "typescript": "^5.3.3"
   }
 }
