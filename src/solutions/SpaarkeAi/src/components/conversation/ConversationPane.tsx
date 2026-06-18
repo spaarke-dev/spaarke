@@ -130,6 +130,7 @@ import {
   type ConversationMessage as HardSlashConversationMessage,
 } from "./HardSlashExecutor";
 import { CommandHelpPanel } from "./CommandHelpPanel";
+import { HelpAffordance } from "./HelpAffordance";
 import { decorateBody as decorateSoftSlashBody } from "./SoftSlashRouter";
 import ReferenceResolver, {
   createScopeFetch,
@@ -581,6 +582,11 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
     overflow: "hidden",
+    // R6 task 085 / D-D-06: anchor for the absolutely-positioned
+    // HelpAffordance (Pillar 8 `/help` discovery button). Keeps the
+    // button in the chat region without disturbing SprkChat's internal
+    // input bar layout (NFR-11: additive UX; existing behavior unchanged).
+    position: "relative",
   },
 
   // ── R5 task 020 / D2-11: "N files attached" indicator strip ──────────────
@@ -2005,6 +2011,15 @@ export function ConversationPane(): React.JSX.Element {
               onBeforeSendMessage={handleBeforeSendMessage}
               onDecorateOutboundBody={handleDecorateOutboundBody}
             />
+            {/*
+              R6 task 085 / D-D-06 (Pillar 8 `/help` UI affordance) — a
+              discoverable button anchored top-right of the chat region.
+              Clicking opens the same CommandHelpPanel as the `/help` hard
+              slash so users who don't know slash syntax can discover the
+              closed Pillar 8 vocabulary. Additive UX — does NOT modify
+              SprkChat's internal input bar (NFR-11).
+            */}
+            <HelpAffordance onClick={() => setHelpPanelOpen(true)} />
             <CommandHelpPanel
               open={helpPanelOpen}
               onClose={() => setHelpPanelOpen(false)}

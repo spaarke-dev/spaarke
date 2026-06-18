@@ -1,68 +1,35 @@
-# Current Task State — R6 (Wave D-G1 task 080 — done)
+# Current Task State — R6 (Wave D-G2 — 084 ✅ closed; 085 ✅ closed; 086 ✅ closed)
 
-> **Last Updated**: 2026-06-18 (Phase D launch — Pillar 8 CommandRouter parser foundation landed)
-> **Mode**: Wave D-G1 (task 080 — CommandRouter parser) — COMPLETE
+> **Last Updated**: 2026-06-18 (Phase D Wave D-G2 — all three D-G2 tasks closed)
+> **Mode**: Wave D-G2 (parallel: 084 composition + 085 /help UI + 086 NL regression) — COMPLETE
 > **Branch**: `work/spaarke-ai-platform-unification-r6`
+> **Task 084 status**: ✅ — 12 tests green; FR-52 (both examples) + NFR-11 passthrough covered; see `notes/task-084-evidence.md`
+> **Task 085 status**: ✅ — `HelpAffordance.tsx` + 10/10 tests green; ConversationPane.tsx minimal additive wire-up; see `notes/task-085-evidence.md`
+> **Task 086 status**: ✅ — 50 tests green; NFR-11 + NFR-01 verified for the 4 binding NL inputs; see `notes/task-086-evidence.md`
 
 ---
 
-## Task 080 — closeout
+## Task 084 — composition integration tests ✅ CLOSED
 
-| Task | Scope | Status | Evidence note |
-|------|-------|--------|---------------|
-| 080 | Pillar 8 foundation. `CommandRouter.ts` pure parser implementing closed Q6 vocabulary (6 hard slashes + 4 soft slashes + 3 reference shapes); 36 unit tests green (each command + each reference + composition + NFR-11 passthrough + purity invariants); wired into `ConversationPane.handleBeforeSendMessage` at send-message boundary in capture-only mode (NO behavior branch — gates 081/082/083). | ✅ | `notes/task-080-evidence.md` |
+**Scope**: end-to-end parse → resolve → decorate → send chain for FR-52 examples plus
+NFR-11 natural-language regression. Tests-only; no production code changes.
 
-### What landed
+| Item | Path |
+|------|------|
+| Test file | `src/solutions/SpaarkeAi/src/components/conversation/__tests__/composition.integration.test.ts` |
+| Evidence note | `projects/spaarke-ai-platform-unification-r6/notes/task-084-evidence.md` |
 
-**Files created:**
-- `src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts` — pure parser; exports `parse(rawText): Intent`, types (`Intent`, `Reference`, `SlashCommand`, `HardSlashCommand`, `SoftSlashCommand`, `ReferenceKind`), read-only vocabulary tables (`HardSlashes`, `SoftSlashes`).
-- `src/solutions/SpaarkeAi/src/components/conversation/__tests__/CommandRouter.test.ts` — 36 tests covering Q6 closed vocabulary + NFR-11 regression + purity invariants.
+### Composition contract under test
 
-**Files modified:**
-- `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` — added `import { parse as parseCommandIntent } from "./CommandRouter"` + `const commandIntent = parseCommandIntent(messageText)` inside `handleBeforeSendMessage` BEFORE the existing R5 `matchIntent` call. `void commandIntent` suppresses unused-var lint until tasks 081/082/083 wire branching behavior. NO behavior change.
+1. `/summarize #engagement-letter.docx` — single-reference soft slash
+2. `/draft response to @opposing-counsel about #motion-to-dismiss` — multi-reference soft slash
+3. Natural-language equivalent — NFR-11 passthrough (no decoration)
 
-### NFR-11 binding regression test
+### Quality gates
 
-Locked in `CommandRouter.test.ts`:
+- Jest tests green: `npx jest src/components/conversation/__tests__/composition.integration.test.ts`
+- BFF publish-size delta = 0 MB (frontend-only, test-only)
 
-```ts
-test('natural language → command: null (full Intent shape)', () => {
-  const intent = parse('summarize this for me');
-  expect(intent).toEqual<Intent>({
-    command: null, references: [], rawText: 'summarize this for me',
-    isHardSlash: false, isSoftSlash: false,
-  });
-});
-```
+### Downstream
 
-This shape is THE contract that lets `handleBeforeSendMessage` fall through to the existing `matchIntent` + SprkChat send funnel UNCHANGED when the user types natural language.
-
-### Build + tests
-
-- **Tests**: `npm test -- --testPathPatterns=CommandRouter` → **36/36 passing** in 8.3s
-- **Module typecheck**: `tsc --noEmit CommandRouter.ts` → **0 errors** (isolated)
-- **`npm run build`**: `tsc-surface-gate` reports **0 surface-owned errors** (98 pre-existing errors in unrelated shared libs deferred to Phase B per gate); Vite build fails on PRE-EXISTING `@spaarke/sdap-client` rollup resolution in `EntityCreationService.ts` (NOT introduced by my changes — confirmed by `git stash` rerun)
-- **ConversationPane regression check**: Stash-and-rerun confirmed 2 pre-existing test-suite failures in `ConversationPane.r5.test.tsx` + `ConversationPane.slash-nl-rewire.test.tsx` exist BEFORE my changes (CreateMatterWizard module resolution); my code adds zero new failures.
-- **BFF publish-size delta**: **0 MB** (frontend-only; no `.cs` files modified)
-
-### Downstream unblocked
-
-- 081 (hard-slash executor — 6 commands)
-- 082 (soft-slash agent routing — 4 commands)
-- 083 (reference resolver — 3 shapes)
-- 084 (composition integration tests)
-- 086 (additional Phase D Wave 2 work that consumes Intent)
-
-TASK-INDEX 080 flipped 🔲 → ✅.
-
----
-
-## Next task
-
-Per TASK-INDEX, Wave D-G1 has three parallel-safe siblings all gated by task 080:
-
-- **task 081** — Hard slashes executor (`/clear`, `/new-session`, `/help`, `/export`, `/save-to-matter`, `/pin`)
-- **task 082** — Soft slashes agent routing (`/summarize`, `/draft`, `/extract-entities`, `/analyze`)
-- **task 083** — References resolver (`#scope`, `@<entity>`, `#<filename>`)
-
-These can be dispatched as a parallel wave (3 sub-agents in one message) per project-pipeline pattern.
+- 087 (vertical-slice integration test, all 9 pillars) gates on 084 ✅
