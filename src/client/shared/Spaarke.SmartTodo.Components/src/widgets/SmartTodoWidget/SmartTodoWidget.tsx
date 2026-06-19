@@ -140,11 +140,17 @@ const SEARCH_DEBOUNCE_MS = 150;
 /**
  * Build the active-todo $select+$filter query targeting `sprk_todo`.
  *
- * Per R4 spec FR-02:
+ * Per R4 spec FR-02 + ownership-alignment fix 2026-06-19:
  *   - statecode eq 0
  *   - statuscode in (Open, In Progress)
  *   - regarding context filter (when supplied)
- *   - owner filter (when supplied and no regarding context)
+ *   - assignee filter (when supplied and no regarding context) —
+ *     aligned to the SmartTodoApp Code Page (R4-031 / FR-07 / OD-2). Previously
+ *     used `_ownerid_value` which mismatched the Code Page and caused records
+ *     created on one surface to be invisible on the other (caught by the
+ *     spaarke-prototype/smart-todo-r4-uat harness 2026-06-19). `ownerid` is
+ *     BU-default and not user-meaningful; `sprk_assignedto` is the canonical
+ *     "this is YOUR to-do" lookup across the Spaarke surfaces.
  *
  * Zero `sprk_event` references. Zero `sprk_todoflag` references.
  */
@@ -169,6 +175,7 @@ export function buildSmartTodoQuery(opts: {
     'sprk_todopinned',
     'statecode',
     'statuscode',
+    '_sprk_assignedto_value',
     'createdon',
     'modifiedon',
   ].join(',');
@@ -176,7 +183,8 @@ export function buildSmartTodoQuery(opts: {
   // Active clause is invariant — Open + In Progress.
   const activeClause = `statecode eq 0 and (statuscode eq ${TODO_STATUSCODE_OPEN} or statuscode eq ${TODO_STATUSCODE_IN_PROGRESS})`;
 
-  // Build context clause — regarding takes precedence; falls back to owner.
+  // Build context clause — regarding takes precedence; falls back to assignee.
+  // `scope='all'` retains the BU-OR-assignee expansion (rare workspace mode).
   let contextClause = '';
   if (opts.regardingContext) {
     const lookupField = entityLogicalNameToLookup(opts.regardingContext.entityLogicalName);
@@ -184,9 +192,9 @@ export function buildSmartTodoQuery(opts: {
       contextClause = `${lookupField} eq ${opts.regardingContext.recordId}`;
     }
   } else if (opts.scope === 'all' && opts.businessUnitId) {
-    contextClause = `(_ownerid_value eq ${opts.userId ?? '00000000-0000-0000-0000-000000000000'} or _owningbusinessunit_value eq ${opts.businessUnitId})`;
+    contextClause = `(_sprk_assignedto_value eq ${opts.userId ?? '00000000-0000-0000-0000-000000000000'} or _owningbusinessunit_value eq ${opts.businessUnitId})`;
   } else if (opts.userId) {
-    contextClause = `_ownerid_value eq ${opts.userId}`;
+    contextClause = `_sprk_assignedto_value eq ${opts.userId}`;
   }
 
   const filter = contextClause ? `${contextClause} and ${activeClause}` : activeClause;
@@ -575,8 +583,31 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     }
     setIsQuickAdding(true);
     setQuickAddError(null);
+
+    // Defaults for quick-create — make the record immediately visible in BOTH
+    // surfaces (widget + Code Page) and assign it to today's column. Per the
+    // ownership-alignment fix (2026-06-19), `sprk_assignedto` is the canonical
+    // "this is YOUR to-do" lookup; `ownerid` is BU-default and won't satisfy
+    // either surface's filter once the widget aligns to sprk_assignedto.
+    //
+    // `sprk_assignedto@odata.bind` is the Web API binding format for lookups
+    // on create (cannot use `_sprk_assignedto_value` on create — that's a
+    // read-only OData column name).
+    //
+    // `sprk_duedate` defaults to end-of-today (local). That makes the new
+    // todo land in the Today bucket with default priority 50 + effort 50 +
+    // urgency 80 → score ~59 (~Today/Tomorrow boundary). If the user wanted
+    // a different bucket, they can drag it OR use the full wizard.
+    const payload: Record<string, unknown> = { sprk_name: title };
+    if (userId) {
+      payload['sprk_assignedto@odata.bind'] = `/systemusers(${userId})`;
+    }
+    const today = new Date();
+    today.setHours(23, 59, 0, 0);
+    payload['sprk_duedate'] = today.toISOString();
+
     try {
-      await webApi.createRecord('sprk_todo', { sprk_name: title });
+      await webApi.createRecord('sprk_todo', payload);
       setQuickAddValue('');
       refetch();
     } catch (err) {
@@ -587,7 +618,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     } finally {
       setIsQuickAdding(false);
     }
-  }, [quickAddValue, webApi, refetch]);
+  }, [quickAddValue, webApi, userId, refetch]);
 
   const handleQuickAddClick = React.useCallback(() => {
     void submitQuickAdd();

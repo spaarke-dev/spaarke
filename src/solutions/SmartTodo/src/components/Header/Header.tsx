@@ -72,6 +72,7 @@ import {
   SettingsRegular,
 } from '@fluentui/react-icons';
 import {
+  MicrosoftToDoIcon,
   OrientationToggle,
   SelectionAwareToolbar,
   ViewToggle,
@@ -79,7 +80,6 @@ import {
   type ToolbarAction,
   type ViewToggleMode,
 } from '@spaarke/ui-components';
-import { MicrosoftToDoIcon } from '../../icons/MicrosoftToDoIcon';
 import { useHeaderStyles } from './Header.styles';
 
 // ---------------------------------------------------------------------------
