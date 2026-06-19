@@ -42,16 +42,20 @@ public sealed class CapabilityRouterOptions
     /// <summary>
     /// Hard-coded general-purpose tool set used as a fallback when the manifest
     /// contains no tools and no DefaultPlaybookId is configured.
+    ///
+    /// R6 hotfix 2026-06-19 (UAT): emptied. The prior list contained CAPABILITY
+    /// names (GenerateSummary, SearchDocuments, etc.) rather than the actual
+    /// Dataverse tool names that <c>ToolHandlerToAIFunctionAdapter.Name</c>
+    /// returns (e.g., "SYS-Text Summary"). The per-turn filter in
+    /// <c>SprkChatAgentFactory.ResolveTools</c> compared the two and matched
+    /// none → every tool was dropped → agent had <c>toolCount=0</c> → LLM
+    /// silently stalled because it had no tools to invoke. Returning an empty
+    /// array triggers the "empty allowed set → return full capability-gated
+    /// tool set" branch (line 1684), which restores the intended fallback
+    /// behaviour: when routing has nothing specific to say, expose every
+    /// tool the user's capabilities allow.
     /// </summary>
-    public static readonly string[] GeneralSupersetFallbackTools =
-    [
-        "GenerateSummary",
-        "GetKnowledgeSource",
-        "QueryEntities",
-        "RefineText",
-        "SearchDiscovery",
-        "SearchDocuments",
-    ];
+    public static readonly string[] GeneralSupersetFallbackTools = [];
 
     /// <summary>
     /// Configuration for the Layer 2 GPT-4o-mini intent classifier (AIPU2-013).
