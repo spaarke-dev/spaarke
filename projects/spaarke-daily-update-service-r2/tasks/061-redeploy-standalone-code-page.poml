@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Redeploy standalone Daily Briefing code page via `code-page-deploy`</title>
+    <phase>Phase7: Deployment + Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>017, 055</dependencies>
+    <blocks>062</blocks>
+    <tags>deploy, frontend, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production-deploy task; post-shrink standalone code page</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build and redeploy the standalone Daily Briefing code page (`sprk_dailyupdate`) via the `code-page-deploy` skill. The page is now a thin host shell (task 017) consuming `@spaarke/daily-briefing-components` and the shared auth factory (task 055). Verify the deployed page renders identically to dev preview.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in `code-page-deploy` skill + Vite + `vite-plugin-singlefile` builds + Dataverse web resource publishing.</role>
+
+  <goal>Standalone Daily Briefing code page redeployed; renders identically to dev preview; auth + runtime config + Daily Briefing UI all wire through correctly.</goal>
+
+  <context>
+    <background>
+      Post-shrink (task 017) + post-DD (task 055), the standalone page is a thin host shell. This deploy confirms the new shape works end-to-end in spaarkedev1.
+    </background>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-026">Vite + `vite-plugin-singlefile` + React 19 build standard.</constraint>
+    <constraint source="project">Use `code-page-deploy` skill; not raw PAC CLI.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/adr/ADR-026-code-page-build-standard.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify task 017 + 055 acceptance — standalone code page is a thin host shell with no local `MicrosoftToDoIcon`/`authInit`/`runtimeConfig`.</step>
+    <step order="2">Run production build of `src/solutions/DailyBriefing/`.</step>
+    <step order="3">Invoke `code-page-deploy` skill to deploy `sprk_dailyupdate`.</step>
+    <step order="4">Open the deployed code page in spaarkedev1; verify TL;DR + bullets + preferences + sub-list (P2a) all render.</step>
+    <step order="5">Toggle dark mode; verify parity.</step>
+    <step order="6">Record deploy details in `notes/standalone-deploy-log.md`.</step>
+    <step order="7">Update TASK-INDEX.md: change task 061 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Production build.</tool>
+    <tool name="terminal">Run code-page-deploy skill.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r2/notes/standalone-deploy-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Standalone code page deployed to spaarkedev1.</criterion>
+    <criterion testable="true">Rendering identical to dev preview (minor token shifts acceptable per NFR-02).</criterion>
+    <criterion testable="true">Dark mode parity preserved.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    SC8 verification happens in task 062 (full E2E).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

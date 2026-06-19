@@ -2,7 +2,7 @@
 
 > **Purpose**: Operator-side decision guide + step-by-step tutorial for adding a new widget to the SpaarkeAi shell. Walks through the **two-wrapper decision tree first**, then the five archetypes that fall out of it, then the file edits + Dataverse seed + deploy sequence. The canonical worked example is the **Calendar widget** (Pattern D — dual-use, shipped R3 tasks 114 + 115, polished through R13).
 >
-> **Last reviewed**: 2026-05-26 (R4 task 011 / W-2). Rewritten around the two-wrapper model now codified in [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md). Previous version (Task 123, R13) catalogued Patterns A–D but did not lead with a single decision tree; this rewrite makes the wrapper choice the first 5 minutes of the read.
+> **Last reviewed**: 2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14). §1.1 archetypes table row 3 (dual-use) updated to list Daily Briefing (`@spaarke/daily-briefing-components`, R2 task 010, with `loadNotificationContext` factory option seam) and Smart Todo (`@spaarke/smart-todo-components`) alongside the canonical Calendar example. Previous review: 2026-05-26 (R4 task 011 / W-2; rewritten around the two-wrapper model now codified in [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md)).
 >
 > **Audience**: A developer who has never built a SpaarkeAi widget. After §1 you should know which wrapper / archetype you need; the rest of the doc is implementation detail per archetype.
 >
@@ -66,7 +66,7 @@ START
 |---|---|---|---|---|---|
 | 1 | Composable section (LW-internal) | Dashboard | A | Quick Summary, Documents, To Do, Latest Updates | New section that genuinely depends on LegalWorkspace context (FeedTodoSyncContext, LW DataverseService) and won't ship in a non-LW host. |
 | 2 | Sophisticated single-purpose direct widget | Direct | B (Code Page dispatcher) or C (AI output) | RedlineViewer, AnalysisEditor, future DocumentViewer | One sophisticated component owns the whole tab. Not composable. Mounted from Assistant or Context (or future surfaces). |
-| 3 | Dual-use section (shared-lib widget + thin LW shim) | Dashboard (Direct optional) | D | **Calendar** (R3 task 115 — canonical) | New widget that could ship in **both** a Dashboard layout AND as a standalone Direct tab. Default for new widgets going forward. |
+| 3 | Dual-use section (shared-lib widget + thin LW shim) | Dashboard (Direct optional) | D | **Calendar** (R3 task 115 — canonical) · **Smart Todo** (`@spaarke/smart-todo-components`) · **Daily Briefing** (`@spaarke/daily-briefing-components`, R2 task 010 — `loadNotificationContext` factory option seam) | New widget that could ship in **both** a Dashboard layout AND as a standalone Direct tab. Default for new widgets going forward. |
 | 4 | Context-pane widget (with workspace dispatch) | (Context-surface UI; dispatches to Direct wrapper) | (Pattern C, but originating in Context) | Create Project wizard, Create Matter wizard final step | Widget body lives in the Context pane; on completion, dispatches `widget_load` to mount a result widget in the Workspace pane. R4 W-5 (FR-03) ships first such dispatch. |
 | 5 | Modal-launcher | Direct (thin) | B (canonical) | create-project-wizard, find-similar-wizard | The "widget" is conceptually a launcher button — it calls `Xrm.Navigation.navigateTo` to open a wizard / Code Page / form as a modal at 80% × 80%. The tab content is small (launch / relaunch / status). |
 

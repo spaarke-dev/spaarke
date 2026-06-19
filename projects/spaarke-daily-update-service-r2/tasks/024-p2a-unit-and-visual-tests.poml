@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>P2a unit + visual tests + dark-mode parity check</title>
+    <phase>P2a: Hybrid Aggregation UX</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>021, 022, 023</dependencies>
+    <blocks>062</blocks>
+    <tags>testing, unit-test, e2e-test, fluent-ui, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test creation; closes P2a coverage including dark-mode parity (ADR-021)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after P2a implementation</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add unit tests for `NarrativeBullet` covering: sub-list rendering when `itemIds.length &gt; 1`; single-item bullets unchanged; sub-row link click invokes `Xrm.Navigation.navigateTo` with correct args; sub-row To-Do invokes `useInlineTodoCreate` with the specific underlying item; sub-row Dismiss vs aggregated Dismiss cascade behavior. Add a dark-mode visual regression check.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React Testing Library + visual regression tooling + Fluent v9 dark-mode validation.</role>
+
+  <goal>Comprehensive P2a test coverage; dark-mode parity asserted; all tests green.</goal>
+
+  <context>
+    <background>
+      Per NFR-05 and ADR-021: tests must cover the new sub-list rendering + dark mode. The 4 sub-row behaviors (link, To-Do, sub-row Dismiss, aggregated cascade Dismiss) each get their own unit test.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/NarrativeBullet.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">NFR-05: test coverage for hoisted shared package.</constraint>
+    <constraint source="ADR-021">Dark-mode parity asserted (no hard-coded colors regress).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-021-fluent-ui-v9-design-system.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Write `NarrativeBullet.test.tsx` with the following cases:</step>
+    <step order="2">Case 1: `itemIds.length === 1` — no sub-list rendered.</step>
+    <step order="3">Case 2: `itemIds.length &gt; 1` — sub-list with N rows rendered.</step>
+    <step order="4">Case 3: sub-row link click invokes `Xrm.Navigation.navigateTo` with the underlying item's `regardingEntityType` + `regardingId` (FR-12).</step>
+    <step order="5">Case 4: sub-row Add-to-To-Do invokes `useInlineTodoCreate` with the specific underlying item (FR-13).</step>
+    <step order="6">Case 5: sub-row Dismiss invokes `markAsRead(item.id)` for that single id (FR-14).</step>
+    <step order="7">Case 6: aggregated Dismiss invokes `markAsRead` for each id in `itemIds[]` (FR-14a cascade).</step>
+    <step order="8">Case 7: dark-mode rendering — assert computed colors use semantic tokens (or visual regression snapshot in dark mode).</step>
+    <step order="9">Run `npm test`; all green.</step>
+    <step order="10">Update TASK-INDEX.md: change task 024 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run test suite.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/NarrativeBullet.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 test cases exist and pass.</criterion>
+    <criterion testable="true">Dark-mode case asserts semantic-token usage (or snapshots).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The dark-mode test may use a JSDOM-friendly token lookup OR a Playwright snapshot — either works. Spec doesn't prescribe one.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

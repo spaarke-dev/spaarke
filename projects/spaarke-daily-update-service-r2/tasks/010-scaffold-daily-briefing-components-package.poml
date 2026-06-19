@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Scaffold new `@spaarke/daily-briefing-components` package</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>011, 012, 013, 014, 015, 016</blocks>
+    <tags>frontend, react, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New package creation; blocks all P2 hoist work; structural decision</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single-task wave; blocks Group A (011, 012, 013)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create the new shared package `@spaarke/daily-briefing-components` at `src/client/shared/Spaarke.DailyBriefing.Components/` per Pattern D, mirroring `@spaarke/events-components` (Calendar) and `@spaarke/smart-todo-components` precedent. Include `package.json`, `tsconfig.json`, build config, and an empty `src/` skeleton with subpath structure (`components/`, `widgets/`, `hooks/`, `services/`, `types/`). The package builds (empty index.ts is fine) and is consumable from the monorepo. No business code moves in this task — that's tasks 011–013.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in monorepo TypeScript package layout, `@spaarke/events-components` precedent, and Pattern D dual-use widget shape.</role>
+
+  <goal>New package skeleton exists; `npm run build` succeeds in the new package; the empty subpath exports are reachable from a consumer test import.</goal>
+
+  <context>
+    <background>
+      Per spec FR-03 and FR-10: a new dedicated package per Calendar/SmartTodo precedent. NOT extending `@spaarke/ui-components`. This task lays the foundation; all subsequent P2 tasks populate it.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/</file>
+      <file>src/client/shared/Spaarke.Events.Components/package.json</file>
+      <file>src/client/shared/Spaarke.Events.Components/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/package.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">New package per dual-use widget convention (not extend an existing shared lib).</constraint>
+    <constraint source="ADR-021">Fluent v9 only; no v8 dependencies.</constraint>
+    <constraint source="ADR-026">Code Page build standard — package must be consumable by Vite + React 19 hosts.</constraint>
+    <constraint source="project">Subpath exports MUST include `./components`, `./widgets`, `./hooks`, `./services`, `./types` per spec FR-10.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/adr/ADR-021-fluent-ui-v9-design-system.md</file>
+      <file>docs/adr/ADR-026-code-page-build-standard.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.Events.Components/package.json</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/package.json</file>
+    </files>
+    <patterns>
+      <pattern name="Pattern D package layout" location="src/client/shared/Spaarke.Events.Components/">
+        Mirror this package's `package.json` exports map, `tsconfig.json`, and `src/` structure exactly.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `Spaarke.Events.Components/package.json` and `tsconfig.json` to identify the canonical layout.</step>
+    <step order="2">Create `src/client/shared/Spaarke.DailyBriefing.Components/` with the same shape (package.json, tsconfig.json, src/index.ts, src/components/index.ts, src/widgets/index.ts, src/hooks/index.ts, src/services/index.ts, src/types/index.ts).</step>
+    <step order="3">Set package name to `@spaarke/daily-briefing-components` (per spec assumption; flag if owner prefers shorter name).</step>
+    <step order="4">Set up subpath exports in `package.json` exports map matching Calendar precedent.</step>
+    <step order="5">Register the new package in the monorepo workspace config (`package.json` workspaces / `pnpm-workspace.yaml` / equivalent — match how Calendar is registered).</step>
+    <step order="6">Run `npm install` and `npm run build` in the new package; verify both succeed.</step>
+    <step order="7">From any consumer (e.g., add a temporary import test), verify `import { } from '@spaarke/daily-briefing-components/components'` resolves.</step>
+    <step order="8">Remove the temporary import test.</step>
+    <step order="9">Update TASK-INDEX.md: change task 010 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install + build TypeScript packages.</tool>
+    <tool name="terminal">Run shell commands.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/package.json</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/tsconfig.json</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/widgets/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/services/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/types/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npm run build` in the new package succeeds with no errors.</criterion>
+    <criterion testable="true">`package.json` exports map matches `@spaarke/events-components` shape (subpaths present).</criterion>
+    <criterion testable="true">Empty consumer import test resolves to the new package (verified during scaffolding, then removed).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Keep this task scoped to scaffolding only. Do NOT move any components/hooks/services yet — those are tasks 011–013 in Group A.
+
+    --- Completion notes (2026-06-18, Wave 2b parallel batch) ---
+    - Package created at `src/client/shared/Spaarke.DailyBriefing.Components/` mirroring `@spaarke/events-components` exactly (peerDeps, devDeps, tsconfig, exports map shape, scripts).
+    - Package name: `@spaarke/daily-briefing-components` (per spec FR-03; no shorter-name preference surfaced).
+    - Subpath exports per FR-10: `.`, `./components`, `./widgets`, `./hooks`, `./services`, `./types`. Omitted Calendar's `./context` + `./utils` — not required by FR-10 and not expected for Daily Briefing (auth/context comes via `@spaarke/auth` per ADR-028).
+    - Monorepo workspace registration: NONE required. Repo root `package.json` has no `workspaces` field and there is no `pnpm-workspace.yaml`. Calendar + SmartTodo are consumed via `file:` references in downstream solution `package.json` files (verified in `src/solutions/EventsPage/package.json:16-18`). Consumer wiring for DailyBriefing/LegalWorkspace/SpaarkeAi will be added by R2 tasks 014-016.
+    - `npm install` → 97 packages, clean. `npm run build` (tsc --noEmit) → clean.
+    - Subpath resolution verified via temporary `src/__subpath-resolve-test.ts` importing all 5 subpaths through the package self-name. Test removed at task completion (per Step 8 of POML).
+    - Step 9 (TASK-INDEX.md update) and git commit/push DEFERRED per orchestrator instructions — main session handles wave boundary.
+    - Quality gates (Step 9.5 code-review + adr-check) SKIPPED per task-execute Step 9.5 rule "configuration-only (no logic changes)" — task created only config files + empty `export {}` barrel placeholders.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

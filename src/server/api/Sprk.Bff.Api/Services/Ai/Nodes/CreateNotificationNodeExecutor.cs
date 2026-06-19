@@ -40,6 +40,19 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     /// </summary>
     private const int DefaultPriority = 200_000_000;
 
+    /// <summary>
+    /// Dataverse <c>toasttype</c> option-set value for "Hidden" — the notification produces no visible toast.
+    /// Per FR-18, hidden-toast notifications skip <c>data.actions[]</c> population because the MDA native bell
+    /// surface that would render the action is not shown.
+    /// </summary>
+    private const int ToastTypeHidden = 100_000_000;
+
+    /// <summary>
+    /// Dataverse <c>toasttype</c> option-set default value ("Timed") — visible toast that auto-dismisses.
+    /// Used when no explicit ToastType is supplied in config.
+    /// </summary>
+    private const int DefaultToastType = 200_000_000;
+
     private readonly ITemplateEngine _templateEngine;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<CreateNotificationNodeExecutor> _logger;
@@ -214,6 +227,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             // Build appnotification payload
             var notificationPayload = BuildNotificationPayload(
                 title, body, category, config.Priority ?? DefaultPriority,
+                config.ToastType ?? DefaultToastType,
                 actionUrl, recipientId.Value, regardingId, regardingType,
                 context);
 
@@ -347,7 +361,10 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 if (isDuplicate) { skipped++; continue; }
             }
 
-            var payload = BuildNotificationPayload(title, body, category, itemConfig.Priority ?? 200_000_000, actionUrl, recipientId.Value, regardingId, regardingType, context);
+            var payload = BuildNotificationPayload(
+                title, body, category, itemConfig.Priority ?? DefaultPriority,
+                itemConfig.ToastType ?? DefaultToastType,
+                actionUrl, recipientId.Value, regardingId, regardingType, context);
             await CreateAppNotificationAsync(payload, cancellationToken);
             created++;
         }
@@ -441,11 +458,21 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     /// <summary>
     /// Builds the appnotification OData payload for Dataverse Web API.
     /// </summary>
+    /// <remarks>
+    /// Per FR-18 (P3): when <paramref name="actionUrl"/> is present, <c>data</c> is serialized as
+    /// <c>{ actions, customData }</c>. <c>customData.actionUrl</c> is populated regardless of
+    /// <paramref name="toastType"/> (consumed by the Daily Briefing UI). The <c>actions</c> array
+    /// (<c>[{ title: "Open", data: { url: actionUrl } }]</c>) is populated ONLY when the toast is
+    /// visible (<paramref name="toastType"/> != <see cref="ToastTypeHidden"/>) so the MDA native bell
+    /// icon shows a clickable "Open" button. Hidden-toast notifications skip <c>data.actions</c>
+    /// because no visible surface renders them.
+    /// </remarks>
     private static Dictionary<string, object?> BuildNotificationPayload(
         string title,
         string body,
         string? category,
         int priority,
+        int toastType,
         string? actionUrl,
         Guid recipientId,
         Guid? regardingId,
@@ -457,6 +484,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             ["title"] = title,
             ["body"] = body,
             ["priority"] = priority,
+            ["toasttype"] = toastType,
             ["ownerid@odata.bind"] = $"/systemusers({recipientId})",
             ["ttlinseconds"] = 259200  // 3 days default TTL
         };
@@ -467,14 +495,32 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             payload["sprk_category"] = category;
         }
 
-        // Add action URL if specified
+        // FR-18 (P3): build appnotification.data payload.
+        // - customData.actionUrl is populated regardless of toasttype (Daily Briefing UI consumer).
+        // - data.actions[] is populated ONLY when actionUrl is present AND toasttype != Hidden
+        //   (so MDA native bell icon shows a clickable "Open" button).
         if (!string.IsNullOrWhiteSpace(actionUrl))
         {
-            payload["data"] = JsonSerializer.Serialize(new
-            {
-                type = "link",
-                url = actionUrl
-            });
+            var isVisibleToast = toastType != ToastTypeHidden;
+            object dataObject = isVisibleToast
+                ? new
+                {
+                    actions = new[]
+                    {
+                        new
+                        {
+                            title = "Open",
+                            data = new { url = actionUrl }
+                        }
+                    },
+                    customData = new { actionUrl }
+                }
+                : new
+                {
+                    customData = new { actionUrl }
+                };
+
+            payload["data"] = JsonSerializer.Serialize(dataObject);
         }
 
         // Add regarding object if specified
@@ -605,6 +651,14 @@ internal sealed record NotificationNodeConfig
     /// Defaults to 200000000 (Important) when not specified.
     /// </summary>
     public int? Priority { get; init; }
+
+    /// <summary>
+    /// Dataverse appnotification <c>toasttype</c> option-set value: 100000000=Hidden (no toast),
+    /// 200000000=Timed (auto-dismiss; default), 300000000=Standard (persistent).
+    /// Per FR-18 (P3): when this value is Hidden, <c>data.actions[]</c> is NOT populated
+    /// because the MDA native bell surface that would render the "Open" action is not shown.
+    /// </summary>
+    public int? ToastType { get; init; }
 
     /// <summary>Action URL to navigate when notification is clicked (supports template variables).</summary>
     public string? ActionUrl { get; init; }
