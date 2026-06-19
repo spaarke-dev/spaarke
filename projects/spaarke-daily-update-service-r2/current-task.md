@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-18 (project initialization)
+> **Last Updated**: 2026-06-18 (Option D mid-flight)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,31 +10,41 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 024 — P2a unit + visual tests + dark-mode parity check (NarrativeBullet sub-list + SubRow*) |
-| **Step** | COMPLETE — 7 cases pass; 5 suites / 26 tests total |
-| **Status** | completed (no commit per task constraints; TASK-INDEX update deferred) |
-| **Next Action** | Awaiting orchestrator instruction for next task |
-| **Rigor Level** | FULL (.tsx test file, ADR-021 dark-mode, 7 test cases, mocks Xrm + callbacks) |
-| **Slot pattern** | 3 separate slot files (`SubRowLink.tsx`, `SubRowTodo.tsx`, `SubRowDismiss.tsx`) — enables Wave 9 parallel edits |
-| **Rigor Level** | FULL (refactoring tag, .ts modifications across 14 files, ADR-012 + ADR-024 + ADR-028) |
-| **Knowledge loaded** | task POML 015, project CLAUDE.md, project spec.md (FR-07), all 11 files in new package src/, source types/notifications.ts + notificationService.ts + preferencesService.ts + toastUtils.ts in solutions/DailyBriefing/, Spaarke.Auth/package.json (peer dep target), package.json of new package, sibling shared-lib tsconfigs (Smart Todo + Events for pattern parity) |
-| **Files hoisted (3 new in package)** | `src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts` (323 LOC); `services/notificationService.ts` (330 LOC); `services/preferencesService.ts` (176 LOC); `utils/toastUtils.ts` (15 LOC) + `utils/index.ts` barrel |
-| **Files modified in new package** | `package.json` (added `@spaarke/auth` peer dep + `./utils` export); `src/index.ts` (added utils barrel re-export); `types/index.ts` (added `BriefingDependencies` interface + re-exported notifications surface); `services/index.ts` (added notification/preferences exports); `services/briefingService.ts` (`@spaarke/auth` direct import + intra-package `ChannelFetchResult`); 5 hooks (`useBriefingActions`, `useBriefingNarration`, `useBriefingNotifications`, `useBriefingPreferences`, `useInlineTodoCreate` — intra-package import paths); 3 components (`DailyBriefingApp`, `ActivityNotesSection`, `PreferencesDropdown` — intra-package import paths) |
-| **Shim files (4 in solutions/DailyBriefing)** | `types/notifications.ts` → `export * from "@spaarke/daily-briefing-components/types/notifications"`; `services/notificationService.ts` → re-export 5 funcs from `@spaarke/daily-briefing-components/services`; `services/preferencesService.ts` → re-export 2 funcs; `utils/toastUtils.ts` → `export { TOASTER_ID } from "@spaarke/daily-briefing-components/utils"` |
-| **package.json peer dep additions** | `@spaarke/auth: ^2.0.0` (per ADR-028; legit peer dep that task 010 scaffold should have included but didn't — orchestrator brief explicitly authorized this in task 015 scope) |
-| **`BriefingDependencies` interface (types/index.ts)** | `{ authenticatedFetch: AuthenticatedFetch, webApi: IWebApi, userId: string, tenantId: string, onRateLimitError?: (info) => void, onRecordOpen?: (info) => void }` — structural; concrete consumer wiring lives at standalone main.tsx + SpaarkeAi widget shell |
-| **Grep result** | `grep -rE "from\s+[\"'][^\"']*solutions/" src/client/shared/Spaarke.DailyBriefing.Components/src/` returns ZERO matches (clean). Also zero `Spaarke.Auth` back-pointer paths. All `solutions/` text in new package is JSDoc-comment-only (intentional hoist-origin history). |
-| **Build verification** | `npm run build` (`tsc --noEmit`) in new package returns 3 errors, all cross-package alias errors (`@spaarke/ui-components`, `@spaarke/ui-components/services`, `@spaarke/auth`) — same architectural pattern as sibling shared libs (Smart Todo + Events have identical `node` type-def errors when tsc-checked package-locally). Cross-package aliases resolve only at consumer site (Vite bundler resolution). ZERO new back-pointer errors. ZERO regressions in hoisted logic (byte-identical preservation). |
-| **Pattern chosen** | Hoist + re-export shim (Calendar + Smart Todo precedent). New package owns: types/notifications.ts, services/{notificationService,preferencesService,briefingService}.ts, utils/toastUtils.ts. Originals become 3-15 line shim files with `export * from "@spaarke/daily-briefing-components/…"`. Added `@spaarke/auth` peer dep + import path. Defined `BriefingDependencies` in types/index.ts. ADR-024 `TODO_REGARDING_CATALOG` in useInlineTodoCreate preserved verbatim (only `IWebApi`/`NotificationItem`/`NotificationPriority` type-import path rewritten). |
-| **Scope adherence** | Only files in `src/client/shared/Spaarke.DailyBriefing.Components/` + `src/solutions/DailyBriefing/` touched. NO BFF, LegalWorkspace, SpaarkeAi, authInit.ts, runtimeConfig.ts, MicrosoftToDoIcon, or TASK-INDEX.md touched (verified via git status). |
+| **Task** | Option D — replace module-mutation slot from R2 task 002 with registry-as-composition factory |
+| **Step** | 8 of 12 — design + Phase 7b POMLs done; implementing the 5-file refactor + 3 tests now |
+| **Status** | in-progress |
+| **Next Action** | Execute refactor on 6 source files per `notes/option-d-registry-as-composition.md` §3; add 3 unit tests; commit + push to PR #396 |
+| **Rigor Level** | FULL — touches LegalWorkspaceApp + SpaarkeAi/main.tsx + WorkspaceGrid + sectionRegistry; high-impact architectural change |
+| **Branch** | `work/spaarke-daily-update-service-r2` |
+| **Active PR** | [#396](https://github.com/spaarke-dev/spaarke/pull/396) — auto-merge armed; will re-fire when CI re-runs after Option D push |
 
-### Files Modified This Session
+### Files Modified Already This Session (Option D)
 
-- None for task 001 — the `loadNotificationContext?: () => Promise<NarrateRequest | null>` option was already added to `dailyBriefing.registration.ts`, `DailyBriefingSection.tsx`, and `useDailyBriefing.ts` in a prior project (task 086 / Round 4 Fix 3, per file headers). All FR-01 acceptance criteria are already met on the current `work/spaarke-daily-update-service-r2` branch.
+- `projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md` — Created — design rationale + alternatives + cookbook + speculative-design discipline
+- `projects/spaarke-daily-update-service-r2/tasks/070-pattern-doc-workspace-section-registry-composition.poml` — Created
+- `projects/spaarke-daily-update-service-r2/tasks/071-update-architecture-docs-for-registry-composition.poml` — Created
+- `projects/spaarke-daily-update-service-r2/tasks/072-adr-workspace-section-registry-composition.poml` — Created
+- `projects/spaarke-daily-update-service-r2/current-task.md` — Modified (this file)
+
+### Pending implementation changes (next 6 files + tests)
+
+| File | Change |
+|---|---|
+| `src/solutions/LegalWorkspace/src/sectionRegistry.ts` | Add `createLegalWorkspaceSectionRegistry(options)` factory + `LegalWorkspaceSectionRegistryOptions` interface; `SECTION_REGISTRY = createLegalWorkspaceSectionRegistry()`; extract dev-guards into `runRegistryDevGuards(registry)` helper |
+| `src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts` | REMOVE `_globalNotificationLoader`, `setLegalWorkspaceDailyBriefingNotificationLoader`, `lateBoundNotificationLoader`; `dailyBriefingRegistration = createLegalWorkspaceDailyBriefingRegistration()` (no loader) |
+| `src/solutions/LegalWorkspace/src/index.ts` | REMOVE setter re-export; ADD factory + options + SECTION_REGISTRY + SectionRegistration type re-exports |
+| `src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx` | Add `sections?: readonly SectionRegistration[]` to `ILegalWorkspaceAppProps`; pass to `WorkspaceGrid` |
+| `src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx` | Accept `sections` prop (default → imported SECTION_REGISTRY); replace direct usage |
+| `src/solutions/SpaarkeAi/src/main.tsx` | REMOVE setter import + call; build `customSections = createLegalWorkspaceSectionRegistry({ dailyBriefing: { loadNotificationContext: loadSpaarkeAiNotificationContext } })`; define `SpaarkeAiWorkspaceRenderer = (props) => <LegalWorkspaceApp {...props} sections={customSections} />`; register via existing `setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer)` |
+| **Tests** | 3 new tests: no-options equivalence; loader threading; legacy setter API removed |
 
 ### Critical Context
 
-Wave 1 orchestrated execution. Task 001 = pre-existing no-op: the seam already exists. Required types (`NarrateRequest`, `CreateDailyBriefingRegistrationOptions`) are exported from `@spaarke/ui-components` via `src/components/WorkspaceShell/index.ts`. Build verification (npm run build) passes on the three dailyBriefing files in isolation; an unrelated `@spaarke/sdap-client` resolution error in `EntityCreationService.ts` is pre-existing and outside task 001 scope. Task 002 (SpaarkeAi main.tsx) can proceed.
+PR #396 is OPEN with auto-merge armed. Option D is being ADDED to this PR so the band-aid module-mutation pattern from R2 task 002 (Wave 8) is REPLACED, not layered. After Option D commits land, CI re-runs and auto-merge fires.
+
+R6 PR #395 is open in parallel with ZERO file-level overlap (verified via `git -C r6-worktree log --oneline origin/master..HEAD -- <files>`). Either PR can merge first; both will apply cleanly.
+
+3 Phase 7b documentation alignment tasks (070/071/072) are CREATED but NOT EXECUTED in this PR — they're queued for post-merge execution so the docs review can be holistic and not block the implementation merge.
 
 ---
 
@@ -42,13 +52,13 @@ Wave 1 orchestrated execution. Task 001 = pre-existing no-op: the seam already e
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 001 |
-| **Task File** | tasks/001-add-load-notification-context-factory-option.poml |
-| **Title** | Add `loadNotificationContext` factory option to dailyBriefingRegistration |
-| **Phase** | P1: Wiring Seam Fix |
-| **Status** | completed-no-op (already implemented) |
-| **Started** | 2026-06-18 (Wave 1 parallel batch) |
-| **Rigor Level** | FULL (per `<rigor-hint>FULL</rigor-hint>`; tags include `frontend/react/fluent-ui`; downstream blocks 002/003/010) |
+| **Task ID** | Option D (no POML — emerged from PR #396 architectural review) |
+| **Design rationale** | `notes/option-d-registry-as-composition.md` (canonical spec for the refactor) |
+| **Title** | Replace module-mutation slot from R2 task 002 with registry-as-composition factory |
+| **Phase** | P1 (architectural follow-up to task 002) |
+| **Status** | in-progress (design done; implementation next) |
+| **Started** | 2026-06-18 (mid-session, after user code review feedback) |
+| **Rigor Level** | FULL |
 
 ---
 
@@ -56,41 +66,68 @@ Wave 1 orchestrated execution. Task 001 = pre-existing no-op: the seam already e
 
 ### Completed Steps
 
-*No steps completed yet*
+- [x] **Step 1**: Diagnose the band-aid pattern (R2 task 002 / Wave 8 Option B module-mutation)
+- [x] **Step 2**: Evaluate alternatives (A: replace registry, B: shipped band-aid, C: React Context, D: registry-as-composition factory)
+- [x] **Step 3**: User authorization for Option D after rejecting C as too narrow for the SpaarkeAi-as-critical-core-surface vision
+- [x] **Step 4**: R6 review (zero file-level overlap confirmed via git diff against branches)
+- [x] **Step 5**: Author comprehensive design rationale in `notes/option-d-registry-as-composition.md`
+- [x] **Step 6**: Create Phase 7b POML tasks 070/071/072 for documentation alignment follow-ups
+- [x] **Step 7**: Update this `current-task.md` with full Option D context
 
 ### Current Step
 
-*No active task*
+**Step 8**: Implement the 6-file refactor + 3 unit tests
 
-### Files Modified (All Task)
+**What this step involves**:
+- Refactor `src/solutions/LegalWorkspace/src/sectionRegistry.ts` to expose `createLegalWorkspaceSectionRegistry(options)` factory + `LegalWorkspaceSectionRegistryOptions` interface. Default `SECTION_REGISTRY` becomes `createLegalWorkspaceSectionRegistry()` (no options). Dev-mode duplicate/drift guards extracted into a reusable `runRegistryDevGuards(registry)` helper that runs for every registry built.
+- In `dailyBriefing.registration.ts`: REMOVE `_globalNotificationLoader`, `setLegalWorkspaceDailyBriefingNotificationLoader`, `lateBoundNotificationLoader`. Default `dailyBriefingRegistration` const becomes `createLegalWorkspaceDailyBriefingRegistration()` (no loader → empty contract preserved for standalone consumers).
+- In `LegalWorkspace/src/index.ts`: REMOVE `setLegalWorkspaceDailyBriefingNotificationLoader` re-export. ADD `createLegalWorkspaceSectionRegistry` + `LegalWorkspaceSectionRegistryOptions` + (re-export of) `SECTION_REGISTRY` re-exports.
+- In `LegalWorkspaceApp.tsx`: ADD optional `sections?: readonly SectionRegistration[]` prop to `ILegalWorkspaceAppProps`. Pass through to `WorkspaceGrid`.
+- In `WorkspaceGrid.tsx`: accept `sections` prop (defaults to imported `SECTION_REGISTRY`). Replace direct usage with the prop variable.
+- In `SpaarkeAi/main.tsx`: REPLACE setter import + call with `createLegalWorkspaceSectionRegistry({ dailyBriefing: { loadNotificationContext: loadSpaarkeAiNotificationContext } })`. Define `SpaarkeAiWorkspaceRenderer: WorkspaceRenderer = (props) => <LegalWorkspaceApp {...props} sections={customSections} />`. Register via existing `setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer)`.
+- Add 3 tests (no-options equivalence; loader threading; legacy setter API removed).
 
-*No files modified yet*
+### Subsequent Steps
+
+- **Step 9**: Build verify (`tsc --noEmit` on LegalWorkspace + new package + SpaarkeAi surface gate)
+- **Step 10**: Test verify (`npm test` in `Spaarke.DailyBriefing.Components` — 5 suites / 26 tests must still pass; new tests bring total to 5 suites / 29 tests)
+- **Step 11**: Update TASK-INDEX.md noting Option D as Wave 11 (post-Wave-10/task-024); commit
+- **Step 12**: Push to `work/spaarke-daily-update-service-r2`; auto-merge re-evaluates when CI re-runs
 
 ### Decisions Made
 
-- 2026-06-18: Use existing `work/spaarke-daily-update-service-r2` branch — Reason: matches Spaarke `work/` convention; current branch already set up.
-- 2026-06-18: Stop after task generation (no auto-execute) — Reason: 6-workstream project benefits from review before execution.
-- 2026-06-18: Skip env-provisioning-app lessons-learned carryforward — Reason: different domain.
+- **2026-06-18 (Option D session)**: Use Option D (registry-as-composition factory) instead of Option C (per-widget React Context). Reason: SpaarkeAi is a critical core surface that must support N widgets + two-way Assistant⇄Workspace⇄Context flows; Option C scales linearly with widget count, Option D scales O(1). Who: user (explicit authorization).
+- **2026-06-18**: NO speculative options added to `LegalWorkspaceSectionRegistryOptions` (no `paneEventBus`/`agentClient`/`contextProvider` until first real consumer). Reason: per CLAUDE.md "Don't add features beyond what the task requires"; the interface is extensible additively when concrete needs arrive. Who: design rationale §5.
+- **2026-06-18**: Documentation alignment (pattern doc + architecture docs + ADR) deferred to 3 separate Phase 7b POML tasks (070/071/072) executed post-merge. Reason: keep the implementation PR focused on the refactor; review the documentation holistically without it gating the merge. Who: user request ("include task(s) to review and update related documentation").
+- **2026-06-18**: NO changes to `@spaarke/ui-components` public API (e.g., NOT adding `sections` to `WorkspaceRendererProps`). Reason: SpaarkeAi can register a custom RENDERER (a wrapper function over `LegalWorkspaceApp`) via the existing `setDefaultWorkspaceRenderer` slot, which already accepts arbitrary renderers. This preserves the shared-lib boundary. Who: design rationale §3.6.
+- **2026-06-18 (R6 coordination)**: Proceed with Option D without coordinating with R6 team. Reason: R6 PR #395 makes ZERO commits to the files Option D touches; R6's Pillar 9 operates on a sibling `WorkspaceWidgetRegistry` at the AI-widgets layer, not `SECTION_REGISTRY` at the LegalWorkspace layer. Who: design rationale §6 + Explore-agent review.
 
 ---
 
 ## Next Action
 
-**Next Step**: Run `task-create projects/spaarke-daily-update-service-r2` to generate POML task files
+**Next Step**: Step 8 — execute the 6-file implementation refactor + 3 unit tests
 
 **Pre-conditions**:
-- `plan.md` and `CLAUDE.md` exist with discovered resources ✓
-- `tasks/` directory created (empty) ✓
+- Design rationale documented ✓
+- Phase 7b doc-alignment POMLs created ✓
+- User authorization received ✓
+- R6 zero-overlap confirmed ✓
+- current-task.md updated (this file) ✓
 
 **Key Context**:
-- Refer to `plan.md` §4 Phase Breakdown for the 6-workstream structure (P1, P2, P2a, P2b, P3, DD + Phase 7 deploy + Phase 8 wrap-up)
-- Refer to `CLAUDE.md` "Applicable ADRs" for the 11 ADRs each task must reference
-- Refer to `spec.md` FR-01..FR-21 for granular requirements per task
+- `notes/option-d-registry-as-composition.md` §3 has the exact target file shapes — implement to those shapes
+- The implementation MUST preserve `SECTION_REGISTRY` as a top-level export (consumer compatibility) — it just becomes a default-options factory call instead of a literal const
+- The legacy setter API (`setLegalWorkspaceDailyBriefingNotificationLoader`) MUST be REMOVED, not deprecated — the whole point is eliminating the band-aid
+- After implementation, all 5 Jest 30 suites + 26 tests from R2 must continue to pass (the new tests bring total to ~29)
+- After commit + push to `work/spaarke-daily-update-service-r2`, auto-merge on PR #396 re-fires when CI re-runs
 
 **Expected Output**:
-- 30–45 POML task files in `tasks/`
-- `tasks/TASK-INDEX.md` with parallel groups + critical path
-- BFF publish-size baseline in `notes/bff-baseline.md` (post-task-create)
+- 6 source files modified per notes/option-d-registry-as-composition.md §3
+- 3 new unit tests added
+- BFF build still green (no impact — only TypeScript files touched)
+- Jest suites still green
+- 1 commit pushed to PR #396
 
 ---
 
@@ -103,36 +140,57 @@ Wave 1 orchestrated execution. Task 001 = pre-existing no-op: the seam already e
 ## Session Notes
 
 ### Current Session
-- Started: 2026-06-18 (project initialization via `/project-pipeline`)
-- Focus: Generate project artifacts (README, plan, CLAUDE.md, task files)
+
+- Started: 2026-06-18 (continuation from R2 31/36 ship state)
+- Focus: Option D architectural refactor (replaces R2 task 002 band-aid)
 
 ### Key Learnings
 
-- R1 (`spaarke-daily-update-service`) has no `lessons-learned.md` — gap. Author one during R2 Phase 8 wrap-up to capture both R1 retrospective and R2 lessons.
-- Pre-flight: BFF builds clean on baseline (warnings pre-existing); master is current; worktree clean except for `projects/spaarke-daily-update-service-r2/` untracked dir.
+- The user's code-review eye caught the module-mutation band-aid before merge. The orchestration agent's framing ("Option B works, file as debt later") was too narrow. The right answer at architectural-review time is "fix it now if the cost is small relative to the strategic blast radius."
+- The pattern (one factory + typed options interface) is the right primitive for N widgets even when only 1 widget needs it today. Adding the pattern doesn't speculatively design future widgets; it just makes adding them cheap when they arrive.
+- `notes/option-d-registry-as-composition.md` is the persistent record. Future maintainers don't have to re-derive the alternatives evaluation.
+- **Speculative-design discipline**: do NOT add `paneEventBus`/`agentClient`/`contextProvider` to `LegalWorkspaceSectionRegistryOptions` today. Add them when the first concrete consumer needs them. The interface is extensible additively.
 
 ### Handoff Notes
 
-*No handoff notes (initialization session)*
+If this session is interrupted before Option D implementation completes:
+
+1. Read `notes/option-d-registry-as-composition.md` §3 for the exact target file shapes — those are the canonical implementation plan
+2. Read this `current-task.md` "Pending implementation changes" list for the 6 files to modify
+3. Read `notes/task-002-blocker.md` for the original architectural analysis that led here
+4. Read the existing `src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts` to see Option B's current code (the band-aid being removed)
+5. Read `src/solutions/SpaarkeAi/src/main.tsx` lines 60-75 + 229-241 to see Option B's setter call (being removed)
+6. After implementing: run `npm test` in `src/client/shared/Spaarke.DailyBriefing.Components/` (existing 5 suites / 26 tests should still pass; new tests bring total to ~29)
+7. Commit + push to `work/spaarke-daily-update-service-r2`; auto-merge on PR #396 will re-evaluate when CI runs
 
 ---
 
 ## Quick Reference
 
 ### Project Context
+
 - **Project**: `spaarke-daily-update-service-r2`
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) (pending creation)
+- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
+- **Active PR**: [#396](https://github.com/spaarke-dev/spaarke/pull/396)
+- **Companion design rationale**: [`notes/option-d-registry-as-composition.md`](./notes/option-d-registry-as-composition.md)
+- **Phase 7b POMLs (post-merge follow-ups)**: tasks 070 (pattern), 071 (architecture docs), 072 (ADR-033)
 
-### Applicable ADRs
+### Applicable ADRs (Option D specifically)
 
-(See [`CLAUDE.md`](./CLAUDE.md) §Applicable ADRs for the full table; 11 ADRs total.)
+- **ADR-006** — UI Surface Architecture (Pattern D dual-use baseline; new ADR-033 will reference)
+- **ADR-012** — Shared Component Library (per-widget factory pattern Option D builds on; new ADR-033 will reference)
+- **ADR-022** — React 19 (the prop-drilling vs context decision; Option D prefers props at this layer)
+- **ADR-026** — Code Page Build Standard (no changes; the shrunk standalone host shell still works)
 
-- ADR-001, ADR-006, ADR-008, ADR-010, ADR-012, ADR-013, ADR-021, ADR-024, ADR-026, ADR-027, ADR-028
+(See `CLAUDE.md` "Applicable ADRs" for the full R2 ADR table; Option D adds ADR-033 as a follow-up via task 072.)
 
 ### Knowledge Files Loaded
 
-(Will be populated per task by task-execute Step 1.)
+- `projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md` — comprehensive design
+- `projects/spaarke-daily-update-service-r2/notes/task-002-blocker.md` — original architectural analysis
+- R6 worktree at `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r6` — reviewed for overlap
+- The 6 source files listed under "Pending implementation changes" — read in main session before implementation
 
 ---
 
@@ -142,8 +200,8 @@ Wave 1 orchestrated execution. Task 001 = pre-existing no-op: the seam already e
 
 1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
 2. **If more context needed**: Read Active Task and Progress sections
-3. **Load task file**: `tasks/{task-id}-*.poml` (once tasks exist)
-4. **Load knowledge files**: From task's `<knowledge>` section
+3. **Load design rationale**: `notes/option-d-registry-as-composition.md` §3 (target file shapes) is the canonical implementation plan
+4. **Knowledge**: the 6 implementation files are listed under "Pending implementation changes" — read them before editing
 5. **Resume**: From the "Next Action" section
 
 **Commands**:
