@@ -48,15 +48,15 @@ export interface NarrateRequest {
 // builds (matching the ids the per-section mocks emit in the test) so the
 // dev-mode metadata-drift guard finds no drift in tests.
 export const SECTION_METADATA_CATALOG: ReadonlyArray<{ id: string }> = [
-  { id: "get-started" },
-  { id: "quick-summary" },
-  { id: "latest-updates" },
-  { id: "todo" },
-  { id: "documents" },
-  { id: "matters" },
-  { id: "projects" },
-  { id: "invoices" },
-  { id: "work-assignments" },
-  { id: "daily-briefing" },
-  { id: "calendar" },
+  { id: 'get-started' },
+  { id: 'quick-summary' },
+  { id: 'latest-updates' },
+  { id: 'todo' },
+  { id: 'documents' },
+  { id: 'matters' },
+  { id: 'projects' },
+  { id: 'invoices' },
+  { id: 'work-assignments' },
+  { id: 'daily-briefing' },
+  { id: 'calendar' },
 ];

@@ -52,58 +52,60 @@
 // inlined inside each factory closure. We use string-literal paths (no
 // template literals or constants) to keep Jest's static-hoist analysis happy.
 
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/getStarted.registration", () => ({
-  getStartedRegistration: { id: "get-started", category: "core", factory: () => ({ id: "get-started" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/getStarted.registration', () => ({
+  getStartedRegistration: { id: 'get-started', category: 'core', factory: () => ({ id: 'get-started' }) },
 }));
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/quickSummary.registration", () => ({
-  quickSummaryRegistration: { id: "quick-summary", category: "core", factory: () => ({ id: "quick-summary" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/quickSummary.registration', () => ({
+  quickSummaryRegistration: { id: 'quick-summary', category: 'core', factory: () => ({ id: 'quick-summary' }) },
 }));
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/latestUpdates.registration", () => ({
-  latestUpdatesRegistration: { id: "latest-updates", category: "core", factory: () => ({ id: "latest-updates" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/latestUpdates.registration', () => ({
+  latestUpdatesRegistration: { id: 'latest-updates', category: 'core', factory: () => ({ id: 'latest-updates' }) },
 }));
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/todo.registration", () => ({
-  todoRegistration: { id: "todo", category: "core", factory: () => ({ id: "todo" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/todo.registration', () => ({
+  todoRegistration: { id: 'todo', category: 'core', factory: () => ({ id: 'todo' }) },
 }));
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/documents.registration", () => ({
-  documentsRegistration: { id: "documents", category: "core", factory: () => ({ id: "documents" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/documents.registration', () => ({
+  documentsRegistration: { id: 'documents', category: 'core', factory: () => ({ id: 'documents' }) },
 }));
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/calendar.registration", () => ({
-  calendarRegistration: { id: "calendar", category: "core", factory: () => ({ id: "calendar" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/calendar.registration', () => ({
+  calendarRegistration: { id: 'calendar', category: 'core', factory: () => ({ id: 'calendar' }) },
 }));
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/projects.registration", () => ({
-  projectsRegistration: { id: "projects", category: "core", factory: () => ({ id: "projects" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/projects.registration', () => ({
+  projectsRegistration: { id: 'projects', category: 'core', factory: () => ({ id: 'projects' }) },
 }));
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/invoices.registration", () => ({
-  invoicesRegistration: { id: "invoices", category: "core", factory: () => ({ id: "invoices" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/invoices.registration', () => ({
+  invoicesRegistration: { id: 'invoices', category: 'core', factory: () => ({ id: 'invoices' }) },
 }));
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/workAssignments.registration", () => ({
-  workAssignmentsRegistration: { id: "work-assignments", category: "core", factory: () => ({ id: "work-assignments" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/workAssignments.registration', () => ({
+  workAssignmentsRegistration: {
+    id: 'work-assignments',
+    category: 'core',
+    factory: () => ({ id: 'work-assignments' }),
+  },
 }));
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/matters.registration", () => ({
-  mattersRegistration: { id: "matters", category: "core", factory: () => ({ id: "matters" }) },
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/matters.registration', () => ({
+  mattersRegistration: { id: 'matters', category: 'core', factory: () => ({ id: 'matters' }) },
 }));
 
 // Mock the dailyBriefing registration. `createLegalWorkspaceDailyBriefingRegistration`
 // is the seam under test (test 2 asserts the loader is threaded through). We
 // stash the jest.fn on `globalThis` so the test body can introspect it after
 // the mock is hoisted above the imports.
-jest.mock("../../../../solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration", () => {
-  const factoryMock = jest.fn(
-    (_options?: { loadNotificationContext?: () => Promise<unknown> }) => ({
-      id: "daily-briefing",
-      category: "core",
-      factory: () => ({ id: "daily-briefing" }),
-    }),
-  );
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration', () => {
+  const factoryMock = jest.fn((_options?: { loadNotificationContext?: () => Promise<unknown> }) => ({
+    id: 'daily-briefing',
+    category: 'core',
+    factory: () => ({ id: 'daily-briefing' }),
+  }));
   // Expose the mock for test assertions.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).__createDailyBriefingMock = factoryMock;
   return {
     createLegalWorkspaceDailyBriefingRegistration: factoryMock,
     dailyBriefingRegistration: {
-      id: "daily-briefing",
-      category: "core",
-      factory: () => ({ id: "daily-briefing" }),
+      id: 'daily-briefing',
+      category: 'core',
+      factory: () => ({ id: 'daily-briefing' }),
     },
   };
 });
@@ -122,28 +124,25 @@ jest.mock("../../../../solutions/LegalWorkspace/src/sections/dailyBriefing/daily
 import {
   createLegalWorkspaceSectionRegistry,
   SECTION_REGISTRY,
-} from "../../../../solutions/LegalWorkspace/src/sectionRegistry";
+} from '../../../../solutions/LegalWorkspace/src/sectionRegistry';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const getDailyBriefingMock = (): jest.Mock<any, any> =>
-  (globalThis as any).__createDailyBriefingMock as jest.Mock;
+const getDailyBriefingMock = (): jest.Mock<any, any> => (globalThis as any).__createDailyBriefingMock as jest.Mock;
 
-describe("createLegalWorkspaceSectionRegistry (R2 Option D)", () => {
+describe('createLegalWorkspaceSectionRegistry (R2 Option D)', () => {
   beforeEach(() => {
     getDailyBriefingMock().mockClear();
   });
 
-  test("createLegalWorkspaceSectionRegistry() returns same widget IDs as SECTION_REGISTRY const", () => {
+  test('createLegalWorkspaceSectionRegistry() returns same widget IDs as SECTION_REGISTRY const', () => {
     const fromFactory = createLegalWorkspaceSectionRegistry();
     // Same length
     expect(fromFactory.length).toBe(SECTION_REGISTRY.length);
     // Same IDs in same order
-    expect(fromFactory.map((r) => r.id)).toEqual(
-      SECTION_REGISTRY.map((r) => r.id),
-    );
+    expect(fromFactory.map(r => r.id)).toEqual(SECTION_REGISTRY.map(r => r.id));
   });
 
-  test("createLegalWorkspaceSectionRegistry({ dailyBriefing: { loadNotificationContext } }) threads loader", () => {
+  test('createLegalWorkspaceSectionRegistry({ dailyBriefing: { loadNotificationContext } }) threads loader', () => {
     const loader = jest.fn().mockResolvedValue(null);
     const mock = getDailyBriefingMock();
     mock.mockClear();
@@ -153,7 +152,7 @@ describe("createLegalWorkspaceSectionRegistry (R2 Option D)", () => {
     });
 
     // dailyBriefing entry exists in the registry
-    const dailyBriefingEntry = registry.find((r) => r.id === "daily-briefing");
+    const dailyBriefingEntry = registry.find(r => r.id === 'daily-briefing');
     expect(dailyBriefingEntry).toBeDefined();
 
     // The factory was called WITH the supplied loader (Option D contract).
@@ -163,7 +162,7 @@ describe("createLegalWorkspaceSectionRegistry (R2 Option D)", () => {
     expect(lastCallArg?.loadNotificationContext).toBe(loader);
   });
 
-  test("legacy setLegalWorkspaceDailyBriefingNotificationLoader API is removed", () => {
+  test('legacy setLegalWorkspaceDailyBriefingNotificationLoader API is removed', () => {
     // Read the LegalWorkspace barrel source text. The R2 task 002 band-aid
     // setter MUST NOT be re-exported. This locks in the Option D migration:
     // a future commit accidentally re-exporting the setter (or re-introducing
@@ -173,13 +172,10 @@ describe("createLegalWorkspaceSectionRegistry (R2 Option D)", () => {
     // barrel transitively imports the React component tree (LegalWorkspaceApp,
     // FluentProvider, etc.), which would force this test to spin up jsdom
     // for what is fundamentally an API-surface contract check.
-    const fs = require("fs");
-    const path = require("path");
-    const barrelPath = path.resolve(
-      __dirname,
-      "../../../../solutions/LegalWorkspace/src/index.ts",
-    );
-    const barrelSource: string = fs.readFileSync(barrelPath, "utf8");
+    const fs = require('fs');
+    const path = require('path');
+    const barrelPath = path.resolve(__dirname, '../../../../solutions/LegalWorkspace/src/index.ts');
+    const barrelSource: string = fs.readFileSync(barrelPath, 'utf8');
 
     // The band-aid setter export should be gone (both `export {...}` and
     // re-export forms). The name is allowed to appear in DOCBLOCK COMMENTS
@@ -193,17 +189,13 @@ describe("createLegalWorkspaceSectionRegistry (R2 Option D)", () => {
     // (which used to export the setter pre-Option D).
     const dailyBriefingPath = path.resolve(
       __dirname,
-      "../../../../solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts",
+      '../../../../solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts'
     );
-    const dailyBriefingSource: string = fs.readFileSync(
-      dailyBriefingPath,
-      "utf8",
-    );
+    const dailyBriefingSource: string = fs.readFileSync(dailyBriefingPath, 'utf8');
     expect(dailyBriefingSource).not.toMatch(exportRegex);
 
     // And no live var declaration of the module-mutable slot.
-    const slotRegex =
-      /^[^/\n]*\b(?:let|const|var)\s+_globalNotificationLoader\b/m;
+    const slotRegex = /^[^/\n]*\b(?:let|const|var)\s+_globalNotificationLoader\b/m;
     expect(dailyBriefingSource).not.toMatch(slotRegex);
   });
 });
