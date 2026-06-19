@@ -250,6 +250,13 @@ public class ScorecardCalculatorPerformanceTests
         // check would catch it (3 batch calls per recalc → 6 total, fails Exactly(2)).
         // The overall NFR-01 budget check is retained, with a more generous CI
         // tolerance since this scenario has artificial I/O delay layered in.
+        //
+        // Flake repair 2 (2026-06-19): the 2000ms budget still flaked on heavily
+        // contended GitHub-hosted runners (observed 2591ms on PR #398's Release
+        // run). The structural Times.Exactly(2) check above remains the real test;
+        // the wall-clock check is sanity-only. Bumped to 10000ms (5x) so the only
+        // failure mode is a catastrophic regression (e.g., batching dropped entirely,
+        // taking 10+ seconds), not normal CI variance.
 
         // Assert - result is valid
         result.GuidelineCurrent.Should().NotBeNull();
@@ -268,9 +275,10 @@ public class ScorecardCalculatorPerformanceTests
         // Assert - generous CI-tolerant budget for the artificial-I/O scenario:
         // queryDelay (50ms) + scheduling overhead (~50–500ms on slow CI). Real
         // perf characteristics for batching are covered by the structural check above.
-        batchTime.TotalMilliseconds.Should().BeLessThan(2000,
+        batchTime.TotalMilliseconds.Should().BeLessThan(10000,
             "batch recalculation with one 50ms simulated round trip should complete " +
-            "well under 2s even on heavily-contended CI VMs");
+            "well under 10s even on heavily-contended CI VMs — this is a sanity " +
+            "backstop only; the real batch semantic is the Times.Exactly(2) check above");
     }
 
     #endregion
