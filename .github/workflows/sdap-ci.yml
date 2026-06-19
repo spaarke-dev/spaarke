@@ -73,6 +73,13 @@ jobs:
     name: Build & Test
     runs-on: windows-latest
     strategy:
+      # When one matrix configuration fails (e.g., a flaky timing test in
+      # Release), the default fail-fast=true cancels the sibling Debug job
+      # mid-flight. The cancelled Debug then shows COMPLETED/CANCELLED — and
+      # because Debug is the only REQUIRED status check, the PR becomes
+      # un-mergeable even though Debug would have passed on its own. We want
+      # each matrix configuration to run to its own conclusion.
+      fail-fast: false
       matrix:
         configuration: [Debug, Release]
 
