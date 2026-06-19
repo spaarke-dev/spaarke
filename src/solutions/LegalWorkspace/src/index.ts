@@ -95,17 +95,28 @@ export const LegalWorkspaceRenderer: WorkspaceRenderer = _LegalWorkspaceApp;
 export { setRuntimeConfig as setLegalWorkspaceRuntimeConfig } from "./config/runtimeConfig";
 
 /**
- * Daily Briefing notification-loader injection seam (R2 task 002, FR-01 / FR-02).
+ * Section registry composition factory (R2 Option D, 2026-06-18).
  *
- * SpaarkeAi `main.tsx` calls this at bootstrap with
- * `loadSpaarkeAiNotificationContext` to flow real notification context into
- * the BFF `/narrate` envelope. Without this call (standalone LegalWorkspace +
- * standalone Daily Briefing Code Page), the slot stays unset and the embedded
- * Daily Briefing falls back to the empty-payload contract.
+ * Post-Option D: the legacy `setLegalWorkspaceDailyBriefingNotificationLoader`
+ * setter is gone. Embedding consumers (SpaarkeAi) build a custom registry via
+ *   `createLegalWorkspaceSectionRegistry({ dailyBriefing: { loadNotificationContext } })`
+ * and pass it to `<LegalWorkspaceApp sections={...} />` via a wrapper renderer
+ * registered through the existing `setDefaultWorkspaceRenderer` slot.
  *
- * Pattern: module-mutable slot — mirrors `setDefaultWorkspaceRenderer` from
- * `@spaarke/ui-components`. The default `dailyBriefingRegistration` consumed
- * by `sectionRegistry.ts` uses a late-bound wrapper that reads from this slot
- * at fetch time, so SECTION_REGISTRY can stay a static `readonly` array.
+ * Standalone LegalWorkspace uses `SECTION_REGISTRY` (the no-options default) —
+ * byte-identical behavior preserved (FR-25 / NFR-10).
+ *
+ * See `projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md`
+ * for the full design rationale and cookbook for adding a new widget.
  */
-export { setLegalWorkspaceDailyBriefingNotificationLoader } from "./sections/dailyBriefing/dailyBriefing.registration";
+export {
+  SECTION_REGISTRY,
+  createLegalWorkspaceSectionRegistry,
+  getSectionById,
+  getSectionsByCategory,
+} from "./sectionRegistry";
+export type { LegalWorkspaceSectionRegistryOptions } from "./sectionRegistry";
+
+// Ergonomic re-export so consumers building a custom registry can type their
+// own `sections` prop without re-importing from `@spaarke/ui-components`.
+export type { SectionRegistration } from "@spaarke/ui-components";

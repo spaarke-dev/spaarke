@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-daily-update-service-r2`
 > **Last Updated**: 2026-06-18
-> **Status**: 31 / 36 complete; remaining 5 are manual operator tasks (003 P1 smoke, 060 BFF deploy, 061 code-page redeploy, 062 E2E SC1–SC14, 090 wrap-up)
+> **Status**: 31 / 39 complete + Option D (registry-as-composition refactor) LANDED — 3 new follow-up tasks (070/071/072 doc-alignment); 5 manual operator tasks remain (003 P1 smoke, 060 BFF deploy, 061 code-page redeploy, 062 E2E SC1–SC14, 090 wrap-up)
 > **Branch**: `work/spaarke-daily-update-service-r2`
 
 ---
@@ -46,6 +46,10 @@
 | 061 | Redeploy standalone Daily Briefing code page via `code-page-deploy` | Phase7 | 🔲 | 017,055 | E | FULL |
 | 062 | E2E verification — SC1–SC14 in spaarkedev1 | Phase7 | 🔲 | 060,061,024,018 | — | STANDARD |
 | 063 | Update architecture docs (SPAARKEAI-COMPONENT-MODEL, SPAARKEAI-WORKSPACE-ARCHITECTURE, BUILD-A-NEW-WORKSPACE-WIDGET) | Phase7 | ✅ 3 docs + cross-ref fix | 016 | — | MINIMAL |
+| **Option D** | **Registry-as-composition factory** — replaces R2 task 002 module-mutation slot with `createLegalWorkspaceSectionRegistry({ dailyBriefing: { loadNotificationContext } })` + custom-renderer wrapper in SpaarkeAi `main.tsx`. 6 files refactored; legacy setter API REMOVED. Design rationale in [`notes/option-d-registry-as-composition.md`](../notes/option-d-registry-as-composition.md). | P1+ | ✅ committed mid-PR-396 | 002 (supersedes) | — | FULL |
+| 070 | Pattern doc — `.claude/patterns/ui/workspace-section-registry-composition.md` codifying Option D for reuse | Phase7b | 🔲 | Option D | F | MINIMAL |
+| 071 | Update SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL + BUILD-A-NEW-WORKSPACE-WIDGET docs for registry composition + cookbook | Phase7b | 🔲 | 070 | — | MINIMAL |
+| 072 | Draft ADR-033 — Workspace Section Registry as Composition Factory (full + concise + ADR-INDEX updates + back-refs to ADR-006/012) | Phase7b | 🔲 | 071 | — | STANDARD |
 | 090 | Project wrap-up (code-review + adr-check + repo-cleanup + README status + lessons-learned) | Phase8 | 🔲 | 062,063 | — | FULL |
 
 ---
@@ -57,6 +61,8 @@
 **Task 010 unblocked → deps cleared (was 003)**. Reason: scaffolding the new `@spaarke/daily-briefing-components` package has no functional dependency on P1 verification. P2 hoist can proceed in parallel with the P1 deferral.
 
 **Task 053 acceptance interpreted, not literal**. The DailyBriefing solution's `authInit.ts` was REWRITTEN as a thin factory consumer with lazy-singleton wrapping (49 LOC) rather than deleted outright — the JSDoc canonical example pattern keeps `services/authInit.ts` as the encapsulation point. The spirit of FR-20 is met: no per-solution auth init *logic* remains; only a thin call-site wrapper. Lazy-singleton needed because DailyBriefing's runtime-config getters aren't available at module load (`setRuntimeConfig` must fire first). Task 054 should verify whether LegalWorkspace + SpaarkeAi need the same pattern (likely don't). See `notes/task-053-factory-config-timing.md`.
+
+**Option D — Registry-as-Composition Factory (post-Wave-10, mid-PR-396 architectural review 2026-06-18)**. The user code-review caught that R2 task 002's Wave 8 fix (module-mutable slot + setter + late-bound wrapper) was a band-aid that doesn't scale to SpaarkeAi's strategic vision as a critical core surface supporting N widgets + two-way Assistant ⇄ Workspace ⇄ Context flows. Option D refactors the LegalWorkspace section-registry primitive from a hard-coded `readonly` const into a `createLegalWorkspaceSectionRegistry(options: LegalWorkspaceSectionRegistryOptions): readonly SectionRegistration[]` factory. `LegalWorkspaceApp` accepts an optional `sections?` prop (defaulting to standalone). SpaarkeAi registers a custom-renderer wrapper that injects per-widget options at construction time. Legacy setter API REMOVED. 6 files refactored + 3 new tests (29 total pass). FR-25/NFR-10 preserved (standalone LegalWorkspace bundle byte-identical). Design rationale: [`notes/option-d-registry-as-composition.md`](../notes/option-d-registry-as-composition.md). Documentation alignment follow-ups land separately via tasks 070 (pattern), 071 (architecture docs), 072 (ADR-033) post-merge. NO speculative options (`paneEventBus`/`agentClient`/`contextProvider`) added today per CLAUDE.md "don't design for hypothetical future requirements" — interface is extensible additively.
 
 ---
 
