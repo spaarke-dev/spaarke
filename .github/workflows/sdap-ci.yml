@@ -114,10 +114,71 @@ jobs:
         # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
         run: dotnet build -c ${{ matrix.configuration }} --no-restore
 
-      - name: Test with coverage
+      # ------------------------------------------------------------------
+      # Two-pass test runner — see scripts/ci/classify-and-retry.ps1 + docs/
+      # procedures/testing-and-code-quality.md.
+      #
+      # Pass 1 runs the full suite. The classifier reads the TRX and consults
+      # tests/.reliability-registry.json. If any pass-1 failure is NOT in the
+      # registry, that's a real bug → classify exits 1 → this job fails (no
+      # retry). If failures are ALL registry-tagged (timing/concurrency-
+      # sensitive), pass 2 reruns just those on a fresh execution. Pass 2
+      # failures fail the build (treated as a real regression — two
+      # consecutive failures on different runs is no longer noise).
+      # ------------------------------------------------------------------
+      - name: Test with coverage (pass 1)
+        id: test-pass-1
+        continue-on-error: true   # let classifier decide; don't abort here on test failures
+        shell: pwsh
         run: |
-          dotnet test -c ${{ matrix.configuration }} --no-build --logger trx --results-directory ./TestResults `
+          dotnet test -c ${{ matrix.configuration }} --no-build `
+            --logger "trx;LogFileName=pass1.trx" `
+            --results-directory ./TestResults/pass1 `
             --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
+
+      - name: Classify pass-1 failures (decide on retry)
+        id: classify
+        shell: pwsh
+        run: ./scripts/ci/classify-and-retry.ps1 -TrxDirectory ./TestResults/pass1
+
+      - name: Retry timing/concurrency-sensitive tests (pass 2)
+        id: test-pass-2
+        if: steps.classify.outputs.retry_needed == 'true'
+        continue-on-error: true   # final verdict step decides; capture TRX either way
+        shell: pwsh
+        run: |
+          dotnet test -c ${{ matrix.configuration }} --no-build `
+            --filter "${{ steps.classify.outputs.retry_filter }}" `
+            --logger "trx;LogFileName=pass2.trx" `
+            --results-directory ./TestResults/pass2
+
+      - name: Final test verdict
+        shell: pwsh
+        run: |
+          $retryRan = "${{ steps.classify.outputs.retry_needed }}" -eq "true"
+          if (-not $retryRan) {
+            # Classify already exited 1 if there were deterministic failures.
+            # Reaching here with retry_needed=false means pass 1 was fully clean.
+            Write-Host "Pass 1 clean — no retry was needed"
+            exit 0
+          }
+          if (-not (Test-Path ./TestResults/pass2/pass2.trx)) {
+            Write-Host "::error::Retry pass 2 ran but pass2.trx is missing — dotnet test likely crashed"
+            exit 1
+          }
+          $xml = [xml](Get-Content ./TestResults/pass2/pass2.trx -Raw)
+          $nsm = New-Object System.Xml.XmlNamespaceManager $xml.NameTable
+          $nsm.AddNamespace("x", "http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
+          $stillFailing = $xml.SelectNodes("//x:UnitTestResult[@outcome='Failed']", $nsm)
+          if ($stillFailing.Count -gt 0) {
+            Write-Host "::error::Retry pass failed: $($stillFailing.Count) test(s) still failing after a second attempt — treating as real regression"
+            $stillFailing | ForEach-Object {
+              Write-Host "  - $($_.GetAttribute('testName'))"
+            }
+            exit 1
+          }
+          $passed = $xml.SelectNodes("//x:UnitTestResult[@outcome='Passed']", $nsm).Count
+          Write-Host "Retry pass clean: $passed test(s) retried, all passed on second attempt"
 
       - name: Upload test results
         uses: actions/upload-artifact@v6
