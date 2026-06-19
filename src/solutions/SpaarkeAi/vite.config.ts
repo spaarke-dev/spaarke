@@ -146,6 +146,19 @@ export default defineConfig({
       // LegalWorkspace todo section (Pattern D dual-use).
       "@spaarke/smart-todo-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
       "@spaarke/smart-todo-components": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
+      // R2.1 hotfix (2026-06-19): @spaarke/daily-briefing-components hosts the
+      // full DailyBriefingApp + the new createDailyBriefingRegistration factory
+      // (Fix A retired the narrative-only DailyBriefingSection in
+      // @spaarke/ui-components). Both the root and /widgets subpath aliases
+      // are needed because consumers import via the subpath specifier.
+      "@spaarke/daily-briefing-components/widgets": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/widgets"),
+      "@spaarke/daily-briefing-components/components": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/components"),
+      "@spaarke/daily-briefing-components/hooks": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/hooks"),
+      "@spaarke/daily-briefing-components/services": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/services"),
+      "@spaarke/daily-briefing-components/types": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/types"),
+      "@spaarke/daily-briefing-components/utils": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/utils"),
+      "@spaarke/daily-briefing-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
+      "@spaarke/daily-briefing-components": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
       // Round 4 Fix 4 (2026-05-21): alias the LegalWorkspace solution source as
       // a "package" so SpaarkeAi can embed the full workspace experience inside
       // a workspace pane tab via `import { LegalWorkspaceApp } from "@spaarke/legal-workspace"`.

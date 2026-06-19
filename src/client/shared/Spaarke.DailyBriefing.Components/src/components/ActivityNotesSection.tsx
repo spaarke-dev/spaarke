@@ -23,7 +23,7 @@
 import * as React from 'react';
 import { makeStyles, tokens, Text, Skeleton, SkeletonItem } from '@fluentui/react-components';
 import { CHANNEL_REGISTRY } from '../types/notifications';
-import type { ChannelFetchResult, NotificationCategory } from '../types/notifications';
+import type { ChannelFetchResult, NotificationCategory, NotificationItem } from '../types/notifications';
 import { getChannelIcon } from './channelIcons';
 import { ChannelHeading } from './ChannelHeading';
 import { NarrativeBullet } from './NarrativeBullet';
@@ -131,7 +131,7 @@ function resolveChannelLabel(category: string): string {
 
 export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
   channelNarratives,
-  channels: _channels,
+  channels,
   onAddToTodo,
   onDismiss,
   isTodoCreated,
@@ -184,35 +184,65 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
       <Text as="h2" size={500} weight="semibold" className={styles.heading}>
         Activity Notes
       </Text>
-      {filteredNarratives.map(channel => (
-        <div key={channel.category} className={styles.channelSection}>
-          <ChannelHeading
-            icon={resolveChannelIcon(channel.category)}
-            label={resolveChannelLabel(channel.category)}
-            itemCount={channel.bullets.length}
-          />
-          {channel.bullets.map((bullet, idx) => {
-            // Determine todo/dismiss state from the first item ID
-            const firstItemId = bullet.itemIds[0] ?? '';
+      {filteredNarratives.map(channel => {
+        // R2.1 hotfix (2026-06-19) — Fix B: resolve the underlying NotificationItem
+        // array for this channel so each bullet can expand into per-item sub-rows
+        // (FR-11/12/13/14). Wave 9 (tasks 020-023) built the SubRow* slot components
+        // and added optional `items` + `onAddToTodoItem` + `onDismissItem` props to
+        // NarrativeBullet, but the wiring from ActivityNotesSection was deferred.
+        // This block closes that gap so aggregated bullets ("Multiple X") expand
+        // into an indented per-item sub-list with link + To-Do + Dismiss per row.
+        const matchingChannel = channels.find(
+          ch => ch.status === 'success' && ch.group.meta.category === channel.category
+        );
+        const channelItems: NotificationItem[] =
+          matchingChannel?.status === 'success' ? matchingChannel.group.items : [];
 
-            return (
-              <NarrativeBullet
-                key={`${channel.category}-${idx}`}
-                narrative={bullet.narrative}
-                primaryEntityName={bullet.primaryEntityName}
-                primaryEntityType={bullet.primaryEntityType}
-                primaryEntityId={bullet.primaryEntityId}
-                itemIds={bullet.itemIds}
-                onAddToTodo={onAddToTodo}
-                onDismiss={onDismiss}
-                isTodoCreated={isTodoCreated(firstItemId)}
-                isTodoPending={isTodoPending(firstItemId)}
-                todoError={getTodoError(firstItemId)}
-              />
-            );
-          })}
-        </div>
-      ))}
+        return (
+          <div key={channel.category} className={styles.channelSection}>
+            <ChannelHeading
+              icon={resolveChannelIcon(channel.category)}
+              label={resolveChannelLabel(channel.category)}
+              itemCount={channel.bullets.length}
+            />
+            {channel.bullets.map((bullet, idx) => {
+              // Determine todo/dismiss state from the first item ID
+              const firstItemId = bullet.itemIds[0] ?? '';
+
+              // Resolve the underlying items for this bullet, preserving the
+              // order of `itemIds`. Missing items are filtered out (defensive
+              // — should not normally happen if the BFF and frontend agree).
+              const bulletItems: NotificationItem[] = bullet.itemIds
+                .map(id => channelItems.find(item => item.id === id))
+                .filter((item): item is NotificationItem => Boolean(item));
+
+              return (
+                <NarrativeBullet
+                  key={`${channel.category}-${idx}`}
+                  narrative={bullet.narrative}
+                  primaryEntityName={bullet.primaryEntityName}
+                  primaryEntityType={bullet.primaryEntityType}
+                  primaryEntityId={bullet.primaryEntityId}
+                  itemIds={bullet.itemIds}
+                  onAddToTodo={onAddToTodo}
+                  onDismiss={onDismiss}
+                  isTodoCreated={isTodoCreated(firstItemId)}
+                  isTodoPending={isTodoPending(firstItemId)}
+                  todoError={getTodoError(firstItemId)}
+                  // FR-11/12/13/14 wiring: when itemIds.length > 1 AND items is
+                  // supplied, NarrativeBullet renders an indented per-item sub-list.
+                  // Per-item callbacks reuse the aggregated handlers with a
+                  // single-item array (DailyBriefingApp's handleAddToTodo /
+                  // handleDismiss already accept arbitrary itemId arrays).
+                  items={bulletItems}
+                  onAddToTodoItem={itemId => onAddToTodo([itemId])}
+                  onDismissItem={itemId => onDismiss([itemId])}
+                />
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 };
