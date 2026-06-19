@@ -23,11 +23,7 @@
 import * as React from 'react';
 import { makeStyles, tokens, Text, Skeleton, SkeletonItem } from '@fluentui/react-components';
 import { CHANNEL_REGISTRY } from '../types/notifications';
-import type {
-  ChannelFetchResult,
-  NotificationCategory,
-  NotificationItem,
-} from '../types/notifications';
+import type { ChannelFetchResult, NotificationCategory, NotificationItem } from '../types/notifications';
 import { getChannelIcon } from './channelIcons';
 import { ChannelHeading } from './ChannelHeading';
 import { NarrativeBullet } from './NarrativeBullet';

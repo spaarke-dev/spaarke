@@ -20,10 +20,7 @@ import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { ActivityNotesSection } from '../src/components/ActivityNotesSection';
-import type {
-  ChannelFetchResult,
-  NotificationItem,
-} from '../src/types/notifications';
+import type { ChannelFetchResult, NotificationItem } from '../src/types/notifications';
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -140,8 +137,6 @@ describe('ActivityNotesSection sub-list wiring (Fix B)', () => {
 
     // The narrative text from the AI-generated bullet stays the primary
     // content; the sub-list is supplementary per FR-11.
-    expect(
-      screen.getByText(/Multiple documents await your review across two matters/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Multiple documents await your review across two matters/i)).toBeInTheDocument();
   });
 });

@@ -46,11 +46,7 @@
 
 import * as React from 'react';
 import { SparkleRegular } from '@fluentui/react-icons';
-import type {
-  SectionRegistration,
-  SectionFactoryContext,
-  ContentSectionConfig,
-} from '@spaarke/ui-components';
+import type { SectionRegistration, SectionFactoryContext, ContentSectionConfig } from '@spaarke/ui-components';
 import { DailyBriefingApp } from '../components/DailyBriefingApp';
 
 // ---------------------------------------------------------------------------
@@ -64,8 +60,7 @@ import { DailyBriefingApp } from '../components/DailyBriefingApp';
  * the same location they import the factory. Same string value as the
  * pre-R2.1 export from `@spaarke/ui-components` — KQL queries unchanged.
  */
-export const TELEMETRY_EVENT_DAILY_BRIEFING_429 =
-  'spaarke-ai-error.daily-briefing.rate-limited';
+export const TELEMETRY_EVENT_DAILY_BRIEFING_429 = 'spaarke-ai-error.daily-briefing.rate-limited';
 
 // ---------------------------------------------------------------------------
 // Narration request shape (re-export for type compat with prior callers)
@@ -173,7 +168,7 @@ export interface CreateDailyBriefingRegistrationOptions {
  * self-contained. See file-level docblock for migration details.
  */
 export function createDailyBriefingRegistration(
-  _options: CreateDailyBriefingRegistrationOptions = {},
+  _options: CreateDailyBriefingRegistrationOptions = {}
 ): SectionRegistration {
   return {
     id: 'daily-briefing',
