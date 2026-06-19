@@ -328,6 +328,15 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
             "FinancialCalculatorHandler",
             "FinancialCalculationToolHandler",
             "ClauseComparisonHandler",
+            // R6 chat tools added in Phase C / Wave C-G2 + C-G6. Their Validate
+            // is chat-context-only (gates on tabId / sessionId / pinType / action
+            // enum) — empty-document is VALID by design (these handlers don't
+            // operate on document content). Same B-G11 / B-G11c rationale as
+            // the chat-only handlers above. Added by PR #395 hotfix 2026-06-18.
+            "SendWorkspaceArtifactHandler",   // task 054 — creates a workspace tab
+            "UpdateWorkspaceTabHandler",      // task 055 — updates an existing tab
+            "CloseWorkspaceTabHandler",       // task 056 — closes a tab
+            "ManagePinnedContextHandler",     // task 069 — pinned-memory CRUD via voice
         };
 
         // Act & Assert

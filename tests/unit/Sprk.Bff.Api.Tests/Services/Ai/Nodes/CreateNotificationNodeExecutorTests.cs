@@ -413,6 +413,258 @@ public class CreateNotificationNodeExecutorTests
 
     #endregion
 
+    #region FR-18: Visible vs Hidden Toast data.actions[] Tests (P3 — Native MDA bell deep-links)
+
+    /// <summary>
+    /// FR-18 (standard path, visible toast): When actionUrl is supplied and toasttype is the
+    /// default (Timed = 200000000, visible), the appnotification.data payload MUST contain a
+    /// single-entry actions array [{ title: "Open", data: { url: actionUrl } }] AND
+    /// customData.actionUrl populated.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_StandardPath_VisibleToast_PopulatesDataActionsAndCustomData()
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+        const string actionUrl = "/main.aspx?pagetype=entityrecord&etn=sprk_document&id=" +
+                                 "00000000-0000-0000-0000-000000000001";
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "New document uploaded",
+            body = "Document summary",
+            actionUrl,
+            recipientId = recipientId.ToString()
+            // toasttype omitted → defaults to DefaultToastType (200000000 = Timed, visible)
+        });
+        var context = CreateValidContext(config);
+
+        SetupMockPassThrough();
+        SetupCreateNotificationReturns(notificationId);
+        var capturedPostBody = CapturePostBody();
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var postedPayload = capturedPostBody.Value
+            ?? throw new InvalidOperationException("POST body was not captured");
+        using var doc = JsonDocument.Parse(postedPayload);
+        var root = doc.RootElement;
+
+        root.TryGetProperty("data", out var dataProperty).Should().BeTrue(
+            "FR-18: visible-toast notifications populate appnotification.data");
+        var dataString = dataProperty.GetString();
+        dataString.Should().NotBeNullOrEmpty();
+
+        using var dataDoc = JsonDocument.Parse(dataString!);
+        var dataRoot = dataDoc.RootElement;
+
+        // (a) data.actions[0].data.url == actionUrl
+        dataRoot.TryGetProperty("actions", out var actionsArr).Should().BeTrue(
+            "FR-18: visible-toast notifications populate data.actions");
+        actionsArr.ValueKind.Should().Be(JsonValueKind.Array);
+        actionsArr.GetArrayLength().Should().Be(1, "FR-18 specifies a single-entry actions array");
+        var firstAction = actionsArr[0];
+        firstAction.GetProperty("title").GetString().Should().Be("Open");
+        firstAction.GetProperty("data").GetProperty("url").GetString().Should().Be(actionUrl);
+
+        // (c) customData.actionUrl populated (regardless of toasttype)
+        dataRoot.TryGetProperty("customData", out var customData).Should().BeTrue();
+        customData.GetProperty("actionUrl").GetString().Should().Be(actionUrl);
+    }
+
+    /// <summary>
+    /// FR-18 (standard path, hidden toast): When actionUrl is supplied but toasttype == Hidden
+    /// (100000000), data.actions MUST be null/absent (no visible bell surface to render the
+    /// "Open" action). customData.actionUrl MUST still be populated (consumed by the Daily
+    /// Briefing UI, not the MDA bell).
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_StandardPath_HiddenToast_OmitsDataActionsButKeepsCustomData()
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+        const string actionUrl = "/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=" +
+                                 "00000000-0000-0000-0000-000000000002";
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "Hidden notification",
+            body = "For Daily Briefing UI only — no MDA bell render",
+            actionUrl,
+            toasttype = 100_000_000, // Hidden
+            recipientId = recipientId.ToString()
+        });
+        var context = CreateValidContext(config);
+
+        SetupMockPassThrough();
+        SetupCreateNotificationReturns(notificationId);
+        var capturedPostBody = CapturePostBody();
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var postedPayload = capturedPostBody.Value
+            ?? throw new InvalidOperationException("POST body was not captured");
+        using var doc = JsonDocument.Parse(postedPayload);
+        var root = doc.RootElement;
+
+        // toasttype = Hidden propagated
+        root.GetProperty("toasttype").GetInt32().Should().Be(100_000_000);
+
+        root.TryGetProperty("data", out var dataProperty).Should().BeTrue(
+            "FR-18: customData still serialized for hidden-toast notifications");
+        var dataString = dataProperty.GetString();
+        dataString.Should().NotBeNullOrEmpty();
+
+        using var dataDoc = JsonDocument.Parse(dataString!);
+        var dataRoot = dataDoc.RootElement;
+
+        // (b) data.actions null/absent — hidden toasts skip actions[] (no MDA bell render surface)
+        dataRoot.TryGetProperty("actions", out _).Should().BeFalse(
+            "FR-18: hidden-toast notifications MUST NOT populate data.actions[]");
+
+        // (c) customData.actionUrl populated (Daily Briefing UI consumer)
+        dataRoot.TryGetProperty("customData", out var customData).Should().BeTrue();
+        customData.GetProperty("actionUrl").GetString().Should().Be(actionUrl);
+    }
+
+    /// <summary>
+    /// FR-18 (iterateItems path, visible toast): The same data.actions[] population rule MUST
+    /// apply when notifications are created in iterate-items mode (one per upstream query item).
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_IterateItems_VisibleToast_PopulatesDataActionsAndCustomData()
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+        var itemRegardingId = Guid.NewGuid();
+
+        // Hand-build the iterate-items config: upstream "items" output + per-item template.
+        // Note: actionUrl is rendered through the template engine (which is mocked pass-through).
+        // Top-level title/body are required by Validate() (line 96-100) even though
+        // ExecuteIterateItemsAsync ultimately renders from itemNotification.
+        var iterateConfig = new
+        {
+            title = "(parent placeholder — iterate uses itemNotification)",
+            body = "(parent placeholder)",
+            iterateItems = true,
+            itemNotification = new
+            {
+                title = "Item: {{item.name}}",
+                body = "Body for item",
+                actionUrl = "/main.aspx?pagetype=entityrecord&etn=sprk_document&id=" +
+                            itemRegardingId.ToString(),
+                recipientId = recipientId.ToString()
+                // toasttype omitted → defaults to visible (DefaultToastType)
+            }
+        };
+        var config = JsonSerializer.Serialize(iterateConfig);
+        var context = CreateIterateContext(config, itemRegardingId);
+
+        SetupMockPassThrough();
+        SetupCreateNotificationReturns(notificationId);
+        var capturedPostBody = CapturePostBody();
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.TextContent.Should().Contain("Created 1 notifications");
+
+        var postedPayload = capturedPostBody.Value
+            ?? throw new InvalidOperationException("POST body was not captured");
+        using var doc = JsonDocument.Parse(postedPayload);
+        var root = doc.RootElement;
+
+        root.TryGetProperty("data", out var dataProperty).Should().BeTrue();
+        using var dataDoc = JsonDocument.Parse(dataProperty.GetString()!);
+        var dataRoot = dataDoc.RootElement;
+
+        // (a) iterateItems path: data.actions[0].data.url is the rendered actionUrl
+        dataRoot.TryGetProperty("actions", out var actionsArr).Should().BeTrue(
+            "FR-18: iterateItems visible-toast notifications populate data.actions");
+        actionsArr.GetArrayLength().Should().Be(1);
+        actionsArr[0].GetProperty("title").GetString().Should().Be("Open");
+        actionsArr[0].GetProperty("data").GetProperty("url").GetString()
+            .Should().Contain(itemRegardingId.ToString());
+
+        // (c) customData.actionUrl populated on iterateItems path
+        dataRoot.TryGetProperty("customData", out var customData).Should().BeTrue();
+        customData.GetProperty("actionUrl").GetString().Should().Contain(itemRegardingId.ToString());
+    }
+
+    /// <summary>
+    /// FR-18 (iterateItems path, hidden toast): For hidden-toast iterate-items notifications,
+    /// data.actions MUST be null/absent and customData.actionUrl MUST still be populated.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_IterateItems_HiddenToast_OmitsDataActionsButKeepsCustomData()
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+        var itemRegardingId = Guid.NewGuid();
+
+        var iterateConfig = new
+        {
+            title = "(parent placeholder)",
+            body = "(parent placeholder)",
+            iterateItems = true,
+            itemNotification = new
+            {
+                title = "Item: {{item.name}}",
+                body = "Body for item",
+                actionUrl = "/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=" +
+                            itemRegardingId.ToString(),
+                toasttype = 100_000_000, // Hidden
+                recipientId = recipientId.ToString()
+            }
+        };
+        var config = JsonSerializer.Serialize(iterateConfig);
+        var context = CreateIterateContext(config, itemRegardingId);
+
+        SetupMockPassThrough();
+        SetupCreateNotificationReturns(notificationId);
+        var capturedPostBody = CapturePostBody();
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.TextContent.Should().Contain("Created 1 notifications");
+
+        var postedPayload = capturedPostBody.Value
+            ?? throw new InvalidOperationException("POST body was not captured");
+        using var doc = JsonDocument.Parse(postedPayload);
+        var root = doc.RootElement;
+
+        root.GetProperty("toasttype").GetInt32().Should().Be(100_000_000);
+
+        root.TryGetProperty("data", out var dataProperty).Should().BeTrue();
+        using var dataDoc = JsonDocument.Parse(dataProperty.GetString()!);
+        var dataRoot = dataDoc.RootElement;
+
+        // (b) iterateItems hidden-toast: actions MUST be absent
+        dataRoot.TryGetProperty("actions", out _).Should().BeFalse(
+            "FR-18: iterateItems hidden-toast notifications MUST NOT populate data.actions[]");
+
+        // (c) customData.actionUrl populated
+        dataRoot.TryGetProperty("customData", out var customData).Should().BeTrue();
+        customData.GetProperty("actionUrl").GetString().Should().Contain(itemRegardingId.ToString());
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private void SetupMockPassThrough()
@@ -508,6 +760,80 @@ public class CreateNotificationNodeExecutorTests
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };
+    }
+
+    /// <summary>
+    /// Builds a NodeExecutionContext for iterate-items mode by attaching a synthetic
+    /// upstream PreviousOutput whose StructuredData contains an "items" array with a single
+    /// item — sufficient to exercise the iterate path while keeping the test focused on
+    /// FR-18's data.actions[] vs customData semantics.
+    /// </summary>
+    private static NodeExecutionContext CreateIterateContext(string configJson, Guid itemRegardingId)
+    {
+        var baseContext = CreateValidContext(configJson);
+
+        // Synthesize an upstream query result: { items: [ { id, name } ] }
+        var upstream = NodeOutput.Ok(
+            nodeId: Guid.NewGuid(),
+            outputVariable: "query",
+            data: new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        id = itemRegardingId.ToString(),
+                        name = "Test Item"
+                    }
+                }
+            },
+            textContent: "1 item");
+
+        return baseContext with
+        {
+            PreviousOutputs = new Dictionary<string, NodeOutput>
+            {
+                ["query"] = upstream
+            }
+        };
+    }
+
+    /// <summary>
+    /// Wires up the idempotency-check GET (returns no duplicate) AND captures the body of
+    /// the next POST to /appnotifications. Returns a single-value holder the test reads
+    /// after Act. Avoids the brittleness of mock.Verify(...).Callback by exposing the
+    /// captured JSON as plain text.
+    /// </summary>
+    private CapturedBody CapturePostBody()
+    {
+        SetupIdempotencyCheckReturnsNoDuplicate();
+
+        var captured = new CapturedBody();
+        _httpHandlerMock
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.Is<HttpRequestMessage>(r => r.Method == HttpMethod.Post),
+                ItExpr.IsAny<CancellationToken>())
+            .Returns(async (HttpRequestMessage request, CancellationToken ct) =>
+            {
+                captured.Value = request.Content is not null
+                    ? await request.Content.ReadAsStringAsync(ct)
+                    : null;
+
+                var response = new HttpResponseMessage(HttpStatusCode.NoContent);
+                response.Headers.Add(
+                    "OData-EntityId",
+                    $"https://org.crm.dynamics.com/api/data/v9.2/appnotifications({Guid.NewGuid()})");
+                return response;
+            });
+
+        return captured;
+    }
+
+    private sealed class CapturedBody
+    {
+        public string? Value { get; set; }
     }
 
     private class SkippedNotificationOutput

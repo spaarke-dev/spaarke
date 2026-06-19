@@ -12,6 +12,7 @@ import {
   getUserThemePreference,
   THEME_CHANGE_EVENT,
 } from "@spaarke/ui-components";
+import type { SectionRegistration } from "@spaarke/ui-components";
 import { PageHeader } from "./components/Shell/PageHeader";
 import { WorkspaceGrid } from "./components/Shell/WorkspaceGrid";
 import type { WorkspaceHeaderState } from "./components/Shell/WorkspaceGrid";
@@ -45,6 +46,18 @@ export interface ILegalWorkspaceAppProps {
    * preserving FR-25 / NFR-10 (byte-identical bundle behaviour).
    */
   embedded?: boolean;
+  /**
+   * Optional custom section registry (R2 Option D, 2026-06-18). When omitted,
+   * the default `SECTION_REGISTRY` is used (standalone LegalWorkspace behavior).
+   * Embedding consumers (SpaarkeAi) pass a registry built via
+   * `createLegalWorkspaceSectionRegistry({...})` to inject per-widget
+   * customization (e.g. SpaarkeAi's `loadSpaarkeAiNotificationContext` for
+   * Daily Briefing).
+   *
+   * Replaces the R2 task 002 module-mutation slot pattern — see
+   * `projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md`.
+   */
+  sections?: readonly SectionRegistration[];
 }
 
 const useStyles = makeStyles({
@@ -86,6 +99,7 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
   userId,
   initialWorkspaceId,
   embedded = false,
+  sections,
 }) => {
   const { theme } = useTheme();
   const styles = useStyles();
@@ -164,6 +178,7 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
             userId={userId}
             initialWorkspaceId={initialWorkspaceId}
             embedded={embedded}
+            sections={sections}
             onHeaderReady={!embedded ? setHeaderState : undefined}
           />
         </main>

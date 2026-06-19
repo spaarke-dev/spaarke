@@ -36,6 +36,11 @@ import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry'
 import { createWorkspaceWrapper } from './WorkspaceWidgetWrapper';
 import { safeRegister } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
+// Pillar 9 visibility derivations (task 073, D-C-28). The Dashboard category
+// is attached to the 'workspace' registration (WorkspaceLayoutWidget); the
+// Table category is attached to all 5 DataverseEntityViewWidget-backed
+// system widgets (documents/matters/projects/invoices/work-assignments).
+import { dashboardWidgetVisibility, tableWidgetVisibility } from './pillar9-visibility';
 
 // ai-spaarke-ai-workspace-UI-r1 brittleness Phase B.5 (2026-06-09):
 // Isolate each registration in its own try/catch. Without this, a synchronous
@@ -575,7 +580,12 @@ registerWorkspaceWidget(
   () =>
     import('./WorkspaceLayoutWidget').then(m => ({
       default: m.WorkspaceLayoutWidget as import('../../types/widget-types').WorkspaceWidgetComponent,
-    }))
+    })),
+  // Pillar 9 visibility opt-in (task 073, D-C-28). Dashboard category:
+  // exposes `dashboardName` + optional `lastViewedSection` ONLY. Never
+  // chart data / section payloads (token economy + privacy per ADR-015).
+  // See `pillar9-visibility.ts` for the derivation rationale.
+  dashboardWidgetVisibility
 );
 
 // ---------------------------------------------------------------------------
@@ -642,6 +652,12 @@ function createEntityViewFactory(configId: string) {
     });
 }
 
+// Pillar 9 visibility opt-in (task 073, D-C-28). Table category: exposes
+// structural state (rowCount + sort + filter + selection CARDINALITY) for
+// all 5 system table widgets. selectedRows is converted from row IDs to a
+// COUNT per SerializedTableState privacy contract — row IDs / cell content
+// never reach the agent prompt. See `pillar9-visibility.ts`.
+
 registerWorkspaceWidget(
   'documents-list',
   {
@@ -651,7 +667,8 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 200,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents)
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents),
+  tableWidgetVisibility
 );
 
 safeRegisterWidget(
@@ -663,7 +680,8 @@ safeRegisterWidget(
     allowMultiple: true,
     defaultOrder: 205,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.matters)
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.matters),
+  tableWidgetVisibility
 );
 
 registerWorkspaceWidget(
@@ -675,7 +693,8 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 210,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects)
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects),
+  tableWidgetVisibility
 );
 
 registerWorkspaceWidget(
@@ -687,7 +706,8 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 220,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices)
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices),
+  tableWidgetVisibility
 );
 
 registerWorkspaceWidget(
@@ -699,7 +719,8 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 230,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments)
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments),
+  tableWidgetVisibility
 );
 
 // ---------------------------------------------------------------------------

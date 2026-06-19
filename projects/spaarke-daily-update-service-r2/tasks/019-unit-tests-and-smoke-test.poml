@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Unit tests for 3 split hooks + smoke test mounting `DailyBriefingApp` (NFR-05)</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>014, 011</dependencies>
+    <blocks>020</blocks>
+    <tags>testing, unit-test, integration-test, frontend, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test creation; explicit constraint set; closes spec NFR-05 test gap</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential; consolidates test coverage of P2 work</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add unit tests for the 3 split hooks (`useBriefingNotifications`, `useBriefingPreferences`, `useBriefingActions`) — independent test fixtures, no shared state. Add a smoke test that mounts `DailyBriefingApp` with mocked `Xrm` + asserts the BFF `/narrate` call fires with a non-empty payload. Closes the NFR-05 test gap.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React Testing Library + Vitest/Jest + mocking `Xrm.WebApi`.</role>
+
+  <goal>Three independent hook tests + one smoke test exist and pass. Test coverage for the new package is measurable and reported.</goal>
+
+  <context>
+    <background>
+      Per NFR-05: new shared package ships with unit tests for the 3 split hooks + smoke test mounting `DailyBriefingApp` with mocked Xrm. Fills the test gap identified in the audit.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingNotifications.test.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingPreferences.test.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingActions.test.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/DailyBriefingApp.smoke.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">NFR-05: 3 hook tests + smoke test required.</constraint>
+    <constraint source="project">Each hook test uses independent mock; no shared state across tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.Events.Components/test/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up test infrastructure in new package (mirror `@spaarke/events-components/test/` config).</step>
+    <step order="2">Write `useBriefingNotifications.test.ts` — mock `webApi`, assert `channels`, `totalUnreadCount`, `refetch` behave per FR-06 contract.</step>
+    <step order="3">Write `useBriefingPreferences.test.ts` — mock `webApi`, assert `preferences`, `updatePreferences`, loading + error states.</step>
+    <step order="4">Write `useBriefingActions.test.ts` — assert `markAsRead`, `markAllAsRead`, `dismissAll`, `refresh`.</step>
+    <step order="5">Write `DailyBriefingApp.smoke.test.tsx` — render with mocked `Xrm`, mocked `authenticatedFetch`; assert `/narrate` fetch fires with non-empty payload; assert at least one channel renders.</step>
+    <step order="6">Run `npm test` in new package; all green.</step>
+    <step order="7">Record coverage report in `notes/` for project tracking.</step>
+    <step order="8">Update TASK-INDEX.md: change task 019 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run test suite.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingNotifications.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingPreferences.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingActions.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/DailyBriefingApp.smoke.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 test files exist; `npm test` green.</criterion>
+    <criterion testable="true">Smoke test asserts `/narrate` fetch fires with non-empty payload.</criterion>
+    <criterion testable="true">Each hook test uses independent mocks (no shared state).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Don't yet write tests for P2a sub-list rendering — those are task 024. P2a tests come after P2a implementation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

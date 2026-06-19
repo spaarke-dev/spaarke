@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Hoist `briefingService` (BFF `/narrate` client) to new package</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>014, 015, 019</blocks>
+    <tags>frontend, refactoring, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Refactor moves service module; consumed by hooks; logic preserved</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Move `briefingService.ts` (the BFF `/narrate` request builder + fetch + response shape) to `src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts` per FR-09. Export it from the `./services` subpath. Preserve all logic verbatim — request shape, error handling, telemetry. Original location becomes a re-export shim (cleaned up later in task 017/018).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF client modules + `@spaarke/auth` authenticatedFetch contract.</role>
+
+  <goal>`briefingService` exported from `@spaarke/daily-briefing-components/services`; consumed by `useBriefingNarration` (task 013); original location remains as re-export shim until task 017/018.</goal>
+
+  <context>
+    <background>
+      Per FR-09: the BFF `/narrate` client lives in the new dual-use package (per Calendar `@spaarke/events-components` precedent — Calendar keeps its BFF client package-local; no generic `@spaarke/bff-clients` package yet).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/services/briefingService.ts</file>
+      <file>src/solutions/DailyBriefing/src/services/briefingService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Package-local BFF client per Calendar precedent.</constraint>
+    <constraint source="ADR-028">Uses `@spaarke/auth`'s `authenticatedFetch` (Spaarke Auth v2) — preserve verbatim.</constraint>
+    <constraint source="project">No request/response shape change; this is a pure file move.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/services/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate canonical `briefingService.ts` (in `Spaarke.UI.Components/.../dailyBriefing/services/` or `src/solutions/DailyBriefing/src/services/`).</step>
+    <step order="2">Move the file to `src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts`.</step>
+    <step order="3">Export it from `src/services/index.ts`.</step>
+    <step order="4">Original location(s) become re-export shims: `export { briefingService, ... } from '@spaarke/daily-briefing-components/services'`.</step>
+    <step order="5">Run `npm run build` in the new package + consumers (`Spaarke.UI.Components`, `src/solutions/DailyBriefing/`).</step>
+    <step order="6">Update TASK-INDEX.md: change task 012 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript packages.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/services/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`briefingService` importable from `@spaarke/daily-briefing-components/services`.</criterion>
+    <criterion testable="true">Original location is a re-export shim; consumers still build.</criterion>
+    <criterion testable="true">No logic, no request/response shape change.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If you find divergent copies of `briefingService.ts` across the two original locations, reconcile to the most-recent version and document the divergence in `notes/`. Spec assumption: they should be the same.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

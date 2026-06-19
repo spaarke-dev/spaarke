@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Pattern doc — `workspace-section-registry-composition.md` codifying Option D for reuse</title>
+    <phase>Phase7b: Documentation Alignment (post-Option D)</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>071, 072</blocks>
+    <tags>documentation, pattern</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Pattern doc authoring; no code; follows existing .claude/patterns/ conventions</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/` paths — main-session-only per CLAUDE.md sub-agent write boundary</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create a new pattern file `.claude/patterns/ui/workspace-section-registry-composition.md` (≤25 lines per `.claude/patterns/` convention) that points readers to the canonical implementation files for the Option D registry-as-composition pattern. This is the Spaarke canonical answer for "how does a host customize a per-widget option in the LegalWorkspace section registry?" Any future widget that needs per-host customization MUST follow this pattern; the pattern file is the entry point that tells reviewers + ai-assistants where to look.
+  </prompt>
+
+  <role>SPAARKE platform developer. Author concise pattern-pointer files under .claude/patterns/ following the existing conventions.</role>
+
+  <goal>One new pattern file under `.claude/patterns/ui/` codifying registry-as-composition. Reviewers + future task authors can find it via the .claude/patterns/INDEX (or grep) when adding a new widget that needs host customization.</goal>
+
+  <context>
+    <background>
+      Option D landed in PR #396 as a foundational architectural pattern for SpaarkeAi workspace customization. Future widgets (Calendar, Smart Todo, future chat panel, future document viewer) that need per-host customization will follow the same pattern. The pattern file codifies it as canonical so we don't re-litigate the design every time a new widget needs customization.
+    </background>
+    <relevant-files>
+      <file>.claude/patterns/ui/</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md</file>
+      <file>src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
+      <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Pattern files are 25-line pointer files per CLAUDE.md §3 — DON'T re-explain Option D's full rationale; point to `option-d-registry-as-composition.md` for the deep dive.</constraint>
+    <constraint source="project">Pattern files MUST list the canonical implementation file paths (sectionRegistry.ts, dailyBriefing.registration.ts, SpaarkeAi main.tsx) so reviewers can find the working example.</constraint>
+    <constraint source="project">Follow the format of an existing pattern file (e.g., `fluent-v9-component-authoring.md`) as the template.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read 2-3 existing `.claude/patterns/ui/*.md` files to understand the format/length convention.</step>
+    <step order="2">Read `option-d-registry-as-composition.md` to confirm what the canonical pattern is.</step>
+    <step order="3">Author `.claude/patterns/ui/workspace-section-registry-composition.md` (≤25 lines) with: one-paragraph problem statement, link to design rationale, list of canonical files (paths with line ranges if known), one-sentence cookbook ("To add a new per-host widget option: add to LegalWorkspaceSectionRegistryOptions + thread through the factory + done").</step>
+    <step order="4">Update `.claude/patterns/INDEX.md` if it exists, adding the new pattern entry.</step>
+    <step order="5">Update TASK-INDEX.md: change task 070 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File ops.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/patterns/ui/workspace-section-registry-composition.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">New file exists at `.claude/patterns/ui/workspace-section-registry-composition.md` and is ≤25 lines.</criterion>
+    <criterion testable="true">File links to `notes/option-d-registry-as-composition.md` (or the equivalent merged location) for the full rationale.</criterion>
+    <criterion testable="true">File lists `sectionRegistry.ts` + `dailyBriefing.registration.ts` + `SpaarkeAi main.tsx` as the canonical implementations.</criterion>
+    <criterion testable="true">File contains a one-sentence cookbook for adding a new per-host widget option.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task touches `.claude/` paths, which sub-agents CANNOT write to per CLAUDE.md §3 Sub-Agent Write Boundary. Main session must execute this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -57,19 +57,34 @@ import type { IRuntimeConfig } from "@spaarke/auth";
 // Both singletons receive the SAME `IRuntimeConfig` so they agree on bffBaseUrl
 // / scope / clientId / tenantId. The two are distinct in-process instances by
 // design — embedding does not collapse them; it just keeps both warm.
+//
+// R2 Option D (2026-06-18): replaces the R2 task 002 module-mutation slot.
+// SpaarkeAi builds a CUSTOM section registry that injects its notification-
+// context loader into the Daily Briefing widget, then registers a wrapper
+// renderer that passes the registry to `LegalWorkspaceApp` via the new
+// `sections` prop. See `notes/option-d-registry-as-composition.md`.
 import {
-  LegalWorkspaceRenderer,
+  LegalWorkspaceApp,
+  createLegalWorkspaceSectionRegistry,
   setLegalWorkspaceRuntimeConfig,
 } from "@spaarke/legal-workspace";
-// R4 task 052 (C-4): register LegalWorkspaceApp as the default workspace
-// renderer. `WorkspaceLayoutWidget` in `@spaarke/ai-widgets` consults this
-// slot at render time instead of importing `@spaarke/legal-workspace` directly.
-// Zero behavioural change today — `LegalWorkspaceRenderer` IS `LegalWorkspaceApp`.
+// R2 task 002 (FR-02): loadSpaarkeAiNotificationContext queries `appnotification`
+// via Xrm.WebApi and builds the populated NarrateRequest envelope (categories +
+// priorityItems + channels) the BFF /narrate endpoint expects to produce real
+// TL;DR + channel bullets. Mirrors the standalone Daily Briefing Code Page
+// data path (see file header for cross-reference).
+import { loadSpaarkeAiNotificationContext } from "./services/notificationContextLoader";
+// R4 task 052 (C-4) + R2 Option D (2026-06-18): register a workspace renderer
+// that wraps `LegalWorkspaceApp` with a SpaarkeAi-specific section registry.
+// `WorkspaceLayoutWidget` in `@spaarke/ai-widgets` consults `setDefaultWorkspaceRenderer`
+// at render time instead of importing `@spaarke/legal-workspace` directly.
+// `WorkspaceRenderer` is the function signature contract the slot accepts.
 import {
   setDefaultWorkspaceRenderer,
   AppErrorBoundary,
   AppInsightsService,
 } from "@spaarke/ui-components";
+import type { WorkspaceRenderer } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // BFF base URL baked in at build time via Vite env var (AIPU-091).
@@ -205,15 +220,33 @@ async function bootstrap(): Promise<void> {
   // See the docblock above this bootstrap() definition for full rationale.
   suppressLegalWorkspaceDailyDigestAutoPopup();
 
-  // R4 task 052 (C-4): register LegalWorkspaceApp as the default workspace
-  // renderer BEFORE rendering the React tree. `WorkspaceLayoutWidget`
-  // (registered into WorkspaceWidgetRegistry by @spaarke/ai-widgets) consults
-  // `getDefaultWorkspaceRenderer()` at render time. Without this call, the
-  // widget would render a "no renderer registered" empty state.
+  // R4 task 052 (C-4) + R2 Option D (2026-06-18): register a SpaarkeAi-specific
+  // workspace renderer that wraps `LegalWorkspaceApp` with a custom section
+  // registry. `WorkspaceLayoutWidget` (registered into WorkspaceWidgetRegistry
+  // by @spaarke/ai-widgets) consults `getDefaultWorkspaceRenderer()` at render
+  // time. Without this call, the widget would render a "no renderer registered"
+  // empty state.
   //
-  // Zero behavioural change vs pre-C-4 (Risk R-4): `LegalWorkspaceRenderer`
-  // IS `LegalWorkspaceApp` — the rename is a typed re-export, not a wrapper.
-  setDefaultWorkspaceRenderer(LegalWorkspaceRenderer);
+  // The custom section registry injects `loadSpaarkeAiNotificationContext`
+  // into the Daily Briefing widget so the embedded copy renders real bullets
+  // on cold load (FR-01 / FR-02) — replaces the R2 task 002 module-mutation
+  // slot pattern. The wrapper renderer preserves the `setDefaultWorkspaceRenderer`
+  // slot mechanism: WorkspaceLayoutWidget still sees a `WorkspaceRenderer`
+  // function, it just renders an instance with custom `sections`. See
+  // `projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md`.
+  //
+  // FR-25 / NFR-10 preserved: standalone LegalWorkspace + standalone Daily
+  // Briefing Code Page do NOT import this module, so the no-options
+  // SECTION_REGISTRY default is used there → empty-payload contract preserved.
+  const sectionsForSpaarkeAi = createLegalWorkspaceSectionRegistry({
+    dailyBriefing: {
+      loadNotificationContext: loadSpaarkeAiNotificationContext,
+    },
+  });
+  const SpaarkeAiWorkspaceRenderer: WorkspaceRenderer = (props) => (
+    <LegalWorkspaceApp {...props} sections={sectionsForSpaarkeAi} />
+  );
+  setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer);
 
   // -------------------------------------------------------------------------
   // 1. Resolve runtime config

@@ -84,6 +84,11 @@ import {
 import { PaneHeader, SprkChat } from "@spaarke/ui-components";
 import type { AttachmentChip, ChatAttachment, IChatMessage } from "@spaarke/ui-components";
 import { useAiSession, usePaneEvent, useDispatchPaneEvent } from "@spaarke/ai-widgets";
+// R6 Pillar 8 (task 081): HardSlashExecutor needs the full bus instance to
+// dispatch on multiple channels. `usePaneEventBus` is promoted to the public
+// events barrel for this seam (preferred public hooks remain
+// useDispatchPaneEvent / usePaneEvent for single-channel components).
+import { usePaneEventBus } from "@spaarke/ai-widgets/events";
 import type { WorkspacePaneEvent, ContextPaneEvent } from "@spaarke/ai-widgets";
 // R4 task 042 (W-4): the DocumentViewerWidget dispatch from this file was
 // disabled in R5 SC-18 cycle 6 (see handleAttachmentReady). Import will be
@@ -101,6 +106,37 @@ import { HistoryMenu } from "./HistoryOverlay";
 // /documents promotion + /summarize SSE streaming + PaneEventBus bridging.
 // See notes/task-036-design-2026-06-05.md for design rationale.
 import { matchIntent } from "./intentMatcher";
+// R6 task 080 / D-D-01 (Pillar 8 foundation): CommandRouter parser is wired
+// into the send-message boundary so downstream Phase D tasks (081 hard-slash
+// executor, 082 soft-slash agent routing, 083 reference resolver) can fan out.
+// This wire-up is INTENT-CAPTURE ONLY — no behavior branch lands here per the
+// POML acceptance criteria. NFR-11 binding: natural-language input still falls
+// through to the existing CapabilityRouter path unchanged (parse() returns
+// command:null for any non-slash input).
+import { parse as parseCommandIntent } from "./CommandRouter";
+// R6 Phase D Wave D-G1 — Pillar 8 Command Router wired via the new
+// onDecorateOutboundBody seam in SprkChat (ADR-012 context-agnostic prop).
+// Hard slashes (081) dispatch client-side + cancel the BFF send by returning null.
+// Soft slashes (082) decorate the outbound body with `commandIntent` for
+// CapabilityRouter Layer 0.5 strong-intent routing.
+// References (083) resolve `#scope` / `@<entity>` / `#<filename>` at parse time
+// and attach `resolvedReferences` to the body. NFR-11 binding: natural-language
+// input (no slash, no references) passes through unchanged.
+import {
+  executeHardSlash,
+  defaultTelemetrySink,
+  defaultDownloadBlob,
+  type ExecutorContext as HardSlashExecutorContext,
+  type ConversationMessage as HardSlashConversationMessage,
+} from "./HardSlashExecutor";
+import { CommandHelpPanel } from "./CommandHelpPanel";
+import { HelpAffordance } from "./HelpAffordance";
+import { decorateBody as decorateSoftSlashBody } from "./SoftSlashRouter";
+import ReferenceResolver, {
+  createScopeFetch,
+  createFileLookupFromSessionMap,
+  type ResolverContext,
+} from "./ReferenceResolver";
 import {
   executeSummarizeIntent,
   type HeldFile,
@@ -546,6 +582,11 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
     overflow: "hidden",
+    // R6 task 085 / D-D-06: anchor for the absolutely-positioned
+    // HelpAffordance (Pillar 8 `/help` discovery button). Keeps the
+    // button in the chat region without disturbing SprkChat's internal
+    // input bar layout (NFR-11: additive UX; existing behavior unchanged).
+    position: "relative",
   },
 
   // ── R5 task 020 / D2-11: "N files attached" indicator strip ──────────────
@@ -839,6 +880,11 @@ export function ConversationPane(): React.JSX.Element {
   // clears the prop back to null so re-renders do not re-inject.
   const [pendingInjection, setPendingInjection] = React.useState<IChatMessage | null>(null);
 
+  // R6 task 081 / Pillar 8 — CommandHelpPanel open state. `/help` flips this on;
+  // the panel's onClose flips it off. Lives alongside `pendingInjection` because
+  // both are local UI affordances dispatched by HardSlashExecutor.
+  const [helpPanelOpen, setHelpPanelOpen] = React.useState<boolean>(false);
+
   // ── R5 task 036 / P2-CLOSEOUT-05: held-files + promoted-chip tracking ─────
   //
   // `heldFilesRef` maps chip id → original `File` for chips that have reached
@@ -1083,6 +1129,21 @@ export function ConversationPane(): React.JSX.Element {
       // This is the chat-pane half of the FR-03 / task-036 contract. The
       // workspace-pane half (structured output → Summary tab) lives in
       // tasks 037 + 038; this task is the publisher (PaneEventBus events).
+
+      // ── R6 task 080 / D-D-01 (Pillar 8 foundation) ──────────────────────
+      // Capture the structured CommandRouter Intent at the send-message
+      // boundary. The Intent is currently CAPTURE-ONLY — there is NO
+      // behavior branch here. Downstream Phase D tasks (081 hard-slash
+      // executor, 082 soft-slash agent routing, 083 reference resolver)
+      // will read this Intent and dispatch. NFR-11 binding: when the user
+      // typed natural language (no slash), `commandIntent.command === null`
+      // and the existing R5-task-036 matcher + SprkChat send funnel runs
+      // UNCHANGED. See projects/.../CLAUDE.md §Pillar 8 + spec FR-48.
+      // void-cast suppresses the "declared but never read" lint until tasks
+      // 081/082/083 wire branching behavior to this value.
+      const commandIntent = parseCommandIntent(messageText);
+      void commandIntent;
+
       const readyChips = attachmentChips.filter(c => c.status === "ready");
       const intent = matchIntent(messageText, readyChips.length > 0, undefined);
       // R6 Hotfix Wave B-G9c3 (B9) — slash-to-NL rewire (2026-06-10):
@@ -1232,6 +1293,115 @@ export function ConversationPane(): React.JSX.Element {
       getAccessToken,
       dispatch,
     ]
+  );
+
+  // ── R6 Phase D Wave D-G1 — Pillar 8 Command Router integration ────────────
+  //
+  // The decoration callback below is the SINGLE seam through which tasks 081
+  // (hard slashes), 082 (soft slashes), and 083 (references) dispatch. It
+  // runs INSIDE SprkChat's handleSend, between body construction and stream
+  // start (see ISprkChatProps.onDecorateOutboundBody JSDoc). Hard slashes
+  // return null → cancel the BFF send. Soft slashes decorate the body with
+  // `commandIntent` for CapabilityRouter Layer 0.5. References attach
+  // `resolvedReferences` to the body so the BFF prompt builder can use them.
+  // Natural-language input (no slash, no refs) passes through unchanged
+  // (NFR-11 backward compat).
+  //
+  // Some executor capabilities (conversation-history serialization for
+  // `/export`, focused-tab tracking for `/pin`) require deeper plumbing
+  // through @spaarke/ui-components surfaces. They are stubbed here so the
+  // seam is functional; richer contexts land via follow-up tasks 084 (full
+  // composition tests) and 085 (/help UI affordance polish).
+  const paneEventBus = usePaneEventBus();
+  const hardSlashContext = React.useMemo<HardSlashExecutorContext>(
+    () => ({
+      bffBaseUrl,
+      authenticatedFetch,
+      sessionId: chatSessionId ?? "",
+      paneEventBus,
+      setHelpOpen: setHelpPanelOpen,
+      clearLocalConversation: () => {
+        // TODO(task 084): hook to SprkChat's internal message-list clear when
+        // a shared-lib API exists. Today: rely on `/new-session` flow path.
+      },
+      createNewSession: async (): Promise<string | null> => {
+        // TODO(task 084): wire to proper session-reset machinery. The current
+        // useAiSession surface doesn't expose a typed reset; the BFF POST to
+        // /api/ai/chat/sessions is the source of truth.
+        return null;
+      },
+      getConversationHistory: (): HardSlashConversationMessage[] => [],
+      getFocusedTabId: (): string | null => null,
+      activeMatterId: entityContext?.matterId ?? null,
+      downloadBlob: defaultDownloadBlob,
+      telemetry: defaultTelemetrySink,
+    }),
+    [bffBaseUrl, authenticatedFetch, chatSessionId, entityContext, paneEventBus]
+  );
+
+  const referenceResolverContext = React.useMemo<ResolverContext>(
+    () => ({
+      // TODO(task 084): thread real tenantId once host exposes it; empty string
+      // turns OFF the resolver's caching (degraded mode) but resolution still
+      // works.
+      tenantId: "",
+      sessionId: chatSessionId ?? "",
+      entityContext: entityContext
+        ? {
+            entityType: entityContext.entityType,
+            entityId: entityContext.entityId,
+            displayName: entityContext.entityName ?? entityContext.entityType,
+          }
+        : undefined,
+      openTabs: [],
+      scopeFetch: createScopeFetch(bffBaseUrl, authenticatedFetch),
+      fileLookup: createFileLookupFromSessionMap(new Map()),
+    }),
+    [bffBaseUrl, authenticatedFetch, chatSessionId, entityContext]
+  );
+
+  const handleDecorateOutboundBody = React.useCallback(
+    async (
+      body: Record<string, unknown>
+    ): Promise<Record<string, unknown> | null> => {
+      const msg = typeof body.message === "string" ? body.message : "";
+      const intent = parseCommandIntent(msg);
+
+      if (intent.isHardSlash) {
+        try {
+          const result = await executeHardSlash(intent, hardSlashContext);
+          if (result.message) {
+            setPendingInjection({
+              role: "Assistant",
+              content: result.message,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } catch (err) {
+          console.error("[R6 Pillar 8] HardSlashExecutor failed:", err);
+        }
+        return null;
+      }
+
+      let decorated: Record<string, unknown> = intent.isSoftSlash
+        ? (decorateSoftSlashBody(intent, body as Parameters<typeof decorateSoftSlashBody>[1]) as Record<string, unknown>)
+        : body;
+
+      if (intent.references.length > 0) {
+        try {
+          const resolved = await ReferenceResolver.resolveAll(
+            intent.references,
+            referenceResolverContext
+          );
+          decorated = { ...decorated, resolvedReferences: resolved };
+        } catch (err) {
+          console.error("[R6 Pillar 8] ReferenceResolver failed:", err);
+        }
+      }
+
+      return decorated;
+    },
+    [hardSlashContext, referenceResolverContext]
   );
 
   /**
@@ -1839,6 +2009,20 @@ export function ConversationPane(): React.JSX.Element {
               injectLocalMessage={pendingInjection}
               onLocalMessageInjected={handleLocalMessageInjected}
               onBeforeSendMessage={handleBeforeSendMessage}
+              onDecorateOutboundBody={handleDecorateOutboundBody}
+            />
+            {/*
+              R6 task 085 / D-D-06 (Pillar 8 `/help` UI affordance) — a
+              discoverable button anchored top-right of the chat region.
+              Clicking opens the same CommandHelpPanel as the `/help` hard
+              slash so users who don't know slash syntax can discover the
+              closed Pillar 8 vocabulary. Additive UX — does NOT modify
+              SprkChat's internal input bar (NFR-11).
+            */}
+            <HelpAffordance onClick={() => setHelpPanelOpen(true)} />
+            <CommandHelpPanel
+              open={helpPanelOpen}
+              onClose={() => setHelpPanelOpen(false)}
             />
           </div>
         </div>

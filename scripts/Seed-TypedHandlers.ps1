@@ -161,6 +161,32 @@ $RowFiles = @{
     # to all playbooks; per-playbook authorization enforced inside the facade + the handler's
     # tenant-visibility check via IPlaybookService). sprk_availableincontexts = Chat (100000001).
     "INVOKE-PLAYBOOK"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-invoke-playbook-row.json"
+    # R6 Pillar 6b / D-C-05 / task 054 — SendWorkspaceArtifactHandler: single row exposing the
+    # send_workspace_artifact(widgetType, title, widgetData, matterId?) chat tool. Constructs
+    # a WorkspaceTab + persists via IWorkspaceStateService.UpsertTabAsync (Pillar 6a infra
+    # landed in task 053). sprk_requiredcapability = null (intentional — sending an artifact
+    # is a default chat affordance; the closed 4-variant widgetType enum is the authorization
+    # surface). sprk_availableincontexts = Chat (100000001) — playbook nodes write to
+    # sprk_analysisoutput, not the chat-session workspace tab list.
+    "SEND-WORKSPACE-ARTIFACT"          = "$RepoRoot/infra/dataverse/sprk_analysistool-send-workspace-artifact-row.json"
+    # R6 Pillar 6b / D-C-06 / task 055 — UpdateWorkspaceTabHandler: single row exposing the
+    # update_workspace_tab(tabId, widgetData, expectedLastUserEditAt?) chat tool. Mutates an
+    # existing WorkspaceTab via IWorkspaceStateService.UpsertTabAsync with Q8 USER-WINS
+    # conflict resolution (refuses with structured 'stale_read' response when the stored
+    # LastUserEditAt is later than the LLM-supplied timestamp). sprk_requiredcapability = null
+    # (intentional — default user affordance available in every chat session; handler-side
+    # gates supply the authorization surface). sprk_availableincontexts = Chat (100000001).
+    "UPDATE-WORKSPACE-TAB"             = "$RepoRoot/infra/dataverse/sprk_analysistool-update-workspace-tab-row.json"
+    # R6 Pillar 7 / D-C-23 / task 069 — ManagePinnedContextHandler: single row exposing the
+    # manage_pinned_context(action, pinType, title, content?) chat tool. Creates or deletes
+    # PinnedContextItem rows via IPinnedContextRepository. Voice command surface (FR-47):
+    # 'remember X' → create user-preference; 'always X' → create system-rule;
+    # 'forget X' → delete by (pinType, title) case-insensitive match. CapabilityRouter Layer 0
+    # voice command pre-pass (added in task 069) recognises the three patterns and biases the
+    # LLM toward this tool. sprk_requiredcapability = null (intentional — default voice
+    # affordance available in every chat session). sprk_availableincontexts = Chat (100000001).
+    # ADR-015 BINDING: handler logs title length + content presence only — never the bodies.
+    "MANAGE-PINNED-CONTEXT"            = "$RepoRoot/infra/dataverse/sprk_analysistool-manage-pinned-context-row.json"
 }
 
 # -----------------------------------------------------------------------------

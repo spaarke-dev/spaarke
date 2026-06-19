@@ -87,17 +87,17 @@
 | 050 | C-G1 | `WorkspaceTab` canonical TypeScript interface (D-C-01) | ✅ | FULL | true | 049 |
 | 051 | C-G2 | `WorkspaceStateService.cs` (Redis hot + Cosmos durable per Q4) (D-C-02) | ✅ | FULL | false | 050 |
 | 052 | C-G3 | `GET /api/workspace/state` endpoint (D-C-03) | ✅ | FULL | false | 051 |
-| 053 | C-G4 | Wire `WorkspaceStateService` into `SprkChatAgentFactory` (D-C-04) | 🔲 | FULL | false | 052 |
+| 053 | C-G4 | Wire `WorkspaceStateService` into `SprkChatAgentFactory` (D-C-04) | ✅ | FULL | false | 052 |
 
 #### Sub-phase 6b — Chat tools + affordances + conflict (parallel with 6c/7/9 after 6a)
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 054 | C-G5 | `send_workspace_artifact` chat tool (D-C-05) | 🔲 | FULL | true | 053 |
-| 055 | C-G5 | `update_workspace_tab` chat tool (Q8 conflict-check) (D-C-06) | 🔲 | FULL | true | 053 |
-| 056 | C-G5 | `close_workspace_tab` chat tool (D-C-07) | 🔲 | FULL | true | 053 |
-| 057 | C-G6 | User affordances (Send to Workspace + Add to Assistant + Pin to Matter) (D-C-08/09/10) | 🔲 | FULL | false | 054, 055, 056 |
-| 058 | C-G7 | Conflict resolution implementation (Q8 user wins) (D-C-11) | 🔲 | FULL | false | 055 |
+| 054 | C-G5 | `send_workspace_artifact` chat tool (D-C-05) | ✅ | FULL | true | 053 |
+| 055 | C-G5 | `update_workspace_tab` chat tool (Q8 conflict-check) (D-C-06) | ✅ | FULL | true | 053 |
+| 056 | C-G5 | `close_workspace_tab` chat tool (D-C-07) | ✅ | FULL | true | 053 |
+| 057 | C-G6 | User affordances (Send to Workspace + Add to Assistant + Pin to Matter) (D-C-08/09/10) | ✅ | FULL | false | 054, 055, 056 |
+| 058 | C-G7 | Conflict resolution implementation (Q8 user wins) (D-C-11) | ✅ | FULL | false | 055 |
 
 #### Sub-phase 6c — Trace widget + PaneEventBus events (parallel with 6b/7/9)
 
@@ -105,51 +105,51 @@
 |----|------|-------|--------|-------|---------------|--------------|
 | 059 | C-G5 | Additive `context.*` PaneEventBus event types (ADR-015 binding) (D-C-12) | ✅ | FULL | true | 053 |
 | 060 | C-G5 | Additive `workspace.*` PaneEventBus event types (D-C-13) — TS via timed-out sub-agent; closeout 2026-06-09 main session | ✅ | FULL | true | 053 |
-| 061 | C-G8 | `ExecutionTraceWidget.tsx` (Context-pane; ordered timeline) (D-C-14) | 🔲 | FULL | false | 059 |
-| 062 | C-G9 | Register trace widget with `ContextWidgetRegistry` (D-C-15) | 🔲 | STANDARD | false | 061 |
-| 063 | C-G10 | Emit `context.*` events from chat agent + playbook execution (D-C-16) | 🔲 | FULL | false | 059 |
+| 061 | C-G8 | `ExecutionTraceWidget.tsx` (Context-pane; ordered timeline) (D-C-14) | ✅ | FULL | false | 059 |
+| 062 | C-G9 | Register trace widget with `ContextWidgetRegistry` (D-C-15) | ✅ | STANDARD | false | 061 |
+| 063 | C-G10 | Emit `context.*` events from chat agent + playbook execution (D-C-16) | ✅ | FULL | false | 059 |
 
 #### Sub-phase 7 — Memory + Q7 expansion
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 064 | C-G5 | Summarization compression service (D-C-17) | 🔲 | FULL | true | 053 |
-| 065 | C-G5 | Pinned-context entity in Cosmos `memory` container (D-C-18) | 🔲 | FULL | true | 053 |
-| 066 | C-G11 | Selective recall via embedding similarity (D-C-19) | 🔲 | FULL | false | 064 |
-| 067 | C-G12 | Hierarchical memory composition (D-C-20) | 🔲 | FULL | false | 064, 065, 066 |
-| 068 | C-G13 | Activate `MatterMemoryService` + shared token budget tracker (D-C-21/22) | 🔲 | FULL | false | 067 |
-| 069 | C-G14 | "Remember/forget/always" recognition via CapabilityRouter (D-C-23) | 🔲 | FULL | false | 065, 068 |
-| 070 | C-G15 | **Q7 EXPANSION: Pinned Memory CRUD + Visualization UI** (D-C-24/25) | 🔲 | FULL | false | 065, 069 |
+| 064 | C-G5 | Summarization compression service (D-C-17) | ✅ | FULL | true | 053 |
+| 065 | C-G5 | Pinned-context entity in Cosmos `memory` container (D-C-18) | ✅ | FULL | true | 053 |
+| 066 | C-G11 | Selective recall via embedding similarity (D-C-19) | ✅ | FULL | false | 064 |
+| 067 | C-G12 | Hierarchical memory composition (D-C-20) | ✅ | FULL | false | 064, 065, 066 |
+| 068 | C-G13 | Activate `MatterMemoryService` + shared token budget tracker (D-C-21/22) | ✅ | FULL | false | 067 |
+| 069 | C-G14 | "Remember/forget/always" recognition via CapabilityRouter (D-C-23) | ✅ | FULL | false | 065, 068 |
+| 070 | C-G15 | **Q7 EXPANSION: Pinned Memory CRUD + Visualization UI** (D-C-24/25) — PART A (BFF endpoints) ✅ + PART B (frontend components + registry + 27 tests) ✅ | ✅ | FULL | false | 065, 069 |
 
 #### Sub-phase 9 — Widget visibility contract (parallel with 6b/6c/7)
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
 | 071 | C-G5 | `getAgentVisibleState()` TypeScript interface (D-C-26) | ✅ | FULL | true | 053 |
-| 072 | C-G16 | Extend `WorkspaceWidgetRegistry` with `getVisibleState?` (D-C-27) | 🔲 | STANDARD | false | 071 |
-| 073 | C-G17 | Implement `getAgentVisibleState()` per widget type (D-C-28) | 🔲 | FULL | false | 072 |
-| 074 | C-G18 | Per-turn agent prompt builder gathers visible state (D-C-29/30) | 🔲 | FULL | false | 053, 073 |
+| 072 | C-G16 | Extend `WorkspaceWidgetRegistry` with `getVisibleState?` (D-C-27) | ✅ | STANDARD | false | 071 |
+| 073 | C-G17 | Implement `getAgentVisibleState()` per widget type (D-C-28) | ✅ | FULL | false | 072 |
+| 074 | C-G18 | Per-turn agent prompt builder gathers visible state (D-C-29/30) | ✅ | FULL | false | 053, 073 |
 
 #### Integration + exit
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 078 | C-G19 | Phase C cross-pillar integration test | 🔲 | STANDARD | false | 057, 058, 062, 063, 070, 074 |
-| 079 | C-G20 | Phase C exit-gate validation | 🔲 | MINIMAL | false | 078 |
+| 078 | C-G19 | Phase C cross-pillar integration test — composed evidence (per-task tests) + 6 NEW cross-pillar tests in `tests/integration/Spe.Integration.Tests/PhaseC/`; see `notes/phase-c-integration-results.md` | ✅ | STANDARD | false | 057, 058, 062, 063, 070, 074 |
+| 079 | C-G20 | Phase C exit-gate validation | ✅ | MINIMAL | false | 078 |
 
 ### Phase D — Command Router + Integration + Closeout (Week 6–7, 10 tasks)
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 080 | D-G1 | `CommandRouter.ts` parser (D-D-01) | 🔲 | FULL | true | 079 |
-| 081 | D-G1 | Hard slashes (6: /clear, /new-session, /help, /export, /save-to-matter, /pin) (D-D-02) | 🔲 | FULL | true | 080 |
-| 082 | D-G1 | Soft slashes (4: /summarize, /draft, /extract-entities, /analyze) (D-D-03) | 🔲 | FULL | true | 080 |
-| 083 | D-G1 | References resolver (#scope/@entity/#filename) (D-D-04) | 🔲 | FULL | true | 080 |
-| 084 | D-G2 | Composition integration tests (D-D-05) | 🔲 | STANDARD | true | 081, 082, 083 |
-| 085 | D-G2 | `/help` UI affordance (D-D-06) | 🔲 | STANDARD | true | 081 |
-| 086 | D-G2 | Natural language regression test (NFR-11 backward compat) (D-D-07) | 🔲 | STANDARD | true | 080 |
-| 087 | D-G3 | **Vertical-slice integration test (all 9 pillars per spec §6) (D-D-08)** | 🔲 | STANDARD | false | 084, 085, 086, 029, 049, 079 |
-| 088 | D-G4 | Lightweight eval baseline (Q10 markdown transcripts) (D-D-09) | 🔲 | MINIMAL | false | 087 |
+| 080 | D-G1 | `CommandRouter.ts` parser (D-D-01) — Pillar 8 closed vocabulary (6 hard + 4 soft + 3 ref); pure parser; 36 tests green; wired into `ConversationPane.handleBeforeSendMessage` (capture-only); NFR-11 regression locked; `notes/task-080-evidence.md` | ✅ | FULL | true | 079 |
+| 081 | D-G1 | Hard slashes (6: /clear, /new-session, /help, /export, /save-to-matter, /pin) (D-D-02) — `HardSlashExecutor.ts` + `CommandHelpPanel.tsx` + 53 tests green (43 executor + 10 help panel); all 6 commands measured <100ms in mocked-BFF; ADR-015 telemetry audit PASS (no user text in payloads); ADR-021 dark-mode parity PASS (renders under webLightTheme + webDarkTheme); BFF publish-size delta = 0 MB (frontend-only; reuses existing endpoints `/api/ai/chat/sessions/{id}` DELETE, `/api/ai/chat/sessions` POST, `/api/memory/pins` POST, `/api/ai/chat/sessions/{id}/tabs` PATCH); ConversationPane.tsx integration deferred to main session (parallel coordination with 082/083); `notes/task-081-evidence.md` | ✅ | FULL | true | 080 |
+| 082 | D-G1 | Soft slashes (4: /summarize, /draft, /extract-entities, /analyze) (D-D-03) — `SoftSlashRouter.ts` (38 tests green) + CapabilityRouter Layer 0.5 pre-pass (18 BFF tests green); BFF publish-size delta ≈ 0 MB; ConversationPane.tsx integration deferred to main session (parallel coordination); `notes/task-082-evidence.md` | ✅ | FULL | true | 080 |
+| 083 | D-G1 | References resolver (#scope/@entity/#filename) (D-D-04) — `ReferenceResolver.ts` + 27 tests green; 3 resolver types wired (scope/entity/file); ADR-014 tenantId cache keys; NFR-01 non-blocking; in-flight de-dup; integration handoff in `notes/task-083-evidence.md`; ConversationPane.tsx integration deferred to main session (parallel coordination with 081/082) | ✅ | FULL | true | 080 |
+| 084 | D-G2 | Composition integration tests (D-D-05) — `composition.integration.test.ts` with 12 tests green; FR-52 `/summarize #engagement-letter.docx` (5 tests) + `/draft response to @opposing-counsel about #motion-to-dismiss` (4 tests) + NFR-11 NL backward-compat (3 tests); end-to-end parse → resolve → decorate → send chain with stubbed adapters (fileLookup/scopeFetch); ADR-014 tenantId cache keys + NFR-01 non-blocking degradation both exercised; BFF publish-size delta = 0 MB (frontend-only, test-only); `notes/task-084-evidence.md` | ✅ | STANDARD | true | 081, 082, 083 |
+| 085 | D-G2 | `/help` UI affordance (D-D-06) — `HelpAffordance.tsx` (subtle Fluent v9 Button + Tooltip + `QuestionCircleRegular`); `HelpAffordance.test.tsx` 10/10 green (aria-label, tooltip, click, Enter/Space keyboard, light/dark theme, disabled state); ConversationPane.tsx minimal additive change (import + render + wire `setHelpPanelOpen(true)` + `sprkChatFlex` gets `position: relative` for absolute anchor); Option A absolute-positioned overlay top-right of chat region; ADR-021 semantic tokens only; NFR-11 additive UX (SprkChat input bar untouched); BFF publish-size delta = 0 MB (frontend-only); `notes/task-085-evidence.md` | ✅ | STANDARD | true | 081 |
+| 086 | D-G2 | Natural language regression test (NFR-11 backward compat) (D-D-07) — `natural-language-regression.test.ts` + 50 tests green; 4 NL inputs verified (summarize-this-document / draft-a-reply / what's-the-matter-status / make-it-shorter); each verified for (a) `Intent.command === null` (b) `decorateBody` no-op no `commandIntent` field (c) input body purity (d) NFR-01 conversational primacy preserved for refinement / follow-up; positive anchor (`/summarize` decorates) + negative anchor (`/clear` no decoration) confirm suite integrity; BFF publish-size delta = 0 MB (test-only); `notes/task-086-evidence.md` | ✅ | STANDARD | true | 080 |
+| 087 | D-G3 | **Vertical-slice integration test (all 9 pillars per spec §6) (D-D-08)** — **COMPOSED EVIDENCE** framing per task 078 precedent: 9-pillar evidence map at `notes/vertical-slice-evidence.md` + new `Pillar8ToPlaybookEngineTests.cs` (13 tests PASSED in 23 ms) at the Pillar 8 → Pillar 3 → Pillar 4 → Pillar 5 → Pillar 6c BFF chain; ADR-015 audit, NFR-11 fall-through, voice-memory vs soft-slash ordering, FR-30 playbook ID propagation, Q6 closed-vocabulary integrity; BFF publish-size 46.06 MB compressed (+0.41 MB cumulative R6 — well within ≤+5 MB NFR-02 and 60 MB ADR-029 hard limit); NFR-08 invariant verified (`git diff src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/` empty); `notes/task-087-evidence.md` | ✅ | STANDARD | false | 084, 085, 086, 029, 049, 079 |
+| 088 | D-G4 | Lightweight eval baseline (Q10 markdown transcripts) (D-D-09) — 4 markdown transcripts at `notes/eval-baseline/`: SYS-DEFAULT × summarize-chat (vertical-slice snapshot) + summarize-workspace (Pillar 5 shared-action) + matter-prefill (NFR-07 evidence) + project-prefill (NFR-07 evidence); each cites Q10 + synthetic user messages per ADR-015; full eval harness deferred R7 per spec Owner Clarifications | ✅ | MINIMAL | false | 087 |
 | 089 | D-G5 | Phase D exit-gate validation | 🔲 | MINIMAL | false | 088 |
 
 ### Parallel — 8 Typed Tool Handlers (spans Phase A–C, 10 tasks)

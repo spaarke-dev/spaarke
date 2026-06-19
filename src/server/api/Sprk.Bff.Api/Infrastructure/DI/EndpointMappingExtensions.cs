@@ -196,6 +196,12 @@ public static class EndpointMappingExtensions
         // ai-context rate-limit + tid-claim tenant scope per InsightEndpoints precedent.
         app.MapWorkspaceStateEndpoints();
 
+        // R6 Pillar 7 / Q7 SCOPE EXPANSION / task 070 PART A — /api/memory/pins CRUD pair.
+        // Consumes IPinnedContextRepository registered in AnalysisServicesModule (task 065).
+        // ai-context rate-limit + tid/oid-claim tenant+user scope. Ownership invariant
+        // enforced at handler level (UserId match between caller's oid and pin's UserId).
+        Sprk.Bff.Api.Api.Memory.PinnedMemoryEndpoints.MapPinnedMemoryEndpoints(app);
+
         app.MapDailyBriefingEndpoints();
 
         app.MapFinanceEndpoints();

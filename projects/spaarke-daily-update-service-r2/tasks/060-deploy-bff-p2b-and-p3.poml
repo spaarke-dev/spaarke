@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Deploy BFF (P2b + P3) via `bff-deploy` skill</title>
+    <phase>Phase7: Deployment + Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>033, 042</dependencies>
+    <blocks>062</blocks>
+    <tags>deploy, bff-api, azure, app-service</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production-deploy task; combined BFF changes from P2b + P3</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF API (P2b `/narrate` fixes + P3 `data.actions[]` population) to spaarkedev1 via the `bff-deploy` skill. Capture the deployment log including final publish-size + CVE status. Verify the deploy by hitting `/healthz` and a quick `/api/ai/daily-briefing/narrate` round-trip.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in `bff-deploy` skill + spaarkedev1 environment + Azure App Service.</role>
+
+  <goal>BFF deployed; `/healthz` 200; quick smoke confirms `/narrate` round-trips successfully (no broken hyperlinks in response).</goal>
+
+  <context>
+    <background>
+      P2b + P3 are bundled because they modify the same `Sprk.Bff.Api` and share publish-size verification. Deploy together once both pass tests + size + CVE checks.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use the `bff-deploy` skill; do not deploy via raw `az webapp` commands.</constraint>
+    <constraint source="project">Deploy target: spaarkedev1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify tasks 033 + 042 acceptance (publish-size delta + no new CVE).</step>
+    <step order="2">Invoke `bff-deploy` skill targeting spaarkedev1.</step>
+    <step order="3">After deploy, hit `/healthz` — expect 200.</step>
+    <step order="4">Hit `/api/ai/daily-briefing/narrate` with a small test payload; verify response contains nulled `primaryEntityId` for any hallucinated ID (P2b validation) and that `regardingId=` appears in logs (P2b prompt).</step>
+    <step order="5">Trigger an `appnotification` create (e.g., upload a document via existing workflow); verify the row has `data.actions[]` populated (P3 verification).</step>
+    <step order="6">Record deploy details in `notes/p2b-p3-deploy-log.md`.</step>
+    <step order="7">Update TASK-INDEX.md: change task 060 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run bff-deploy + healthz + smoke API calls.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r2/notes/p2b-p3-deploy-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF deployed to spaarkedev1; `/healthz` returns 200.</criterion>
+    <criterion testable="true">`/narrate` round-trip succeeds; logs show `regardingId=` emission.</criterion>
+    <criterion testable="true">Newly-created `appnotification` rows have `data.actions[]` populated for visible toasts.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    SC1 / SC3 / SC6 / SC7 full E2E verification is task 062 — this task is a smoke check only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

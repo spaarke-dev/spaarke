@@ -33,7 +33,7 @@ import {
   ArrowClockwiseRegular,
   SettingsRegular,
 } from "@fluentui/react-icons";
-import { MicrosoftToDoIcon } from "../icons/MicrosoftToDoIcon";
+import { MicrosoftToDoIcon } from "@spaarke/ui-components";
 import { AddTodoBar } from "./AddTodoBar";
 
 // ---------------------------------------------------------------------------

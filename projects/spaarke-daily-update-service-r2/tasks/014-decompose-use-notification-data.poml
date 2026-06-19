@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Decompose `useNotificationData` → 3 independent hooks (FR-06)</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>011, 012, 013</dependencies>
+    <blocks>015, 019</blocks>
+    <tags>frontend, react, refactoring, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Refactor with semantics change; effect-based coordination at consumer; highest-risk P2 task</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after Group A; restructures shared hook surface</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per FR-06: split monolithic `useNotificationData` into three independent hooks living in `@spaarke/daily-briefing-components/src/hooks/`:
+    - `useBriefingNotifications(webApi)` → `{ channels, totalUnreadCount, loadingState, error, refetch }`
+    - `useBriefingPreferences(webApi, userId)` → `{ preferences, updatePreferences, isLoading, error }`
+    - `useBriefingActions(webApi)` → `{ markAsRead, markAllAsRead, dismissAll, refresh }`
+    Cross-hook coordination happens at the **consumer layer via effects** (Option A). `DailyBriefingApp` runs `useEffect([preferences.disabledChannels], () => refetch())`. Delete the monolithic `useNotificationData` after the split is consumed.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React 19 hooks, single-responsibility decomposition, and consumer-layer effect coordination.</role>
+
+  <goal>Three new hooks exported from `./hooks`; old `useNotificationData` deleted; `DailyBriefingApp` composes the three with effect-based coordination; build + tests green.</goal>
+
+  <context>
+    <background>
+      Per design.md and spec FR-06: independent cache lifetimes, re-render isolation, Single Responsibility. Option A (effect-based) chosen for explicitness, traceability, idiomatic React.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNotifications.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingPreferences.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingActions.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/hooks/useNotificationData.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-06: each hook can be consumed independently; no shared internal state.</constraint>
+    <constraint source="project">Cross-hook coordination via consumer-layer effect; no hidden coupling inside the hooks.</constraint>
+    <constraint source="ADR-024">Preserve `TODO_REGARDING_CATALOG` consumption in `useBriefingActions` if dismiss path uses it.</constraint>
+    <constraint source="project">Delete the old monolithic `useNotificationData` after consumer migration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-024-sprk-todo-multi-entity-regarding.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current `useNotificationData` and map each piece of state/effect to one of the three new hook contracts.</step>
+    <step order="2">Author `useBriefingNotifications(webApi)` returning `{ channels, totalUnreadCount, loadingState, error, refetch }`.</step>
+    <step order="3">Author `useBriefingPreferences(webApi, userId)` returning `{ preferences, updatePreferences, isLoading, error }`.</step>
+    <step order="4">Author `useBriefingActions(webApi)` returning `{ markAsRead, markAllAsRead, dismissAll, refresh }`.</step>
+    <step order="5">Export all three from `src/hooks/index.ts`.</step>
+    <step order="6">Update `DailyBriefingApp.tsx` to compose the three hooks; add `useEffect([preferences.disabledChannels], () =&gt; refetch())` for cross-hook coordination (Option A).</step>
+    <step order="7">Verify no shared internal state across the three hooks (grep for any singleton/context coupling).</step>
+    <step order="8">Delete `useNotificationData.ts` from its original location (both `Spaarke.UI.Components/.../hooks/` and `src/solutions/DailyBriefing/src/hooks/` if it exists).</step>
+    <step order="9">Run `npm run build` on new package + consumers + the standalone code page. All green.</step>
+    <step order="10">Smoke test: render standalone code page; verify notifications + preferences UI still work; toggling a preference triggers refetch.</step>
+    <step order="11">Update TASK-INDEX.md: change task 014 status from 🔲 to ✅.</step>
+    <step order="12">Document the consumer-layer effect coordination pattern in `notes/` for future maintainers.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test TypeScript packages.</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Toggling preference refetches channels (consumer-layer effect)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_dailyupdate</url>
+      <steps>
+        <step>Open standalone Daily Briefing</step>
+        <step>Open preferences dropdown</step>
+        <step>Disable a channel</step>
+        <step>Verify channel disappears from rendered briefing (refetch fired)</step>
+        <step>Re-enable the channel</step>
+        <step>Verify channel reappears</step>
+      </steps>
+      <expected>Refetch fires on preferences change; rendered channels update accordingly</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNotifications.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingPreferences.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingActions.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Three new hooks exist with the specified return shapes.</criterion>
+    <criterion testable="true">Old `useNotificationData` deleted (grep returns zero hits in new package).</criterion>
+    <criterion testable="true">`DailyBriefingApp.tsx` composes all three hooks with consumer-layer effect coordination.</criterion>
+    <criterion testable="true">Toggling a preference triggers channel refetch (manual smoke).</criterion>
+    <criterion testable="true">Build green on new package + consumers + standalone code page.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Highest-risk P2 task. If cache semantics drift unexpectedly, surface in `notes/`. The Option A effect-based pattern is the canonical choice — don't introduce a context provider or shared state without explicit owner approval.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

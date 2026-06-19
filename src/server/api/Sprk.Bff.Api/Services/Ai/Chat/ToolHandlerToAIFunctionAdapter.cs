@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -97,6 +98,14 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     private readonly Func<ChatSseEvent, CancellationToken, Task>? _sseWriter;
     private readonly Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task>? _documentStreamWriter;
     private readonly Guid? _analysisId;
+    /// <summary>
+    /// R6 Pillar 6c (FR-37 / task 063) — optional context.* event emitter. When non-null,
+    /// the adapter emits <c>context.tool_call_started</c> before each invocation and
+    /// <c>context.tool_call_completed</c> after. When null (test scenarios with older
+    /// fixtures), emission is skipped silently — ADR-015 anti-leakage is preserved by
+    /// construction (the interface accepts no user content).
+    /// </summary>
+    private readonly IContextEventEmitter? _contextEventEmitter;
 
     /// <summary>
     /// Constructs the adapter. Validates the tool's JSON Schema (well-formedness + top-level
@@ -184,7 +193,8 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         CitationContext? citationAccumulator = null,
         Func<ChatSseEvent, CancellationToken, Task>? sseWriter = null,
         Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task>? documentStreamWriter = null,
-        Guid? analysisId = null)
+        Guid? analysisId = null,
+        IContextEventEmitter? contextEventEmitter = null)
     {
         _tool = tool ?? throw new ArgumentNullException(nameof(tool));
         _handler = handler ?? throw new ArgumentNullException(nameof(handler));
@@ -194,6 +204,7 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         _sseWriter = sseWriter;
         _documentStreamWriter = documentStreamWriter;
         _analysisId = analysisId;
+        _contextEventEmitter = contextEventEmitter;
 
         if (string.IsNullOrWhiteSpace(tool.Name))
         {
@@ -361,6 +372,13 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         var startedAt = DateTimeOffset.UtcNow;
         var stopwatch = Stopwatch.StartNew();
 
+        // R6 Pillar 6c (FR-37 / task 063) — context.tool_call_started.
+        // ADR-015 audit: payload is the tool NAME (config identifier, Tier 1 safe) +
+        // decisionId (freshly-generated GUID, no semantic content) + sessionId/tenantId
+        // (deterministic identifiers). No args, no user text.
+        _contextEventEmitter?.ToolCallStarted(
+            _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId);
+
         try
         {
             // FR-09: ValidateChat first (default impl rejects; chat-available handlers override).
@@ -371,6 +389,12 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
                 LogToolOutcome(context.DecisionId, outcome: "validation_failed", stopwatch.ElapsedMilliseconds, errorCode: "ValidationFailed");
                 activity?.SetTag("sprk.tool.outcome", "validation_failed");
                 activity?.SetStatus(ActivityStatusCode.Error, description: "validation_failed");
+
+                // R6 Pillar 6c — context.tool_call_completed (validation_failed branch).
+                // ADR-015 audit: outcome is enum-like ("validation_failed"), durationMs is numeric.
+                _contextEventEmitter?.ToolCallCompleted(
+                    _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId,
+                    outcome: "validation_failed", durationMs: stopwatch.ElapsedMilliseconds);
 
                 // Return a structured envelope the LLM can interpret. We surface validation
                 // errors as a tool-error response (NOT a thrown exception) so the LLM can
@@ -400,6 +424,13 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
                 activity?.SetStatus(ActivityStatusCode.Error, description: result.ErrorCode);
             }
 
+            // R6 Pillar 6c — context.tool_call_completed (handler-dispatch branch).
+            // ADR-015 audit: outcome is enum-like ("ok"/"error"), durationMs is numeric.
+            // No result body, no LLM response, no args.
+            _contextEventEmitter?.ToolCallCompleted(
+                _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId,
+                outcome: outcome, durationMs: stopwatch.ElapsedMilliseconds);
+
             // R6 Wave 7b: post-process well-known metadata keys for citation accumulation +
             // widget event emission. Failures here are non-fatal — handlers stay pure
             // input/output; this is cross-cutting infrastructure that MUST NOT bleed into
@@ -417,6 +448,12 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             LogToolOutcome(context.DecisionId, outcome: "cancelled", stopwatch.ElapsedMilliseconds, errorCode: "Cancelled");
             activity?.SetTag("sprk.tool.outcome", "cancelled");
             activity?.SetStatus(ActivityStatusCode.Error, description: "cancelled");
+
+            // R6 Pillar 6c — context.tool_call_completed (cancelled branch).
+            _contextEventEmitter?.ToolCallCompleted(
+                _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId,
+                outcome: "cancelled", durationMs: stopwatch.ElapsedMilliseconds);
+
             throw;
         }
         catch (Exception ex)
@@ -431,6 +468,14 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             activity?.SetTag("sprk.tool.outcome", "exception");
             activity?.SetTag("sprk.tool.exceptionType", ex.GetType().FullName);
             activity?.SetStatus(ActivityStatusCode.Error, description: ex.GetType().Name);
+
+            // R6 Pillar 6c — context.tool_call_completed (exception branch).
+            // ADR-015 audit: outcome is enum-like ("exception"); the exception details are
+            // logged separately above with ADR-015 governance — NOT carried in this event.
+            _contextEventEmitter?.ToolCallCompleted(
+                _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId,
+                outcome: "exception", durationMs: stopwatch.ElapsedMilliseconds);
+
             throw;
         }
     }

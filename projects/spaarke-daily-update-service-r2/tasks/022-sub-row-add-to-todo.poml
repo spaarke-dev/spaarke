@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Sub-row Add-to-To-Do uses `useInlineTodoCreate` (FR-13)</title>
+    <phase>P2a: Hybrid Aggregation UX</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>024</blocks>
+    <tags>frontend, react, fluent-ui, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code change in NarrativeBullet; creates Dataverse records via Xrm.WebApi</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Default serial within Group C (file-overlap with 021/023 on NarrativeBullet.tsx)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per FR-13: each sub-row's Add-to-To-Do button invokes `useInlineTodoCreate` with the specific underlying `NotificationItem` (real title, body, regarding lookup). Creates a concrete `sprk_todo` row whose `sprk_name`/`sprk_notes`/regarding match the underlying notification — NOT a vague aggregated summary.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in `useInlineTodoCreate` + ADR-024 11-entity regarding catalog + `sprk_todo` schema.</role>
+
+  <goal>Clicking a sub-row To-Do creates a `sprk_todo` row with field-level fidelity to the underlying notification (verifiable in Dataverse).</goal>
+
+  <context>
+    <background>
+      Per FR-13: prior aggregated To-Do creation produced vague summaries. The sub-row pattern lets users create one concrete To-Do per underlying item.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">`TODO_REGARDING_CATALOG` + `applyResolverFields` apply unchanged (preserved during hoist in task 013).</constraint>
+    <constraint source="project">FR-13: sub-row To-Do uses the specific underlying `NotificationItem`, not the aggregated summary.</constraint>
+    <constraint source="ADR-021">Fluent v9 Button; semantic tokens.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-024-sprk-todo-multi-entity-regarding.md</file>
+      <file>docs/adr/ADR-021-fluent-ui-v9-design-system.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">In `NarrativeBullet.tsx`, populate the sub-row To-Do slot with a Fluent v9 `Button` (compact, icon-only or icon+text).</step>
+    <step order="2">`onClick`: invoke `useInlineTodoCreate` with the underlying `NotificationItem` (the specific row, not the aggregated summary).</step>
+    <step order="3">`sprk_todo` fields populated: `sprk_name` = item.title; `sprk_notes` = item.body (or stripped HTML); `regarding lookup` resolved via `TODO_REGARDING_CATALOG` from `item.regardingEntityType` + `item.regardingId`.</step>
+    <step order="4">On success: toast notification ("Added to To Dos") + optimistic UI update.</step>
+    <step order="5">On error: surface user-friendly message; log to telemetry.</step>
+    <step order="6">Run dev server; click sub-row To-Do; query Dataverse for the created `sprk_todo`; verify field-level fidelity.</step>
+    <step order="7">Update TASK-INDEX.md: change task 022 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev server.</tool>
+    <tool name="terminal">Query Dataverse (verify created row).</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Sub-row Add-to-To-Do creates concrete sprk_todo (FR-13)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_dailyupdate</url>
+      <steps>
+        <step>Find an aggregated bullet with N&gt;1 underlying items</step>
+        <step>Click the first sub-row Add-to-To-Do button</step>
+        <step>Verify toast confirmation</step>
+        <step>Open Dataverse `sprk_todo` advanced find; locate the newly-created row</step>
+        <step>Verify `sprk_name` = underlying notification title (not aggregated summary)</step>
+        <step>Verify regarding lookup = underlying notification's `regardingId` (correct entity type)</step>
+      </steps>
+      <expected>Created `sprk_todo` row matches the specific underlying notification field-by-field</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sub-row Add-to-To-Do creates a `sprk_todo` row with field-level fidelity to the underlying notification.</criterion>
+    <criterion testable="true">Regarding lookup resolves via `TODO_REGARDING_CATALOG`.</criterion>
+    <criterion testable="true">Success/failure UX feedback present.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Don't change the existing aggregated-bullet To-Do behavior (that's the main narrative-line To-Do). This is only for sub-rows.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>
