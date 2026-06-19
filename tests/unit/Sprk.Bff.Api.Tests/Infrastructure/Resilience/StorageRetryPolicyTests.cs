@@ -398,18 +398,25 @@ public class StorageRetryPolicyTests
         var cts = new CancellationTokenSource();
         var attemptCount = 0;
 
-        // Act - operation throws retryable exception, then we cancel during delay
+        // Act - operation throws retryable exception, then we cancel during delay.
+        //
+        // R6 PR #395 hotfix 2026-06-18: replaced Task.Run + Task.Delay scheduling
+        // with CancellationTokenSource.CancelAfter to eliminate the scheduling race.
+        // The previous pattern relied on Task.Run (queue + thread-pool dispatch) to
+        // fire Task.Delay(500) within the policy's 2-second retry delay window. On
+        // heavily-contended CI VMs the dispatch lag could exceed 2 seconds, causing
+        // the policy's retry delay to complete (and the operation to succeed on
+        // attempt #2) before cancellation fired — the test then asserted on an
+        // OperationCanceledException that never threw. CancelAfter uses the
+        // ThreadingTimer infrastructure directly and fires reliably even under
+        // CI VM contention. 100ms lands well inside the policy's 2-second retry
+        // delay window.
         var act = async () => await _policy.ExecuteAsync(ct =>
         {
             attemptCount++;
             if (attemptCount == 1)
             {
-                // Schedule cancellation to occur during the retry delay
-                _ = Task.Run(async () =>
-                {
-                    await Task.Delay(500); // Cancel during 2s delay
-                    cts.Cancel();
-                });
+                cts.CancelAfter(TimeSpan.FromMilliseconds(100));
                 throw StorageRetryableException.DocumentNotFound(Guid.NewGuid());
             }
             return Task.FromResult("success");
