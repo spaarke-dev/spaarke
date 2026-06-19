@@ -172,6 +172,25 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install shared libs (resolves transitive deps for code pages)
+        run: |
+          # Webpack/Vite in the code pages below resolves @spaarke/* libraries via
+          # path-mapped aliases pointing at the libs' src/. Those libs import
+          # @azure/msal-browser, @fluentui/react-components, etc. — those packages
+          # need to exist in the libs' own node_modules for module resolution to
+          # succeed. Without this step, the code-page builds fail with
+          # "Can't resolve '@azure/msal-browser'" / "Can't resolve '@fluentui/react-components'".
+          # Mirrors the install order from scripts/master-deploy/* and Step 1 of
+          # the /master-deploy skill.
+          set -e
+          for lib in Spaarke.Auth Spaarke.AI.Context Spaarke.SdapClient Spaarke.UI.Components Spaarke.AI.Outputs Spaarke.AI.Widgets Spaarke.Events.Components Spaarke.SmartTodo.Components; do
+            echo "::group::npm install $lib"
+            cd "src/client/shared/$lib"
+            npm install --legacy-peer-deps --no-audit --no-fund
+            cd - > /dev/null
+            echo "::endgroup::"
+          done
+
       - name: Build SemanticSearch Code Page
         run: |
           cd src/client/code-pages/SemanticSearch
@@ -363,7 +382,12 @@ jobs:
           HIGH_OR_CRITICAL: ${{ needs.vuln-scan.outputs.high_or_critical }}
         shell: bash
         run: |
-          set -euo pipefail
+          # Drop `-e` (was `set -euo pipefail`): when an ancillary `gh issue list`
+          # or `gh issue comment` returns non-zero (rate limit, search quirk with
+          # the em-dash in the title, etc.), we still want to attempt the rest of
+          # the report. Variable-undefined safety (-u) and pipe-failure detection
+          # (-o pipefail) remain on.
+          set -uo pipefail
           today=$(date -u +%Y-%m-%d)
           title="Nightly Health — $today"
 
