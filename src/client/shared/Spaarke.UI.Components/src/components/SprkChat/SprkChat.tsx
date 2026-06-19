@@ -336,6 +336,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   injectLocalMessage,
   onLocalMessageInjected,
   onBeforeSendMessage,
+  // R6 Pillar 8 (tasks 080+) outbound-body decoration hook (optional; ADR-012
+  // context-agnostic). Existing consumers ignore.
+  onDecorateOutboundBody,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -972,7 +975,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
   // Send a message and start streaming the response
   const handleSend = React.useCallback(
-    (messageText: string) => {
+    async (messageText: string) => {
       if (!session || isStreaming) {
         return;
       }
@@ -1029,7 +1032,30 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           textContent: a.textContent,
         }));
       }
-      startStream(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`, body, getAccessToken);
+
+      // R6 Pillar 8 (task 080+) outbound-body decoration. Hosts wire CommandRouter
+      // + HardSlashExecutor + SoftSlashRouter + ReferenceResolver via this single
+      // seam. Returns null → cancel send (hard slash dispatched client-side).
+      // Throwing/rejecting → fall back to base body; send proceeds.
+      let finalBody: Record<string, unknown> = body;
+      if (onDecorateOutboundBody) {
+        try {
+          const decorated = await onDecorateOutboundBody(body);
+          if (decorated === null) {
+            // Host cancelled the send (e.g. `/clear`, `/help`). Reset streaming
+            // state set above and stop here.
+            isStreamingRef.current = false;
+            return;
+          }
+          if (decorated !== undefined) {
+            finalBody = decorated;
+          }
+        } catch {
+          // Host failures must not break the send lifecycle.
+        }
+      }
+
+      startStream(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`, finalBody, getAccessToken);
     },
     [
       session,
@@ -1042,6 +1068,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       getAccessToken,
       chatAttachments,
       onBeforeSendMessage,
+      onDecorateOutboundBody,
     ]
   );
 

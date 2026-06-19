@@ -20,17 +20,36 @@ public interface ICapabilityRouter
     /// NFR: must complete in under 50ms for up to 50 capabilities.
     /// No network I/O, no LLM calls — pure in-memory keyword matching.
     /// </summary>
-    CapabilityRoutingResult RouteSync(string userMessage, string? activePlaybookName);
+    /// <param name="userMessage">The user turn text.</param>
+    /// <param name="activePlaybookName">Optional active playbook name for bias.</param>
+    /// <param name="commandIntent">
+    /// R6 Pillar 8 / task 082 / FR-50: Optional closed-vocabulary soft-slash hint
+    /// emitted by the frontend `SoftSlashRouter.decorateBody()`. When non-null AND
+    /// recognised (one of: "summarize", "draft", "extract-entities", "analyze"),
+    /// a Layer-0.5 deterministic pre-pass short-circuits to a Confident result
+    /// selecting the synthetic capability for that intent.
+    /// Default null preserves backward compatibility — pre-R6 callers (tests +
+    /// legacy code paths) skip the pre-pass entirely.
+    /// </param>
+    CapabilityRoutingResult RouteSync(string userMessage, string? activePlaybookName, string? commandIntent = null);
 
     /// <summary>
     /// Full three-tier async routing: Layer 1 → Layer 2 (if uncertain) → Layer 3 fallback.
     ///
     /// Always returns a result — never throws for routing failures.
     /// </summary>
+    /// <param name="userMessage">The user turn text.</param>
+    /// <param name="activePlaybookName">Optional active playbook name for bias.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="commandIntent">
+    /// R6 Pillar 8 / task 082 / FR-50: Optional soft-slash hint; see <see cref="RouteSync"/>.
+    /// Default null preserves backward compatibility.
+    /// </param>
     Task<CapabilityRoutingResult> RouteAsync(
         string userMessage,
         string? activePlaybookName,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        string? commandIntent = null);
 
     /// <summary>
     /// Layer 3: synchronous broad superset fallback (AIPU2-014).

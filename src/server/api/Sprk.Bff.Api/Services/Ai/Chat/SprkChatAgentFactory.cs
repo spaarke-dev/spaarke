@@ -15,8 +15,11 @@ using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.Foundry;
+using Sprk.Bff.Api.Models.Workspace;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
+using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -158,6 +161,15 @@ public class SprkChatAgentFactory
     /// omit the parameter behave exactly as before.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="commandIntent">
+    /// R6 Pillar 8 / task 082 / FR-50: Optional closed-vocabulary soft-slash hint
+    /// emitted by the frontend `SoftSlashRouter.decorateBody()`. When non-null AND
+    /// recognised (one of: "summarize", "draft", "extract-entities", "analyze"),
+    /// CapabilityRouter Layer 0.5 short-circuits to a Confident result selecting
+    /// the synthetic capability for that intent — biasing the LLM toward the
+    /// matching playbook / handler on FIRST try. Default null preserves backward
+    /// compatibility — pre-R6 callers (tests + legacy paths) skip the pre-pass.
+    /// </param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
     /// The returned agent is wrapped with the middleware pipeline (AIPL-057, AIPU-072):
@@ -175,7 +187,8 @@ public class SprkChatAgentFactory
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? commandIntent = null)
     {
         _logger.LogInformation(
             "Creating SprkChatAgent for session={SessionId}, document={DocumentId}, playbook={PlaybookId}, tenant={TenantId}",
@@ -225,11 +238,30 @@ public class SprkChatAgentFactory
 
             if (!ReferenceEquals(enrichedPrompt, context.SystemPrompt))
             {
-                context = context with { SystemPrompt = enrichedPrompt };
-                _logger.LogDebug(
-                    "Enriched system prompt with Active Capabilities section ({CommandCount} scope commands)",
-                    commands.Count(c => !string.Equals(c.Category, "system", StringComparison.OrdinalIgnoreCase)
-                                     && !string.Equals(c.Category, "playbook", StringComparison.OrdinalIgnoreCase)));
+                // R6 task 068 — Active Capabilities block participates in the shared 8K
+                // budget tracker. We resolve the tracker lazily here (it lives later in
+                // the prompt-assembly path below; this is a no-op when null).
+                var capabilitiesAddition = enrichedPrompt.Length > context.SystemPrompt.Length
+                    ? enrichedPrompt[context.SystemPrompt.Length..]
+                    : string.Empty;
+                var lazyTracker = scope.ServiceProvider.GetService<IPromptBudgetTracker>();
+                var lazySessionGuid = Guid.TryParse(sessionId, out var pg) ? pg : (Guid?)null;
+                if (TryReservePromptBudget(
+                        lazyTracker, "active-capabilities", capabilitiesAddition,
+                        lazySessionGuid, tenantId))
+                {
+                    context = context with { SystemPrompt = enrichedPrompt };
+                    _logger.LogDebug(
+                        "Enriched system prompt with Active Capabilities section ({CommandCount} scope commands)",
+                        commands.Count(c => !string.Equals(c.Category, "system", StringComparison.OrdinalIgnoreCase)
+                                         && !string.Equals(c.Category, "playbook", StringComparison.OrdinalIgnoreCase)));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "R6 task 068: Active Capabilities block denied by shared prompt budget tracker (sessionId={SessionId}); omitting",
+                        sessionId);
+                }
             }
         }
         catch (Exception ex)
@@ -264,10 +296,25 @@ public class SprkChatAgentFactory
                 var manifestSuffix = BuildSessionFilesManifestSuffix(files);
                 if (!string.IsNullOrEmpty(manifestSuffix))
                 {
-                    context = context with { SystemPrompt = context.SystemPrompt + manifestSuffix };
-                    _logger.LogInformation(
-                        "R5 task 033: appended Session Files manifest to system prompt — sessionId={SessionId}, fileCount={FileCount}",
-                        sessionId, files.Count);
+                    // R6 task 068 — session-files manifest participates in the shared 8K
+                    // budget tracker (manifest only — fileId + fileName + count; ADR-015).
+                    var lazyTracker = scope.ServiceProvider.GetService<IPromptBudgetTracker>();
+                    var lazySessionGuid = Guid.TryParse(sessionId, out var pg) ? pg : (Guid?)null;
+                    if (TryReservePromptBudget(
+                            lazyTracker, "session-files-manifest", manifestSuffix,
+                            lazySessionGuid, tenantId))
+                    {
+                        context = context with { SystemPrompt = context.SystemPrompt + manifestSuffix };
+                        _logger.LogInformation(
+                            "R5 task 033: appended Session Files manifest to system prompt — sessionId={SessionId}, fileCount={FileCount}",
+                            sessionId, files.Count);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "R6 task 068: Session Files manifest denied by shared prompt budget tracker — sessionId={SessionId}, fileCount={FileCount}; omitting",
+                            sessionId, files.Count);
+                    }
                 }
             }
             catch (Exception ex)
@@ -296,6 +343,76 @@ public class SprkChatAgentFactory
         // content. NFR-01 conversational primacy preserved.
         context = context with { SystemPrompt = context.SystemPrompt + BuildCompactFormattingDirective() };
         // === End R6 Hotfix Wave B-G10b =========================================
+
+        // === R6 task 068 — Shared prompt budget tracker (Pillar 7 / FR-46) =====
+        // Resolve the shared 8K system-prompt budget tracker from the per-turn scope.
+        // Scoped lifetime — one tracker per HTTP request / per chat turn — so accounting
+        // reflects only this turn. When the tracker is unavailable (pre-task-068 envs),
+        // the factory falls back to per-block local budget checks (workspace block already
+        // does this via length-truncation in BuildWorkspaceStateBlock).
+        //
+        // ADR-015: tracker emits truncation telemetry with deterministic IDs only
+        // (layer name, token counts, sessionId, tenantId, decision enum). Never fragment
+        // bodies. The tracker's tag-set + log-prefix is `[ADR-015][memory.prompt_budget_*]`.
+        var promptBudgetTracker = scope.ServiceProvider.GetService<IPromptBudgetTracker>();
+        var sessionGuid = Guid.TryParse(sessionId, out var parsedSessionGuid)
+            ? parsedSessionGuid
+            : (Guid?)null;
+        // === End R6 task 068 — tracker resolution ==============================
+
+        // === R6 task 053 — Workspace State block (Pillar 6a / FR-34) ===========
+        // Per-turn snapshot of currently open workspace tabs the user has marked
+        // visible to the assistant. Lets the LLM answer questions like "what's
+        // open in my workspace?" / "what file is on tab 2?". Pillar 9 (task 074)
+        // refines this to schema-aware per-widget visible state.
+        //
+        // ADR-010: IWorkspaceStateService is Scoped; resolved from the same
+        // per-turn scope as IChatContextProvider (factory is Singleton) — ZERO
+        // new top-level DI registrations.
+        // ADR-014: tenantId in the read path (cache key + Cosmos partition key).
+        // ADR-015: block carries widget type + matterName + isPinned flags ONLY —
+        // never raw user message text from prior turns.
+        // NFR-10: workspace block truncates after ~500 chars to preserve the 8K
+        // system prompt budget; truncation emits telemetry. R6 task 068 wires the
+        // shared budget tracker so the workspace block participates in the same
+        // 8K accounting as document context + knowledge + memory composition.
+        try
+        {
+            var workspaceService = scope.ServiceProvider.GetService<IWorkspaceStateService>();
+            if (workspaceService is not null)
+            {
+                var tabs = await workspaceService.GetTabsAsync(tenantId, sessionId, cancellationToken);
+                var workspaceBlock = BuildWorkspaceStateBlock(tabs, sessionId);
+                if (!string.IsNullOrEmpty(workspaceBlock))
+                {
+                    if (TryReservePromptBudget(
+                            promptBudgetTracker, "workspace-state", workspaceBlock,
+                            sessionGuid, tenantId))
+                    {
+                        context = context with { SystemPrompt = context.SystemPrompt + workspaceBlock };
+                        _logger.LogDebug(
+                            "R6 task 053: appended Workspace State block to system prompt — sessionId={SessionId}, blockLength={BlockLength}",
+                            sessionId, workspaceBlock.Length);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "R6 task 068: workspace-state block denied by shared prompt budget tracker — sessionId={SessionId}, blockLength={BlockLength}; omitting",
+                            sessionId, workspaceBlock.Length);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Soft failure — workspace state is enhancing, not required. The agent
+            // still works without the block; it just can't answer workspace-aware
+            // questions for this turn. Logged so operators see in App Insights.
+            _logger.LogWarning(ex,
+                "R6 task 053: failed to query workspace state for system prompt — sessionId={SessionId}, continuing without",
+                sessionId);
+        }
+        // === End R6 task 053 ===================================================
 
         // Resolve playbook capabilities from Dataverse to determine which tools should be available.
         // When no playbook is specified (generic/standalone chat mode), use core capabilities only.
@@ -334,8 +451,14 @@ public class SprkChatAgentFactory
                     ? context.PlaybookId.Value.ToString("N")
                     : null;
 
+                // R6 Pillar 8 / task 082 / FR-50: pass the soft-slash `commandIntent`
+                // (when supplied by the frontend `SoftSlashRouter`) so Layer 0.5 can
+                // short-circuit to the deterministic capability for the four soft
+                // slashes. Null in the common path (natural language, hard slashes,
+                // unrecognised slashes) preserves NFR-11 backward compat — Layer 1
+                // keyword scoring runs unchanged.
                 routingResult = await _capabilityRouter
-                    .RouteAsync(latestUserMessage, activePlaybookName, cancellationToken)
+                    .RouteAsync(latestUserMessage, activePlaybookName, cancellationToken, commandIntent)
                     .ConfigureAwait(false);
 
                 _logger.LogInformation(
@@ -1358,11 +1481,19 @@ public class SprkChatAgentFactory
                     // metadata. The adapter calls this per LLM invocation to get a fresh
                     // decision id (Guid.NewGuid per call).
                     var sessionIdGuid = TryParseChatSessionId(sessionId);
+                    // R6 Pillar 7 / task 069 (FR-47) — capture the principal oid claim once at
+                    // factory time and forward it through the per-call ChatInvocationContext so
+                    // user-scoped chat handlers (ManagePinnedContextHandler) see the owning user.
+                    // ADR-015: deterministic identifier only; never user message text. Null when
+                    // standalone chat (no authenticated user) or when the oid claim is missing.
+                    var oidClaim = httpContext?.User?.FindFirst("oid")?.Value
+                        ?? httpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
                     Func<ChatInvocationContext> contextFactory = () => new ChatInvocationContext
                     {
                         ChatSessionId = sessionIdGuid,
                         TenantId = tenantId,
                         MatterId = TryParseMatterId(knowledgeScope),
+                        UserId = string.IsNullOrWhiteSpace(oidClaim) ? null : oidClaim,
                         // R6 Wave 7c: forward the playbook's knowledge scope so chat-side
                         // handlers (KnowledgeRetrievalHandler etc.) can filter their queries
                         // to the playbook's knowledge sources without taking a separate DI
@@ -1894,6 +2025,250 @@ public class SprkChatAgentFactory
     /// widen the AI public-contracts surface.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// R6 Task 053 (Pillar 6a / FR-34) + Task 074 (Pillar 9 / FR-57/58/59) — builds the
+    /// per-turn Workspace State block summarizing currently open tabs the user has marked
+    /// visible to the assistant. Returns empty string when no tab is visible OR no visible
+    /// tab has a derivable visible state — call site short-circuits.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Privacy filter (FR-58 + FR-59 binding)</b>: a tab is INCLUDED iff
+    /// <see cref="WorkspaceTab.VisibleToAssistant"/> is true AND
+    /// <see cref="TryDeriveVisibleState"/> returns non-null for its widget data. Tabs
+    /// whose <c>VisibleToAssistant</c> is false OR whose widget data lacks renderable
+    /// visible state (e.g., Summary with no Tldr and empty Body) are filtered OUT.
+    /// This is the BFF-side enforcement of Pillar 9's per-widget
+    /// <c>getAgentVisibleState()</c> contract — server derives FR-57 shapes directly
+    /// from the typed <see cref="WorkspaceTabWidgetData"/> polymorphic union so the
+    /// closed 4-variant contract is structurally guaranteed.
+    /// </para>
+    /// <para>
+    /// <b>FR-57 shapes per widget category</b>:
+    /// <list type="bullet">
+    ///   <item><c>Summary</c> → <c>{ widgetType, summary, tldr, hasUserEdits }</c>.</item>
+    ///   <item><c>DocumentViewer</c> → <c>{ widgetType, filename, mimeType, sizeBytes,
+    ///   hasSelection, selectionText? }</c> (selectionText capped at 200 chars).</item>
+    ///   <item><c>Dashboard</c> → <c>{ widgetType, dashboardName, lastViewedSection }</c>
+    ///   (NO chart data; payload minimization per NFR-10).</item>
+    ///   <item><c>Table</c> → <c>{ widgetType, rowCount, sortColumn, filteredColumns,
+    ///   selectedRows: number }</c> (count only, NOT row IDs — token economy; stricter
+    ///   than POML which proposed <c>selectedRows[]</c>).</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <b>ADR-015 governance</b>: block carries the FR-57 deterministic fields ONLY.
+    /// NEVER full widget bodies, NEVER raw user message text from prior turns. The
+    /// Summary body is explicitly omitted; only the TL;DR + edit flag participate.
+    /// DocumentViewer.selectionText is content-bearing but capped at 200 chars per the
+    /// frontend contract (task 073) and the spec's payload-minimization principle.
+    /// </para>
+    /// <para>
+    /// <b>NFR-10 budget</b>: each per-tab block is incrementally reserved against the
+    /// shared <see cref="IPromptBudgetTracker"/> by the call site
+    /// (<see cref="TryReservePromptBudget"/>). When the requested allocation is denied,
+    /// the entire block is omitted (the tracker emits truncation telemetry on the
+    /// <c>workspace-state</c> layer). The legacy <see cref="WorkspaceStateBlockMaxChars"/>
+    /// is retained as a hard fallback ceiling for when the tracker is unavailable
+    /// (pre-task-068 environments) — but is widened from 500 to
+    /// <see cref="WorkspaceStateBlockMaxCharsRich"/> to fit the richer per-tab shapes.
+    /// </para>
+    /// <para>
+    /// <b>Active tab convention</b>: the tab with the most recent <c>UpdatedAt</c>
+    /// is labeled "(active)". Preserved from task 053.
+    /// </para>
+    /// </remarks>
+    internal const int WorkspaceStateBlockMaxChars = 500;
+
+    /// <summary>
+    /// Hard fallback char ceiling for rich per-tab visible state when no
+    /// <see cref="IPromptBudgetTracker"/> is wired. ~2 KB ≈ 500 tokens at the conservative
+    /// 1.3× word-cost estimate — comfortably under the 8K NFR-10 budget. The tracker
+    /// supersedes this when present.
+    /// </summary>
+    internal const int WorkspaceStateBlockMaxCharsRich = 2000;
+
+    internal string BuildWorkspaceStateBlock(IReadOnlyList<WorkspaceTab> tabs, string sessionId)
+    {
+        // FR-58 + FR-59 BINDING: filter is `visibleToAssistant === true` AND widget has
+        // derivable visible state. Both required. Privacy default — when EITHER condition
+        // is unmet, the tab does NOT appear in the agent prompt.
+        var visible = tabs
+            .Where(t => t.VisibleToAssistant)
+            .Select(t => (Tab: t, State: TryDeriveVisibleState(t)))
+            .Where(p => p.State is not null)
+            .ToList();
+
+        if (visible.Count == 0) return string.Empty;
+
+        // Most-recent UpdatedAt → "active" (preserved from task 053 v1 simplification;
+        // explicit active-tab state from registry is a separate follow-up).
+        var ordered = visible.OrderByDescending(p => p.Tab.UpdatedAt).ToList();
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("\n\n## Workspace State\n");
+        sb.Append("Tabs the user has marked visible to the assistant. Per-tab fields are deterministic visible state only (ADR-015 — no raw user text, no widget bodies).\n");
+
+        var truncatedAt = -1;
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var (tab, state) = ordered[i];
+            var activeMarker = i == 0 ? " (active)" : "";
+            var pinnedMarker = tab.IsPinned ? " user-pinned" : "";
+            var matterName = tab.MatterContext?.MatterName;
+            var matterSuffix = string.IsNullOrWhiteSpace(matterName) ? "" : $" matter=\"{matterName}\"";
+
+            // Header line + structured fields. Format chosen so the LLM can parse without
+            // needing to validate a JSON envelope per tab while still treating each tab as
+            // a discrete block.
+            var header = $"- Tab {i + 1}{activeMarker}: widgetType={tab.WidgetType}{pinnedMarker}{matterSuffix}\n";
+            var fields = FormatVisibleStateFields(state!);
+            var block = header + fields;
+
+            if (sb.Length + block.Length > WorkspaceStateBlockMaxCharsRich)
+            {
+                truncatedAt = i;
+                break;
+            }
+            sb.Append(block);
+        }
+
+        if (truncatedAt >= 0)
+        {
+            _logger.LogInformation(
+                "R6 task 074: Workspace State block truncated against fallback ceiling — sessionId={SessionId}, includedTabs={Included}, droppedTabs={Dropped}, charBudget={Budget}",
+                sessionId, truncatedAt, ordered.Count - truncatedAt, WorkspaceStateBlockMaxCharsRich);
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// R6 Task 074 (Pillar 9 / FR-57) — server-side derivation of the agent-visible state
+    /// shape from a tab's typed <see cref="WorkspaceTabWidgetData"/>. Mirrors the frontend
+    /// per-widget <c>getAgentVisibleState()</c> impls (task 073) so the BFF enforces the
+    /// FR-57 contract structurally, not by trusting client serialization.
+    /// </summary>
+    /// <returns>
+    /// A typed <see cref="WorkspaceTabVisibleState"/> instance when the widget has
+    /// derivable visible state; <c>null</c> when the widget should NOT appear in the
+    /// agent prompt (privacy default — e.g., Summary with no TL;DR and empty body).
+    /// </returns>
+    /// <remarks>
+    /// <b>ADR-015 BINDING</b>: only the FR-57 deterministic fields are projected.
+    /// Summary's <c>Body</c> is deliberately NOT projected — only TL;DR + edit flag.
+    /// DocumentViewer's <c>SelectionText</c> is capped at <see cref="SelectionTextMaxChars"/>.
+    /// Dashboard never projects chart data. Table never projects raw rows — only count.
+    /// </remarks>
+    internal const int SelectionTextMaxChars = 200;
+
+    internal static WorkspaceTabVisibleState? TryDeriveVisibleState(WorkspaceTab tab)
+    {
+        // Closed-union switch over the polymorphic widget-data types. A new widget kind
+        // cannot accidentally leak more than the FR-57 contract permits because the
+        // compiler requires explicit handling here.
+        return tab.WidgetData switch
+        {
+            SummaryTabWidgetData s when HasSummaryState(s) => new WorkspaceTabVisibleState.Summary(
+                Tldr: s.Tldr,
+                SummaryText: NormalizeBody(s.Body),
+                HasUserEdits: s.HasUserEdits ?? false),
+
+            DocumentViewerTabWidgetData d => new WorkspaceTabVisibleState.DocumentViewer(
+                Filename: d.Filename,
+                MimeType: d.MimeType,
+                SizeBytes: d.SizeBytes,
+                HasSelection: d.HasSelection ?? false,
+                SelectionText: TruncateSelection(d.SelectionText, d.HasSelection ?? false)),
+
+            DashboardTabWidgetData db => new WorkspaceTabVisibleState.Dashboard(
+                DashboardName: db.DashboardName,
+                LastViewedSection: db.LastViewedSection),
+
+            TableTabWidgetData t => new WorkspaceTabVisibleState.Table(
+                RowCount: t.RowCount,
+                SortColumn: t.SortColumn,
+                FilteredColumns: t.FilteredColumns,
+                SelectedRows: t.SelectedRows?.Count ?? 0),
+
+            // Unknown / null widget data → no visible state (privacy default).
+            _ => null,
+        };
+    }
+
+    /// <summary>Summary has visible state when EITHER a non-empty TL;DR OR a non-empty body exists.</summary>
+    private static bool HasSummaryState(SummaryTabWidgetData s)
+        => !string.IsNullOrWhiteSpace(s.Tldr) || !string.IsNullOrWhiteSpace(s.Body);
+
+    /// <summary>
+    /// Normalize the Summary body for the agent prompt — collapse whitespace + cap at a
+    /// conservative limit. Body text DOES participate in the prompt (it is the agent-
+    /// generated summary the user can quote), but we cap aggressively to honor NFR-10.
+    /// </summary>
+    private const int SummaryBodyMaxChars = 600;
+
+    private static string? NormalizeBody(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        var trimmed = body.Trim();
+        if (trimmed.Length <= SummaryBodyMaxChars) return trimmed;
+        return trimmed[..SummaryBodyMaxChars] + "…";
+    }
+
+    private static string? TruncateSelection(string? selection, bool hasSelection)
+    {
+        if (!hasSelection || string.IsNullOrWhiteSpace(selection)) return null;
+        var trimmed = selection.Trim();
+        if (trimmed.Length <= SelectionTextMaxChars) return trimmed;
+        return trimmed[..SelectionTextMaxChars] + "…";
+    }
+
+    /// <summary>
+    /// Format a derived <see cref="WorkspaceTabVisibleState"/> as the per-tab prompt
+    /// fields. Indented 2 spaces under the tab header. ADR-015: only deterministic
+    /// fields are emitted; selectionText is the only content-bearing field and respects
+    /// the 200-char cap upstream.
+    /// </summary>
+    internal static string FormatVisibleStateFields(WorkspaceTabVisibleState state)
+    {
+        var sb = new System.Text.StringBuilder();
+        switch (state)
+        {
+            case WorkspaceTabVisibleState.Summary s:
+                if (!string.IsNullOrWhiteSpace(s.Tldr))
+                    sb.Append($"  tldr: {s.Tldr}\n");
+                if (!string.IsNullOrWhiteSpace(s.SummaryText))
+                    sb.Append($"  summary: {s.SummaryText}\n");
+                sb.Append($"  hasUserEdits: {(s.HasUserEdits ? "true" : "false")}\n");
+                break;
+
+            case WorkspaceTabVisibleState.DocumentViewer d:
+                sb.Append($"  filename: {d.Filename}\n");
+                sb.Append($"  mimeType: {d.MimeType}\n");
+                sb.Append($"  sizeBytes: {d.SizeBytes}\n");
+                sb.Append($"  hasSelection: {(d.HasSelection ? "true" : "false")}\n");
+                if (!string.IsNullOrWhiteSpace(d.SelectionText))
+                    sb.Append($"  selectionText: {d.SelectionText}\n");
+                break;
+
+            case WorkspaceTabVisibleState.Dashboard db:
+                sb.Append($"  dashboardName: {db.DashboardName}\n");
+                if (!string.IsNullOrWhiteSpace(db.LastViewedSection))
+                    sb.Append($"  lastViewedSection: {db.LastViewedSection}\n");
+                break;
+
+            case WorkspaceTabVisibleState.Table t:
+                sb.Append($"  rowCount: {t.RowCount}\n");
+                if (!string.IsNullOrWhiteSpace(t.SortColumn))
+                    sb.Append($"  sortColumn: {t.SortColumn}\n");
+                if (t.FilteredColumns is { Count: > 0 })
+                    sb.Append($"  filteredColumns: [{string.Join(", ", t.FilteredColumns)}]\n");
+                sb.Append($"  selectedRows: {t.SelectedRows}\n");
+                break;
+        }
+        return sb.ToString();
+    }
+
     /// <summary>
     /// Hotfix Wave B-G10b (R6, 2026-06-10) — builds the system-prompt suffix that
     /// instructs the LLM to use compact markdown formatting in chat-pane responses.
@@ -2524,5 +2899,44 @@ public class SprkChatAgentFactory
             DocumentContextService.MaxTokenBudget, result.AnyTruncated);
 
         return context with { DocumentSummary = enrichedSummary };
+    }
+
+    /// <summary>
+    /// R6 task 068 (D-C-22 / FR-46) — shared-tracker budget-reservation helper. When
+    /// <paramref name="tracker"/> is null (pre-task-068 environments), returns true so
+    /// behaviour is unchanged. When wired, estimates token cost of
+    /// <paramref name="fragment"/> and attempts to reserve via the tracker; truncation
+    /// telemetry is emitted by the tracker on denial.
+    /// </summary>
+    /// <remarks>
+    /// Uses the SAME conservative whitespace-word-count estimate as
+    /// <see cref="PlaybookChatContextProvider"/>'s EstimateTokenCount: word_count * 1.3.
+    /// Keeps accounting consistent across the four prompt-assembly subsystems.
+    /// </remarks>
+    internal static bool TryReservePromptBudget(
+        Sprk.Bff.Api.Services.Ai.Memory.IPromptBudgetTracker? tracker,
+        string layer,
+        string fragment,
+        Guid? sessionId,
+        string? tenantId)
+    {
+        if (tracker is null)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrEmpty(fragment))
+        {
+            return true;
+        }
+
+        var wordCount = fragment.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        var tokens = (int)Math.Ceiling(wordCount * 1.3);
+        if (tokens <= 0)
+        {
+            return true;
+        }
+
+        return tracker.TryReserve(layer, tokens, sessionId, tenantId);
     }
 }

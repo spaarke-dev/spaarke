@@ -93,6 +93,33 @@ public record ChatInvocationContext : ToolInvocationContextBase
     public Guid? MatterId { get; init; }
 
     /// <summary>
+    /// Optional owning user identifier for user-curated chat affordances (R6 Pillar 7 /
+    /// task 069 / FR-47). Sourced from the request principal's <c>oid</c> claim at
+    /// <see cref="Chat.SprkChatAgentFactory"/> resolution time and forwarded into the per-call
+    /// context by <see cref="Chat.ToolHandlerToAIFunctionAdapter"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Carries a deterministic principal identifier only (the Azure AD <c>oid</c> GUID rendered
+    /// as a string). ADR-015 compliant — never user message text. Null when standalone chat
+    /// (no authenticated user) or when the <c>oid</c> claim is unavailable.
+    /// </para>
+    /// <para>
+    /// Consumed by chat-side handlers that read or write user-scoped data (currently
+    /// <c>ManagePinnedContextHandler</c> for the "remember / forget / always" affordance —
+    /// the <see cref="Memory.IPinnedContextRepository"/> contract requires a non-empty
+    /// <c>userId</c> on pin creation and partitions reads by user). Handlers that REQUIRE this
+    /// field MUST short-circuit with a clear diagnostic (<see cref="ToolResult.Error"/>) when
+    /// null — never throw, and never fall back to a synthetic sentinel id.
+    /// </para>
+    /// <para>
+    /// Mirrors the shape of <see cref="MatterId"/> + <see cref="AnalysisId"/>: optional,
+    /// init-only, deterministic identifier.
+    /// </para>
+    /// </remarks>
+    public string? UserId { get; init; }
+
+    /// <summary>
     /// Optional analysis id from the active chat session (R6 Wave 9 / ADR-033 Stage 4).
     /// Carries the deterministic <c>sprk_analysisoutput</c> row id when the chat session is
     /// bound to an active analysis. Read by chat-side handlers that fetch or persist

@@ -487,7 +487,10 @@ public static class ChatEndpoints
                 sseWriter,
                 latestUserMessage: effectiveMessage,
                 uploadedFiles: session.UploadedFiles,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken,
+                // R6 Pillar 8 / task 082 / FR-50: forward the soft-slash hint to the
+                // CapabilityRouter Layer 0.5 pre-pass. Null in the common path.
+                commandIntent: request.CommandIntent);
 
             // Convert session history to AI framework messages for context
             var history = BuildAiHistory(session.Messages);
@@ -2622,10 +2625,20 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// in-memory only). Default null preserves backwards compatibility for clients that omit
 /// the field. See <see cref="ValidateAttachments"/> for validation rules (NFR-04).
 /// </param>
+/// <param name="CommandIntent">
+/// R6 Pillar 8 / task 082 / FR-50: Optional closed-vocabulary soft-slash hint emitted by
+/// the frontend `SoftSlashRouter.decorateBody()`. When non-null and recognised (one of:
+/// "summarize", "draft", "extract-entities", "analyze"), the BFF `CapabilityRouter`
+/// Layer 0.5 pre-pass short-circuits to a Confident result selecting the synthetic
+/// capability for that intent. Default null preserves backwards compatibility — clients
+/// that omit the field route via the existing Layer 1 keyword path (NFR-11).
+/// ADR-015 audit: this is a closed-vocabulary identifier, NEVER raw user message text.
+/// </param>
 public record ChatSendMessageRequest(
     string Message,
     string? DocumentId = null,
-    IReadOnlyList<ChatMessageAttachment>? Attachments = null);
+    IReadOnlyList<ChatMessageAttachment>? Attachments = null,
+    string? CommandIntent = null);
 
 /// <summary>
 /// In-memory chat-message attachment with client-extracted text content (FR-07).
