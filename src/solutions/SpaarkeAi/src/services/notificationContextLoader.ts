@@ -41,7 +41,13 @@
  * so the shared hook falls back to the empty-payload contract (→ empty-state UI).
  */
 
-import type { NarrateRequest } from "@spaarke/ui-components";
+// R2.1 hotfix (2026-06-19): NarrateRequest re-exported from the new
+// daily-briefing-components/widgets module after Fix A retired the old
+// useDailyBriefing types from @spaarke/ui-components. Shape preserved
+// verbatim for backward compat with this loader's return value, even though
+// DailyBriefingApp (post-Fix A) no longer consumes loadNotificationContext
+// at runtime — the loader is now effectively dead code, slated for cleanup.
+import type { NarrateRequest } from "@spaarke/daily-briefing-components/widgets";
 
 // ---------------------------------------------------------------------------
 // Notification category registry (mirrors DailyBriefing solution's
