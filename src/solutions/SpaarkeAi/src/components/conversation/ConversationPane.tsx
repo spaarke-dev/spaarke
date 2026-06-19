@@ -885,6 +885,15 @@ export function ConversationPane(): React.JSX.Element {
   // both are local UI affordances dispatched by HardSlashExecutor.
   const [helpPanelOpen, setHelpPanelOpen] = React.useState<boolean>(false);
 
+  // R6 hotfix 2026-06-19 (UAT) — SprkChat remount key. `/clear` increments this,
+  // which forces SprkChat to unmount + remount and wipes its internal message
+  // list. This was previously a TODO stub on `clearLocalConversation` that
+  // shipped uncovered; the BFF DELETE session call still fires (it clears the
+  // server-side cache) but the UI message list was not being cleared, producing
+  // the "conversation didn't clear after /clear" UAT bug. The remount pattern
+  // is pragmatic (no new SprkChat API surface) and surgical to /clear.
+  const [sprkChatRemountKey, setSprkChatRemountKey] = React.useState<number>(0);
+
   // ── R5 task 036 / P2-CLOSEOUT-05: held-files + promoted-chip tracking ─────
   //
   // `heldFilesRef` maps chip id → original `File` for chips that have reached
@@ -1321,8 +1330,11 @@ export function ConversationPane(): React.JSX.Element {
       paneEventBus,
       setHelpOpen: setHelpPanelOpen,
       clearLocalConversation: () => {
-        // TODO(task 084): hook to SprkChat's internal message-list clear when
-        // a shared-lib API exists. Today: rely on `/new-session` flow path.
+        // R6 hotfix 2026-06-19 (UAT): increment the SprkChat key to force a
+        // remount + state reset. Replaces the prior TODO no-op. The BFF
+        // session DELETE called by the executor handles server-side state;
+        // this handles client-side.
+        setSprkChatRemountKey((k) => k + 1);
       },
       createNewSession: async (): Promise<string | null> => {
         // TODO(task 084): wire to proper session-reset machinery. The current
@@ -1993,6 +2005,7 @@ export function ConversationPane(): React.JSX.Element {
           */}
           <div className={mergeClasses(styles.sprkChatFlex)}>
             <SprkChat
+              key={sprkChatRemountKey}
               apiBaseUrl={bffBaseUrl}
               authenticatedFetch={authenticatedFetch}
               getAccessToken={getAccessToken}
