@@ -79,7 +79,7 @@ import {
   type ToolbarAction,
   type ViewToggleMode,
 } from '@spaarke/ui-components';
-import { MicrosoftToDoIcon } from '../../icons/MicrosoftToDoIcon';
+import { MicrosoftToDoIcon } from '@spaarke/ui-components';
 import { useHeaderStyles } from './Header.styles';
 
 // ---------------------------------------------------------------------------
