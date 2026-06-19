@@ -310,7 +310,17 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
 
     private static readonly Regex InvalidToolNameChars = new(@"[^a-zA-Z0-9_.-]", RegexOptions.Compiled);
 
-    private static string SanitiseToolName(string raw)
+    /// <summary>
+    /// R6 hotfix 2026-06-19 — public so callers that compare against
+    /// AIFunction.Name (e.g., <c>SprkChatAgentFactory.BuildAllowedToolNames</c>'s
+    /// per-turn tool filter) can apply the same transform to their input. The
+    /// filter compares <c>AIFunction.Name</c> (this property is sanitised) to
+    /// the manifest-derived <c>allowedToolNames</c> HashSet (which carries raw
+    /// Dataverse <c>sprk_name</c> values with spaces). Without applying the same
+    /// sanitisation to the HashSet, every comparison fails and the agent ends
+    /// up with toolCount=0 — the LLM stalls because it has no tools to invoke.
+    /// </summary>
+    public static string SanitiseToolName(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
         {

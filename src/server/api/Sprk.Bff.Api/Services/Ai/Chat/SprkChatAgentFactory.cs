@@ -1711,12 +1711,18 @@ public class SprkChatAgentFactory
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Layer 3 superset: SelectedToolNames is pre-computed by ComputeLayer3Superset.
+        // R6 hotfix 2026-06-19: apply the same sanitisation as
+        // ToolHandlerToAIFunctionAdapter.Name so the filter at the call site
+        // (which compares against AIFunction.Name) actually matches. Without
+        // this, the manifest's raw sprk_name (e.g. "SYS-Document Search") never
+        // matches the sanitised AIFunction.Name ("SYS-Document_Search") and the
+        // filter drops every tool, leaving the agent with toolCount=0.
         if (routingResult.SelectedToolNames.Length > 0)
         {
             foreach (var toolName in routingResult.SelectedToolNames)
             {
                 if (!string.IsNullOrWhiteSpace(toolName))
-                    allowed.Add(toolName);
+                    allowed.Add(ToolHandlerToAIFunctionAdapter.SanitiseToolName(toolName));
             }
             return allowed;
         }
@@ -1733,8 +1739,10 @@ public class SprkChatAgentFactory
                     {
                         foreach (var toolName in entry.ToolNames)
                         {
+                            // R6 hotfix 2026-06-19: sanitise to match AIFunction.Name
+                            // (see BuildAllowedToolNames header comment above).
                             if (!string.IsNullOrWhiteSpace(toolName))
-                                allowed.Add(toolName);
+                                allowed.Add(ToolHandlerToAIFunctionAdapter.SanitiseToolName(toolName));
                         }
                     }
                     else
