@@ -191,12 +191,36 @@ export const useSmartTodoWidgetStyles = makeStyles({
    *
    * `minHeight: 0` is essential — without it the parent's `flex: 1 1 auto`
    * body wins the height race and the inner card list cannot scroll.
+   *
+   * 2026-06-19 fix #1: `flex: '1 1 0'` (NOT `1 1 auto`) — matches the Code Page
+   * boardContainer. With `auto` flex-basis the kanban height was content-driven,
+   * collapsed to 0 in nested flex chains. `flex: 1 1 0` is the canonical
+   * "fill remaining height in a column-flex parent" idiom.
+   *
+   * 2026-06-19 fix #2: `minHeight: 'max(400px, 60vh)'` (NOT `0`) — even with
+   * the flex fix, the kanban region's Griffel-shared `min-height: 0` class
+   * collapsed the inner KanbanBoard when the widget's host pane had ambiguous
+   * height resolution (LegalWorkspace SectionPanel, harness frames, etc.).
+   *
+   * `max(400px, 60vh)` is a FLEXIBLE floor:
+   *   - Absolute minimum 400px (so the kanban never disappears even on tiny
+   *     viewports or in broken host layouts)
+   *   - Scales to 60% of viewport height on any reasonable screen
+   *     (e.g., 540px on a 900px viewport, 648px on 1080p, 864px on 1440p)
+   *   - Actual rendered height GROWS BEYOND this floor when the host
+   *     provides more vertical space via flex: 1 1 0
+   *
+   * Discovered via spaarke-prototype/smart-todo-r4-uat harness: manually
+   * overriding the Griffel `min-height: 0` class made cards appear. The Code
+   * Page already gets enough height from its full-page host chrome
+   * (~viewport - chrome ≈ 800px); the widget needs an explicit floor since
+   * SectionPanel + variable host layouts don't guarantee height.
    */
   kanbanContainer: {
     display: 'flex',
     flexDirection: 'column',
-    flex: '1 1 auto',
-    minHeight: 0,
+    flex: '1 1 0',
+    minHeight: 'max(400px, 60vh)',
     minWidth: 0,
   },
 
