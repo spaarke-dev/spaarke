@@ -430,6 +430,11 @@ function SmartTodoLayout(): React.ReactElement {
           // that's still anchored inside SmartToDo.
           hideHeader
           onSettingsOpenerReady={handleSettingsOpenerReady}
+          // UAT 2026-06-19 — single-source-of-truth for orientation.
+          // Without this prop, SmartToDo's internal useUserPreferences
+          // instance held its own copy that didn't react to Header toggle
+          // clicks; the kanban stayed stuck regardless of persisted state.
+          orientation={orientation}
         />
       </div>
 

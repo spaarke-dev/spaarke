@@ -310,6 +310,18 @@ export interface ISmartToDoProps {
    * SmartToDo. Implemented as a callback ref bound on mount.
    */
   onSettingsOpenerReady?: (open: () => void) => void;
+  /**
+   * UAT 2026-06-19 — Optional orientation override.
+   * When provided, this prop wins over SmartToDo's internal
+   * `useUserPreferences().orientation`. This is the cross-instance fix:
+   * if the parent (SmartTodoApp) also calls useUserPreferences, both
+   * instances would hold independent local state and the user's Header
+   * toggle wouldn't reach SmartToDo's KanbanBoard. With this prop, the
+   * parent is the single source of truth.
+   *
+   * Back-compat: when omitted, SmartToDo uses its own preference instance.
+   */
+  orientation?: Orientation;
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +341,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onOpenTodo,
   hideHeader = false,
   onSettingsOpenerReady,
+  orientation: orientationProp,
 }) => {
   const styles = useStyles();
 
@@ -449,7 +462,14 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
    * the hook — `updatePreferences` already does an optimistic local
    * update, so a single call drives both state + persistence.
    */
-  const orientation = preferences.orientation;
+  // UAT 2026-06-19 — if parent passes orientation prop, that wins over
+  // SmartToDo's internal preference state. Otherwise fall back to the
+  // hook's value. Fixes the cross-instance state-sync bug: when both
+  // SmartTodoApp and SmartToDo call useUserPreferences independently,
+  // toggling in the Header updates the app's instance only — SmartToDo's
+  // KanbanBoard stays stuck on the original orientation without this
+  // prop override.
+  const orientation = orientationProp ?? preferences.orientation;
   const setOrientation = React.useCallback(
     (next: Orientation) => {
       void updatePreferences({ orientation: next });
