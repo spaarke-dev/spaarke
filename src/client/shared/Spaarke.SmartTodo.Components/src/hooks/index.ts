@@ -16,3 +16,8 @@ export {
 } from './useKanbanColumns';
 
 export type { IUseKanbanColumnsOptions, IUseKanbanColumnsResult } from './useKanbanColumns';
+
+// UAT 2026-06-19 — resolve current user's sprk_contact GUID for the
+// migrated sprk_todo.sprk_assignedto Contact lookup.
+export { useCurrentContactId } from './useCurrentContactId';
+export type { IUseCurrentContactIdOptions, IUseCurrentContactIdResult } from './useCurrentContactId';

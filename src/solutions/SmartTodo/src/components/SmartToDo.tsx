@@ -46,6 +46,7 @@ import {
   MessageBarBody,
 } from "@fluentui/react-components";
 import { KanbanBoard, OrientationToggle, type Orientation } from "@spaarke/ui-components";
+import { useCurrentContactId } from "@spaarke/smart-todo-components";
 // R4 task 102 (E-1, 2026-06-18) — `KanbanCard` hoisted from this folder into
 // the `@spaarke/smart-todo-components` peer package so the workspace widget
 // can render the IDENTICAL card surface. The Code Page swap is an
@@ -375,9 +376,15 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   const { preferences, updatePreferences, isLoading: prefsLoading } =
     useUserPreferences({ webApi, userId });
 
+  // UAT 2026-06-19 — resolve current systemuser → sprk_contact for the
+  // migrated sprk_assignedto Contact lookup. useTodoItems gets the
+  // contactId (passed via the legacy-named `userId` arg per the boundary
+  // comment on useTodoItems options).
+  const { contactId } = useCurrentContactId({ webApi, userId });
+
   const { items, isLoading, error, refetch } = useTodoItems({
     webApi,
-    userId,
+    userId: contactId ?? '00000000-0000-0000-0000-000000000000',
     mockItems,
   });
 
@@ -624,9 +631,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         return;
       }
       const payload: Record<string, unknown> = { sprk_name: detail.title };
-      const assignedToId = detail.assignedToId || userId;
-      if (assignedToId) {
-        payload['sprk_assignedto@odata.bind'] = `/systemusers(${assignedToId})`;
+      // UAT 2026-06-19 — sprk_assignedto now binds to sprk_contact.
+      // detail.assignedToId is a contact GUID (the Header's quick-add
+      // Assigned To field). When unset, fall back to current user's contactId.
+      const assignedToContactId = detail.assignedToId || contactId || '';
+      if (assignedToContactId) {
+        payload['sprk_assignedto@odata.bind'] = `/sprk_contacts(${assignedToContactId})`;
       }
       if (detail.dueDate) {
         const [y, m, d] = detail.dueDate.split('-').map(Number);
@@ -647,7 +657,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     return () => {
       window.removeEventListener(QUICK_ADD_TODO_EVENT, listener);
     };
-  }, [webApi, userId, refetch]);
+  }, [webApi, contactId, refetch]);
 
   // -------------------------------------------------------------------------
   // Dismiss handler

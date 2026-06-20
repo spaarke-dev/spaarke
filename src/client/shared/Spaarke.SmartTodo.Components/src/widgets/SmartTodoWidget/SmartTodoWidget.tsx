@@ -115,6 +115,7 @@ import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
 import type { IKanbanDataverseService } from '../../types/kanban';
 import { SmartTodoKanban } from '../../components/SmartTodoKanban';
+import { useCurrentContactId } from '../../hooks/useCurrentContactId';
 
 // ---------------------------------------------------------------------------
 // Public statuscode constants (R3 task 009 / OS-1)
@@ -141,23 +142,22 @@ const SEARCH_DEBOUNCE_MS = 150;
 /**
  * Build the active-todo $select+$filter query targeting `sprk_todo`.
  *
- * Per R4 spec FR-02 + ownership-alignment fix 2026-06-19:
+ * Per R4 spec FR-02 + UAT 2026-06-19 assigned-to migration:
  *   - statecode eq 0
  *   - statuscode in (Open, In Progress)
  *   - regarding context filter (when supplied)
  *   - assignee filter (when supplied and no regarding context) —
- *     aligned to the SmartTodoApp Code Page (R4-031 / FR-07 / OD-2). Previously
- *     used `_ownerid_value` which mismatched the Code Page and caused records
- *     created on one surface to be invisible on the other (caught by the
- *     spaarke-prototype/smart-todo-r4-uat harness 2026-06-19). `ownerid` is
- *     BU-default and not user-meaningful; `sprk_assignedto` is the canonical
- *     "this is YOUR to-do" lookup across the Spaarke surfaces.
+ *     `_sprk_assignedto_value` is now a CONTACT lookup (was systemuser).
+ *     Callers must resolve their systemuser → sprk_contact via
+ *     useCurrentContactId hook and pass `contactId` here. Passing a raw
+ *     systemuser GUID will produce zero matches.
  *
  * Zero `sprk_event` references. Zero `sprk_todoflag` references.
  */
 export function buildSmartTodoQuery(opts: {
   regardingContext?: IRegardingContext | null;
-  userId?: string;
+  /** sprk_contact GUID — the current user's contact, NOT systemuser GUID. */
+  contactId?: string;
   businessUnitId?: string;
   scope?: 'my' | 'all';
   top?: number;
@@ -193,9 +193,9 @@ export function buildSmartTodoQuery(opts: {
       contextClause = `${lookupField} eq ${opts.regardingContext.recordId}`;
     }
   } else if (opts.scope === 'all' && opts.businessUnitId) {
-    contextClause = `(_sprk_assignedto_value eq ${opts.userId ?? '00000000-0000-0000-0000-000000000000'} or _owningbusinessunit_value eq ${opts.businessUnitId})`;
-  } else if (opts.userId) {
-    contextClause = `_sprk_assignedto_value eq ${opts.userId}`;
+    contextClause = `(_sprk_assignedto_value eq ${opts.contactId ?? '00000000-0000-0000-0000-000000000000'} or _owningbusinessunit_value eq ${opts.businessUnitId})`;
+  } else if (opts.contactId) {
+    contextClause = `_sprk_assignedto_value eq ${opts.contactId}`;
   }
 
   const filter = contextClause ? `${contextClause} and ${activeClause}` : activeClause;
@@ -385,7 +385,10 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   }, []);
   const [quickAddTitle, setQuickAddTitle] = React.useState<string>('');
   const [quickAddDueDate, setQuickAddDueDate] = React.useState<string>(todayISODate);
-  const [quickAddAssignedTo, setQuickAddAssignedTo] = React.useState<string>(userId ?? '');
+  // Default to empty string here — populated from resolved contactId via useEffect below
+  // once useCurrentContactId resolves. We can't reference contactId here because it's
+  // declared later in the function body.
+  const [quickAddAssignedTo, setQuickAddAssignedTo] = React.useState<string>('');
   const [quickAddError, setQuickAddError] = React.useState<string | null>(null);
   const [isQuickAdding, setIsQuickAdding] = React.useState<boolean>(false);
 
@@ -412,14 +415,31 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // Query effect
   // -------------------------------------------------------------------------
 
+  // UAT 2026-06-19 — resolve current systemuser → sprk_contact GUID for the
+  // migrated sprk_todo.sprk_assignedto Contact lookup. The widget defers
+  // the data fetch until the contact resolves (one extra RTT on cold start).
+  const { contactId, isLoading: isContactLoading } = useCurrentContactId({ webApi, userId });
+
+  // Populate the quick-add Assigned To default once the contact resolves.
+  // User can edit (override) the default to assign to a different contact.
   React.useEffect(() => {
+    if (contactId && !quickAddAssignedTo) {
+      setQuickAddAssignedTo(contactId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contactId]);
+
+  React.useEffect(() => {
+    // Defer fetch until the contact lookup resolves — querying with a
+    // systemuser GUID against a Contact lookup would always return empty.
+    if (isContactLoading) return;
     let cancelled = false;
     setIsLoading(true);
     setError(null);
 
     const query = buildSmartTodoQuery({
       regardingContext,
-      userId,
+      contactId: contactId ?? undefined,
       businessUnitId,
       scope,
     });
@@ -446,7 +466,8 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     };
   }, [
     webApi,
-    userId,
+    contactId,
+    isContactLoading,
     businessUnitId,
     scope,
     regardingContext?.entityLogicalName,
@@ -618,13 +639,16 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     setIsQuickAdding(true);
     setQuickAddError(null);
 
-    // Build payload from the three-field quick-add. Per ownership-alignment
-    // (2026-06-19), `sprk_assignedto@odata.bind` is required for the record
-    // to appear in both surfaces (widget + Code Page filter by assignedto).
+    // Build payload from the three-field quick-add. Per UAT 2026-06-19
+    // assigned-to migration, `sprk_assignedto` now targets sprk_contact
+    // (NOT systemuser). Bind format must use `/sprk_contacts(GUID)` and
+    // the GUID must be a sprk_contact ID — for "assigned to me" we use the
+    // resolved contactId from useCurrentContactId. The quickAddAssignedTo
+    // text field can override (when user types a different contact GUID).
     const payload: Record<string, unknown> = { sprk_name: title };
-    const assignedToId = quickAddAssignedTo.trim() || userId || '';
-    if (assignedToId) {
-      payload['sprk_assignedto@odata.bind'] = `/systemusers(${assignedToId})`;
+    const assignedToContactId = quickAddAssignedTo.trim() || contactId || '';
+    if (assignedToContactId) {
+      payload['sprk_assignedto@odata.bind'] = `/sprk_contacts(${assignedToContactId})`;
     }
     if (quickAddDueDate) {
       // Date input gives YYYY-MM-DD; treat as end-of-day local.
@@ -646,7 +670,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     } finally {
       setIsQuickAdding(false);
     }
-  }, [quickAddTitle, quickAddDueDate, quickAddAssignedTo, webApi, userId, refetch]);
+  }, [quickAddTitle, quickAddDueDate, quickAddAssignedTo, webApi, contactId, refetch]);
 
   const handleQuickAddClick = React.useCallback(() => {
     void submitQuickAdd();
