@@ -303,16 +303,15 @@ export const Header: React.FC<HeaderProps> = ({
   const [quickAddAssignedTo, setQuickAddAssignedTo] = React.useState<string>('');
   const [quickAddAssignedToContactId, setQuickAddAssignedToContactId] = React.useState<string>('');
 
-  // Hydrate from upstream defaults once they resolve.
+  // UAT 2026-06-20 — track contactId internally (for the bind default);
+  // do NOT pre-fill the visible name field. User sees placeholder
+  // "Assigned to" by default; implicit assignment is to current user.
   React.useEffect(() => {
     if (defaultAssignedToContactId && !quickAddAssignedToContactId) {
       setQuickAddAssignedToContactId(defaultAssignedToContactId);
     }
-    if (defaultAssignedToName && !quickAddAssignedTo) {
-      setQuickAddAssignedTo(defaultAssignedToName);
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultAssignedToContactId, defaultAssignedToName]);
+  }, [defaultAssignedToContactId]);
 
   const dispatchQuickAdd = React.useCallback((title: string) => {
     const trimmed = title.trim();
@@ -441,7 +440,7 @@ export const Header: React.FC<HeaderProps> = ({
             size="small"
             value={quickAddAssignedTo}
             onChange={handleQuickAddAssignedToChange}
-            placeholder="Assigned to (GUID)"
+            placeholder="Assigned to"
             aria-label="Assigned to"
             className={styles.quickAddAssignedInput}
           />

@@ -255,47 +255,29 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
             };
           })();
 
-          if (isCollapsed) {
-            return (
-              <div
-                key={column.id}
-                className={styles.columnCollapsed}
-                role="group"
-                aria-label={`${column.title} (collapsed)`}
-                onClick={() => onToggleCollapse?.(column.id)}
-                style={columnInlineStyle}
-              >
-                {/* UAT 2026-06-19 — same layout as expanded header: title
-                    left, pill right; only the card list area is hidden. */}
-                <div className={styles.columnCollapsedHeader}>
-                  <span className={styles.columnCollapsedTitle}>{column.title}</span>
-                  <span
-                    className={styles.columnCount}
-                    style={
-                      column.accentColor
-                        ? {
-                            backgroundColor: column.accentColor,
-                            color: column.countTextColor ?? tokens.colorNeutralForegroundOnBrand,
-                          }
-                        : undefined
-                    }
-                  >
-                    {column.items.length}
-                  </span>
-                </div>
-              </div>
-            );
-          }
+          // UAT 2026-06-20 — Single container for both expanded AND collapsed.
+          // Same column classname/layout in both states; only the droppable
+          // card list area is conditional. This fixes two issues:
+          //   1. Vertical mode collapsed: column inherits columnVertical's
+          //      `flex: 0 0 auto` so it sizes to its content (just the header
+          //      = ~44px), instead of growing via the prior `columnCollapsed`
+          //      `flex: 1 1 0` which fell through unstyled in vertical parents.
+          //   2. Horizontal mode collapsed: `alignSelf: flex-start` opts out
+          //      of the cross-axis stretch default so the column height
+          //      collapses to header height. Other expanded siblings still
+          //      stretch to board height normally.
+          const collapsedHorizontalInline =
+            isCollapsed && !isVertical ? { alignSelf: 'flex-start' as const } : {};
 
           return (
             <div
               key={column.id}
               className={columnClassName}
               role="group"
-              aria-label={column.title}
-              style={columnInlineStyle}
+              aria-label={isCollapsed ? `${column.title} (collapsed)` : column.title}
+              style={{ ...columnInlineStyle, ...collapsedHorizontalInline }}
             >
-              {/* Column header */}
+              {/* Column header — always rendered; click toggles collapse. */}
               <div
                 className={styles.columnHeader}
                 style={onToggleCollapse ? { cursor: 'pointer' } : undefined}
@@ -307,10 +289,6 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
                 </div>
                 <span
                   className={styles.columnCount}
-                  // UAT 2026-06-19: count pill background = column accent color.
-                  // Yellow needs DARK text for contrast (WCAG); red/green use
-                  // white. column.countTextColor lets the column define the
-                  // foreground; default is white-on-brand for back-compat.
                   style={
                     column.accentColor
                       ? {
@@ -325,32 +303,34 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
                 </span>
               </div>
 
-              {/* Droppable card list */}
-              <Droppable droppableId={column.id}>
-                {provided => (
-                  <div ref={provided.innerRef} {...provided.droppableProps} className={cardListClassName} role="list">
-                    {column.items.length === 0 && <div className={styles.emptyColumn}>No items</div>}
-                    {column.items.map((item, index) => {
-                      const itemId = getItemId(item);
-                      return (
-                        <Draggable key={itemId} draggableId={itemId} index={index}>
-                          {dragProvided => (
-                            <div
-                              ref={dragProvided.innerRef}
-                              {...dragProvided.draggableProps}
-                              {...dragProvided.dragHandleProps}
-                              className={styles.cardWrapper}
-                            >
-                              {renderCard(item, index, column.id)}
-                            </div>
-                          )}
-                        </Draggable>
-                      );
-                    })}
-                    {provided.placeholder}
-                  </div>
-                )}
-              </Droppable>
+              {/* Droppable card list — hidden when column collapsed. */}
+              {!isCollapsed && (
+                <Droppable droppableId={column.id}>
+                  {provided => (
+                    <div ref={provided.innerRef} {...provided.droppableProps} className={cardListClassName} role="list">
+                      {column.items.length === 0 && <div className={styles.emptyColumn}>No items</div>}
+                      {column.items.map((item, index) => {
+                        const itemId = getItemId(item);
+                        return (
+                          <Draggable key={itemId} draggableId={itemId} index={index}>
+                            {dragProvided => (
+                              <div
+                                ref={dragProvided.innerRef}
+                                {...dragProvided.draggableProps}
+                                {...dragProvided.dragHandleProps}
+                                className={styles.cardWrapper}
+                              >
+                                {renderCard(item, index, column.id)}
+                              </div>
+                            )}
+                          </Draggable>
+                        );
+                      })}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              )}
             </div>
           );
         })}

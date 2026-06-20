@@ -425,14 +425,15 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   const [quickAddAssignedToContactId, setQuickAddAssignedToContactId] = React.useState<string>('');
 
   React.useEffect(() => {
+    // Track the contactId internally for the bind, but DON'T pre-fill the
+    // visible text field — user wants the placeholder "Assigned to" to
+    // show by default. The implicit assignment is to current user (via
+    // contactId); user types to override.
     if (contactId && !quickAddAssignedToContactId) {
       setQuickAddAssignedToContactId(contactId);
     }
-    if (contactName && !quickAddAssignedTo) {
-      setQuickAddAssignedTo(contactName);
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contactId, contactName]);
+  }, [contactId]);
 
   React.useEffect(() => {
     // Defer fetch until the contact lookup resolves — querying with a
@@ -858,12 +859,11 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
                 <Button
                   appearance="primary"
                   size="small"
+                  icon={<Add20Regular />}
                   onClick={handleQuickAddClick}
                   disabled={quickAddDisabled}
                   aria-label="Add to-do"
-                >
-                  Add
-                </Button>
+                />
               </Tooltip>
             </>
           )}
