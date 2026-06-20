@@ -341,6 +341,19 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // the FIRST id — matches app's selection-aware toolbar pattern).
   const [selectedIds, setSelectedIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
+  // UAT 2026-06-19 — collapsible columns in both orientations.
+  // Default: all columns expanded (matches Code Page default after the same
+  // UAT round). User collapses via column-header click.
+  const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(() => new Set());
+  const handleToggleCollapse = React.useCallback((columnId: string) => {
+    setCollapsedColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(columnId)) next.delete(columnId);
+      else next.add(columnId);
+      return next;
+    });
+  }, []);
+
   // R4 task 102 (E-1, 2026-06-18) — local orientation state. Kept WIDGET-LOCAL
   // (not persisted via `useUserPreferences`) because the widget mounts in
   // multiple workspace contexts and forcing per-context Dataverse round-trips
@@ -980,6 +993,8 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
               onToggleSelect={handleToggleSelect}
               onOpenTodo={onOpenTodo}
               orientation={orientation}
+              collapsedColumns={collapsedColumns}
+              onToggleCollapse={handleToggleCollapse}
               ariaLabel={`${title} Kanban board`}
             />
           </div>
