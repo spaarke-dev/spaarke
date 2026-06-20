@@ -40,7 +40,19 @@ const useStyles = makeStyles({
     flexDirection: 'row',
     gap: tokens.spacingHorizontalM,
     flex: '1 1 0',
+    // 2026-06-19 fix: explicit `width: 100%` + `alignSelf: stretch` to
+    // guarantee the board fills its container's cross-axis. Without these,
+    // some host layouts (Griffel-nested flex chains, SectionPanel) computed
+    // the board at half the container width and clipped Tomorrow + Future
+    // columns via `overflow: hidden`. The user's decision (2026-06-19):
+    // horizontal mode = ALWAYS fit all 3 columns to container, no
+    // horizontal scroll. Columns themselves shrink via `flex: 1 1 0 /
+    // minWidth: 0 / overflow: hidden` so cards ellipsis-truncate cleanly
+    // in narrow widgets.
+    width: '100%',
+    alignSelf: 'stretch',
     minHeight: 0,
+    minWidth: 0,
     overflow: 'hidden',
     // FR-29 / NFR-08 — smooth row↔column flip (CSS-only). Honour
     // prefers-reduced-motion by snapping with zero transition.
