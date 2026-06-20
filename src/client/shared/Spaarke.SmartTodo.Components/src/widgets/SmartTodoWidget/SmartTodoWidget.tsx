@@ -346,7 +346,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // UAT round). User collapses via column-header click.
   const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(() => new Set());
   const handleToggleCollapse = React.useCallback((columnId: string) => {
-    setCollapsedColumns((prev) => {
+    setCollapsedColumns(prev => {
       const next = new Set(prev);
       if (next.has(columnId)) next.delete(columnId);
       else next.add(columnId);
@@ -620,12 +620,9 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     [quickAddError]
   );
 
-  const handleQuickAddDueDateChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setQuickAddDueDate(e.target.value);
-    },
-    []
-  );
+  const handleQuickAddDueDateChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setQuickAddDueDate(e.target.value);
+  }, []);
 
   const handleQuickAddAssignedToChange = React.useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
@@ -656,9 +653,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     // user has cleared the Assigned To name field, fall back to contactId
     // (still assigns to current user); if they cleared both, leave unassigned.
     const assignedToContactId =
-      quickAddAssignedTo.trim() && quickAddAssignedToContactId
-        ? quickAddAssignedToContactId
-        : contactId || '';
+      quickAddAssignedTo.trim() && quickAddAssignedToContactId ? quickAddAssignedToContactId : contactId || '';
     if (assignedToContactId) {
       payload['sprk_assignedto@odata.bind'] = `/sprk_contacts(${assignedToContactId})`;
     }

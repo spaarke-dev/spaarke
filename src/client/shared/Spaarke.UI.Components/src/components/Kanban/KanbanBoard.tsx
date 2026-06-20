@@ -266,8 +266,7 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
           //      of the cross-axis stretch default so the column height
           //      collapses to header height. Other expanded siblings still
           //      stretch to board height normally.
-          const collapsedHorizontalInline =
-            isCollapsed && !isVertical ? { alignSelf: 'flex-start' as const } : {};
+          const collapsedHorizontalInline = isCollapsed && !isVertical ? { alignSelf: 'flex-start' as const } : {};
 
           return (
             <div

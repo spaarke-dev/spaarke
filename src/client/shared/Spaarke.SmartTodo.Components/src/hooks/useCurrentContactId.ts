@@ -45,9 +45,7 @@ export interface IUseCurrentContactIdResult {
   isLoading: boolean;
 }
 
-export function useCurrentContactId(
-  options: IUseCurrentContactIdOptions,
-): IUseCurrentContactIdResult {
+export function useCurrentContactId(options: IUseCurrentContactIdOptions): IUseCurrentContactIdResult {
   const { webApi, userId } = options;
   const [contactId, setContactId] = React.useState<string | null>(null);
   const [contactName, setContactName] = React.useState<string | null>(null);
@@ -68,22 +66,20 @@ export function useCurrentContactId(
 
     webApi
       .retrieveMultipleRecords('sprk_contact', query)
-      .then((result) => {
+      .then(result => {
         if (cancelled) return;
         const entities = (result.entities ?? []) as Array<{ sprk_contactid?: string; sprk_name?: string }>;
         if (entities.length === 0) {
           // eslint-disable-next-line no-console
           console.warn(
-            `[useCurrentContactId] No sprk_contact found for systemuser ${userId}. "Assigned to Me" filter will return empty.`,
+            `[useCurrentContactId] No sprk_contact found for systemuser ${userId}. "Assigned to Me" filter will return empty.`
           );
           setContactId(null);
           setContactName(null);
         } else {
           if (entities.length > 1) {
             // eslint-disable-next-line no-console
-            console.warn(
-              `[useCurrentContactId] Multiple sprk_contact records for systemuser ${userId}; using first.`,
-            );
+            console.warn(`[useCurrentContactId] Multiple sprk_contact records for systemuser ${userId}; using first.`);
           }
           setContactId(entities[0].sprk_contactid ?? null);
           setContactName(entities[0].sprk_name ?? null);

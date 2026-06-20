@@ -278,7 +278,8 @@ export interface IUseKanbanColumnsResult<T extends IKanbanTodoLike> {
 export function useKanbanColumns<T extends IKanbanTodoLike>(
   options: IUseKanbanColumnsOptions<T>
 ): IUseKanbanColumnsResult<T> {
-  const { items, todayThreshold, tomorrowThreshold, dataverseService, initialColumnOrders, onColumnOrdersChange } = options;
+  const { items, todayThreshold, tomorrowThreshold, dataverseService, initialColumnOrders, onColumnOrdersChange } =
+    options;
 
   const [isRecalculating, setIsRecalculating] = React.useState(false);
 
@@ -287,9 +288,7 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
   // so the caller can persist back to sprk_userpreference. When pref later
   // refetches with a newer order, the seed still wins (we don't merge mid-session
   // to avoid clobbering the user's in-progress drag work).
-  const [columnOrders, setColumnOrders] = React.useState<Record<string, string[]>>(
-    () => initialColumnOrders ?? {}
-  );
+  const [columnOrders, setColumnOrders] = React.useState<Record<string, string[]>>(() => initialColumnOrders ?? {});
 
   // Hydrate columnOrders ONCE when initialColumnOrders arrives non-empty
   // (the prefs hook starts with {} then resolves after the Dataverse fetch).

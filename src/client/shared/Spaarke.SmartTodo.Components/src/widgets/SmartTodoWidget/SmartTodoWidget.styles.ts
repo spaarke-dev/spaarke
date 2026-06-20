@@ -77,7 +77,7 @@ export const useSmartTodoWidgetStyles = makeStyles({
       tokens.spacingVerticalS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalXS,
-      tokens.spacingHorizontalM,
+      tokens.spacingHorizontalM
     ),
     backgroundColor: tokens.colorNeutralBackground2,
   },
