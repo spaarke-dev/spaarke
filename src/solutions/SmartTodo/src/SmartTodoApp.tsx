@@ -40,7 +40,7 @@ import {
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
-import { ListView } from "./components/ListView";
+// ListView import removed 2026-06-19 per UAT: list view discontinued — kanban only.
 import { Header } from "./components/Header";
 import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
 import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
@@ -48,7 +48,7 @@ import { SmartTodoModal, todosToModalRecords } from "./components/Modal";
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
 import { useLaunchContext } from "./hooks/useLaunchContext";
 import { useUserPreferences } from "./hooks/useUserPreferences";
-import type { SmartTodoViewMode } from "./hooks/useUserPreferences";
+// SmartTodoViewMode type import removed 2026-06-19 — see viewMode removal above.
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -105,14 +105,11 @@ function SmartTodoLayout(): React.ReactElement {
   // KanbanHeader is suppressed via `hideHeader`).
   const { preferences: viewPrefs, updatePreferences: updateViewPrefs } =
     useUserPreferences({ webApi: getWebApi(), userId: getUserId() });
-  const viewMode = viewPrefs.viewMode;
   const orientation = viewPrefs.orientation;
-  const handleViewModeChange = React.useCallback(
-    (mode: SmartTodoViewMode) => {
-      void updateViewPrefs({ viewMode: mode });
-    },
-    [updateViewPrefs],
-  );
+  // viewMode / handleViewModeChange removed 2026-06-19 per UAT — list view
+  // discontinued, kanban is the sole presentation. The preference field
+  // remains in useUserPreferences (back-compat for old user records) but
+  // is no longer surfaced in the chrome.
   const handleOrientationChange = React.useCallback(
     (next: Orientation) => {
       void updateViewPrefs({ orientation: next });
@@ -411,36 +408,29 @@ function SmartTodoLayout(): React.ReactElement {
         onOpenSettings={handleOpenSettings}
         selectedCount={selectedIds.size}
         toolbarActions={toolbarActions}
-        viewMode={viewMode}
-        onViewModeChange={handleViewModeChange}
         orientation={orientation}
         onOrientationChange={handleOrientationChange}
       />
 
-      {/* ── Primary surface — Kanban Board (default) OR List View (R4 task 033 / FR-09) ── */}
+      {/* ── Primary surface — Kanban Board (UAT 2026-06-19: list view removed
+            per user feedback; kanban is the sole presentation. The
+            viewMode + onViewModeChange Header props are intentionally
+            omitted so the Header suppresses the ViewToggle.) ── */}
       <div className={styles.primaryPanel}>
-        {viewMode === "list" ? (
-          <ListView
-            items={items}
-            onItemClick={selectItem}
-            selectedTodoId={selectedEventId}
-          />
-        ) : (
-          <SmartToDo
-            webApi={getWebApi()}
-            userId={getUserId()}
-            // R4 task 060 — Card affordances plumbing (FR-25/26/27)
-            selectedIds={selectedIds}
-            onToggleSelect={handleToggleSelect}
-            onOpenTodo={handleCardOpen}
-            // R4-104 (Wave E-3) — Suppress inner KanbanHeader (chrome lives
-            // in the consolidated <Header /> above) + expose Settings opener
-            // so the Header's gear button can trigger the threshold popover
-            // that's still anchored inside SmartToDo.
-            hideHeader
-            onSettingsOpenerReady={handleSettingsOpenerReady}
-          />
-        )}
+        <SmartToDo
+          webApi={getWebApi()}
+          userId={getUserId()}
+          // R4 task 060 — Card affordances plumbing (FR-25/26/27)
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onOpenTodo={handleCardOpen}
+          // R4-104 (Wave E-3) — Suppress inner KanbanHeader (chrome lives
+          // in the consolidated <Header /> above) + expose Settings opener
+          // so the Header's gear button can trigger the threshold popover
+          // that's still anchored inside SmartToDo.
+          hideHeader
+          onSettingsOpenerReady={handleSettingsOpenerReady}
+        />
       </div>
 
       {/* ── R4 task 040 — Card-open modal (HYBRID modal pattern, FR-13/16/17)

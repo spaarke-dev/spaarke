@@ -423,9 +423,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onSettingsOpenerReady]);
 
-  /** Collapsed Kanban columns — Future is collapsed by default */
+  /**
+   * Collapsed Kanban columns — UAT 2026-06-19: ALL columns expanded by default
+   * per user feedback (previously Future was collapsed). User explicitly
+   * collapses via column-header click.
+   */
   const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(
-    new Set(["Future"])
+    new Set()
   );
 
   /**

@@ -202,7 +202,9 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
       title: 'Tomorrow',
       subtitle: `Score ${tomorrowThreshold}–${todayThreshold - 1}`,
       items: tomorrow,
-      accentColor: tokens.colorPaletteDarkOrangeBorder2,
+      // 2026-06-19 UAT: yellow accent (not orange/red) per user feedback —
+      // matches the yellow tint background; cards inherit this for left-border.
+      accentColor: tokens.colorPaletteYellowBorder2,
       tintColor: tokens.colorPaletteYellowBackground1,
     },
     {

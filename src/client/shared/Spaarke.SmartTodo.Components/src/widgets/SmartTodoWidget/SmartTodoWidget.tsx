@@ -741,19 +741,12 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
         accessibility conventions.
       */}
       <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
-        {/* ── LEFT: wizard + QuickAdd ─────────────────────────────────── */}
+        {/* ── LEFT: QuickAdd only (UAT 2026-06-19: '+ wizard' button removed
+             per user feedback — quick-add is the sole create affordance in
+             the widget toolbar. The full-form wizard remains reachable from
+             the quick-add error MessageBar's 'Open full wizard' link, AND
+             from the parent-form ribbon / Outlook ribbon entry points.) ──── */}
         <div className={styles.toolbarLeft}>
-          {onAddTodo && (
-            <Tooltip content="New to-do (full form)" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<Add20Regular />}
-                onClick={onAddTodo}
-                aria-label="New to-do (full form)"
-              />
-            </Tooltip>
-          )}
           {quickAddAvailable && (
             <>
               <Input
