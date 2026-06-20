@@ -59,6 +59,36 @@ export const useSmartTodoWidgetStyles = makeStyles({
   },
 
   /**
+   * Title row — sits ABOVE the toolbar (UAT 2026-06-19) for chrome uniformity
+   * with the Code Page Header. Brand icon + "Smart To Do" text.
+   *
+   * Production hosts that already render their own section title (e.g.,
+   * LegalWorkspace SectionPanel) can suppress this via the `showTitle={false}`
+   * prop on `SmartTodoWidget`. Default shows the title for standalone /
+   * harness consumption.
+   */
+  titleRow: {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    ...shorthands.padding(
+      tokens.spacingVerticalS,
+      tokens.spacingHorizontalM,
+      tokens.spacingVerticalXS,
+      tokens.spacingHorizontalM,
+    ),
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+
+  /** Title text color/typography (matches the Code Page Header). */
+  titleText: {
+    color: tokens.colorNeutralForeground1,
+    whiteSpace: 'nowrap',
+  },
+
+  /**
    * Sole chrome row — single `<Toolbar>` with left (wizard + QuickAdd),
    * spacer, right (action cluster + search icon toggle). R4-103 reorganised
    * from R4-099's [SearchBox left | actions right] layout.

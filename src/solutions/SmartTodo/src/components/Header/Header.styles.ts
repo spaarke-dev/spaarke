@@ -23,10 +23,42 @@ import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 
 export const useHeaderStyles = makeStyles({
   /**
-   * Single toolbar landmark — flex row, full width, sticky height. Mirrors
-   * the SmartTodoWidget `toolbar` rule so the two surfaces feel like one
-   * product (UAT 8 + 11). `flexWrap: 'wrap'` lets the right cluster drop
-   * to a second line on very narrow viewports without breaking layout.
+   * Header column — wraps the title row + toolbar row (UAT 2026-06-19:
+   * title moved to its OWN row above the toolbar per user feedback;
+   * previously the title sat inline at the start of the toolbar).
+   */
+  headerColumn: {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderBottom(
+      tokens.strokeWidthThin,
+      'solid',
+      tokens.colorNeutralStroke1,
+    ),
+  },
+
+  /**
+   * Title row — sits ABOVE the toolbar, full width, slightly larger text +
+   * brand icon. Mirrors the widget's title row for uniformity (UAT 2026-06-19).
+   */
+  titleRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    ...shorthands.padding(
+      tokens.spacingVerticalS,
+      tokens.spacingHorizontalM,
+      tokens.spacingVerticalXS,
+      tokens.spacingHorizontalM,
+    ),
+  },
+
+  /**
+   * Toolbar row — flex row below the title row. NO bottom border (the
+   * headerColumn carries it instead).
    */
   toolbar: {
     flexShrink: 0,
@@ -37,22 +69,17 @@ export const useHeaderStyles = makeStyles({
     columnGap: tokens.spacingHorizontalM,
     rowGap: tokens.spacingVerticalXS,
     ...shorthands.padding(
-      tokens.spacingVerticalS,
+      tokens.spacingVerticalXS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalS,
       tokens.spacingHorizontalM,
-    ),
-    backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderBottom(
-      tokens.strokeWidthThin,
-      'solid',
-      tokens.colorNeutralStroke1,
     ),
     minHeight: '44px',
     boxSizing: 'border-box',
   },
 
-  /** Brand title cluster (icon + text). Flex-shrink: 0 to keep title intact. */
+  /** Brand title cluster (icon + text). Flex-shrink: 0 to keep title intact.
+   *  Kept for back-compat — still applied to the titleRow children. */
   titleGroup: {
     display: 'flex',
     flexDirection: 'row',

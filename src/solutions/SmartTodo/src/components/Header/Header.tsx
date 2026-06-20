@@ -313,19 +313,25 @@ export const Header: React.FC<HeaderProps> = ({
   const quickAddDisabled = quickAddValue.trim().length === 0;
 
   return (
-    <Toolbar
-      aria-label="Smart To Do toolbar"
-      size="small"
-      className={styles.toolbar}
-    >
-      {/* ── Left: brand title ──────────────────────────────────────────── */}
-      <div className={styles.titleGroup}>
-        <MicrosoftToDoIcon size={20} active />
-        <Text size={400} weight="semibold" as="h1" className={styles.title}>
-          {title}
-        </Text>
+    <div className={styles.headerColumn}>
+      {/* ── Title row (UAT 2026-06-19): brand icon + "Smart To Do" text
+            now sits in its OWN row above the toolbar (was inline at the
+            start of the toolbar). Mirrors the widget's title row for
+            uniform chrome across surfaces. */}
+      <div className={styles.titleRow}>
+        <div className={styles.titleGroup}>
+          <MicrosoftToDoIcon size={20} active />
+          <Text size={400} weight="semibold" as="h1" className={styles.title}>
+            {title}
+          </Text>
+        </div>
       </div>
 
+      <Toolbar
+        aria-label="Smart To Do toolbar"
+        size="small"
+        className={styles.toolbar}
+      >
       {/* ── Center-left: QuickAdd (compact, matches widget pattern) ────── */}
       {/*
         QuickAdd is suppressed when there is an active selection — the
@@ -443,7 +449,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       )}
-    </Toolbar>
+      </Toolbar>
+    </div>
   );
 };
 

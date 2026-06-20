@@ -109,6 +109,7 @@ import {
   OrientationToggle,
   type Orientation,
 } from '../../../../Spaarke.UI.Components/src/components/OrientationToggle';
+import { MicrosoftToDoIcon } from '../../../../Spaarke.UI.Components/src/icons/MicrosoftToDoIcon';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
@@ -260,13 +261,18 @@ export interface SmartTodoWidgetProps {
    */
   feedSync?: IFeedSyncBridge;
   /**
-   * Title used for the root region's `aria-label`. Defaults to "Smart To Do".
-   *
-   * Post-099 (Pattern D consolidation): the widget no longer renders a visible
-   * title bar — the host (LegalWorkspace SectionPanel or Direct-widget caller)
-   * owns the visible title. This prop survives for accessibility only.
+   * Title text. Used for the root region's `aria-label` AND (when
+   * `showTitle` is true) for the visible title row above the toolbar.
+   * Defaults to "Smart To Do".
    */
   title?: string;
+  /**
+   * UAT 2026-06-19: show a visible title row above the toolbar with the
+   * brand icon + title text. Defaults to `true` for standalone / harness
+   * consumption. Hosts that render their own section title (e.g.,
+   * LegalWorkspace SectionPanel) should pass `false` to avoid duplication.
+   */
+  showTitle?: boolean;
   /** Notify the host of the active count (for badge / tab counter). */
   onBadgeCountChange?: (count: number) => void;
   /** Expose the refetch trigger to the host (for header refresh button). */
@@ -312,6 +318,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   businessUnitId,
   feedSync,
   title = 'Smart To Do',
+  showTitle = true,
   onBadgeCountChange,
   onRefetchReady,
   onOpenTodo,
@@ -740,6 +747,20 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
         `aria-label` AND a `<Tooltip relationship="label">` per Fluent v9
         accessibility conventions.
       */}
+      {/* ── Title row (UAT 2026-06-19): brand icon + "Smart To Do" text in
+            its own row above the toolbar. Mirrors the Code Page Header's
+            title row for chrome uniformity. Suppressed via `showTitle={false}`
+            when host (e.g., LegalWorkspace SectionPanel) already renders a
+            section title. */}
+      {showTitle && (
+        <div className={styles.titleRow}>
+          <MicrosoftToDoIcon size={20} active />
+          <Text size={400} weight="semibold" as="h1" className={styles.titleText}>
+            {title}
+          </Text>
+        </div>
+      )}
+
       <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
         {/* ── LEFT: QuickAdd only (UAT 2026-06-19: '+ wizard' button removed
              per user feedback — quick-add is the sole create affordance in
