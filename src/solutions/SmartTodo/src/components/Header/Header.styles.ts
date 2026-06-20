@@ -23,10 +23,42 @@ import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 
 export const useHeaderStyles = makeStyles({
   /**
-   * Single toolbar landmark — flex row, full width, sticky height. Mirrors
-   * the SmartTodoWidget `toolbar` rule so the two surfaces feel like one
-   * product (UAT 8 + 11). `flexWrap: 'wrap'` lets the right cluster drop
-   * to a second line on very narrow viewports without breaking layout.
+   * Header column — wraps the title row + toolbar row (UAT 2026-06-19:
+   * title moved to its OWN row above the toolbar per user feedback;
+   * previously the title sat inline at the start of the toolbar).
+   */
+  headerColumn: {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderBottom(
+      tokens.strokeWidthThin,
+      'solid',
+      tokens.colorNeutralStroke1,
+    ),
+  },
+
+  /**
+   * Title row — sits ABOVE the toolbar, full width, slightly larger text +
+   * brand icon. Mirrors the widget's title row for uniformity (UAT 2026-06-19).
+   */
+  titleRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    ...shorthands.padding(
+      tokens.spacingVerticalS,
+      tokens.spacingHorizontalM,
+      tokens.spacingVerticalXS,
+      tokens.spacingHorizontalM,
+    ),
+  },
+
+  /**
+   * Toolbar row — flex row below the title row. NO bottom border (the
+   * headerColumn carries it instead).
    */
   toolbar: {
     flexShrink: 0,
@@ -37,22 +69,17 @@ export const useHeaderStyles = makeStyles({
     columnGap: tokens.spacingHorizontalM,
     rowGap: tokens.spacingVerticalXS,
     ...shorthands.padding(
-      tokens.spacingVerticalS,
+      tokens.spacingVerticalXS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalS,
       tokens.spacingHorizontalM,
-    ),
-    backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderBottom(
-      tokens.strokeWidthThin,
-      'solid',
-      tokens.colorNeutralStroke1,
     ),
     minHeight: '44px',
     boxSizing: 'border-box',
   },
 
-  /** Brand title cluster (icon + text). Flex-shrink: 0 to keep title intact. */
+  /** Brand title cluster (icon + text). Flex-shrink: 0 to keep title intact.
+   *  Kept for back-compat — still applied to the titleRow children. */
   titleGroup: {
     display: 'flex',
     flexDirection: 'row',
@@ -68,12 +95,11 @@ export const useHeaderStyles = makeStyles({
   },
 
   /**
-   * QuickAdd cluster — compact input + Add button + optional "+ New" wizard.
-   * `flex: '1 1 auto'` lets the input expand to fill spare width without
-   * pushing the right cluster off-screen. `minWidth: 0` allows the input to
-   * shrink below its intrinsic content width in narrow viewports.
-   * `maxWidth` caps the QuickAdd at a reasonable max so the right cluster
-   * doesn't get crowded on wide screens.
+   * QuickAdd cluster — Title + Due Date + Assigned To + Add button.
+   * UAT 2026-06-19: maxWidth raised + flex-grow on so the three fields
+   * have generous room (matches widget chrome). Title field gets the
+   * lion's share via flex; Due Date stays content-sized; Assigned To
+   * gets a moderate min/preferred width.
    */
   quickAddGroup: {
     display: 'flex',
@@ -82,7 +108,7 @@ export const useHeaderStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     flex: '1 1 auto',
     minWidth: 0,
-    maxWidth: '420px',
+    // No maxWidth — let the right cluster shrink first via its own flex sizing.
   },
 
   /**
@@ -94,6 +120,39 @@ export const useHeaderStyles = makeStyles({
     flex: '1 1 auto',
     minWidth: 0,
     width: '100%',
+  },
+
+  /** UAT 2026-06-19 — Due Date native HTML input. */
+  quickAddDateInput: {
+    flexShrink: 0,
+    minWidth: '130px',
+    height: '24px',
+    boxSizing: 'border-box',
+    borderRadius: tokens.borderRadiusMedium,
+    borderTopWidth: tokens.strokeWidthThin,
+    borderRightWidth: tokens.strokeWidthThin,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderLeftWidth: tokens.strokeWidthThin,
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke1,
+    borderRightColor: tokens.colorNeutralStroke1,
+    borderBottomColor: tokens.colorNeutralStroke1,
+    borderLeftColor: tokens.colorNeutralStroke1,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    fontSize: tokens.fontSizeBase200,
+    fontFamily: tokens.fontFamilyBase,
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+
+  /** UAT 2026-06-19 — Assigned To input — moderate width; same as widget. */
+  quickAddAssignedInput: {
+    flex: '0 1 220px',
+    minWidth: '140px',
   },
 
   /**

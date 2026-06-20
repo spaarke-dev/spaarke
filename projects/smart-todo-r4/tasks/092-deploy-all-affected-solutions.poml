@@ -136,5 +136,48 @@ All 3 deploy scripts reported `Publishing customizations... Published`. No error
 ### Status
 
 `in-progress` until user UAT sign-off confirms golden-path. Per user instruction "do not close the PR or project until testing and acceptance are signed off on" — R4-092 stays open; R4-098 wrap-up is held; PR-close is held.
+
+---
+
+## Deploy session 2026-06-18 (Wave E) — second deploy of the day
+
+Post-PR #394 (Wave E widget/app parity) merged to master at `3d02a3d38` (2026-06-18T21:03:49Z). This deploy supersedes the Wave D deploy from earlier today (16:25-16:30 UTC) for SmartTodo + SpaarkeAi surfaces. The Wave D deploy of those 2 surfaces did NOT include Wave E (drag-drop, multi-select, column tints, search-as-icon, always-on Open, inline quick-add, app's single-toolbar chrome).
+
+### Surfaces deployed (2)
+
+| Surface | Web Resource | Bundle | Carries (Wave E delta) |
+|---|---|---|---|
+| SmartTodo Code Page | `sprk_smarttodo` | 1709 KB (was 1706 KB pre-Wave-E) | R4-104 app chrome consolidation (single Toolbar, compact QuickAdd, 3-col first-load); R4-102 app-side Kanban consumer import swap |
+| SpaarkeAi (embeds LW shell with widget) | `sprk_spaarkeai` | 3766 KB (was 3752 KB pre-Wave-E) | R4-102 full widget Kanban (drag/drop/multi-select/orientation/pin); R4-103 widget toolbar polish (search-icon, always-on Open, column tints, Capital Case, inline quick-add) |
+
+### Surfaces NOT redeployed (intentional)
+
+- **CreateTodoWizard** (`sprk_createtodowizard`) — Wave E did NOT modify it. R4-100's BroadcastChannel producer is already live from the Wave D deploy (modifiedon 6/18/2026 4:30:41 PM). No-op skip.
+- **RegardingResolver PCF v1.1.0**, **`sprk_todo_dirty_check.js`**, **BFF API**, **Matter insight web resources** — all untouched in Wave E (same as Wave D).
+
+### Pre-deploy verification
+
+- Main repo at `c:/code_files/spaarke` synced to master tip `3d02a3d38` (PR #394 merge commit)
+- npm install with `--legacy-peer-deps --no-audit --no-fund` per CI hardening convention (PR #392 + PR #393)
+- Both Vite builds green: SmartTodo 1.74 MB / 476 KB gzip in 13.18s; SpaarkeAi 3.85 MB / 1.05 MB gzip in 12.11s
+- DATAVERSE_URL = https://spaarkedev1.crm.dynamics.com; az auth valid
+
+### Deploy results — both ✅
+
+- SmartTodo: "Publishing customizations... Published"; modifiedon = 6/18/2026 9:25:43 PM
+- SpaarkeAi: "Publishing customizations... Published"; modifiedon = 6/18/2026 9:27:21 PM
+
+Dataverse server timestamps confirm both writes landed within the past 5 minutes of this commit.
+
+### Acceptance criteria status (cumulative across Wave D + Wave E deploys)
+
+- [x] All affected solutions deployed to spaarkedev1 (Wave D 3 surfaces + Wave E 2 surfaces = 4 unique surfaces; CreateTodoWizard shared between both)
+- [x] sprk_todoflag: 0 functional hits in source (R4-094 grep gate 2026-06-12)
+- [ ] Golden-path smoke test — STILL DELEGATED to user UAT (round 3 now, post-Wave-E)
+- [ ] PR description — Wave E landed via PR #394; this notes block records it
+
+### Status (unchanged)
+
+`in-progress` until user UAT round 3 confirms widget/app parity per the 11 UAT items in `notes/e-widget-app-parity-audit-2026-06-18.md`. R4-098 wrap-up + final PR-close stay HELD.
   </notes>
 </task>

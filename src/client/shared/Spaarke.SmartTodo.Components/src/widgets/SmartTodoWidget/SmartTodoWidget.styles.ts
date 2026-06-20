@@ -59,6 +59,36 @@ export const useSmartTodoWidgetStyles = makeStyles({
   },
 
   /**
+   * Title row — sits ABOVE the toolbar (UAT 2026-06-19) for chrome uniformity
+   * with the Code Page Header. Brand icon + "Smart To Do" text.
+   *
+   * Production hosts that already render their own section title (e.g.,
+   * LegalWorkspace SectionPanel) can suppress this via the `showTitle={false}`
+   * prop on `SmartTodoWidget`. Default shows the title for standalone /
+   * harness consumption.
+   */
+  titleRow: {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    ...shorthands.padding(
+      tokens.spacingVerticalS,
+      tokens.spacingHorizontalM,
+      tokens.spacingVerticalXS,
+      tokens.spacingHorizontalM
+    ),
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+
+  /** Title text color/typography (matches the Code Page Header). */
+  titleText: {
+    color: tokens.colorNeutralForeground1,
+    whiteSpace: 'nowrap',
+  },
+
+  /**
    * Sole chrome row — single `<Toolbar>` with left (wizard + QuickAdd),
    * spacer, right (action cluster + search icon toggle). R4-103 reorganised
    * from R4-099's [SearchBox left | actions right] layout.
@@ -100,10 +130,54 @@ export const useSmartTodoWidgetStyles = makeStyles({
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
 
-  /** QuickAdd Input — grows to fill the left slot; min-width keeps it usable. */
+  /** QuickAdd Title Input — grows to fill the left slot; min-width keeps it usable. */
   quickAddInput: {
     flex: '1 1 auto',
     minWidth: '120px',
+  },
+
+  /** UAT 2026-06-19 — Due Date input (native HTML date picker). */
+  quickAddDateInput: {
+    flexShrink: 0,
+    minWidth: '130px',
+    height: '24px',
+    boxSizing: 'border-box',
+    borderRadius: tokens.borderRadiusMedium,
+    borderTopWidth: tokens.strokeWidthThin,
+    borderRightWidth: tokens.strokeWidthThin,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderLeftWidth: tokens.strokeWidthThin,
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke1,
+    borderRightColor: tokens.colorNeutralStroke1,
+    borderBottomColor: tokens.colorNeutralStroke1,
+    borderLeftColor: tokens.colorNeutralStroke1,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    fontSize: tokens.fontSizeBase200,
+    fontFamily: tokens.fontFamilyBase,
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+
+  /** UAT 2026-06-19 — Assigned To Input — moderate width to display name. */
+  quickAddAssignedInput: {
+    flex: '0 1 220px',
+    minWidth: '140px',
+  },
+
+  /**
+   * UAT 2026-06-19 — Inline filter SearchBox shown in the right toolbar
+   * cluster when Filter is active. Takes the horizontal space that the
+   * action buttons (Open/Refresh/Orient) normally occupy.
+   */
+  inlineFilterBox: {
+    flex: '1 1 auto',
+    minWidth: '180px',
+    maxWidth: '320px',
   },
 
   /**
@@ -191,12 +265,36 @@ export const useSmartTodoWidgetStyles = makeStyles({
    *
    * `minHeight: 0` is essential — without it the parent's `flex: 1 1 auto`
    * body wins the height race and the inner card list cannot scroll.
+   *
+   * 2026-06-19 fix #1: `flex: '1 1 0'` (NOT `1 1 auto`) — matches the Code Page
+   * boardContainer. With `auto` flex-basis the kanban height was content-driven,
+   * collapsed to 0 in nested flex chains. `flex: 1 1 0` is the canonical
+   * "fill remaining height in a column-flex parent" idiom.
+   *
+   * 2026-06-19 fix #2: `minHeight: 'max(400px, 60vh)'` (NOT `0`) — even with
+   * the flex fix, the kanban region's Griffel-shared `min-height: 0` class
+   * collapsed the inner KanbanBoard when the widget's host pane had ambiguous
+   * height resolution (LegalWorkspace SectionPanel, harness frames, etc.).
+   *
+   * `max(400px, 60vh)` is a FLEXIBLE floor:
+   *   - Absolute minimum 400px (so the kanban never disappears even on tiny
+   *     viewports or in broken host layouts)
+   *   - Scales to 60% of viewport height on any reasonable screen
+   *     (e.g., 540px on a 900px viewport, 648px on 1080p, 864px on 1440p)
+   *   - Actual rendered height GROWS BEYOND this floor when the host
+   *     provides more vertical space via flex: 1 1 0
+   *
+   * Discovered via spaarke-prototype/smart-todo-r4-uat harness: manually
+   * overriding the Griffel `min-height: 0` class made cards appear. The Code
+   * Page already gets enough height from its full-page host chrome
+   * (~viewport - chrome ≈ 800px); the widget needs an explicit floor since
+   * SectionPanel + variable host layouts don't guarantee height.
    */
   kanbanContainer: {
     display: 'flex',
     flexDirection: 'column',
-    flex: '1 1 auto',
-    minHeight: 0,
+    flex: '1 1 0',
+    minHeight: 'max(400px, 60vh)',
     minWidth: 0,
   },
 

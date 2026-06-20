@@ -2,7 +2,7 @@
 
 > **Purpose**: Central registry of all Claude Code skills — the **single source of truth** for what skills exist, their triggers, and how to create new ones.
 >
-> **Last Updated**: February 24, 2026 (added code-page-deploy skill, enhanced bff-deploy and pcf-deploy with path maps)
+> **Last Updated**: June 18, 2026 (added prototype-harness-setup, prototype-harness-extend, prototype-experiment-init for the spaarke-prototype UI iteration framework)
 
 ---
 
@@ -80,6 +80,9 @@
 | [spe-integration](spe-integration/SKILL.md) | Integrate with SharePoint Embedded — containers, permissions, agent grounding, webUrl opens (reads `knowledge/sharepoint-embedded/`) | No | "SharePoint Embedded", "SPE container", "container type", "webUrl document open" |
 | [widget-design](widget-design/SKILL.md) | Design MCP App widget — inline or side-by-side, Fluent v9, sandboxed iframe constraints (reads `knowledge/mcp-apps/`) | No | "MCP App widget", "Copilot widget", "side-by-side widget", "inline widget" |
 | [fluent-v9-component](fluent-v9-component/SKILL.md) | Author/modify any Fluent UI v9 React component across Spaarke surfaces — loads `.claude/patterns/{ui,pcf}/fluent-v9-*.md` + drills into `knowledge/fluent-ui-v9/` | No | "Fluent UI", "Fluent v9", "build component", "theming", "FluentProvider", "Griffel", "makeStyles", "Popover/Tooltip/Dialog/Menu/Toast" |
+| [prototype-harness-setup](prototype-harness-setup/SKILL.md) | Scaffold a Mode 2 production component harness in `spaarke-prototype` for sub-second visual iteration on a worktree component | No | `/prototype-harness-setup`, "set up prototype harness", "create UAT harness", "stand up local dev for X widget", "iterate on UI visually" |
+| [prototype-harness-extend](prototype-harness-extend/SKILL.md) | Add a new Dataverse entity factory + preset to `spaarke-prototype/_infra/seed/` for harness consumption | No | `/prototype-harness-extend`, "add entity to prototype seed", "create factory for sprk_X", "extend the harness with X entity" |
+| [prototype-experiment-init](prototype-experiment-init/SKILL.md) | Scaffold a Mode 1 standalone UX experiment for greenfield design work (no production code yet) | No | `/prototype-experiment-init`, "start UX experiment", "design new prototype for X", "greenfield design for Y" |
 
 ## Skill Categories
 
@@ -111,6 +114,11 @@
 - **jps-scope-refresh** - Operational: Refresh scope-model-index.json from Dataverse (Tier 3)
 - **jps-validate** - Component: Validate JPS JSON against schema and test rendering (Tier 1)
 - **add-reference-to-index** - Operational: Index golden reference documents into AI Search for L1 knowledge retrieval
+
+### 🎨 UI Prototyping (sub-second iteration via `spaarke-prototype` framework)
+- **prototype-harness-setup** - Scaffold Mode 2 production harness (aliases worktree source, mocks Xrm/auth, seeded data, HMR)
+- **prototype-harness-extend** - Add new entity factory + preset to shared `_infra/seed/`
+- **prototype-experiment-init** - Scaffold Mode 1 standalone UX experiment (greenfield, no production source yet)
 
 ### 🔧 Maintenance
 - **ai-procedure-maintenance** - Propagate updates when adding ADRs, constraints, patterns, skills

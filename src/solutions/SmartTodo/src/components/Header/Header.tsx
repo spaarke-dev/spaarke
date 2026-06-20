@@ -61,6 +61,7 @@ import {
   Input,
   SearchBox,
   Text,
+  ToggleButton,
   Toolbar,
   Tooltip,
   type InputOnChangeData,
@@ -69,9 +70,11 @@ import {
 import {
   Add20Regular,
   ArrowClockwise20Regular,
+  Search20Regular,
   SettingsRegular,
 } from '@fluentui/react-icons';
 import {
+  MicrosoftToDoIcon,
   OrientationToggle,
   SelectionAwareToolbar,
   ViewToggle,
@@ -79,7 +82,6 @@ import {
   type ToolbarAction,
   type ViewToggleMode,
 } from '@spaarke/ui-components';
-import { MicrosoftToDoIcon } from '../../icons/MicrosoftToDoIcon';
 import { useHeaderStyles } from './Header.styles';
 
 // ---------------------------------------------------------------------------
@@ -96,10 +98,15 @@ import { useHeaderStyles } from './Header.styles';
  */
 export const QUICK_ADD_TODO_EVENT = 'sprk-smarttodo:quick-add' as const;
 
-/** Detail payload for the QUICK_ADD_TODO_EVENT custom event. */
+/** Detail payload for the QUICK_ADD_TODO_EVENT custom event.
+ *  UAT 2026-06-19: extended from title-only to three-field. */
 export interface QuickAddTodoEventDetail {
   /** Trimmed, non-empty title for the new to-do. */
   title: string;
+  /** ISO date string (YYYY-MM-DD) or empty/undefined for "no due date". */
+  dueDate?: string;
+  /** systemuser GUID to set on sprk_assignedto, or empty/undefined to default. */
+  assignedToId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +194,21 @@ export interface HeaderProps {
    * Placeholder for the QuickAdd input. Defaults to "Add a to-do…".
    */
   quickAddPlaceholder?: string;
+
+  /**
+   * UAT 2026-06-19 — current user's sprk_contact GUID (resolved upstream
+   * via useCurrentContactId in SmartTodoApp). Used as the default
+   * assignedTo for new todos created via the quick-add. Hidden from the UI
+   * (only the contact NAME is shown in the Assigned To text field).
+   */
+  defaultAssignedToContactId?: string;
+  /**
+   * UAT 2026-06-19 — display name for the current user's contact. Used as
+   * the visible value in the quick-add Assigned To field (so the user sees
+   * "Jane Doe" not a GUID). User can edit; on edit, only the visible text
+   * changes (the bind still goes to the original contactId).
+   */
+  defaultAssignedToName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +246,8 @@ function useDebouncedEffect(
 // ---------------------------------------------------------------------------
 
 export const Header: React.FC<HeaderProps> = ({
+  defaultAssignedToContactId,
+  defaultAssignedToName,
   title = 'Smart To Do',
   searchQuery: searchQueryProp,
   onSearchChange,
@@ -266,25 +290,66 @@ export const Header: React.FC<HeaderProps> = ({
   );
 
   // ── QuickAdd local state ────────────────────────────────────────────────
-  // The actual create logic lives inside `<SmartToDo>` (R3 task 015 +
-  // optimistic insert in `SmartToDo.tsx::handleAdd`). We dispatch a window
-  // CustomEvent that the inner component subscribes to — same pattern as
-  // OPEN_TODOS_EVENT for selection-aware Open (R4-032).
+  // UAT 2026-06-19: three-field quick-add (title + due date + assigned to).
+  // The actual create logic lives inside `<SmartToDo>`; we dispatch a window
+  // CustomEvent with the extended detail payload that SmartToDo subscribes to.
+  const todayISODate = React.useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
   const [quickAddValue, setQuickAddValue] = React.useState<string>('');
+  const [quickAddDueDate, setQuickAddDueDate] = React.useState<string>(todayISODate);
+  // Display = name (visible); internal = contactId (used for bind).
+  const [quickAddAssignedTo, setQuickAddAssignedTo] = React.useState<string>('');
+  const [quickAddAssignedToContactId, setQuickAddAssignedToContactId] = React.useState<string>('');
+
+  // UAT 2026-06-20 — track contactId internally (for the bind default);
+  // do NOT pre-fill the visible name field. User sees placeholder
+  // "Assigned to" by default; implicit assignment is to current user.
+  React.useEffect(() => {
+    if (defaultAssignedToContactId && !quickAddAssignedToContactId) {
+      setQuickAddAssignedToContactId(defaultAssignedToContactId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultAssignedToContactId]);
 
   const dispatchQuickAdd = React.useCallback((title: string) => {
     const trimmed = title.trim();
     if (!trimmed) return;
-    const detail: QuickAddTodoEventDetail = { title: trimmed };
+    const detail: QuickAddTodoEventDetail = {
+      title: trimmed,
+      dueDate: quickAddDueDate || undefined,
+      // UAT 2026-06-19 — pass the internal contactId for the bind, not
+      // the display name. Falls back to upstream default if the user
+      // hasn't changed it.
+      assignedToId:
+        quickAddAssignedToContactId ||
+        defaultAssignedToContactId ||
+        undefined,
+    };
     window.dispatchEvent(
       new CustomEvent<QuickAddTodoEventDetail>(QUICK_ADD_TODO_EVENT, { detail }),
     );
     setQuickAddValue('');
-  }, []);
+  }, [quickAddDueDate, quickAddAssignedToContactId, defaultAssignedToContactId]);
 
   const handleQuickAddChange = React.useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
       setQuickAddValue(data.value);
+    },
+    [],
+  );
+
+  const handleQuickAddDueDateChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setQuickAddDueDate(e.target.value);
+    },
+    [],
+  );
+
+  const handleQuickAddAssignedToChange = React.useCallback(
+    (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
+      setQuickAddAssignedTo(data.value);
     },
     [],
   );
@@ -303,6 +368,17 @@ export const Header: React.FC<HeaderProps> = ({
     dispatchQuickAdd(quickAddValue);
   }, [dispatchQuickAdd, quickAddValue]);
 
+  // UAT 2026-06-19 — Filter slide toggle. When active, the right action
+  // cluster swaps to an inline SearchBox + close button (same pattern as widget).
+  const [isFilterOpen, setIsFilterOpen] = React.useState<boolean>(false);
+  const handleToggleFilter = React.useCallback(() => {
+    setIsFilterOpen((v) => !v);
+    if (isFilterOpen) {
+      // Closing → clear the query so next open starts fresh.
+      setLocalQuery('');
+    }
+  }, [isFilterOpen]);
+
   // ── Right-group derived flags ───────────────────────────────────────────
   const showViewToggle = viewMode !== undefined && onViewModeChange !== undefined;
   const showOrientationToggle =
@@ -313,19 +389,25 @@ export const Header: React.FC<HeaderProps> = ({
   const quickAddDisabled = quickAddValue.trim().length === 0;
 
   return (
-    <Toolbar
-      aria-label="Smart To Do toolbar"
-      size="small"
-      className={styles.toolbar}
-    >
-      {/* ── Left: brand title ──────────────────────────────────────────── */}
-      <div className={styles.titleGroup}>
-        <MicrosoftToDoIcon size={20} active />
-        <Text size={400} weight="semibold" as="h1" className={styles.title}>
-          {title}
-        </Text>
+    <div className={styles.headerColumn}>
+      {/* ── Title row (UAT 2026-06-19): brand icon + "Smart To Do" text
+            now sits in its OWN row above the toolbar (was inline at the
+            start of the toolbar). Mirrors the widget's title row for
+            uniform chrome across surfaces. */}
+      <div className={styles.titleRow}>
+        <div className={styles.titleGroup}>
+          <MicrosoftToDoIcon size={20} active />
+          <Text size={400} weight="semibold" as="h1" className={styles.title}>
+            {title}
+          </Text>
+        </div>
       </div>
 
+      <Toolbar
+        aria-label="Smart To Do toolbar"
+        size="small"
+        className={styles.toolbar}
+      >
       {/* ── Center-left: QuickAdd (compact, matches widget pattern) ────── */}
       {/*
         QuickAdd is suppressed when there is an active selection — the
@@ -334,6 +416,9 @@ export const Header: React.FC<HeaderProps> = ({
         clear their selection to add a new to-do.
       */}
       {!hasSelection && (
+        // UAT 2026-06-19: three-field quick-add (Title + Due Date + Assigned To + Add).
+        // Replaces single-input title-only quick-add. Dispatches extended
+        // QUICK_ADD_TODO_EVENT detail consumed by SmartToDo.
         <div className={styles.quickAddGroup}>
           <Input
             size="small"
@@ -341,8 +426,23 @@ export const Header: React.FC<HeaderProps> = ({
             placeholder={quickAddPlaceholder}
             onChange={handleQuickAddChange}
             onKeyDown={handleQuickAddKeyDown}
-            aria-label="Quick add a new to-do"
+            aria-label="To-do name"
             className={styles.quickAddInput}
+          />
+          <input
+            type="date"
+            value={quickAddDueDate}
+            onChange={handleQuickAddDueDateChange}
+            aria-label="Due date"
+            className={styles.quickAddDateInput}
+          />
+          <Input
+            size="small"
+            value={quickAddAssignedTo}
+            onChange={handleQuickAddAssignedToChange}
+            placeholder="Assigned to"
+            aria-label="Assigned to"
+            className={styles.quickAddAssignedInput}
           />
           <Tooltip
             content="Add to-do (Enter)"
@@ -376,74 +476,137 @@ export const Header: React.FC<HeaderProps> = ({
       <div className={styles.spacer} />
 
       {/* ── Right: selection-aware OR default action cluster ───────────── */}
+      {/* UAT 2026-06-19 — Filter slide UX:
+            - When Filter is OFF: show the action cluster (Refresh + Orient + Settings) + Filter icon.
+            - When Filter is ON: hide the action cluster; show an inline SearchBox
+              that takes that space + a Filter-close icon. (Matches the widget's
+              Filter slide UX for chrome uniformity.)
+            Selection-aware actions still take precedence over Filter open:
+            if there's a selection, the SelectionAwareToolbar replaces the
+            action cluster, and the Filter icon stays in its rightmost slot. */}
       {hasSelection ? (
-        // When ≥1 selected, replace the default cluster with the
-        // selection-aware actions (Open / Delete / Email / Pin) — matches
-        // Outlook/Teams "selection drawer" UX. Search stays visible so the
-        // user can refine while a selection is active.
         <div className={styles.rightGroup}>
           <SelectionAwareToolbar
             selectedCount={selectedCount}
             actions={toolbarActions}
           />
-          <div className={styles.searchWrap}>
-            <SearchBox
-              size="small"
-              value={localQuery}
-              placeholder={searchPlaceholder}
-              onChange={handleSearchChange}
-              aria-label="Search to-dos"
-            />
-          </div>
+          {isFilterOpen ? (
+            <>
+              <div className={styles.searchWrap}>
+                <SearchBox
+                  size="small"
+                  value={localQuery}
+                  placeholder={searchPlaceholder}
+                  onChange={handleSearchChange}
+                  aria-label="Filter to-dos"
+                  autoFocus
+                />
+              </div>
+              <Tooltip content="Close filter" relationship="label">
+                <ToggleButton
+                  appearance="subtle"
+                  size="small"
+                  icon={<Search20Regular />}
+                  checked
+                  onClick={handleToggleFilter}
+                  aria-label="Close filter"
+                  aria-expanded
+                />
+              </Tooltip>
+            </>
+          ) : (
+            <Tooltip content="Filter to-dos" relationship="label">
+              <ToggleButton
+                appearance="subtle"
+                size="small"
+                icon={<Search20Regular />}
+                checked={false}
+                onClick={handleToggleFilter}
+                aria-label="Open filter"
+                aria-expanded={false}
+              />
+            </Tooltip>
+          )}
         </div>
       ) : (
         <div className={styles.rightGroup}>
-          {onRefresh !== undefined && (
-            <Tooltip content="Refresh" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<ArrowClockwise20Regular />}
-                aria-label="Refresh to-dos"
-                onClick={onRefresh}
-              />
-            </Tooltip>
+          {isFilterOpen ? (
+            <>
+              <div className={styles.searchWrap}>
+                <SearchBox
+                  size="small"
+                  value={localQuery}
+                  placeholder={searchPlaceholder}
+                  onChange={handleSearchChange}
+                  aria-label="Filter to-dos"
+                  autoFocus
+                />
+              </div>
+              <Tooltip content="Close filter" relationship="label">
+                <ToggleButton
+                  appearance="subtle"
+                  size="small"
+                  icon={<Search20Regular />}
+                  checked
+                  onClick={handleToggleFilter}
+                  aria-label="Close filter"
+                  aria-expanded
+                />
+              </Tooltip>
+            </>
+          ) : (
+            <>
+              {onRefresh !== undefined && (
+                <Tooltip content="Refresh" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<ArrowClockwise20Regular />}
+                    aria-label="Refresh to-dos"
+                    onClick={onRefresh}
+                  />
+                </Tooltip>
+              )}
+              {showViewToggle && (
+                <ViewToggle
+                  mode={viewMode as ViewToggleMode}
+                  onChange={onViewModeChange as (mode: ViewToggleMode) => void}
+                />
+              )}
+              {showOrientationToggle && (
+                <OrientationToggle
+                  orientation={orientation as Orientation}
+                  onChange={onOrientationChange as (orientation: Orientation) => void}
+                />
+              )}
+              {onOpenSettings !== undefined && (
+                <Tooltip content="Settings" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<SettingsRegular />}
+                    aria-label="Settings"
+                    onClick={onOpenSettings}
+                  />
+                </Tooltip>
+              )}
+              <Tooltip content="Filter to-dos" relationship="label">
+                <ToggleButton
+                  appearance="subtle"
+                  size="small"
+                  icon={<Search20Regular />}
+                  checked={false}
+                  onClick={handleToggleFilter}
+                  aria-label="Open filter"
+                  aria-expanded={false}
+                />
+              </Tooltip>
+            </>
           )}
-          {showViewToggle && (
-            <ViewToggle
-              mode={viewMode as ViewToggleMode}
-              onChange={onViewModeChange as (mode: ViewToggleMode) => void}
-            />
-          )}
-          {showOrientationToggle && (
-            <OrientationToggle
-              orientation={orientation as Orientation}
-              onChange={onOrientationChange as (orientation: Orientation) => void}
-            />
-          )}
-          {onOpenSettings !== undefined && (
-            <Tooltip content="Settings" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<SettingsRegular />}
-                aria-label="Settings"
-                onClick={onOpenSettings}
-              />
-            </Tooltip>
-          )}
-          <div className={styles.searchWrap}>
-            <SearchBox
-              size="small"
-              value={localQuery}
-              placeholder={searchPlaceholder}
-              onChange={handleSearchChange}
-              aria-label="Search to-dos"
-            />
-          </div>
         </div>
       )}
-    </Toolbar>
+      </Toolbar>
+    </div>
   );
 };
 

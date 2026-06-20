@@ -127,6 +127,20 @@ export interface ITodoKanbanPreferences {
    * viewMode) rather than a separate preferencetype optionset value.
    */
   orientation: SmartTodoOrientation;
+  /**
+   * UAT 2026-06-19 — persisted per-column manual order. Map column id
+   * ("Today" / "Tomorrow" / "Future") to an array of sprk_todoids in the
+   * user's preferred order. Cards present in the array are rendered in
+   * that order; cards NOT in the array (newly created since the last
+   * reorder) get appended to the end. Empty / missing means use the
+   * default sort (score desc, due-date asc).
+   *
+   * Cross-device behavior: like all other prefs, this lives in the user's
+   * sprk_userpreference Dataverse record, so any client that authenticates
+   * as the same user (desktop browser, mobile app, tablet) reads the same
+   * order. Updates from one device propagate on next read.
+   */
+  columnOrders?: Record<string, string[]>;
 }
 
 export interface IUseUserPreferencesOptions {
@@ -154,6 +168,7 @@ const DEFAULT_PREFERENCES: ITodoKanbanPreferences = {
   tomorrowThreshold: DEFAULT_TOMORROW_THRESHOLD,
   viewMode: DEFAULT_SMART_TODO_VIEW_MODE,
   orientation: DEFAULT_SMART_TODO_ORIENTATION,
+  columnOrders: {},
 };
 
 // ---------------------------------------------------------------------------
@@ -217,6 +232,12 @@ export function useUserPreferences(
               orientation: isValidOrientation(parsed.orientation)
                 ? parsed.orientation
                 : DEFAULT_SMART_TODO_ORIENTATION,
+              // UAT 2026-06-19 — columnOrders: shape-check + accept.
+              // Older records without this key just default to empty.
+              columnOrders:
+                parsed.columnOrders && typeof parsed.columnOrders === 'object'
+                  ? (parsed.columnOrders as Record<string, string[]>)
+                  : {},
             });
           } catch {
             console.warn('[useUserPreferences] Failed to parse preference JSON, using defaults');

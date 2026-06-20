@@ -14,11 +14,117 @@
 | **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
 | **PR #384** | ✅ MERGED to master 2026-06-11 (Waves A + B + C; 14 tasks) |
 | **Wave D** | ✅ COMPLETE on branch (NOT yet on master): 099 widget chrome + Pattern D, 101 useKanbanColumns hoist, 100 openTodo launch + BroadcastChannel refetch. 4 commits on branch (`c50690be8` planning + `6074d42b9` 099 + `afb6ac6cc` 101 + `f593292c2` 100). Closes UAT issues 1-6 from 2026-06-18 screenshot. |
-| **Worktree branch** | `work/smart-todo-r4-wave2` — synced to master + Wave E queued (POMLs filed, awaiting agent dispatch) |
-| **Active task** | **Wave E queued** (R4-102 + R4-103 + R4-104 per 2026-06-18 UAT round 2; widget/app full parity). R4-092 deploy stays IN-PROGRESS until UAT sign-off (Wave E will require re-deploy after merge). |
-| **Working tree** | Wave E planning artifacts staged (audit note + 3 POMLs + TASK-INDEX updates); awaiting commit + agent dispatch |
-| **Next Action** | **Dispatch Wave E-1**: R4-102 (Kanban hoist) + R4-104 (app chrome) in parallel via Agent tool. After R4-102 lands, dispatch R4-103 serially. Then open PR, master-deploy, hold for UAT round 3. |
-| **PR strategy** | Wave D shipped via PR #391 (`e4e91a3ec`); CI hardening shipped via PR #392 (`a93fbebf6`) + PR #393 (eslint root-cause; auto-merge enabled, awaiting CI green). Wave E ships as one follow-up PR after 3 tasks complete + redeploy. R4-098 wrap-up + project-close still HELD until final UAT acceptance per durable user instruction. |
+| **Worktree branch** | `work/smart-todo-r4-wave2` — synced to master tip `3d02a3d38` (post-PR-394 Wave E merge); R4-105 closeout local |
+| **Active task** | **R4-092 deploy** (in-progress) — Wave D + Wave E both deployed to spaarkedev1; awaiting user UAT round 3 sign-off |
+| **Working tree** | R4-105 POML + TASK-INDEX changes pending commit (this commit) |
+| **Next Action** | **User UAT round 3 options**: (a) test on the deployed spaarkedev1 bits (Ctrl+F5 first); OR (b) use the NEW prototype harness at `c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat/` (`npm run dev` → localhost:5173, sub-second HMR on widget source edits — no deploy needed for visual iteration). After UAT sign-off: flip R4-092 + R4-093 to ✅, proceed to R4-098 wrap-up + final PR-close. |
+| **PR strategy** | Wave D (PR #391 `e4e91a3ec`); CI hardening (PR #392 + #393); Wave E (PR #394 `3d02a3d38` merged 2026-06-18T21:03:49Z). Prototype harness on `feature/uat-harness-framework` in spaarke-prototype repo — separate PR there when ready to land. R4-098 wrap-up + project-close still HELD until final UAT acceptance per durable user instruction. |
+
+### 🆕 UAT-iteration harness (R4-105)
+
+Built this session to address the ~30-min-per-Ctrl-F5 cost that drove Wave D + Wave E rework. Live now in `c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat/`:
+
+```bash
+cd c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat
+npm run dev   # localhost:5173 with widget + 15 seeded todos + HMR on widget source
+```
+
+Framework (reusable for any future project): `c:/code_files/spaarke-prototype/_infra/` + `projects/_templates/prod-component-harness/`. See `projects/_framework-setup-2026-06/README.md` in the prototype repo for the design. AI convention: `claude.md` updated with "Production Component Harnesses" section.
+
+---
+
+## 🚨 RESTART POINT — read this first after compaction
+
+> **Saved**: 2026-06-18 (session approaching context limit)
+> **Status**: 35/38 tasks ✅; Wave E deployed; UAT-harness framework shipped to prototype repo
+> **What's HELD**: R4-098 wrap-up + R4-093 UI tests + R4-092 closeout — ALL gated on user UAT acceptance per durable instruction
+
+### Where every piece lives
+
+| Artifact | Repo | Path | Branch |
+|---|---|---|---|
+| smart-todo-r4 production code | `c:/code_files/spaarke-wt-smart-todo-r4` | `src/` | `work/smart-todo-r4-wave2` (this worktree; HEAD = c1b02c961) |
+| smart-todo-r4 production code (also on master) | `c:/code_files/spaarke` (main repo) | `src/` | `master` (HEAD = 3d02a3d38, PR #394 merged) |
+| Deployed to spaarkedev1 | Dataverse | sprk_smarttodo + sprk_spaarkeai + sprk_createtodowizard web resources | Wave D + Wave E both live (timestamps 9:25-9:27 PM 2026-06-18) |
+| UAT-harness framework | `c:/code_files/spaarke-prototype` | `_infra/` + `projects/_templates/prod-component-harness/` + `projects/smart-todo-r4-uat/` | `feature/uat-harness-framework` (HEAD = 73a9ddc; pushed to origin; PR NOT yet opened to main) |
+| Framework docs | `c:/code_files/spaarke-prototype` | `docs/PROTOTYPE-UI-SYSTEM-GUIDE.md` + `docs/SKILLS-TO-BUILD.md` + `projects/_framework-setup-2026-06/README.md` + `claude.md` | Same `feature/uat-harness-framework` branch |
+| R4-105 POML | `c:/code_files/spaarke-wt-smart-todo-r4` | `projects/smart-todo-r4/tasks/105-UAT-harness-consumer.poml` | This worktree, committed |
+
+### PRs landed this session
+
+| PR | Merged | Scope |
+|---|---|---|
+| #391 | 2026-06-18T16:03:49Z | Wave D widget parity (R4-099/100/101) |
+| #392 | 2026-06-18T16:31:07Z | CI hardening: lockfile + `npm install` pattern |
+| #393 | 2026-06-18T~17:00Z | CI hardening: explicit eslint dep in PCF package.json (root-cause fix) |
+| #394 | 2026-06-18T21:03:49Z | Wave E widget/app parity (R4-102/103/104) — merge commit 3d02a3d38 |
+
+### Outstanding work
+
+| Task | State | Blocked on |
+|---|---|---|
+| **User UAT round 3** | Pending — user testing on live spaarkedev1 OR via new prototype harness | User availability |
+| R4-092 deploy session POML closeout | 🔄 in-progress | UAT round 3 sign-off |
+| R4-093 UI test suite | 🔲 not-started (superseded by iterative UAT) | UAT round 3 sign-off — likely auto-✅ when user signs off |
+| R4-098 project wrap-up | 🔲 not-started — lessons-learned + README → Complete + final PR-close | UAT round 3 sign-off |
+| Prototype harness framework PR → main | NOT yet opened; branch `feature/uat-harness-framework` pushed at commit 73a9ddc | User decision (merge now / wait for team review) |
+| Skill build: `prototype-harness-setup` (HIGH priority per `docs/SKILLS-TO-BUILD.md`) | Not started | User decision (build it now? defer?) |
+
+### Resume commands
+
+```bash
+# 1. Verify state
+cd c:/code_files/spaarke-wt-smart-todo-r4
+git status                                    # should be clean
+git log -1 --oneline                          # should be c1b02c961
+git fetch origin --prune
+git rev-list --count HEAD..origin/master     # expect 0 (Wave E + R4-105 closeout both on master? no — closeout still local)
+
+# Check prototype repo
+cd c:/code_files/spaarke-prototype
+git status
+git branch --show-current                    # should be feature/uat-harness-framework
+git log -1 --oneline                          # should be 73a9ddc
+
+# To launch the harness for testing
+cd c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat
+npm run dev                                   # localhost:5173
+
+# To verify deployed bits on spaarkedev1
+# Browser: open spaarkedev1 SpaarkeAi workspace; Ctrl+F5 first
+# Or query Dataverse:
+pwsh -NoProfile -File /c/tmp/verify-deploy.ps1
+```
+
+### Decision points awaiting user
+
+1. **UAT round 3 verdict**: sign-off, partial sign-off (with new bugs filed), or new Wave F?
+2. **Prototype harness PR to main**: merge `feature/uat-harness-framework` → main now, or wait?
+3. **Build `prototype-harness-setup` skill**: build now (~4 hr investment, would benefit all future projects) or defer?
+
+### Recovery instructions (for next session)
+
+1. Read this Quick Recovery + RESTART POINT sections (above)
+2. Read `c:/code_files/spaarke-prototype/docs/PROTOTYPE-UI-SYSTEM-GUIDE.md` for full framework context (700+ lines covering both modes)
+3. Read `c:/code_files/spaarke-prototype/docs/SKILLS-TO-BUILD.md` for the skill decision context
+4. Read this session's last commit messages: `git log --oneline -10` in BOTH repos
+5. Re-confirm with user which decision point they want to address first
+
+### Last commits this session (both repos)
+
+```
+spaarke-wt-smart-todo-r4 (work/smart-todo-r4-wave2):
+  c1b02c961 feat(smart-todo-r4): R4-105 UAT-harness framework (cross-repo; sub-second iteration enabler)
+  1e8872871 chore(smart-todo-r4): R4-092 Wave E deploy session 2026-06-18
+  10e5b8a01 Merge remote-tracking branch 'origin/master' into work/smart-todo-r4-wave2
+  87b3d3a85 chore(smart-todo-r4): prettier --write on 8 Wave E peer-package files
+  1a906db84 feat(smart-todo-r4): R4-103 (E-2) — widget toolbar polish
+  0a1443fbe feat(smart-todo-r4): R4-104 (E-3) — app chrome consolidation
+  882c1836a feat(smart-todo-r4): R4-102 (E-1) — widget Kanban hoist
+
+spaarke-prototype (feature/uat-harness-framework):
+  73a9ddc feat(prototype): UAT harness framework + smart-todo-r4-uat first consumer
+```
 
 ### Critical context for resume
 

@@ -499,30 +499,26 @@ export const TODO_SELECT_FIELDS: string[] = [
  * Returns `sprk_todo` records where:
  *   - statecode = 0 (Active)
  *   - statuscode in (Open, In Progress) — excludes Completed + Dismissed
- *   - assignee = currentuser ("Assigned to Me" — R4 task 031 / FR-07 / OD-2,
- *     the sole filter mode; legacy R3 "My Tasks" + "All" modes removed)
+ *   - assignee = current user's CONTACT ("Assigned to Me" — R4 task 031 / FR-07 / OD-2)
  *
  * Sort: priorityscore desc, then duedate asc (most urgent first).
+ *
+ * UAT 2026-06-19: `sprk_assignedto` migrated from systemuser → sprk_contact
+ * lookup. Caller must resolve the current systemuser → sprk_contact (via
+ * useCurrentContactId) and pass that contactId here. Passing a systemuser
+ * GUID would return zero matches.
  *
  * Per FR-11: zero queries to `sprk_event` from the kanban path.
  * Per OS-1: no `sprk_todoflag` filter — that field no longer exists on `sprk_event`.
  *
- * @param userId - GUID of the current user
+ * @param contactId - GUID of the current user's sprk_contact record
  */
-export function buildTodoItemsQuery(userId: string): string {
-  // Active to-do statuscodes per task 009:
-  //   1          = Open
-  //   659490001  = In Progress
-  // Completed (2) and Dismissed (659490002) are inactive and handled by the
-  // dismissed / restore paths.
+export function buildTodoItemsQuery(contactId: string): string {
   const activeClause =
     `statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001)`;
 
-  // R4 task 031 / FR-07 / OD-2 — "Assigned to Me" is the SOLE ownership clause.
-  // The legacy R3 "My Tasks" (owner OR assignee) and "All" modes were dropped
-  // because `ownerid` is BU-owned (not user-meaningful) and UAT users could
-  // not distinguish the parallel modes.
-  const ownershipClause = `_sprk_assignedto_value eq ${userId}`;
+  // UAT 2026-06-19 — Contact-lookup ownership clause.
+  const ownershipClause = `_sprk_assignedto_value eq ${contactId}`;
 
   const filter = `${ownershipClause} and ${activeClause}`;
 
