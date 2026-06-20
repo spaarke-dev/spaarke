@@ -235,6 +235,22 @@ export interface IUseKanbanColumnsOptions<T extends IKanbanTodoLike> {
    * omits this — it renders grouped lists with no drag-drop.
    */
   dataverseService?: IKanbanDataverseService;
+  /**
+   * UAT 2026-06-19 — initial column orders (from user preferences,
+   * cross-device persisted). Each key = column id, each value = ordered
+   * list of sprk_todoids. Cards present in the array render in that order;
+   * cards NOT in the array (newly created since last reorder) get appended.
+   * Pass `undefined` (default) for legacy default-sort behavior.
+   */
+  initialColumnOrders?: Record<string, string[]>;
+  /**
+   * UAT 2026-06-19 — called when the user reorders cards within a column.
+   * Caller persists the new map to user preferences (sprk_userpreference)
+   * so the order survives refresh + cross-device. Receives the FULL current
+   * columnOrders map after the reorder; caller usually just spread-merges
+   * into the prefs.
+   */
+  onColumnOrdersChange?: (next: Record<string, string[]>) => void;
 }
 
 export interface IUseKanbanColumnsResult<T extends IKanbanTodoLike> {
@@ -259,12 +275,29 @@ export interface IUseKanbanColumnsResult<T extends IKanbanTodoLike> {
 export function useKanbanColumns<T extends IKanbanTodoLike>(
   options: IUseKanbanColumnsOptions<T>
 ): IUseKanbanColumnsResult<T> {
-  const { items, todayThreshold, tomorrowThreshold, dataverseService } = options;
+  const { items, todayThreshold, tomorrowThreshold, dataverseService, initialColumnOrders, onColumnOrdersChange } = options;
 
   const [isRecalculating, setIsRecalculating] = React.useState(false);
 
-  // Manual intra-column ordering. Key: column ID, Value: ordered todoId array.
-  const [columnOrders, setColumnOrders] = React.useState<Record<string, string[]>>({});
+  // UAT 2026-06-19 — Seed from user-preference's columnOrders (cross-device
+  // persisted). Subsequent reorderInColumn calls fire onColumnOrdersChange
+  // so the caller can persist back to sprk_userpreference. When pref later
+  // refetches with a newer order, the seed still wins (we don't merge mid-session
+  // to avoid clobbering the user's in-progress drag work).
+  const [columnOrders, setColumnOrders] = React.useState<Record<string, string[]>>(
+    () => initialColumnOrders ?? {}
+  );
+
+  // Hydrate columnOrders ONCE when initialColumnOrders arrives non-empty
+  // (the prefs hook starts with {} then resolves after the Dataverse fetch).
+  const initialHydratedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (initialHydratedRef.current) return;
+    if (initialColumnOrders && Object.keys(initialColumnOrders).length > 0) {
+      setColumnOrders(initialColumnOrders);
+      initialHydratedRef.current = true;
+    }
+  }, [initialColumnOrders]);
 
   // Local overrides for optimistic column/pin mutations.
   // Key: todoId, Value: { column, pinned } overrides.
@@ -340,9 +373,17 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
       const ids = col.items.map(i => i.sprk_todoid);
       const [moved] = ids.splice(fromIndex, 1);
       ids.splice(toIndex, 0, moved);
-      setColumnOrders(prev => ({ ...prev, [columnId]: ids }));
+      setColumnOrders(prev => {
+        const next = { ...prev, [columnId]: ids };
+        // UAT 2026-06-19 — persist back so order survives refresh + cross-device.
+        // Defer the callback so we don't fire during setState (React warns).
+        if (onColumnOrdersChange) {
+          queueMicrotask(() => onColumnOrdersChange(next));
+        }
+        return next;
+      });
     },
-    [columns]
+    [columns, onColumnOrdersChange]
   );
 
   // ---- moveItem ----
