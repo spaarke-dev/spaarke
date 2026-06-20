@@ -532,6 +532,16 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Kanban columns hook
   // -------------------------------------------------------------------------
 
+  // UAT 2026-06-19 — persist manual intra-column order to user prefs
+  // (cross-device via sprk_userpreference). Reads `columnOrders` from prefs
+  // on mount; writes back on each reorder.
+  const handleColumnOrdersChange = React.useCallback(
+    (next: Record<string, string[]>) => {
+      void updatePreferences({ columnOrders: next });
+    },
+    [updatePreferences],
+  );
+
   const {
     columns,
     moveItem,
@@ -548,6 +558,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     // structurally compatible because its 3 Kanban methods return
     // `IResult<...>` which carries `success: boolean`.
     dataverseService: serviceRef.current,
+    initialColumnOrders: preferences.columnOrders,
+    onColumnOrdersChange: handleColumnOrdersChange,
   });
 
   // -------------------------------------------------------------------------
