@@ -109,8 +109,26 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
+  /**
+   * Column-header count badge — UAT 2026-06-19 redesign:
+   * pill-shaped with a column-coordinated background color (red/yellow/green)
+   * matching the column accent. The background color is applied INLINE
+   * because it's data-driven per column; the rest of the pill shape +
+   * typography is Griffel-managed.
+   */
   columnCount: {
-    color: tokens.colorNeutralForeground3,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '24px',
+    height: '20px',
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    borderRadius: '999px',
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForegroundOnBrand,
+    backgroundColor: tokens.colorNeutralBackground3,
   },
   columnSubtitle: {
     color: tokens.colorNeutralForeground4,
@@ -240,7 +258,12 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
                 style={columnInlineStyle}
               >
                 <div className={styles.columnCollapsedHeader}>
-                  <span className={styles.columnCount}>{column.items.length}</span>
+                  <span
+                    className={styles.columnCount}
+                    style={column.accentColor ? { backgroundColor: column.accentColor } : undefined}
+                  >
+                    {column.items.length}
+                  </span>
                   <span className={styles.columnCollapsedTitle}>{column.title}</span>
                 </div>
               </div>
@@ -265,7 +288,13 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
                   <span className={styles.columnTitle}>{column.title}</span>
                   {column.subtitle && <div className={styles.columnSubtitle}>{column.subtitle}</div>}
                 </div>
-                <span className={styles.columnCount} aria-label={`${column.items.length} items`}>
+                <span
+                  className={styles.columnCount}
+                  // UAT 2026-06-19: count pill background = column accent color
+                  // (red/yellow/green) for at-a-glance bucket identity.
+                  style={column.accentColor ? { backgroundColor: column.accentColor } : undefined}
+                  aria-label={`${column.items.length} items`}
+                >
                   {column.items.length}
                 </span>
               </div>
