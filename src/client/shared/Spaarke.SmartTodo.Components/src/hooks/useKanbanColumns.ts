@@ -206,6 +206,9 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
       // matches the yellow tint background; cards inherit this for left-border.
       accentColor: tokens.colorPaletteYellowBorder2,
       tintColor: tokens.colorPaletteYellowBackground1,
+      // 2026-06-19 UAT: yellow pill needs DARK text (WCAG contrast).
+      // Red + Green keep the default white-on-brand.
+      countTextColor: tokens.colorNeutralForeground1,
     },
     {
       id: 'Future',

@@ -45,6 +45,13 @@ export interface IKanbanColumn<T> {
    * the same column for a layered "border accent + background wash" treatment.
    */
   tintColor?: string;
+  /**
+   * UAT 2026-06-19 — text color for the count badge pill. When the column
+   * accentColor is light (e.g., yellow), white text on the pill has poor
+   * contrast; override with a dark token. Default (when omitted) is
+   * `colorNeutralForegroundOnBrand` (white) for back-compat with red/green.
+   */
+  countTextColor?: string;
 }
 
 /**

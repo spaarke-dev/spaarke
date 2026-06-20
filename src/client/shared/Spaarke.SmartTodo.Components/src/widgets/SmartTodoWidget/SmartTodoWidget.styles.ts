@@ -163,10 +163,10 @@ export const useSmartTodoWidgetStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
   },
 
-  /** UAT 2026-06-19 — Assigned To Input — narrower than Title; grows modestly. */
+  /** UAT 2026-06-19 — Assigned To Input — moderate width to display name. */
   quickAddAssignedInput: {
-    flex: '0 1 180px',
-    minWidth: '100px',
+    flex: '0 1 220px',
+    minWidth: '140px',
   },
 
   /**

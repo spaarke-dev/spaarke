@@ -164,30 +164,38 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalXL,
     paddingBottom: tokens.spacingVerticalXL,
   },
+  /**
+   * UAT 2026-06-19 — collapsed column matches expanded shape:
+   * SAME flex sizing + width as expanded so the layout doesn't jump.
+   * Title left-aligned, count pill right-aligned. Only the card list area
+   * is hidden. The user's request: "title should show and be left aligned;
+   * pill right aligned (same location as when not collapsed)".
+   */
   columnCollapsed: {
-    flex: '0 0 40px',
+    flex: '1 1 0',
     display: 'flex',
     flexDirection: 'column',
-    minWidth: '40px',
+    minWidth: 0,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
     overflow: 'hidden',
     cursor: 'pointer',
   },
+  /** Collapsed header — same layout as columnHeader. */
   columnCollapsedHeader: {
     display: 'flex',
-    flexDirection: 'column',
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
-    gap: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
   },
+  /** Collapsed title — horizontal, semibold (matches expanded columnTitle). */
   columnCollapsedTitle: {
-    writingMode: 'vertical-rl',
-    transform: 'rotate(180deg)',
     fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground1,
   },
 });
 
@@ -257,14 +265,23 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
                 onClick={() => onToggleCollapse?.(column.id)}
                 style={columnInlineStyle}
               >
+                {/* UAT 2026-06-19 — same layout as expanded header: title
+                    left, pill right; only the card list area is hidden. */}
                 <div className={styles.columnCollapsedHeader}>
+                  <span className={styles.columnCollapsedTitle}>{column.title}</span>
                   <span
                     className={styles.columnCount}
-                    style={column.accentColor ? { backgroundColor: column.accentColor } : undefined}
+                    style={
+                      column.accentColor
+                        ? {
+                            backgroundColor: column.accentColor,
+                            color: column.countTextColor ?? tokens.colorNeutralForegroundOnBrand,
+                          }
+                        : undefined
+                    }
                   >
                     {column.items.length}
                   </span>
-                  <span className={styles.columnCollapsedTitle}>{column.title}</span>
                 </div>
               </div>
             );
@@ -290,9 +307,18 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
                 </div>
                 <span
                   className={styles.columnCount}
-                  // UAT 2026-06-19: count pill background = column accent color
-                  // (red/yellow/green) for at-a-glance bucket identity.
-                  style={column.accentColor ? { backgroundColor: column.accentColor } : undefined}
+                  // UAT 2026-06-19: count pill background = column accent color.
+                  // Yellow needs DARK text for contrast (WCAG); red/green use
+                  // white. column.countTextColor lets the column define the
+                  // foreground; default is white-on-brand for back-compat.
+                  style={
+                    column.accentColor
+                      ? {
+                          backgroundColor: column.accentColor,
+                          color: column.countTextColor ?? tokens.colorNeutralForegroundOnBrand,
+                        }
+                      : undefined
+                  }
                   aria-label={`${column.items.length} items`}
                 >
                   {column.items.length}

@@ -194,6 +194,21 @@ export interface HeaderProps {
    * Placeholder for the QuickAdd input. Defaults to "Add a to-do…".
    */
   quickAddPlaceholder?: string;
+
+  /**
+   * UAT 2026-06-19 — current user's sprk_contact GUID (resolved upstream
+   * via useCurrentContactId in SmartTodoApp). Used as the default
+   * assignedTo for new todos created via the quick-add. Hidden from the UI
+   * (only the contact NAME is shown in the Assigned To text field).
+   */
+  defaultAssignedToContactId?: string;
+  /**
+   * UAT 2026-06-19 — display name for the current user's contact. Used as
+   * the visible value in the quick-add Assigned To field (so the user sees
+   * "Jane Doe" not a GUID). User can edit; on edit, only the visible text
+   * changes (the bind still goes to the original contactId).
+   */
+  defaultAssignedToName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +246,8 @@ function useDebouncedEffect(
 // ---------------------------------------------------------------------------
 
 export const Header: React.FC<HeaderProps> = ({
+  defaultAssignedToContactId,
+  defaultAssignedToName,
   title = 'Smart To Do',
   searchQuery: searchQueryProp,
   onSearchChange,
@@ -282,7 +299,20 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
   const [quickAddValue, setQuickAddValue] = React.useState<string>('');
   const [quickAddDueDate, setQuickAddDueDate] = React.useState<string>(todayISODate);
+  // Display = name (visible); internal = contactId (used for bind).
   const [quickAddAssignedTo, setQuickAddAssignedTo] = React.useState<string>('');
+  const [quickAddAssignedToContactId, setQuickAddAssignedToContactId] = React.useState<string>('');
+
+  // Hydrate from upstream defaults once they resolve.
+  React.useEffect(() => {
+    if (defaultAssignedToContactId && !quickAddAssignedToContactId) {
+      setQuickAddAssignedToContactId(defaultAssignedToContactId);
+    }
+    if (defaultAssignedToName && !quickAddAssignedTo) {
+      setQuickAddAssignedTo(defaultAssignedToName);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultAssignedToContactId, defaultAssignedToName]);
 
   const dispatchQuickAdd = React.useCallback((title: string) => {
     const trimmed = title.trim();
@@ -290,13 +320,19 @@ export const Header: React.FC<HeaderProps> = ({
     const detail: QuickAddTodoEventDetail = {
       title: trimmed,
       dueDate: quickAddDueDate || undefined,
-      assignedToId: quickAddAssignedTo.trim() || undefined,
+      // UAT 2026-06-19 — pass the internal contactId for the bind, not
+      // the display name. Falls back to upstream default if the user
+      // hasn't changed it.
+      assignedToId:
+        quickAddAssignedToContactId ||
+        defaultAssignedToContactId ||
+        undefined,
     };
     window.dispatchEvent(
       new CustomEvent<QuickAddTodoEventDetail>(QUICK_ADD_TODO_EVENT, { detail }),
     );
     setQuickAddValue('');
-  }, [quickAddDueDate, quickAddAssignedTo]);
+  }, [quickAddDueDate, quickAddAssignedToContactId, defaultAssignedToContactId]);
 
   const handleQuickAddChange = React.useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {

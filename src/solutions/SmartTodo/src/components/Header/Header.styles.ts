@@ -95,12 +95,11 @@ export const useHeaderStyles = makeStyles({
   },
 
   /**
-   * QuickAdd cluster — compact input + Add button + optional "+ New" wizard.
-   * `flex: '1 1 auto'` lets the input expand to fill spare width without
-   * pushing the right cluster off-screen. `minWidth: 0` allows the input to
-   * shrink below its intrinsic content width in narrow viewports.
-   * `maxWidth` caps the QuickAdd at a reasonable max so the right cluster
-   * doesn't get crowded on wide screens.
+   * QuickAdd cluster — Title + Due Date + Assigned To + Add button.
+   * UAT 2026-06-19: maxWidth raised + flex-grow on so the three fields
+   * have generous room (matches widget chrome). Title field gets the
+   * lion's share via flex; Due Date stays content-sized; Assigned To
+   * gets a moderate min/preferred width.
    */
   quickAddGroup: {
     display: 'flex',
@@ -109,7 +108,7 @@ export const useHeaderStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     flex: '1 1 auto',
     minWidth: 0,
-    maxWidth: '420px',
+    // No maxWidth — let the right cluster shrink first via its own flex sizing.
   },
 
   /**
@@ -150,10 +149,10 @@ export const useHeaderStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
   },
 
-  /** UAT 2026-06-19 — Assigned To input — narrower than title. */
+  /** UAT 2026-06-19 — Assigned To input — moderate width; same as widget. */
   quickAddAssignedInput: {
-    flex: '0 1 180px',
-    minWidth: '100px',
+    flex: '0 1 220px',
+    minWidth: '140px',
   },
 
   /**

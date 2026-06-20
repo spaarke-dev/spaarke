@@ -415,19 +415,24 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // Query effect
   // -------------------------------------------------------------------------
 
-  // UAT 2026-06-19 — resolve current systemuser → sprk_contact GUID for the
-  // migrated sprk_todo.sprk_assignedto Contact lookup. The widget defers
-  // the data fetch until the contact resolves (one extra RTT on cold start).
-  const { contactId, isLoading: isContactLoading } = useCurrentContactId({ webApi, userId });
+  // UAT 2026-06-19 — resolve current systemuser → sprk_contact (GUID + name)
+  // for the migrated sprk_todo.sprk_assignedto Contact lookup.
+  const { contactId, contactName, isLoading: isContactLoading } = useCurrentContactId({ webApi, userId });
 
-  // Populate the quick-add Assigned To default once the contact resolves.
-  // User can edit (override) the default to assign to a different contact.
+  // Track the resolved contact GUID separately from the user-visible name.
+  // Display = name; internal payload = GUID. User can clear the field to
+  // unassign, or in a future iteration we can wire a real lookup picker.
+  const [quickAddAssignedToContactId, setQuickAddAssignedToContactId] = React.useState<string>('');
+
   React.useEffect(() => {
-    if (contactId && !quickAddAssignedTo) {
-      setQuickAddAssignedTo(contactId);
+    if (contactId && !quickAddAssignedToContactId) {
+      setQuickAddAssignedToContactId(contactId);
+    }
+    if (contactName && !quickAddAssignedTo) {
+      setQuickAddAssignedTo(contactName);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contactId]);
+  }, [contactId, contactName]);
 
   React.useEffect(() => {
     // Defer fetch until the contact lookup resolves — querying with a
@@ -646,7 +651,13 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     // resolved contactId from useCurrentContactId. The quickAddAssignedTo
     // text field can override (when user types a different contact GUID).
     const payload: Record<string, unknown> = { sprk_name: title };
-    const assignedToContactId = quickAddAssignedTo.trim() || contactId || '';
+    // Use the internal contactId (not the display name) for the bind. If the
+    // user has cleared the Assigned To name field, fall back to contactId
+    // (still assigns to current user); if they cleared both, leave unassigned.
+    const assignedToContactId =
+      quickAddAssignedTo.trim() && quickAddAssignedToContactId
+        ? quickAddAssignedToContactId
+        : contactId || '';
     if (assignedToContactId) {
       payload['sprk_assignedto@odata.bind'] = `/sprk_contacts(${assignedToContactId})`;
     }
@@ -670,7 +681,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     } finally {
       setIsQuickAdding(false);
     }
-  }, [quickAddTitle, quickAddDueDate, quickAddAssignedTo, webApi, contactId, refetch]);
+  }, [quickAddTitle, quickAddDueDate, quickAddAssignedTo, quickAddAssignedToContactId, webApi, contactId, refetch]);
 
   const handleQuickAddClick = React.useCallback(() => {
     void submitQuickAdd();
@@ -838,7 +849,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
                 size="small"
                 value={quickAddAssignedTo}
                 onChange={handleQuickAddAssignedToChange}
-                placeholder="Assigned to (GUID or name)"
+                placeholder="Assigned to"
                 disabled={isQuickAdding}
                 aria-label="Assigned to"
                 className={styles.quickAddAssignedInput}

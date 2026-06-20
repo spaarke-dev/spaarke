@@ -38,6 +38,9 @@ export interface IUseCurrentContactIdOptions {
 export interface IUseCurrentContactIdResult {
   /** The resolved sprk_contact GUID, or null when not found / still loading. */
   contactId: string | null;
+  /** UAT 2026-06-19 — the resolved contact's display name, for UI display (so
+   *  the user sees "Jane Doe" not a raw GUID). Null when not resolved. */
+  contactName: string | null;
   /** True while the resolve query is in flight. */
   isLoading: boolean;
 }
@@ -47,6 +50,7 @@ export function useCurrentContactId(
 ): IUseCurrentContactIdResult {
   const { webApi, userId } = options;
   const [contactId, setContactId] = React.useState<string | null>(null);
+  const [contactName, setContactName] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
 
   React.useEffect(() => {
@@ -58,19 +62,22 @@ export function useCurrentContactId(
     let cancelled = false;
     setIsLoading(true);
 
-    const query = `?$select=sprk_contactid&$filter=_sprk_systemuser_value eq ${userId}&$top=2`;
+    // Select sprk_name too so the UI can display the contact name in
+    // place of the raw GUID (e.g., quick-add "Assigned To" field).
+    const query = `?$select=sprk_contactid,sprk_name&$filter=_sprk_systemuser_value eq ${userId}&$top=2`;
 
     webApi
       .retrieveMultipleRecords('sprk_contact', query)
       .then((result) => {
         if (cancelled) return;
-        const entities = (result.entities ?? []) as Array<{ sprk_contactid?: string }>;
+        const entities = (result.entities ?? []) as Array<{ sprk_contactid?: string; sprk_name?: string }>;
         if (entities.length === 0) {
           // eslint-disable-next-line no-console
           console.warn(
             `[useCurrentContactId] No sprk_contact found for systemuser ${userId}. "Assigned to Me" filter will return empty.`,
           );
           setContactId(null);
+          setContactName(null);
         } else {
           if (entities.length > 1) {
             // eslint-disable-next-line no-console
@@ -79,6 +86,7 @@ export function useCurrentContactId(
             );
           }
           setContactId(entities[0].sprk_contactid ?? null);
+          setContactName(entities[0].sprk_name ?? null);
         }
         setIsLoading(false);
       })
@@ -87,6 +95,7 @@ export function useCurrentContactId(
         // eslint-disable-next-line no-console
         console.warn('[useCurrentContactId] sprk_contact resolve failed:', err);
         setContactId(null);
+        setContactName(null);
         setIsLoading(false);
       });
 
@@ -95,5 +104,5 @@ export function useCurrentContactId(
     };
   }, [webApi, userId]);
 
-  return { contactId, isLoading };
+  return { contactId, contactName, isLoading };
 }

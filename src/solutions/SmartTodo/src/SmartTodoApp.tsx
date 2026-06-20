@@ -42,6 +42,7 @@ import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
 // ListView import removed 2026-06-19 per UAT: list view discontinued — kanban only.
 import { Header } from "./components/Header";
+import { useCurrentContactId } from "@spaarke/smart-todo-components";
 import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
 import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
 import { SmartTodoModal, todosToModalRecords } from "./components/Modal";
@@ -106,6 +107,10 @@ function SmartTodoLayout(): React.ReactElement {
   const { preferences: viewPrefs, updatePreferences: updateViewPrefs } =
     useUserPreferences({ webApi: getWebApi(), userId: getUserId() });
   const orientation = viewPrefs.orientation;
+  // UAT 2026-06-19 — resolve current user's sprk_contact for quick-add
+  // Assigned To defaults (display name + bind GUID). Passed to Header.
+  const { contactId: currentContactId, contactName: currentContactName } =
+    useCurrentContactId({ webApi: getWebApi(), userId: getUserId() });
   // viewMode / handleViewModeChange removed 2026-06-19 per UAT — list view
   // discontinued, kanban is the sole presentation. The preference field
   // remains in useUserPreferences (back-compat for old user records) but
@@ -410,6 +415,8 @@ function SmartTodoLayout(): React.ReactElement {
         toolbarActions={toolbarActions}
         orientation={orientation}
         onOrientationChange={handleOrientationChange}
+        defaultAssignedToContactId={currentContactId ?? undefined}
+        defaultAssignedToName={currentContactName ?? undefined}
       />
 
       {/* ── Primary surface — Kanban Board (UAT 2026-06-19: list view removed
