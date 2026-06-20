@@ -130,10 +130,54 @@ export const useSmartTodoWidgetStyles = makeStyles({
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
 
-  /** QuickAdd Input — grows to fill the left slot; min-width keeps it usable. */
+  /** QuickAdd Title Input — grows to fill the left slot; min-width keeps it usable. */
   quickAddInput: {
     flex: '1 1 auto',
     minWidth: '120px',
+  },
+
+  /** UAT 2026-06-19 — Due Date input (native HTML date picker). */
+  quickAddDateInput: {
+    flexShrink: 0,
+    minWidth: '130px',
+    height: '24px',
+    boxSizing: 'border-box',
+    borderRadius: tokens.borderRadiusMedium,
+    borderTopWidth: tokens.strokeWidthThin,
+    borderRightWidth: tokens.strokeWidthThin,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderLeftWidth: tokens.strokeWidthThin,
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke1,
+    borderRightColor: tokens.colorNeutralStroke1,
+    borderBottomColor: tokens.colorNeutralStroke1,
+    borderLeftColor: tokens.colorNeutralStroke1,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    fontSize: tokens.fontSizeBase200,
+    fontFamily: tokens.fontFamilyBase,
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+
+  /** UAT 2026-06-19 — Assigned To Input — narrower than Title; grows modestly. */
+  quickAddAssignedInput: {
+    flex: '0 1 180px',
+    minWidth: '100px',
+  },
+
+  /**
+   * UAT 2026-06-19 — Inline filter SearchBox shown in the right toolbar
+   * cluster when Filter is active. Takes the horizontal space that the
+   * action buttons (Open/Refresh/Orient) normally occupy.
+   */
+  inlineFilterBox: {
+    flex: '1 1 auto',
+    minWidth: '180px',
+    maxWidth: '320px',
   },
 
   /**

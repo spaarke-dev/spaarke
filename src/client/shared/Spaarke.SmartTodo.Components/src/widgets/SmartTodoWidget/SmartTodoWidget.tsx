@@ -362,12 +362,17 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // active" perceptually coupled. Default closed for low visual weight.
   const [isSearchExpanded, setIsSearchExpanded] = React.useState<boolean>(false);
 
-  // R4 task 103 (E-2, 2026-06-18) — inline quick-add state (UAT 7).
-  // Title typed into the toolbar's QuickAdd Input. Submitted on Enter or
-  // Add-button click. After successful create, the field clears + the widget
-  // refetches. On error (missing required fields, etc.), `quickAddError`
-  // surfaces a MessageBar with a "Open full wizard" link.
-  const [quickAddValue, setQuickAddValue] = React.useState<string>('');
+  // UAT 2026-06-19 — three-field inline quick-add: Title + Due Date + Assigned To + Add.
+  // Replaces the prior single-field title-only quick-add. Each field is
+  // independently controlled; submission sends all three to webApi.createRecord.
+  // Defaults: due date = today (end-of-day local), assigned to = widget's userId prop.
+  const todayISODate = React.useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+  const [quickAddTitle, setQuickAddTitle] = React.useState<string>('');
+  const [quickAddDueDate, setQuickAddDueDate] = React.useState<string>(todayISODate);
+  const [quickAddAssignedTo, setQuickAddAssignedTo] = React.useState<string>(userId ?? '');
   const [quickAddError, setQuickAddError] = React.useState<string | null>(null);
   const [isQuickAdding, setIsQuickAdding] = React.useState<boolean>(false);
 
@@ -566,24 +571,33 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     });
   }, []);
 
-  // R4 task 103 (E-2, 2026-06-18) — quick-add handlers (UAT 7).
-  const handleQuickAddChange = React.useCallback(
+  // UAT 2026-06-19 — three-field quick-add handlers.
+  const handleQuickAddTitleChange = React.useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
-      setQuickAddValue(data.value);
-      // Clearing the input also clears any prior error so the next attempt
-      // starts fresh visually.
+      setQuickAddTitle(data.value);
       if (quickAddError) setQuickAddError(null);
     },
     [quickAddError]
   );
 
+  const handleQuickAddDueDateChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setQuickAddDueDate(e.target.value);
+    },
+    []
+  );
+
+  const handleQuickAddAssignedToChange = React.useCallback(
+    (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
+      setQuickAddAssignedTo(data.value);
+    },
+    []
+  );
+
   const submitQuickAdd = React.useCallback(async () => {
-    const title = quickAddValue.trim();
+    const title = quickAddTitle.trim();
     if (!title) return;
     if (!webApi.createRecord) {
-      // Defensive guard — the toolbar suppresses the QuickAdd group when
-      // createRecord isn't wired, so this branch should be unreachable. Log
-      // a warning if it does fire so the wiring gap is visible.
       // eslint-disable-next-line no-console
       console.warn('[SmartTodoWidget] quickAdd invoked without webApi.createRecord — input ignored.');
       return;
@@ -591,31 +605,25 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     setIsQuickAdding(true);
     setQuickAddError(null);
 
-    // Defaults for quick-create — make the record immediately visible in BOTH
-    // surfaces (widget + Code Page) and assign it to today's column. Per the
-    // ownership-alignment fix (2026-06-19), `sprk_assignedto` is the canonical
-    // "this is YOUR to-do" lookup; `ownerid` is BU-default and won't satisfy
-    // either surface's filter once the widget aligns to sprk_assignedto.
-    //
-    // `sprk_assignedto@odata.bind` is the Web API binding format for lookups
-    // on create (cannot use `_sprk_assignedto_value` on create — that's a
-    // read-only OData column name).
-    //
-    // `sprk_duedate` defaults to end-of-today (local). That makes the new
-    // todo land in the Today bucket with default priority 50 + effort 50 +
-    // urgency 80 → score ~59 (~Today/Tomorrow boundary). If the user wanted
-    // a different bucket, they can drag it OR use the full wizard.
+    // Build payload from the three-field quick-add. Per ownership-alignment
+    // (2026-06-19), `sprk_assignedto@odata.bind` is required for the record
+    // to appear in both surfaces (widget + Code Page filter by assignedto).
     const payload: Record<string, unknown> = { sprk_name: title };
-    if (userId) {
-      payload['sprk_assignedto@odata.bind'] = `/systemusers(${userId})`;
+    const assignedToId = quickAddAssignedTo.trim() || userId || '';
+    if (assignedToId) {
+      payload['sprk_assignedto@odata.bind'] = `/systemusers(${assignedToId})`;
     }
-    const today = new Date();
-    today.setHours(23, 59, 0, 0);
-    payload['sprk_duedate'] = today.toISOString();
+    if (quickAddDueDate) {
+      // Date input gives YYYY-MM-DD; treat as end-of-day local.
+      const [y, m, d] = quickAddDueDate.split('-').map(Number);
+      const dt = new Date(y, m - 1, d, 23, 59, 0);
+      payload['sprk_duedate'] = dt.toISOString();
+    }
 
     try {
       await webApi.createRecord('sprk_todo', payload);
-      setQuickAddValue('');
+      setQuickAddTitle('');
+      // Keep due date + assigned-to defaults for the next entry (faster repeat).
       refetch();
     } catch (err) {
       const message = err instanceof Error && err.message ? err.message : 'Could not create the to-do.';
@@ -625,7 +633,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     } finally {
       setIsQuickAdding(false);
     }
-  }, [quickAddValue, webApi, userId, refetch]);
+  }, [quickAddTitle, quickAddDueDate, quickAddAssignedTo, webApi, userId, refetch]);
 
   const handleQuickAddClick = React.useCallback(() => {
     void submitQuickAdd();
@@ -646,7 +654,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // user is never stuck if Dataverse rejects the bare-title create.
   const handleOpenWizardFromError = React.useCallback(() => {
     setQuickAddError(null);
-    setQuickAddValue('');
+    setQuickAddTitle('');
     onAddTodo?.();
   }, [onAddTodo]);
 
@@ -725,7 +733,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // button are suppressed; the `+` wizard button remains as the only create
   // affordance.
   const quickAddAvailable = typeof webApi.createRecord === 'function';
-  const quickAddDisabled = quickAddValue.trim().length === 0 || isQuickAdding;
+  const quickAddDisabled = quickAddTitle.trim().length === 0 || isQuickAdding;
 
   // -------------------------------------------------------------------------
   // Render
@@ -770,15 +778,33 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
         <div className={styles.toolbarLeft}>
           {quickAddAvailable && (
             <>
+              {/* UAT 2026-06-19: three-field quick-add — Title + Due Date + Assigned To + Add. */}
               <Input
                 size="small"
-                value={quickAddValue}
+                value={quickAddTitle}
                 placeholder={quickAddPlaceholder}
-                onChange={handleQuickAddChange}
+                onChange={handleQuickAddTitleChange}
                 onKeyDown={handleQuickAddKeyDown}
-                aria-label="Quick add a new to-do"
+                aria-label="To-do name"
                 disabled={isQuickAdding}
                 className={styles.quickAddInput}
+              />
+              <input
+                type="date"
+                value={quickAddDueDate}
+                onChange={handleQuickAddDueDateChange}
+                disabled={isQuickAdding}
+                aria-label="Due date"
+                className={styles.quickAddDateInput}
+              />
+              <Input
+                size="small"
+                value={quickAddAssignedTo}
+                onChange={handleQuickAddAssignedToChange}
+                placeholder="Assigned to (GUID or name)"
+                disabled={isQuickAdding}
+                aria-label="Assigned to"
+                className={styles.quickAddAssignedInput}
               />
               <Tooltip content="Add to-do (Enter)" relationship="label">
                 <Button
@@ -798,56 +824,79 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
         {/* ── SPACER ──────────────────────────────────────────────────── */}
         <div className={styles.toolbarSpacer} />
 
-        {/* ── RIGHT: actions + search icon ────────────────────────────── */}
+        {/* ── RIGHT: actions OR inline filter input (UAT 2026-06-19) ────
+              When Filter is toggled OFF, show the action cluster (Open /
+              Refresh / Orient / Filter icon).
+              When Filter is toggled ON, the action cluster slides out (hidden)
+              and a SearchBox slides in to its place — filter field is INLINE
+              in the toolbar, not in a separate row below. Click the Filter
+              icon again to slide back to actions. */}
         <div className={styles.toolbarActions}>
-          <Tooltip content={openTooltip} relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<Open20Regular />}
-              onClick={handleOpenSelected}
-              aria-label={openTooltip}
-            />
-          </Tooltip>
-          <Tooltip content="Refresh to-do list" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<ArrowClockwiseRegular />}
-              onClick={refetch}
-              aria-label="Refresh to-do list"
-            />
-          </Tooltip>
-          {/* R4 task 102 (E-1, 2026-06-18) — orientation toggle. Mirrors the
-              Code Page's `<OrientationToggle>` so the widget can flip between
-              horizontal columns (default) and vertical stacked sections.
-              Local-only state — see `useState` block above for rationale. */}
-          <OrientationToggle orientation={orientation} onChange={setOrientation} />
-          {/* R4 task 103 (E-2, 2026-06-18) — search-as-icon (UAT 1). The
-              SearchBox lives in an expandable row BELOW this toolbar; this
-              ToggleButton controls its visibility. Right-aligned with the
-              other action icons so search reads as one of several tools
-              rather than a permanently-occupied lane. */}
-          <Tooltip content={isSearchExpanded ? 'Close search' : 'Search to-dos'} relationship="label">
-            <ToggleButton
-              appearance="subtle"
-              size="small"
-              icon={<Search20Regular />}
-              checked={isSearchExpanded}
-              onClick={handleToggleSearch}
-              aria-label={isSearchExpanded ? 'Close search' : 'Open search'}
-              aria-expanded={isSearchExpanded}
-            />
-          </Tooltip>
+          {isSearchExpanded ? (
+            <>
+              <SearchBox
+                value={searchQuery}
+                placeholder="Filter to-dos…"
+                onChange={handleSearchChange}
+                aria-label="Filter to-dos"
+                size="small"
+                className={styles.inlineFilterBox}
+                autoFocus
+              />
+              <Tooltip content="Close filter" relationship="label">
+                <ToggleButton
+                  appearance="subtle"
+                  size="small"
+                  icon={<Search20Regular />}
+                  checked
+                  onClick={handleToggleSearch}
+                  aria-label="Close filter"
+                  aria-expanded
+                />
+              </Tooltip>
+            </>
+          ) : (
+            <>
+              <Tooltip content={openTooltip} relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<Open20Regular />}
+                  onClick={handleOpenSelected}
+                  aria-label={openTooltip}
+                />
+              </Tooltip>
+              <Tooltip content="Refresh to-do list" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<ArrowClockwiseRegular />}
+                  onClick={refetch}
+                  aria-label="Refresh to-do list"
+                />
+              </Tooltip>
+              <OrientationToggle orientation={orientation} onChange={setOrientation} />
+              <Tooltip content="Filter to-dos" relationship="label">
+                <ToggleButton
+                  appearance="subtle"
+                  size="small"
+                  icon={<Search20Regular />}
+                  checked={false}
+                  onClick={handleToggleSearch}
+                  aria-label="Open filter"
+                  aria-expanded={false}
+                />
+              </Tooltip>
+            </>
+          )}
         </div>
       </Toolbar>
 
-      {/* ── Expanded search row (R4-103, UAT 1) ─────────────────────────
-          Conditionally rendered so it doesn't reserve vertical space when
-          collapsed. Layout sits between the toolbar and the error/body so
-          the SearchBox always reads as a contiguous extension of the chrome
-          rather than floating above the cards. */}
-      {isSearchExpanded && (
+      {/* UAT 2026-06-19: the prior expanded-search row BELOW the toolbar
+          is removed. Filter input lives INLINE in the toolbar (above).
+          Kept this conditional false-fallthrough so any legacy `isSearchExpanded`
+          consumers don't break. */}
+      {false && isSearchExpanded && (
         <div className={styles.searchRow}>
           <div className={styles.searchWrap}>
             <SearchBox

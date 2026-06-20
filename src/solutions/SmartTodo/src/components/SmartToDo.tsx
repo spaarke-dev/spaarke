@@ -591,15 +591,43 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   React.useEffect(() => {
     const listener = (ev: Event): void => {
       const detail = (ev as CustomEvent<QuickAddTodoEventDetail>).detail;
-      if (detail?.title) {
+      if (!detail?.title) return;
+      // UAT 2026-06-19 — three-field payload. When dueDate / assignedToId are
+      // present, bypass the basic handleAdd and call webApi.createRecord
+      // directly so the additional fields (`sprk_duedate`,
+      // `sprk_assignedto@odata.bind`) land on the create. Falls back to the
+      // simple title-only path when extra fields aren't provided (back-compat
+      // for old launchers).
+      const hasExtras = !!detail.dueDate || !!detail.assignedToId;
+      if (!hasExtras) {
         void handleAddRef.current(detail.title);
+        return;
       }
+      const payload: Record<string, unknown> = { sprk_name: detail.title };
+      const assignedToId = detail.assignedToId || userId;
+      if (assignedToId) {
+        payload['sprk_assignedto@odata.bind'] = `/systemusers(${assignedToId})`;
+      }
+      if (detail.dueDate) {
+        const [y, m, d] = detail.dueDate.split('-').map(Number);
+        const dt = new Date(y, m - 1, d, 23, 59, 0);
+        payload['sprk_duedate'] = dt.toISOString();
+      }
+      void (async () => {
+        try {
+          await webApi.createRecord('sprk_todo', payload);
+          refetch();
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[SmartToDo] three-field quickAdd create failed:', err);
+        }
+      })();
     };
     window.addEventListener(QUICK_ADD_TODO_EVENT, listener);
     return () => {
       window.removeEventListener(QUICK_ADD_TODO_EVENT, listener);
     };
-  }, []);
+  }, [webApi, userId, refetch]);
 
   // -------------------------------------------------------------------------
   // Dismiss handler

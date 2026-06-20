@@ -123,6 +123,39 @@ export const useHeaderStyles = makeStyles({
     width: '100%',
   },
 
+  /** UAT 2026-06-19 — Due Date native HTML input. */
+  quickAddDateInput: {
+    flexShrink: 0,
+    minWidth: '130px',
+    height: '24px',
+    boxSizing: 'border-box',
+    borderRadius: tokens.borderRadiusMedium,
+    borderTopWidth: tokens.strokeWidthThin,
+    borderRightWidth: tokens.strokeWidthThin,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderLeftWidth: tokens.strokeWidthThin,
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke1,
+    borderRightColor: tokens.colorNeutralStroke1,
+    borderBottomColor: tokens.colorNeutralStroke1,
+    borderLeftColor: tokens.colorNeutralStroke1,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    fontSize: tokens.fontSizeBase200,
+    fontFamily: tokens.fontFamilyBase,
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+
+  /** UAT 2026-06-19 — Assigned To input — narrower than title. */
+  quickAddAssignedInput: {
+    flex: '0 1 180px',
+    minWidth: '100px',
+  },
+
   /**
    * Flex spacer — pushes the right cluster to the trailing edge of the row.
    * `flex: '1 1 0'` (vs auto) means it absorbs leftover space without
