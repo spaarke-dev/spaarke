@@ -1,0 +1,52 @@
+<task id="R3-020" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`GET /api/admin/jobs` + `GET /api/admin/jobs/{jobId}/status`</title>
+    <status>not-started</status>
+    <phase>P3</phase>
+    <parallel-group>F (with 021, 022)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>bff-api,admin-endpoints,scheduling</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Admin/JobsEndpointsTests.cs</file>
+    </relevant-files>
+    <dependencies>013, 014, 015, 016</dependencies>
+  </metadata>
+  <prompt>Implement GET endpoints for listing jobs + per-job status. Use SystemAdmin policy. Queries sprk_backgroundjob + sprk_backgroundjobrun. Per spec.md FR-2.6.</prompt>
+  <goal>GET /api/admin/jobs returns all registered jobs + status. GET /api/admin/jobs/{jobId}/status returns detailed status + last 10 runs. Both behind SystemAdmin policy.</goal>
+  <constraints>
+    <constraint source="ADR-008">Endpoint filter for auth — NOT global middleware</constraint>
+    <constraint source="spec">Use existing SystemAdmin policy at AuthorizationModule.cs:241</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>admin-endpoint-pattern</topic>
+    <files>
+      <file>docs/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2.6 + Q6 owner clarification (SystemAdmin policy)</step>
+    <step order="1">Create JobsEndpoints.cs static class with MapAdminJobsEndpoints extension</step>
+    <step order="2">Implement GET / endpoint: list ScheduledJobRegistry + map to status DTO</step>
+    <step order="3">Implement GET /{jobId}/status endpoint with last 10 runs</step>
+    <step order="4">Register in Program.cs with .RequireAuthorization("SystemAdmin")</step>
+    <step order="5">Unit tests: list returns expected, status returns 404 for unknown jobId, 403 for non-admin</step>
+    <step order="6">Build + tests + publish-size</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/admin/jobs returns list of registered jobs with status</criterion>
+    <criterion testable="true">GET /api/admin/jobs/{jobId}/status returns detailed status + last 10 runs</criterion>
+    <criterion testable="true">Non-admin token gets 403</criterion>
+    <criterion testable="true">Unknown jobId returns 404</criterion>
+  </acceptance-criteria>
+</task>

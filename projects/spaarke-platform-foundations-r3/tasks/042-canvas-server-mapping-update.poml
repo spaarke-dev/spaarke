@@ -1,0 +1,42 @@
+<task id="R3-042" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Update `playbookNodeSync.ts` (client) + `NodeService.cs` (server) canvas-server mapping</title>
+    <status>not-started</status>
+    <phase>P5</phase>
+    <parallel-group>K (with 043)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2h</estimated-effort>
+    <tags>frontend,bff-api,playbook-builder,canvas-mapping</tags>
+    <relevant-files>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/types/playbook.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs</file>
+    </relevant-files>
+    <dependencies>040, 041</dependencies>
+  </metadata>
+  <prompt>Add LookupUserMembership (52) to canvas-server mapping in both client (playbookNodeSync.ts + playbook.ts ActionType enum) and server (NodeService.cs). Per spec FR-1B.3.</prompt>
+  <goal>Builder canvas can emit LookupUserMembership nodes; server correctly identifies + dispatches them.</goal>
+  <constraints>
+    <constraint source="spec FR-3H3.1">Canvas-server drift test (Workstream H3) will catch any missed mapping</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-builder-canvas-mapping</topic>
+    <files>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1B.3</step>
+    <step order="1">Add LookupUserMembership = 52 to client ActionType enum in playbook.ts</step>
+    <step order="2">Add LookupUserMembership case to playbookNodeSync.ts canvas→config mapping</step>
+    <step order="3">Add server-side mapping in NodeService.cs</step>
+    <step order="4">Build client + server; verify no regression</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Client + server enums in sync</criterion>
+    <criterion testable="true">Both builds pass</criterion>
+  </acceptance-criteria>
+</task>

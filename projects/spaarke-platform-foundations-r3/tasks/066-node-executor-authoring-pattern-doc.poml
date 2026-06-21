@@ -1,0 +1,43 @@
+<task id="R3-066" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Author `.claude/patterns/ai/node-executor-authoring.md`</title>
+    <status>not-started</status>
+    <phase>P7.1</phase>
+    <parallel-group>none (main-session-only — .claude/ write boundary)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2h</estimated-effort>
+    <tags>docs,patterns,playbook,di</tags>
+    <relevant-files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/patterns/ai/INDEX.md</file>
+    </relevant-files>
+    <dependencies>041</dependencies>
+  </metadata>
+  <prompt>Author pattern doc documenting the Singleton-executor-depends-on-Scoped-service pattern: `IServiceProvider.CreateScope()` per execution. Cite AgentServiceNodeExecutor as worked example. Include canvas-server mapping drift checklist.</prompt>
+  <goal>Pattern doc exists + indexed. Cite both `AgentServiceNodeExecutor` (existing) and `LookupUserMembershipNodeExecutor` (R3) as worked examples.</goal>
+  <constraints>
+    <constraint source="CLAUDE.md §3">.claude/ writes are main-session-only</constraint>
+    <constraint source="spec FR-3H3.5">Pattern doc location</constraint>
+  </constraints>
+  <knowledge>
+    <topic>pattern-doc-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/INDEX.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AgentServiceNodeExecutor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-3H3.5</step>
+    <step order="1">Read AgentServiceNodeExecutor for worked example</step>
+    <step order="2">Author 25-line pointer-style pattern doc per `.claude/patterns/` convention</step>
+    <step order="3">Update INDEX.md</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Pattern doc exists + indexed (AC-H3.3)</criterion>
+    <criterion testable="true">Cites at least one worked example</criterion>
+  </acceptance-criteria>
+</task>

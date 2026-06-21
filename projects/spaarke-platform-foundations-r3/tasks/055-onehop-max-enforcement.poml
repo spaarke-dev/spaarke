@@ -1,0 +1,41 @@
+<task id="R3-055" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>1-hop max enforcement on `includeRelated` chains</title>
+    <status>not-started</status>
+    <phase>P6.5</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1h</estimated-effort>
+    <tags>bff-api,membership,validation</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Membership/IncludeRelatedValidationTests.cs</file>
+    </relevant-files>
+    <dependencies>054</dependencies>
+  </metadata>
+  <prompt>Add explicit validation: `includeRelated` accepts comma-separated entity logical names; if any entity reference appears in a transitive chain &gt; 1 hop, return 400 BadRequest with explanatory ProblemDetails.</prompt>
+  <goal>Multi-hop requests rejected at endpoint validation, before any Dataverse query. Clear error message.</goal>
+  <constraints>
+    <constraint source="ADR-019">ProblemDetails for errors</constraint>
+    <constraint source="spec Q3">1 hop max enforced explicitly</constraint>
+  </constraints>
+  <knowledge>
+    <topic>endpoint-validation</topic>
+    <files>
+      <file>docs/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check</step>
+    <step order="1">Add validation in MembershipEndpoints.cs handler</step>
+    <step order="2">Return ProblemDetails 400 with type "transitive-chain-too-deep"</step>
+    <step order="3">Unit tests</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">2+ hop request returns 400 with ProblemDetails</criterion>
+    <criterion testable="true">1-hop request works correctly</criterion>
+  </acceptance-criteria>
+</task>

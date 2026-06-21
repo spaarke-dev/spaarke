@@ -1,0 +1,43 @@
+<task id="R3-062" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Update `DeliverToIndexNodeExecutor` to write new fields (dual-write)</title>
+    <status>not-started</status>
+    <phase>P7.1</phase>
+    <parallel-group>N (with 061)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api,playbook,indexing,h3</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/DeliverToIndexNodeExecutorTests.cs</file>
+    </relevant-files>
+    <dependencies>061</dependencies>
+  </metadata>
+  <prompt>Rewrite DeliverToIndexNodeExecutor to: (a) write `sprk_searchindexqueuedon` when enqueued; (b) write `sprk_searchindexcompletedon` when index callback confirms completion; (c) keep dual-writing old `sprk_searchindexed` boolean during transition.</prompt>
+  <goal>Index queueing + completion correctly recorded in new datetime fields. Old field still set for backward compat.</goal>
+  <constraints>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+    <constraint source="spec FR-3H3.2">Update writer to use new fields</constraint>
+  </constraints>
+  <knowledge>
+    <topic>node-executor-dataverse-write</topic>
+    <files>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-3H3.2</step>
+    <step order="1">Update executor enqueue path: write queuedon = UtcNow</step>
+    <step order="2">Update completion path (callback from AI Search): write completedon = UtcNow</step>
+    <step order="3">Dual-write sprk_searchindexed = true at completion (transition)</step>
+    <step order="4">Unit tests for both paths</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Queued doc has sprk_searchindexqueuedon set</criterion>
+    <criterion testable="true">Completed doc has sprk_searchindexcompletedon AND sprk_searchindexed=true (dual)</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

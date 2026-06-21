@@ -1,0 +1,42 @@
+<task id="R3-065" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Canvas-server mapping drift integration test (CI)</title>
+    <status>not-started</status>
+    <phase>P7.1</phase>
+    <parallel-group>O (with 063, 064)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>integration-test,ci,playbook-builder,h3</tags>
+    <relevant-files>
+      <file>tests/integration/PlaybookBuilder.Tests/CanvasServerMappingDriftTests.cs (new)</file>
+    </relevant-files>
+    <dependencies>042</dependencies>
+  </metadata>
+  <prompt>Integration test in `tests/integration/PlaybookBuilder.Tests/` asserts every canvas type in `playbookNodeSync.ts` has a corresponding entry in `NodeService.cs`. Fails CI build on intentional drift (G6 prevention).</prompt>
+  <goal>CI fails when canvas/server mappings drift. Test catches missing ActionType pairs.</goal>
+  <constraints>
+    <constraint source="spec FR-3H3.1">Drift test required + must fail CI on drift</constraint>
+  </constraints>
+  <knowledge>
+    <topic>integration-test-drift-detection</topic>
+    <files>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-3H3.1</step>
+    <step order="1">Implement test: parse playbookNodeSync.ts (Node.js subprocess) + parse NodeService.cs (Roslyn) + compare</step>
+    <step order="2">Verify test passes for current state</step>
+    <step order="3">Insert temporary drift → assert CI fails → revert</step>
+    <step order="4">Document in test README</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test passes for current canvas/server alignment</criterion>
+    <criterion testable="true">Test FAILS on intentional drift (AC-H3.1)</criterion>
+    <criterion testable="true">CI integration verified</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,38 @@
+<task id="R3-053" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Integration tests for all migrated playbooks</title>
+    <status>not-started</status>
+    <phase>P6</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>integration-test,playbook,membership</tags>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/MigratedPlaybookTests.cs (new)</file>
+    </relevant-files>
+    <dependencies>050, 051, 052</dependencies>
+  </metadata>
+  <prompt>End-to-end tests for the 3 migrated playbooks per spec FR-1C.4. Each runs against seeded spaarkedev1 user fixture; asserts non-zero notification rows.</prompt>
+  <goal>AC-1C.1 + AC-1C.2 covered by automated tests.</goal>
+  <constraints>
+    <constraint source="NFR-03">Integration tests mandatory</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-integration-testing</topic>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + AC-1C.1, AC-1C.2, FR-1C.4</step>
+    <step order="1">Author MigratedPlaybookTests.cs covering each migrated playbook</step>
+    <step order="2">Seed fixture data; run playbook end-to-end; assert count &gt; 0</step>
+    <step order="3">CI integration</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">All migrated playbooks produce non-zero notification rows in tests</criterion>
+    <criterion testable="true">Tests pass green in CI</criterion>
+  </acceptance-criteria>
+</task>

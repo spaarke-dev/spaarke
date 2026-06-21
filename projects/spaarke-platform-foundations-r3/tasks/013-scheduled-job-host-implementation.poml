@@ -1,0 +1,53 @@
+<task id="R3-013" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Implement `ScheduledJobHost : BackgroundService` (cron dispatch + run-record write)</title>
+    <status>not-started</status>
+    <phase>P2</phase>
+    <parallel-group>D (with 014)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>4-6h</estimated-effort>
+    <tags>shared-lib,scheduling,background-service,cron</tags>
+    <relevant-files>
+      <file>src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs</file>
+      <file>src/server/shared/Spaarke.Scheduling/ScheduledJobRegistry.cs</file>
+      <file>tests/unit/Spaarke.Scheduling.Tests/ScheduledJobHostTests.cs</file>
+    </relevant-files>
+    <dependencies>010, 011</dependencies>
+  </metadata>
+  <prompt>Implement `ScheduledJobHost : BackgroundService` per spec.md design snippet: reads `sprk_backgroundjob` rows on startup + refreshes hourly; for each enabled job, parses cron via Cronos and manages a per-job `PeriodicTimer`; invokes `IScheduledJob.ExecuteAsync`; writes `sprk_backgroundjobrun` row per execution.</prompt>
+  <goal>Host starts → enumerates registered IScheduledJob impls + Dataverse job rows → dispatches on schedule → records runs. Cancellation propagates within 30s (NFR-07).</goal>
+  <constraints>
+    <constraint source="ADR-001">In-process BackgroundService; no Azure Functions</constraint>
+    <constraint source="ADR-010">DI minimalism — register as Singleton via AddHostedService</constraint>
+    <constraint source="NFR-07">Honor CancellationToken throughout; host cancellation propagates within 30s</constraint>
+    <constraint source="NFR-08">Every run carries correlationId</constraint>
+  </constraints>
+  <knowledge>
+    <topic>background-service-cron-dispatch</topic>
+    <files>
+      <file>docs/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/api/resilience.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerService.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2.3</step>
+    <step order="1">Implement `ScheduledJobRegistry` (in-memory dict of jobId → IScheduledJob)</step>
+    <step order="2">Implement `ScheduledJobHost.StartAsync`: load Dataverse rows + Cronos cron parsing + per-job PeriodicTimer</step>
+    <step order="3">Implement dispatch path: build JobRunContext + invoke ExecuteAsync + write sprk_backgroundjobrun + capture failure</step>
+    <step order="4">Implement hourly refresh of Dataverse job rows (catches new/disabled/changed jobs)</step>
+    <step order="5">Honor cancellation throughout (per NFR-07)</step>
+    <step order="6">Unit tests: cron parsing, dispatch invocation, run-record write, cancellation propagation</step>
+    <step order="7">Build + tests + publish-size</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Cronos cron expressions parse correctly (e.g., `0 2 * * *`)</criterion>
+    <criterion testable="true">Job dispatched on schedule → IScheduledJob.ExecuteAsync invoked → run row written</criterion>
+    <criterion testable="true">Cancellation propagates to in-flight jobs within 30s</criterion>
+    <criterion testable="true">Hourly Dataverse refresh picks up new/changed/disabled jobs</criterion>
+    <criterion testable="true">Unit tests pass; build succeeds</criterion>
+  </acceptance-criteria>
+</task>

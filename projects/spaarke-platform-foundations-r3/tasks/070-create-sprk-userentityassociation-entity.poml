@@ -1,0 +1,43 @@
+<task id="R3-070" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Create `sprk_userentityassociation` Dataverse entity + indexes</title>
+    <status>not-started</status>
+    <phase>P7.5</phase>
+    <parallel-group>P (with 071)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>dataverse,schema,phase2,junction-table</tags>
+    <relevant-files>
+      <file>scripts/Create-UserEntityAssociation.ps1 (new)</file>
+      <file>docs/data-model/sprk_userentityassociation.md (new)</file>
+    </relevant-files>
+    <dependencies>010</dependencies>
+  </metadata>
+  <prompt>Create junction entity with 7 columns per spec.md FR-2P2.1: sprk_personid (Uniqueidentifier), sprk_personidtype (OptionSet 1-6), sprk_entitylogicalname (Text), sprk_entityrecordid (Uniqueidentifier), sprk_role (Text), sprk_sourcefield (Text), sprk_lastsyncedon (DateTime). Composite indexes on {sprk_personid, sprk_entitylogicalname} and {sprk_entitylogicalname, sprk_entityrecordid}.</prompt>
+  <goal>Junction entity deployed to spaarkedev1. Both indexes created for bidirectional query efficiency.</goal>
+  <constraints>
+    <constraint source="spec FR-2P2.1">7 columns + 2 composite indexes</constraint>
+  </constraints>
+  <knowledge>
+    <topic>dataverse-junction-table</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/relationship-navigation.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2P2.1</step>
+    <step order="1">Define OptionSet sprk_personidtype (SystemUser=1, Contact=2, Team=3, BusinessUnit=4, Account=5, Organization=6)</step>
+    <step order="2">Create entity via dataverse-create-schema</step>
+    <step order="3">Add 7 columns with correct types</step>
+    <step order="4">Add 2 composite indexes</step>
+    <step order="5">Deploy to spaarkedev1 + verify</step>
+    <step order="6">Document in data-model doc</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-1P2.1 — entity with 7 columns + 2 indexes deployed</criterion>
+  </acceptance-criteria>
+</task>

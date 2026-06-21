@@ -1,0 +1,48 @@
+<task id="R3-054" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Implement `includeRelated=documents,events` query parameter (chained discovery)</title>
+    <status>not-started</status>
+    <phase>P6.5</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>4-6h</estimated-effort>
+    <tags>bff-api,membership,transitive,chained-discovery</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Membership/TransitiveMembershipTests.cs (new)</file>
+    </relevant-files>
+    <dependencies>033, 035</dependencies>
+  </metadata>
+  <prompt>Implement Phase 1D transitive memberships per spec.md FR-1D.1, FR-1D.2, FR-1D.3. Promoted to firm in-scope by owner 2026-06-20. 1-hop max enforced (Q3).</prompt>
+  <goal>Endpoint accepts `?includeRelated=documents,events`. Returns transitive memberships (e.g., documents on matters I'm on). Response shape extends byRole with nested keys.</goal>
+  <constraints>
+    <constraint source="spec FR-1D.2">Max chain depth = 1 hop (Q3); deeper requests rejected with 400</constraint>
+    <constraint source="NFR-04">p95 ≤300ms target maintained or documented limit</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>transitive-membership-chained-discovery</topic>
+    <files>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/dataverse/relationship-navigation.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1D.1, FR-1D.2, FR-1D.3, Q3</step>
+    <step order="1">Extend MembershipResolverService.ResolveAsync to accept includeRelated[]</step>
+    <step order="2">For each related entity, discover its Lookup fields back to the primary entity</step>
+    <step order="3">Build chained FetchXML: primary IDs → related IDs</step>
+    <step order="4">Extend MembershipResponse.byRole with nested structure (e.g., byRole.documents.{role})</step>
+    <step order="5">Update endpoint to parse includeRelated query param</step>
+    <step order="6">Reject deeper chains with 400 BadRequest</step>
+    <step order="7">Integration tests</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">includeRelated=documents returns matter→document transitive memberships (AC-1D.1)</criterion>
+    <criterion testable="true">Multi-hop request returns 400 BadRequest</criterion>
+    <criterion testable="true">p95 within budget OR limit documented (AC-1D.2)</criterion>
+  </acceptance-criteria>
+</task>

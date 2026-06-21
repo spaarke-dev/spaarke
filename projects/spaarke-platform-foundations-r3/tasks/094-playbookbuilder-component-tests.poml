@@ -1,0 +1,38 @@
+<task id="R3-094" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>PlaybookBuilder component tests + snapshot regression</title>
+    <status>not-started</status>
+    <phase>P9</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>3-4h</estimated-effort>
+    <tags>frontend,test,playbook-builder,h2</tags>
+    <relevant-files>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/__tests__/</file>
+    </relevant-files>
+    <dependencies>091, 092, 093</dependencies>
+  </metadata>
+  <prompt>Comprehensive snapshot + behavior tests for all H2 affordances. Run with the LookupUserMembershipForm tests from task 043 to cover the full new surface.</prompt>
+  <goal>No regression in existing PlaybookBuilder UX. Dark mode parity. Coverage for rename, branch, perf-hint scenarios.</goal>
+  <constraints>
+    <constraint source="NFR-03">Coverage mandatory for new UI</constraint>
+  </constraints>
+  <knowledge>
+    <topic>react-component-testing</topic>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check</step>
+    <step order="1">Add tests for all H2 scenarios</step>
+    <step order="2">Snapshot regression suite</step>
+    <step order="3">Dark mode static-scan</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">All H2 component tests pass</criterion>
+    <criterion testable="true">Snapshot regression suite green</criterion>
+  </acceptance-criteria>
+</task>

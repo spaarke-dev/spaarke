@@ -1,0 +1,42 @@
+<task id="R3-086" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Redis pub/sub cache invalidation on junction-row writes</title>
+    <status>not-started</status>
+    <phase>P8</phase>
+    <parallel-group>none (sequential — depends on 084)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>3-4h</estimated-effort>
+    <tags>bff-api,redis,cache-invalidation,phase2</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipCacheInvalidator.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs (subscribe)</file>
+    </relevant-files>
+    <dependencies>033, 084, 085</dependencies>
+  </metadata>
+  <prompt>On junction-row write (by either handler 084 or recon job 085), publish to Redis channel `membership-cache-invalidate` carrying `{userId, entityType}`. All BFF instances subscribed; evict matching cache entries.</prompt>
+  <goal>Membership cache invalidates correctly when junction-row changes. Stale cache cleared within seconds.</goal>
+  <constraints>
+    <constraint source="ADR-009">Redis pub/sub pattern</constraint>
+    <constraint source="spec FR-2P2.8">Channel `membership-cache-invalidate`</constraint>
+  </constraints>
+  <knowledge>
+    <topic>redis-pubsub-cache-invalidation</topic>
+    <files>
+      <file>docs/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/patterns/api/resilience.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2P2.8</step>
+    <step order="1">Implement MembershipCacheInvalidator with Publish + Subscribe on Redis channel</step>
+    <step order="2">Wire publisher into MembershipJunctionUpdater + MembershipReconciliationJob</step>
+    <step order="3">Wire subscriber into MembershipResolverService startup (evict on message)</step>
+    <step order="4">Unit tests: publish + subscribe roundtrip</step>
+    <step order="5">Integration test: junction write → cache evicted on remote BFF instance</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-1P2.7 — cache invalidates on junction write</criterion>
+  </acceptance-criteria>
+</task>

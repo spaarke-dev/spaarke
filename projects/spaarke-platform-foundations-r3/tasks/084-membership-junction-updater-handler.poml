@@ -1,0 +1,46 @@
+<task id="R3-084" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`MembershipJunctionUpdater` handler (subscription consumer, idempotent)</title>
+    <status>not-started</status>
+    <phase>P8</phase>
+    <parallel-group>S (with 085)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>4-6h</estimated-effort>
+    <tags>bff-api,membership,service-bus-consumer,phase2</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipJunctionUpdater.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipJunctionUpdaterHost.cs (new BackgroundService)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipJunctionUpdaterTests.cs</file>
+    </relevant-files>
+    <dependencies>070, 071, 072</dependencies>
+  </metadata>
+  <prompt>Implement Service Bus subscription consumer that processes MembershipChangedEvent and upserts/deletes `sprk_userentityassociation` rows. Idempotent: keyed on {personId, entityRecordId, sourceField} — duplicate delivery safe.</prompt>
+  <goal>Handler consumes from `recon-junction-updater` subscription. Add → upsert. Remove → delete. Update → upsert (overwrite role/timestamp). Idempotent on duplicate delivery.</goal>
+  <constraints>
+    <constraint source="ADR-001">In-process BackgroundService</constraint>
+    <constraint source="spec FR-2P2.4">Idempotency keyed on {personId, entityRecordId, sourceField}</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>service-bus-consumer-handler</topic>
+    <files>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2P2.4</step>
+    <step order="1">Implement MembershipJunctionUpdater (event-handler logic)</step>
+    <step order="2">Implement MembershipJunctionUpdaterHost : BackgroundService (subscription consumer loop)</step>
+    <step order="3">Upsert by composite key (idempotency)</step>
+    <step order="4">Unit tests: add/remove/update; duplicate delivery; cancellation</step>
+    <step order="5">Integration test: event published → row appears in junction table</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-1P2.5 — handler upserts/deletes correctly + idempotent</criterion>
+    <criterion testable="true">Cancellation propagates within 30s (NFR-07)</criterion>
+  </acceptance-criteria>
+</task>

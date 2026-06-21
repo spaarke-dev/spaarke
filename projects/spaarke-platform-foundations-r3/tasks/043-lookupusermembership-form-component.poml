@@ -1,0 +1,49 @@
+<task id="R3-043" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Create `LookupUserMembershipForm.tsx` in PlaybookBuilder properties</title>
+    <status>not-started</status>
+    <phase>P5</phase>
+    <parallel-group>K (with 042)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>frontend,react,fluent-ui,playbook-builder</tags>
+    <relevant-files>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/LookupUserMembershipForm.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/index.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts</file>
+    </relevant-files>
+    <dependencies>040</dependencies>
+  </metadata>
+  <prompt>Create per-ActionType properties form following existing pattern (e.g. CreateNotificationForm.tsx). Fields: entityType (text), roles (multi-select chips), outputVariable (text). Register in properties/index.ts and wire into NodePropertiesDialog. Add validation in canvasValidation.ts.</prompt>
+  <goal>Builder UI lets author configure LookupUserMembership node with entityType + roles + outputVariable. Per Q5: aligns with existing PlaybookBuilder componentry — DO NOT invent new patterns.</goal>
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 + semantic tokens + dark mode</constraint>
+    <constraint source="spec Q5">Align with existing per-ActionType form pattern; reuse infra</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-builder-property-forms</topic>
+    <files>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/CreateNotificationForm.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1B.4 + Q5</step>
+    <step order="1">Study CreateNotificationForm.tsx + QueryDataverse equivalent for layout pattern</step>
+    <step order="2">Author LookupUserMembershipForm.tsx with 3 fields + dark-mode semantic tokens</step>
+    <step order="3">Register in properties/index.ts</step>
+    <step order="4">Wire into NodePropertiesDialog dispatch (per ActionType)</step>
+    <step order="5">Add validation rules in canvasValidation.ts</step>
+    <step order="6">Component test + snapshot</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Form renders correctly in PlaybookBuilder when LookupUserMembership node is selected</criterion>
+    <criterion testable="true">Dark mode parity (semantic tokens; no hardcoded colors)</criterion>
+    <criterion testable="true">Validation: missing entityType blocks save</criterion>
+  </acceptance-criteria>
+</task>

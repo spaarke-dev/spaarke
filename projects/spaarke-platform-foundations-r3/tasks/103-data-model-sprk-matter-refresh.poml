@@ -1,0 +1,39 @@
+<task id="R3-103" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Refresh `docs/data-model/sprk_matter-related-tables.md` with actual `sprk_matter` columns</title>
+    <status>not-started</status>
+    <phase>P10</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>docs,data-model</tags>
+    <relevant-files>
+      <file>docs/data-model/sprk_matter-related-tables.md</file>
+    </relevant-files>
+    <dependencies>030</dependencies>
+  </metadata>
+  <prompt>Refresh data-model doc to list actual sprk_matter columns: sprk_assignedattorney1/2, sprk_assignedparalegal1/2, sprk_assignedlawfirm1/2 (target=sprk_organization per Q4), sprk_assignedtointernal, sprk_assignedtoexternal. Per spec AC-X.4 + NFR-06.</prompt>
+  <goal>Doc matches actual schema. Discovery report endpoint output aligns with doc.</goal>
+  <constraints>
+    <constraint source="spec AC-X.4">Doc drift resolved</constraint>
+    <constraint source="spec NFR-06">Mandatory refresh</constraint>
+  </constraints>
+  <knowledge>
+    <topic>data-model-doc-refresh</topic>
+    <files>
+      <file>docs/data-model/sprk_matter-related-tables.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + AC-X.4 + Q4</step>
+    <step order="1">Pull actual column list from spaarkedev1 metadata</step>
+    <step order="2">Update doc with all sprk_assigned* columns + correct Lookup targets</step>
+    <step order="3">Cross-link to ADR-034 + membership-resolution-pattern doc</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-X.4 — doc matches actual schema</criterion>
+    <criterion testable="true">sprk_assignedlawfirm* documented as targeting sprk_organization</criterion>
+  </acceptance-criteria>
+</task>

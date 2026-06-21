@@ -1,0 +1,36 @@
+<task id="R3-034" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`MembershipResponse` DTO + response shape</title>
+    <status>not-started</status>
+    <phase>P4</phase>
+    <parallel-group>H (with 033)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1h</estimated-effort>
+    <tags>bff-api,membership,dto,api-contract</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/MembershipResponse.cs</file>
+    </relevant-files>
+    <dependencies>030</dependencies>
+  </metadata>
+  <prompt>Define the API response shape per spec.md FR-1A.9. Includes entityType, personIdentity, ids[], byRole map, count, cacheExpiresAt, continuationToken.</prompt>
+  <goal>DTO compiles. JSON serialization matches spec response shape exactly.</goal>
+  <constraints>
+    <constraint source="spec FR-1A.9">Response shape locked per design</constraint>
+  </constraints>
+  <knowledge>
+    <topic>api-contract-dto</topic>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1A.9 response shape</step>
+    <step order="1">Author MembershipResponse record + PersonIdentity record</step>
+    <step order="2">Verify JSON serialization matches spec shape (snake_case if needed)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">DTO compiles + serializes to spec shape</criterion>
+  </acceptance-criteria>
+</task>

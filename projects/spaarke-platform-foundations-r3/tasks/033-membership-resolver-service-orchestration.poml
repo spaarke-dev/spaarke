@@ -1,0 +1,54 @@
+<task id="R3-033" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`MembershipResolverService` — orchestration (discovery + normalization + FetchXML query)</title>
+    <status>not-started</status>
+    <phase>P4</phase>
+    <parallel-group>H (with 034)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>4-6h</estimated-effort>
+    <tags>bff-api,membership,orchestration,fetchxml</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>030, 031, 032</dependencies>
+  </metadata>
+  <prompt>Implement the top-level orchestration that combines FieldDiscovery + IdentityNormalization + OrganizationMembership + per-user Redis cache (5-min TTL) and builds FetchXML to query the target entity for matching rows.</prompt>
+  <goal>MembershipResolverService.ResolveAsync(systemUserId, entityType, options) returns MembershipResponse with ids[], byRole map, identity, count. Per-user cache 5-min TTL (Phase 1A; Phase 2 lengthens TTL with pub/sub invalidation).</goal>
+  <constraints>
+    <constraint source="spec FR-1A.8">Per-user cache 5-min TTL (Phase 1A); no write invalidation</constraint>
+    <constraint source="ADR-009">Redis</constraint>
+    <constraint source="ADR-016">Cache + retry pattern</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>membership-orchestration</topic>
+    <files>
+      <file>docs/adr/ADR-009-redis-caching.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-016-rate-limits.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/QueryDataverseNodeExecutor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1A.5 through FR-1A.8</step>
+    <step order="1">Implement IMembershipResolverService.ResolveAsync(systemUserId, entityType, options)</step>
+    <step order="2">Pull discovered descriptors (from FieldDiscoveryService)</step>
+    <step order="3">Pull PersonIdentity (from IdentityNormalizationService)</step>
+    <step order="4">For each descriptor, build FetchXML condition matching the user's identity values</step>
+    <step order="5">Combine into single OR-joined FetchXML; execute against target entity</step>
+    <step order="6">Group results by role; return MembershipResponse</step>
+    <step order="7">Per-user cache 5-min TTL keyed on {systemUserId, entityType, optionsHash}</step>
+    <step order="8">Unit tests: orchestration paths; integration test against spaarkedev1 fixture</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">ResolveAsync returns expected IDs for seeded user (AC-1A.3)</criterion>
+    <criterion testable="true">byRole map populated correctly</criterion>
+    <criterion testable="true">Cache hit on second call within 5min</criterion>
+    <criterion testable="true">p95 ≤300ms for ≤500-membership user on 50K-row entity (AC-1A.5; verify via App Insights post-deploy)</criterion>
+  </acceptance-criteria>
+</task>

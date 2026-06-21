@@ -1,0 +1,38 @@
+<task id="R3-060" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>P7.0 — Inventory all consumers of `sprk_searchindexed`</title>
+    <status>not-started</status>
+    <phase>P7.0</phase>
+    <parallel-group>M (sequential — main-session only)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>discovery,inventory,h3</tags>
+    <relevant-files>
+      <file>projects/spaarke-platform-foundations-r3/notes/sprk-searchindexed-consumer-inventory.md (new)</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>Grep all references to `sprk_searchindexed` across the repo: C# code, TypeScript, FetchXML, OData filters, UI tiles, code-pages, PCF controls, plugins. Produce checklist for downstream migration tasks (061-065).</prompt>
+  <goal>Complete inventory of `sprk_searchindexed` consumers documented in `notes/sprk-searchindexed-consumer-inventory.md`. Each consumer cluster identified for downstream migration. AC-H3.2 prerequisite.</goal>
+  <constraints>
+    <constraint source="spec FR-3H3.3">Inventory MUST precede migration (P7.0 → P7.1)</constraint>
+  </constraints>
+  <knowledge>
+    <topic>codebase-grep-discovery</topic>
+    <files>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-3H3.3</step>
+    <step order="1">Grep `sprk_searchindexed` recursively (case-insensitive)</step>
+    <step order="2">Categorize hits: writer (DeliverToIndexNodeExecutor), readers (UI tiles, queries, OData filters), schema (Dataverse metadata)</step>
+    <step order="3">Group readers by cluster (UI vs API vs PCF) for parallel migration in P7.1</step>
+    <step order="4">Author inventory doc + recommended migration order</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Inventory doc exists with categorized list</criterion>
+    <criterion testable="true">Each consumer's migration owner identified (UI / API / PCF cluster)</criterion>
+  </acceptance-criteria>
+</task>

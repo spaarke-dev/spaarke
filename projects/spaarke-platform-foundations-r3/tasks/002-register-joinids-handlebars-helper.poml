@@ -1,0 +1,65 @@
+<task id="R3-002" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Register `joinIds` Handlebars helper in TemplateEngine.cs</title>
+    <status>not-started</status>
+    <phase>P1</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>1h</estimated-effort>
+    <tags>bff-api,playbook-engine,handlebars,template-engine</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs</file>
+    </relevant-files>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Register `joinIds` Handlebars helper that produces comma-separated lists suitable for FetchXML `operator='in'` clauses. Used by migrated playbooks consuming `LookupUserMembership` node output.
+    Source: spec.md FR-3H1.2 (and FR-1B.2 — single implementation); AC-H1.1, AC-1B.2.
+  </prompt>
+
+  <role>Senior .NET developer (Handlebars.NET + FetchXML)</role>
+
+  <goal>
+    `{{joinIds arr}}` renders comma-separated values from `arr` (IEnumerable). Empty array → empty string. Unit tests cover: array of GUIDs, array of strings, empty array, null array.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">AI architecture — extend existing TemplateEngine</constraint>
+    <constraint source="bff-extensions.md §A">Pre-merge checklist (BFF-touching)</constraint>
+    <constraint source="NFR-01">Verify publish-size delta</constraint>
+    <constraint source="spec">Single implementation shared between FR-1B.2 and FR-3H1.2</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>handlebars-helper-registration</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check + load FR-3H1.2 + FR-1B.2 from spec.md</step>
+    <step order="1">Add `_handlebars.RegisterHelper("joinIds", ...)` per spec snippet</step>
+    <step order="2">Unit tests for 4 scenarios</step>
+    <step order="3">Build + tests pass + publish-size delta</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs (modified)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`{{joinIds ['a','b','c']}}` renders "a,b,c"</criterion>
+    <criterion testable="true">`{{joinIds []}}` renders ""</criterion>
+    <criterion testable="true">`{{joinIds null}}` renders ""</criterion>
+    <criterion testable="true">FetchXML snippet `<condition attribute="sprk_matter" operator="in" value="{{joinIds myMatters.ids}}"/>` produces valid XML</criterion>
+    <criterion testable="true">Unit tests pass; build succeeds; publish-size reported</criterion>
+  </acceptance-criteria>
+</task>

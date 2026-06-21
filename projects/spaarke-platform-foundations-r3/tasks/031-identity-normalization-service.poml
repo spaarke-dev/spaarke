@@ -1,0 +1,54 @@
+<task id="R3-031" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`IdentityNormalizationService` — systemuser → {contactId, email, teamIds, BU, organizationIds}</title>
+    <status>not-started</status>
+    <phase>P4</phase>
+    <parallel-group>G (with 030, 032)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>4-6h</estimated-effort>
+    <tags>bff-api,membership,identity,redis-cache</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IIdentityNormalizationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/PersonIdentity.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/IdentityNormalizationServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>012</dependencies>
+  </metadata>
+  <prompt>Implement identity normalization per spec.md FR-1A.5 and FR-1A.6. Resolves a systemuserid into the full PersonIdentity record: contactId (via azureactivedirectoryobjectid per ADR-028), primary email, teamIds (via teammembership), businessUnitId + descendants per config, accountId (via parentcustomerid), organizationIds (via configured mapping). Redis cache 10-min TTL per user.</prompt>
+  <goal>Service returns PersonIdentity for any systemuserid. Edge cases handled: user without contact, contact without systemuser, multiple emails.</goal>
+  <constraints>
+    <constraint source="ADR-028">Cross-reference via azureactivedirectoryobjectid</constraint>
+    <constraint source="ADR-009">Redis cache 10-min TTL</constraint>
+    <constraint source="spec Q4">sprk_organization mapping mechanism (assumed: N:N relationship or configurable lookup; first task here defines the mechanism)</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>identity-normalization</topic>
+    <files>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-009-redis-caching.md</file>
+      <file>docs/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1A.5 + FR-1A.6 + Q4 (sprk_organization mapping mechanism — define if not exists)</step>
+    <step order="1">Define PersonIdentity model</step>
+    <step order="2">Implement IdentityNormalizationService.ResolveAsync(systemUserId) — orchestrates 6 sub-queries</step>
+    <step order="3">Each identity-type path independent (failing one does not fail others)</step>
+    <step order="4">Redis cache per user (10-min TTL)</step>
+    <step order="5">Unit tests: each path, edge cases (user no contact, contact no user, multi-email), cache hit/miss</step>
+    <step order="6">Integration test: known seeded user resolves correctly across all 6 paths</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">PersonIdentity populated correctly for seeded test user</criterion>
+    <criterion testable="true">User without contact returns PersonIdentity with contactId=null (no exception)</criterion>
+    <criterion testable="true">Contact without systemuser handled in Lookup→contact path</criterion>
+    <criterion testable="true">Cache hit on second call (10-min TTL)</criterion>
+    <criterion testable="true">AC-1A.4 integration test passes</criterion>
+  </acceptance-criteria>
+</task>

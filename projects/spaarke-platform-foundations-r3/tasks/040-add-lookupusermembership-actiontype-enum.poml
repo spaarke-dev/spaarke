@@ -1,0 +1,36 @@
+<task id="R3-040" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Add `LookupUserMembership = 52` to ActionType enum</title>
+    <status>not-started</status>
+    <phase>P5</phase>
+    <parallel-group>J (with 041)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>30min</estimated-effort>
+    <tags>bff-api,playbook,enum-extension</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    </relevant-files>
+    <dependencies>035</dependencies>
+  </metadata>
+  <prompt>Add `LookupUserMembership = 52` to the ActionType enum. Slots into the Dataverse-data-ops group (51=QueryDataverse, 60=AgentService). Add XML doc comment matching existing style.</prompt>
+  <goal>Enum value added. BFF builds. No collision with existing values.</goal>
+  <constraints>
+    <constraint source="spec FR-1B.1">Value = 52 (per spec design)</constraint>
+  </constraints>
+  <knowledge>
+    <topic>actiontype-enum-extension</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check</step>
+    <step order="1">Add LookupUserMembership = 52 to ActionType enum with XML doc</step>
+    <step order="2">Build verifies no collisions</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">ActionType.LookupUserMembership = 52 exists + builds</criterion>
+  </acceptance-criteria>
+</task>

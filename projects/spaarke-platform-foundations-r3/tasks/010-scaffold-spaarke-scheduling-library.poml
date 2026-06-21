@@ -1,0 +1,62 @@
+<task id="R3-010" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Scaffold `Spaarke.Scheduling` library project + csproj</title>
+    <status>not-started</status>
+    <phase>P2</phase>
+    <parallel-group>C-init (blocks 011, 012, 013, 014)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2h</estimated-effort>
+    <tags>shared-lib,scheduling,dotnet,scaffolding</tags>
+    <relevant-files>
+      <file>src/server/shared/Spaarke.Scheduling/</file>
+      <file>src/server/shared/Spaarke.Scheduling/Spaarke.Scheduling.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>Spaarke.sln</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Create new shared library `Spaarke.Scheduling` at `src/server/shared/Spaarke.Scheduling/`. Net8.0, depends ONLY on `Spaarke.Core` + `Cronos` NuGet (~50KB) + standard `Microsoft.Extensions.*`. Add to `Spaarke.sln`. Reference from BFF API csproj.
+    Source: spec.md FR-2.1, ADR-012 (new shared lib convention).
+  </prompt>
+
+  <goal>Empty `Spaarke.Scheduling.csproj` builds cleanly. Solution build succeeds. BFF references the lib. Cronos NuGet added with version pinned to latest stable v0.7.x.</goal>
+
+  <constraints>
+    <constraint source="ADR-012">Shared component library — new lib under `src/server/shared/`</constraint>
+    <constraint source="ADR-001">In-process scheduling — no Azure Functions, no external scheduler</constraint>
+    <constraint source="NFR-01">Adds ~50KB Cronos to BFF publish; verify within budget</constraint>
+    <constraint source="NFR-02">Cronos has no HIGH CVE</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>shared-library-scaffolding</topic>
+    <files>
+      <file>docs/adr/ADR-001-minimal-api.md</file>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>src/server/shared/Spaarke.Core/Spaarke.Core.csproj</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check + FR-2.1</step>
+    <step order="1">Create project structure under `src/server/shared/Spaarke.Scheduling/`</step>
+    <step order="2">Author csproj: net8.0, ProjectReference to Spaarke.Core, PackageReference Cronos</step>
+    <step order="3">Add project to `Spaarke.sln`</step>
+    <step order="4">Add ProjectReference from `Sprk.Bff.Api.csproj`</step>
+    <step order="5">Solution build + verify Cronos resolves + verify no HIGH CVE</step>
+    <step order="6">Capture publish-size baseline change</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet build Spaarke.sln` succeeds</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows no new HIGH CVE</criterion>
+    <criterion testable="true">BFF publish-size delta reported (expected +~50KB)</criterion>
+    <criterion testable="true">Cronos referenced and resolvable from BFF code</criterion>
+  </acceptance-criteria>
+</task>

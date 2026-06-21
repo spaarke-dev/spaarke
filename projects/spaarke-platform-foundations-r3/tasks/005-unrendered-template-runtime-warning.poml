@@ -1,0 +1,58 @@
+<task id="R3-005" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Unrendered-template runtime warning in PlaybookOrchestrationService</title>
+    <status>not-started</status>
+    <phase>P1</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api,playbook-engine,telemetry,observability</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>004</dependencies>
+  </metadata>
+
+  <prompt>
+    After each playbook node executes, scan its NodeOutput string fields for literal `{{` substrings. If found, log structured warning AND emit `PlaybookStreamEvent` of type `unrendered-template-detected` carrying nodeId + sample text + correlationId.
+    Source: spec.md FR-3H1.4, AC-H1.2.
+  </prompt>
+
+  <goal>Broken/unrendered templates are detected at runtime and surfaced via logs + stream events (not silently leaked into output). Unit + integration tests verify both happy path (no warning) and broken path (warning emitted).</goal>
+
+  <constraints>
+    <constraint source="ADR-013">Extend PlaybookOrchestrationService — do not create parallel orchestrator</constraint>
+    <constraint source="bff-extensions.md §A">Pre-merge BFF checklist</constraint>
+    <constraint source="NFR-01">Publish-size delta reported</constraint>
+    <constraint source="NFR-08">Warning carries correlationId for distributed tracing</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>playbook-orchestration-telemetry</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check + FR-3H1.4</step>
+    <step order="1">Locate the post-node-execution hook in PlaybookOrchestrationService</step>
+    <step order="2">Add scan: walk NodeOutput string fields; if `{{` detected, log structured warning + emit stream event</step>
+    <step order="3">Unit test: NodeOutput with `{{` → warning emitted; without → no warning</step>
+    <step order="4">Integration test: intentionally-broken playbook produces warning in stream</step>
+    <step order="5">Build + tests + publish-size delta</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">NodeOutput containing `{{x.output}}` literal triggers warning log</criterion>
+    <criterion testable="true">`PlaybookStreamEvent unrendered-template-detected` appears in stream telemetry</criterion>
+    <criterion testable="true">Clean output produces NO false-positive warnings</criterion>
+    <criterion testable="true">Unit + integration tests pass</criterion>
+  </acceptance-criteria>
+</task>

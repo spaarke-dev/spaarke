@@ -1,0 +1,53 @@
+<task id="R3-037" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Author ADR-034 — User-record membership resolution pattern</title>
+    <status>not-started</status>
+    <phase>P4</phase>
+    <parallel-group>I (with 035, 036) — main-session-only (.claude/ write boundary)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>3-4h</estimated-effort>
+    <tags>adr,docs,architecture,membership</tags>
+    <relevant-files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>docs/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/INDEX.md</file>
+      <file>docs/architecture/membership-resolution-pattern.md (new)</file>
+    </relevant-files>
+    <dependencies>030, 031, 032, 033</dependencies>
+  </metadata>
+  <prompt>Author ADR-034 documenting: contract (endpoint + DTO), identity normalization, discovery model with override mechanism, Phase 2 junction architecture (design — implementation in P7.5/P8), strangler-fig migration path, naming-collision disambiguation from existing AssociationResolver PCF.</prompt>
+  <goal>ADR-034 merged into both `.claude/adr/` (concise) and `docs/adr/` (full). INDEX files updated. New architecture page `docs/architecture/membership-resolution-pattern.md` describes the pattern + pointers to code entry points.</goal>
+  <constraints>
+    <constraint source="CLAUDE.md §3">.claude/ writes are main-session-only</constraint>
+    <constraint source="spec">ADR-034 reserved for membership pattern</constraint>
+    <constraint source="spec">Disambiguate from existing AssociationResolver PCF in Naming Collision Register</constraint>
+  </constraints>
+  <knowledge>
+    <topic>adr-authoring</topic>
+    <files>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>projects/spaarke-platform-foundations-r3/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + spec ADR-034 reference + naming collision register</step>
+    <step order="1">Read existing ADR-013 + ADR-028 as nearest precedents</step>
+    <step order="2">Author full ADR in `docs/adr/ADR-034-*.md`</step>
+    <step order="3">Author concise version in `.claude/adr/ADR-034-*.md` (MUST/MUST NOT rules)</step>
+    <step order="4">Update both INDEX.md files</step>
+    <step order="5">Author `docs/architecture/membership-resolution-pattern.md` + cross-link from architecture INDEX</step>
+    <step order="6">Document naming-collision disambiguation from AssociationResolver PCF</step>
+    <step order="7">Document Phase 2 junction architecture as design-committed (implementation in P7.5/P8)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">ADR-034 files exist + cross-referenced from INDEX</criterion>
+    <criterion testable="true">Naming-collision register in ADR + architecture doc</criterion>
+    <criterion testable="true">Phase 2 strangler-fig migration path documented</criterion>
+    <criterion testable="true">AC-1.ADR + AC-1.Docs pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,55 @@
+<task id="R3-011" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Define `IScheduledJob` contract + `JobRunContext` + `JobRunResult` + `JobRunTrigger`</title>
+    <status>not-started</status>
+    <phase>P2</phase>
+    <parallel-group>C (with 012)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>1.5h</estimated-effort>
+    <tags>shared-lib,scheduling,contract,dotnet</tags>
+    <relevant-files>
+      <file>src/server/shared/Spaarke.Scheduling/IScheduledJob.cs</file>
+      <file>src/server/shared/Spaarke.Scheduling/JobRunContext.cs</file>
+      <file>src/server/shared/Spaarke.Scheduling/JobRunResult.cs</file>
+      <file>src/server/shared/Spaarke.Scheduling/JobRunTrigger.cs</file>
+    </relevant-files>
+    <dependencies>010</dependencies>
+  </metadata>
+
+  <prompt>
+    Define the public contract types for `Spaarke.Scheduling`: `IScheduledJob` interface (JobId, DisplayName, Description, ExecuteAsync), `JobRunContext` record (RunId, CorrelationId, Trigger, Parameters), `JobRunResult` record (Success, ErrorMessage, ProcessedItems, Duration), `JobRunTrigger` enum (Scheduled, ManualAdmin, OnStartup).
+    Source: spec.md FR-2.1 (per the design.md library code snippets).
+  </prompt>
+
+  <goal>Four type files compile. Public surface matches spec.md design snippets exactly. XML doc comments on public types describe intent.</goal>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — `IScheduledJob` is allowed as testing seam</constraint>
+    <constraint source="NFR-07">`ExecuteAsync` MUST accept CancellationToken</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>shared-library-contract-design</topic>
+    <files>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check + FR-2.1</step>
+    <step order="1">Author `IScheduledJob.cs`: interface with 3 properties + ExecuteAsync</step>
+    <step order="2">Author `JobRunContext.cs`: record with 4 fields</step>
+    <step order="3">Author `JobRunResult.cs`: record with 4 fields</step>
+    <step order="4">Author `JobRunTrigger.cs`: enum with 3 values</step>
+    <step order="5">Build verifies all types compile + accessible</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 type files build</criterion>
+    <criterion testable="true">Public surface matches spec snippets verbatim</criterion>
+    <criterion testable="true">`ExecuteAsync(JobRunContext, CancellationToken)` signature correct</criterion>
+  </acceptance-criteria>
+</task>

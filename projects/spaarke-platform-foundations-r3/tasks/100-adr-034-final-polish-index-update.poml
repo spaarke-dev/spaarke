@@ -1,0 +1,40 @@
+<task id="R3-100" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>ADR-034 final polish + INDEX update (post-implementation pass)</title>
+    <status>not-started</status>
+    <phase>P10</phase>
+    <parallel-group>U (sequential — main-session-only — .claude/ write boundary)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>docs,adr,polish</tags>
+    <relevant-files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>docs/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/INDEX.md</file>
+    </relevant-files>
+    <dependencies>037, 087</dependencies>
+  </metadata>
+  <prompt>Post-implementation pass: ADR-034 polish to reflect what was actually built in P4 + P6.5 + P7.5 + P8 (Phase 2 sync materialized; sprk_organization mapping mechanism chosen; 1-hop transitive limit confirmed).</prompt>
+  <goal>ADR-034 final state matches deployed reality. INDEX updated.</goal>
+  <constraints>
+    <constraint source="CLAUDE.md §3">.claude/ writes are main-session-only</constraint>
+  </constraints>
+  <knowledge>
+    <topic>adr-post-implementation-polish</topic>
+    <files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>docs/adr/ADR-034-user-record-membership.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + diff ADR text vs actual implementation</step>
+    <step order="1">Update both ADR files with as-built reality</step>
+    <step order="2">Update INDEX entries</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">ADR-034 reflects shipped reality</criterion>
+  </acceptance-criteria>
+</task>

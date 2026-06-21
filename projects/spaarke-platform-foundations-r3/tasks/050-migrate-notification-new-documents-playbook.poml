@@ -1,0 +1,41 @@
+<task id="R3-050" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Migrate `notification-new-documents.json` to use `LookupUserMembership` node</title>
+    <status>not-started</status>
+    <phase>P6</phase>
+    <parallel-group>L (with 051, 052)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>playbook-config,migration,membership</tags>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</file>
+    </relevant-files>
+    <dependencies>041, 042</dependencies>
+  </metadata>
+  <prompt>Replace the broken `sprk_matter → sprk_matterteammember[sprk_user = currentuser]` FetchXML join with a LookupUserMembership node for sprk_matter + downstream Query node that uses `{{joinIds myMatters.ids}}` in `operator='in'` condition.</prompt>
+  <goal>Playbook produces non-zero notifications for seeded test fixture. Old broken join removed.</goal>
+  <constraints>
+    <constraint source="spec">notification-new-documents.json is the canonical broken playbook (A1 defect)</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-migration-with-lookupusermembership</topic>
+    <files>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + A1 defect + FR-1C.1</step>
+    <step order="1">Read existing playbook; identify the broken join</step>
+    <step order="2">Add LookupUserMembership node with entityType=sprk_matter, roles=[owner, assignedAttorney, assignedParalegal], outputVariable=myMatters</step>
+    <step order="3">Update Query node to use `{{joinIds myMatters.ids}}` in operator='in' condition</step>
+    <step order="4">Schema validation</step>
+    <step order="5">Smoke test against seeded spaarkedev1 user → assert non-zero notification count</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">grep `sprk_matterteammember` returns ZERO matches</criterion>
+    <criterion testable="true">Playbook produces non-zero notifications (AC-1C.1)</criterion>
+  </acceptance-criteria>
+</task>

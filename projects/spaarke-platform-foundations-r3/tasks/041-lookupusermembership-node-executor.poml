@@ -1,0 +1,51 @@
+<task id="R3-041" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Implement `LookupUserMembershipNodeExecutor`</title>
+    <status>not-started</status>
+    <phase>P5</phase>
+    <parallel-group>J (with 040)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>3-4h</estimated-effort>
+    <tags>bff-api,playbook,node-executor</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/LookupUserMembershipNodeExecutorTests.cs</file>
+    </relevant-files>
+    <dependencies>033, 040</dependencies>
+  </metadata>
+  <prompt>Implement node executor that calls MembershipResolverService IN-PROCESS (NOT HTTP round-trip) per spec.md FR-1B.1. Reads node config (entityType, roles, outputVariable); binds resolved IDs to OutputVariable for downstream nodes.</prompt>
+  <goal>Node executor registered + handles ActionType=52. Configuration validation per node-executor pattern. Tests cover happy path + invalid config.</goal>
+  <constraints>
+    <constraint source="ADR-013">Extend existing node executor framework</constraint>
+    <constraint source="ADR-010">DI: Singleton executor depending on Scoped MembershipResolverService → use IServiceProvider.CreateScope() pattern (see AgentServiceNodeExecutor for reference)</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>node-executor-authoring</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/QueryDataverseNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AgentServiceNodeExecutor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1B.1</step>
+    <step order="1">Author LookupUserMembershipNodeExecutor : INodeExecutor (SupportedActionTypes = [LookupUserMembership])</step>
+    <step order="2">Implement Validate(): require entityType + outputVariable; roles optional</step>
+    <step order="3">Implement ExecuteAsync(): CreateScope per execution → resolve IMembershipResolverService → invoke ResolveAsync → bind to NodeOutput</step>
+    <step order="4">Register in NodeExecutorRegistry</step>
+    <step order="5">Unit tests: validate path, execute path, missing entityType error, missing OutputVariable error</step>
+    <step order="6">Integration test: end-to-end playbook with LookupUserMembership node + downstream consumer of OutputVariable</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Executor handles ActionType=52; binds IDs to OutputVariable (AC-1B.1)</criterion>
+    <criterion testable="true">Singleton+Scoped DI pattern followed (CreateScope per execution)</criterion>
+    <criterion testable="true">Unit + integration tests pass</criterion>
+  </acceptance-criteria>
+</task>

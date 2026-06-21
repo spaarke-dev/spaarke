@@ -1,0 +1,47 @@
+<task id="R3-081" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Wire event-publishing into matter mutation endpoints</title>
+    <status>not-started</status>
+    <phase>P8</phase>
+    <parallel-group>R (with 082, 083)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>3-4h</estimated-effort>
+    <tags>bff-api,membership,event-publishing,phase2</tags>
+    <relevant-files>
+      <file>(per inventory — matter cluster endpoints)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/MembershipEventPublisher.cs (new)</file>
+    </relevant-files>
+    <dependencies>080</dependencies>
+  </metadata>
+  <prompt>Per inventory, add MembershipChangedEvent publishing to matter mutation endpoints. Fire-and-forget per Q2 — publish failure logs structured warning but does NOT roll back mutation.</prompt>
+  <goal>Matter cluster endpoints publish events on lookup mutations. Tests confirm publish.</goal>
+  <constraints>
+    <constraint source="spec Q2">Fire-and-forget semantics; publish failure logs warning + nightly recon backstop</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+    <constraint source="NFR-08">correlationId carried in published event</constraint>
+  </constraints>
+  <knowledge>
+    <topic>event-publishing-service-bus</topic>
+    <files>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/notes/event-source-inventory.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2P2.6 + Q2</step>
+    <step order="1">Create MembershipEventPublisher (Singleton) that wraps Service Bus topic client</step>
+    <step order="2">For each matter mutation endpoint per inventory: detect lookup mutation in request → publish event after successful mutation</step>
+    <step order="3">Fire-and-forget: publish exceptions logged as warnings (do NOT throw)</step>
+    <step order="4">Unit tests: detect mutation, publish event, fire-and-forget on publisher failure</step>
+    <step order="5">Integration test: end-to-end mutation → event published to topic</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Matter lookup mutations publish events</criterion>
+    <criterion testable="true">Publish failure logs warning but mutation succeeds</criterion>
+    <criterion testable="true">Integration test passes</criterion>
+  </acceptance-criteria>
+</task>

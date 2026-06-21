@@ -1,0 +1,42 @@
+<task id="R3-061" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Schema migration — `sprk_searchindexed` → `sprk_searchindexqueuedon` + `sprk_searchindexcompletedon`</title>
+    <status>not-started</status>
+    <phase>P7.1</phase>
+    <parallel-group>N (with 062)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>dataverse,schema-migration,h3</tags>
+    <relevant-files>
+      <file>scripts/Migrate-SprkSearchIndexedSchema.ps1 (new)</file>
+    </relevant-files>
+    <dependencies>060</dependencies>
+  </metadata>
+  <prompt>Add new fields `sprk_searchindexqueuedon` (datetime) + `sprk_searchindexcompletedon` (datetime) to the relevant entity (sprk_document or similar — verify from inventory). Keep `sprk_searchindexed` for dual-write during transition.</prompt>
+  <goal>New fields exist + writable. Old field still readable. Dual-write enabled in DeliverToIndexNodeExecutor (task 062).</goal>
+  <constraints>
+    <constraint source="spec FR-3H3.2">Dual-field migration (queuedon + completedon)</constraint>
+    <constraint source="spec assumption">Dual-write for R3 + one sprint after; remove old field post-migration</constraint>
+  </constraints>
+  <knowledge>
+    <topic>dataverse-schema-migration</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>projects/spaarke-platform-foundations-r3/notes/sprk-searchindexed-consumer-inventory.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + inventory results</step>
+    <step order="1">Identify host entity from inventory</step>
+    <step order="2">Add `sprk_searchindexqueuedon` + `sprk_searchindexcompletedon` columns</step>
+    <step order="3">Deploy to spaarkedev1; verify maker portal</step>
+    <step order="4">Keep `sprk_searchindexed` for dual-write transition</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">New fields exist + writable in spaarkedev1</criterion>
+    <criterion testable="true">Old field intact (dual-write transition)</criterion>
+  </acceptance-criteria>
+</task>

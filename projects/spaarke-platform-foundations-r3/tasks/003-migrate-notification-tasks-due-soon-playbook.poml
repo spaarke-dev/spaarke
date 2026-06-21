@@ -1,0 +1,54 @@
+<task id="R3-003" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Migrate `notification-tasks-due-soon.json` from `??` to `{{default}}`</title>
+    <status>not-started</status>
+    <phase>P1</phase>
+    <parallel-group>B (with 004)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>30min</estimated-effort>
+    <tags>playbook-config,migration,handlebars</tags>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json</file>
+    </relevant-files>
+    <dependencies>002</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace broken `{{userPreferences.timeWindow ?? '24h'}}` with `{{default userPreferences.timeWindow '24h'}}` in `notification-tasks-due-soon.json`. The `??` operator is not supported by Handlebars.NET and silently breaks the templated FetchXML.
+    Source: spec.md FR-3H1.3; design.md A2 defect.
+  </prompt>
+
+  <role>Playbook maintainer familiar with Handlebars + FetchXML</role>
+  <goal>All `??` usages in `notification-tasks-due-soon.json` replaced with `{{default ...}}` helper. Playbook validates against schema. Manual smoke test: running the playbook produces non-empty FetchXML (no literal `{{ ?? }}` substrings).</goal>
+
+  <constraints>
+    <constraint source="spec">Helper registration must already exist (depends on task 002)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>playbook-handlebars-migration</topic>
+    <files>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check + load FR-3H1.3</step>
+    <step order="1">Read playbook JSON; locate all `??` usages</step>
+    <step order="2">Replace each `{{X ?? 'Y'}}` with `{{default X 'Y'}}`</step>
+    <step order="3">Validate JSON schema; verify no syntax breakage</step>
+    <step order="4">Manual integration: run playbook executor against seeded fixture; assert non-zero rows</step>
+  </steps>
+
+  <outputs>
+    <output type="config">projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep `??` in the playbook returns zero matches</criterion>
+    <criterion testable="true">Playbook executes end-to-end; emits non-zero notification rows</criterion>
+  </acceptance-criteria>
+</task>

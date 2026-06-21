@@ -1,0 +1,38 @@
+<task id="R3-102" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Refresh `docs/architecture/playbook-architecture.md` Known Pitfalls section</title>
+    <status>not-started</status>
+    <phase>P10</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>docs,architecture,playbook</tags>
+    <relevant-files>
+      <file>docs/architecture/playbook-architecture.md</file>
+    </relevant-files>
+    <dependencies>005, 065, 066</dependencies>
+  </metadata>
+  <prompt>Update Known Pitfalls section: mark G1 + G10 as fixed (Workstream H1); G6 + G7 + G8 as fixed (H3); G2 + G3 + G9 as fixed (H2); add G4 explicit doc; mark G5 as fixed (Part 1); mark G11/H4 as deferred to R4. Per spec FR-3G4 + AC-Docs.</prompt>
+  <goal>Known Pitfalls section reflects R3 outcomes. G1-G11 status accurate.</goal>
+  <constraints>
+    <constraint source="spec FR-3G4">G4 doc-only update</constraint>
+    <constraint source="spec AC-Docs">Refresh required</constraint>
+  </constraints>
+  <knowledge>
+    <topic>architecture-doc-update</topic>
+    <files>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + spec G1-G11 status</step>
+    <step order="1">Update Known Pitfalls table with R3 outcomes</step>
+    <step order="2">Add G4 explicit doc (idempotency-on-unread)</step>
+    <step order="3">Cross-reference R4 follow-up for G11/H4</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-Docs — Known Pitfalls section refreshed</criterion>
+  </acceptance-criteria>
+</task>

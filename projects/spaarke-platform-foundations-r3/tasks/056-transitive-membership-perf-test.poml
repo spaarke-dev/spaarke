@@ -1,0 +1,38 @@
+<task id="R3-056" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Transitive membership perf integration tests + p95 check</title>
+    <status>not-started</status>
+    <phase>P6.5</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>integration-test,perf,membership</tags>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Membership/TransitiveMembershipPerfTests.cs</file>
+    </relevant-files>
+    <dependencies>054, 055</dependencies>
+  </metadata>
+  <prompt>Add perf integration test that runs transitive query (matter→documents) against seeded fixture; measures duration; asserts under NFR-04 budget OR documents the actual limit if exceeded.</prompt>
+  <goal>AC-1D.2 satisfied — either p95 within 300ms budget for transitive, OR limit documented in task notes + spec.md update.</goal>
+  <constraints>
+    <constraint source="NFR-04">p95 ≤300ms target</constraint>
+  </constraints>
+  <knowledge>
+    <topic>perf-integration-test</topic>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + NFR-04, AC-1D.2</step>
+    <step order="1">Author perf test: 500-membership user, matter+documents transitive, 100-iteration warm + measured</step>
+    <step order="2">If p95 ≤300ms: pass</step>
+    <step order="3">If p95 &gt;300ms: document actual limit + update spec.md Phase 1D constraint</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Perf test runs end-to-end</criterion>
+    <criterion testable="true">Either p95 within budget OR limit documented</criterion>
+  </acceptance-criteria>
+</task>

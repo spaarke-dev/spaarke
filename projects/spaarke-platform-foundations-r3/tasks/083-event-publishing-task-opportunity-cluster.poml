@@ -1,0 +1,38 @@
+<task id="R3-083" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Wire event-publishing into remaining entity mutation endpoints (per inventory)</title>
+    <status>not-started</status>
+    <phase>P8</phase>
+    <parallel-group>R (with 081, 082)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-4h (varies by inventory)</estimated-effort>
+    <tags>bff-api,membership,event-publishing,phase2</tags>
+    <relevant-files>
+      <file>(per inventory — task / opportunity / other entity cluster endpoints)</file>
+    </relevant-files>
+    <dependencies>080, 081</dependencies>
+  </metadata>
+  <prompt>Per inventory, hook MembershipChangedEvent publishing into any remaining mutation endpoints (e.g., task, opportunity, contact relationships). Same pattern as 081.</prompt>
+  <goal>All inventoried endpoints publish events. Coverage matches inventory checklist 100%.</goal>
+  <constraints>
+    <constraint source="spec Q2">Fire-and-forget</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>event-publishing-service-bus</topic>
+    <files>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>projects/spaarke-platform-foundations-r3/notes/event-source-inventory.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + inventory remaining clusters</step>
+    <step order="1">Hook each endpoint per task 081 pattern</step>
+    <step order="2">Tests + checklist verification</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">All inventory items addressed (AC-1P2.4)</criterion>
+  </acceptance-criteria>
+</task>

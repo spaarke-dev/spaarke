@@ -1,0 +1,48 @@
+<task id="R3-091" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`OutputVariable` rename guard in Builder UI</title>
+    <status>not-started</status>
+    <phase>P9</phase>
+    <parallel-group>T (with 092, 093)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>3-4h</estimated-effort>
+    <tags>frontend,playbook-builder,h2,validation</tags>
+    <relevant-files>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesForm.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/VariableReferencePanel.tsx</file>
+    </relevant-files>
+    <dependencies>090</dependencies>
+  </metadata>
+  <prompt>Per FR-3H2.1: when user edits a node's OutputVariable, scan all other nodes for {{<oldName>.output*}} references. If found, dialog with auto-rename/keep/continue options. Default: auto-rename. Reuse VariableReferencePanel for the scan. Validation rule in canvasValidation.ts.</prompt>
+  <goal>Rename guard prevents silent breakage. Auto-rename works correctly. Component tests + snapshots verify behavior.</goal>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + semantic tokens + dark mode</constraint>
+    <constraint source="spec Q5">Extend existing patterns — do NOT invent</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-builder-rename-guard</topic>
+    <files>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/spaarke-platform-foundations-r3/notes/playbookbuilder-pattern-research.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/VariableReferencePanel.tsx</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-3H2.1 + research doc</step>
+    <step order="1">Add OutputVariable rename detection in NodePropertiesForm.tsx onChange</step>
+    <step order="2">Reuse VariableReferencePanel scan logic</step>
+    <step order="3">Add Fluent v9 dialog with 3 options (auto-rename default)</step>
+    <step order="4">Auto-rename: find/replace across all node configs (using existing config-mutation primitives)</step>
+    <step order="5">Validation rule in canvasValidation.ts</step>
+    <step order="6">Component tests + snapshots (rename scenario, keep scenario, advanced scenario)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-H2.1 — silent rename breakage prevented</criterion>
+    <criterion testable="true">Auto-rename updates all downstream references correctly</criterion>
+    <criterion testable="true">Dark mode parity</criterion>
+  </acceptance-criteria>
+</task>

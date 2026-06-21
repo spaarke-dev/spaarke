@@ -1,0 +1,44 @@
+<task id="R3-016" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Create `sprk_backgroundjobrun` Dataverse entity (job run instances)</title>
+    <status>not-started</status>
+    <phase>P2</phase>
+    <parallel-group>E (with 015)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>dataverse,schema,entity-creation</tags>
+    <relevant-files>
+      <file>scripts/Create-BackgroundJobRunEntity.ps1</file>
+      <file>docs/data-model/sprk_backgroundjobrun.md (new)</file>
+    </relevant-files>
+    <dependencies>010</dependencies>
+  </metadata>
+  <prompt>Create `sprk_backgroundjobrun` Dataverse entity (per-run instances) with 10 columns per spec.md FR-2.5, including lookup to sprk_backgroundjob.</prompt>
+  <goal>Entity created in spaarkedev1; lookup to sprk_backgroundjob enforces referential integrity; OptionSets defined (sprk_trigger: Scheduled/ManualAdmin/OnStartup; sprk_status: Running/Success/Failed/Cancelled).</goal>
+  <constraints>
+    <constraint source="spec">10 columns per FR-2.5; lookup to sprk_backgroundjob</constraint>
+  </constraints>
+  <knowledge>
+    <topic>dataverse-entity-creation</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/relationship-navigation.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2.5</step>
+    <step order="1">Define OptionSets sprk_trigger + sprk_status</step>
+    <step order="2">Create entity via dataverse-create-schema</step>
+    <step order="3">Add 10 columns with types per spec; lookup to sprk_backgroundjob</step>
+    <step order="4">Deploy to spaarkedev1 + verify</step>
+    <step order="5">Document in `docs/data-model/sprk_backgroundjobrun.md`</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Entity exists with 10 columns + lookup</criterion>
+    <criterion testable="true">OptionSets correct</criterion>
+    <criterion testable="true">Data-model doc created</criterion>
+  </acceptance-criteria>
+</task>

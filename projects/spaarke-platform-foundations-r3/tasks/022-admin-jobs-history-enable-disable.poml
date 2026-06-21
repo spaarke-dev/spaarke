@@ -1,0 +1,43 @@
+<task id="R3-022" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`GET /history` + `POST /enable` + `POST /disable` endpoints</title>
+    <status>not-started</status>
+    <phase>P3</phase>
+    <parallel-group>F (with 020, 021)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api,admin-endpoints,scheduling</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Admin/JobsEndpointsTests.cs</file>
+    </relevant-files>
+    <dependencies>013, 014, 015, 016</dependencies>
+  </metadata>
+  <prompt>Implement GET /{jobId}/history?limit=N + POST /{jobId}/enable + POST /{jobId}/disable. Disabled jobs remain in registry but skip scheduled execution.</prompt>
+  <goal>Operators can query history + flip enabled/disabled flag on any job. Disabled jobs do not dispatch on cron tick.</goal>
+  <constraints>
+    <constraint source="ADR-008">Endpoint-filter auth</constraint>
+    <constraint source="spec">Toggling sprk_backgroundjob.sprk_enabled requires runtime re-evaluation in host</constraint>
+  </constraints>
+  <knowledge>
+    <topic>admin-endpoint-pattern</topic>
+    <files>
+      <file>docs/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2.6</step>
+    <step order="1">Add GET /history handler (last N runs ordered DESC)</step>
+    <step order="2">Add POST /enable + POST /disable handlers (update sprk_backgroundjob.sprk_enabled)</step>
+    <step order="3">Trigger ScheduledJobHost refresh after flag change (immediate effect)</step>
+    <step order="4">Unit tests: history pagination, enable→re-dispatches, disable→skips</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">GET /history returns last N runs in DESC order</criterion>
+    <criterion testable="true">POST /disable → job skips next scheduled tick</criterion>
+    <criterion testable="true">POST /enable → job resumes on next tick</criterion>
+  </acceptance-criteria>
+</task>

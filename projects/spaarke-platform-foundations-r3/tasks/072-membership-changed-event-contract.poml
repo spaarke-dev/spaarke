@@ -1,0 +1,41 @@
+<task id="R3-072" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`MembershipChangedEvent` payload contract + serialization</title>
+    <status>not-started</status>
+    <phase>P7.5</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>bff-api,membership,event-contract</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/MembershipChangedEvent.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/MembershipMutationType.cs (new)</file>
+    </relevant-files>
+    <dependencies>070, 071</dependencies>
+  </metadata>
+  <prompt>Define event payload per spec.md FR-2P2.2: {personId, personIdType, entityLogicalName, entityRecordId, sourceField, role, mutationType (added/removed/updated), correlationId}.</prompt>
+  <goal>Event record compiles. JSON serialization stable + versionable.</goal>
+  <constraints>
+    <constraint source="spec FR-2P2.2">Field set locked</constraint>
+    <constraint source="NFR-08">correlationId mandatory</constraint>
+  </constraints>
+  <knowledge>
+    <topic>event-payload-design</topic>
+    <files>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2P2.2</step>
+    <step order="1">Define enum MembershipMutationType (Added=1, Removed=2, Updated=3)</step>
+    <step order="2">Define record MembershipChangedEvent with all fields + correlationId</step>
+    <step order="3">Add schemaVersion field for future evolution</step>
+    <step order="4">Unit test serialization roundtrip</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Event record + enum compile</criterion>
+    <criterion testable="true">Serialization roundtrip preserves all fields</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,53 @@
+<task id="R3-035" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`GET /api/users/me/memberships/{entityType}` endpoint + filtering + pagination</title>
+    <status>not-started</status>
+    <phase>P4</phase>
+    <parallel-group>I (with 036, 037)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>3-4h</estimated-effort>
+    <tags>bff-api,membership,endpoint,obo-auth</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Membership/MembershipEndpointsTests.cs</file>
+    </relevant-files>
+    <dependencies>033, 034</dependencies>
+  </metadata>
+  <prompt>Implement the user-facing endpoint per spec.md FR-1A.9. Standard OBO auth. Query params: roles, identityTypes, includeRelated (deferred to P6.5), limit, continuationToken.</prompt>
+  <goal>Authenticated user can GET their memberships per entity. Supports filtering by role + identityType + pagination via continuation token.</goal>
+  <constraints>
+    <constraint source="ADR-028">OBO auth (delegated)</constraint>
+    <constraint source="ADR-008">Endpoint-filter pattern</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+    <constraint source="NFR-04">p95 ≤300ms target</constraint>
+  </constraints>
+  <knowledge>
+    <topic>endpoint-with-obo-auth</topic>
+    <files>
+      <file>docs/adr/ADR-008-endpoint-filters.md</file>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1A.9</step>
+    <step order="1">Create MembershipEndpoints.cs with MapMembershipEndpoints extension</step>
+    <step order="2">Implement handler: resolve current user via OBO claims → delegate to MembershipResolverService → return MembershipResponse</step>
+    <step order="3">Parse query params (roles, identityTypes, limit, continuationToken)</step>
+    <step order="4">Pagination via continuation token (default limit 500)</step>
+    <step order="5">Register in Program.cs with .RequireAuthorization()</step>
+    <step order="6">Unit + integration tests</step>
+    <step order="7">Publish-size delta</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/users/me/memberships/sprk_matter returns expected IDs for seeded user (AC-1A.3)</criterion>
+    <criterion testable="true">Filters work (roles, identityTypes)</criterion>
+    <criterion testable="true">Pagination via continuation token works for &gt;500 memberships</criterion>
+    <criterion testable="true">401 for unauthenticated; 403 if any future role gate applied</criterion>
+  </acceptance-criteria>
+</task>

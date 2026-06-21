@@ -1,0 +1,44 @@
+<task id="R3-014" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Retry/backoff + idempotency in ScheduledJobHost</title>
+    <status>not-started</status>
+    <phase>P2</phase>
+    <parallel-group>D (with 013)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>shared-lib,scheduling,resilience,retry-backoff</tags>
+    <relevant-files>
+      <file>src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs</file>
+      <file>src/server/shared/Spaarke.Scheduling/JobRetryPolicy.cs</file>
+      <file>tests/unit/Spaarke.Scheduling.Tests/JobRetryPolicyTests.cs</file>
+    </relevant-files>
+    <dependencies>013</dependencies>
+  </metadata>
+  <prompt>Add retry-with-backoff for failing jobs (exponential, configurable max attempts) and idempotency guarantees (don't run same scheduled tick twice on host restart).</prompt>
+  <goal>Failing jobs retry per configured policy. Restart during in-flight run does NOT cause duplicate execution of completed runs.</goal>
+  <constraints>
+    <constraint source=".claude/patterns/api/resilience.md">Use Polly or equivalent retry pattern</constraint>
+    <constraint source="NFR-08">Failed runs surface in sprk_backgroundjobrun with errorMessage</constraint>
+  </constraints>
+  <knowledge>
+    <topic>retry-backoff-idempotency</topic>
+    <files>
+      <file>.claude/patterns/api/resilience.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check</step>
+    <step order="1">Define `JobRetryPolicy` (max attempts, base delay, max delay)</step>
+    <step order="2">Wrap ExecuteAsync invocation in retry loop with exponential backoff</step>
+    <step order="3">Implement idempotency: check sprk_backgroundjobrun for in-progress/completed tick before starting</step>
+    <step order="4">Unit tests: retry on transient failure, give up after max attempts, idempotency dedupe</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Failing job retries per policy (configurable)</criterion>
+    <criterion testable="true">Final failure records in sprk_backgroundjobrun with status=Failed</criterion>
+    <criterion testable="true">Idempotency prevents duplicate execution after host restart</criterion>
+  </acceptance-criteria>
+</task>

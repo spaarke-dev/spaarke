@@ -1,0 +1,38 @@
+<task id="R3-063" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Migrate UI tile consumers of `sprk_searchindexed`</title>
+    <status>not-started</status>
+    <phase>P7.1</phase>
+    <parallel-group>O (with 064, 065)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>frontend,pcf,code-pages,migration</tags>
+    <relevant-files>
+      <file>(per inventory — UI tiles that read sprk_searchindexed)</file>
+    </relevant-files>
+    <dependencies>061, 062</dependencies>
+  </metadata>
+  <prompt>Per P7.0 inventory, migrate UI tiles (PCF, code-pages) that read `sprk_searchindexed` to read `sprk_searchindexcompletedon` (treat non-null as "indexed").</prompt>
+  <goal>UI tile cluster migrated. Status display still works (binary completed/not).</goal>
+  <constraints>
+    <constraint source="spec FR-3H3.4">Consumer migration per inventory</constraint>
+  </constraints>
+  <knowledge>
+    <topic>consumer-migration</topic>
+    <files>
+      <file>projects/spaarke-platform-foundations-r3/notes/sprk-searchindexed-consumer-inventory.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + inventory UI cluster</step>
+    <step order="1">Update each UI consumer to read sprk_searchindexcompletedon (non-null = indexed)</step>
+    <step order="2">Component tests / snapshots</step>
+    <step order="3">Manual smoke per consumer</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Each UI tile consumer migrated</criterion>
+    <criterion testable="true">Status display unchanged from user perspective</criterion>
+  </acceptance-criteria>
+</task>
