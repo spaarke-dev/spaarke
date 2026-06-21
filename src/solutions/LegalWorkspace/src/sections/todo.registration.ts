@@ -127,30 +127,56 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
     [notifyTodoChange, subscribe],
   );
 
-  // UAT 2026-06-20 round 4 — split Open behaviour by selection:
+  // UAT 2026-06-21 round 5 — split Open behaviour by selection AND open as
+  // a true DIALOG (not page-nav):
   //
-  //   - todoId PRESENT → open the OOB To Do record FORM directly via
-  //     `Xrm.Navigation.openForm({ entityName: 'sprk_todo', entityId })`.
-  //     Skips the SmartTodo Code Page hop entirely so the user gets a single
-  //     record modal instead of the prior "Code Page modal → record modal"
-  //     stack (UAT round 4 issue 3). The form gets BPF + business rules +
-  //     ribbon for free — same as opening from any view.
+  //   - todoId PRESENT → open the OOB sprk_todo record FORM as a dialog via
+  //     `Xrm.Navigation.navigateTo({pageType:'entityrecord', ...}, {target:2})`.
+  //     `target: 2` = dialog mode (modal overlay over the current page).
+  //     The current SpaarkeAi page stays mounted underneath, so when the
+  //     dialog closes, the user is back exactly where they were (widget
+  //     context preserved). This fixes UAT round 5 issues #2 (was opening as
+  //     full-page nav via openForm) and #3 (save/close was landing the user
+  //     on SpaarkeAi instead of returning to the widget context).
   //
   //   - todoId ABSENT  → open the SmartTodo Code Page (no launch data) so
   //     `useLaunchContext` returns undefined → app renders its default 3-col
   //     Kanban view (no auto-modal). This preserves "user wants to just open
   //     the full app" without forcing a card selection first.
   //
-  // Falls back to the prior Code-Page-hop path if Xrm.Navigation is somehow
-  // unavailable (defensive — should not happen inside MDA).
+  // Falls back to openForm (page-nav) if Xrm.Navigation.navigateTo is somehow
+  // unavailable — defensive only, should not happen inside MDA.
   const handleOpenTodo = React.useCallback(
     (todoId?: string) => {
       if (todoId) {
-        // Preferred path: open the record form directly. No Code Page stack.
-        // `Xrm` is the model-driven app global; types are loose because the
-        // shared lib doesn't pull in @types/xrm.
-        const xrm = (globalThis as unknown as { Xrm?: { Navigation?: { openForm?: (opts: unknown) => Promise<unknown> } } }).Xrm;
+        // Loose typing — the shared lib doesn't pull in @types/xrm.
+        const xrm = (globalThis as unknown as {
+          Xrm?: {
+            Navigation?: {
+              navigateTo?: (page: unknown, opts?: unknown) => Promise<unknown>;
+              openForm?: (opts: unknown) => Promise<unknown>;
+            };
+          };
+        }).Xrm;
+        if (xrm?.Navigation?.navigateTo) {
+          // target: 2 = dialog. Width/height keep the dialog roomy but inset.
+          void xrm.Navigation.navigateTo(
+            {
+              pageType: "entityrecord",
+              entityName: "sprk_todo",
+              entityId: todoId,
+            },
+            {
+              target: 2,
+              position: 1, // 1 = center
+              width: { value: 80, unit: "%" },
+              height: { value: 80, unit: "%" },
+            },
+          );
+          return;
+        }
         if (xrm?.Navigation?.openForm) {
+          // Defensive — page-nav fallback only.
           void xrm.Navigation.openForm({
             entityName: "sprk_todo",
             entityId: todoId,
@@ -158,7 +184,7 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
           });
           return;
         }
-        // Defensive fallback only — should never run in real MDA.
+        // Last-resort fallback: Code-Page-hop (legacy path).
         const data =
           `${LAUNCH_PARAM_ACTION}=${LAUNCH_ACTION_OPEN_TODO}` +
           `&${LAUNCH_PARAM_TODO_ID}=${encodeURIComponent(todoId)}`;

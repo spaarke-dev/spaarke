@@ -117,11 +117,37 @@ function computeTodoScore(todo: IKanbanTodoLike): number {
 // no-mutation render path that doesn't need stateful overrides).
 // ---------------------------------------------------------------------------
 
-/** Determine which column an unpinned item belongs to based on its To Do Score. */
-function assignColumnByScore(todo: IKanbanTodoLike, todayThreshold: number, tomorrowThreshold: number): TodoColumn {
-  const score = computeTodoScore(todo);
-  if (score >= todayThreshold) return 'Today';
-  if (score >= tomorrowThreshold) return 'Tomorrow';
+/**
+ * UAT 2026-06-21 — bucket by DUE DATE, not score.
+ *
+ * The column names (Today / Tomorrow / Future) are date concepts; the
+ * previous score-based bucketing produced confusing UX where high-priority
+ * items with far-out due dates landed in "Today" while low-priority items
+ * due today landed in "Future". Per user UAT round 5, bucketing now uses
+ * sprk_duedate directly:
+ *   - Today    = due today OR overdue (no due date counts as Future)
+ *   - Tomorrow = due tomorrow
+ *   - Future   = due day-after-tomorrow or later, OR no due date set
+ *
+ * Score is still computed (see `computeTodoScore`) and used as the within-
+ * column sort key — high-score items surface to the top of their bucket.
+ *
+ * Threshold args are kept on the function signature for back-compat with
+ * existing call sites but are no longer consulted. Plan to remove in a
+ * follow-up cleanup task once all callers update.
+ */
+function assignColumnByDate(todo: IKanbanTodoLike): TodoColumn {
+  const due = parseDueDate(todo.sprk_duedate);
+  if (!due) return 'Future';
+  // Compare day boundaries in LOCAL time so "today" matches the user's
+  // calendar, not UTC.
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const diffDays = Math.round((dueDay.getTime() - today.getTime()) / msPerDay);
+  if (diffDays <= 0) return 'Today'; // due today OR overdue
+  if (diffDays === 1) return 'Tomorrow';
   return 'Future';
 }
 
@@ -146,9 +172,9 @@ function pinnedColumnAsNumber(value: number | string | null | undefined): number
 function resolveColumn(todo: IKanbanTodoLike, todayThreshold: number, tomorrowThreshold: number): TodoColumn {
   const pinnedChoice = pinnedColumnAsNumber(todo.sprk_todocolumn);
   if (todo.sprk_todopinned && pinnedChoice != null) {
-    return CHOICE_TO_COLUMN[pinnedChoice] ?? assignColumnByScore(todo, todayThreshold, tomorrowThreshold);
+    return CHOICE_TO_COLUMN[pinnedChoice] ?? assignColumnByDate(todo);
   }
-  return assignColumnByScore(todo, todayThreshold, tomorrowThreshold);
+  return assignColumnByDate(todo);
 }
 
 /**
@@ -192,7 +218,8 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
     {
       id: 'Today',
       title: 'Today',
-      subtitle: `Score ≥ ${todayThreshold}`,
+      // UAT 2026-06-21 — date-based bucketing; subtitle reflects new meaning
+      subtitle: 'Due today or overdue',
       items: today,
       accentColor: tokens.colorPaletteRedBorder2,
       tintColor: tokens.colorPaletteRedBackground1,
@@ -200,7 +227,7 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
     {
       id: 'Tomorrow',
       title: 'Tomorrow',
-      subtitle: `Score ${tomorrowThreshold}–${todayThreshold - 1}`,
+      subtitle: 'Due tomorrow',
       items: tomorrow,
       // 2026-06-19 UAT: yellow accent (not orange/red) per user feedback —
       // matches the yellow tint background; cards inherit this for left-border.
@@ -213,7 +240,7 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
     {
       id: 'Future',
       title: 'Future',
-      subtitle: `Score < ${tomorrowThreshold}`,
+      subtitle: 'Due later or undated',
       items: future,
       accentColor: tokens.colorPaletteGreenBorder2,
       tintColor: tokens.colorPaletteGreenBackground1,
@@ -464,7 +491,7 @@ export function useKanbanColumns<T extends IKanbanTodoLike>(
     for (const item of effectiveItems) {
       if (item.sprk_todopinned) continue;
 
-      const computedColumn = assignColumnByScore(item, todayThreshold, tomorrowThreshold);
+      const computedColumn = assignColumnByDate(item);
       const computedChoice = COLUMN_TO_CHOICE[computedColumn];
       const currentChoice = pinnedColumnAsNumber(item.sprk_todocolumn);
 

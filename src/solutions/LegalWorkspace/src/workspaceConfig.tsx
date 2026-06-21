@@ -297,7 +297,13 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
       },
 
       // -----------------------------------------------------------------------
-      // My To Do List — SmartToDo (height: 560px, 50% width)
+      // My To Do List — SmartToDo
+      //
+      // UAT 2026-06-21 round 5 — height was pinned at 560px which capped the
+      // widget regardless of viewport size. Switched to viewport-relative
+      // `calc(100vh - 200px)` so the widget grows to fill the available
+      // vertical space (minus tab chrome + header). Internal scroll inside
+      // the kanban handles overflow when there are many cards.
       // -----------------------------------------------------------------------
       {
         id: "todo",
@@ -305,7 +311,7 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
         title: "My To Do List",
         badgeCount: p.todoCount,
         toolbar: todoToolbar,
-        style: { height: "560px" },
+        style: { height: "calc(100vh - 200px)", minHeight: "560px" },
         renderContent: () => (
           <SmartToDo
             embedded
