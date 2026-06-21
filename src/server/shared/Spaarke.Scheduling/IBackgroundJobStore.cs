@@ -37,11 +37,19 @@ public interface IBackgroundJobStore
     /// <param name="jobId">Stable job id (matches <see cref="BackgroundJobDefinition.JobId"/>).</param>
     /// <param name="trigger">What caused this run (Scheduled / ManualAdmin / OnStartup) per NFR-08.</param>
     /// <param name="correlationId">Distributed-trace correlation id flowed through to all downstream telemetry per NFR-08.</param>
+    /// <param name="scheduledFireUtc">
+    /// The cron-derived scheduled fire time for this tick (for <see cref="JobRunTrigger.Scheduled"/>
+    /// runs), or <c>null</c> for <see cref="JobRunTrigger.ManualAdmin"/> / <see cref="JobRunTrigger.OnStartup"/>
+    /// (which don't participate in tick-level idempotency). Persisted so
+    /// <see cref="HasRunForScheduledTimeAsync"/> can detect duplicate dispatch after host restart
+    /// (FR-2.3 idempotency requirement; tasks 015/016 add <c>sprk_backgroundjobrun.sprk_scheduledfireon</c>).
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<Guid> RecordRunStartAsync(
         string jobId,
         JobRunTrigger trigger,
         string correlationId,
+        DateTimeOffset? scheduledFireUtc,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -54,6 +62,32 @@ public interface IBackgroundJobStore
     Task RecordRunCompleteAsync(
         Guid runId,
         JobRunResult result,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Idempotency probe used by <see cref="ScheduledJobHost"/> BEFORE dispatching a scheduled
+    /// tick. If a prior run exists for this <paramref name="jobId"/> + <paramref name="scheduledFireUtc"/>
+    /// pair (regardless of completion status), the host MUST skip the dispatch to avoid
+    /// duplicate execution after host restart (FR-2.3).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Implementations match equality on <paramref name="scheduledFireUtc"/> at second-precision
+    /// or better — the host derives this from the cron occurrence (which has minute or
+    /// second precision depending on schedule), so there is no fuzzy comparison needed.
+    /// </para>
+    /// <para>
+    /// Returns <c>false</c> for non-scheduled triggers (manual admin / on-startup), which are
+    /// not tick-deduplicated (the admin chose to retrigger; on-startup is by-design one-shot).
+    /// </para>
+    /// </remarks>
+    /// <param name="jobId">Stable job id (matches <see cref="BackgroundJobDefinition.JobId"/>).</param>
+    /// <param name="scheduledFireUtc">The cron-derived scheduled fire time being checked.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> if a run already exists for this scheduled time, <c>false</c> otherwise.</returns>
+    Task<bool> HasRunForScheduledTimeAsync(
+        string jobId,
+        DateTimeOffset scheduledFireUtc,
         CancellationToken cancellationToken);
 }
 

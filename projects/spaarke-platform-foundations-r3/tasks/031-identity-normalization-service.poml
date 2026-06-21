@@ -1,7 +1,7 @@
 <task id="R3-031" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>`IdentityNormalizationService` — systemuser → {contactId, email, teamIds, BU, organizationIds}</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>P4</phase>
     <parallel-group>G (with 030, 032)</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -51,4 +51,73 @@
     <criterion testable="true">Cache hit on second call (10-min TTL)</criterion>
     <criterion testable="true">AC-1A.4 integration test passes</criterion>
   </acceptance-criteria>
+  <notes>
+Completed 2026-06-21.
+
+Files created:
+  - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/PersonIdentity.cs
+    (full shape — replaces task 032's placeholder; positional-with-defaults
+    preserves existing single-arg constructor signature)
+  - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IIdentityNormalizationService.cs
+  - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IIdentityOrganizationResolver.cs
+    (coordination seam — task 032's OrganizationMembershipResolver implements both
+     IOrganizationMembershipResolver canonical + this seam)
+  - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs
+    (parallel-fetches 6 identity paths; per-path try/catch isolation;
+     IDistributedCache 10-min TTL per ADR-009)
+  - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/IdentityNormalizationServiceTests.cs
+    (10 unit tests, all pass)
+  - projects/spaarke-platform-foundations-r3/notes/bff-publish-size-task031.md
+
+Files modified:
+  - src/server/api/Sprk.Bff.Api/Infrastructure/DI/MembershipModule.cs
+    (added IIdentityNormalizationService singleton registration; updated header
+     comment to record task 031 + 032 contributions)
+
+Tests: 10/10 pass (IdentityNormalizationServiceTests); 24/24 Membership-namespace
+       (regression sanity confirmed task 012 + 032 still pass after PersonIdentity
+        shape extension)
+BFF Build: pass (0 errors, 0 new warnings — 16 pre-existing warnings unchanged)
+Publish size: 46.16 MB compressed (delta +0.02 MB vs 46.14 baseline; well under
+              +1 MB NFR-01 ceiling and 60 MB hard cap)
+CVE check: no new HIGH-severity CVE (only pre-existing Microsoft.Kiota.Abstractions
+           finding, tracked at project level — not introduced by 031)
+
+Design decisions:
+  1. Dataverse abstraction: IDataverseService (composite via IGenericEntityService —
+     RetrieveAsync + RetrieveMultipleAsync(QueryExpression)). No direct
+     IOrganizationService injection per task brief.
+  2. Coordination with task 032: defined IIdentityOrganizationResolver in this
+     task (031) as the coordination seam; 032's OrganizationMembershipResolver
+     implements both IOrganizationMembershipResolver (canonical) and
+     IIdentityOrganizationResolver (the seam). IdentityNormalizationService
+     consumes IEnumerable<IIdentityOrganizationResolver> so zero registered
+     resolvers is acceptable (returns empty OrganizationIds list).
+  3. Per-path failure isolation: each of the 6 identity components is wrapped
+     in try/catch. Cancellation is re-thrown explicitly (not swallowed). Cache
+     read/write failures are fail-open (re-resolve from Dataverse — no functional
+     impact). Other failures log Warning + populate null/empty for that field
+     while letting other paths complete.
+  4. PersonIdentity shape: positional-with-defaults so it remains compatible
+     with task 032's placeholder constructor (`new PersonIdentity(systemUserId)`)
+     while supporting the full record (`new PersonIdentity(id, contactId, email,
+     teams, bu, account, orgs)`). TeamIds + OrganizationIds default to empty
+     arrays via init-only overrides — consumers never observe null collections.
+  5. Cache key: `membership:identity:{systemUserId:D}` — `membership:` namespace
+     prefix aligns with the Phase 2 invalidation channel (FR-2P2.8 — task 086).
+
+Integration test (AC-1A.4): SKIPPED per task brief — deferred to P4 wrap-up
+                            manual UAT against spaarkedev1 (depends on real
+                            azureactivedirectoryobjectid values + at least one
+                            multi-team test user).
+
+bff-extensions.md §A pre-merge: PASS (see notes/bff-publish-size-task031.md
+                                 checklist for full details)
+bff-extensions.md §F test obligation: PASS — 10 new unit tests; service +
+                                 module registered UNCONDITIONALLY (no
+                                 feature flag) → asymmetric-registration
+                                 anti-pattern §F.1 not applicable
+
+Not committed per task brief.
+  </notes>
 </task>

@@ -23,4 +23,9 @@ public sealed class ScheduledJobHostOptions
     /// pathological cron expressions whose next-fire is far in the future and keeps the refresh
     /// granular. Default: equal to <see cref="RefreshInterval"/>.</summary>
     public TimeSpan MaxLoopSleep { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>Retry-with-backoff policy applied to a failing job execution before recording
+    /// final failure. Default: <see cref="JobRetryPolicy"/> defaults (3 attempts, 5s base delay,
+    /// 2min cap). Per spec.md FR-2.3.</summary>
+    public JobRetryPolicy RetryPolicy { get; set; } = new();
 }

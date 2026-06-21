@@ -1,7 +1,7 @@
 <task id="R3-005" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Unrendered-template runtime warning in PlaybookOrchestrationService</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>P1</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>

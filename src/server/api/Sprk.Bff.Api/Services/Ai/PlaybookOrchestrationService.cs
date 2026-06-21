@@ -1246,6 +1246,14 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     output.ErrorMessage ?? "Unknown error"), cancellationToken);
             }
 
+            // R3 FR-3H1.4 / AC-H1.2 — scan NodeOutput for literal `{{` substrings
+            // (unrendered Handlebars templates). Non-fatal: logs warning + emits a
+            // PlaybookStreamEvent of type UnrenderedTemplateDetected so the UI / SSE
+            // consumers surface the leak. Output already stored + emitted above; this
+            // is observation only and does NOT mutate or block the stream.
+            await ScanForUnrenderedTemplatesAsync(runContext, node, output, writer, cancellationToken)
+                .ConfigureAwait(false);
+
             // R6 Pillar 6c (FR-37 / task 063) — wrapper-level completion emission.
             // NFR-08 BINDING: this is at the WRAPPER, not inside the executor.
             EmitNodeCompleted(output.Success ? "success" : "failed");
@@ -1323,6 +1331,120 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// R3 FR-3H1.4 / AC-H1.2 — scans a completed node's <see cref="NodeOutput"/>
+    /// for literal <c>{{</c> substrings, indicating a Handlebars template that
+    /// leaked into the output unrendered. When detected, logs a structured warning
+    /// AND emits a <see cref="PlaybookEventType.UnrenderedTemplateDetected"/> stream
+    /// event with sample text + correlation IDs. Non-fatal — does NOT throw;
+    /// downstream nodes still see the output.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Scanned string fields (in order):
+    /// <see cref="NodeOutput.TextContent"/>, <see cref="NodeOutput.ErrorMessage"/>,
+    /// every entry in <see cref="NodeOutput.Warnings"/>, and the serialized
+    /// <see cref="NodeOutput.StructuredData"/>.
+    /// </para>
+    /// <para>
+    /// One warning + one stream event per node — the warning identifies every
+    /// field that contained <c>{{</c>; the stream event sample is taken from the
+    /// first such field, capped at 200 chars. Sample text is logged so operators
+    /// can identify which template token leaked.
+    /// </para>
+    /// <para>
+    /// CorrelationId: <see cref="PlaybookRunContext.RunId"/> per NFR-08 (matches
+    /// the run-scoped trace identifier surfaced on every PlaybookStreamEvent).
+    /// HttpContext.TraceIdentifier is also logged when present.
+    /// </para>
+    /// </remarks>
+    private async Task ScanForUnrenderedTemplatesAsync(
+        PlaybookRunContext runContext,
+        PlaybookNodeDto node,
+        NodeOutput output,
+        ChannelWriter<PlaybookStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        // Lazy: build a list of (fieldName, value) pairs we will scan.
+        // Keep allocation minimal — most outputs have only TextContent populated.
+        List<(string Field, string Value)>? offenders = null;
+
+        void Check(string fieldName, string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return;
+            if (value.IndexOf("{{", StringComparison.Ordinal) < 0)
+                return;
+            offenders ??= new List<(string, string)>(capacity: 2);
+            offenders.Add((fieldName, value));
+        }
+
+        Check(nameof(NodeOutput.TextContent), output.TextContent);
+        Check(nameof(NodeOutput.ErrorMessage), output.ErrorMessage);
+
+        // Warnings list — index in the message so operators can locate the entry.
+        if (output.Warnings.Count > 0)
+        {
+            for (var i = 0; i < output.Warnings.Count; i++)
+            {
+                Check($"{nameof(NodeOutput.Warnings)}[{i}]", output.Warnings[i]);
+            }
+        }
+
+        // StructuredData — serialize once to scan; cheaper than walking JSON tokens
+        // for the common path (no leaks) since the call is bounded by NodeOutput size
+        // which is already capped by upstream contracts (CHAT-ATTACHMENT-POLICY etc.).
+        if (output.StructuredData is JsonElement structured && structured.ValueKind != JsonValueKind.Undefined && structured.ValueKind != JsonValueKind.Null)
+        {
+            // GetRawText avoids re-serializing; quotes around JSON strings won't
+            // produce false-positive "{{" because the literal is a 2-char sequence
+            // (JSON cannot embed it as escape — `{` is not escapable inside strings).
+            string raw;
+            try
+            {
+                raw = structured.GetRawText();
+            }
+            catch (InvalidOperationException)
+            {
+                // Disposed JsonDocument or otherwise unreadable — skip silently.
+                raw = string.Empty;
+            }
+            Check(nameof(NodeOutput.StructuredData), raw);
+        }
+
+        if (offenders is null)
+            return;
+
+        // Build sample from first offender, capped at 200 chars per task spec.
+        var firstField = offenders[0].Field;
+        var firstValue = offenders[0].Value;
+        var sample = firstValue.Length <= 200 ? firstValue : firstValue[..200];
+        var fieldList = string.Join(", ", offenders.Select(o => o.Field));
+
+        var httpTraceId = runContext.HttpContext?.TraceIdentifier;
+
+        _logger.LogWarning(
+            "Unrendered template detected in node {NodeName} (NodeId={NodeId}, RunId={RunId}, CorrelationId={CorrelationId}, HttpTraceId={HttpTraceId}). " +
+            "Field(s) containing '{{{{': {Fields}. Sample (first 200 chars of {SampleField}): {TemplateSample}",
+            node.Name,
+            node.Id,
+            runContext.RunId,
+            runContext.RunId,
+            httpTraceId,
+            fieldList,
+            firstField,
+            sample);
+
+        await writer.WriteAsync(
+            PlaybookStreamEvent.UnrenderedTemplateDetected(
+                runContext.RunId,
+                runContext.PlaybookId,
+                node.Id,
+                node.Name,
+                sample),
+            cancellationToken).ConfigureAwait(false);
     }
 
     #endregion

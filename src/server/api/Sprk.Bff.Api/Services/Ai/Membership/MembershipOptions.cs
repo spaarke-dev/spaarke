@@ -59,6 +59,45 @@ public sealed class MembershipOptions
     /// <c>sprk_assignedlawfirm2</c> → <c>"assignedLawFirm"</c>).
     /// </summary>
     public Dictionary<string, EntityOverride> EntityOverrides { get; set; } = new();
+
+    /// <summary>
+    /// Configuration for resolving the user → <c>sprk_organization</c> mapping
+    /// per <see cref="IOrganizationMembershipResolver"/> (task 032). When
+    /// <see cref="OrganizationLookupOptions.UserLookupField"/> is empty the
+    /// resolver returns an empty list (fail-soft) — meaning a user simply has
+    /// no organizational affiliations. See
+    /// <c>notes/sprk-organization-mapping-decision.md</c> for the mechanism
+    /// decision (Option b — configurable Lookup field on sprk_organization
+    /// pointing to systemuser).
+    /// </summary>
+    public OrganizationLookupOptions OrganizationLookup { get; set; } = new();
+}
+
+/// <summary>
+/// Configuration for the user → <c>sprk_organization</c> mapping mechanism
+/// (task 032 — Option b). Operators configure a single Lookup field on
+/// <c>sprk_organization</c> that points to <c>systemuser</c>; the resolver
+/// queries organizations whose configured field equals the systemuser GUID.
+/// </summary>
+public sealed class OrganizationLookupOptions
+{
+    /// <summary>
+    /// Logical name of the Lookup field on <c>sprk_organization</c> that
+    /// points to <c>systemuser</c>. Common operator choices:
+    /// <c>sprk_owneruser</c>, <c>sprk_relationshipowner</c>, or any custom
+    /// field added for this purpose. The field MUST target the
+    /// <c>systemuser</c> entity. Empty string (default) means no mapping is
+    /// configured — the resolver returns an empty list and logs an info
+    /// message at startup-first-use.
+    /// </summary>
+    public string UserLookupField { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Maximum number of organization GUIDs returned per user. Hard cap to
+    /// protect against runaway queries on misconfigured environments. Default
+    /// 1000 (well above any plausible per-user count).
+    /// </summary>
+    public int MaxOrganizationsPerUser { get; set; } = 1000;
 }
 
 /// <summary>

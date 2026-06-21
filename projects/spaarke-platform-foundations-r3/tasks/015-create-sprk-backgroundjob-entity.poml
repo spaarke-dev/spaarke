@@ -1,7 +1,7 @@
 <task id="R3-015" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Create `sprk_backgroundjob` Dataverse entity</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>P2</phase>
     <parallel-group>E (with 016)</parallel-group>
     <parallel-safe>true</parallel-safe>

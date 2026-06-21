@@ -51,6 +51,7 @@ public sealed class InMemoryBackgroundJobStore : IBackgroundJobStore
         string jobId,
         JobRunTrigger trigger,
         string correlationId,
+        DateTimeOffset? scheduledFireUtc,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(jobId);
@@ -63,6 +64,7 @@ public sealed class InMemoryBackgroundJobStore : IBackgroundJobStore
             jobId,
             trigger,
             correlationId,
+            ScheduledFireUtc: scheduledFireUtc,
             StartedAtUtc: DateTimeOffset.UtcNow,
             CompletedAtUtc: null,
             Result: null);
@@ -86,6 +88,7 @@ public sealed class InMemoryBackgroundJobStore : IBackgroundJobStore
                 JobId: "(unknown)",
                 Trigger: JobRunTrigger.Scheduled,
                 CorrelationId: "(unknown)",
+                ScheduledFireUtc: null,
                 StartedAtUtc: DateTimeOffset.UtcNow - result.Duration,
                 CompletedAtUtc: DateTimeOffset.UtcNow,
                 Result: result),
@@ -97,12 +100,47 @@ public sealed class InMemoryBackgroundJobStore : IBackgroundJobStore
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
+    public Task<bool> HasRunForScheduledTimeAsync(
+        string jobId,
+        DateTimeOffset scheduledFireUtc,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(jobId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Snapshot to avoid races with concurrent RecordRunStartAsync. Match on (jobId,
+        // scheduledFireUtc) — any prior run (in-progress OR completed) is a duplicate.
+        // UTC equality is exact here because the host derives scheduledFireUtc from the same
+        // CronExpression.GetNextOccurrence call (which produces deterministic UTC DateTime
+        // values at minute or second precision).
+        foreach (var record in _runs.Values)
+        {
+            if (record.ScheduledFireUtc is { } recorded
+                && string.Equals(record.JobId, jobId, StringComparison.Ordinal)
+                && recorded == scheduledFireUtc)
+            {
+                return Task.FromResult(true);
+            }
+        }
+        return Task.FromResult(false);
+    }
+
+    /// <summary>Seed a run record directly — TEST-ONLY surface for simulating host-restart scenarios
+    /// where a prior run already exists in the store before the host first dispatches the job.</summary>
+    public void SeedRunRecord(RunRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        _runs[record.RunId] = record;
+    }
+
     /// <summary>One run-history row (in-memory parallel of <c>sprk_backgroundjobrun</c>).</summary>
     public sealed record RunRecord(
         Guid RunId,
         string JobId,
         JobRunTrigger Trigger,
         string CorrelationId,
+        DateTimeOffset? ScheduledFireUtc,
         DateTimeOffset StartedAtUtc,
         DateTimeOffset? CompletedAtUtc,
         JobRunResult? Result);

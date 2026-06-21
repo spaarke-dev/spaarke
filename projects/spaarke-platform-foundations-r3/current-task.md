@@ -7,12 +7,12 @@
 
 ## Active Task
 
-**Status**: none (task 013 complete 2026-06-21)
+**Status**: none (task 031 complete 2026-06-21)
 
-**Next Task**: `014-scheduled-job-host-retry-idempotency.poml` (Phase P2 / Group D — extends 013's host)
+**Next Task**: per TASK-INDEX next 🔲 — likely group **E** (015, 016 — `sprk_backgroundjob*` entities) or remaining **G** sibling task 030, or **H** orchestration tasks 033/034 (now unblocked by 030+031+032).
 
 **To start**:
-- Say "work on task 014" or "continue"
+- Say "work on task <NNN>" or "continue"
 
 ---
 
@@ -32,6 +32,112 @@
 ---
 
 ## Recently Completed (this session)
+
+- **2026-06-21 — Task 031**: `IdentityNormalizationService` — systemuser → 6-path
+  PersonIdentity (contactId via AAD-oid cross-ref per ADR-028, primary email, teamIds via
+  teammembership, businessUnitId, accountId via contact.parentcustomerid, organizationIds
+  via task-032 resolver seam). Redis 10-min TTL per ADR-009.
+  - Files (new, src): `Services/Ai/Membership/IIdentityNormalizationService.cs`,
+    `IdentityNormalizationService.cs`, `IIdentityOrganizationResolver.cs` (coordination
+    seam consumed by IdentityNormalizationService; task 032's `OrganizationMembershipResolver`
+    implements both this seam AND the canonical `IOrganizationMembershipResolver`).
+  - Files (new, tests): `IdentityNormalizationServiceTests.cs` (10 tests — happy path 6-way,
+    user-without-contact, contact-without-account, multi-team, system-user-query-failure
+    isolation, org-resolver-failure isolation, no-resolvers empty list, cache-hit verification
+    via FakeDistributedCache call-count probes, cancelled-token, empty-Guid guard).
+  - Files (modified, src): `Services/Ai/Membership/Models/PersonIdentity.cs` (extended task
+    032's SystemUserId-only placeholder to the full 7-field record; positional-with-defaults
+    preserves backward-compat constructor); `Infrastructure/DI/MembershipModule.cs` (added
+    `IIdentityNormalizationService` singleton registration).
+  - **10 / 10 tests pass** (full Membership-namespace regression: **24/24** pass — task 012
+    MembershipOptions + task 032 OrganizationResolver still green after PersonIdentity shape
+    extension).
+  - BFF build: 0 errors, 0 new warnings (16 pre-existing warnings unchanged).
+  - Publish size: **46.16 MB** compressed (delta **+0.02 MB** vs 46.14 baseline; no new
+    NuGet packages — uses existing `IDataverseService` + `IDistributedCache`).
+  - CVE check: no new HIGH-severity CVE (only pre-existing `Microsoft.Kiota.Abstractions
+    1.21.2` HIGH finding, tracked at project level — not introduced by 031).
+  - **Design decisions**:
+    - **Dataverse abstraction**: injected `IDataverseService` (composite, includes
+      `IGenericEntityService` → `RetrieveAsync` + `RetrieveMultipleAsync(QueryExpression)`).
+      No direct `IOrganizationService` use per task brief.
+    - **Coordination with task 032**: defined `IIdentityOrganizationResolver` in this
+      task (031). Task 032's `OrganizationMembershipResolver` implements both the canonical
+      `IOrganizationMembershipResolver` (PersonIdentity-aware) AND the
+      `IIdentityOrganizationResolver` (this task's seam). Module registers the concrete +
+      both interfaces. `IdentityNormalizationService` consumes
+      `IEnumerable<IIdentityOrganizationResolver>` so zero registered resolvers is acceptable
+      → empty `OrganizationIds` (verified by dedicated test).
+    - **Failure isolation per path**: each of the 6 identity paths is wrapped in try/catch.
+      Cancellation re-thrown explicitly (not swallowed). Cache read/write failures fail-open
+      → re-resolve from Dataverse (verified by FakeDistributedCache test). Other failures
+      log Warning + null/empty for that field while letting other paths complete (verified
+      by `SystemUserQueryThrows_OtherPathsStillResolve` test).
+    - **Cache contract**: `IDistributedCache` with key `membership:identity:{systemUserId:D}`,
+      `DistributedCacheEntryOptions.AbsoluteExpirationRelativeToNow = 10min`. Namespace
+      prefix aligns with Phase 2 invalidation channel (FR-2P2.8 — task 086).
+    - **PersonIdentity shape**: positional-with-defaults preserves task 032's placeholder
+      constructor `new PersonIdentity(systemUserId)` so 032's resolver tests don't break;
+      init-only collection overrides ensure consumers never observe null collections.
+  - **AC-1A.4 integration test**: SKIPPED per task brief (deferred to P4 wrap-up manual UAT
+    against spaarkedev1; needs real AAD object ids + multi-team test user).
+  - adr-check (self): PASS — ADR-001 (in-process singleton, no new background process),
+    ADR-009 (Redis 10-min TTL exactly per constraint), ADR-010 (interface as testing seam,
+    concrete also resolvable), ADR-013 (lives under Services/Ai/Membership/),
+    ADR-024 (per-path failure isolation pattern), ADR-028 (cross-ref via
+    `azureactivedirectoryobjectid` equality query), ADR-032 N/A (service is unconditional).
+  - bff-extensions §A/§F: PASS — no BFF csproj changes, no new conditional DI, no new HIGH
+    CVE, 10 unit tests cover new behavior, asymmetric-registration §F.1 N/A (unconditional
+    registration; future endpoints in task 035 must also be unconditional).
+  - Not committed per task brief.
+  - Notes: `notes/bff-publish-size-task031.md` (publish-size measurement + pre-merge checklist).
+
+- **2026-06-21 — Task 014**: Retry/backoff + idempotency in `ScheduledJobHost`.
+  - Files (new, src): `Spaarke.Scheduling/JobRetryPolicy.cs`.
+  - Files (new, tests): `Spaarke.Scheduling.Tests/JobRetryPolicyTests.cs` (+7 tests),
+    `RetryAndIdempotencyTests.cs` (+6 tests — transient retry, exhaustion, max-attempts
+    cap-per-tick, cancellation interrupts retry-loop sleep, idempotency dedup via
+    pre-seeded prior run, distinct ticks still execute).
+  - Files (modified, src): `IBackgroundJobStore.cs` (added `scheduledFireUtc` param to
+    `RecordRunStartAsync`; added `HasRunForScheduledTimeAsync`); `InMemoryBackgroundJobStore.cs`
+    (matching impl + `SeedRunRecord` test surface + `ScheduledFireUtc` field on `RunRecord`);
+    `ScheduledJobHostOptions.cs` (`RetryPolicy` property defaulting to `new JobRetryPolicy()`);
+    `ScheduledJobHost.cs` (`DispatchAndAdvance` snapshots `scheduledFireUtc` BEFORE
+    `AdvanceNextFire`; `RunJobAsync` idempotency probe via `HasRunForScheduledTimeAsync`
+    BEFORE recording start; new `ExecuteWithRetryAsync` wraps `IScheduledJob.ExecuteAsync`
+    in retry loop honoring cancellation throughout).
+  - Files (modified, tests): `InMemoryBackgroundJobStoreTests.cs` (updated signature; +3
+    new tests for `HasRunForScheduledTimeAsync`).
+  - Files (modified, project mgmt): `tasks/014-...poml` status -> completed;
+    `TASK-INDEX.md` row 014 -> ✅; `notes/bff-publish-size-task014.md` (new); this file.
+  - **42 tests pass** in Spaarke.Scheduling.Tests (delta +17 from 25); solution build 0
+    errors / 16 pre-existing BFF warnings (none from `Spaarke.Scheduling` which enforces
+    TreatWarningsAsErrors).
+  - Publish size 46.16 MB compressed (delta +0.02 MB / +16 KB vs 46.14 baseline; no new
+    NuGet packages — JobRetryPolicy is in-house POCO, intentionally NOT Polly).
+  - No new HIGH CVE (single pre-existing `Microsoft.Kiota.Abstractions` advisory unchanged).
+  - **Design decisions**:
+    - **Idempotency mechanism**: extended `IBackgroundJobStore` with explicit
+      `HasRunForScheduledTimeAsync(jobId, scheduledFireUtc, ct)` probe + added
+      `scheduledFireUtc` parameter on `RecordRunStartAsync`. Cleanest minimal-surface
+      extension; tasks 015/016 (Dataverse entities) will add a corresponding
+      `sprk_backgroundjobrun.sprk_scheduledfireon` column to back this probe.
+    - **Retry policy default**: 3 attempts, 5s base delay, 2 min cap; exponential
+      `BaseDelay * 2^(attempt-1)`. In-house POCO (`JobRetryPolicy`), NOT Polly — Polly's
+      middleware shape is overkill for in-process direct invocation, no Retry-After
+      semantics needed, no jitter needed (single in-process caller per tick). Rationale
+      captured in XML doc on the class.
+    - **Cancellation**: explicit `IsCancellationRequested` check at top of each retry
+      iteration + cancellable `Task.Delay` for inter-attempt sleep, so a cancelled host
+      short-circuits without sleeping through a multi-second retry delay (verified by
+      `CancellationDuringRetryLoop_StopsImmediately_DoesNotSleepThroughToken` test).
+  - adr-check (self): PASS — ADR-001 (in-process), ADR-010 (`JobRetryPolicy` POCO; no
+    new interface added; `IBackgroundJobStore` extension justified by ≥2 impls remaining
+    valid), ADR-012 (lives in shared lib), NFR-07 (cancellation propagates through
+    retry-loop sleep AND ExecuteAsync), NFR-08 (final failure record carries
+    `exception.Message` as `ErrorMessage`).
+  - bff-extensions §A/§F: PASS — no BFF csproj changes, no new conditional DI, no new HIGH CVE.
+  - Not committed per task brief.
 
 - **2026-06-21 — Task 013**: `ScheduledJobHost : BackgroundService` (cron dispatch + run-record write).
   - Files (new, src): `Spaarke.Scheduling/ScheduledJobHost.cs`, `ScheduledJobRegistry.cs`,

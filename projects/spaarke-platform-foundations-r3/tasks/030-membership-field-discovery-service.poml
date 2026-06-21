@@ -1,7 +1,7 @@
 <task id="R3-030" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>`MembershipFieldDiscoveryService` — metadata query + filtering + role-name strategy</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>P4</phase>
     <parallel-group>G (with 031, 032)</parallel-group>
     <parallel-safe>true</parallel-safe>

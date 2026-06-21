@@ -1,7 +1,53 @@
 <task id="R3-032" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Define + implement `sprk_organization` user-mapping mechanism</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-06-21</completed-date>
+    <completion-notes>
+      Mechanism chosen: Option (b) — configurable Lookup field on sprk_organization
+      pointing to systemuser. Operators set
+      Membership:OrganizationLookup:UserLookupField to the field's logical name
+      (e.g., sprk_owneruser). When unset, the resolver returns an empty list and
+      logs Info once per process (fail-soft default).
+
+      Files created:
+        - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IOrganizationMembershipResolver.cs
+        - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/OrganizationMembershipResolver.cs
+        - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/PersonIdentity.cs (placeholder; replaced by task 031 with full shape)
+        - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/OrganizationMembershipResolverTests.cs
+        - projects/spaarke-platform-foundations-r3/notes/sprk-organization-mapping-decision.md
+        - projects/spaarke-platform-foundations-r3/notes/bff-publish-size-task032.md
+
+      Files modified:
+        - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs
+          (added OrganizationLookupOptions nested record + OrganizationLookup property)
+        - src/server/api/Sprk.Bff.Api/Infrastructure/DI/MembershipModule.cs
+          (registered OrganizationMembershipResolver as singleton behind both
+          IOrganizationMembershipResolver canonical contract AND task 031's
+          IIdentityOrganizationResolver seam)
+
+      Coordination with task 031: parallel agent created
+      IIdentityOrganizationResolver with a different signature
+      (ResolveOrganizationsAsync(systemUserId, contactId, ct)) and the full
+      PersonIdentity record shape. Resolved by having the concrete
+      OrganizationMembershipResolver implement BOTH interfaces. The
+      IIdentityOrganizationResolver method delegates to the canonical
+      task-032 method and ignores the contactId parameter (Option b keys
+      off systemuser only).
+
+      Operator follow-up needed: yes — operators wanting non-empty mappings
+      must configure UserLookupField to point at a Lookup column on
+      sprk_organization targeting systemuser. Decision note documents the
+      runbook steps. Environments that do nothing get fail-soft empty
+      results.
+
+      Tests: 7 passed (no-mapping, empty-userid, zero-rows, three-rows
+      with FetchXml inspection, exception fail-soft, cap honouring,
+      cancellation propagation)
+      Build: pass (0 errors, 0 warnings on BFF csproj)
+      Publish size: 46.16 MB (+0.02 MB vs 46.14 MB baseline)
+      CVE: no new HIGH
+    </completion-notes>
     <phase>P4</phase>
     <parallel-group>G (with 030, 031)</parallel-group>
     <parallel-safe>true</parallel-safe>

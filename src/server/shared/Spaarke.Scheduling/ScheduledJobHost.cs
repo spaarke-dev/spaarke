@@ -315,6 +315,11 @@ public sealed class ScheduledJobHost : BackgroundService
     /// <summary>Dispatches the handler on a background task and advances <c>NextFireUtc</c>.</summary>
     private void DispatchAndAdvance(ScheduledJobState entry, DateTimeOffset firingUtc, CancellationToken stoppingToken)
     {
+        // Snapshot the scheduled fire time BEFORE advancing — this is the value the idempotency
+        // probe + run-start record key off, and it must match the cron occurrence the loop just
+        // observed (not the post-advance NextFireUtc).
+        var scheduledFireUtc = entry.NextFireUtc ?? firingUtc;
+
         // Advance the next-fire time eagerly so we don't double-fire if the dispatch task
         // hasn't observed cancellation by the time the loop comes back around.
         entry.AdvanceNextFire(firingUtc);
@@ -328,7 +333,7 @@ public sealed class ScheduledJobHost : BackgroundService
             Parameters: ParametersFor(entry.Definition));
 
         // Track the dispatch task so StopAsync can drain it (NFR-07).
-        var task = Task.Run(() => RunJobAsync(entry, context, stoppingToken), stoppingToken);
+        var task = Task.Run(() => RunJobAsync(entry, context, scheduledFireUtc, stoppingToken), stoppingToken);
         _inFlight[runId] = task;
 
         // Untrack on completion regardless of outcome.
@@ -342,16 +347,50 @@ public sealed class ScheduledJobHost : BackgroundService
             TaskScheduler.Default);
     }
 
-    private async Task RunJobAsync(ScheduledJobState entry, JobRunContext context, CancellationToken stoppingToken)
+    private async Task RunJobAsync(
+        ScheduledJobState entry,
+        JobRunContext context,
+        DateTimeOffset scheduledFireUtc,
+        CancellationToken stoppingToken)
     {
         var jobId = entry.Definition.JobId;
         Guid persistedRunId = default;
-        var sw = Stopwatch.StartNew();
+
+        // ── Idempotency probe (FR-2.3) ────────────────────────────────────────────────────
+        // On host restart, the in-memory advance state is lost but the persistent store
+        // remembers prior runs. If a row already exists for this (jobId, scheduledFireUtc),
+        // skip dispatch entirely — do NOT re-execute and do NOT record a duplicate start row.
+        try
+        {
+            var duplicate = await _store
+                .HasRunForScheduledTimeAsync(jobId, scheduledFireUtc, stoppingToken)
+                .ConfigureAwait(false);
+            if (duplicate)
+            {
+                _logger.LogInformation(
+                    "Scheduled job '{JobId}' tick at {ScheduledFireUtc:o} already executed (idempotency dedupe) — skipping",
+                    jobId, scheduledFireUtc);
+                return;
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            // Probe failure is non-fatal — log and proceed. The risk of a duplicate run is
+            // strictly less bad than the risk of silently dropping a scheduled tick.
+            _logger.LogWarning(
+                ex,
+                "ScheduledJobHost idempotency probe failed for '{JobId}' tick {ScheduledFireUtc:o} — proceeding with dispatch (may risk duplicate)",
+                jobId, scheduledFireUtc);
+        }
 
         try
         {
             persistedRunId = await _store
-                .RecordRunStartAsync(jobId, context.Trigger, context.CorrelationId, stoppingToken)
+                .RecordRunStartAsync(jobId, context.Trigger, context.CorrelationId, scheduledFireUtc, stoppingToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -362,44 +401,7 @@ public sealed class ScheduledJobHost : BackgroundService
                 jobId, context.CorrelationId);
         }
 
-        JobRunResult result;
-        try
-        {
-            _logger.LogInformation(
-                "Dispatching scheduled job '{JobId}' runId={RunId} correlationId={CorrelationId}",
-                jobId, context.RunId, context.CorrelationId);
-
-            result = await entry.Handler.ExecuteAsync(context, stoppingToken).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "Scheduled job '{JobId}' completed runId={RunId} success={Success} processedItems={ProcessedItems} duration={DurationMs}ms",
-                jobId, context.RunId, result.Success, result.ProcessedItems, (long)result.Duration.TotalMilliseconds);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            sw.Stop();
-            result = new JobRunResult(
-                Success: false,
-                ErrorMessage: "Cancelled by host shutdown (NFR-07)",
-                ProcessedItems: null,
-                Duration: sw.Elapsed);
-            _logger.LogWarning(
-                "Scheduled job '{JobId}' runId={RunId} cancelled by host shutdown",
-                jobId, context.RunId);
-        }
-        catch (Exception ex)
-        {
-            sw.Stop();
-            result = new JobRunResult(
-                Success: false,
-                ErrorMessage: ex.Message,
-                ProcessedItems: null,
-                Duration: sw.Elapsed);
-            _logger.LogError(
-                ex,
-                "Scheduled job '{JobId}' runId={RunId} threw — recorded as failure",
-                jobId, context.RunId);
-        }
+        var result = await ExecuteWithRetryAsync(entry, context, stoppingToken).ConfigureAwait(false);
 
         if (persistedRunId != default)
         {
@@ -417,6 +419,110 @@ public sealed class ScheduledJobHost : BackgroundService
                     jobId, context.RunId, context.CorrelationId);
             }
         }
+    }
+
+    /// <summary>
+    /// Invokes <see cref="IScheduledJob.ExecuteAsync"/> with exponential-backoff retry per
+    /// <see cref="ScheduledJobHostOptions.RetryPolicy"/>. Cancellation by
+    /// <paramref name="stoppingToken"/> short-circuits the retry loop (no sleep, no further attempts)
+    /// per NFR-07. Final result is the outcome of the last attempt — success on any successful
+    /// attempt, otherwise the captured exception from the last failed attempt.
+    /// </summary>
+    private async Task<JobRunResult> ExecuteWithRetryAsync(
+        ScheduledJobState entry,
+        JobRunContext context,
+        CancellationToken stoppingToken)
+    {
+        var jobId = entry.Definition.JobId;
+        var policy = _options.RetryPolicy;
+        var maxAttempts = Math.Max(1, policy.MaxAttempts);
+        var overallSw = Stopwatch.StartNew();
+
+        Exception? lastException = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            if (stoppingToken.IsCancellationRequested)
+            {
+                overallSw.Stop();
+                return new JobRunResult(
+                    Success: false,
+                    ErrorMessage: "Cancelled by host shutdown (NFR-07)",
+                    ProcessedItems: null,
+                    Duration: overallSw.Elapsed);
+            }
+
+            // Inter-attempt delay (only attempts >= 2 sleep).
+            if (attempt > 1)
+            {
+                var delay = policy.ComputeDelay(attempt);
+                try
+                {
+                    await Task.Delay(delay, _timeProvider, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    overallSw.Stop();
+                    return new JobRunResult(
+                        Success: false,
+                        ErrorMessage: "Cancelled by host shutdown (NFR-07)",
+                        ProcessedItems: null,
+                        Duration: overallSw.Elapsed);
+                }
+            }
+
+            try
+            {
+                _logger.LogInformation(
+                    "Dispatching scheduled job '{JobId}' runId={RunId} correlationId={CorrelationId} attempt={Attempt}/{MaxAttempts}",
+                    jobId, context.RunId, context.CorrelationId, attempt, maxAttempts);
+
+                var result = await entry.Handler.ExecuteAsync(context, stoppingToken).ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "Scheduled job '{JobId}' completed runId={RunId} success={Success} processedItems={ProcessedItems} duration={DurationMs}ms attempt={Attempt}",
+                    jobId, context.RunId, result.Success, result.ProcessedItems, (long)result.Duration.TotalMilliseconds, attempt);
+
+                return result;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                overallSw.Stop();
+                _logger.LogWarning(
+                    "Scheduled job '{JobId}' runId={RunId} cancelled by host shutdown on attempt {Attempt}",
+                    jobId, context.RunId, attempt);
+                return new JobRunResult(
+                    Success: false,
+                    ErrorMessage: "Cancelled by host shutdown (NFR-07)",
+                    ProcessedItems: null,
+                    Duration: overallSw.Elapsed);
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Scheduled job '{JobId}' runId={RunId} attempt {Attempt}/{MaxAttempts} failed — retrying after backoff",
+                        jobId, context.RunId, attempt, maxAttempts);
+                }
+                else
+                {
+                    _logger.LogError(
+                        ex,
+                        "Scheduled job '{JobId}' runId={RunId} exhausted {MaxAttempts} attempts — recording final failure",
+                        jobId, context.RunId, maxAttempts);
+                }
+            }
+        }
+
+        overallSw.Stop();
+        return new JobRunResult(
+            Success: false,
+            ErrorMessage: lastException?.Message ?? "Job exhausted retries with no captured exception",
+            ProcessedItems: null,
+            Duration: overallSw.Elapsed);
     }
 
     /// <summary>

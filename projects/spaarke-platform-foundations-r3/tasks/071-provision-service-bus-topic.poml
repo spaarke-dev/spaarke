@@ -1,7 +1,15 @@
 <task id="R3-071" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Provision Service Bus topic `sprk-membership-changes` + subscription `recon-junction-updater` (Bicep)</title>
-    <status>not-started</status>
+    <status>blocked-operator</status>
+    <completion-notes>
+      Bicep authored + compiled clean (az bicep build, all 3 files: membership-topic.bicep, customer.bicep, stacks/model2-full.bicep — no errors, no new warnings).
+      New module: infrastructure/bicep/modules/membership-topic.bicep (topic sprk-membership-changes + subscription recon-junction-updater + BFF MI Sender/Receiver RBAC).
+      Wired into customer.bicep (new param `bffPrincipalId`) + stacks/model2-full.bicep (uses bffApi.outputs.appServicePrincipalId directly).
+      Doc updated: docs/architecture/background-workers-architecture.md (new "Service Bus Topic Subscriptions (R3 Phase 2)" section).
+      Operator runbook: projects/spaarke-platform-foundations-r3/notes/operator-followup-task071.md (3 deployment recipes + verification steps).
+      Deployment deferred to operator per task constraints — Bicep is the deliverable; AC-1P2.2 graduation gate completes when operator runs `az deployment ... create` per runbook.
+    </completion-notes>
     <phase>P7.5</phase>
     <parallel-group>P (with 070)</parallel-group>
     <parallel-safe>true</parallel-safe>

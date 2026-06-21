@@ -1,7 +1,12 @@
 // R3 Part 1 — User-Record Membership Resolution (DI module)
-// Task 012 (2026-06-21): Registers MembershipOptions binding only. Service
-// registrations (IMembershipResolverService, IMembershipFieldDiscoveryService,
-// endpoint mappings) arrive in later P4 tasks.
+// Task 012 (2026-06-21): Registers MembershipOptions binding.
+// Task 031 (2026-06-21): Adds IIdentityNormalizationService singleton.
+// Task 032 (2026-06-21): Adds OrganizationMembershipResolver (registered as
+// both IOrganizationMembershipResolver canonical + IIdentityOrganizationResolver
+// task-031 seam).
+// Task 030 (2026-06-21): Adds IMembershipFieldDiscoveryService singleton.
+// Remaining registrations (IMembershipResolverService, endpoint mappings)
+// arrive in later P4 tasks (033, 035-036).
 //
 // ADR-010 (DI Minimalism): Feature-module pattern — one Add{Module}() per
 // feature area, called from Program.cs.
@@ -34,6 +39,37 @@ public static class MembershipModule
         // service (task 030) will validate the contents at first-use.
         services.Configure<MembershipOptions>(
             configuration.GetSection(MembershipOptions.SectionName));
+
+        // Task 032: organization-membership resolver. One concrete satisfies
+        // both consumer-facing interfaces:
+        //   - IOrganizationMembershipResolver: canonical (PersonIdentity-aware) contract
+        //   - IIdentityOrganizationResolver: task 031's IEnumerable seam consumed by
+        //     IdentityNormalizationService
+        // Registered as singleton (ADR-010) — the resolver holds no per-request
+        // state; the once-per-process "no mapping configured" log latch is
+        // intentionally singleton-scoped.
+        services.AddSingleton<OrganizationMembershipResolver>();
+        services.AddSingleton<IOrganizationMembershipResolver>(
+            sp => sp.GetRequiredService<OrganizationMembershipResolver>());
+        services.AddSingleton<IIdentityOrganizationResolver>(
+            sp => sp.GetRequiredService<OrganizationMembershipResolver>());
+
+        // Task 031: identity normalization. Singleton (per ADR-010, holds no
+        // per-request state — Redis cache is the only mutable surface, and
+        // IDistributedCache itself is thread-safe). Consumes IDataverseService
+        // (registered elsewhere), IDistributedCache (CacheModule),
+        // IEnumerable<IIdentityOrganizationResolver> (registered above —
+        // empty enumerable is acceptable; service returns empty OrganizationIds),
+        // IOptions<MembershipOptions>, ILogger.
+        services.AddSingleton<IIdentityNormalizationService, IdentityNormalizationService>();
+
+        // Task 030: metadata-driven Lookup-field discovery. Singleton (per
+        // ADR-010, holds no per-request state — IDistributedCache is the only
+        // mutable surface and is thread-safe). Consumes IDataverseService
+        // (unwrapped to ServiceClient for RetrieveEntityRequest, matches the
+        // existing Services.Dataverse.MetadataService pattern), IDistributedCache
+        // (CacheModule), IOptions<MembershipOptions>, ILogger.
+        services.AddSingleton<IMembershipFieldDiscoveryService, MembershipFieldDiscoveryService>();
 
         return services;
     }

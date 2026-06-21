@@ -1,8 +1,8 @@
 # Task Index — Spaarke Platform Foundations (R3)
 
 > **Project**: `spaarke-platform-foundations-r3`
-> **Last Updated**: 2026-06-20 (initial — pipeline-generated)
-> **Status**: 7 / 69 complete
+> **Last Updated**: 2026-06-21 (task 015 sprk_backgroundjob deployed to spaarkedev1; task 071 Bicep authored — deployment deferred to operator)
+> **Status**: 13 / 69 complete; 1 blocked-operator (071)
 > **Branch**: `work/spaarke-platform-foundations-r3`
 > **Parallel-optimized**: Yes (per user directive 2026-06-20)
 
@@ -18,14 +18,14 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 002 | Register `joinIds` Handlebars helper | P1 | ✅ | 001 | — | true | FULL |
 | 003 | Migrate `notification-tasks-due-soon.json` from `??` | P1 | ✅ | 002 | **B** | true | FULL |
 | 004 | Grep + migrate remaining `??` playbooks | P1 | ✅ | 002 | **B** | true | STANDARD |
-| 005 | Unrendered-template runtime warning | P1 | 🔲 | 004 | — | true | FULL |
+| 005 | Unrendered-template runtime warning | P1 | ✅ | 004 | — | true | FULL |
 | 010 | Scaffold `Spaarke.Scheduling` library | P2 | ✅ | none | **C-init** | false | FULL |
 | 011 | Define `IScheduledJob` contract + records + enum | P2 | ✅ | 010 | **C** | true | FULL |
 | 012 | `MembershipOptions` placeholder + appsettings binding | P2 | ✅ | 010 | **C** | true | STANDARD |
 | 013 | Implement `ScheduledJobHost : BackgroundService` | P2 | ✅ | 010, 011 | **D** | true | FULL |
-| 014 | Retry/backoff + idempotency in ScheduledJobHost | P2 | 🔲 | 013 | **D** | true | FULL |
-| 015 | Create `sprk_backgroundjob` entity | P2 | 🔲 | 010 | **E** | true | FULL |
-| 016 | Create `sprk_backgroundjobrun` entity | P2 | 🔲 | 010 | **E** | true | FULL |
+| 014 | Retry/backoff + idempotency in ScheduledJobHost | P2 | ✅ | 013 | **D** | true | FULL |
+| 015 | Create `sprk_backgroundjob` entity | P2 | ✅ | 010 | **E** | true | FULL |
+| 016 | Create `sprk_backgroundjobrun` entity | P2 | ✅ | 010 | **E** | true | FULL |
 | 017 | Author ADR-036 — Background-job infrastructure | P2 | 🔲 | 013, 014, 015, 016 | — main-only | false | FULL |
 | 020 | `GET /api/admin/jobs` + status endpoint | P3 | 🔲 | 013, 014, 015, 016 | **F** | true | FULL |
 | 021 | `POST /api/admin/jobs/{jobId}/trigger` | P3 | 🔲 | 013, 014, 015, 016 | **F** | true | FULL |
@@ -33,9 +33,9 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 023 | Migrate `PlaybookSchedulerService` to Spaarke.Scheduling | P3 | 🔲 | 013, 020, 021 | — | true | FULL |
 | 024 | Migrate `sprk_analysisplaybook.sprk_configjson` schedule | P3 | 🔲 | 023 | — | true | STANDARD |
 | 025 | Admin endpoints + scheduler integration tests | P3 | 🔲 | 020-024 | — | true | STANDARD |
-| 030 | `MembershipFieldDiscoveryService` | P4 | 🔲 | 005, 012 | **G** | true | FULL |
-| 031 | `IdentityNormalizationService` | P4 | 🔲 | 012 | **G** | true | FULL |
-| 032 | Define + implement `sprk_organization` user-mapping | P4 | 🔲 | 012 | **G** | true | FULL |
+| 030 | `MembershipFieldDiscoveryService` | P4 | ✅ | 005, 012 | **G** | true | FULL |
+| 031 | `IdentityNormalizationService` | P4 | ✅ | 012 | **G** | true | FULL |
+| 032 | Define + implement `sprk_organization` user-mapping | P4 | ✅ | 012 | **G** | true | FULL |
 | 033 | `MembershipResolverService` orchestration | P4 | 🔲 | 030, 031, 032 | **H** | true | FULL |
 | 034 | `MembershipResponse` DTO | P4 | 🔲 | 030 | **H** | true | STANDARD |
 | 035 | `GET /api/users/me/memberships/{entityType}` endpoint | P4 | 🔲 | 033, 034 | **I** | true | FULL |
@@ -59,8 +59,8 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 064 | Migrate FetchXML/OData query consumers | P7.1 | 🔲 | 061, 062 | **O** | true | STANDARD |
 | 065 | Canvas-server mapping drift integration test | P7.1 | 🔲 | 042 | **O** | true | FULL |
 | 066 | Author `.claude/patterns/ai/node-executor-authoring.md` | P7.1 | 🔲 | 041 | — main-only | false | FULL |
-| 070 | Create `sprk_userentityassociation` entity + indexes | P7.5 | 🔲 | 010 | **P** | true | FULL |
-| 071 | Provision Service Bus topic `sprk-membership-changes` | P7.5 | 🔲 | 010 | **P** | true | FULL |
+| 070 | Create `sprk_userentityassociation` entity + indexes | P7.5 | ✅ | 010 | **P** | true | FULL |
+| 071 | Provision Service Bus topic `sprk-membership-changes` | P7.5 | ❌ blocked-operator | 010 | **P** | true | FULL |
 | 072 | `MembershipChangedEvent` payload contract | P7.5 | 🔲 | 070, 071 | — | true | STANDARD |
 | 073 | Bicep deploy + topic/subscription smoke test | P7.5 | 🔲 | 071, 072 | — | true | STANDARD |
 | 080 | P-event-1 — Event-source endpoint inventory | P8 | 🔲 | 070, 071, 072 | **Q** main-only | false | STANDARD |
