@@ -182,7 +182,9 @@ export const SmartTodoModal: React.FC<SmartTodoModalProps> = ({
   //    listener; for task 040 we plumb the window reference so the shell
   //    is ready to use it the moment 041 lands).
   const [iframeWindow, setIframeWindow] = React.useState<Window | null>(null);
+  const iframeNodeRef = React.useRef<HTMLIFrameElement | null>(null);
   const iframeRef = React.useCallback((node: HTMLIFrameElement | null) => {
+    iframeNodeRef.current = node;
     setIframeWindow(node?.contentWindow ?? null);
   }, []);
 
@@ -193,6 +195,57 @@ export const SmartTodoModal: React.FC<SmartTodoModalProps> = ({
   React.useEffect(() => {
     setIframeLoading(true);
   }, [iframeSrc]);
+
+  // ── UAT 2026-06-21 round 6 — close-on-iframe-navigation guard.
+  //
+  // The OOB MDA form's "Save & Close" button calls `Xrm.Page.ui.close()`
+  // which, when the form is loaded inside an iframe, navigates the IFRAME
+  // away from the form URL (typically to a "back" URL — which in some
+  // environments resolves to the user's home workspace, e.g. SpaarkeAi).
+  // Without intercepting this we get: dialog stays open showing the wrong
+  // page underneath, OR (worse) the parent window navigates and the user
+  // is whisked off the Code Page entirely.
+  //
+  // Mitigation: each iframe `load` event after the FIRST one, compare the
+  // iframe's current URL against the intended form URL. If they no longer
+  // match, the form has closed itself — call onClose to dismiss the modal
+  // before any further parent navigation can cascade.
+  //
+  // Same-origin guard: we read `contentWindow.location.href` only when
+  // same-origin (else the access throws). Cross-origin reads return null
+  // and we treat that as "navigated away" too (defensive).
+  const initialLoadRef = React.useRef<boolean>(true);
+  React.useEffect(() => {
+    // Reset the first-load gate whenever the intended src changes (next
+    // record navigated via prev/next chrome).
+    initialLoadRef.current = true;
+  }, [iframeSrc]);
+
+  const handleIframeLoad = React.useCallback(() => {
+    setIframeLoading(false);
+    if (initialLoadRef.current) {
+      // First load — this IS the form rendering. Don't close.
+      initialLoadRef.current = false;
+      return;
+    }
+    // Subsequent load — the iframe navigated. Compare URL against the
+    // intended form URL; if different (or unreadable), treat as close.
+    const node = iframeNodeRef.current;
+    if (!node) {
+      onClose();
+      return;
+    }
+    let currentHref: string | null = null;
+    try {
+      currentHref = node.contentWindow?.location?.href ?? null;
+    } catch {
+      // Cross-origin access throws — treat as navigated away.
+      currentHref = null;
+    }
+    if (!currentHref || (iframeSrc && !currentHref.startsWith(iframeSrc.split('?')[0]))) {
+      onClose();
+    }
+  }, [iframeSrc, onClose]);
 
   // ── Navigation handler ──────────────────────────────────────────────────
   // Shell guarantees `direction` is 'prev' | 'next' and is only invoked when
@@ -245,7 +298,7 @@ export const SmartTodoModal: React.FC<SmartTodoModalProps> = ({
                   ? `${styles.iframe} ${styles.iframeLoading}`
                   : styles.iframe
               }
-              onLoad={() => setIframeLoading(false)}
+              onLoad={handleIframeLoad}
               title={`To Do ${safeIndex + 1} of ${navTotal}`}
               // Allow the iframe to navigate same-origin Dataverse links
               // without being blocked. The OOB form needs `allow-scripts`
