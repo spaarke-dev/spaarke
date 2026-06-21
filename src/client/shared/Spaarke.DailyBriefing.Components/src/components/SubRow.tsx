@@ -115,9 +115,7 @@ export const SubRow: React.FC<SubRowProps> = ({ item, onAddToTodoItem, onDismiss
       </div>
       {/* R2.2: per-item due date hint (only when item.dueDate is set, i.e. task notifications). */}
       {dueDateLabel && (
-        <span className={`${styles.dueDate} ${isOverdue ? styles.dueDateOverdue : ''}`.trim()}>
-          {dueDateLabel}
-        </span>
+        <span className={`${styles.dueDate} ${isOverdue ? styles.dueDateOverdue : ''}`.trim()}>{dueDateLabel}</span>
       )}
       {/* Slots B + C: per-item actions (FR-13/FR-14, tasks 022/023). */}
       <div className={styles.actions}>

@@ -199,9 +199,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   // Showing a single due-date on an aggregated bullet would misrepresent
   // multi-item due dates.
   const singleItemDueDate =
-    !showSubList && Array.isArray(items) && items.length === 1
-      ? formatDueDate(items[0].dueDate)
-      : null;
+    !showSubList && Array.isArray(items) && items.length === 1 ? formatDueDate(items[0].dueDate) : null;
   const isSingleItemOverdue = singleItemDueDate?.startsWith('Overdue') ?? false;
 
   const handleLinkClick = () => {
