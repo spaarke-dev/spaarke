@@ -5,8 +5,8 @@
 // both IOrganizationMembershipResolver canonical + IIdentityOrganizationResolver
 // task-031 seam).
 // Task 030 (2026-06-21): Adds IMembershipFieldDiscoveryService singleton.
-// Remaining registrations (IMembershipResolverService, endpoint mappings)
-// arrive in later P4 tasks (033, 035-036).
+// Task 033 (2026-06-21): Adds IMembershipResolverService singleton (orchestration).
+// Remaining registrations (endpoint mappings) arrive in later P4 tasks (035-036).
 //
 // ADR-010 (DI Minimalism): Feature-module pattern — one Add{Module}() per
 // feature area, called from Program.cs.
@@ -70,6 +70,14 @@ public static class MembershipModule
         // existing Services.Dataverse.MetadataService pattern), IDistributedCache
         // (CacheModule), IOptions<MembershipOptions>, ILogger.
         services.AddSingleton<IMembershipFieldDiscoveryService, MembershipFieldDiscoveryService>();
+
+        // Task 033: top-level orchestration. Singleton (per ADR-010, holds no
+        // per-request state — IDistributedCache is the only mutable surface and is
+        // thread-safe). Consumes IMembershipFieldDiscoveryService (above),
+        // IIdentityNormalizationService (above), IDataverseService (registered
+        // elsewhere — used for FetchExpression queries against the target entity),
+        // IDistributedCache (CacheModule), IOptions<MembershipOptions>, ILogger.
+        services.AddSingleton<IMembershipResolverService, MembershipResolverService>();
 
         return services;
     }

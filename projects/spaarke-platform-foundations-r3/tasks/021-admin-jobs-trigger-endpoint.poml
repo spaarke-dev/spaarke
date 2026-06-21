@@ -1,7 +1,7 @@
 <task id="R3-021" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>`POST /api/admin/jobs/{jobId}/trigger` — Run NOW</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>P3</phase>
     <parallel-group>F (with 020, 022)</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -43,4 +43,46 @@
     <criterion testable="true">sprk_backgroundjobrun row written with trigger=ManualAdmin</criterion>
     <criterion testable="true">404 for unknown jobId; 403 for non-admin</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-06-21.
+    Files (new, src):
+      - src/server/shared/Spaarke.Scheduling/JobNotFoundException.cs (JobNotFoundException + TriggerResult record).
+      - src/server/api/Sprk.Bff.Api/Api/Admin/Models/TriggerResponse.cs (BFF-side DTO).
+    Files (modified, src):
+      - src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs (+TriggerNowAsync public method,
+        +RunManualTriggerAsync private background-task body, +ExecuteHandlerWithRetryAsync, +BuildManualTriggerParameters).
+      - src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs (MapPost handler in reserved task 021 block + TriggerJobAsync handler).
+      - src/server/api/Sprk.Bff.Api/Infrastructure/DI/SchedulingModule.cs (+ScheduledJobHostOptions + ScheduledJobHost singleton registrations).
+    Files (new, tests):
+      - tests/unit/Spaarke.Scheduling.Tests/ScheduledJobHostTests.cs (+5 TriggerNowAsync tests appended).
+      - tests/unit/Sprk.Bff.Api.Tests/Api/Admin/JobsEndpointsTests.cs (+6 POST /trigger tests appended).
+    Tests: 47/47 Spaarke.Scheduling (delta +5 from 42); 17/17 BFF Admin (delta +6 from 11).
+    BFF build: 0 errors, 16 pre-existing warnings unchanged. Scheduling lib builds clean (TreatWarningsAsErrors).
+    Publish size: 44.86 MB compressed (delta -1.32 MB vs 46.18 baseline; no new NuGet adds).
+    CVE: no new HIGH-severity CVE (only pre-existing Microsoft.Kiota.Abstractions 1.21.2).
+    Design decisions:
+      - Fire-and-track mechanism: Task.Run with CancellationToken.None for the dispatched task
+        (admin client cancellation cancels dispatch path only, NOT in-flight runs — host shutdown
+        drain via _inFlight tracking is the correct cancel surface per NFR-07).
+      - JobNotFoundException location: Spaarke.Scheduling (not BFF) so any consumer of TriggerNowAsync
+        catches the same type without taking a BFF dependency.
+      - TriggerResult vs TriggerResponse: Spaarke.Scheduling owns TriggerResult (shared-lib contract);
+        BFF owns TriggerResponse (wire-DTO with sibling DTOs in Api/Admin/Models/). Endpoint maps
+        between them. Preserves single-direction dependency (BFF → shared-lib, never reverse).
+      - ScheduledJobHost singleton (NOT hosted-service) registration: TriggerNowAsync works without
+        the cron loop running. First production cron migration (task 023+) adds AddHostedService.
+        Avoids paying for an idle cron loop in P3 deployments when no cron jobs exist yet.
+      - Manual triggers persist scheduledFireUtc=null per IBackgroundJobStore contract; no idempotency
+        dedup applied (admin double-click = 2 runs by design).
+      - Retry policy applies uniformly to manual triggers (same RetryPolicy as scheduled).
+      - Caller-supplied parameter overrides merge ON TOP OF definition's persisted ConfigJson
+        (overrides win on key conflict).
+    Coordination with tasks 022: pre-marked "===== Task 022 =====" comment block in JobsEndpoints.cs
+    reserves handler slot. Task 022 will add GET /history + POST /enable + POST /disable without
+    touching task 020 or 021 handlers / helpers.
+    adr-check (self): PASS — ADR-001 (in-process), ADR-008 (RequireAuthorization at MapGroup),
+    ADR-010 (singleton concrete + interface only justified by ≥2 impls), ADR-029 (publish measured),
+    ADR-032 N/A (host is unconditional). bff-extensions §A/§C/§F/§F.1: PASS.
+    Not committed per task brief.
+  </notes>
 </task>

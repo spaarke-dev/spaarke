@@ -89,7 +89,67 @@ public interface IBackgroundJobStore
         string jobId,
         DateTimeOffset scheduledFireUtc,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Retrieve the most-recent run records for <paramref name="jobId"/>, ordered newest-first,
+    /// capped at <paramref name="limit"/> entries. Surfaces both completed and in-progress runs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in R3 task 020 (admin endpoints) to back <c>GET /api/admin/jobs/{jobId}/status</c>
+    /// and <c>GET /api/admin/jobs/{jobId}/history</c> (task 022). The Dataverse-backed
+    /// implementation (task 023+) queries <c>sprk_backgroundjobrun</c> ordered by
+    /// <c>sprk_startedon DESC</c>; the in-memory implementation snapshots the in-process run
+    /// dictionary and sorts by <see cref="BackgroundJobRunRecord.StartedOn"/>.
+    /// </para>
+    /// <para>
+    /// Returns an empty list (not <c>null</c>) when the job has never executed or has no
+    /// recorded runs. <paramref name="limit"/> values &lt;= 0 are clamped to 1 by implementations.
+    /// </para>
+    /// </remarks>
+    /// <param name="jobId">Stable job id (matches <see cref="BackgroundJobDefinition.JobId"/>).</param>
+    /// <param name="limit">Maximum number of run records to return (newest-first). Implementations clamp to 1 if &lt;= 0.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<IReadOnlyList<BackgroundJobRunRecord>> GetRecentRunsAsync(
+        string jobId,
+        int limit,
+        CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Public, stable projection of one run-history row surfaced to consumers via
+/// <see cref="IBackgroundJobStore.GetRecentRunsAsync"/>. Mirrors the in-memory
+/// <c>InMemoryBackgroundJobStore.RunRecord</c> shape but exposes only the fields needed by
+/// admin tooling (no internal correlation guardrails).
+/// </summary>
+/// <remarks>
+/// Per R3 spec.md FR-2.6. The Dataverse-backed store (task 023+) populates this from
+/// <c>sprk_backgroundjobrun</c>. <see cref="ErrorMessage"/> + <see cref="ProcessedItems"/> are
+/// nullable because they're only known after run completion (and not every job reports an item
+/// count). <see cref="Status"/> is canonicalized to <c>"Succeeded"</c> / <c>"Failed"</c> /
+/// <c>"InProgress"</c> by implementations.
+/// </remarks>
+/// <param name="RunId">Persistent run identifier from the run-history store.</param>
+/// <param name="JobId">Stable job id this run belongs to.</param>
+/// <param name="Trigger">What caused this run (Scheduled / ManualAdmin / OnStartup).</param>
+/// <param name="CorrelationId">Distributed-trace correlation id per NFR-08.</param>
+/// <param name="StartedOn">When the run started executing.</param>
+/// <param name="CompletedOn">When the run completed, or <c>null</c> if still running.</param>
+/// <param name="Status">Canonical run outcome (<c>"Succeeded"</c>, <c>"Failed"</c>, or <c>"InProgress"</c>).</param>
+/// <param name="ErrorMessage">Final failure message, or <c>null</c> on success or while in-progress.</param>
+/// <param name="ProcessedItems">Optional item-processing count (per <see cref="JobRunResult.ProcessedItems"/>).</param>
+/// <param name="Duration">Run duration. <see cref="TimeSpan.Zero"/> while in-progress.</param>
+public sealed record BackgroundJobRunRecord(
+    Guid RunId,
+    string JobId,
+    JobRunTrigger Trigger,
+    string CorrelationId,
+    DateTimeOffset StartedOn,
+    DateTimeOffset? CompletedOn,
+    string Status,
+    string? ErrorMessage,
+    int? ProcessedItems,
+    TimeSpan Duration);
 
 /// <summary>
 /// Immutable view of one row in (eventually) <c>sprk_backgroundjob</c>. Returned by

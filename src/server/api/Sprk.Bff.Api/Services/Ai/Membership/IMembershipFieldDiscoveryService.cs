@@ -62,6 +62,32 @@ public interface IMembershipFieldDiscoveryService
     /// Thrown when the entity is not found in Dataverse metadata.
     /// </exception>
     Task<DiscoveryResult> DiscoverAsync(string entityLogicalName, CancellationToken ct);
+
+    /// <summary>
+    /// Invalidates the per-entity discovery cache for the
+    /// <c>POST /api/admin/membership/refresh-metadata</c> admin endpoint
+    /// (task 036). When <paramref name="entityLogicalName"/> is non-null/empty,
+    /// invalidates only that entity's cached <see cref="DiscoveryResult"/>.
+    /// When null/empty/whitespace, invalidates every entity-type cache entry
+    /// the service has populated since process start (tracked internally via a
+    /// thread-safe set of populated cache keys — works against both Redis and
+    /// the in-memory distributed-cache fallback, neither of which exposes a
+    /// portable "scan by prefix" API). The returned list contains the
+    /// lowercase-normalized entity-type strings that were actually invalidated
+    /// (after de-duplication), in arbitrary order.
+    /// </summary>
+    /// <param name="entityLogicalName">
+    /// Optional. Single entity to invalidate (case-insensitive — normalized to
+    /// lowercase to match <see cref="DiscoverAsync"/>'s cache-key convention).
+    /// Null/empty/whitespace means "invalidate all known entries".
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// The lowercase-normalized entity types that were invalidated. Empty when
+    /// no matching cache entries had been populated yet (e.g., admin calls
+    /// refresh-all on a cold process). Always non-null.
+    /// </returns>
+    Task<IReadOnlyList<string>> InvalidateCacheAsync(string? entityLogicalName, CancellationToken ct);
 }
 
 /// <summary>

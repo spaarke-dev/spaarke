@@ -1,7 +1,7 @@
 <task id="R3-035" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>`GET /api/users/me/memberships/{entityType}` endpoint + filtering + pagination</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>P4</phase>
     <parallel-group>I (with 036, 037)</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -50,4 +50,73 @@
     <criterion testable="true">Pagination via continuation token works for &gt;500 memberships</criterion>
     <criterion testable="true">401 for unauthenticated; 403 if any future role gate applied</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-06-21. Files (new, src): Api/Membership/MembershipEndpoints.cs (~440 lines —
+    includes MembershipApiExtensions Add+Map pairing). Files (new, tests):
+    tests/.../Api/Membership/MembershipEndpointsTests.cs (18 tests covering auth gate,
+    malformed input, query-param → MembershipResolveOptions mapping, ExtractAadObjectId
+    + ParseCsv helpers). Files (modified, src): Program.cs (+8 lines: using import +
+    AddMembershipApi() call), Infrastructure/DI/EndpointMappingExtensions.cs (+9 lines:
+    using import + MapMembershipApi() call + comment block).
+    18/18 new tests pass (1s). No regressions: 51/51 related tests still pass
+    (JobsEndpoints 11, IdentityNormalization 10, MembershipResolver 12, MembershipResponse 10,
+    other Membership-namespace 8). BFF build: 0 errors, 16 pre-existing warnings unchanged.
+    Publish size: 44.85 MB compressed (-1.33 MB vs task 020 baseline of 46.18; no NuGet adds).
+    CVE check: no new HIGH-severity CVE (Microsoft.Kiota.Abstractions 1.21.2 HIGH unchanged,
+    tracked at project level).
+    Design decisions:
+    - Current-user systemuserid lookup mechanism: INLINE HELPER in MembershipEndpoints.cs
+      (ResolveSystemUserIdAsync). Reasons: (a) first BFF surface needing AAD-oid →
+      systemuserid (opposite direction from IdentityNormalizationService's systemuserid →
+      6-path PersonIdentity); (b) helper is ~30 lines using cached IDataverseService +
+      IDistributedCache; (c) introducing a one-use ICurrentUserService would create premature
+      abstraction. Documented future extraction path: when a SECOND endpoint needs the
+      same direction, extract to Services/Ai/Membership/CurrentUserResolver.cs.
+      Cache key: "membership:currentuser:{aadOid:D}" (sibling namespace to
+      IdentityNormalizationService's "membership:identity:*"). TTL: 10 min (matches
+      identity-normalization cache TTL). Query also filters isdisabled=false to prevent
+      disabled-user impersonation.
+    - Endpoint registration site: PAIRED Add+Map convention via MembershipApiExtensions
+      (in MembershipEndpoints.cs). AddMembershipApi() is currently no-op (resolver is
+      registered by MembershipModule.AddMembership from task 033) but reserved for future
+      endpoint-specific services (e.g., the extracted CurrentUserResolver). MapMembershipApi()
+      delegates to MapMembershipEndpoints(). Both wired UNCONDITIONALLY in Program.cs +
+      EndpointMappingExtensions.MapDomainEndpoints per bff-extensions.md §F.1.
+    - Query-param parsing: ParseCsv normalizes empty CSV ("roles=" or "roles=,,,") to null
+      so MembershipResolverService treats it as "use all" per its MembershipResolveOptions
+      contract. limit=0 / limit&lt;0 returns 400; limit&gt;MaxLimit (5000) silently clamps
+      to MaxLimit (matches OData top-N clamp convention).
+    - Auth model: standard .RequireAuthorization() on MapGroup (no specific policy — any
+      authenticated user can query their OWN memberships, never another user's). Defensive
+      re-check of oid claim after RequireAuthorization in case a test or filter override
+      bypasses the policy (matches PrecedentAdminEndpoints precedent). 401 (not 403) when
+      Dataverse has no matching systemuser row — the token authenticates an unknown
+      identity rather than denying a known one.
+    - includeRelated passthrough: endpoint surfaces options.IncludeRelated to the resolver
+      verbatim. Phase 1A MembershipResolverService ignores it; task 054 activates Phase 1D
+      transitive expansion without touching MembershipEndpoints.cs.
+    - Test fixture: dedicated MembershipEndpointsTestFixture (NOT shared with AdminJobsTestFixture
+      or CustomWebAppFactory) because tests need per-call AAD oid selection via X-Test-Oid
+      header — sibling fixtures hardcode either SystemAdmin or a fixed user id which would
+      mask the oid-claim extraction path. MockBehavior.Strict on IMembershipResolverService
+      surfaces any unexpected call as test failure; MockBehavior.Loose on IDataverseService
+      allows seeded-by-test query setup without needing to stub every unrelated call.
+    AC verification (unit-level — integration AC-1A.3 + AC-1A.5 deferred to P4 UAT per task brief):
+    - 200 + MembershipResponse for authenticated user: ✅ (GetMyMemberships_Returns200_...).
+    - Filters work (roles, identityTypes): ✅ (MapsRolesAndIdentityTypesCsv_ToResolverOptions).
+    - Pagination via continuationToken: ✅ (MapsLimitAndContinuationToken_ToResolverOptions).
+    - 401 unauthenticated: ✅ (Returns401_WhenUnauthenticated).
+    - Filters mapped correctly to MembershipResolveOptions: ✅ (6 mapping tests).
+    - includeRelated passed through: ✅ (MapsIncludeRelated_ToResolverOptions_ForPhase1DPassthrough).
+    adr-check (self): PASS — ADR-001 (Minimal API extension method), ADR-008 (.RequireAuthorization
+    on MapGroup, no global middleware, RFC 7807 ProblemDetails), ADR-009 (Redis 10-min TTL
+    matches IdentityNormalizationService), ADR-010 (no premature interface — helper is inline
+    with documented extraction path), ADR-028 (oid claim canonical + cross-ref via
+    azureactivedirectoryobjectid), ADR-029 (publish-size -1.33 MB).
+    bff-extensions §A/§F/§F.1: PASS — Placement Justification documented in publish-size note,
+    ADRs cited above, publish-size measured + within ceiling, no new CRUD→AI dep,
+    feature-module DI (MembershipApiExtensions Add+Map pairing), unconditional registration
+    on both sides, 18 unit tests cover new behavior.
+    Not committed per task brief. Notes: notes/bff-publish-size-task035.md.
+  </notes>
 </task>

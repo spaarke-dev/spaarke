@@ -126,6 +126,51 @@ public sealed class InMemoryBackgroundJobStore : IBackgroundJobStore
         return Task.FromResult(false);
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<BackgroundJobRunRecord>> GetRecentRunsAsync(
+        string jobId,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(jobId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Implementations clamp limit to >= 1 per the interface contract — defends against
+        // unsanitized query-string ints from admin tooling that might pass 0 or a negative.
+        var effectiveLimit = Math.Max(1, limit);
+
+        IReadOnlyList<BackgroundJobRunRecord> projection = _runs.Values
+            .Where(r => string.Equals(r.JobId, jobId, StringComparison.Ordinal))
+            .OrderByDescending(r => r.StartedAtUtc)
+            .Take(effectiveLimit)
+            .Select(ToPublicProjection)
+            .ToArray();
+        return Task.FromResult(projection);
+    }
+
+    private static BackgroundJobRunRecord ToPublicProjection(RunRecord record)
+    {
+        // Canonicalize Status. In-progress = RecordRunStartAsync called but RecordRunCompleteAsync
+        // never observed (CompletedAtUtc null + Result null). Otherwise derive from Result.Success.
+        var status = record.CompletedAtUtc is null
+            ? "InProgress"
+            : record.Result is { Success: true }
+                ? "Succeeded"
+                : "Failed";
+
+        return new BackgroundJobRunRecord(
+            RunId: record.RunId,
+            JobId: record.JobId,
+            Trigger: record.Trigger,
+            CorrelationId: record.CorrelationId,
+            StartedOn: record.StartedAtUtc,
+            CompletedOn: record.CompletedAtUtc,
+            Status: status,
+            ErrorMessage: record.Result?.ErrorMessage,
+            ProcessedItems: record.Result?.ProcessedItems,
+            Duration: record.Result?.Duration ?? TimeSpan.Zero);
+    }
+
     /// <summary>Seed a run record directly — TEST-ONLY surface for simulating host-restart scenarios
     /// where a prior run already exists in the store before the host first dispatches the job.</summary>
     public void SeedRunRecord(RunRecord record)

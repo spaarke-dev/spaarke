@@ -7,9 +7,9 @@
 
 ## Active Task
 
-**Status**: none (task 031 complete 2026-06-21)
+**Status**: none (task 021 complete 2026-06-21)
 
-**Next Task**: per TASK-INDEX next 🔲 — likely group **E** (015, 016 — `sprk_backgroundjob*` entities) or remaining **G** sibling task 030, or **H** orchestration tasks 033/034 (now unblocked by 030+031+032).
+**Next Task**: parallel-group F final sibling (022) — `GET /api/admin/jobs/{jobId}/history?limit=N` + `POST /enable` + `POST /disable`. Same JobsEndpoints.cs reserved comment block at the file end.
 
 **To start**:
 - Say "work on task <NNN>" or "continue"
@@ -32,6 +32,197 @@
 ---
 
 ## Recently Completed (this session)
+
+- **2026-06-21 — Task 021**: `POST /api/admin/jobs/{jobId}/trigger` admin manual-trigger endpoint.
+  - Files (new, src): `Spaarke.Scheduling/JobNotFoundException.cs` (JobNotFoundException +
+    public `TriggerResult` record), `Api/Admin/Models/TriggerResponse.cs` (BFF-side wire DTO).
+  - Files (new, tests): none (extended existing ScheduledJobHostTests.cs +5 tests; extended
+    existing JobsEndpointsTests.cs +6 tests).
+  - Files (modified, src):
+    - `Spaarke.Scheduling/ScheduledJobHost.cs` — added public `TriggerNowAsync(jobId, parameters, ct)`;
+      private `RunManualTriggerAsync` background-task body; private `ExecuteHandlerWithRetryAsync`
+      (manual-trigger variant of scheduled retry envelope — no ScheduledJobState dep); private
+      `BuildManualTriggerParameters` (merges definition.ConfigJson + caller overrides).
+    - `Api/Admin/JobsEndpoints.cs` — `MapPost("/{jobId}/trigger", TriggerJobAsync)` inside the
+      task-021 reserved comment block; private `TriggerJobAsync` handler (202 + Location header,
+      404 via JobNotFoundException catch, 499 for client-cancellation). Did NOT modify task 020's
+      GET handlers or shared helpers.
+    - `Infrastructure/DI/SchedulingModule.cs` — registered `ScheduledJobHostOptions` (defaults POCO,
+      spec-verbatim) + `ScheduledJobHost` as **singleton** (NOT HostedService) so admin trigger
+      endpoint can inject it for out-of-band dispatch without spinning up the cron loop. Task 023+
+      will add `AddHostedService(sp => sp.GetRequiredService<ScheduledJobHost>())` when first
+      production cron job lands. bff-extensions §F.1 compliance: endpoint mapped unconditionally →
+      host registered unconditionally.
+  - **Tests**: Spaarke.Scheduling.Tests **47/47 pass** (delta +5: TriggerNowAsync registered/unknown/
+    NFR-08 distinct-correlationIds / param-override-merge / pre-cancel). BFF Admin tests **17/17
+    pass** (delta +6: 401/403/404 paths + 202+body shape + manual-admin trigger persistence + NFR-08
+    distinct correlationIds + RunRecord with scheduledFireUtc=null).
+  - BFF build: 0 errors, 16 pre-existing warnings unchanged. `Spaarke.Scheduling` TreatWarningsAsErrors
+    honored (0 warnings in scheduling project).
+  - Publish size: **44.86 MB** compressed (delta **-1.32 MB** vs 46.18 baseline; no NuGet adds —
+    JobNotFoundException + TriggerResult are POCOs in existing project; the decrease is consistent
+    with Release-mode publish-mode optimizations across other recent low-impact tasks).
+  - CVE check: no new HIGH-severity CVE (only pre-existing `Microsoft.Kiota.Abstractions 1.21.2`
+    HIGH advisory tracked at project level).
+  - **Design decisions**:
+    - **Fire-and-track via Task.Run + CancellationToken.None for background task body**:
+      admin client cancellation cancels the dispatch path only (registry resolve + run-start write),
+      NOT in-flight runs. Host shutdown drain (`_inFlight` tracking + StopAsync 30s ceiling per NFR-07)
+      is the correct cancel surface for in-flight runs. Verified by `TriggerNowAsync_CancellationBeforeDispatch`.
+    - **JobNotFoundException location**: `Spaarke.Scheduling` (NOT BFF). Any future caller of
+      `TriggerNowAsync` (CLI tools, other shared-lib consumers) catches the same type without
+      depending on BFF-side code.
+    - **TriggerResult (shared lib) vs TriggerResponse (BFF DTO)**: dual-record split preserves the
+      single-direction dependency (BFF → shared-lib, never reverse) and lets the BFF DTO live
+      alongside sibling JobStatusSummary/JobStatusDetail/JobRunDetail DTOs in Api/Admin/Models/.
+      Endpoint maps between them (zero-cost positional copy).
+    - **ScheduledJobHost singleton (NOT hosted service) registration in SchedulingModule**: keeps
+      P3 deployments lean (no cron loop spinning when no cron jobs exist yet) while satisfying
+      §F.1 asymmetric-registration: endpoint mapped unconditionally → host registered unconditionally.
+      First production cron job migration (task 023 PlaybookSchedulerService) adds the
+      HostedService registration; same singleton instance.
+    - **scheduledFireUtc=null for manual triggers**: per `IBackgroundJobStore.RecordRunStartAsync`
+      contract; no idempotency dedup applied to manual triggers (admin double-click = 2 runs by
+      design — admins explicitly chose to retrigger).
+    - **Retry policy applies uniformly**: same `_options.RetryPolicy` (3 attempts, 5s base, 2min cap)
+      wraps manual-trigger handler invocations. Transient failures retry without admin re-trigger.
+    - **Caller-supplied parameter overrides merge ON TOP of definition's persisted ConfigJson**:
+      verified by `TriggerNowAsync_OverrideParameters_MergedIntoRunContext`. Overrides win on key
+      conflict. Endpoint passes `parameters: null` (R3 task 021 doesn't accept request body) —
+      future tasks can extend with `[FromBody] Dictionary<string, object>` parameter.
+    - **202 Accepted + Location header**: canonical "where to find this resource later" path is
+      `/api/admin/jobs/{jobId}/runs/{runId}` (resource-style). Existing status surface lives at
+      `/{jobId}/status` (task 020); the runs/{runId} shape is the location convention admin
+      clients expect for a created resource per Microsoft Learn admin API guidance.
+    - **499 Client Closed Request for caller-cancellation**: not 500 (no server fault); not 408
+      (no request timeout — caller chose to cancel). 499 is the canonical nginx/admin-API convention.
+  - **AC verification**: AC ✅ POST returns 202 + TriggerResponse (body shape verified); AC ✅
+    sprk_backgroundjobrun row written with trigger=ManualAdmin (verified via
+    InMemoryBackgroundJobStore.RunRecords + `RunRecord.Trigger`); AC ✅ 404 for unknown jobId
+    (JobNotFoundException → ProblemDetails 404); AC ✅ 403 non-admin + 401 unauthenticated;
+    AC ✅ NFR-08 fresh correlationId per run (verified via two-trigger distinct-count test).
+  - adr-check (self): PASS — ADR-001 (in-process), ADR-008 (RequireAuthorization at MapGroup,
+    no global middleware), ADR-010 (singleton concrete + JobNotFoundException is POCO; interface
+    only where ≥2 impls warranted), ADR-029 (publish-size measured -1.32 MB), ADR-032 N/A (host
+    is unconditional). Spaarke.Scheduling TreatWarningsAsErrors honored.
+  - bff-extensions §A/§C/§F/§F.1: PASS — Placement Justification ✅ (admin trigger is thin BFF
+    surface over shared-lib TriggerNowAsync; trigger logic correctly placed in Spaarke.Scheduling);
+    Minimal API endpoint via extension method ✅; endpoint-filter auth ✅; ProblemDetails ✅;
+    Producess annotations ✅; test-update obligation ✅ (+6 BFF + +5 Spaarke.Scheduling);
+    asymmetric-registration ✅ (host registered unconditionally — static scan: TriggerJobAsync
+    is the only consumer; ScheduledJobRegistry + IBackgroundJobStore + ScheduledJobHostOptions
+    all unconditional in same module).
+  - **Coordination with task 022**: pre-marked `// ===== Task 022 =====` comment block reserved
+    in JobsEndpoints.cs (3 endpoints: GET /history, POST /enable, POST /disable). Task 022 adds
+    handlers in that block without touching task 020 or 021 work.
+  - Not committed per task brief.
+
+- **2026-06-21 — Task 020**: `GET /api/admin/jobs` + `GET /api/admin/jobs/{jobId}/status` admin endpoints.
+  - Files (new, src): `Api/Admin/JobsEndpoints.cs` (~280 lines), `Api/Admin/Models/JobStatusSummary.cs`,
+    `JobStatusDetail.cs`, `JobRunDetail.cs`, `Infrastructure/DI/SchedulingModule.cs`.
+  - Files (new, tests): `tests/.../Api/Admin/JobsEndpointsTests.cs` (11 tests), `AdminJobsTestFixture.cs`
+    (WebApplicationFactory + admin/non-admin/unauthenticated client builders).
+  - Files (modified, src): `Spaarke.Scheduling/IBackgroundJobStore.cs` (added `GetRecentRunsAsync`
+    + public `BackgroundJobRunRecord` record with canonical Status), `InMemoryBackgroundJobStore.cs`
+    (impl + status canonicalization helper), `Program.cs` (+`AddSchedulingModule`),
+    `EndpointMappingExtensions.cs` (+`MapAdminJobsEndpoints` call at end of MapDomainEndpoints).
+  - **11/11 new BFF tests pass** (133ms); Spaarke.Scheduling regression **42/42 pass**.
+  - BFF build: 0 errors, 0 new warnings (16 pre-existing in unrelated files unchanged).
+  - Publish size: **46.18 MB** compressed (delta **+0.02 MB** vs 46.16 baseline; no NuGet adds —
+    Cronos reused from task 010).
+  - CVE check: no new HIGH-severity CVE (only pre-existing `Microsoft.Kiota.Abstractions 1.21.2`
+    HIGH, tracked at project level).
+  - **Design decisions**:
+    - **IBackgroundJobStore extension**: added `GetRecentRunsAsync(jobId, limit, ct)` returning
+      new public record `BackgroundJobRunRecord` with canonical Status string
+      (Succeeded/Failed/InProgress). Public projection of internal `InMemoryBackgroundJobStore.RunRecord`
+      — Dataverse-backed store (task 023+) won't need to re-canonicalize from `sprk_backgroundjobrun`
+      option-set values.
+    - **SchedulingModule unconditional** per bff-extensions.md §F.1: registers `ScheduledJobRegistry`
+      + `InMemoryBackgroundJobStore` (as `IBackgroundJobStore` + concrete) with no feature gate.
+      Endpoints map unconditionally; dependencies must too. ADR-032 N/A (real services, not
+      kill-switches). When task 023+ swaps to Dataverse-backed store, this module is the single
+      registration site.
+    - **NextScheduledOn computation**: local `ParseCron` helper in `JobsEndpoints.cs` mirrors
+      `ScheduledJobHost.ParseCron` (5-field minute-precision OR 6-field seconds). Cron-format
+      failures log Warning + omit `NextScheduledOn` rather than 500 the whole admin list.
+    - **Orphan-handler tolerance**: jobs registered with `ScheduledJobRegistry` but missing a
+      definition in `IBackgroundJobStore` surface with `Enabled=false` + empty cron +
+      `NextScheduledOn=null`. Mirrors `ScheduledJobHost`'s same tolerance; lets operators spot
+      "handler registered, definition missing" misconfigs via admin UI.
+    - **Authorization (Q6)**: existing `SystemAdmin` policy at `AuthorizationModule.cs:241` —
+      NOT a new `PlatformAdmin` policy. Precedent: `RagEndpoints.cs` admin group.
+    - **Test fixture**: dedicated `AdminJobsTestFixture` (NOT shared with `CustomWebAppFactory`
+      or `WorkspaceTestFixture`) because tests need per-call admin/non-admin/unauthenticated
+      selection via `X-Test-Role` header — sibling fixtures hardcode SystemAdmin which would
+      mask the 403 path.
+    - **Task 021/022 coordination**: pre-marked `// ===== Task 021/022 ===== //` comment blocks
+      in `JobsEndpoints.cs` reserve insertion points. Tasks 021/022 add their handlers after the
+      task 020 GET handlers without touching shared helpers.
+    - **Test reset via reflection** on `_runs`/`_jobs` ConcurrentDictionaries (production
+      Clear() intentionally absent — single-host invariant; tests need symmetric teardown given
+      shared `IClassFixture`).
+  - adr-check (self): PASS — ADR-001 (in-process, no Azure Function), ADR-008 (`.RequireAuthorization`
+    at MapGroup, no global middleware), ADR-010 (singletons + `IBackgroundJobStore` interface
+    justified by ≥2 impls), ADR-029 (publish-size measured +0.02 MB), ADR-032 N/A. Spaarke.Scheduling
+    TreatWarningsAsErrors honored.
+  - bff-extensions §A/§F/§F.1: PASS — Placement Justification ✅, ADRs cited ✅, publish-size ✅,
+    no new CRUD→AI dep ✅, feature-module DI ✅, unconditional registration ✅.
+  - **AC verification**: AC-2.5 ✅ (403 non-admin + 401 unauthenticated tests pass), GET list returns
+    seeded job summaries ✅, GET detail returns last 10 runs (capped from 12 seeded, newest-first) ✅,
+    404 unknown jobId ✅, AC-2.7 failed-run ErrorMessage surfaces via `RecentRuns[0]` ✅.
+  - Not committed per task brief.
+  - Notes: `notes/bff-publish-size-task020.md` (publish-size + pre-merge checklist).
+
+- **2026-06-21 — Task 034**: `MembershipResponse` DTO + nested-shape PersonIdentity JSON contract.
+  - Files (new, src): `Services/Ai/Membership/Models/MembershipResponse.cs` — authoritative
+    response shape per design.md Part 1 §"Endpoint contract": positional record
+    (EntityType, PersonIdentity, Ids, ByRole, Count, CacheExpiresAt, ContinuationToken?)
+    with [property: JsonPropertyName("camelCase")] on every parameter. Self-locked JSON
+    contract independent of host JsonSerializerOptions.
+  - Files (new, tests): `tests/.../MembershipResponseTests.cs` — 10 tests covering
+    camelCase top-level keys, camelCase nested personIdentity keys, GUID D-form,
+    ISO 8601 DateTimeOffset (+00:00 suffix), explicit `continuationToken: null` emission,
+    preserved empty `byRole` arrays, full roundtrip (top-level + nested), continuation-
+    token-present serialization, roundtrip with token.
+  - Files (modified, src): `Services/Ai/Membership/Models/PersonIdentity.cs` — added
+    [JsonPropertyName] attributes on all 7 fields (5 via `[property:]` on positional
+    params for SystemUserId/ContactId/PrimaryEmail/BusinessUnitId/AccountId; 2 via body
+    attributes on the TeamIds + OrganizationIds init-only redeclarations). Non-breaking:
+    task 031's tests pass unchanged.
+  - **10 / 10 new tests pass**; full Membership-namespace regression: **48/48 pass**
+    (10 task 031 + 8 task 030 + 6 task 032 + 14 task 012 + 10 new from this task).
+  - BFF build: 0 errors, 0 new warnings (16 pre-existing unchanged).
+  - Publish size: **46.16 MB** compressed (delta **0.00 MB** vs 46.16 baseline; pure
+    record + attribute additions, no NuGet adds).
+  - CVE check: no new HIGH-severity CVE (only pre-existing `Microsoft.Kiota.Abstractions
+    1.21.2` HIGH finding, tracked at project level).
+  - **Coordination with task 033** (parallel group H): at authoring time (2026-06-21)
+    task 033 had NOT created `MembershipResponse.cs` — both still 🔲. No reconciliation
+    required. Task 033 consumes this DTO as the authoritative output shape.
+  - **Design decisions**:
+    - **`[property: JsonPropertyName(...)]` over default camelCase policy**: locks the
+      contract at the type level so the DTO serializes identically regardless of host
+      `JsonSerializerOptions` configuration (relevant for test contexts and internal
+      logger contexts that don't run the BFF's configured options).
+    - **Explicit `continuationToken: null` emission**: design example shows
+      `"continuationToken": null` explicitly. We deliberately do NOT apply
+      `[JsonIgnore(WhenWritingNull)]` so clients always see the key.
+    - **PersonIdentity attribute placement**: body-declared properties (TeamIds,
+      OrganizationIds) carry `[JsonPropertyName]` on the body declaration; positional
+      params do NOT also carry `[property:]` for those two (would duplicate / shadow).
+      The 5 non-overridden positional params carry `[property:]`.
+    - **GUID format**: System.Text.Json default D-form (`aaaaaaaa-aaaa-aaaa-aaaa-...`),
+      no braces. Test asserts both presence + absence-of-braces.
+    - **DateTimeOffset format**: System.Text.Json default ISO 8601 round-trip with `+00:00`
+      suffix for UTC (NOT `Z` — STJ preserves the offset). Test locks the runtime
+      behavior exactly.
+  - adr-check (self): PASS — ADR-013 (lives under Services/Ai/Membership/Models/),
+    ADR-029 (zero publish-size impact), TreatWarningsAsErrors honored.
+  - bff-extensions §A/§F: PASS — no BFF csproj changes, no new conditional DI, no new
+    HIGH CVE, 10 unit tests cover the new behavior, asymmetric-registration §F.1 N/A
+    (no service registration in this task).
+  - Not committed per task brief.
 
 - **2026-06-21 — Task 031**: `IdentityNormalizationService` — systemuser → 6-path
   PersonIdentity (contactId via AAD-oid cross-ref per ADR-028, primary email, teamIds via

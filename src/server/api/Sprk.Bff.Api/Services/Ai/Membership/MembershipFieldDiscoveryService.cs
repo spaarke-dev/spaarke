@@ -35,6 +35,7 @@
 // Reference: projects/spaarke-platform-foundations-r3/spec.md FR-1A.1
 //            through FR-1A.4, FR-1A.7; design.md Part 1 § "Discovery algorithm".
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -83,6 +84,13 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
     private readonly IDistributedCache _cache;
     private readonly MembershipOptions _options;
     private readonly ILogger<MembershipFieldDiscoveryService> _logger;
+
+    // Tracks the set of lowercase-normalized entity-type strings whose cache
+    // entries this service has populated since process start. Backs the
+    // "refresh-all" code-path in InvalidateCacheAsync (task 036) since neither
+    // IDistributedCache (Redis or in-memory) exposes a portable "scan by
+    // prefix" API. Used as a Set — value is irrelevant; we choose byte.
+    private readonly ConcurrentDictionary<string, byte> _populatedEntityKeys = new(StringComparer.OrdinalIgnoreCase);
 
     public MembershipFieldDiscoveryService(
         IDataverseService dataverse,
@@ -492,6 +500,20 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
                     AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(ttlMinutes)
                 },
                 ct).ConfigureAwait(false);
+
+            // Track the lowercase-normalized entity-type derived from the cache key
+            // so InvalidateCacheAsync(null, ...) can enumerate populated entries
+            // (IDistributedCache exposes no portable scan-by-prefix API). Cache write
+            // succeeded before we reach this point — recording on success preserves the
+            // invariant that the tracking set never references keys that don't exist.
+            if (cacheKey.StartsWith(CacheKeyPrefix, StringComparison.Ordinal))
+            {
+                var entityType = cacheKey.Substring(CacheKeyPrefix.Length);
+                if (!string.IsNullOrWhiteSpace(entityType))
+                {
+                    _populatedEntityKeys.TryAdd(entityType, 0);
+                }
+            }
         }
         catch (OperationCanceledException)
         {
@@ -504,6 +526,92 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
                 "next call will re-resolve (no functional impact)",
                 cacheKey);
         }
+    }
+
+    // ── Admin cache invalidation (task 036) ────────────────────────────────
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<string>> InvalidateCacheAsync(
+        string? entityLogicalName,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        // Single-entity path: targeted invalidation. We invalidate regardless of
+        // whether the entity is in the tracked set — the operator may know about a
+        // cache entry the service never populated (e.g., set by an older process
+        // instance that wrote to the same Redis instance). Returning the requested
+        // entity-type lets the admin response show what was acted on.
+        if (!string.IsNullOrWhiteSpace(entityLogicalName))
+        {
+            var normalized = entityLogicalName.Trim().ToLowerInvariant();
+            var cacheKey = CacheKeyPrefix + normalized;
+
+            try
+            {
+                await _cache.RemoveAsync(cacheKey, ct).ConfigureAwait(false);
+                _populatedEntityKeys.TryRemove(normalized, out _);
+                _logger.LogInformation(
+                    "MembershipFieldDiscoveryService invalidated cache for entity={EntityType}",
+                    normalized);
+                return new[] { normalized };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "MembershipFieldDiscoveryService failed to invalidate cache for entity={EntityType}; " +
+                    "next call will re-resolve (no functional impact)",
+                    normalized);
+                // Still report the entity as "refreshed" — the next DiscoverAsync()
+                // for it will go to live metadata regardless of whether the explicit
+                // RemoveAsync succeeded (worst case: a stale entry expires per TTL).
+                return new[] { normalized };
+            }
+        }
+
+        // Refresh-all path: enumerate everything this service has populated since
+        // process start. Snapshot the keys first to avoid mutation during enumeration.
+        var keysToInvalidate = _populatedEntityKeys.Keys.ToArray();
+        if (keysToInvalidate.Length == 0)
+        {
+            _logger.LogInformation(
+                "MembershipFieldDiscoveryService refresh-all invoked but no discovery cache entries are tracked (cold process or already invalidated)");
+            return Array.Empty<string>();
+        }
+
+        var invalidated = new List<string>(keysToInvalidate.Length);
+        foreach (var entityType in keysToInvalidate)
+        {
+            ct.ThrowIfCancellationRequested();
+            var cacheKey = CacheKeyPrefix + entityType;
+            try
+            {
+                await _cache.RemoveAsync(cacheKey, ct).ConfigureAwait(false);
+                _populatedEntityKeys.TryRemove(entityType, out _);
+                invalidated.Add(entityType);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "MembershipFieldDiscoveryService failed to invalidate cache for entity={EntityType} during refresh-all; " +
+                    "continuing with remaining entries",
+                    entityType);
+                // Still include it in the invalidated list — see single-entity rationale.
+                invalidated.Add(entityType);
+            }
+        }
+
+        _logger.LogInformation(
+            "MembershipFieldDiscoveryService refresh-all invalidated {Count} cache entr(ies)",
+            invalidated.Count);
+        return invalidated;
     }
 
     /// <summary>

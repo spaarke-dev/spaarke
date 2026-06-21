@@ -25,6 +25,8 @@
 //            Identity normalization contract; ADR-028 § Cross-reference rule;
 //            ADR-034 (forthcoming) § Identity normalization.
 
+using System.Text.Json.Serialization;
+
 namespace Sprk.Bff.Api.Services.Ai.Membership.Models;
 
 /// <summary>
@@ -66,23 +68,25 @@ namespace Sprk.Bff.Api.Services.Ai.Membership.Models;
 /// of the registered resolvers return matches (always non-null).
 /// </param>
 public sealed record PersonIdentity(
-    Guid SystemUserId,
-    Guid? ContactId = null,
-    string? PrimaryEmail = null,
+    [property: JsonPropertyName("systemUserId")] Guid SystemUserId,
+    [property: JsonPropertyName("contactId")] Guid? ContactId = null,
+    [property: JsonPropertyName("primaryEmail")] string? PrimaryEmail = null,
     IReadOnlyList<Guid>? TeamIds = null,
-    Guid? BusinessUnitId = null,
-    Guid? AccountId = null,
+    [property: JsonPropertyName("businessUnitId")] Guid? BusinessUnitId = null,
+    [property: JsonPropertyName("accountId")] Guid? AccountId = null,
     IReadOnlyList<Guid>? OrganizationIds = null)
 {
     /// <summary>
     /// Distinct teamids resolved via <c>teammembership</c>. Always non-null at
     /// the consumer surface — defaults to an empty list when no teams resolve.
     /// </summary>
+    [JsonPropertyName("teamIds")]
     public IReadOnlyList<Guid> TeamIds { get; init; } = TeamIds ?? Array.Empty<Guid>();
 
     /// <summary>
     /// Distinct <c>sprk_organizationid</c> values. Always non-null at the
     /// consumer surface — defaults to an empty list when no resolver match.
     /// </summary>
+    [JsonPropertyName("organizationIds")]
     public IReadOnlyList<Guid> OrganizationIds { get; init; } = OrganizationIds ?? Array.Empty<Guid>();
 }

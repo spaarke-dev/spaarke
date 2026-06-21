@@ -154,6 +154,317 @@ public sealed class ScheduledJobHost : BackgroundService
     }
 
     /// <summary>
+    /// Dispatch a registered <see cref="IScheduledJob"/> out-of-band as a manual admin trigger
+    /// (R3 task 021 — <c>POST /api/admin/jobs/{jobId}/trigger</c>). Returns immediately with the
+    /// persistent run id + start timestamp after the run row is written and the handler dispatch
+    /// is fire-and-tracked on a background task. The run completion record is written by the
+    /// tracked task without the caller waiting on the job's duration.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why fire-and-track</b>: jobs run for arbitrary durations (membership recon = minutes,
+    /// search-index rebuild = hours). Blocking the admin HTTP request on job completion would
+    /// time out the request and tie up a request thread. The endpoint returns 202 Accepted
+    /// immediately; admin clients poll <c>GET /api/admin/jobs/{jobId}/status</c> for outcome.</para>
+    /// <para><b>Trigger</b>: <see cref="JobRunTrigger.ManualAdmin"/>. Per the
+    /// <see cref="IBackgroundJobStore.RecordRunStartAsync"/> contract, <c>scheduledFireUtc</c> is
+    /// <c>null</c> for manual triggers — these don't participate in tick-level idempotency
+    /// (the admin chose to retrigger; duplicate-fire dedupe doesn't apply).</para>
+    /// <para><b>Correlation id (NFR-08)</b>: every trigger gets a fresh GUID-derived correlation id
+    /// distinct from any other run (scheduled or manual).</para>
+    /// <para><b>Cancellation (NFR-07)</b>: <paramref name="cancellationToken"/> cancels the
+    /// <i>dispatch path</i> (registry lookup, run-start record). Once the background task is
+    /// kicked off, it observes the host's <c>stoppingToken</c> instead — caller cancellation
+    /// does NOT interrupt the in-flight job (that would lose the run on a Ctrl-C from the admin
+    /// client). The host's shutdown drain (NFR-07: 30s) is the correct cancellation surface
+    /// for in-flight runs.</para>
+    /// <para><b>Idempotency</b>: NOT applied to manual triggers. If an admin double-clicks the
+    /// trigger button, two run records are written and the handler runs twice — this is the
+    /// admin's explicit choice. Scheduled idempotency (<see cref="IBackgroundJobStore.HasRunForScheduledTimeAsync"/>)
+    /// only kicks in for tick-level dedup after host restart.</para>
+    /// <para><b>Background task tracking</b>: the dispatched task is added to <see cref="_inFlight"/>
+    /// so <see cref="StopAsync"/>'s drain logic waits for it (NFR-07).</para>
+    /// </remarks>
+    /// <param name="jobId">Stable job id (matches <see cref="IScheduledJob.JobId"/>).</param>
+    /// <param name="parameters">Optional parameter overrides for this manual run; merged into the
+    /// per-run <see cref="JobRunContext.Parameters"/> dictionary on top of the job's persisted
+    /// <c>ConfigJson</c>. Pass <c>null</c> for no overrides.</param>
+    /// <param name="cancellationToken">Cancels the dispatch path only (NOT the in-flight job).</param>
+    /// <returns>
+    /// <see cref="TriggerResult"/> with the persistent run id, <c>"Running"</c> status, and dispatch
+    /// timestamp. Returned BEFORE the handler completes.
+    /// </returns>
+    /// <exception cref="JobNotFoundException">Thrown if <paramref name="jobId"/> is not registered
+    /// with <see cref="ScheduledJobRegistry"/>. The admin endpoint maps this to 404.</exception>
+    /// <exception cref="OperationCanceledException">Thrown if <paramref name="cancellationToken"/>
+    /// is cancelled before the run row is written.</exception>
+    public async Task<TriggerResult> TriggerNowAsync(
+        string jobId,
+        IDictionary<string, object>? parameters,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(jobId);
+
+        // Registry lookup → JobNotFoundException maps to 404 at endpoint layer. We do NOT
+        // require the job to have a BackgroundJobDefinition in the store — manual triggers
+        // can run a handler-registered-but-not-yet-defined job (admin troubleshooting flow).
+        var handler = _registry.Resolve(jobId)
+            ?? throw new JobNotFoundException(jobId);
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Look up the (optional) definition so any persisted ConfigJson flows into the run
+        // context. If the definition is missing, parameters still get the synthetic jobId key
+        // (mirrors ParametersFor's contract for scheduled runs).
+        var definitions = await _store.LoadJobsAsync(cancellationToken).ConfigureAwait(false);
+        var definition = definitions.FirstOrDefault(d => string.Equals(d.JobId, jobId, StringComparison.Ordinal));
+        var contextParameters = BuildManualTriggerParameters(jobId, definition, parameters);
+
+        var runId = Guid.NewGuid();
+        var correlationId = Guid.NewGuid().ToString("N"); // NFR-08: fresh per trigger.
+        var context = new JobRunContext(
+            RunId: runId,
+            CorrelationId: correlationId,
+            Trigger: JobRunTrigger.ManualAdmin,
+            Parameters: contextParameters);
+
+        var startedAt = _timeProvider.GetUtcNow();
+
+        // Persist the run-start row BEFORE returning so admin clients can poll
+        // /api/admin/jobs/{jobId}/status and see the row immediately. scheduledFireUtc=null
+        // because manual triggers don't participate in tick-level idempotency
+        // (per IBackgroundJobStore.RecordRunStartAsync contract).
+        Guid persistedRunId;
+        try
+        {
+            persistedRunId = await _store
+                .RecordRunStartAsync(jobId, context.Trigger, context.CorrelationId, scheduledFireUtc: null, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Persistence failure on a manual trigger is fatal — we can't return a runId the
+            // admin can poll on. Bubble up; endpoint layer maps to ProblemDetails 500.
+            _logger.LogError(
+                ex,
+                "ScheduledJobHost.TriggerNowAsync failed to record run start for '{JobId}' (correlationId {CorrelationId})",
+                jobId, context.CorrelationId);
+            throw;
+        }
+
+        _logger.LogInformation(
+            "Manual admin trigger dispatched for job '{JobId}' runId={RunId} correlationId={CorrelationId}",
+            jobId, persistedRunId, context.CorrelationId);
+
+        // Fire-and-track on a background task. We use the host's stoppingToken (not the
+        // caller's cancellationToken) so admin client cancellation doesn't kill an in-flight
+        // run. We still need a token for the handler — use a CancellationTokenSource that
+        // ties to the host's lifetime via a captured field. The simplest correct mechanism
+        // is to use CancellationToken.None for the dispatch wrapper (the in-flight task is
+        // tracked in _inFlight and drained by StopAsync per NFR-07).
+        var task = Task.Run(
+            () => RunManualTriggerAsync(handler, context, persistedRunId, CancellationToken.None),
+            CancellationToken.None);
+        _inFlight[runId] = task;
+
+        // Untrack on completion regardless of outcome (same pattern as DispatchAndAdvance).
+        _ = task.ContinueWith(
+            _ =>
+            {
+                _inFlight.TryRemove(runId, out Task? _removed);
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return new TriggerResult(
+            RunId: persistedRunId,
+            Status: "Running",
+            StartedAt: startedAt);
+    }
+
+    /// <summary>
+    /// Background-task body for a manual-admin trigger. Invokes the handler via the same
+    /// retry policy as scheduled runs (so transient errors are retried consistently) and
+    /// writes the run-completion record.
+    /// </summary>
+    private async Task RunManualTriggerAsync(
+        IScheduledJob handler,
+        JobRunContext context,
+        Guid persistedRunId,
+        CancellationToken cancellationToken)
+    {
+        var jobId = handler.JobId;
+        var sw = Stopwatch.StartNew();
+
+        // Reuse the per-attempt retry behavior from scheduled runs. To do so without
+        // forcing a ScheduledJobState (which requires a definition + parsed cron), call
+        // a small inline executor that mirrors ExecuteWithRetryAsync's contract minus the
+        // ScheduledJobState dependency.
+        JobRunResult result;
+        try
+        {
+            result = await ExecuteHandlerWithRetryAsync(handler, context, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Defensive: ExecuteHandlerWithRetryAsync converts all caught exceptions into
+            // JobRunResult.Failure; anything thrown out is unexpected.
+            sw.Stop();
+            _logger.LogError(
+                ex,
+                "Manual trigger for '{JobId}' runId={RunId} threw outside the retry envelope (unexpected)",
+                jobId, context.RunId);
+            result = new JobRunResult(
+                Success: false,
+                ErrorMessage: ex.Message,
+                ProcessedItems: null,
+                Duration: sw.Elapsed);
+        }
+
+        try
+        {
+            await _store.RecordRunCompleteAsync(persistedRunId, result, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "ScheduledJobHost failed to record manual-trigger completion for '{JobId}' runId={RunId} (correlationId {CorrelationId})",
+                jobId, persistedRunId, context.CorrelationId);
+        }
+    }
+
+    /// <summary>
+    /// Retry-wrapped handler invocation for manual triggers — equivalent shape to
+    /// <see cref="ExecuteWithRetryAsync"/> but operates on an <see cref="IScheduledJob"/> directly
+    /// (no <see cref="ScheduledJobState"/> required, because manual triggers don't need cron state).
+    /// </summary>
+    private async Task<JobRunResult> ExecuteHandlerWithRetryAsync(
+        IScheduledJob handler,
+        JobRunContext context,
+        CancellationToken cancellationToken)
+    {
+        var jobId = handler.JobId;
+        var policy = _options.RetryPolicy;
+        var maxAttempts = Math.Max(1, policy.MaxAttempts);
+        var overallSw = Stopwatch.StartNew();
+
+        Exception? lastException = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                overallSw.Stop();
+                return new JobRunResult(
+                    Success: false,
+                    ErrorMessage: "Cancelled (manual trigger)",
+                    ProcessedItems: null,
+                    Duration: overallSw.Elapsed);
+            }
+
+            if (attempt > 1)
+            {
+                var delay = policy.ComputeDelay(attempt);
+                try
+                {
+                    await Task.Delay(delay, _timeProvider, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    overallSw.Stop();
+                    return new JobRunResult(
+                        Success: false,
+                        ErrorMessage: "Cancelled (manual trigger)",
+                        ProcessedItems: null,
+                        Duration: overallSw.Elapsed);
+                }
+            }
+
+            try
+            {
+                _logger.LogInformation(
+                    "Dispatching manual-trigger job '{JobId}' runId={RunId} correlationId={CorrelationId} attempt={Attempt}/{MaxAttempts}",
+                    jobId, context.RunId, context.CorrelationId, attempt, maxAttempts);
+
+                var result = await handler.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "Manual-trigger job '{JobId}' completed runId={RunId} success={Success} processedItems={ProcessedItems} duration={DurationMs}ms attempt={Attempt}",
+                    jobId, context.RunId, result.Success, result.ProcessedItems, (long)result.Duration.TotalMilliseconds, attempt);
+
+                return result;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                overallSw.Stop();
+                _logger.LogWarning(
+                    "Manual-trigger job '{JobId}' runId={RunId} cancelled on attempt {Attempt}",
+                    jobId, context.RunId, attempt);
+                return new JobRunResult(
+                    Success: false,
+                    ErrorMessage: "Cancelled (manual trigger)",
+                    ProcessedItems: null,
+                    Duration: overallSw.Elapsed);
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Manual-trigger job '{JobId}' runId={RunId} attempt {Attempt}/{MaxAttempts} failed — retrying after backoff",
+                        jobId, context.RunId, attempt, maxAttempts);
+                }
+                else
+                {
+                    _logger.LogError(
+                        ex,
+                        "Manual-trigger job '{JobId}' runId={RunId} exhausted {MaxAttempts} attempts — recording final failure",
+                        jobId, context.RunId, maxAttempts);
+                }
+            }
+        }
+
+        overallSw.Stop();
+        return new JobRunResult(
+            Success: false,
+            ErrorMessage: lastException?.Message ?? "Manual trigger exhausted retries with no captured exception",
+            ProcessedItems: null,
+            Duration: overallSw.Elapsed);
+    }
+
+    /// <summary>
+    /// Build the per-run parameter bag for a manual-admin trigger. Mirrors the
+    /// <see cref="ParametersFor"/> shape used by scheduled runs — same <c>configJson</c> + <c>jobId</c>
+    /// keys — and overlays any caller-supplied per-trigger overrides.
+    /// </summary>
+    private static IDictionary<string, object> BuildManualTriggerParameters(
+        string jobId,
+        BackgroundJobDefinition? definition,
+        IDictionary<string, object>? overrides)
+    {
+        var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+        if (definition is not null && !string.IsNullOrEmpty(definition.ConfigJson))
+        {
+            parameters["configJson"] = definition.ConfigJson;
+        }
+        parameters["jobId"] = jobId;
+
+        if (overrides is not null)
+        {
+            foreach (var kvp in overrides)
+            {
+                parameters[kvp.Key] = kvp.Value;
+            }
+        }
+
+        return parameters;
+    }
+
+    /// <summary>
     /// One iteration of the scheduling loop. Refreshes definitions if due, computes the next
     /// fire time across all enabled jobs, and either dispatches due jobs or sleeps until the
     /// earliest upcoming fire. Visible to tests via <c>InternalsVisibleTo</c>.

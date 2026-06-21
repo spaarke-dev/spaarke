@@ -285,6 +285,167 @@ public class ScheduledJobHostTests
         fake.LastContext.Parameters["jobId"].Should().Be("cfg-job");
     }
 
+    // ================================================================================
+    // ===== Task 021: TriggerNowAsync (manual-admin out-of-band dispatch) ===========
+    // ================================================================================
+    //
+    // The host's TriggerNowAsync is the dispatch mechanism for POST /api/admin/jobs/{jobId}/trigger
+    // (R3 task 021). These tests verify the contract independent of the BFF endpoint layer.
+
+    [Fact]
+    public async Task TriggerNowAsync_RegisteredJob_InvokesHandler_AndRecordsRunWithManualAdminTrigger()
+    {
+        // Arrange
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("trigger-target");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        // Note: NO definition seeded — TriggerNowAsync MUST work for handler-registered-but-not-yet-defined
+        // jobs (admin troubleshooting flow).
+
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+
+        // Act
+        var result = await host.TriggerNowAsync("trigger-target", parameters: null, CancellationToken.None);
+
+        // Assert — synchronous return shape.
+        result.Should().NotBeNull();
+        result.RunId.Should().NotBe(Guid.Empty);
+        result.Status.Should().Be("Running");
+        result.StartedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
+
+        // Wait for background task to invoke the handler + write completion record.
+        await WaitUntilAsync(() => fake.InvocationCount > 0, TimeSpan.FromSeconds(5));
+        await WaitUntilAsync(
+            () => store.RunRecords.Any(r => r.RunId == result.RunId && r.CompletedAtUtc is not null),
+            TimeSpan.FromSeconds(5));
+
+        // Assert — run record has the right shape.
+        var run = store.RunRecords.Single(r => r.JobId == "trigger-target");
+        run.RunId.Should().Be(result.RunId);
+        run.Trigger.Should().Be(JobRunTrigger.ManualAdmin, "FR-2.6 / task 021 requires Trigger=ManualAdmin");
+        run.ScheduledFireUtc.Should().BeNull("manual triggers persist scheduledFireUtc=null per IBackgroundJobStore contract");
+        run.CorrelationId.Should().NotBeNullOrEmpty("NFR-08: fresh correlationId per run");
+        run.Result.Should().NotBeNull();
+        run.Result!.Success.Should().BeTrue("FakeScheduledJob always succeeds by default");
+
+        // Assert — the handler context carried the manual trigger marker.
+        fake.LastContext.Should().NotBeNull();
+        fake.LastContext!.Trigger.Should().Be(JobRunTrigger.ManualAdmin);
+        fake.LastContext.CorrelationId.Should().Be(run.CorrelationId);
+        fake.LastContext.Parameters.Should().ContainKey("jobId");
+        fake.LastContext.Parameters["jobId"].Should().Be("trigger-target");
+    }
+
+    [Fact]
+    public async Task TriggerNowAsync_UnknownJobId_ThrowsJobNotFoundException()
+    {
+        // Arrange
+        var registry = new ScheduledJobRegistry();
+        var store = new InMemoryBackgroundJobStore();
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+
+        // Act + Assert
+        var act = async () => await host.TriggerNowAsync("never-registered", parameters: null, CancellationToken.None);
+        var ex = await act.Should().ThrowAsync<JobNotFoundException>();
+        ex.Which.JobId.Should().Be("never-registered");
+        ex.Which.Message.Should().Contain("never-registered");
+
+        // Assert — no run record was created for the unknown job (host must NOT write a runStart row
+        // for a non-existent handler).
+        store.RunRecords.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TriggerNowAsync_TwoSequentialTriggers_ProduceDistinctRunIdsAndCorrelationIds_NFR08()
+    {
+        // Arrange
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("nfr08-job");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+
+        // Act — fire twice.
+        var first = await host.TriggerNowAsync("nfr08-job", parameters: null, CancellationToken.None);
+        var second = await host.TriggerNowAsync("nfr08-job", parameters: null, CancellationToken.None);
+
+        // Wait for both background tasks to complete.
+        await WaitUntilAsync(
+            () => store.RunRecords.Count(r => r.JobId == "nfr08-job" && r.CompletedAtUtc is not null) >= 2,
+            TimeSpan.FromSeconds(5));
+
+        // Assert — RunIds distinct.
+        first.RunId.Should().NotBe(second.RunId, "every manual trigger MUST yield a distinct runId");
+
+        // Assert — both runs persisted; correlationIds distinct (NFR-08).
+        var runs = store.RunRecords.Where(r => r.JobId == "nfr08-job").ToList();
+        runs.Should().HaveCount(2);
+        runs.Select(r => r.CorrelationId).Distinct().Should().HaveCount(2,
+            "NFR-08 mandates a fresh correlationId per run");
+        runs.All(r => r.Trigger == JobRunTrigger.ManualAdmin).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TriggerNowAsync_OverrideParameters_MergedIntoRunContext()
+    {
+        // Arrange
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("params-job");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        // Seed a definition with configJson — the override should be added ALONGSIDE, not replace it.
+        store.AddOrReplaceJob(new BackgroundJobDefinition(
+            "params-job", "Params", "Param-merging test", true, "0 2 * * *",
+            ConfigJson: "{\"persisted\":true}"));
+
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+
+        var overrides = new Dictionary<string, object>
+        {
+            ["adminOverride"] = "yes",
+            ["targetTenant"] = "test-tenant",
+        };
+
+        // Act
+        await host.TriggerNowAsync("params-job", overrides, CancellationToken.None);
+        await WaitUntilAsync(() => fake.InvocationCount > 0, TimeSpan.FromSeconds(5));
+
+        // Assert — context carries jobId + persisted configJson + caller overrides.
+        fake.LastContext.Should().NotBeNull();
+        var p = fake.LastContext!.Parameters;
+        p.Should().ContainKey("jobId");
+        p["jobId"].Should().Be("params-job");
+        p.Should().ContainKey("configJson");
+        p["configJson"].Should().Be("{\"persisted\":true}");
+        p.Should().ContainKey("adminOverride");
+        p["adminOverride"].Should().Be("yes");
+        p.Should().ContainKey("targetTenant");
+        p["targetTenant"].Should().Be("test-tenant");
+    }
+
+    [Fact]
+    public async Task TriggerNowAsync_CancellationBeforeDispatch_ThrowsOperationCancelled()
+    {
+        // Arrange
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("cancel-pre-dispatch");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel(); // pre-cancel — TriggerNowAsync should observe immediately
+
+        // Act + Assert — pre-cancelled token short-circuits BEFORE the run row is written.
+        var act = async () => await host.TriggerNowAsync("cancel-pre-dispatch", parameters: null, cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        // Handler was NOT invoked + no run record persisted.
+        fake.InvocationCount.Should().Be(0);
+        store.RunRecords.Should().BeEmpty();
+    }
+
     /// <summary>Polls a predicate until satisfied or the deadline elapses (xUnit-friendly wait helper).</summary>
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout, string? because = null)
     {
