@@ -473,6 +473,29 @@ public sealed class CapabilityRouter : ICapabilityRouter
             return null;
         }
 
+        // R6 hotfix 2026-06-21 (UAT #4): empty-manifest guard. Verify the synthetic
+        // capability is actually present in the manifest with non-empty ToolNames.
+        // When the sprk_aicapability table is not provisioned (or has been wiped),
+        // a "Confident" routing result here selects a capability with zero tools,
+        // and the LLM ends up with no invoke_playbook tool to call — manifesting as
+        // /summarize producing a chat-only response with NO Workspace tab (the UAT
+        // bug observed 2026-06-19). NL "summarize" worked because it falls all the
+        // way to Layer 3, where Hotfix #3 emptied GeneralSupersetFallbackTools to
+        // trigger the "empty allowed set → full capability-gated tool set" rescue
+        // path. This guard makes the slash path behave the same: fall through so
+        // the downstream rescue fires for both. Same defensive pattern as Hotfix #3.
+        if (!_manifest.TryGet(capabilityName, out var manifestEntry)
+            || manifestEntry is null
+            || manifestEntry.ToolNames.Count == 0)
+        {
+            _logger.LogInformation(
+                "CapabilityRouter.Layer0.5: synthetic capability '{CapabilityName}' " +
+                "not in manifest or has no tools — falling through to Layer 1+ so " +
+                "downstream fallback can deliver tools.",
+                capabilityName);
+            return null;
+        }
+
         // R6 Pillar 6c (FR-37 / task 063) — context.decision_made (Layer 0.5 soft slash).
         // ADR-015 audit: capabilityName is a synthetic config identifier;
         // decision is the "soft_slash" enum string; no user message text.
