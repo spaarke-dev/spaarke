@@ -1,7 +1,7 @@
 <task id="R3-010" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Scaffold `Spaarke.Scheduling` library project + csproj</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>P2</phase>
     <parallel-group>C-init (blocks 011, 012, 013, 014)</parallel-group>
     <parallel-safe>false</parallel-safe>

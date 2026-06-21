@@ -1,7 +1,7 @@
 <task id="R3-011" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Define `IScheduledJob` contract + `JobRunContext` + `JobRunResult` + `JobRunTrigger`</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>P2</phase>
     <parallel-group>C (with 012)</parallel-group>
     <parallel-safe>true</parallel-safe>

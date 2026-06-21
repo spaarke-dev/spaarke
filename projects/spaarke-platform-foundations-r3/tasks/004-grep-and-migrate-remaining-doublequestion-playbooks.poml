@@ -1,7 +1,7 @@
 <task id="R3-004" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Grep all playbook JSON for `??` and migrate any additional hits</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>P1</phase>
     <parallel-group>B (with 003)</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -47,4 +47,24 @@
     <criterion testable="true">grep `\\?\\?` across all playbook JSON returns ZERO matches</criterion>
     <criterion testable="true">All modified playbooks remain schema-valid</criterion>
   </acceptance-criteria>
+
+  <notes completed="2026-06-21">
+    Exhaustive grep across `projects/*/notes/playbooks/*.json`, `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/*.json`, and `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/*.json` found two `??` occurrences:
+
+    1. `projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json:65` — owned by task 003 (parallel group B), SKIPPED.
+    2. `projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json:65` — MIGRATED by this task.
+
+    **Migration applied (task 004 scope)**: `notification-new-documents.json:65`
+    - Before: `"timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"`
+    - After:  `"timeWindow": "{{default userPreferences.timeWindow '24h'}}"`
+
+    **Validation**:
+    - JSON parses valid (`ConvertFrom-Json` succeeds) for `notification-new-documents.json` after edit.
+    - Confirmed `notification-tasks-due-soon.json` also parses valid (task 003 had completed its migration in parallel during this task's execution).
+    - Exhaustive raw-content scan across all `*.json` in `projects/` and `src/server/api/.../Ai/`: **ZERO_HITS_CONFIRMED** for `??`.
+
+    **TemplateEngine.cs check**: `_handlebars.RegisterHelper("default", ...)` at line 57 confirms the helper exists (registered in task 002). The migrated syntax `{{default expr fallback}}` matches the helper's signature.
+
+    **Outcome vs spec assumption**: Spec FR-3H1.3 assumed `notification-tasks-due-soon.json` was the only known broken playbook; this task discovered ONE additional file (`notification-new-documents.json`) — the assumption was slightly low but the discovery was small and easily migrated.
+  </notes>
 </task>

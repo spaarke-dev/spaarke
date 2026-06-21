@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-platform-foundations-r3`
 > **Last Updated**: 2026-06-20 (initial — pipeline-generated)
-> **Status**: 0 / 69 complete
+> **Status**: 7 / 69 complete
 > **Branch**: `work/spaarke-platform-foundations-r3`
 > **Parallel-optimized**: Yes (per user directive 2026-06-20)
 
@@ -14,15 +14,15 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 
 | ID | Title | Phase | Status | Dependencies | Group | Parallel-Safe | Rigor |
 |----|-------|-------|--------|--------------|-------|---------------|-------|
-| 001 | Register `default` Handlebars helper | P1 | 🔲 | none | — | true | FULL |
-| 002 | Register `joinIds` Handlebars helper | P1 | 🔲 | 001 | — | true | FULL |
-| 003 | Migrate `notification-tasks-due-soon.json` from `??` | P1 | 🔲 | 002 | **B** | true | FULL |
-| 004 | Grep + migrate remaining `??` playbooks | P1 | 🔲 | 002 | **B** | true | STANDARD |
+| 001 | Register `default` Handlebars helper | P1 | ✅ | none | — | true | FULL |
+| 002 | Register `joinIds` Handlebars helper | P1 | ✅ | 001 | — | true | FULL |
+| 003 | Migrate `notification-tasks-due-soon.json` from `??` | P1 | ✅ | 002 | **B** | true | FULL |
+| 004 | Grep + migrate remaining `??` playbooks | P1 | ✅ | 002 | **B** | true | STANDARD |
 | 005 | Unrendered-template runtime warning | P1 | 🔲 | 004 | — | true | FULL |
-| 010 | Scaffold `Spaarke.Scheduling` library | P2 | 🔲 | none | **C-init** | false | FULL |
-| 011 | Define `IScheduledJob` contract + records + enum | P2 | 🔲 | 010 | **C** | true | FULL |
-| 012 | `MembershipOptions` placeholder + appsettings binding | P2 | 🔲 | 010 | **C** | true | STANDARD |
-| 013 | Implement `ScheduledJobHost : BackgroundService` | P2 | 🔲 | 010, 011 | **D** | true | FULL |
+| 010 | Scaffold `Spaarke.Scheduling` library | P2 | ✅ | none | **C-init** | false | FULL |
+| 011 | Define `IScheduledJob` contract + records + enum | P2 | ✅ | 010 | **C** | true | FULL |
+| 012 | `MembershipOptions` placeholder + appsettings binding | P2 | ✅ | 010 | **C** | true | STANDARD |
+| 013 | Implement `ScheduledJobHost : BackgroundService` | P2 | ✅ | 010, 011 | **D** | true | FULL |
 | 014 | Retry/backoff + idempotency in ScheduledJobHost | P2 | 🔲 | 013 | **D** | true | FULL |
 | 015 | Create `sprk_backgroundjob` entity | P2 | 🔲 | 010 | **E** | true | FULL |
 | 016 | Create `sprk_backgroundjobrun` entity | P2 | 🔲 | 010 | **E** | true | FULL |

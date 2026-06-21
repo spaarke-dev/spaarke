@@ -1,0 +1,32 @@
+{
+  "_comment": "Development-only overrides. Copy to appsettings.Development.json (gitignored) for local use; CI/CD does not consume this template. R3 task 012 (2026-06-21) adds the 'Membership' section per design.md Part 1 § Configuration shape.",
+
+  "Membership": {
+    "IncludedIdentityTables": [
+      { "Table": "systemuser",         "IdentityType": "SystemUser" },
+      { "Table": "contact",            "IdentityType": "Contact" },
+      { "Table": "team",               "IdentityType": "Team" },
+      { "Table": "businessunit",       "IdentityType": "BusinessUnit" },
+      { "Table": "account",            "IdentityType": "Account" },
+      { "Table": "sprk_organization",  "IdentityType": "Organization" }
+    ],
+    "GlobalFieldExclusions": [
+      "createdby",
+      "modifiedby",
+      "createdonbehalfby",
+      "modifiedonbehalfby"
+    ],
+    "RoleNameStrategy": "CamelCase",
+    "MetadataCacheTtlMinutes": 60,
+    "EntityOverrides": {
+      "sprk_matter": {
+        "ExcludedFields": [],
+        "IncludedFields": [],
+        "FieldRoleOverrides": {
+          "sprk_assignedlawfirm1": "assignedLawFirm",
+          "sprk_assignedlawfirm2": "assignedLawFirm"
+        }
+      }
+    }
+  }
+}

@@ -62,7 +62,7 @@
         "entityLogicalName": "task",
         "fetchXml": "<fetch top='50'><entity name='task'><attribute name='subject'/><attribute name='scheduledend'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><condition attribute='ownerid' operator='eq-userid'/><condition attribute='statecode' operator='eq' value='0'/><condition attribute='scheduledend' operator='on-or-after' value='{{todayUtc}}'/><condition attribute='scheduledend' operator='on-or-before' value='{{todayPlusDueWithinDays}}'/></filter><order attribute='scheduledend' descending='false'/></entity></fetch>",
         "templateParameters": {
-          "dueWithinDays": "{{userPreferences.dueWithinDays ?? 3}}"
+          "dueWithinDays": "{{default userPreferences.dueWithinDays 3}}"
         },
         "description": "Query open tasks owned by current user where scheduledend is between today and today + dueWithinDays"
       }

@@ -1,7 +1,7 @@
 <task id="R3-002" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Register `joinIds` Handlebars helper in TemplateEngine.cs</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>P1</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -62,4 +62,40 @@
     <criterion testable="true">FetchXML snippet `<condition attribute="sprk_matter" operator="in" value="{{joinIds myMatters.ids}}"/>` produces valid XML</criterion>
     <criterion testable="true">Unit tests pass; build succeeds; publish-size reported</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-21.
+
+    Implementation:
+    - Added `joinIds` Handlebars helper in `TemplateEngine.cs` ctor next to `default` helper.
+    - `JoinIds(object? value)` private static method handles 4 graceful-degradation paths:
+      null, `UndefinedBindingResult` (unresolved binding — per task 001 empirical finding),
+      string (treated as scalar, NOT as IEnumerable<char>), and non-enumerable scalar.
+    - Enumerable path uses `string.Join(",", parts)` where each part is `item?.ToString() ?? ""`.
+    - Added `using System.Collections;` for `IEnumerable` interface.
+
+    Tests:
+    - Added 8 new unit tests in `TemplateEngineTests.cs` under `#region JoinIds Helper (FR-1B.2 + FR-3H1.2)`:
+      array of strings, array of Guids, empty array, null array, unresolved binding,
+      FetchXML condition snippet (validated with `XDocument.Parse`), string scalar, mixed heterogeneous array.
+    - All 33 TemplateEngine tests pass (was 25 prior; +8 = 33).
+
+    Build: Release build SUCCESS (0 errors, 16 pre-existing warnings unrelated to this change).
+    Tests: 33/33 PASS in 33ms.
+
+    Publish size (compressed tar.gz): 44.78 MB (46,953,311 bytes).
+    Baseline reference: 46.12 MB (per task brief, post-task-001).
+    Delta: -1.34 MB (no growth — pure code addition, no NuGet packages).
+    Well under 60 MB hard ceiling (NFR-01) and below ~55 MB cumulative-architecture-review threshold.
+
+    CVE check: 1 pre-existing HIGH (Microsoft.Kiota.Abstractions 1.21.2 GHSA-7j59-v9qr-6fq9).
+    NOT introduced by this task — present in csproj before R3 (last touched by an R6 PR).
+    No new HIGH/CRITICAL CVEs added.
+
+    Quality gates:
+    - adr-check: PASS (no violations across ADR-001/007/008/009/010/013/021/028; BFF §A all PASS)
+    - code-review: PASS (0 critical, 0 warning, 0 suggestion; AI smell score 0/5; quality direction = Neutral/Improved)
+
+    No commit per task brief instruction.
+  </notes>
 </task>

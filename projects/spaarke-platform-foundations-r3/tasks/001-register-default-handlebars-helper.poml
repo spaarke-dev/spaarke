@@ -1,7 +1,7 @@
 <task id="R3-001" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Register `default` Handlebars helper in TemplateEngine.cs</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>P1</phase>
     <parallel-group>none (predecessor for 002, 003, 004)</parallel-group>
     <parallel-safe>true</parallel-safe>

@@ -1,7 +1,7 @@
 <task id="R3-003" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Migrate `notification-tasks-due-soon.json` from `??` to `{{default}}`</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>P1</phase>
     <parallel-group>B (with 004)</parallel-group>
     <parallel-safe>true</parallel-safe>

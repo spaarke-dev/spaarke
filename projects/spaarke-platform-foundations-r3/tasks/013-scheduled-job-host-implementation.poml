@@ -1,7 +1,23 @@
 <task id="R3-013" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Implement `ScheduledJobHost : BackgroundService` (cron dispatch + run-record write)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Shipped ScheduledJobHost : BackgroundService with cron dispatch (Cronos), per-run correlation
+      id (NFR-08), 30s graceful drain on StopAsync (NFR-07), hourly definition refresh (FR-2.3),
+      and IBackgroundJobStore abstraction with InMemoryBackgroundJobStore stub so the host can ship
+      before sprk_backgroundjob entities (tasks 015/016) exist. Persistence-strategy decision:
+      abstraction + in-memory; Dataverse-backed implementation deferred to task 023+. ParseCron
+      transparently supports 5- and 6-field cron (5-field is FR-2.4 default; 6-field enables
+      sub-second tests + future high-frequency internal jobs).
+      Files: 5 new in Spaarke.Scheduling (IBackgroundJobStore.cs, InMemoryBackgroundJobStore.cs,
+      ScheduledJobRegistry.cs, ScheduledJobHostOptions.cs, ScheduledJobHost.cs) + new test project
+      with 25 tests (4 csproj+tests files added under tests/unit/Spaarke.Scheduling.Tests/). Library
+      builds 0 warnings under TreatWarningsAsErrors. Solution build PASS; 25/25 tests PASS in 10s.
+      Publish size 46.14 MB (delta +0.01 vs 46.13 baseline). No new HIGH CVE. Not committed per
+      task brief.
+    </completion-notes>
     <phase>P2</phase>
     <parallel-group>D (with 014)</parallel-group>
     <parallel-safe>true</parallel-safe>

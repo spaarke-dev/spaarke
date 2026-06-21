@@ -62,7 +62,7 @@
         "entityLogicalName": "sprk_document",
         "fetchXml": "<fetch top='50'><entity name='sprk_document'><attribute name='sprk_name'/><attribute name='sprk_filename'/><attribute name='createdon'/><attribute name='sprk_documentid'/><attribute name='sprk_matter'/><link-entity name='sprk_matter' from='sprk_matterid' to='sprk_matter' link-type='inner'><link-entity name='sprk_matterteammember' from='sprk_matter' to='sprk_matterid' link-type='inner'><filter type='and'><condition attribute='sprk_user' operator='eq-userid'/></filter></link-entity></link-entity><filter type='and'><condition attribute='createdon' operator='last-x-hours' value='{{timeWindowHours}}'/><condition attribute='createdby' operator='ne-userid'/></filter><order attribute='createdon' descending='true'/></entity></fetch>",
         "templateParameters": {
-          "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
+          "timeWindow": "{{default userPreferences.timeWindow '24h'}}"
         },
         "description": "Query documents created on user's matters within the configured time window, excluding documents created by the user themselves"
       }
