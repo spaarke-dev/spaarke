@@ -137,8 +137,11 @@ describe('DailyBriefingApp (smoke)', () => {
         new Response(
           JSON.stringify({
             tldr: {
-              highlights: ['You have 1 overdue motion.'],
-              confidence: 0.9,
+              summary: 'You have 1 overdue motion that needs immediate review.',
+              keyTakeaways: ['Acme Matter motion to dismiss is overdue.'],
+              topAction: 'Review the Acme Matter motion to dismiss.',
+              categoryCount: 1,
+              priorityItemCount: 1,
             },
             channelNarratives: [
               {

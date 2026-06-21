@@ -102,9 +102,15 @@ export interface NarrateResponse {
 }
 
 export interface TldrResult {
-  briefing: string;
+  /** 2-3 sentence executive summary (R2.2 replaces the prior single `briefing` blob). */
+  summary: string;
+  /** 3-5 short key-takeaway bullet strings (no leading "- "). */
+  keyTakeaways: string[];
+  /** ONE-sentence top action for today. */
   topAction: string;
+  /** Count of notification categories that fed the summary. */
   categoryCount: number;
+  /** Count of priority items that fed the summary. */
   priorityItemCount: number;
 }
 
