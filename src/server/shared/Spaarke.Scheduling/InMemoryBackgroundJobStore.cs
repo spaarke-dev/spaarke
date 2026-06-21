@@ -148,6 +148,40 @@ public sealed class InMemoryBackgroundJobStore : IBackgroundJobStore
         return Task.FromResult(projection);
     }
 
+    /// <inheritdoc />
+    public Task<bool> SetEnabledAsync(
+        string jobId,
+        bool enabled,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(jobId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // AddOrUpdate semantics aren't quite right — we want NO-OP if the key is missing
+        // (the endpoint translates that to 404). Use TryGetValue + TryUpdate so we observe
+        // the missing case explicitly. Records are immutable so we allocate a replacement
+        // with the new Enabled value via the with-expression.
+        while (_jobs.TryGetValue(jobId, out var current))
+        {
+            if (current.Enabled == enabled)
+            {
+                // No-op — already in the desired state. Treated as a successful update
+                // (endpoint still triggers a host refresh, harmlessly).
+                return Task.FromResult(true);
+            }
+
+            var updated = current with { Enabled = enabled };
+            if (_jobs.TryUpdate(jobId, updated, current))
+            {
+                return Task.FromResult(true);
+            }
+            // CAS failed — a concurrent mutation beat us. Loop to re-read and retry.
+        }
+
+        // Job id not found in the store. Endpoint returns ProblemDetails 404.
+        return Task.FromResult(false);
+    }
+
     private static BackgroundJobRunRecord ToPublicProjection(RunRecord record)
     {
         // Canonicalize Status. In-progress = RecordRunStartAsync called but RecordRunCompleteAsync
@@ -168,7 +202,8 @@ public sealed class InMemoryBackgroundJobStore : IBackgroundJobStore
             Status: status,
             ErrorMessage: record.Result?.ErrorMessage,
             ProcessedItems: record.Result?.ProcessedItems,
-            Duration: record.Result?.Duration ?? TimeSpan.Zero);
+            Duration: record.Result?.Duration ?? TimeSpan.Zero,
+            ResultJson: record.Result?.ResultJson);
     }
 
     /// <summary>Seed a run record directly — TEST-ONLY surface for simulating host-restart scenarios

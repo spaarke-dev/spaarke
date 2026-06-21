@@ -39,6 +39,13 @@ public static class JobsEndpoints
 {
     private const int DefaultRecentRunsLimit = 10;
 
+    // ── Task 022 — /history limit clamps ─────────────────────────────────────────────
+    // Default 50 (5x the per-job /status surface; admins doing history triage want
+    // more rows than the summary). Hard cap 500 to prevent a poison query from
+    // pulling unbounded run history once the Dataverse-backed store ships (task 023+).
+    private const int DefaultHistoryLimit = 50;
+    private const int MaxHistoryLimit = 500;
+
     public static IEndpointRouteBuilder MapAdminJobsEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app
@@ -95,14 +102,52 @@ public static class JobsEndpoints
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         // ============================================================================
-        // Future expansion slots (DO NOT remove these comment headers — they reserve
-        // demarcated areas for task 022 to append its handlers without merge conflict
-        // risk against this task's work):
-        //
-        //   ===== Task 022 — GET  /api/admin/jobs/{jobId}/history?limit=N =============
-        //   ===== Task 022 — POST /api/admin/jobs/{jobId}/enable ======================
-        //   ===== Task 022 — POST /api/admin/jobs/{jobId}/disable =====================
+        // ===== Task 022 — GET /api/admin/jobs/{jobId}/history?limit=N ===============
         // ============================================================================
+        // Returns the last N run records for the given job, ordered newest-first. Default
+        // limit 50, hard cap 500 (defends against unbounded history pulls once the
+        // Dataverse-backed store ships). 404 if jobId is not registered.
+        group.MapGet("/{jobId}/history", GetJobHistoryAsync)
+            .WithName("AdminJobsHistory")
+            .WithSummary("Get recent run history for a specific background job")
+            .WithDescription("Returns the most-recent run records for jobId, ordered newest-first. Optional `limit` query string (default 50, capped at 500). 404 when jobId is not registered with the in-process ScheduledJobRegistry.")
+            .Produces<IReadOnlyList<JobRunDetail>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        // ============================================================================
+        // ===== Task 022 — POST /api/admin/jobs/{jobId}/enable ======================
+        // ============================================================================
+        // Flips sprk_backgroundjob.sprk_enabled = true (in-memory: BackgroundJobDefinition.Enabled).
+        // Triggers ScheduledJobHost.RefreshDefinitionsAsync so the new state takes effect on the
+        // very next scheduling-loop tick (not the hourly refresh — per spec FR-2.6, runtime
+        // re-evaluation is required). 404 when jobId has no definition in the store.
+        group.MapPost("/{jobId}/enable", EnableJobAsync)
+            .WithName("AdminJobsEnable")
+            .WithSummary("Enable a registered background job")
+            .WithDescription("Sets BackgroundJobDefinition.Enabled=true for jobId and triggers an immediate ScheduledJobHost refresh so the change takes effect on the next scheduling-loop tick. Returns 204 No Content on success. 404 when jobId has no definition in the store.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        // ============================================================================
+        // ===== Task 022 — POST /api/admin/jobs/{jobId}/disable =====================
+        // ============================================================================
+        // Mirror of /enable — sets Enabled=false. Disabled jobs remain visible in the admin
+        // surface (list + status + history) but the host MUST NOT dispatch them on cron tick.
+        group.MapPost("/{jobId}/disable", DisableJobAsync)
+            .WithName("AdminJobsDisable")
+            .WithSummary("Disable a registered background job")
+            .WithDescription("Sets BackgroundJobDefinition.Enabled=false for jobId and triggers an immediate ScheduledJobHost refresh so the change takes effect on the next scheduling-loop tick. Disabled jobs remain in the admin surface but are skipped by the cron loop. Returns 204 No Content on success. 404 when jobId has no definition in the store.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return app;
     }
@@ -298,6 +343,176 @@ public static class JobsEndpoints
                 jobId);
             return Results.StatusCode(StatusCodes.Status499ClientClosedRequest);
         }
+    }
+
+    // ============================================================================
+    // ===== Task 022 handlers ====================================================
+    // ============================================================================
+
+    /// <summary>
+    /// Handler for <c>GET /api/admin/jobs/{jobId}/history?limit=N</c>. Returns the last N run
+    /// records for the job, ordered newest-first. <c>limit</c> defaults to
+    /// <see cref="DefaultHistoryLimit"/> (50) and is clamped to <see cref="MaxHistoryLimit"/> (500)
+    /// to defend against unbounded history pulls once the Dataverse-backed store ships.
+    /// </summary>
+    /// <remarks>
+    /// 404 when <paramref name="jobId"/> is not registered with the registry. We deliberately
+    /// check the <i>registry</i> (handler) not the <i>store</i> (definition) — same precedent
+    /// as <see cref="GetJobStatusAsync"/> so handler-registered-but-undefined jobs return an
+    /// empty history list rather than 404. Status surface and history surface 404 on the same
+    /// trigger (unknown handler), which keeps the admin client's mental model consistent.
+    /// </remarks>
+    private static async Task<IResult> GetJobHistoryAsync(
+        string jobId,
+        [FromQuery] int? limit,
+        ScheduledJobRegistry registry,
+        IBackgroundJobStore store,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "jobId route parameter is required",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        if (registry.Resolve(jobId) is null)
+        {
+            return Results.NotFound(new ProblemDetails
+            {
+                Title = "Not Found",
+                Detail = $"No background job with jobId '{jobId}' is registered.",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+
+        // Clamp limit: default 50 if absent or non-positive, hard cap at 500. The store also
+        // clamps to >= 1 but defending the upper bound is the endpoint's job (the store has no
+        // notion of "admin reasonable bound" — its contract just says limit > 0).
+        var effectiveLimit = limit is null or <= 0
+            ? DefaultHistoryLimit
+            : Math.Min(limit.Value, MaxHistoryLimit);
+
+        var runs = await store.GetRecentRunsAsync(jobId, effectiveLimit, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Project to the same JobRunDetail shape used by /status — admin clients deserialize
+        // both with the same type. Store guarantees newest-first ordering per its contract.
+        var details = runs.Select(ToJobRunDetail).ToArray();
+        return Results.Ok(details);
+    }
+
+    /// <summary>
+    /// Handler for <c>POST /api/admin/jobs/{jobId}/enable</c>. Flips the definition's
+    /// <c>Enabled</c> flag to <c>true</c> in the store, then triggers an immediate
+    /// <see cref="ScheduledJobHost.RefreshDefinitionsAsync"/> so the host rebuilds its scheduling
+    /// state on the next tick (not the hourly refresh).
+    /// </summary>
+    private static Task<IResult> EnableJobAsync(
+        string jobId,
+        ScheduledJobRegistry registry,
+        IBackgroundJobStore store,
+        ScheduledJobHost host,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken) =>
+        SetEnabledAsync(jobId, enabled: true, registry, store, host, logger, cancellationToken);
+
+    /// <summary>
+    /// Handler for <c>POST /api/admin/jobs/{jobId}/disable</c>. Same as <see cref="EnableJobAsync"/>
+    /// but flips to <c>false</c>. Disabled jobs remain visible in the admin surface
+    /// (list/status/history) but the host's scheduling loop skips them per
+    /// <see cref="IBackgroundJobStore.LoadJobsAsync"/> contract.
+    /// </summary>
+    private static Task<IResult> DisableJobAsync(
+        string jobId,
+        ScheduledJobRegistry registry,
+        IBackgroundJobStore store,
+        ScheduledJobHost host,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken) =>
+        SetEnabledAsync(jobId, enabled: false, registry, store, host, logger, cancellationToken);
+
+    /// <summary>
+    /// Shared body for <see cref="EnableJobAsync"/> and <see cref="DisableJobAsync"/>: validate
+    /// route param, 404 if no definition exists for the job, mutate via
+    /// <see cref="IBackgroundJobStore.SetEnabledAsync"/>, then force-refresh the host so the new
+    /// state takes effect immediately.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// We 404 on missing <i>definition</i> (not missing handler) here because enable/disable
+    /// only makes sense for jobs that have a persisted definition row to mutate. A
+    /// handler-registered-but-undefined job has nothing to flip — surfacing this as 404 makes
+    /// the missing-definition condition explicit to the admin caller.
+    /// </para>
+    /// <para>
+    /// Host refresh failures are NOT propagated to the admin — the state mutation is the
+    /// durable change; the in-memory host refresh is a best-effort optimization (the hourly
+    /// refresh will pick up the change as a fallback). Logged at Warning for ops visibility.
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> SetEnabledAsync(
+        string jobId,
+        bool enabled,
+        ScheduledJobRegistry registry,
+        IBackgroundJobStore store,
+        ScheduledJobHost host,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "jobId route parameter is required",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        var updated = await store.SetEnabledAsync(jobId, enabled, cancellationToken).ConfigureAwait(false);
+        if (!updated)
+        {
+            return Results.NotFound(new ProblemDetails
+            {
+                Title = "Not Found",
+                Detail = $"No background job definition with jobId '{jobId}' exists in the store.",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+
+        // Force-refresh the host so the scheduling loop observes the new Enabled flag on its
+        // next tick. Best-effort — failure here doesn't roll back the durable mutation. The
+        // host's own hourly refresh is the backstop.
+        try
+        {
+            await host.RefreshDefinitionsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Caller cancelled — the store mutation already succeeded, so we still return 204.
+            // The host's next periodic refresh will pick up the change.
+            logger.LogInformation(
+                "Admin {Action} for job '{JobId}' succeeded in store; host refresh skipped (caller cancelled). Hourly refresh will pick up the change.",
+                enabled ? "enable" : "disable", jobId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Admin {Action} for job '{JobId}' succeeded in store but host RefreshDefinitionsAsync threw — change will take effect at the next hourly refresh",
+                enabled ? "enable" : "disable", jobId);
+        }
+
+        logger.LogInformation(
+            "Admin {Action} succeeded for background job '{JobId}'",
+            enabled ? "enable" : "disable", jobId);
+
+        return Results.NoContent();
     }
 
     // ============================================================================

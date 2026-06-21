@@ -1,8 +1,8 @@
 # Task Index — Spaarke Platform Foundations (R3)
 
 > **Project**: `spaarke-platform-foundations-r3`
-> **Last Updated**: 2026-06-21 (task 021 POST /api/admin/jobs/{jobId}/trigger; +5 Spaarke.Scheduling tests for TriggerNowAsync; +6 BFF admin tests; 47/47 + 17/17 pass; publish 44.86 MB)
-> **Status**: 15 / 69 complete; 1 blocked-operator (071)
+> **Last Updated**: 2026-06-21 (tasks 017 + 037 — ADR-036 + ADR-034 authored by main session; .claude/ + docs/ ADR INDEX updated)
+> **Status**: 27 / 69 complete; 1 blocked-operator (071)
 > **Branch**: `work/spaarke-platform-foundations-r3`
 > **Parallel-optimized**: Yes (per user directive 2026-06-20)
 
@@ -26,11 +26,11 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 014 | Retry/backoff + idempotency in ScheduledJobHost | P2 | ✅ | 013 | **D** | true | FULL |
 | 015 | Create `sprk_backgroundjob` entity | P2 | ✅ | 010 | **E** | true | FULL |
 | 016 | Create `sprk_backgroundjobrun` entity | P2 | ✅ | 010 | **E** | true | FULL |
-| 017 | Author ADR-036 — Background-job infrastructure | P2 | 🔲 | 013, 014, 015, 016 | — main-only | false | FULL |
+| 017 | Author ADR-036 — Background-job infrastructure | P2 | ✅ | 013, 014, 015, 016 | — main-only | false | FULL |
 | 020 | `GET /api/admin/jobs` + status endpoint | P3 | ✅ | 013, 014, 015, 016 | **F** | true | FULL |
 | 021 | `POST /api/admin/jobs/{jobId}/trigger` | P3 | ✅ | 013, 014, 015, 016 | **F** | true | FULL |
-| 022 | `GET /history` + `POST /enable` + `POST /disable` | P3 | 🔲 | 013, 014, 015, 016 | **F** | true | FULL |
-| 023 | Migrate `PlaybookSchedulerService` to Spaarke.Scheduling | P3 | 🔲 | 013, 020, 021 | — | true | FULL |
+| 022 | `GET /history` + `POST /enable` + `POST /disable` | P3 | ✅ | 013, 014, 015, 016 | **F** | true | FULL |
+| 023 | Migrate `PlaybookSchedulerService` to Spaarke.Scheduling | P3 | ✅ | 013, 020, 021 | — | true | FULL |
 | 024 | Migrate `sprk_analysisplaybook.sprk_configjson` schedule | P3 | 🔲 | 023 | — | true | STANDARD |
 | 025 | Admin endpoints + scheduler integration tests | P3 | 🔲 | 020-024 | — | true | STANDARD |
 | 030 | `MembershipFieldDiscoveryService` | P4 | ✅ | 005, 012 | **G** | true | FULL |
@@ -40,8 +40,8 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 034 | `MembershipResponse` DTO | P4 | ✅ | 030 | **H** | true | STANDARD |
 | 035 | `GET /api/users/me/memberships/{entityType}` endpoint | P4 | ✅ | 033, 034 | **I** | true | FULL |
 | 036 | Membership admin endpoints (discovered + refresh-metadata) | P4 | ✅ | 030 | **I** | true | FULL |
-| 037 | Author ADR-034 — User-record membership pattern | P4 | 🔲 | 030, 031, 032, 033 | **I** main-only | false | FULL |
-| 040 | Add `LookupUserMembership = 52` to ActionType enum | P5 | 🔲 | 035 | **J** | true | STANDARD |
+| 037 | Author ADR-034 — User-record membership pattern | P4 | ✅ | 030, 031, 032, 033 | **I** main-only | false | FULL |
+| 040 | Add `LookupUserMembership = 52` to ActionType enum | P5 | ✅ | 035 | **J** | true | STANDARD |
 | 041 | Implement `LookupUserMembershipNodeExecutor` | P5 | 🔲 | 033, 040 | **J** | true | FULL |
 | 042 | Canvas-server mapping update (client + server) | P5 | 🔲 | 040, 041 | **K** | true | FULL |
 | 043 | `LookupUserMembershipForm.tsx` in PlaybookBuilder | P5 | 🔲 | 040 | **K** | true | FULL |

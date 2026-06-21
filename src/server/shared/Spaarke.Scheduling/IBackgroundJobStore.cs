@@ -114,6 +114,39 @@ public interface IBackgroundJobStore
         string jobId,
         int limit,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Mutate the <see cref="BackgroundJobDefinition.Enabled"/> flag for the named job
+    /// (admin enable/disable surface — R3 task 022). Returns <c>true</c> if the definition
+    /// was found + updated, <c>false</c> if no definition row exists for <paramref name="jobId"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in R3 task 022 to back <c>POST /api/admin/jobs/{jobId}/enable</c> and
+    /// <c>POST /api/admin/jobs/{jobId}/disable</c>. The endpoint pairs this call with
+    /// <see cref="ScheduledJobHost.RefreshDefinitionsAsync"/> so the new state takes effect
+    /// on the next scheduling-loop tick (not the hourly refresh — spec FR-2.6 implies
+    /// runtime re-evaluation in the host).
+    /// </para>
+    /// <para>
+    /// The Dataverse-backed implementation (task 023+) updates the <c>sprk_enabled</c>
+    /// column on <c>sprk_backgroundjob</c>; the in-memory implementation mutates the in-process
+    /// dictionary entry by allocating a replacement <see cref="BackgroundJobDefinition"/> with
+    /// the new <c>Enabled</c> value (records are immutable so we use <c>with</c>-expression).
+    /// </para>
+    /// <para>
+    /// Returns <c>false</c> (not throws) when the jobId is unknown so the endpoint can produce
+    /// a clean ProblemDetails 404 without exception-mapping plumbing.
+    /// </para>
+    /// </remarks>
+    /// <param name="jobId">Stable job id (matches <see cref="BackgroundJobDefinition.JobId"/>).</param>
+    /// <param name="enabled">New value for <see cref="BackgroundJobDefinition.Enabled"/>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> if a definition was found + updated; <c>false</c> if no definition exists for the jobId.</returns>
+    Task<bool> SetEnabledAsync(
+        string jobId,
+        bool enabled,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -139,6 +172,11 @@ public interface IBackgroundJobStore
 /// <param name="ErrorMessage">Final failure message, or <c>null</c> on success or while in-progress.</param>
 /// <param name="ProcessedItems">Optional item-processing count (per <see cref="JobRunResult.ProcessedItems"/>).</param>
 /// <param name="Duration">Run duration. <see cref="TimeSpan.Zero"/> while in-progress.</param>
+/// <param name="ResultJson">
+/// Optional handler-specific output JSON blob (per <see cref="JobRunResult.ResultJson"/>; added R3 task 023 for FR-2.8).
+/// <c>null</c> while in-progress, on failure-without-payload, or when the handler doesn't surface structured output.
+/// Persisted by the Dataverse-backed store to <c>sprk_backgroundjobrun.sprk_resultjson</c>.
+/// </param>
 public sealed record BackgroundJobRunRecord(
     Guid RunId,
     string JobId,
@@ -149,7 +187,8 @@ public sealed record BackgroundJobRunRecord(
     string Status,
     string? ErrorMessage,
     int? ProcessedItems,
-    TimeSpan Duration);
+    TimeSpan Duration,
+    string? ResultJson = null);
 
 /// <summary>
 /// Immutable view of one row in (eventually) <c>sprk_backgroundjob</c>. Returned by

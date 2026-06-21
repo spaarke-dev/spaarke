@@ -446,6 +446,111 @@ public class ScheduledJobHostTests
         store.RunRecords.Should().BeEmpty();
     }
 
+    // ================================================================================
+    // ===== Task 022: RefreshDefinitionsAsync (admin enable/disable plumbing) =======
+    // ================================================================================
+    //
+    // The host's RefreshDefinitionsAsync was promoted to public in task 022 so the admin
+    // enable/disable endpoints can force an immediate re-read of the store after flipping
+    // sprk_enabled. These tests pin the contract:
+    //   1. Disable → next-tick dispatch stops (verified by mutating store then refreshing).
+    //   2. Re-enable → next-tick dispatch resumes.
+    //   3. Refresh is safe to call externally (no exceptions, prior state preserved on failure).
+
+    [Fact]
+    public async Task RefreshDefinitionsAsync_PicksUpDisableFlip_DispatchStopsOnNextTick()
+    {
+        // Arrange — fast-tick host with one enabled "every second" job.
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("disable-mid-flight");
+        registry.Register(fake);
+
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EverySecond("disable-mid-flight"));
+
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        await host.StartAsync(CancellationToken.None);
+
+        // Let it fire at least once so we know it's running normally.
+        await WaitUntilAsync(() => fake.InvocationCount > 0, TimeSpan.FromSeconds(5));
+        var baselineCount = fake.InvocationCount;
+
+        // Act — flip Enabled=false in the store, then force-refresh.
+        (await store.SetEnabledAsync("disable-mid-flight", enabled: false, CancellationToken.None))
+            .Should().BeTrue();
+        await host.RefreshDefinitionsAsync(CancellationToken.None);
+
+        // Wait long enough that any cron-driven dispatch would have fired multiple times if
+        // the disable wasn't honored — but keep it sub-second-and-a-half so test runtime stays
+        // tight.
+        var countAtRefresh = fake.InvocationCount;
+        await Task.Delay(TimeSpan.FromMilliseconds(1500));
+        await host.StopAsync(CancellationToken.None);
+
+        // Assert — invocation count after refresh is exactly the count at refresh time
+        // (or one more if a dispatch was in-flight at the moment of refresh; we allow that
+        // for race-tolerance — but it MUST NOT keep firing). Use a tight upper bound: at most
+        // 1 extra invocation post-refresh; without disable we'd see ≥3.
+        var deltaAfterRefresh = fake.InvocationCount - countAtRefresh;
+        deltaAfterRefresh.Should().BeLessThanOrEqualTo(1,
+            "after disable + refresh, the cron loop must skip subsequent ticks (at most 1 in-flight race tolerance)");
+        baselineCount.Should().BeGreaterThan(0, "sanity — the job WAS firing before the disable");
+    }
+
+    [Fact]
+    public async Task RefreshDefinitionsAsync_PicksUpEnableFlip_DispatchResumesOnNextTick()
+    {
+        // Arrange — start with a DISABLED definition so no dispatches happen.
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("enable-from-disabled");
+        registry.Register(fake);
+
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EverySecond("enable-from-disabled", enabled: false));
+
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        await host.StartAsync(CancellationToken.None);
+
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        fake.InvocationCount.Should().Be(0, "disabled definition must not be dispatched");
+
+        // Act — flip Enabled=true + refresh.
+        (await store.SetEnabledAsync("enable-from-disabled", enabled: true, CancellationToken.None))
+            .Should().BeTrue();
+        await host.RefreshDefinitionsAsync(CancellationToken.None);
+
+        // Assert — host now dispatches.
+        await WaitUntilAsync(
+            () => fake.InvocationCount > 0,
+            TimeSpan.FromSeconds(5),
+            because: "after enable + refresh, the host MUST pick up the change and start dispatching");
+
+        await host.StopAsync(CancellationToken.None);
+
+        store.RunRecords.Should().Contain(r => r.JobId == "enable-from-disabled");
+    }
+
+    [Fact]
+    public async Task RefreshDefinitionsAsync_PublicSurface_CanBeCalledWithoutHostStart()
+    {
+        // The endpoint resolves the host as a singleton and may call RefreshDefinitionsAsync
+        // before the BackgroundService loop has started (e.g., during P3 admin-surface
+        // testing where the cron loop is intentionally not running per SchedulingModule.cs).
+        // RefreshDefinitionsAsync MUST be safe in that state — it only mutates _state.
+        var registry = new ScheduledJobRegistry();
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(new BackgroundJobDefinition("standalone-refresh", "S", "", true, "0 2 * * *", null));
+        var fake = new FakeScheduledJob("standalone-refresh");
+        registry.Register(fake);
+
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+
+        // Do NOT call StartAsync — just refresh directly.
+        var act = async () => await host.RefreshDefinitionsAsync(CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+    }
+
     /// <summary>Polls a predicate until satisfied or the deadline elapses (xUnit-friendly wait helper).</summary>
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout, string? because = null)
     {

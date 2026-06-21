@@ -549,8 +549,28 @@ public sealed class ScheduledJobHost : BackgroundService
         }
     }
 
-    /// <summary>Re-reads job definitions from the store and rebuilds the scheduling state.</summary>
-    private async Task RefreshDefinitionsAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Re-reads job definitions from the store and rebuilds the scheduling state.
+    /// Promoted to <c>public</c> in R3 task 022 so the admin enable/disable endpoints can
+    /// force an immediate re-evaluation after a flag flip (without waiting for the hourly
+    /// refresh tick). Internally invoked at startup + each <see cref="ScheduledJobHostOptions.RefreshInterval"/>
+    /// tick from <see cref="TickAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Safe to call concurrently with the scheduling loop: <see cref="_state"/> is replaced
+    /// atomically by a fresh dictionary instance, so an in-flight <see cref="TickAsync"/>
+    /// iteration that snapshots <see cref="_state"/> early continues to operate on its
+    /// snapshot while subsequent ticks pick up the new state.
+    /// </para>
+    /// <para>
+    /// Failure modes (store throw, cron-parse error) are handled internally — the prior state
+    /// is preserved on failure (so a transient Dataverse hiccup doesn't kill scheduling).
+    /// Callers do NOT need to wrap this in a try/catch for those scenarios; only
+    /// <see cref="OperationCanceledException"/> propagates out.
+    /// </para>
+    /// </remarks>
+    public async Task RefreshDefinitionsAsync(CancellationToken cancellationToken)
     {
         try
         {

@@ -111,4 +111,113 @@ public class InMemoryBackgroundJobStoreTests
             "j", JobRunTrigger.Scheduled, "", scheduledFireUtc: null, CancellationToken.None);
         await act.Should().ThrowAsync<ArgumentException>();
     }
+
+    // ================================================================================
+    // ===== Task 022: GetRecentRunsAsync + SetEnabledAsync ==========================
+    // ================================================================================
+
+    [Fact]
+    public async Task GetRecentRunsAsync_ReturnsNewestFirst_AndRespectsLimit()
+    {
+        // Seed 5 runs over a 5-minute window; ask for 3 — the newest 3 should come back.
+        var store = new InMemoryBackgroundJobStore();
+        var baseTime = new DateTimeOffset(2026, 6, 21, 1, 0, 0, TimeSpan.Zero);
+        for (var i = 0; i < 5; i++)
+        {
+            store.SeedRunRecord(new InMemoryBackgroundJobStore.RunRecord(
+                RunId: Guid.NewGuid(),
+                JobId: "history-job",
+                Trigger: JobRunTrigger.Scheduled,
+                CorrelationId: $"corr-{i}",
+                ScheduledFireUtc: baseTime.AddMinutes(i),
+                StartedAtUtc: baseTime.AddMinutes(i),
+                CompletedAtUtc: baseTime.AddMinutes(i).AddSeconds(1),
+                Result: new JobRunResult(Success: true, ErrorMessage: null, ProcessedItems: i, Duration: TimeSpan.FromSeconds(1))));
+        }
+
+        var runs = await store.GetRecentRunsAsync("history-job", limit: 3, CancellationToken.None);
+
+        runs.Should().HaveCount(3);
+        // Newest first: indexes 4, 3, 2 by StartedAt — verify ProcessedItems matches.
+        runs[0].ProcessedItems.Should().Be(4);
+        runs[1].ProcessedItems.Should().Be(3);
+        runs[2].ProcessedItems.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetRecentRunsAsync_EmptyJob_ReturnsEmptyList()
+    {
+        var store = new InMemoryBackgroundJobStore();
+        var runs = await store.GetRecentRunsAsync("never-run", limit: 10, CancellationToken.None);
+        runs.Should().NotBeNull();
+        runs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetRecentRunsAsync_LimitClampedToOne_WhenZeroOrNegative()
+    {
+        var store = new InMemoryBackgroundJobStore();
+        store.SeedRunRecord(new InMemoryBackgroundJobStore.RunRecord(
+            RunId: Guid.NewGuid(),
+            JobId: "clamp-job",
+            Trigger: JobRunTrigger.Scheduled,
+            CorrelationId: "c",
+            ScheduledFireUtc: DateTimeOffset.UtcNow,
+            StartedAtUtc: DateTimeOffset.UtcNow,
+            CompletedAtUtc: DateTimeOffset.UtcNow,
+            Result: new JobRunResult(true, null, 0, TimeSpan.Zero)));
+
+        // limit=0 → clamped to 1; limit=-5 → clamped to 1.
+        (await store.GetRecentRunsAsync("clamp-job", 0, CancellationToken.None)).Should().HaveCount(1);
+        (await store.GetRecentRunsAsync("clamp-job", -5, CancellationToken.None)).Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task SetEnabledAsync_FlipsEnabledFlag_AndReturnsTrue()
+    {
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(new BackgroundJobDefinition("enable-flip", "Flip", "", true, "0 * * * *", null));
+
+        var updated = await store.SetEnabledAsync("enable-flip", enabled: false, CancellationToken.None);
+
+        updated.Should().BeTrue("the definition exists, so the update should succeed");
+        var def = (await store.LoadJobsAsync(CancellationToken.None)).Single();
+        def.Enabled.Should().BeFalse();
+        def.JobId.Should().Be("enable-flip");
+        // Other fields must be preserved by the with-expression copy.
+        def.DisplayName.Should().Be("Flip");
+        def.CronSchedule.Should().Be("0 * * * *");
+    }
+
+    [Fact]
+    public async Task SetEnabledAsync_NoOp_WhenAlreadyInDesiredState_StillReturnsTrue()
+    {
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(new BackgroundJobDefinition("noop", "N", "", true, "0 * * * *", null));
+
+        // Re-enable an already-enabled definition.
+        var updated = await store.SetEnabledAsync("noop", enabled: true, CancellationToken.None);
+
+        updated.Should().BeTrue("a no-op enable on an already-enabled job is treated as a successful update so the endpoint still returns 204");
+    }
+
+    [Fact]
+    public async Task SetEnabledAsync_ReturnsFalse_WhenJobIdMissing()
+    {
+        var store = new InMemoryBackgroundJobStore();
+
+        var updated = await store.SetEnabledAsync("never-seeded", enabled: true, CancellationToken.None);
+
+        updated.Should().BeFalse("the endpoint maps the false return to ProblemDetails 404");
+    }
+
+    [Fact]
+    public async Task SetEnabledAsync_ThrowsArgumentException_WhenJobIdNullOrEmpty()
+    {
+        var store = new InMemoryBackgroundJobStore();
+
+        var act = async () => await store.SetEnabledAsync("", enabled: true, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
 }

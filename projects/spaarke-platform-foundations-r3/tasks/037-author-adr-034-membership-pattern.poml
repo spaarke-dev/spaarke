@@ -1,7 +1,14 @@
 <task id="R3-037" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Author ADR-034 — User-record membership resolution pattern</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Authored both versions:
+      - `.claude/adr/ADR-034-user-record-membership.md` (concise — MUST/MUST NOT + key types + identity normalization contract + Phase 1A→Phase 2 migration + admin endpoints + alternatives + integration with other ADRs)
+      - `docs/adr/ADR-034-user-record-membership.md` (full — Context (A1/D5 root cause + 6 consumer use cases + naming-collision concern) + Decision (7 sections: discovery + identity normalization + organization mapping + orchestration + Phase 1B node + Phase 2 sync + Phase 1D transitive) + Consequences + AC + open questions resolved Q3/Q4/Q5/Q6/D3/Q2 + task 032 mechanism choice)
+      Both INDEX files updated. All owner clarifications baked in: Q3 (1-hop transitive max), Q4 (sprk_assignedlawfirm* → Organization, NOT Contact), Q5 (align with existing PlaybookBuilder componentry), Q6 (SystemAdmin policy), D3 (Service Bus topic, NOT queue), Q2 (fire-and-forget publishing with nightly recon backstop). Naming-collision register binding (Membership terminology distinct from existing AssociationResolver PCF). Cross-references ADR-036 (MembershipReconciliationJob is 2nd reference consumer of Spaarke.Scheduling). Main-session execution per .claude/ write boundary. Architecture page (docs/architecture/membership-resolution-pattern.md) will be authored by task 104 in P10. Not committed — main session batches.
+    </completion-notes>
     <phase>P4</phase>
     <parallel-group>I (with 035, 036) — main-session-only (.claude/ write boundary)</parallel-group>
     <parallel-safe>false</parallel-safe>

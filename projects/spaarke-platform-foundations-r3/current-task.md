@@ -7,31 +7,108 @@
 
 ## Active Task
 
-**Status**: none (task 021 complete 2026-06-21)
-
-**Next Task**: parallel-group F final sibling (022) — `GET /api/admin/jobs/{jobId}/history?limit=N` + `POST /enable` + `POST /disable`. Same JobsEndpoints.cs reserved comment block at the file end.
-
-**To start**:
-- Say "work on task <NNN>" or "continue"
+**Status**: in-progress (task 025 — admin endpoints + scheduler integration tests)
 
 ---
 
 ## Task State (when active)
 
-(populated by `task-execute` when a task starts)
-
-- **Task ID**: —
-- **Title**: —
-- **Started**: —
-- **Rigor Level**: —
-- **Step**: —
-- **Files Modified**: —
-- **Decisions Made**: —
-- **Blockers**: —
+- **Task ID**: 025
+- **Title**: Integration tests for admin endpoints + scheduler migration
+- **Started**: 2026-06-21
+- **Rigor Level**: FULL (BFF code, integration tests, dependencies on tasks 020-024)
+- **Files Planned**:
+  - tests/integration/Sprk.Bff.Api.IntegrationTests/Admin/JobsEndpointsIntegrationTests.cs (new)
+  - tests/integration/Sprk.Bff.Api.IntegrationTests/Scheduling/PlaybookSchedulerJobIntegrationTests.cs (new)
+- **Next Action**: Author the two integration-test classes; run them; verify regressions.
 
 ---
 
 ## Recently Completed (this session)
+
+- **2026-06-21 — Task 023**: Migrated `PlaybookSchedulerService` → `PlaybookSchedulerJob : IScheduledJob` (FR-2.8 / D2 / Q1).
+  - Files (new, src): `Services/Ai/PlaybookSchedulerJob.cs` (~470 lines; identical discovery + due-check + parallel
+    user fan-out as legacy; per-child fresh correlationId; children recorded in `JobRunResult.ResultJson`).
+  - Files (new, tests): `tests/.../Services/Ai/PlaybookSchedulerJobTests.cs` (27 tests),
+    `tests/.../Services/InlineNotificationIntegrationPointsTests.cs` (5 tests — relocated from the deleted
+    `PlaybookSchedulerServiceTests` "Inline Notification Integration Points" region).
+  - Files (modified, src): `Spaarke.Scheduling/JobRunResult.cs` (+1 optional positional record param `ResultJson`);
+    `Spaarke.Scheduling/IBackgroundJobStore.cs` (+1 optional positional record param on `BackgroundJobRunRecord`);
+    `Spaarke.Scheduling/InMemoryBackgroundJobStore.cs` (+1 line in `ToPublicProjection` to flow `ResultJson`);
+    `Infrastructure/DI/SchedulingModule.cs` (rewritten: hosted-service forwarder for `ScheduledJobHost`, new
+    internal `SchedulingBootstrapHostedService` inserted at index 0 to seed
+    `notification-playbook-scheduler` BackgroundJobDefinition + register handler in
+    `ScheduledJobRegistry` before the cron loop's first tick); `Infrastructure/DI/AnalysisServicesModule.cs`
+    (removed `AddHostedService<PlaybookSchedulerService>` line + added pointer comment to SchedulingModule).
+  - Files (DELETED): `src/server/api/Sprk.Bff.Api/Services/PlaybookSchedulerService.cs` (~487 lines);
+    `tests/unit/Sprk.Bff.Api.Tests/Services/PlaybookSchedulerServiceTests.cs` (split into two new test files).
+  - **Tests**: 32 new pass (27 PlaybookSchedulerJob + 5 InlineNotification); Spaarke.Scheduling regression
+    **57/57 pass** (zero impact from optional `ResultJson` additions); full BFF unit suite 7458 pass /
+    110 skipped / 0 failed (no regressions).
+  - BFF build: 0 errors, 16 pre-existing warnings unchanged. Spaarke.Scheduling TreatWarningsAsErrors honored.
+  - Publish size: **46.20 MB** compressed (delta **+0.01 MB** vs 46.19 baseline; well under +1 MB ceiling).
+  - CVE check: no new HIGH-severity CVE (only pre-existing `Microsoft.Kiota.Abstractions 1.21.2` HIGH).
+  - **Design decisions**:
+    - **JobId = "notification-playbook-scheduler"**: per D2 / FR-2.8; constant exposed as
+      `PlaybookSchedulerJob.JobIdConstant` for cross-module reuse.
+    - **Cron = `0 * * * *`** (every hour at minute 0): exactly matches the legacy
+      `DefaultTickInterval = TimeSpan.FromHours(1)`. NFR-04 (preserve cadence) verified by inspection;
+      the per-playbook elapsed-time due-check inside `IsPlaybookDue` is the final gate.
+    - **PlaybookSchedulerService disposition**: REMOVED entirely (not an adapter). PlaybookSchedulerJob
+      is the canonical replacement; cleaner architecture per task brief recommendation. Legacy class +
+      its test file deleted; useful test coverage (inline notification integration points) relocated to
+      a dedicated `InlineNotificationIntegrationPointsTests` file (5 tests preserved verbatim).
+    - **Hosted-service registration**: `services.AddHostedService(sp => sp.GetRequiredService<ScheduledJobHost>())`
+      pattern preserves the singleton identity so admin trigger (task 021) and the cron loop share
+      `_inFlight` state. Task 021 had pre-marked this as the task-023 follow-up; verified via XML
+      doc + the existing `JobsEndpointsTests` (admin tests still 17/17 pass).
+    - **Seed mechanism**: new internal `SchedulingBootstrapHostedService` runs at startup (inserted at
+      index 0 of hosted services via `services.Insert(0, ...)`) and (a) registers PlaybookSchedulerJob
+      with `ScheduledJobRegistry` and (b) seeds the `notification-playbook-scheduler`
+      BackgroundJobDefinition in `InMemoryBackgroundJobStore`. Idempotent on host restart. When task
+      023+ swaps in Dataverse-backed store, the seed moves to a one-shot Dataverse upsert here.
+    - **Children correlationId format**: `Guid.NewGuid().ToString("N")` (no dashes) — matches
+      `ScheduledJobHost.DispatchAndAdvance` convention so admin tooling sees a consistent shape.
+    - **ResultJson shape**: `{"Children": [{"PlaybookId": "...", "PlaybookName": "...", "CorrelationId": "...",
+      "Status": "Succeeded|PartialFailure|Failed|Skipped|Cancelled", "UserCount": N, "SuccessCount": N,
+      "FailureCount": N, "ErrorMessage": "..."}]}`. STJ default PascalCase keys (no naming policy override).
+      Per-user errors NOT surfaced individually — kept in logs to bound payload size; per-playbook
+      `ErrorMessage` only set on Status=Failed/Cancelled.
+    - **`Success=true` even with per-playbook failures**: Children entries with Status=Failed/PartialFailure
+      surface in `ResultJson`. Only an unhandled exception ABOVE the per-playbook try/catch turns the
+      whole run into a failure (preserves legacy "continue with next playbook" semantics).
+    - **Coordination with task 024** (`sprk_analysisplaybook` config migration): `ParseScheduleConfig`
+      and `ScheduleConfig` record are flagged in XML docs as the stable surface task 024 must preserve
+      — task 024 may replace the JSON parse with a column read, but `IsPlaybookDue(lastRun, schedule)`
+      semantics + return shape MUST remain identical.
+    - **JobRunResult / BackgroundJobRunRecord extensions**: added `ResultJson` as an OPTIONAL positional
+      record parameter with default `null`. All 17 existing call sites continue to compile + run unchanged
+      (positional records accept default-value parameters). Verified: Spaarke.Scheduling regression
+      57/57 pass after the change.
+    - **`PersistLastRunTimestampAsync` failure is non-fatal**: matches legacy semantics — next tick
+      re-reads (still-stale) `sprk_lastrundate` and re-dispatches. Verified by
+      `ExecuteAsync_ContinuesGracefully_WhenLastRunPersistenceFails`.
+    - **Read `sprk_lastrundate` per-tick instead of in-memory dictionary**: the legacy service held a
+      `ConcurrentDictionary<Guid, DateTimeOffset>` seeded once at startup. PlaybookSchedulerJob re-reads
+      from Dataverse on every tick — small perf cost (1 query / ~7 rows / 1h cadence) but eliminates
+      restart-window gaps where in-memory state diverged from the canonical row. Dataverse remains
+      the source of truth.
+  - **adr-check (self)**: PASS — ADR-001 (in-process via ScheduledJobHost; no external scheduler),
+    ADR-010 (concrete singleton; IScheduledJob is framework seam; ResultJson additions are POCO record
+    params), ADR-013 (lives under Services/Ai/), ADR-029 (publish-size +0.01 MB), ADR-032 N/A
+    (handler unconditional). Spaarke.Scheduling TreatWarningsAsErrors honored.
+  - **bff-extensions §A/§F/§F.1**: PASS — Placement Justification ✓ (PlaybookSchedulerJob lives next
+    to AI deps); ADRs cited ✓; publish-size ✓; no new HIGH CVE ✓; test update obligation ✓ (+32 new);
+    asymmetric-registration §F.1 ✓ (handler + host BOTH unconditional; static-scan: no new
+    `if (flag) { … }` block); BFF csproj unchanged ✓.
+  - **AC verification** (per task brief): AC ✓ PlaybookSchedulerJob registered as IScheduledJob;
+    AC ✓ visible to GET /api/admin/jobs as "notification-playbook-scheduler" (via SchedulingBootstrap
+    seed); AC ✓ all 7 active playbooks fan out (validated by 7-playbook cardinality test); AC ✓ each
+    child gets its own correlationId (validated by unique-distinct + child≠parent tests); AC ✓ parent
+    sprk_resultjson records children correlationIds (validated by ResultJson-records test); AC ✓ old
+    PlaybookSchedulerService BackgroundService REMOVED (file deleted).
+  - Not committed per task brief.
+  - Notes: `notes/bff-publish-size-task023.md` (publish-size + pre-merge checklist).
 
 - **2026-06-21 — Task 021**: `POST /api/admin/jobs/{jobId}/trigger` admin manual-trigger endpoint.
   - Files (new, src): `Spaarke.Scheduling/JobNotFoundException.cs` (JobNotFoundException +

@@ -1,7 +1,14 @@
 <task id="R3-017" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Author ADR-036 — Background-job infrastructure (Spaarke.Scheduling)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Authored both versions:
+      - `.claude/adr/ADR-036-background-job-infrastructure.md` (concise — MUST/MUST NOT + key types + admin endpoints + alternatives + integration with other ADRs)
+      - `docs/adr/ADR-036-background-job-infrastructure.md` (full — Context + Decision (6 sections: lib + host + entities + endpoints + reference consumers + NOT in R3) + Consequences + AC + open questions resolved D1/D2/D4/Q1/Q6)
+      Both INDEX files updated (.claude/adr/INDEX.md + docs/adr/INDEX.md) with cross-references. Owner clarifications baked in: D2 (single-row fan-out for PlaybookScheduler), Q1 (fresh per-child correlationId in ResultJson), Q6 (existing SystemAdmin policy NOT new PlatformAdmin). Two reference consumers documented: MembershipReconciliationJob (Phase 2, task 085) + PlaybookSchedulerJob (task 023 migration, single sprk_backgroundjob row "notification-playbook-scheduler"). Main-session execution per .claude/ write boundary (CLAUDE.md §3). Not committed per project convention — main session batches commits.
+    </completion-notes>
     <phase>P2</phase>
     <parallel-group>none (main-session-only — .claude/ write boundary)</parallel-group>
     <parallel-safe>false</parallel-safe>

@@ -716,7 +716,13 @@ public static class AnalysisServicesModule
         services.AddHttpClient<IPlaybookSharingService, PlaybookSharingService>();
         // NotificationService promoted to unconditional registration (task 011 Phase 1b Tier 1, D-09 §2 B1).
         // See AddUnconditionalChatAndNotificationServices below.
-        services.AddHostedService<Sprk.Bff.Api.Services.PlaybookSchedulerService>();
+
+        // R3 task 023 (FR-2.8 / D2 / Q1): the legacy PlaybookSchedulerService BackgroundService has
+        // been DELETED. Its discovery + fan-out logic is now PlaybookSchedulerJob (IScheduledJob),
+        // registered + seeded in SchedulingModule.AddSchedulingModule(). The ScheduledJobHost
+        // (Spaarke.Scheduling) drives the cron tick on the same 1h cadence (NFR-04 preserved).
+        // Do NOT re-add an AddHostedService<PlaybookSchedulerService> here — that path was the
+        // migration target.
 
         // R5 task 007 (D1-07) — Session-files cleanup hosted service per spec NFR-02
         // "Aggressive cleanup on session-end". Scheduled sweep (every IntervalHours;
