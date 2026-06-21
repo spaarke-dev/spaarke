@@ -140,22 +140,26 @@ export class TodoService {
     entity['sprk_priorityscore'] = formValues.priorityScore;
     entity['sprk_effortscore'] = formValues.effortScore;
 
-    // 2. Assignee lookup (sprk_assignedto → systemuser)
+    // 2. Assignee lookup (sprk_assignedto → contact). UAT 2026-06-21:
+    //    sprk_todo.sprk_assignedto was migrated from a systemuser lookup to
+    //    the OOB `contact` (Person) entity. The wizard's Assignee picker
+    //    now feeds a CONTACT GUID via `searchContactsAsLookup`. Bind set
+    //    name is `contacts` (plural of the OOB contact table).
     if (formValues.assignedToId) {
       try {
         const navProps = await _discoverNavProps('sprk_todo');
         const assignedNav = navProps.find(
-          n => n.referencedEntity === 'systemuser' && n.columnName.toLowerCase().includes('assignedto')
+          n => n.referencedEntity === 'contact' && n.columnName.toLowerCase().includes('assignedto')
         );
         if (assignedNav) {
-          entity[`${assignedNav.navPropName}@odata.bind`] = `/systemusers(${formValues.assignedToId})`;
+          entity[`${assignedNav.navPropName}@odata.bind`] = `/contacts(${formValues.assignedToId})`;
         } else {
           // Fallback: use the lookup attribute name directly
-          entity['sprk_assignedto@odata.bind'] = `/systemusers(${formValues.assignedToId})`;
+          entity['sprk_assignedto@odata.bind'] = `/contacts(${formValues.assignedToId})`;
         }
       } catch (err) {
         console.warn('[TodoService] Failed to resolve sprk_assignedto nav-prop, using fallback:', err);
-        entity['sprk_assignedto@odata.bind'] = `/systemusers(${formValues.assignedToId})`;
+        entity['sprk_assignedto@odata.bind'] = `/contacts(${formValues.assignedToId})`;
       }
     }
 

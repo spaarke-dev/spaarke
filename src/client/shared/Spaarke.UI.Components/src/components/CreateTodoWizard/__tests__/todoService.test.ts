@@ -87,11 +87,11 @@ const NAV_PROPS_RESPONSE = {
       ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
       ReferencedEntity: 'sprk_recordtype_ref',
     },
-    // Assignee
+    // Assignee — UAT 2026-06-21: migrated from systemuser to OOB contact lookup
     {
       ReferencingAttribute: 'sprk_assignedto',
       ReferencingEntityNavigationPropertyName: 'sprk_AssignedTo',
-      ReferencedEntity: 'systemuser',
+      ReferencedEntity: 'contact',
     },
   ],
 };
@@ -242,13 +242,14 @@ describe('TodoService.createTodo', () => {
 
     await service.createTodo({
       ...FORM_VALUES,
-      assignedToId: 'user-guid-123',
+      assignedToId: 'contact-guid-123',
       assignedToName: 'Jane Doe',
     });
 
     const [, payload] = dataService.createRecord.mock.calls[0] as [string, Record<string, unknown>];
-    // Discovered nav-prop is sprk_AssignedTo
-    expect(payload['sprk_AssignedTo@odata.bind']).toBe('/systemusers(user-guid-123)');
+    // Discovered nav-prop is sprk_AssignedTo; bind targets the OOB contact entity
+    // (UAT 2026-06-21 migration — was /systemusers pre-migration)
+    expect(payload['sprk_AssignedTo@odata.bind']).toBe('/contacts(contact-guid-123)');
   });
 
   // -----------------------------------------------------------------

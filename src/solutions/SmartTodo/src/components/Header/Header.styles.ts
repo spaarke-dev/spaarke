@@ -156,6 +156,71 @@ export const useHeaderStyles = makeStyles({
   },
 
   /**
+   * UAT 2026-06-20 round 4 — typeahead wrapper + dropdown for the Assigned
+   * To field. Mirrors the widget's `assignedToWrap` / `assignedToResults` /
+   * `assignedToResultItem` styles so the two surfaces look identical.
+   */
+  assignedToWrap: {
+    position: 'relative',
+    flex: '0 1 220px',
+    minWidth: '140px',
+  },
+
+  assignedToResults: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 50,
+    marginTop: '2px',
+    maxHeight: '220px',
+    overflowY: 'auto',
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderTopWidth: '1px',
+    borderRightWidth: '1px',
+    borderBottomWidth: '1px',
+    borderLeftWidth: '1px',
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke2,
+    borderRightColor: tokens.colorNeutralStroke2,
+    borderBottomColor: tokens.colorNeutralStroke2,
+    borderLeftColor: tokens.colorNeutralStroke2,
+    borderTopLeftRadius: tokens.borderRadiusMedium,
+    borderTopRightRadius: tokens.borderRadiusMedium,
+    borderBottomLeftRadius: tokens.borderRadiusMedium,
+    borderBottomRightRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow8,
+  },
+
+  assignedToResultItem: {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalSNudge}`,
+    backgroundColor: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground1,
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+    ':focus': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      outlineStyle: 'none',
+    },
+  },
+
+  assignedToResultsHint: {
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalSNudge}`,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+
+  /**
    * Flex spacer — pushes the right cluster to the trailing edge of the row.
    * `flex: '1 1 0'` (vs auto) means it absorbs leftover space without
    * fighting the QuickAdd for room.

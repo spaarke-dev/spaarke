@@ -44,16 +44,22 @@ const useStyles = makeStyles({
     // guarantee the board fills its container's cross-axis. Without these,
     // some host layouts (Griffel-nested flex chains, SectionPanel) computed
     // the board at half the container width and clipped Tomorrow + Future
-    // columns via `overflow: hidden`. The user's decision (2026-06-19):
-    // horizontal mode = ALWAYS fit all 3 columns to container, no
-    // horizontal scroll. Columns themselves shrink via `flex: 1 1 0 /
-    // minWidth: 0 / overflow: hidden` so cards ellipsis-truncate cleanly
-    // in narrow widgets.
+    // columns via `overflow: hidden`.
+    //
+    // UAT 2026-06-20 round 4: replaced `overflow: hidden` with
+    // `overflowX: auto` + `overflowY: hidden`. In narrow workspace panes the
+    // 3 columns + gap can still exceed available width even with `flex: 1 1
+    // 0 / minWidth: 0` (because card content + padding sets an intrinsic
+    // floor). Without horizontal scroll the rightmost column (Future) was
+    // CLIPPED — invisible to the user. Now: columns still shrink to fit when
+    // possible; when they can't, the user can scroll horizontally to reveal
+    // them. Vertical orientation overrides via `boardVertical`.
     width: '100%',
     alignSelf: 'stretch',
     minHeight: 0,
     minWidth: 0,
-    overflow: 'hidden',
+    overflowX: 'auto',
+    overflowY: 'hidden',
     // FR-29 / NFR-08 — smooth row↔column flip (CSS-only). Honour
     // prefers-reduced-motion by snapping with zero transition.
     transitionProperty: 'gap',
@@ -257,16 +263,22 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
 
           // UAT 2026-06-20 — Single container for both expanded AND collapsed.
           // Same column classname/layout in both states; only the droppable
-          // card list area is conditional. This fixes two issues:
+          // card list area is conditional. This fixes three issues:
           //   1. Vertical mode collapsed: column inherits columnVertical's
           //      `flex: 0 0 auto` so it sizes to its content (just the header
           //      = ~44px), instead of growing via the prior `columnCollapsed`
           //      `flex: 1 1 0` which fell through unstyled in vertical parents.
-          //   2. Horizontal mode collapsed: `alignSelf: flex-start` opts out
-          //      of the cross-axis stretch default so the column height
-          //      collapses to header height. Other expanded siblings still
-          //      stretch to board height normally.
-          const collapsedHorizontalInline = isCollapsed && !isVertical ? { alignSelf: 'flex-start' as const } : {};
+          //   2. Horizontal mode collapsed CROSS-axis: `alignSelf: flex-start`
+          //      opts out of the cross-axis stretch default so the column
+          //      height collapses to header height. Other expanded siblings
+          //      still stretch to board height normally.
+          //   3. Horizontal mode collapsed INLINE-axis (UAT 2026-06-20 round 4):
+          //      override base column `flex: 1 1 0` with `flex: 0 0 auto` so
+          //      the column width shrinks to header content instead of
+          //      equal-sharing with expanded siblings. Result: a thin "tab"
+          //      strip the user can click to re-expand.
+          const collapsedHorizontalInline =
+            isCollapsed && !isVertical ? { alignSelf: 'flex-start' as const, flex: '0 0 auto' as const } : {};
 
           return (
             <div

@@ -1,16 +1,22 @@
 /**
- * useCurrentContactId — Resolve the current systemuser's sprk_contact GUID.
+ * useCurrentContactId — Resolve the current systemuser's OOB contact GUID.
  *
- * UAT 2026-06-19: `sprk_todo.sprk_assignedto` was migrated from a systemuser
- * lookup to a `sprk_contact` (custom Person table) lookup. The "Assigned to Me"
- * filter therefore needs the CONTACT GUID corresponding to the current user,
- * not their systemuser GUID.
+ * UAT 2026-06-20: `sprk_todo.sprk_assignedto` was migrated from a systemuser
+ * lookup to the OOB `contact` (Person) table. The OOB `contact` entity has
+ * been extended with a custom `sprk_systemuser` lookup pointing back to
+ * systemuser (relationship `sprk_SystemUser_SystemUser_Contact`). The
+ * "Assigned to Me" filter therefore needs the CONTACT GUID corresponding to
+ * the current user, not their systemuser GUID.
+ *
+ * IMPORTANT: This queries the OOB `contact` entity (NOT a custom `sprk_contact`
+ * entity — there is no such custom table). Fields used:
+ *   - `contactid` (PK)
+ *   - `fullname` (display name)
+ *   - `_sprk_systemuser_value` (OData filter form of `sprk_systemuser` lookup)
  *
  * Resolution flow (one query at mount):
- *   1. Query `sprk_contact` where `_sprk_systemuser_value eq <systemUserId>`
- *      (the sprk_contact table has a sprk_systemuser lookup pointing back
- *      to systemuser — relationship sprk_SystemUser_SystemUser_Contact).
- *   2. If exactly one match → return that contact's `sprk_contactid`.
+ *   1. Query `contact` where `_sprk_systemuser_value eq <systemUserId>`.
+ *   2. If exactly one match → return that contact's `contactid`.
  *   3. If zero matches → return null (user has no associated contact;
  *      surfaces should fall back to "no records" rather than filter by an
  *      invalid GUID).
@@ -23,7 +29,7 @@
  * when contactId resolves.
  *
  * @see sprk_todo.sprk_assignedto (Contact lookup) — the field this resolves for
- * @see sprk_contact.sprk_systemuser (SystemUser lookup) — the reverse relationship
+ * @see contact.sprk_systemuser (SystemUser lookup) — the reverse relationship
  */
 
 import * as React from 'react';
@@ -36,10 +42,10 @@ export interface IUseCurrentContactIdOptions {
 }
 
 export interface IUseCurrentContactIdResult {
-  /** The resolved sprk_contact GUID, or null when not found / still loading. */
+  /** The resolved contact GUID, or null when not found / still loading. */
   contactId: string | null;
-  /** UAT 2026-06-19 — the resolved contact's display name, for UI display (so
-   *  the user sees "Jane Doe" not a raw GUID). Null when not resolved. */
+  /** UAT 2026-06-20 — the resolved contact's display name (`fullname`), for UI
+   *  display so the user sees "Jane Doe" not a raw GUID. Null when not resolved. */
   contactName: string | null;
   /** True while the resolve query is in flight. */
   isLoading: boolean;
@@ -60,36 +66,38 @@ export function useCurrentContactId(options: IUseCurrentContactIdOptions): IUseC
     let cancelled = false;
     setIsLoading(true);
 
-    // Select sprk_name too so the UI can display the contact name in
-    // place of the raw GUID (e.g., quick-add "Assigned To" field).
-    const query = `?$select=sprk_contactid,sprk_name&$filter=_sprk_systemuser_value eq ${userId}&$top=2`;
+    // OOB `contact` entity. The relevant fields:
+    //   - `contactid` (PK)
+    //   - `fullname` (display name)
+    //   - `_sprk_systemuser_value` (OData form of the custom `sprk_systemuser` lookup)
+    const query = `?$select=contactid,fullname&$filter=_sprk_systemuser_value eq ${userId}&$top=2`;
 
     webApi
-      .retrieveMultipleRecords('sprk_contact', query)
+      .retrieveMultipleRecords('contact', query)
       .then(result => {
         if (cancelled) return;
-        const entities = (result.entities ?? []) as Array<{ sprk_contactid?: string; sprk_name?: string }>;
+        const entities = (result.entities ?? []) as Array<{ contactid?: string; fullname?: string }>;
         if (entities.length === 0) {
           // eslint-disable-next-line no-console
           console.warn(
-            `[useCurrentContactId] No sprk_contact found for systemuser ${userId}. "Assigned to Me" filter will return empty.`
+            `[useCurrentContactId] No contact found for systemuser ${userId}. "Assigned to Me" filter will return empty.`
           );
           setContactId(null);
           setContactName(null);
         } else {
           if (entities.length > 1) {
             // eslint-disable-next-line no-console
-            console.warn(`[useCurrentContactId] Multiple sprk_contact records for systemuser ${userId}; using first.`);
+            console.warn(`[useCurrentContactId] Multiple contact records for systemuser ${userId}; using first.`);
           }
-          setContactId(entities[0].sprk_contactid ?? null);
-          setContactName(entities[0].sprk_name ?? null);
+          setContactId(entities[0].contactid ?? null);
+          setContactName(entities[0].fullname ?? null);
         }
         setIsLoading(false);
       })
       .catch((err: Error) => {
         if (cancelled) return;
         // eslint-disable-next-line no-console
-        console.warn('[useCurrentContactId] sprk_contact resolve failed:', err);
+        console.warn('[useCurrentContactId] contact resolve failed:', err);
         setContactId(null);
         setContactName(null);
         setIsLoading(false);

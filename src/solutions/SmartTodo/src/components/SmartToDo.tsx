@@ -643,12 +643,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         return;
       }
       const payload: Record<string, unknown> = { sprk_name: detail.title };
-      // UAT 2026-06-19 — sprk_assignedto now binds to sprk_contact.
+      // UAT 2026-06-20 — sprk_assignedto binds to the OOB `contact` entity.
       // detail.assignedToId is a contact GUID (the Header's quick-add
       // Assigned To field). When unset, fall back to current user's contactId.
+      // Bind set name is `contacts` (plural of the OOB contact table).
       const assignedToContactId = detail.assignedToId || contactId || '';
       if (assignedToContactId) {
-        payload['sprk_assignedto@odata.bind'] = `/sprk_contacts(${assignedToContactId})`;
+        payload['sprk_assignedto@odata.bind'] = `/contacts(${assignedToContactId})`;
       }
       if (detail.dueDate) {
         const [y, m, d] = detail.dueDate.split('-').map(Number);

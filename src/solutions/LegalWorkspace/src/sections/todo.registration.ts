@@ -127,30 +127,50 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
     [notifyTodoChange, subscribe],
   );
 
-  // R4 task 100 (W-2) — Open handler now passes the `openTodo` launch
-  // discriminator so the SmartTodo Code Page auto-mounts <SmartTodoModal>
-  // on the clicked record. Pre-R4-100 it used `eventId=<guid>` which the
-  // Code Page ignored (defaulting to Kanban) — UAT issue 4.
+  // UAT 2026-06-20 round 4 — split Open behaviour by selection:
   //
-  // R4 task 103 (E-2, 2026-06-18) — UAT 2 made the widget's Open button
-  // ALWAYS-ENABLED. The `todoId` arg is now OPTIONAL:
-  //   - present → dispatch openTodo launch (existing behaviour, auto-mount modal)
-  //   - absent  → open the SmartTodo Code Page with NO launch data → the
-  //     app's `useLaunchContext` returns undefined → app renders its default
-  //     3-col Kanban view (no auto-modal). This satisfies "user wants to just
-  //     open the app" without forcing a card selection first.
+  //   - todoId PRESENT → open the OOB To Do record FORM directly via
+  //     `Xrm.Navigation.openForm({ entityName: 'sprk_todo', entityId })`.
+  //     Skips the SmartTodo Code Page hop entirely so the user gets a single
+  //     record modal instead of the prior "Code Page modal → record modal"
+  //     stack (UAT round 4 issue 3). The form gets BPF + business rules +
+  //     ribbon for free — same as opening from any view.
   //
-  // Wire format: `action=openTodo&todoId=<guid>` — Dataverse URL-encodes the
-  // entire string as `?data=<envelope>` per the parseDataParams convention
-  // (ADR-026). `useLaunchContext.parseLaunchContextFromSearch` handles BOTH
-  // wire formats so test URLs (raw query) work without an MDA host too.
+  //   - todoId ABSENT  → open the SmartTodo Code Page (no launch data) so
+  //     `useLaunchContext` returns undefined → app renders its default 3-col
+  //     Kanban view (no auto-modal). This preserves "user wants to just open
+  //     the full app" without forcing a card selection first.
+  //
+  // Falls back to the prior Code-Page-hop path if Xrm.Navigation is somehow
+  // unavailable (defensive — should not happen inside MDA).
   const handleOpenTodo = React.useCallback(
     (todoId?: string) => {
-      const data = todoId
-        ? `${LAUNCH_PARAM_ACTION}=${LAUNCH_ACTION_OPEN_TODO}` +
-          `&${LAUNCH_PARAM_TODO_ID}=${encodeURIComponent(todoId)}`
-        : undefined;
-      ctx.onOpenWizard(SMART_TODO_CODE_PAGE_NAME, data, {
+      if (todoId) {
+        // Preferred path: open the record form directly. No Code Page stack.
+        // `Xrm` is the model-driven app global; types are loose because the
+        // shared lib doesn't pull in @types/xrm.
+        const xrm = (globalThis as unknown as { Xrm?: { Navigation?: { openForm?: (opts: unknown) => Promise<unknown> } } }).Xrm;
+        if (xrm?.Navigation?.openForm) {
+          void xrm.Navigation.openForm({
+            entityName: "sprk_todo",
+            entityId: todoId,
+            openInNewWindow: false,
+          });
+          return;
+        }
+        // Defensive fallback only — should never run in real MDA.
+        const data =
+          `${LAUNCH_PARAM_ACTION}=${LAUNCH_ACTION_OPEN_TODO}` +
+          `&${LAUNCH_PARAM_TODO_ID}=${encodeURIComponent(todoId)}`;
+        ctx.onOpenWizard(SMART_TODO_CODE_PAGE_NAME, data, {
+          width: { value: 85, unit: "%" },
+          height: { value: 85, unit: "%" },
+        });
+        return;
+      }
+
+      // No selection → open the full Smart To Do Code Page at its default view.
+      ctx.onOpenWizard(SMART_TODO_CODE_PAGE_NAME, undefined, {
         width: { value: 85, unit: "%" },
         height: { value: 85, unit: "%" },
       });
