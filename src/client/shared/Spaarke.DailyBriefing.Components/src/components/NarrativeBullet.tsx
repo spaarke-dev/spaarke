@@ -35,6 +35,7 @@ import { makeStyles, tokens, Text, Button, Tooltip, Spinner } from '@fluentui/re
 import { DismissRegular } from '@fluentui/react-icons';
 import { MicrosoftToDoIcon } from '@spaarke/ui-components';
 import type { NotificationItem } from '../types/notifications';
+import { formatDueDate } from '../utils/formatDueDate';
 import { SubRow } from './SubRow';
 
 // ---------------------------------------------------------------------------
@@ -71,6 +72,15 @@ const useStyles = makeStyles({
     ':hover': {
       textDecorationLine: 'underline',
     },
+  },
+  dueDateRow: {
+    color: tokens.colorNeutralForeground2,
+    lineHeight: tokens.lineHeightBase200,
+    marginTop: tokens.spacingVerticalXXS,
+  },
+  dueDateOverdue: {
+    color: tokens.colorPaletteRedForeground1,
+    fontWeight: tokens.fontWeightSemibold,
   },
   actions: {
     display: 'flex',
@@ -184,6 +194,16 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   // consumers), the sub-list is suppressed.
   const showSubList = itemIds.length > 1 && Array.isArray(items) && items.length > 0;
 
+  // R2.2: per-item due-date hint for SINGLE-item bullets. Aggregated bullets
+  // delegate to SubRow (which renders each item's due date in its own row).
+  // Showing a single due-date on an aggregated bullet would misrepresent
+  // multi-item due dates.
+  const singleItemDueDate =
+    !showSubList && Array.isArray(items) && items.length === 1
+      ? formatDueDate(items[0].dueDate)
+      : null;
+  const isSingleItemOverdue = singleItemDueDate?.startsWith('Overdue') ?? false;
+
   const handleLinkClick = () => {
     if (!primaryEntityType || !primaryEntityId) return;
     const xrm =
@@ -242,6 +262,15 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
             }}
           >
             {primaryEntityName} &#8599;
+          </Text>
+        )}
+        {/* R2.2: single-item due-date hint (task notifications only — others have item.dueDate=null). */}
+        {singleItemDueDate && (
+          <Text
+            size={200}
+            className={`${styles.dueDateRow} ${isSingleItemOverdue ? styles.dueDateOverdue : ''}`.trim()}
+          >
+            {singleItemDueDate}
           </Text>
         )}
         {/* FR-11: per-item sub-list for aggregated bullets (itemIds.length > 1). */}

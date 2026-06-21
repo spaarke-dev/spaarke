@@ -7,3 +7,4 @@
  */
 
 export { TOASTER_ID } from './toastUtils';
+export { formatDueDate } from './formatDueDate';

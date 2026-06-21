@@ -26,6 +26,7 @@
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import type { NotificationItem } from '../types/notifications';
+import { formatDueDate } from '../utils/formatDueDate';
 import { SubRowLink } from './SubRowLink';
 import { SubRowTodo } from './SubRowTodo';
 import { SubRowDismiss } from './SubRowDismiss';
@@ -60,6 +61,18 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
   },
+  dueDate: {
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: tokens.lineHeightBase200,
+    paddingLeft: tokens.spacingHorizontalXS,
+    paddingRight: tokens.spacingHorizontalXS,
+  },
+  dueDateOverdue: {
+    color: tokens.colorPaletteRedForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+  },
   actions: {
     display: 'flex',
     alignItems: 'center',
@@ -87,6 +100,8 @@ export interface SubRowProps {
 
 export const SubRow: React.FC<SubRowProps> = ({ item, onAddToTodoItem, onDismissItem }) => {
   const styles = useStyles();
+  const dueDateLabel = formatDueDate(item.dueDate);
+  const isOverdue = dueDateLabel?.startsWith('Overdue') ?? false;
 
   return (
     <div className={styles.root}>
@@ -98,6 +113,12 @@ export const SubRow: React.FC<SubRowProps> = ({ item, onAddToTodoItem, onDismiss
       <div className={styles.linkSlot}>
         <SubRowLink item={item} />
       </div>
+      {/* R2.2: per-item due date hint (only when item.dueDate is set, i.e. task notifications). */}
+      {dueDateLabel && (
+        <span className={`${styles.dueDate} ${isOverdue ? styles.dueDateOverdue : ''}`.trim()}>
+          {dueDateLabel}
+        </span>
+      )}
       {/* Slots B + C: per-item actions (FR-13/FR-14, tasks 022/023). */}
       <div className={styles.actions}>
         <SubRowTodo item={item} onAddToTodo={onAddToTodoItem} />

@@ -98,7 +98,8 @@
           "actionUrl": "/main.aspx?pagetype=entityrecord&etn=task&id={{item.activityid}}",
           "recipientId": "{{run.userId}}",
           "regardingId": "{{item.activityid}}",
-          "regardingType": "task"
+          "regardingType": "task",
+          "dueDate": "{{item.scheduledend}}"
         }
       }
     }

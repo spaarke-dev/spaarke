@@ -69,6 +69,8 @@ function parseNotificationData(raw: unknown): {
   regardingId: string;
   isAiGenerated: boolean;
   aiConfidence?: number;
+  /** R2.2: ISO-8601 due date from customData.dueDate (set by task playbooks). */
+  dueDate: string | null;
 } | null {
   if (!raw || typeof raw !== 'string') return null;
 
@@ -89,6 +91,7 @@ function parseNotificationData(raw: unknown): {
       regardingId: (customData['regardingId'] as string) ?? (parsed['regardingId'] as string) ?? '',
       isAiGenerated: (customData['isAiGenerated'] as boolean) ?? false,
       aiConfidence: typeof customData['aiConfidence'] === 'number' ? (customData['aiConfidence'] as number) : undefined,
+      dueDate: (customData['dueDate'] as string) ?? null,
     };
   } catch {
     console.warn('[DailyBriefing] Failed to parse notification data JSON');
@@ -121,6 +124,7 @@ function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
     isAiGenerated: customData?.isAiGenerated ?? false,
     aiConfidence: customData?.aiConfidence,
     createdOn: (entity['createdon'] as string) ?? new Date().toISOString(),
+    dueDate: customData?.dueDate ?? null,
   };
 }
 

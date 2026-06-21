@@ -83,6 +83,7 @@ const fakeChannels: ChannelFetchResult[] = [
           isRead: false,
           isAiGenerated: false,
           createdOn: new Date().toISOString(),
+          dueDate: null,
         },
       ],
       unreadCount: 1,
