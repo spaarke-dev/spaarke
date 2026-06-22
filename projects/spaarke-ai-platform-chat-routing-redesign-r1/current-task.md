@@ -1,7 +1,7 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-22 (Phase 1 ✅ CLOSED; task 027 exit-gate GO; Phase 2 Wave 2-A in progress — task 030 verification-only)
-> **Recovery**: Phase 1 complete. Task 027 = GO. Next: task 030 verification of 4 sprk_analysisplaybook tracking fields.
+> **Last Updated**: 2026-06-22 (Phase 1 ✅ + Wave 2-A ✅ + Wave 2-B partial — 032 ✅; 033 🚫 BLOCKED; Wave 2-C NEXT)
+> **Recovery**: 4 tasks completed this session (027, 030, 031, 032). Last commit `1347b8c92` pushed. Next: Wave 2-C tasks 034/036 (BFF code, autonomous-friendly); 035 likely Power Apps blocker.
 
 ---
 
@@ -12,10 +12,10 @@
 | **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
 | **Origin status** | Rebased onto `origin/master` + force-pushed clean. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
-| **Last commit (post-rebase)** | `6b0d74605` — task 025 commit `7a33b37ee` rebased on top of master's Daily Update Service r2.2 work |
-| **Phase status** | Phase 0 ✅ · Phase 1 ✅ CLOSED (027 GO; 026 ⏭️ DEFERRED) · **Phase 2 Wave 2-A IN PROGRESS** |
-| **Execution mode** | Autonomous wave-by-wave per `current-task.md` rules; user explicitly authorized Phase 0-6 |
-| **Next Action** | **Dispatch Wave 2-A task 030** (verification-only per Q4 — 4 sprk_analysisplaybook fields already exist). Read POML at `tasks/030-*.poml`. MINIMAL rigor. After 030 ✅, run task 031 (add `sprk_jpsmatchingmetadata` MultilineText). |
+| **Last commit (pushed)** | `1347b8c92` — task 032 PlaybookEmbeddingService extension (FR-10) |
+| **Phase status** | Phase 0 ✅ · Phase 1 ✅ · Wave 2-A ✅ · Wave 2-B partial (032 ✅; 033 🚫) · **Wave 2-C SCOPE-BLOCKED** (034 doable; 035 partial-blocked; 036 BLOCKED) |
+| **Execution mode** | Autonomous wave-by-wave; **STOPPED at Wave 2-C** pending owner direction on the cascading send-to-index endpoint blocker |
+| **Next Action** | **OWNER DECISION REQUIRED** — see `notes/handoffs/wave-2-c-scope-assessment.md` for 4-option menu (A: stand up endpoint; B: server-side auto-index; C: skip UX, keep drift job; D: skip Wave 2-C entirely, jump to Phase 3). Recommended: **C or D**. If user says "continue", autonomous safe path is to pivot to Phase 3 Wave 3-A (tasks 045/046/047 — BFF model extensions; 3 parallel-safe; depend only on task 027 ✅). |
 
 ### Critical context (3-sentence version)
 
