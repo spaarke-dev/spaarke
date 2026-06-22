@@ -150,6 +150,34 @@ const ATTACHMENT_WARNING_BYTES = 25 * 1024 * 1024;
 /** Soft cap for inline summary preview rendering. */
 const _SUMMARY_PREVIEW_CHAR_CAP = 600;
 
+/**
+ * Stable playbook ID (GUID format) for the "Summarize New File(s)" playbook
+ * used by the wizard's Combined Summary step. Resolved via
+ * `/api/ai/playbooks/by-id/{id}` (stable, immutable `sprk_playbookid` alt-key)
+ * per spec FR-03 Pattern B migration (task 021).
+ *
+ * Previously this wizard resolved the playbook by literal name via
+ * `/api/ai/playbooks/by-name/Summarize%20New%20File(s)` — that path is being
+ * retired (zero production callers expected post-migration).
+ *
+ * The constant lives at module scope (not in shared config) because:
+ *   1. The wizard is a context-agnostic shared library component; no
+ *      backend `WorkspaceOptions:SummarizePlaybookId` value is plumbed
+ *      through to consumers (PCF and code-page hosts inject only auth +
+ *      bffBaseUrl, not playbook configuration).
+ *   2. The playbook ID is immutable per Q1 (2026-06-22) — the
+ *      `sprk_playbookid` column mirrors the row's primary key and is portable
+ *      across environments by convention.
+ *   3. Lifting to a shared `playbookIds.ts` module would only be justified
+ *      if a second wizard needed the same ID; today this is the sole consumer
+ *      in this library (`useAiSummary.ts` uses a different playbook —
+ *      Document Profile).
+ *
+ * DEV environment GUID (also the production value per existing convention):
+ *   `4a72f99c-a119-f111-8343-7ced8d1dc988` — Summarize New File(s) playbook.
+ */
+const SUMMARIZE_NEW_FILES_PLAYBOOK_ID = '4a72f99c-a119-f111-8343-7ced8d1dc988';
+
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -618,21 +646,29 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
     setCombinedSummary('');
 
     try {
-      // 1) Resolve "Summarize New File(s)" playbook ID — same playbook the
-      //    Summarize Files wizard uses (BFF config key Workspace:SummarizePlaybookId,
-      //    default GUID 4a72f99c-a119-f111-8343-7ced8d1dc988). This playbook is
-      //    purpose-built for file summarization and returns a structured result
-      //    (tldr, summary, practice areas, parties, call to action). We were
-      //    previously using Document Profile, which is for individual document
-      //    classification, not multi-doc combined summarization.
-      const playbookUrl = `${bffBaseUrl ?? ''}/api/ai/playbooks/by-name/${encodeURIComponent('Summarize New File(s)')}`;
+      // 1) Resolve "Summarize New File(s)" playbook ID via stable-ID lookup.
+      //    Spec FR-03 Pattern B migration (task 021): replaces the prior
+      //    by-name resolution (`/by-name/Summarize%20New%20File(s)`) with a
+      //    stable-ID call (`/by-id/{id}`) keyed on the immutable
+      //    `sprk_playbookid` alt-key. Same playbook the Summarize Files wizard
+      //    uses; purpose-built for file summarization with a structured result
+      //    (tldr, summary, practice areas, parties, call to action). Document
+      //    Profile is for individual document classification — not used here.
+      const playbookUrl = `${bffBaseUrl ?? ''}/api/ai/playbooks/by-id/${encodeURIComponent(SUMMARIZE_NEW_FILES_PLAYBOOK_ID)}`;
       const playbookRes = await authenticatedFetch(playbookUrl, {
         method: 'GET',
         headers: { Accept: 'application/json' },
         signal: abort.signal,
       });
       if (!playbookRes.ok) {
-        throw new Error(`Failed to resolve Document Profile playbook (HTTP ${playbookRes.status})`);
+        // Per ADR-019, the BFF returns RFC 7807 ProblemDetails for 404
+        // (`type: https://spaarke.com/problems/playbook-not-found`). Surface
+        // a user-friendly message — ADR-015: we log only the HTTP status, not
+        // the response body or playbook ID, to keep client telemetry clean.
+        if (playbookRes.status === 404) {
+          throw new Error('Playbook unavailable. Please contact your administrator.');
+        }
+        throw new Error('Playbook unavailable. Please contact your administrator.');
       }
       const playbook = await playbookRes.json();
       const playbookId = playbook.playbookId || playbook.id;
