@@ -31,12 +31,17 @@ public static class WorkspaceFileEndpoints
     // Bound via WorkspaceOptions.SummarizePlaybookId (ADR-018 typed-options).
     // Task 012 / spec FR-04 (chat-routing-redesign-r1) lifted the prior
     // raw IConfiguration["Workspace:SummarizePlaybookId"] indexer read into
-    // WorkspaceOptions. Per Q&A 2026-06-22 Q1, SummarizePlaybookId is now the canonical
+    // WorkspaceOptions. Per Q&A 2026-06-22 Q1, SummarizePlaybookId is the canonical
     // stable-ID lookup value (GUID; mirrors row's sprk_analysisplaybookid PK).
-    // Task 019 will migrate this consumer to resolve via
-    // IPlaybookLookupService.GetByIdAsync(WorkspaceOptions.SummarizePlaybookId).
-    private static readonly Guid DefaultSummarizePlaybookId =
-        Guid.Parse("4a72f99c-a119-f111-8343-7ced8d1dc988");
+    //
+    // FR-04 stable-ID resolution (chat-routing-redesign-r1 task 019): the prior
+    // hardcoded 4a72f99c-a119-f111-8343-7ced8d1dc988 GUID fallback has been removed.
+    // The playbook is now resolved at runtime via
+    // IPlaybookLookupService.GetByIdAsync(WorkspaceOptions.SummarizePlaybookId, ct),
+    // which queries the sprk_playbookid alternate key on sprk_analysisplaybook with
+    // 1-hour caching (ADR-014). Fail-fast on missing config — no hardcoded fallback
+    // at this convergence point per FR-04 / NFR-02 (mirrors the SessionSummarizeOrchestrator
+    // pattern proven by Wave 1-D task 015).
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -148,6 +153,7 @@ public static class WorkspaceFileEndpoints
         IFormFileCollection files,
         ITextExtractor textExtractor,
         IPlaybookOrchestrationService playbookService,
+        IPlaybookLookupService playbookLookup,
         IOptions<WorkspaceOptions> workspaceOptions,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -208,7 +214,7 @@ public static class WorkspaceFileEndpoints
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("analyzing", "Analyzing..."), ct);
 
             await RunSummarizePlaybookAsSSEAsync(
-                extractedText, playbookService, workspaceOptions, response, httpContext, logger, ct);
+                extractedText, playbookService, playbookLookup, workspaceOptions, response, httpContext, logger, ct);
 
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("delivering", "Delivering results..."), ct);
             await response.WriteAsync("data: [DONE]\n\n", ct);
@@ -244,6 +250,7 @@ public static class WorkspaceFileEndpoints
     private static async Task RunSummarizePlaybookAsSSEAsync(
         string documentText,
         IPlaybookOrchestrationService playbookService,
+        IPlaybookLookupService playbookLookup,
         IOptions<WorkspaceOptions> workspaceOptions,
         HttpResponse response,
         HttpContext httpContext,
@@ -258,13 +265,29 @@ public static class WorkspaceFileEndpoints
             documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
         }
 
-        // Typed-options read replaces raw IConfiguration[...] indexer (ADR-018 / task 012 / FR-04).
-        // SummarizePlaybookId is now the canonical stable-ID lookup value (Q&A 2026-06-22 Q1).
-        // Task 019 will swap to runtime resolution via IPlaybookLookupService.GetByIdAsync.
-        var playbookIdStr = workspaceOptions.Value.SummarizePlaybookId;
-        var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
-            ? parsed
-            : DefaultSummarizePlaybookId;
+        // FR-04 stable-ID resolution (chat-routing-redesign-r1 task 019): typed-options read
+        // (ADR-018 / task 012) of WorkspaceOptions.SummarizePlaybookId — the canonical stable-ID
+        // lookup value (Q&A 2026-06-22 Q1) which mirrors the row's sprk_analysisplaybookid PK.
+        // Fail-fast on missing config — there is no hardcoded fallback at this convergence
+        // point per FR-04 / NFR-02. Mirrors the SessionSummarizeOrchestrator pattern proven by
+        // Wave 1-D task 015. The lookup service caches results for 1 hour (ADR-014).
+        var configuredPlaybookId = workspaceOptions.Value.SummarizePlaybookId;
+        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        {
+            logger.LogError(
+                "Workspace:SummarizePlaybookId is not configured. Cannot resolve summarize-document-for-workspace " +
+                "playbook for CorrelationId={CorrelationId}. Configure the per-environment GUID (mirrors " +
+                "sprk_analysisplaybookid PK) for the summarize-document-for-workspace@v1 row.",
+                httpContext.TraceIdentifier);
+            throw new InvalidOperationException(
+                "Workspace:SummarizePlaybookId is not configured. /api/workspace/files/summarize cannot resolve " +
+                "its playbook without per-environment configuration.");
+        }
+
+        var playbook = await playbookLookup
+            .GetByIdAsync(configuredPlaybookId, ct)
+            .ConfigureAwait(false);
+        var playbookId = playbook.Id;
 
         logger.LogInformation("Invoking summarize playbook as SSE. PlaybookId={PlaybookId}, TextLength={TextLength}", playbookId, documentText.Length);
 
