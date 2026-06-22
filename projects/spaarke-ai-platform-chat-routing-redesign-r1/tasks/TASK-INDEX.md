@@ -255,13 +255,13 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 024 | Add deprecation telemetry to `/by-name/` endpoint (warning log + Activity tags) | ✅ | STANDARD | true | 1-H | 022 | `bff-api`, `telemetry`, `ADR-015` — 3 integration tests; 6 KQL dashboard queries documented; +0.01 MB |
 | 025 | Phase 1 stable-ID migration regression suite (10 facts × 9 consumer surfaces) | ✅ | STANDARD | true | 1-I | 023,024 | `testing`, `integration-test` — `Phase1StableIdMigrationSuite.cs`; 10/10 pass in 43ms; recommended as task 027 first gate check |
 | 026 | Deploy Phase 1 to bff-dev environment | ⏭️ DEFERRED | STANDARD | true | 1-I | 023,024 | `deploy`, `azure`, `bff-api` — **DEFERRED 2026-06-22 per owner**: deploy held until later managed window. Code/tests verified locally — Phase 1 work is solid in code regardless of when bff-dev catches up. Task 027 exit gate uses LOCAL test suite (task 025) instead of deployed smoke tests. |
-| 027 | Phase 1 exit gate — verify zero hardcoded GUIDs/names in `Services/Ai/` via grep | 🔲📝 | MINIMAL | true | 1-J | 025,026 | `verification` |
+| 027 | Phase 1 exit gate — verify zero hardcoded GUIDs/names in `Services/Ai/` via grep | ✅ | MINIMAL | true | 1-J | 025,026 | `verification` — GO; strict `Guid.Parse(...)` returns 0; 10/10 tests pass 186ms; 2 const stable-IDs in `AppOnlyAnalysisService` are Pattern B execution-path consts (task 020 design); evidence: `notes/handoffs/027-phase-1-exit-gate-evidence.md` |
 
 ## Phase 2 — WP1.5 Index Governance
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|
-| 030 | **DEMOTED 2026-06-22 (Q4)**: VERIFY 4 tracking fields on `sprk_analysisplaybook` (`sprk_lastindexedat`, `sprk_indexstatus`, `sprk_lastindexerror`, `sprk_indexhash`) — Dataverse describe confirms all 4 already exist with correct types + option values. No schema work. 30-min verification + spec.md note. | 🔲📝 | MINIMAL | true | 2-A | 027 | `dataverse`, `verification` |
+| 030 | **DEMOTED 2026-06-22 (Q4)**: VERIFY 4 tracking fields on `sprk_analysisplaybook` (`sprk_lastindexedat`, `sprk_indexstatus`, `sprk_lastindexerror`, `sprk_indexhash`) — Dataverse describe confirms all 4 already exist with correct types + option values. No schema work. 30-min verification + spec.md note. | ✅ | MINIMAL | true | 2-A | 027 | `dataverse`, `verification` — all 4 verified via MCP describe; indexstatus has 5 options (codes 100000000–100000004); lastindexerror NVARCHAR(1000) and indexhash NVARCHAR(100) both wider than spec (headroom); evidence: `notes/handoffs/030-schema-verification-evidence.md` |
 | 031 | Add `sprk_jpsmatchingmetadata` (MultilineText) + document JSON schema | 🔲📝 | STANDARD | false | 2-A | 030 | `dataverse`, `solution`, `fields` |
 | 032 | Extend `PlaybookEmbeddingService.cs:28-30` embed-input to include `documentTypes + intents + triggerPhrases` | 🔲📝 | FULL | true | 2-B | 031 | `bff-api`, `ai`, `services` |
 | 033 | Power Apps "Send to Index" button on `sprk_analysisplaybook` form | 🔲📝 | STANDARD | true | 2-B | 031 | `dataverse`, `power-apps`, `forms` |

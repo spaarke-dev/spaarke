@@ -1,7 +1,7 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-22 (by `/context-handoff` pre-compact; Phase 1 nearly complete; rebased onto master)
-> **Recovery**: Read "Quick Recovery" section first. User will run `/compact` after this handoff; on resume, continue with Wave 1-J task 027.
+> **Last Updated**: 2026-06-22 (Phase 1 ✅ CLOSED; task 027 exit-gate GO; Phase 2 Wave 2-A in progress — task 030 verification-only)
+> **Recovery**: Phase 1 complete. Task 027 = GO. Next: task 030 verification of 4 sprk_analysisplaybook tracking fields.
 
 ---
 
@@ -13,9 +13,9 @@
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
 | **Origin status** | Rebased onto `origin/master` + force-pushed clean. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
 | **Last commit (post-rebase)** | `6b0d74605` — task 025 commit `7a33b37ee` rebased on top of master's Daily Update Service r2.2 work |
-| **Phase status** | Phase 0 ✅ closed · Phase 1 nearly done (waves 1-A through 1-I/025 ✅; **026 ⏭️ DEFERRED**; **1-J/027 IS NEXT**) |
+| **Phase status** | Phase 0 ✅ · Phase 1 ✅ CLOSED (027 GO; 026 ⏭️ DEFERRED) · **Phase 2 Wave 2-A IN PROGRESS** |
 | **Execution mode** | Autonomous wave-by-wave per `current-task.md` rules; user explicitly authorized Phase 0-6 |
-| **Next Action** | **Dispatch Wave 1-J task 027** (Phase 1 exit gate — local verification only since 026 deferred). Read POML at `tasks/027-phase-1-exit-gate.poml`. STANDARD rigor. After 027 ✅, proceed to Phase 2 (WP1.5 index governance, MVP-trimmed). |
+| **Next Action** | **Dispatch Wave 2-A task 030** (verification-only per Q4 — 4 sprk_analysisplaybook fields already exist). Read POML at `tasks/030-*.poml`. MINIMAL rigor. After 030 ✅, run task 031 (add `sprk_jpsmatchingmetadata` MultilineText). |
 
 ### Critical context (3-sentence version)
 
