@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="015" project="spaarke-ai-platform-chat-routing-redesign-r1">
   <metadata>
-    <title>Migrate SessionSummarizeOrchestrator to stable code (FR-05 first)</title>
-    <phase>1: §1.7 Stable Codes Migration</phase>
+    <title>Migrate SessionSummarizeOrchestrator to stable ID (FR-05 first)</title>
+    <phase>1: §1.7 Stable IDs Migration</phase>
     <status>not-started</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>014</dependencies>
@@ -16,18 +16,20 @@
   </metadata>
 
   <prompt>
-    Remove the hardcoded `ChatSummarizePlaybookId` GUID at `SessionSummarizeOrchestrator.cs:78-79` (`44285d15-...`) and migrate the orchestrator to resolve the playbook by stable code `summarize-document-chat` via the `/by-code/{code}` endpoint or direct `IPlaybookLookupService`. Per spec FR-05 this is the FIRST stable-code migration (lowest blast radius — no config override exists today).
+    Remove the hardcoded `ChatSummarizePlaybookId` GUID at `SessionSummarizeOrchestrator.cs:78-79` (`44285d15-...`) and migrate the orchestrator to resolve the playbook by stable ID `summarize-document-chat` via the `/by-id/{id}` endpoint or direct `IPlaybookLookupService`. Per spec FR-05 this is the FIRST stable-ID migration (lowest blast radius — no config override exists today).
   </prompt>
 
   <role>SPAARKE platform BFF developer. Expert in chat-routing layer + minimal-API DI.</role>
 
   <goal>
-    `SessionSummarizeOrchestrator.ChatSummarizePlaybookId` constant removed. Playbook resolved by stable code `summarize-document-chat` (lifted to typed options or direct `IPlaybookLookupService.GetByCodeAsync`). Integration test confirms `/api/ai/chat/sessions/{id}/summarize` continues to work end-to-end with same output. Telemetry "path" dimension on `R5SummarizeTelemetry` unchanged.
+    `SessionSummarizeOrchestrator.ChatSummarizePlaybookId` constant removed. Playbook resolved by stable ID `summarize-document-chat` (lifted to typed options or direct `IPlaybookLookupService.GetByIdAsync`). Integration test confirms `/api/ai/chat/sessions/{id}/summarize` continues to work end-to-end with same output. Telemetry "path" dimension on `R5SummarizeTelemetry` unchanged.
   </goal>
 
   <context>
     <background>
       Per spec.md §1.7 Pattern A + FR-05. `SessionSummarizeOrchestrator` is the chat /summarize convergence point (per R6 FR-26). It has no config override today — purely hardcoded GUID — which makes it both: (a) lowest blast radius (no env-specific config to maintain), and (b) the riskiest if migration regresses (no fallback). Tests cover the convergence invariant; do not weaken.
+
+      **Refresh (Q&A 2026-06-22 Q1)**: This POML's language was refreshed to match the post-Q1 code reality — stable lookups go through `sprk_playbookid` (immutable opaque ID, GUID-format), NOT `sprk_playbookcode`. See spec.md § Canonical Field Naming for the corrected role table.
     </background>
     <relevant-files>
       <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
@@ -40,12 +42,12 @@
 
   <constraints>
     <constraint source="ADR-013">No direct injection of `IOpenAiClient`/`IPlaybookService` into CRUD code; orchestrator already inside Services/Ai layer — OK.</constraint>
-    <constraint source="ADR-014">Code lookup uses 5-min cache from task 010 endpoint or `IPlaybookLookupService` cached layer.</constraint>
+    <constraint source="ADR-014">ID lookup uses 5-min cache from task 010 endpoint or `IPlaybookLookupService` cached layer.</constraint>
     <constraint source="ADR-018">Lift to typed options preferred over raw `IConfiguration["..."]` indexer.</constraint>
     <constraint source="ADR-029">Per-task BFF publish-size measurement; expect minor delta only.</constraint>
     <constraint source="spec">R6 FR-26 convergence invariant: `/summarize` slash + agent-tool dispatch + NL "summarize" all converge on this playbook. Preserve.</constraint>
     <constraint source="spec">R6 FR-30 dedup invariant: chat + workspace SUM-CHAT siblings dedup to one render. Preserve.</constraint>
-    <constraint source="project">Test update obligation (CLAUDE.md §10) — modify tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` to use stable code in test fixtures.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — modify tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` to use stable ID in test fixtures.</constraint>
   </constraints>
 
   <knowledge>
@@ -64,13 +66,13 @@
 
   <steps>
     <step order="1">Read `SessionSummarizeOrchestrator.cs:78-79` — locate `ChatSummarizePlaybookId` constant.</step>
-    <step order="2">Identify the playbook lookup call site that uses this constant; trace the flow to understand what shape the orchestrator needs (GUID? Entity? Code?).</step>
+    <step order="2">Identify the playbook lookup call site that uses this constant; trace the flow to understand what shape the orchestrator needs (GUID? Entity? ID?).</step>
     <step order="3">Choose migration shape:
-      (a) Lift to `WorkspaceOptions.SummarizeChatPlaybookCode = "summarize-document-chat"` typed option; OR
-      (b) Directly use `IPlaybookLookupService.GetByCodeAsync("summarize-document-chat", tenantId)` per ADR-018 preference.
+      (a) Lift to `WorkspaceOptions.SummarizeChatPlaybookId = "summarize-document-chat"` typed option; OR
+      (b) Directly use `IPlaybookLookupService.GetByIdAsync("summarize-document-chat", tenantId)` per ADR-018 preference.
       Document choice in PR.</step>
-    <step order="4">Replace hardcoded GUID + code path with code-based resolution.</step>
-    <step order="5">Update unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` — fixtures should use stable code.</step>
+    <step order="4">Replace hardcoded GUID + code path with ID-based resolution.</step>
+    <step order="5">Update unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` — fixtures should use stable ID.</step>
     <step order="6">Verify telemetry "path" dimension on `R5SummarizeTelemetry` unchanged (spec.md §1.5 mentioned).</step>
     <step order="7">Run `dotnet build` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Must pass.</step>
     <step order="8">Run integration test for `/api/ai/chat/sessions/{id}/summarize`. Must pass.</step>
@@ -105,7 +107,7 @@
   </acceptance-criteria>
 
   <notes>
-    First stable-code migration. If any unexpected coupling surfaces (e.g., orchestrator passes GUID downstream), document in notes/debug/ before patching. R6 FR-26 + FR-30 invariants are sacred — do not weaken to ease migration.
+    First stable-ID migration. If any unexpected coupling surfaces (e.g., orchestrator passes GUID downstream), document in notes/debug/ before patching. R6 FR-26 + FR-30 invariants are sacred — do not weaken to ease migration.
   </notes>
 
   <execution>

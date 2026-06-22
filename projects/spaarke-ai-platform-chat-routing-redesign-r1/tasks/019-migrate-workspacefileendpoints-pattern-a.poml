@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="019" project="spaarke-ai-platform-chat-routing-redesign-r1">
   <metadata>
-    <title>Migrate WorkspaceFileEndpoints to stable code (Pattern A — consumes SummarizePlaybookCode)</title>
-    <phase>1: §1.7 Stable Codes Migration</phase>
+    <title>Migrate WorkspaceFileEndpoints to stable ID (Pattern A — consumes SummarizePlaybookId)</title>
+    <phase>1: §1.7 Stable IDs Migration</phase>
     <status>not-started</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>015</dependencies>
@@ -15,18 +15,20 @@
   </metadata>
 
   <prompt>
-    Replace the hardcoded GUID resolution at `WorkspaceFileEndpoints.cs:30,254` with a stable-code lookup via `IPlaybookLookupService.GetByCodeAsync(WorkspaceOptions.SummarizePlaybookCode, tenantId)`. Task 012 already added the typed option + fixed the ADR-018 indexer violation. This task replaces the GUID-based resolution with code-based, and removes the backward-compat `SummarizePlaybookId` GUID property once consumer migration is complete.
+    Replace the hardcoded GUID resolution at `WorkspaceFileEndpoints.cs:30,254` with a stable-ID lookup via `IPlaybookLookupService.GetByIdAsync(WorkspaceOptions.SummarizePlaybookId, tenantId)`. Task 012 already added the typed option + fixed the ADR-018 indexer violation. This task replaces the legacy GUID-based resolution with stable-ID-based, and retires the backward-compat legacy GUID property once consumer migration is complete.
   </prompt>
 
   <role>SPAARKE platform BFF developer. Expert in workspace file orchestration endpoints + minimal-API DI.</role>
 
   <goal>
-    `WorkspaceFileEndpoints.cs:30,254` resolves the summarize playbook via `IPlaybookLookupService.GetByCodeAsync(options.SummarizePlaybookCode, tenantId)`. Hardcoded GUID removed; `WorkspaceOptions.SummarizePlaybookId` GUID property retired (or marked `[Obsolete]` for stabilization window). Endpoint integration test passes asserting summarize flow end-to-end.
+    `WorkspaceFileEndpoints.cs:30,254` resolves the summarize playbook via `IPlaybookLookupService.GetByIdAsync(options.SummarizePlaybookId, tenantId)`. Hardcoded legacy GUID removed; the legacy raw-GUID property retired (or marked `[Obsolete]` for stabilization window). Endpoint integration test passes asserting summarize flow end-to-end.
   </goal>
 
   <context>
     <background>
-      Per spec FR-02 + FR-04 + §1.7 Pattern A. Task 012 fixed the ADR-018 indexer violation but kept backward-compat GUID property. This task completes the migration: code-based resolution + GUID property retirement. The endpoint at `WorkspaceFileEndpoints.cs:254` is the workspace-side "summarize file" handler used by SpaarkeAi workspace tabs.
+      Per spec FR-02 + FR-04 + §1.7 Pattern A. Task 012 fixed the ADR-018 indexer violation but kept backward-compat legacy raw-GUID property. This task completes the migration: stable-ID-based resolution + legacy raw-GUID property retirement. The endpoint at `WorkspaceFileEndpoints.cs:254` is the workspace-side "summarize file" handler used by SpaarkeAi workspace tabs.
+
+      **Refresh (Q&A 2026-06-22 Q1)**: This POML's language was refreshed to match the post-Q1 code reality — stable lookups go through `sprk_playbookid` (immutable opaque ID, GUID-format), NOT `sprk_playbookcode`. See spec.md § Canonical Field Naming for the corrected role table.
     </background>
     <relevant-files>
       <file>src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs</file>
@@ -44,9 +46,9 @@
     <constraint source="ADR-014">Cached lookup.</constraint>
     <constraint source="ADR-018">No raw `IConfiguration[]` indexer (task 012 already fixed; verify regression).</constraint>
     <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
-    <constraint source="spec">NFR-02: production-bound `summarize-document-for-workspace@v1` (now `sprk_playbookcode = "summarize-document-workspace"`) unchanged.</constraint>
+    <constraint source="spec">NFR-02: production-bound `summarize-document-for-workspace@v1` (now `sprk_playbookid = "summarize-document-workspace"`) unchanged.</constraint>
     <constraint source="project">DO NOT modify sibling Pattern A targets (016/017/018).</constraint>
-    <constraint source="project">Marking `SummarizePlaybookId` `[Obsolete]` is preferred over deletion in this task; deletion happens in a later stabilization window.</constraint>
+    <constraint source="project">Marking the legacy raw-GUID property `[Obsolete]` is preferred over deletion in this task; deletion happens in a later stabilization window.</constraint>
   </constraints>
 
   <knowledge>
@@ -68,11 +70,11 @@
 
   <steps>
     <step order="1">Read `WorkspaceFileEndpoints.cs:30,254`. Locate GUID resolution call sites.</step>
-    <step order="2">Verify task 012 already lifted `IConfiguration["..."]` to `IOptions&lt;WorkspaceOptions&gt;.Value.SummarizePlaybookId` (GUID property).</step>
-    <step order="3">Verify `WorkspaceOptions.SummarizePlaybookCode` exists (task 012) and `Workspace:SummarizePlaybookCode = "summarize-document-workspace"` in appsettings.</step>
-    <step order="4">Verify `GET /api/ai/playbooks/by-code/summarize-document-workspace` returns 200 (task 014 backfill).</step>
-    <step order="5">Refactor endpoint handler: inject `IPlaybookLookupService`; replace `_options.Value.SummarizePlaybookId` resolution with `await _playbookLookup.GetByCodeAsync(_options.Value.SummarizePlaybookCode, tenantId, ct)`.</step>
-    <step order="6">Mark `WorkspaceOptions.SummarizePlaybookId` `[Obsolete("Use SummarizePlaybookCode + IPlaybookLookupService.GetByCodeAsync. Removed in stabilization window per spec FR-02.", error: false)]`.</step>
+    <step order="2">Verify task 012 already lifted `IConfiguration["..."]` to typed options (legacy raw-GUID property).</step>
+    <step order="3">Verify `WorkspaceOptions.SummarizePlaybookId` exists (task 012) and `Workspace:SummarizePlaybookId = "summarize-document-workspace"` in appsettings.</step>
+    <step order="4">Verify `GET /api/ai/playbooks/by-id/summarize-document-workspace` returns 200 (task 014 backfill).</step>
+    <step order="5">Refactor endpoint handler: inject `IPlaybookLookupService`; replace legacy raw-GUID resolution with `await _playbookLookup.GetByIdAsync(_options.Value.SummarizePlaybookId, tenantId, ct)`.</step>
+    <step order="6">Mark the legacy raw-GUID property `[Obsolete("Use SummarizePlaybookId + IPlaybookLookupService.GetByIdAsync. Removed in stabilization window per spec FR-02.", error: false)]`.</step>
     <step order="7">Update integration test `tests/integration/Sprk.Bff.Api.IntegrationTests/WorkspaceFileEndpointsTests.cs` to exercise summarize flow end-to-end; assert response shape unchanged.</step>
     <step order="8">Run `dotnet build` + `dotnet test`. Pass.</step>
     <step order="9">Measure publish size; report delta.</step>
@@ -88,8 +90,8 @@
   </tools>
 
   <outputs>
-    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs — refactored to stable code</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs — SummarizePlaybookId marked [Obsolete] (value-only attribute add)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs — refactored to stable ID</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs — legacy raw-GUID property marked [Obsolete] (value-only attribute add)</output>
     <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/WorkspaceFileEndpointsTests.cs — end-to-end summarize test</output>
     <output type="docs">notes/handoffs/019-bff-publish-delta.md</output>
   </outputs>
@@ -98,7 +100,7 @@
     <criterion testable="true">`WorkspaceFileEndpoints.cs` injects `IPlaybookLookupService`.</criterion>
     <criterion testable="true">No hardcoded GUID for summarize playbook remains in the endpoints file.</criterion>
     <criterion testable="true">`grep "IConfiguration\\[\"Workspace:SummarizePlaybookId\"\\]" src/` STILL returns zero matches (task 012 invariant preserved).</criterion>
-    <criterion testable="true">`SummarizePlaybookId` property marked `[Obsolete]`.</criterion>
+    <criterion testable="true">Legacy raw-GUID property marked `[Obsolete]`.</criterion>
     <criterion testable="true">Integration test exits 0.</criterion>
     <criterion testable="true">Publish-size delta within NFR-01 thresholds.</criterion>
     <criterion testable="true">code-review + adr-check exit 0.</criterion>

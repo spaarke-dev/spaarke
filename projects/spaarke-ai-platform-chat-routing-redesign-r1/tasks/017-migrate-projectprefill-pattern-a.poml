@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="017" project="spaarke-ai-platform-chat-routing-redesign-r1">
   <metadata>
-    <title>Migrate ProjectPreFillService to stable code (Pattern A — consumes ProjectPreFillPlaybookCode)</title>
-    <phase>1: §1.7 Stable Codes Migration</phase>
+    <title>Migrate ProjectPreFillService to stable ID (Pattern A — consumes ProjectPreFillPlaybookId)</title>
+    <phase>1: §1.7 Stable IDs Migration</phase>
     <status>not-started</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>015</dependencies>
@@ -15,18 +15,20 @@
   </metadata>
 
   <prompt>
-    Replace the hardcoded GUID at `ProjectPreFillService.cs:42-43` with a stable-code lookup via `IPlaybookLookupService.GetByCodeAsync(WorkspaceOptions.ProjectPreFillPlaybookCode, tenantId)`. Per Pattern A, the typed option is already pre-added in task 013. Also scrub the stale `3f21cec1-` GUID COMMENT at line 40 if task 003 did not already remove it (verify pre-flight). NFR-07 BINDING: do NOT modify the pre-fill flow signature, `useAiPrefill` consumer, 45s timeout, or `$choices` output contract.
+    Replace the hardcoded GUID at `ProjectPreFillService.cs:42-43` with a stable-ID lookup via `IPlaybookLookupService.GetByIdAsync(WorkspaceOptions.ProjectPreFillPlaybookId, tenantId)`. Per Pattern A, the typed option is already pre-added in task 013. Also scrub the stale `3f21cec1-` GUID COMMENT at line 40 if task 003 did not already remove it (verify pre-flight). NFR-07 BINDING: do NOT modify the pre-fill flow signature, `useAiPrefill` consumer, 45s timeout, or `$choices` output contract.
   </prompt>
 
   <role>SPAARKE platform BFF developer. Expert in pre-fill orchestration + NFR-07 binding invariants.</role>
 
   <goal>
-    `ProjectPreFillService.cs` resolves the pre-fill playbook via `IPlaybookLookupService.GetByCodeAsync(options.ProjectPreFillPlaybookCode, tenantId)`. Hardcoded GUID removed. Stale `3f21cec1-` comment scrubbed (or confirmed already-removed by task 003). Public contract (signature, 45s timeout, `$choices` output) unchanged. Unit + integration tests pass.
+    `ProjectPreFillService.cs` resolves the pre-fill playbook via `IPlaybookLookupService.GetByIdAsync(options.ProjectPreFillPlaybookId, tenantId)`. Hardcoded GUID removed. Stale `3f21cec1-` comment scrubbed (or confirmed already-removed by task 003). Public contract (signature, 45s timeout, `$choices` output) unchanged. Unit + integration tests pass.
   </goal>
 
   <context>
     <background>
       Per spec FR-02 + §1.7 Pattern A + NFR-07. `ProjectPreFillService.cs:42-43` is the project-creation companion to matter-creation (task 016) and follows the identical Pattern A shape. The line-40 stale comment is documented in task 003 — verify removal status; if 003 missed it, this task removes it.
+
+      **Refresh (Q&A 2026-06-22 Q1)**: This POML's language was refreshed to match the post-Q1 code reality — stable lookups go through `sprk_playbookid` (immutable opaque ID, GUID-format), NOT `sprk_playbookcode`. See spec.md § Canonical Field Naming for the corrected role table.
     </background>
     <relevant-files>
       <file>src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs</file>
@@ -44,7 +46,7 @@
     <constraint source="ADR-018">Read via typed options; no `IConfiguration[]` indexer.</constraint>
     <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
     <constraint source="spec">NFR-07 BINDING: pre-fill signature + 45s timeout + `useAiPrefill` contract + `$choices` output unchanged.</constraint>
-    <constraint source="spec">NFR-02: production-bound playbook `"Create New Project Pre-Fill"` (now `sprk_playbookcode = "create-project-prefill"`) unchanged.</constraint>
+    <constraint source="spec">NFR-02: production-bound playbook `"Create New Project Pre-Fill"` (now `sprk_playbookid = "create-project-prefill"`) unchanged.</constraint>
     <constraint source="project">DO NOT modify `WorkspaceOptions.cs` (task 013 owns); DO NOT modify sibling Pattern A targets (016/018/019).</constraint>
     <constraint source="project">Test update obligation per CLAUDE.md §10 F.</constraint>
   </constraints>
@@ -68,11 +70,11 @@
   <steps>
     <step order="1">Read `ProjectPreFillService.cs:40-44`. Locate hardcoded GUID + stale `3f21cec1-` comment.</step>
     <step order="2">If `3f21cec1-` comment still present, remove it (task 003 may have missed); otherwise note in handoff.</step>
-    <step order="3">Verify `WorkspaceOptions.ProjectPreFillPlaybookCode = "create-project-prefill"` exists (task 013).</step>
-    <step order="4">Verify `GET /api/ai/playbooks/by-code/create-project-prefill` returns 200 (task 014 backfill).</step>
-    <step order="5">Refactor: inject `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService`; replace hardcoded GUID with `await _playbookLookup.GetByCodeAsync(_options.Value.ProjectPreFillPlaybookCode, tenantId, ct)`.</step>
+    <step order="3">Verify `WorkspaceOptions.ProjectPreFillPlaybookId = "create-project-prefill"` exists (task 013).</step>
+    <step order="4">Verify `GET /api/ai/playbooks/by-id/create-project-prefill` returns 200 (task 014 backfill).</step>
+    <step order="5">Refactor: inject `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService`; replace hardcoded GUID with `await _playbookLookup.GetByIdAsync(_options.Value.ProjectPreFillPlaybookId, tenantId, ct)`.</step>
     <step order="6">Verify public method signature (consumed by `useAiPrefill`) unchanged. 45s timeout preserved. `$choices` output preserved.</step>
-    <step order="7">Update unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ProjectPreFillServiceTests.cs` — fixtures use stable code.</step>
+    <step order="7">Update unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ProjectPreFillServiceTests.cs` — fixtures use stable ID.</step>
     <step order="8">Add/update integration test asserting end-to-end project pre-fill returns `$choices`-shaped output within 45s.</step>
     <step order="9">Run `dotnet build` + `dotnet test`. Pass.</step>
     <step order="10">Measure publish size; report delta.</step>
@@ -88,8 +90,8 @@
   </tools>
 
   <outputs>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs — refactored to stable code</output>
-    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ProjectPreFillServiceTests.cs — fixtures use stable code</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs — refactored to stable ID</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ProjectPreFillServiceTests.cs — fixtures use stable ID</output>
     <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/ProjectPreFillIntegrationTests.cs — NFR-07 regression test</output>
     <output type="docs">notes/handoffs/017-bff-publish-delta.md</output>
   </outputs>
