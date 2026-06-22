@@ -1,8 +1,8 @@
 # ADR-036: Background-Job Infrastructure (Spaarke.Scheduling) (Concise)
 
-> **Status**: Accepted
+> **Status**: Accepted — shipped in R3 (2026-06-22; Phase 2 reconciliation consumer pending operator topic deploy per task 071)
 > **Domain**: BFF API / Background Workers / Shared Library
-> **Last Updated**: 2026-06-21
+> **Last Updated**: 2026-06-22 (post-implementation polish per R3 task 101)
 > **Source project**: `spaarke-platform-foundations-r3` Part 2 (closes the "28 BackgroundService implementations with no shared framework" gap surfaced during R2 UAT)
 > **Cross-references**: extends ADR-001 (in-process workers); reinforces ADR-010 (DI minimalism); reuses ADR-012 (shared library convention); aligns with CLAUDE.md §10.
 
@@ -12,10 +12,10 @@
 
 A new shared library `src/server/shared/Spaarke.Scheduling/` provides a uniform contract + host + admin surface for **schedule-driven** background jobs across Spaarke. Cron parsing via the `Cronos` NuGet package (~63 KB). Job definitions persist in a new Dataverse entity `sprk_backgroundjob`; per-run instances in `sprk_backgroundjobrun`. Admin operators control jobs via `/api/admin/jobs/*` endpoints behind the existing `SystemAdmin` policy.
 
-**TWO reference consumers ship in R3** to prove the framework end-to-end:
+**Reference consumers** to prove the framework end-to-end:
 
-1. `PlaybookSchedulerJob` — migration of the legacy `PlaybookSchedulerService` (deleted). Single `sprk_backgroundjob` row (`jobId="notification-playbook-scheduler"`) that fans out across the 7 active notification playbooks. Each child playbook receives a **fresh `correlationId`** per Q1 owner clarification; the parent run records all children correlationIds in `sprk_backgroundjobrun.sprk_resultjson` for trace correlation.
-2. `MembershipReconciliationJob` — nightly reconciliation of the Phase 2 `sprk_userentityassociation` junction table against source-of-truth lookups (real reconciliation logic per Phase 2 owner decision; NOT a no-op).
+1. **`PlaybookSchedulerJob` — SHIPPED in R3** (task 023). Migration of the legacy `PlaybookSchedulerService` (deleted). Single `sprk_backgroundjob` row (`jobId="notification-playbook-scheduler"`) that fans out across the 7 active notification playbooks. Each child playbook receives a **fresh `correlationId`** per Q1 owner clarification; the parent run records all children correlationIds in `sprk_backgroundjobrun.sprk_resultjson` for trace correlation. 27 unit tests + 28 integration tests (R3 tasks 023 + 025).
+2. **`MembershipReconciliationJob` — DEFERRED to post-operator-deploy** (R3 task 085). Phase 2 reconciliation against the `sprk_userentityassociation` junction depends on Service Bus topic `sprk-membership-changes` deployment, which is operator-gated via task 071's Bicep (`infrastructure/bicep/modules/membership-topic.bicep` authored + clean `az bicep build`; deferred deploy per `projects/spaarke-platform-foundations-r3/notes/operator-followup-task071.md`). Tasks 084 + 085 unblock once the topic is provisioned. The framework contracts are stable today; Phase 2 consumer code is ready to write when unblocked.
 
 **Out of scope for R3** (opportunistic migration over time):
 - The other 26 `BackgroundService` implementations in BFF — they keep their bespoke patterns until touched.

@@ -1,8 +1,8 @@
 # Task Index — Spaarke Platform Foundations (R3)
 
 > **Project**: `spaarke-platform-foundations-r3`
-> **Last Updated**: 2026-06-21 (task 060 — P7.0 `sprk_searchindexed` consumer inventory authored at `notes/sprk-searchindexed-consumer-inventory.md`; discovery-only, no code changes)
-> **Status**: 30 / 69 complete; 1 blocked-operator (071)
+> **Last Updated**: 2026-06-22 (Waves 17-19 — tasks 062 + 094 + 063 + 064 + 066 + 102 + 101 closed)
+> **Status**: 54 / 69 complete; 1 blocked-operator (071); 14 pending (operator/human-gated by 071 deploy)
 > **Branch**: `work/spaarke-platform-foundations-r3`
 > **Parallel-optimized**: Yes (per user directive 2026-06-20)
 
@@ -78,8 +78,8 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 094 | PlaybookBuilder component tests + snapshots | P9 | ✅ | 091, 092, 093 | — | true | STANDARD |
 | 095 | Manual UAT — H2 scenarios in spaarkedev1 | P9 | 🔲 | 091-094 | — | true | STANDARD |
 | 100 | ADR-034 final polish + INDEX update | P10 | 🔲 | 037, 087 | **U** main-only | false | STANDARD |
-| 101 | ADR-036 final polish + INDEX update | P10 | 🔲 | 017, 023, 025 | **U** main-only | false | STANDARD |
-| 102 | Refresh `playbook-architecture.md` Known Pitfalls | P10 | 🔲 | 005, 065, 066 | — | true | STANDARD |
+| 101 | ADR-036 final polish + INDEX update | P10 | ✅ | 017, 023, 025 | **U** main-only | false | STANDARD |
+| 102 | Refresh `playbook-architecture.md` Known Pitfalls | P10 | ✅ | 005, 065, 066 | — | true | STANDARD |
 | 103 | Refresh `sprk_matter-related-tables.md` data model doc | P10 | ✅ | 030 | — | true | STANDARD |
 | 104 | Author `membership-resolution-pattern.md` architecture doc | P10 | 🔲 | 037, 087 | — | true | STANDARD |
 | 110 | Project wrap-up (lessons-learned + code-review + cleanup) | P11 | 🔲 | all prior | — | false | FULL |

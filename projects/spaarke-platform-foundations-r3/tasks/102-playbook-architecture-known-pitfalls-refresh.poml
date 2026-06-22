@@ -1,7 +1,26 @@
 <task id="R3-102" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Refresh `docs/architecture/playbook-architecture.md` Known Pitfalls section</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Refreshed `docs/architecture/playbook-architecture.md` Known Pitfalls section per FR-3G4 + AC-Docs:
+      - Restructured to canonical G1-G11 catalog (from design.md Part 3 §G1-G11) replacing the previous unnumbered 6-item list.
+      - Added status legend (Fixed (R3) / Documented (R3) / Deferred to R4).
+      - G1 (Handlebars `??`): Fixed — cited tasks 003, 004, 050, 051, 052, 053 (default helper + 3 playbook migrations + integration tests).
+      - G2 (OutputVariable rename): Fixed — cited tasks 091 + 094 (rename guard via VariableReferencePanel.tsx + canvasValidation.ts).
+      - G3 (Condition branch wiring): Fixed — cited tasks 092 + 094 (branch metadata auto-generation).
+      - G4 (CreateNotification idempotency-on-unread): Explicit doc paragraph added per FR-3G4. Documented the unread-key dedupe in CreateNotificationNodeExecutor + the independent ScheduledJobHost.HasRunForScheduledTimeAsync tick-coalescing mechanism (task 014).
+      - G5 (sprk_matterteammember): Fixed (Part 1) — cited tasks 030-035 + 037 (MembershipResolverService + ADR-034).
+      - G6 (canvas-server drift): Fixed — cited task 065 (CI drift test).
+      - G7 (Singleton-Scoped DI pattern): Fixed (documentation) — cited task 066 (node-executor authoring pattern doc).
+      - G8 (sprk_searchindexed misleading): Fixed — cited tasks 060 + 061 + 062 (consumer inventory + schema migration + dual-write executor).
+      - G9 (unnecessary edges): Fixed — cited tasks 093 + 094 (edge perf hint advisory).
+      - G10 (unrendered template leakage): Fixed — cited task 005 (runtime unrendered-template detection event).
+      - G11 (scheduler rollout-mode): Deferred to R4 — `spaarke-playbook-rollout-mode-r4` + ADR-035 (reserved); also added R4 Follow-up table at section end.
+      - Added Changelog entry 2.1 (2026-06-22) summarizing the refresh.
+      No source code changes; docs-only. No .claude/ writes. AC-Docs satisfied.
+    </completion-notes>
     <phase>P10</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>

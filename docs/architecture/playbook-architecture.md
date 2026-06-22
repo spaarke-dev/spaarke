@@ -387,17 +387,90 @@ Each playbook node maps conceptually to an AI agent: Node -> `AIAgent`, Action -
 
 ## Known Pitfalls
 
-1. **Canvas-to-Dataverse mapping drift**: If a new canvas node type is added to the builder without updating both `playbookNodeSync.ts` (client) and `NodeService.cs` (server), the node falls through to `AIAnalysis` default, causing scope resolution errors and misleading "requires an Action" messages.
+> **Status Legend** (refreshed 2026-06-22 per R3 spec FR-3G4 + AC-Docs):
+> - **Fixed (R3)** — Engineered fix landed in `spaarke-platform-foundations-r3`. Original description retained for context.
+> - **Documented (R3)** — Behavior is intentional but surprising; documented explicitly so authors can plan around it.
+> - **Deferred to R4** — Out of R3 scope; tracked in successor project.
+>
+> Pitfall numbering follows the canonical G1-G11 catalog from `projects/spaarke-platform-foundations-r3/design.md` §Part 3. G5 is Part-1 (membership) and listed here for completeness.
 
-2. **AiAnalysisNodeExecutor is Singleton but IToolHandlerRegistry is Scoped**: The executor uses `IServiceProvider.CreateScope()` per execution to resolve the scoped registry. Forgetting this pattern when adding new executors that depend on scoped services will cause DI resolution failures.
+### G1 — Handlebars `??` operator not supported; renders as literal text
 
-3. **DeliverToIndex "indexed" flag is misleading**: `sprk_searchindexed = true` means the job was **enqueued**, not that indexing completed. To verify actual index presence, query Azure AI Search directly.
+The Handlebars.NET engine does not support the JavaScript-style `{{X ?? 'Y'}}` null-coalescing operator. When authors wrote this pattern in playbook JSON (carried over from PCF muscle memory), the engine emitted the raw literal text instead of falling back to the default — a silent breakage mode affecting 2 of 7 active notification playbooks (detected during R2 UAT 2026-06-20).
 
-4. **Unnecessary dependency edges kill parallelism**: Every edge between nodes forces sequential execution. Only add edges where a node actually references `{{upstream.output}}` in its prompt or config. Audit playbooks with unexpectedly slow execution for unnecessary edges.
+**Fixed (R3)**: New `{{default X 'Y'}}` Handlebars helper registered in `TemplateEngine.cs` (FR-3H1.1); 3 known-broken playbooks migrated from `??` to `default` helper (FR-3H1.3); integration tests assert rendered output (task 053). See: tasks 003 + 004 + 050 + 051 + 052 + 053.
 
-5. **Template variable resolution timing**: Template variables resolve at execution time using outputs from completed nodes. If a referenced variable's node failed or was skipped, the template renders the raw `{{variable}}` string. Condition nodes should guard downstream template usage.
+### G2 — Renaming a node's `OutputVariable` silently breaks downstream `{{x.output}}` references
 
-6. **Scheduler runs all notification playbooks for all users**: The opt-out model means a new notification playbook is immediately active for every user. There is no per-user opt-in -- plan accordingly when deploying new notification playbooks.
+In the Builder UI, changing a node's `OutputVariable` did not propagate to other nodes that reference `{{<oldName>.output*}}` in their prompts/configs. Downstream nodes would render the raw `{{...}}` literal at runtime.
+
+**Fixed (R3)**: PlaybookBuilder UI `OutputVariable` rename guard added (FR-3H2.1) — scans all other nodes for `{{<oldName>.output*}}` references via existing `VariableReferencePanel.tsx` infrastructure; presents dialog: (a) Auto-rename + find/replace all references [default], (b) Keep old name, (c) Continue and break. New validation rule in `services/canvasValidation.ts`. See: tasks 091 + 094.
+
+### G3 — Condition node's `selectedBranch` only skips downstream nodes with explicit branch metadata
+
+Without `DependsOn` branch metadata wired (`true` / `false` / `both`), all downstream nodes execute regardless of the Condition node's result, defeating the conditional intent.
+
+**Fixed (R3)**: PlaybookBuilder Branch Wiring auto-generation (FR-3H2.2) — when an edge connects a Condition node (handled via existing `ConditionEditor.tsx`) to a downstream node, the UI prompts for branch and persists in `DependsOn` branch metadata; edges visualize differently per branch. See: tasks 092 + 094.
+
+### G4 — `CreateNotification` idempotency dedupes per UNREAD only (intentional, surprising)
+
+The `CreateNotificationNodeExecutor` checks for an existing unread notification with the same `sprk_notificationkey` for the same user before creating; if one is found, it is updated rather than inserted. **However**, once a user reads/dismisses the notification, subsequent scheduled runs of the same playbook will create a fresh notification (the prior one is no longer "unread" and therefore not matched).
+
+This is **intentional**: it lets recurring schedules re-surface a notification after a user marks it read, which is desirable for daily-update-style playbooks. But it is surprising to authors who expect "once per key, ever" semantics.
+
+**Documented (R3)** — no behavior change. The complementary mechanism that prevents *runtime* duplicate playbook execution on the same scheduled tick lives in `ScheduledJobHost` + `IBackgroundJobStore.HasRunForScheduledTimeAsync` (`src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs`, task 014) — this guards retries-on-restart and tick-coalescing, not the per-user notification dedupe described above. The two layers are independent. See: task 014 (host-level idempotency), `CreateNotificationNodeExecutor.cs` (unread-key dedupe).
+
+### G5 — `sprk_matterteammember` membership resolution (Part 1)
+
+Out-of-band of Playbook engine but listed for catalog completeness. Identity normalization + membership resolution previously had no canonical service; user-record-based playbook lookups (e.g., `LookupUserMembership` node) had ad-hoc patterns.
+
+**Fixed (R3)**: New `MembershipResolverService` + identity normalization + organization mapping + `/api/membership/{userId}` endpoint + `LookupUserMembership` node executor (ActionType = 52). Pattern captured in ADR-034. See: tasks 030 + 031 + 032 + 033 + 034 + 035 + 037.
+
+### G6 — Canvas-to-Dataverse mapping drift
+
+If a new canvas node type is added to the builder without updating both `playbookNodeSync.ts` (client) and `NodeService.cs` (server), the node falls through to `AIAnalysis` default, causing scope resolution errors and misleading "requires an Action" messages.
+
+**Fixed (R3)**: Canvas-server mapping drift integration test added in `tests/integration/PlaybookBuilder.Tests/` (FR-3H3.1) — asserts every canvas type in `playbookNodeSync.ts` has a corresponding entry in `NodeService.cs`; fails CI build on drift. See: task 065.
+
+### G7 — `AiAnalysisNodeExecutor` Singleton-with-Scoped-dependency pattern
+
+The executor uses `IServiceProvider.CreateScope()` per execution to resolve the scoped `IToolHandlerRegistry`. Forgetting this pattern when adding new executors that depend on scoped services will cause DI resolution failures (runtime "cannot resolve scoped service from root provider" errors).
+
+**Fixed (R3) — documentation**: Node-executor authoring pattern doc created at `.claude/patterns/ai/node-executor-authoring.md` (FR-3H3.5) documenting the Singleton-executor-depends-on-Scoped-service pattern; `AiAnalysisNodeExecutor` cited as worked example. See: task 066. (Sub-mechanism related: dual-write schema migration in tasks 060 + 061 + 062.)
+
+### G8 — `sprk_searchindexed = true` means "enqueued", not "indexing completed"
+
+The boolean flag was misleading because it was set when the indexing job was enqueued (before AI Search confirmation), causing operational confusion when operators checked the flag and assumed the document was searchable.
+
+**Fixed (R3)**: Schema migration in progress (FR-3H3.2) — renamed `sprk_searchindexed` (bool) → `sprk_searchindexqueuedon` (datetime) and added `sprk_searchindexcompletedon` (datetime). `DeliverToIndexNodeExecutor.cs` writes both fields; legacy `sprk_searchindexed` maintained as dual-write during consumer migration (FR-3H3.4). To verify actual index presence operators may still query Azure AI Search directly. See: tasks 060 (consumer inventory) + 061 (schema migration) + 062 (dual-write executor).
+
+### G9 — Unnecessary dependency edges kill parallelism
+
+Every edge between nodes forces sequential execution. Only add edges where a node actually references `{{upstream.output}}` in its prompt or config. Audit playbooks with unexpectedly slow execution for unnecessary edges.
+
+**Fixed (R3)**: Edge perf hint added in PlaybookBuilder UI (FR-3H2.3) — when an edge connects two nodes whose configs don't reference each other's `OutputVariable`, a non-blocking advisory warning displays via `NodeValidationBadge.tsx`: "This edge forces sequential execution. Confirm or remove?" Validation rule added to `services/canvasValidation.ts`. See: tasks 093 + 094.
+
+### G10 — Template variable resolution timing (raw `{{x}}` leakage)
+
+Template variables resolve at execution time using outputs from completed nodes. If a referenced variable's node failed or was skipped, the template renders the raw `{{variable}}` string. Condition nodes should guard downstream template usage.
+
+**Fixed (R3)**: Runtime unrendered-template detection added (FR-3H1.4) — after each node executes, `PlaybookOrchestrationService.cs` scans `NodeOutput` string fields for literal `{{`; if found, logs structured warning AND emits `PlaybookStreamEvent` with type `unrendered-template-detected`. Authors can react in real time instead of discovering breakage in downstream consumers. See: task 005.
+
+### G11 — Scheduler activates new notification playbooks for ALL users on deploy
+
+The opt-out model means a new notification playbook is immediately active for every user. There is no per-user opt-in -- plan accordingly when deploying new notification playbooks.
+
+**Deferred to R4**: Playbook rollout-mode (Disabled / PilotUsers / AllUsers) is reserved for the successor project `spaarke-playbook-rollout-mode-r4` + **ADR-035 (reserved)**. Out of R3 scope per design.md decision 2026-06-20. Until then, treat any new notification playbook deploy as an all-user activation.
+
+---
+
+### R4 Follow-up
+
+The following pitfalls are explicitly **deferred** out of R3 and tracked for the successor project:
+
+| Pitfall | Tracking |
+|---------|----------|
+| G11 (scheduler rollout-mode) — also referenced internally as **H4** | `spaarke-playbook-rollout-mode-r4` (planned); ADR-035 (reserved) |
 
 ---
 
@@ -440,5 +513,6 @@ Each playbook node maps conceptually to an AI agent: Node -> `AIAgent`, Action -
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-06-22 | 2.1 | Refreshed Known Pitfalls section per R3 FR-3G4 + AC-Docs: restructured to canonical G1-G11 catalog, added Fixed-(R3) attribution for G1/G2/G3/G5/G6/G7/G8/G9/G10, added explicit G4 doc (idempotency-on-unread semantics), marked G11/H4 deferred to R4 (ADR-035 reserved). Task 102. |
 | 2026-04-05 | 2.0 | Restored depth: execution engine dual mode, all 9 node executors (including CreateNotification/QueryDataverse), builder subsystem, scheduler, integration points, known pitfalls, constraints |
 | 2026-03-13 | 1.0 | Initial version -- extracted from AI-ARCHITECTURE.md (v3.3). Added DeliverToIndex node documentation. |
