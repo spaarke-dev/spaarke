@@ -362,15 +362,11 @@ export const useSmartTodoWidgetStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     flex: '1 1 auto',
-    // UAT 2026-06-21 round 8: matching the working pattern from
-    // CalendarWorkspaceWidget (`gridContainer: flex 1 1 auto, minHeight 0`)
-    // and DailyBriefingApp (`scrollContent: flex 1`). `minHeight: 0` is
-    // critical — it lets this flex child shrink BELOW its content's
-    // intrinsic size when the parent has constrained height, instead of
-    // pushing the toolbar above it offscreen. Combined with the section's
-    // `minHeight: auto` (no inline height cap), the kanban now claims the
-    // full SectionPanel content area like Daily Briefing/Calendar do.
-    minHeight: 0,
+    // UAT 2026-06-22 round 9 (REVERT round 8): restoring the defensive
+    // 400px floor so the kanban renders even when the parent section's
+    // calc(100vh-200px) height supplies less than expected. minHeight 0
+    // exposed a collapse bug when the parent chain wasn't reliable.
+    minHeight: '400px',
     minWidth: 0,
   },
 

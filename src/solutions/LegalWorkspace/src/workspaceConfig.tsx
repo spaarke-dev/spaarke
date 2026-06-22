@@ -299,14 +299,13 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
       // -----------------------------------------------------------------------
       // My To Do List — SmartToDo
       //
-      // UAT 2026-06-21 round 8: matching the working pattern from
-      // Daily Briefing's workspaceConfig (no `height` cap, just
-      // `minHeight: 'auto'`). The SectionPanel's flex chain delivers the
-      // full pane height down to the widget; the widget's internal
-      // `kanbanContainer { flex 1 1 auto, minHeight 0 }` claims that
-      // height and scrolls internally on overflow. Previous rounds set
-      // `height: 'calc(100vh - 200px)'` here which CAPPED the section
-      // (not just floored it), preventing fill in tall viewports.
+      // UAT 2026-06-22 round 9 (REVERT round 8): the `minHeight: auto`
+      // change collapsed the widget because LegalWorkspace's parent chain
+      // doesn't deliver flex height through SectionPanel without an
+      // explicit supply. The Explore-agent comparison to DailyBriefing
+      // may be measuring a different layout context. Restoring the
+      // viewport-relative `calc(100vh - 200px)` that worked in rounds 5/6
+      // until a deeper layout audit identifies the structural break.
       // -----------------------------------------------------------------------
       {
         id: "todo",
@@ -314,7 +313,7 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
         title: "My To Do List",
         badgeCount: p.todoCount,
         toolbar: todoToolbar,
-        style: { minHeight: "auto" },
+        style: { height: "calc(100vh - 200px)", minHeight: "560px" },
         renderContent: () => (
           <SmartToDo
             embedded
