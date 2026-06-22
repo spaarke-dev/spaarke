@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="145" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Insights Engine regression suite — verify all binding-NEGATIVE components unchanged</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>143</dependencies>
+    <blocks>147,148</blocks>
+    <tags>testing, regression, architecture-binding</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Architecture §5 binding-NEGATIVE compliance verification; spans multiple subsystems; STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>7-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec NFR-06 + architecture §5 binding-NEGATIVE rules: run the Insights Engine regression suite and verify ALL binding-NEGATIVE components are behaviorally unchanged after Phase 4-6 work. Components to verify untouched: `spaarke-insights-index`, `MultiIndexComposer`, `InsightsOrchestrator`, `EvidenceSufficiencyNode`, `GroundingVerifyNode`, `sprk_matter.sprk_performancesummary`. Report at `notes/handoffs/145-insights-regression.md`.
+  </prompt>
+
+  <role>SPAARKE Insights Engine regression test operator. Knows architecture §5 boundary.</role>
+
+  <goal>
+    Insights Engine regression suite runs to completion with zero failures. Architecture §5 binding-NEGATIVE components verified untouched via grep + behavioral tests. Report at `notes/handoffs/145-insights-regression.md` confirms compliance with FR-37, NFR-06, success criterion #15.
+  </goal>
+
+  <context>
+    <background>
+      Per spec NFR-06 + architecture §5.2.1 through §5.2.6 + success criterion #15. The chat-routing redesign + WP5 + WP6 work was bounded by architecture §5 — Insights components are categorical mismatches for chat memory. Phase 7 verifies the boundary held: Insights subsystem regression suite passes, none of the 6 binding-NEGATIVE assets were modified or behaviorally drifted.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Insights/ (or wherever Insights tests live)</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="architecture-§5">DO NOT use `spaarke-insights-index`, `MultiIndexComposer`, `InsightsOrchestrator`, `EvidenceSufficiencyNode`, `GroundingVerifyNode`, `sprk_matter.sprk_performancesummary` for chat memory. Verify zero references from chat-routing/memory code.</constraint>
+    <constraint source="spec">NFR-06 — Insights regression suite must pass.</constraint>
+    <constraint source="spec">Success criterion #15 — verify via grep + Insights regression suite.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate the Insights regression test suite under `tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Insights/` (or equivalent path).</step>
+    <step order="2">Run the suite: `dotnet test --filter "Category=Insights"` (or equivalent filter).</step>
+    <step order="3">Grep verification: confirm zero chat-routing or memory code references the 6 binding-NEGATIVE assets:
+      - `grep -rn "spaarke-insights-index" src/server/api/Sprk.Bff.Api/Services/Ai/Chat/` → 0 hits
+      - `grep -rn "MultiIndexComposer" src/server/api/Sprk.Bff.Api/Services/Ai/Memory/` → 0 hits (Insights/ dir OK)
+      - `grep -rn "InsightsOrchestrator" src/server/api/Sprk.Bff.Api/Services/Ai/Chat/" → 0 hits
+      - `grep -rn "EvidenceSufficiencyNode" src/server/api/Sprk.Bff.Api/Services/Ai/Chat/` → 0 hits
+      - `grep -rn "GroundingVerifyNode" src/server/api/Sprk.Bff.Api/Services/Ai/Chat/` → 0 hits
+      - `grep -rn "sprk_performancesummary" src/server/api/Sprk.Bff.Api/Services/Ai/Chat/" → 0 hits</step>
+    <step order="4">Verify `sprk_matter.sprk_performancesummary` field has zero chat-side reads/writes via Dataverse audit query if available.</step>
+    <step order="5">Author report at `notes/handoffs/145-insights-regression.md` documenting: suite results, grep verification table, Dataverse check outcome, compliance with NFR-06 + success criterion #15.</step>
+    <step order="6">If any binding-NEGATIVE component referenced from chat-routing code, escalate per CLAUDE.md §6.</step>
+    <step order="7">Update TASK-INDEX.md: task 145 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">dotnet test --filter Insights + grep verification</tool>
+    <tool name="Write">notes/handoffs/145-insights-regression.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/145-insights-regression.md — Insights regression + boundary verification report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Insights regression suite runs to completion with zero failures.</criterion>
+    <criterion testable="true">All 6 grep checks return 0 hits (or only hits are inside Insights/ directory, not chat-routing/memory).</criterion>
+    <criterion testable="true">`sprk_performancesummary` field has zero chat-side mutations.</criterion>
+    <criterion testable="true">Report documents architecture §5 compliance.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Architecture §5 boundary verification is binding-grade. If any grep returns unexpected hits, that's a project-defining issue. Document carefully — task 150 wrap-up references this report.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

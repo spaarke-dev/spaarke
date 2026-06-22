@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Deploy-Playbook.ps1 JSON-schema validation gate for sprk_configjson</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>048,049,050,051</dependencies>
+    <blocks>054</blocks>
+    <tags>deploy, scripts, validation, powershell</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'deploy' + 'scripts'; PowerShell deployment script extension; no .cs/.tsx change — STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>3-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend `scripts/Deploy-Playbook.ps1` (or equivalent playbook deployment script) with a JSON-schema validation gate that validates each playbook's `sprk_configjson` against `node-routing-config.schema.json` BEFORE deploy. On schema violation, abort with structured error naming the failing playbook + violation. Implements spec FR-14e.
+  </prompt>
+
+  <role>SPAARKE deployment scripting engineer. Expert in PowerShell + JSON-schema validation (`Test-Json` cmdlet or equivalent).</role>
+
+  <goal>
+    Deploy-Playbook script validates each playbook config JSON against the schema before deployment. Malformed configJson aborts the deploy with a structured error (file name, playbook code, schema-violation reason). Valid configJson proceeds. JSON schema document `node-routing-config.schema.json` lives in `scripts/schemas/` (or `projects/.../architecture/`) and is reused by deploy + (potentially) tooling.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14e + design §1.3 step 5. Today playbook deploy is fire-and-forget for `sprk_configjson` — authoring errors surface only at runtime. This gate catches schema violations at deploy time. The schema is built from `NodeRoutingConfig.cs` semantics: required `destination` (one of 5 values per FR-14a), optional `widgetType` (string), and any additional fields the model carries.
+    </background>
+    <relevant-files>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>scripts/schemas/</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/NodeRoutingConfig.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-14e acceptance: malformed configJson deploy fails with structured error; valid configJson deploy succeeds.</constraint>
+    <constraint source="project">Schema must align with `NodeRoutingConfig.cs` post-task-045 (i.e., includes `"both"` as valid destination value).</constraint>
+    <constraint source="project">Use PowerShell 7+ `Test-Json -Schema` for validation (per environment).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate `Deploy-Playbook.ps1` or equivalent playbook deployment script (may be `scripts/Deploy-DataverseSolution.ps1` segment or stand-alone).</step>
+    <step order="2">Author `node-routing-config.schema.json` (JSON Schema Draft 2020-12) with:
+      - Required: `destination` (enum: `chat | workspace | both | form-prefill | side-effect`)
+      - Optional: `widgetType` (string, max 64 chars)
+      - Additional properties allowed (forward-compat).
+      Place in `scripts/schemas/node-routing-config.schema.json`.</step>
+    <step order="3">In the deploy script, BEFORE pushing each playbook node to Dataverse, run `Test-Json -Json $configJson -Schema $schemaPath`. On failure, throw a structured error with playbook code + node ID + Test-Json error.</step>
+    <step order="4">Add a test fixture: a malformed configJson (e.g., destination = "invalid") + a valid configJson. Run the script in dry-run mode against both. Confirm abort vs. success.</step>
+    <step order="5">Update script documentation / inline comments naming spec FR-14e.</step>
+    <step order="6">Update TASK-INDEX.md: task 052 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">existing Deploy-*.ps1 scripts</tool>
+    <tool name="Write">JSON schema + script extension</tool>
+    <tool name="Bash">pwsh - Test-Json invocations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Deploy-Playbook.ps1 (or equivalent) — validation gate added</output>
+    <output type="docs">scripts/schemas/node-routing-config.schema.json — Draft 2020-12</output>
+    <output type="docs">notes/handoffs/052-validation-gate.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">JSON schema `node-routing-config.schema.json` exists with all 5 destination values (post-FR-14a).</criterion>
+    <criterion testable="true">Deploy attempt with malformed configJson aborts with structured error naming the playbook + violation.</criterion>
+    <criterion testable="true">Deploy attempt with valid configJson proceeds normally.</criterion>
+    <criterion testable="true">Schema test fixtures pass (one valid + one invalid case).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Schema source-of-truth note: NodeRoutingConfig.cs is the C# source of truth; the JSON schema is its mechanical projection. If the enum changes in C#, the schema must update in lockstep. Document this in script comments.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

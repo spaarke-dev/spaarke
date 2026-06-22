@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="103" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase 4 integration test suite (T-002 + T-004 + T-005 + T-009)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4f)</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>064,102</dependencies>
+    <blocks>104</blocks>
+    <tags>testing, integration-test, architecture-binding</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'testing' + 'integration-test'; new test files; STANDARD per task-execute Step 0.5; cross-wave dep on 064 enforces frontend build prereq.</rigor-reason>
+    <parallel-group>4-R</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author / extend the Phase 4 integration test suite covering the 4 spec.md Success Criteria T-002, T-004, T-005, T-009. These tests exercise the end-to-end 6-tier memory subsystem (T2 session memory + upload pipeline; T3 matter memory + promotion; T5 retrieval over chat-domain indexes; T6 audit). **Cross-wave dep on 064** (frontend build) — the test suite exercises the frontend `memory` channel subscriber path; main session MUST verify 064 ✅ before dispatching this task.
+  </prompt>
+
+  <role>SPAARKE platform test engineer with end-to-end integration test expertise (BFF + frontend memory event subscribers + Azure AI Search + Cosmos).</role>
+
+  <goal>
+    Integration test suite passes for T-002, T-004, T-005, T-009. Tests assert: (T-002) session-file recall returns citations on requireCitations=true; (T-004) promote_to_matter_memory drives full Cosmos pending-record → `memory.promotion_pending` → ContextPane subscriber → approve → `MatterMemoryService.AppendFactAsync` → `memory.fact_promoted` chain; (T-005) Tier 5 retrieval handlers query ONLY chat-domain indexes; (T-009) FR-25 audit-only `sprk_aichatmessage` write succeeds without violating ADR-015 tier-1 fields.
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md Success Criteria. T-002 covers `recall_session_file` citation enforcement (FR-29 + FR-31). T-004 covers FR-32 memory-promotion full chain (Cosmos doc-type `matter-memory-promotion` + new `memory` PaneEventBus channel from ADR-030 v2 amendment + ContextPane subscriber from task 098). T-005 covers FR-36 chat-domain index isolation per architecture §5.2.1 (zero `spaarke-insights-index` reads). T-009 covers FR-25 `sprk_aichatmessage` write-only audit. Cross-wave dep on 064: T-004 chain reaches the frontend subscriber; frontend build must compile cleanly per task 064 before integration tests are meaningful.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/</file>
+      <file>src/solutions/SpaarkeAi/src/components/context/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/PaneEventTypes.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec T-002">Citation enforcement: `recall_session_file` with `requireCitations: true` returns citations alongside content; LLM must cite per persona instruction.</constraint>
+    <constraint source="spec T-004">Promotion full chain: Cosmos pending-record → `memory.promotion_pending` → ContextPane subscriber → approve → `MatterMemoryService.AppendFactAsync` → `memory.promotion_resolved` + `memory.fact_promoted` + `context.decision_made` audit emission.</constraint>
+    <constraint source="spec T-005">Tier 5 wraps chat-domain indexes only; `grep "spaarke-insights-index"` returns zero hits in chat-memory paths.</constraint>
+    <constraint source="spec T-009">FR-25: `sprk_aichatmessage` write-only audit; integration test confirms writes succeed; zero reads remain.</constraint>
+    <constraint source="ADR-015">Tier-1 logging in test assertions: tests assert NO query text, file content, recall results, or memory facts surface in App Insights / log output paths.</constraint>
+    <constraint source="cross-wave">Task 064 (frontend build) must be ✅ before dispatching this task; main session verifies before parallel-wave fan-out.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify cross-wave prereqs in TASK-INDEX: task 064 (frontend build) = ✅ AND task 102 (write-only verification) = ✅. If either is not ✅, STOP and report.</step>
+    <step order="2">Read spec.md Success Criteria T-002, T-004, T-005, T-009 in full. Note expected acceptance signals per test.</step>
+    <step order="3">For T-002 (citation enforcement): author/extend `RecallSessionFileHandlerIntegrationTests` — upload a test PDF; invoke `recall_session_file(mode='section', purpose='quote', requireCitations=true)`; assert response includes `citations[]` with page + paragraph + text; assert truncation_reason field set correctly.</step>
+    <step order="4">For T-004 (promotion full chain): author end-to-end test — POST `promote_to_matter_memory` via handler → assert Cosmos `memory` container has `matter-memory-promotion_{guid}` doc; assert `memory.promotion_pending` event dispatched (verify via test event-bus harness); simulate POST `/api/memory/promotions/{id}/approve` → assert `MatterMemoryService.AppendFactAsync` called with correct fact; assert `memory.promotion_resolved { decision: 'approved' }` + `memory.fact_promoted { factId, matterId }` events dispatched; assert `context.decision_made` audit event emitted to Cosmos `audit`.</step>
+    <step order="5">For T-005 (Tier 5 chat-domain isolation): author static-grep test (or runtime assertion harness) that confirms recall handler classes target only `spaarke-session-files` / `spaarke-files-index` / `spaarke-rag-references`; assert constructor of any chat-memory retrieval handler throws when passed an `spaarke-insights-index` configuration.</step>
+    <step order="6">For T-009 (FR-25 audit write): author integration test that triggers a chat session save → assert `sprk_aichatmessage` write succeeds (via Dataverse Web API check); assert zero read paths invoked on the entity during normal chat flow; assert audit consumers read from Cosmos `audit` container instead.</step>
+    <step order="7">Run the new tests via `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/`. All 4 must pass.</step>
+    <step order="8">Spot-check frontend memory subscriber behavior via the `SpaarkeAi` test harness (Vitest or equivalent) — verify `usePaneEvent('memory', ...)` receives the dispatched events during the T-004 flow.</step>
+    <step order="9">Document test outputs at `notes/handoffs/103-phase4-integration-test-report.md`.</step>
+    <step order="10">Update TASK-INDEX.md: task 103 → ✅; current-task.md → ready for 104.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Spec criteria + existing test patterns + handler implementations</tool>
+    <tool name="Edit">Author new integration test classes; extend existing ones as needed</tool>
+    <tool name="Bash">dotnet test; npm test (frontend if needed); verify cross-wave prereqs via TASK-INDEX inspection</tool>
+    <tool name="Grep">T-005 static assertions on index targeting; T-009 verify zero remaining read paths</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Phase4/RecallSessionFileTests.cs — T-002</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Phase4/MatterMemoryPromotionFlowTests.cs — T-004</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Phase4/Tier5RetrievalIsolationTests.cs — T-005</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Phase4/ChatAuditWriteOnlyTests.cs — T-009</output>
+    <output type="docs">notes/handoffs/103-phase4-integration-test-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 integration test suites (T-002, T-004, T-005, T-009) exit 0.</criterion>
+    <criterion testable="true">T-004 verifies full promotion chain end-to-end including frontend subscriber receipt.</criterion>
+    <criterion testable="true">T-005 verifies fail-fast guard against `spaarke-insights-index` configuration.</criterion>
+    <criterion testable="true">T-009 verifies zero read paths on `sprk_aichatmessage` during chat flow.</criterion>
+    <criterion testable="true">No ADR-015 tier-1 violations in test log output (no query/content/fact leakage).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Cross-wave dep on 064 is critical — verify TASK-INDEX before starting. If frontend build is failing, T-004 will produce false negatives. The T-004 chain is the trickiest test because it spans BFF + frontend; use a test event-bus harness to simulate ContextPane subscribers if real frontend integration is too brittle.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — Step 9.5 quality gates skipped (test-only task).</protocol>
+  </execution>
+</task>

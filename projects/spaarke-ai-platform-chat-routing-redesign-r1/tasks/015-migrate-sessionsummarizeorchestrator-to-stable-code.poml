@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Migrate SessionSummarizeOrchestrator to stable code (FR-05 first)</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>016,017,018,019</blocks>
+    <tags>bff-api, refactoring, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies .cs file; refactors hot path; FULL per Step 0.5</rigor-reason>
+    <parallel-group>1-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>FR-05 sequencing — must migrate first to prove resolver infra before wave 1-E Pattern A parallel migrations (016, 017, 018, 019)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Remove the hardcoded `ChatSummarizePlaybookId` GUID at `SessionSummarizeOrchestrator.cs:78-79` (`44285d15-...`) and migrate the orchestrator to resolve the playbook by stable code `summarize-document-chat` via the `/by-code/{code}` endpoint or direct `IPlaybookLookupService`. Per spec FR-05 this is the FIRST stable-code migration (lowest blast radius — no config override exists today).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat-routing layer + minimal-API DI.</role>
+
+  <goal>
+    `SessionSummarizeOrchestrator.ChatSummarizePlaybookId` constant removed. Playbook resolved by stable code `summarize-document-chat` (lifted to typed options or direct `IPlaybookLookupService.GetByCodeAsync`). Integration test confirms `/api/ai/chat/sessions/{id}/summarize` continues to work end-to-end with same output. Telemetry "path" dimension on `R5SummarizeTelemetry` unchanged.
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md §1.7 Pattern A + FR-05. `SessionSummarizeOrchestrator` is the chat /summarize convergence point (per R6 FR-26). It has no config override today — purely hardcoded GUID — which makes it both: (a) lowest blast radius (no env-specific config to maintain), and (b) the riskiest if migration regresses (no fallback). Tests cover the convergence invariant; do not weaken.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DefaultPlaybookConstants.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookLookupService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No direct injection of `IOpenAiClient`/`IPlaybookService` into CRUD code; orchestrator already inside Services/Ai layer — OK.</constraint>
+    <constraint source="ADR-014">Code lookup uses 5-min cache from task 010 endpoint or `IPlaybookLookupService` cached layer.</constraint>
+    <constraint source="ADR-018">Lift to typed options preferred over raw `IConfiguration["..."]` indexer.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect minor delta only.</constraint>
+    <constraint source="spec">R6 FR-26 convergence invariant: `/summarize` slash + agent-tool dispatch + NL "summarize" all converge on this playbook. Preserve.</constraint>
+    <constraint source="spec">R6 FR-30 dedup invariant: chat + workspace SUM-CHAT siblings dedup to one render. Preserve.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — modify tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` to use stable code in test fixtures.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `SessionSummarizeOrchestrator.cs:78-79` — locate `ChatSummarizePlaybookId` constant.</step>
+    <step order="2">Identify the playbook lookup call site that uses this constant; trace the flow to understand what shape the orchestrator needs (GUID? Entity? Code?).</step>
+    <step order="3">Choose migration shape:
+      (a) Lift to `WorkspaceOptions.SummarizeChatPlaybookCode = "summarize-document-chat"` typed option; OR
+      (b) Directly use `IPlaybookLookupService.GetByCodeAsync("summarize-document-chat", tenantId)` per ADR-018 preference.
+      Document choice in PR.</step>
+    <step order="4">Replace hardcoded GUID + code path with code-based resolution.</step>
+    <step order="5">Update unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` — fixtures should use stable code.</step>
+    <step order="6">Verify telemetry "path" dimension on `R5SummarizeTelemetry` unchanged (spec.md §1.5 mentioned).</step>
+    <step order="7">Run `dotnet build` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Must pass.</step>
+    <step order="8">Run integration test for `/api/ai/chat/sessions/{id}/summarize`. Must pass.</step>
+    <step order="9">Measure BFF publish size; report delta.</step>
+    <step order="10">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 014 → ✅; current-task.md → task 015 ready.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">SessionSummarizeOrchestrator.cs + tests</tool>
+    <tool name="Edit">Apply migration + update tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+    <tool name="Grep">Search for other consumers of ChatSummarizePlaybookId constant</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs — refactored</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs (if option lifted) — extended</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/* — updated fixtures</output>
+    <output type="docs">notes/handoffs/014-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "44285d15" src/` returns zero matches.</criterion>
+    <criterion testable="true">`grep "ChatSummarizePlaybookId" src/` returns zero matches OR only in comments documenting the removal.</criterion>
+    <criterion testable="true">Unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` exit 0.</criterion>
+    <criterion testable="true">Integration test for `/api/ai/chat/sessions/{id}/summarize` exits 0.</criterion>
+    <criterion testable="true">Telemetry "path" dimension on `R5SummarizeTelemetry` retains existing dimensions.</criterion>
+    <criterion testable="true">FR-26 convergence invariant test (slash + NL → same playbook) passes.</criterion>
+    <criterion testable="true">FR-30 dedup test (chat + workspace siblings dedup) passes.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    First stable-code migration. If any unexpected coupling surfaces (e.g., orchestrator passes GUID downstream), document in notes/debug/ before patching. R6 FR-26 + FR-30 invariants are sacred — do not weaken to ease migration.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Migrate Pattern B backend name-resolve consumers (AppOnlyAnalysisService + ChatContextMappingService)</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016,017,018,019</dependencies>
+    <blocks>022</blocks>
+    <tags>bff-api, refactoring, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; refactors two services in same wave; FULL per Step 0.5</rigor-reason>
+    <parallel-group>1-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Migrate backend Pattern B name-resolve consumers from literal name string lookups (`/by-name/{name}`) to stable code lookups (`/by-code/{code}`). Affected sites: `AppOnlyAnalysisService.cs:46,1068` (two call sites — one per playbook name) + `ChatContextMappingService.cs`. Per spec FR-03 the by-name endpoint stays for the deprecation window (task 024 adds telemetry) but new code MUST use by-code.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat-context mapping + agent execution orchestration.</role>
+
+  <goal>
+    `AppOnlyAnalysisService.cs:46` and `:1068` resolve playbooks via `IPlaybookLookupService.GetByCodeAsync(stableCode, tenantId)` instead of name lookup. `ChatContextMappingService.cs` likewise. The literal name strings (e.g., `"Summarize New File(s)"`, `"Document Profile"`) are removed from the consumer; the stable codes are looked up (typed-options reference where appropriate, otherwise inline constant in the service). Unit tests updated.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-03 + §1.7 Pattern B. Pattern B differs from Pattern A in that the existing code reads a NAME (e.g., `"Summarize New File(s)"`) — these are the 4 name-based call sites. Some Pattern B sites don't have a clean typed-option home (they're inside execution paths, not configuration paths); for those, define a `const string` inside the consuming class for the stable code.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatContextMappingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookLookupService.cs (read-only)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatContextMappingServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Inject `IPlaybookLookupService` directly; no `IServiceProvider.GetService&lt;T&gt;()`.</constraint>
+    <constraint source="ADR-013">Services inside `Services/Ai/` — fine; CRUD consumer crosses facade — preserve public contract.</constraint>
+    <constraint source="ADR-014">Cached by-code lookup.</constraint>
+    <constraint source="ADR-018">For values better expressed as configuration, lift to `WorkspaceOptions` (e.g., `ChatContextMappingService` likely benefits); for execution-path values, use class-level `const string`.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-03 acceptance: `/by-name/` endpoint emits deprecation warning per call (task 024); calls drop to zero AFTER migration. This task removes ALL by-name call sites from these two services.</constraint>
+    <constraint source="spec">NFR-02: name strings reference production-bound playbooks — those playbooks unchanged; only the consumer's resolution mechanism changes.</constraint>
+    <constraint source="project">DO NOT add typed options to `WorkspaceOptions.cs` in this task (architectural placement check via bff-extensions.md — these services may not be the right `WorkspaceOptions` consumers). Class-level `const string` is acceptable per Pattern B.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `AppOnlyAnalysisService.cs:46` and `:1068`. Record the literal name strings used.</step>
+    <step order="2">Map each literal name string to its stable code via spec §1.7.3 codes table (or query Dataverse by name → `sprk_playbookcode`).</step>
+    <step order="3">Read `ChatContextMappingService.cs`. Record name-based playbook references.</step>
+    <step order="4">Refactor `AppOnlyAnalysisService.cs`: inject `IPlaybookLookupService`; replace by-name calls with by-code calls using class-level `const string` stable codes.</step>
+    <step order="5">Refactor `ChatContextMappingService.cs`: same pattern.</step>
+    <step order="6">Update unit tests for both services — fixtures use stable codes; mocks return typed playbook entities.</step>
+    <step order="7">Run `dotnet build` + `dotnet test`. Pass.</step>
+    <step order="8">Measure publish size; report delta.</step>
+    <step order="9">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="10">Update TASK-INDEX.md: task 020 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">AppOnlyAnalysisService.cs + ChatContextMappingService.cs</tool>
+    <tool name="Edit">Apply Pattern B migration + update tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+    <tool name="Grep">Verify zero literal-name lookups remain in target services</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs — refactored to stable code (2 call sites)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatContextMappingService.cs — refactored to stable code</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs — fixtures use stable code</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatContextMappingServiceTests.cs — fixtures use stable code</output>
+    <output type="docs">notes/handoffs/020-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "Summarize New File" src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs` returns zero matches.</criterion>
+    <criterion testable="true">`grep "Document Profile" src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs` returns zero matches (or only in comments).</criterion>
+    <criterion testable="true">`ChatContextMappingService.cs` contains no literal playbook-name lookup calls.</criterion>
+    <criterion testable="true">Both services inject `IPlaybookLookupService`.</criterion>
+    <criterion testable="true">Unit tests exit 0.</criterion>
+    <criterion testable="true">Publish-size delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 021 (frontend Pattern B) because they touch different layers. Within this task, the two services touched are independent — no shared state. If `AppOnlyAnalysisService:46` and `:1068` resolve to the SAME stable code (likely "summarize-new-files"), define one class-level const string and reference it from both call sites for DRY.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

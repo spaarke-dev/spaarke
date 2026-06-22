@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Scrub stale 3f21cec1- GUID comments in WorkspaceOptions.cs and ProjectPreFillService.cs</title>
+    <phase>0: §1.7 Pattern C Cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>000</dependencies>
+    <blocks>004,012,013</blocks>
+    <tags>cleanup, documentation, bff-api</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation/comment scrubbing only; no behavior change</rigor-reason>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Remove stale `3f21cec1-...` GUID comment references in `src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs:35` and `src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs:40`. These comments reference a rotated/incorrect GUID from before the 2026-06-09 hotfix; leaving them risks confusion during Pattern A migration (tasks 012 + 016).
+  </prompt>
+
+  <role>SPAARKE platform developer. Cleanup task.</role>
+
+  <goal>Stale GUID comment references removed. Comments either deleted or replaced with neutral pointers to the canonical config key.</goal>
+
+  <context>
+    <background>
+      Per spec.md §1.7.3a + design §1.7.3. ProjectPreFillService had its GUID corrected from `3f21cec1-...` to `fc343e9c-...` in a 2026-06-09 hotfix, but the OLD GUID still appears in code comments. Tasks 012 + 016 will migrate these services to stable code resolution; leaving the stale GUID in comments creates noise.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Only modify comments; no code logic changes in this task.</constraint>
+    <constraint source="project">Preserve any non-stale comments around the affected lines.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `WorkspaceOptions.cs` line 35 area; identify stale GUID reference.</step>
+    <step order="2">Read `ProjectPreFillService.cs` line 40 area; identify stale GUID reference.</step>
+    <step order="3">Grep wider for any other `3f21cec1` references in the repo and document in notes/drafts/.</step>
+    <step order="4">Replace stale GUID comments with neutral pointer (e.g., "// Use IOptions&lt;WorkspaceOptions&gt;.ProjectPreFillPlaybookId — see ADR-018").</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` to confirm no behavior change.</step>
+    <step order="6">Update TASK-INDEX.md: task 003 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read affected files</tool>
+    <tool name="Grep">Find all 3f21cec1 references</tool>
+    <tool name="Edit">Update comments</tool>
+    <tool name="Bash">dotnet build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs (comment scrubbed)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs (comment scrubbed)</output>
+    <output type="docs">notes/drafts/003-stale-guid-inventory.md (if other references found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "3f21cec1" src/` returns zero matches in production code (test fixtures excepted).</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>This is the lowest-risk Phase 0 task. If any 3f21cec1 references found outside the two known locations, surface in notes/drafts/ for review before deletion — don't auto-scrub references in files outside scope.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Follow MINIMAL rigor protocol.</protocol>
+  </execution>
+</task>

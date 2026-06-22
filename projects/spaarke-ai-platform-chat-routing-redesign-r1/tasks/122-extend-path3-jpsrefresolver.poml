@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="122" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Extend PlaybookExecutionEngine.ExecuteChatSummarizeAsync (Path 3) with JpsRefResolver BEFORE LLM call</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>121</dependencies>
+    <blocks>123,124,125,130</blocks>
+    <tags>bff-api, services, ai, streaming, ADR-033</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies hot-path chat-summarize engine (.cs); ADR-033 streaming preservation is BINDING; FULL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Task 123 (streaming preservation regression test) edits same engine area; sequential per CRIT-2-style file overlap</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `PlaybookExecutionEngine.ExecuteChatSummarizeAsync` (Path 3) to invoke `JpsRefResolver.ResolveAsync` BEFORE the streaming LLM call, per spec FR-38 + design §WP6 recommendation (b). The canonical Path 1 invocation lives at `AiAnalysisNodeExecutor.cs:442-499` — replicate the pattern. Streaming behavior MUST remain unchanged per ADR-033: `StreamStructuredCompletionAsync` + `IncrementalJsonParser` + `FieldDelta` SSE-event emission per top-level field stays intact. `$ref` resolution happens in prompt assembly only, before any streaming.
+  </prompt>
+
+  <role>SPAARKE BFF AI engineer. Expert in Path 1/2/3 execution model + streaming Structured Outputs.</role>
+
+  <goal>
+    `PlaybookExecutionEngine.ExecuteChatSummarizeAsync` calls `JpsRefResolver.ResolveAsync` before the streaming LLM call when the action's systemPrompt contains JPS `$ref` markers. Resolved prompt (Skill PromptFragments + Knowledge Content inlined) is passed to `StreamStructuredCompletionAsync`. Streaming hot path (per-field SSE emission) unchanged. Unit test confirms resolver invoked when refs present; integration test confirms streaming behavior identical.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-38 + design §WP6 (b) Recommendation. Path 3 (`PlaybookExecutionEngine.ExecuteChatSummarizeAsync` at line ~185) currently bypasses Skill/Knowledge composition — it goes directly from action.SystemPrompt to streaming LLM call. Specialized playbooks (Summarize-NDA, Summarize-Patent, Extract-Invoice) need JPS `$ref` composition; without this engine change, they cannot reuse seeded Skills + Knowledge primitives. Q7 resolved: streaming MUST be preserved; resolution happens BEFORE LLM call.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/JpsRefResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Scopes/IScopeResolverService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">Streaming chat tool side-channel preservation — `FieldDelta` SSE events per top-level field MUST emit unchanged; `IncrementalJsonParser` flow untouched; resolution happens BEFORE LLM call only.</constraint>
+    <constraint source="ADR-013">Stay within `Services/Ai/` boundary; do not leak `IOpenAiClient` / `IPlaybookService` into CRUD code.</constraint>
+    <constraint source="ADR-014">If `JpsRefResolver` makes Dataverse lookups, those calls hit the 5-min ADR-014 cache layer in `IScopeResolverService` — verify cache key still tenant-scoped.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement required — expect minor delta only (engine wiring + DI is small).</constraint>
+    <constraint source="spec">FR-38 acceptance — unit test verifies `JpsRefResolver.ResolveAsync` called; streaming integration test continues to emit `FieldDelta` per top-level field.</constraint>
+    <constraint source="project">Per CLAUDE.md §10 — test update obligation: PRs modifying `Sprk.Bff.Api/Services/` MUST update `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookExecutionEngine.cs` around line 185 (`ExecuteChatSummarizeAsync`) to locate the existing prompt assembly + streaming call.</step>
+    <step order="2">Read `AiAnalysisNodeExecutor.cs:442-499` to capture the canonical JPS `$ref` invocation pattern from Path 1.</step>
+    <step order="3">Inspect `JpsRefResolver` constructor signature, dependencies, and `ResolveAsync` API.</step>
+    <step order="4">Determine the DI registration of `JpsRefResolver` (likely registered already; verify in `AiModule.cs`). If `PlaybookExecutionEngine` does not currently depend on it, add constructor injection.</step>
+    <step order="5">In `ExecuteChatSummarizeAsync`, BEFORE the LLM call, add:
+      ```csharp
+      var actionSystemPrompt = action.SystemPrompt;
+      if (JpsRefResolver.HasRefs(actionSystemPrompt))
+      {
+          actionSystemPrompt = await _jpsRefResolver.ResolveAsync(
+              actionSystemPrompt,
+              scopeResolver: _scopeResolverService,
+              cancellationToken);
+      }
+      // existing streaming continues unchanged:
+      // StreamStructuredCompletionAsync(messages, schema, ...)
+      ```
+      Confirm `messages` (or whatever prompt accumulator) uses the resolved `actionSystemPrompt`.</step>
+    <step order="6">Verify the streaming path is untouched — `StreamStructuredCompletionAsync` + `IncrementalJsonParser` + `FieldDelta` SSE emit logic is downstream and unchanged.</step>
+    <step order="7">Add a unit test in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` that mocks `JpsRefResolver.ResolveAsync`, invokes `ExecuteChatSummarizeAsync` with a `$ref`-bearing systemPrompt, and asserts the resolver was called exactly once.</step>
+    <step order="8">Add a unit test for the no-`$ref` path: when systemPrompt has no refs, resolver MUST NOT be invoked (avoid Dataverse round-trip on legacy paths).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Must pass.</step>
+    <step order="10">Measure BFF publish size; report delta vs prior baseline at `notes/handoffs/122-bff-publish-delta.md`.</step>
+    <step order="11">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="12">Update TASK-INDEX.md: task 122 → ✅. Task 123 (streaming regression test) becomes ready.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookExecutionEngine.cs, AiAnalysisNodeExecutor.cs, JpsRefResolver.cs</tool>
+    <tool name="Grep">Locate JpsRefResolver DI registration in AiModule.cs</tool>
+    <tool name="Edit">Apply engine extension + DI fix + unit tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs — extended ExecuteChatSummarizeAsync</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Modules/AiModule.cs (if DI fix needed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookExecutionEngineJpsRefTests.cs — new tests</output>
+    <output type="docs">notes/handoffs/122-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "JpsRefResolver" src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs` returns at least one hit.</criterion>
+    <criterion testable="true">Unit test "ResolverInvokedWhenRefsPresent" passes.</criterion>
+    <criterion testable="true">Unit test "ResolverNotInvokedWhenNoRefs" passes.</criterion>
+    <criterion testable="true">No edits to `StreamStructuredCompletionAsync` or `IncrementalJsonParser` (ADR-033 compliance).</criterion>
+    <criterion testable="true">`dotnet build` exits 0.</criterion>
+    <criterion testable="true">BFF publish delta reported; cumulative within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The streaming path is sacred per ADR-033. Resolution happens ONCE per turn at prompt-assembly time — adds ~100-300ms Dataverse lookup latency at turn start but ZERO impact on token-stream behavior. Test the no-`$ref` path explicitly to avoid regressions on legacy chat-Summarize playbooks (PB-001, PB-002).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

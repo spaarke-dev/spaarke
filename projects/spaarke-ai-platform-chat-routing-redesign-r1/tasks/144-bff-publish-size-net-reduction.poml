@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="144" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>BFF publish-size net reduction verification (expect NET REDUCTION from WP4 deletion vs baseline 45.65 MB)</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>143</dependencies>
+    <blocks>147,148</blocks>
+    <tags>verification, ADR-029, NFR-01</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Pure measurement + report; no code modification; MINIMAL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>7-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec NFR-01 + ADR-029: measure final BFF publish size after WP4 deletion (tasks 141 + 142 + 143). Confirm NET REDUCTION vs the Phase 5 Outcome A baseline of 45.65 MB compressed (per CLAUDE.md §10). Author the consolidated report at `notes/handoffs/144-bff-publish-final-summary.md` with: pre-WP4 size, post-WP4 size, delta, % reduction, NFR-01 threshold compliance.
+  </prompt>
+
+  <role>SPAARKE BFF release engineer. Familiar with publish-size measurement protocol.</role>
+
+  <goal>
+    Final BFF publish-size measurement complete. Report shows NET REDUCTION vs baseline 45.65 MB (binding NFR-01 expectation for WP4). Cumulative size below the 60 MB ceiling. Report archived at `notes/handoffs/144-bff-publish-final-summary.md` and referenced by task 150 wrap-up.
+  </goal>
+
+  <context>
+    <background>
+      Per CLAUDE.md §10 binding publish-size rule + spec NFR-01 + ADR-029. Task 141 measured pre/post deletion at the single-task grain; task 144 measures the cumulative Phase 7 delta. WP4 was sized in design §WP4 as "substantial deletion" — NET REDUCTION is the binding hypothesis. If size REMAINS HIGHER (or grows), that's an architectural violation requiring investigation.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/141-pre-deletion-publish.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/141-post-deletion-publish.md</file>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Per-task publish-size measurement protocol — `dotnet publish -c Release ...` compressed output is the canonical metric.</constraint>
+    <constraint source="spec">NFR-01 — current baseline 45.65 MB (post-Phase 5 Outcome A); ≥+5 MB single-task delta requires justification; ≥55 MB cumulative triggers architecture review; ≥60 MB HARD STOP.</constraint>
+    <constraint source="project">EXPECTED outcome — NET REDUCTION from WP4 deletion. If not observed, escalate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.</step>
+    <step order="2">Compress the publish output (zip / tar) and measure compressed byte size — that's the NFR-01 metric.</step>
+    <step order="3">Compare to baseline 45.65 MB. Compute delta + % change.</step>
+    <step order="4">Author report at `notes/handoffs/144-bff-publish-final-summary.md` with: baseline, current, delta, % change, NFR-01 threshold check, expected NET REDUCTION confirmation.</step>
+    <step order="5">If size did NOT reduce (grew or flat), escalate per CLAUDE.md §6 — investigation needed.</step>
+    <step order="6">Update TASK-INDEX.md: task 144 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">dotnet publish + compress + measure</tool>
+    <tool name="Write">notes/handoffs/144-bff-publish-final-summary.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/144-bff-publish-final-summary.md — final publish-size summary</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Publish-size measurement recorded.</criterion>
+    <criterion testable="true">Delta vs 45.65 MB baseline computed.</criterion>
+    <criterion testable="true">Below 60 MB hard-stop ceiling.</criterion>
+    <criterion testable="true">NET REDUCTION confirmed (or escalation triggered).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Quick verification task. The report feeds task 150 wrap-up. If WP4 deletion did NOT reduce size, something's wrong — likely missed call sites still referencing dead types via TypeRef.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol.</protocol>
+  </execution>
+</task>

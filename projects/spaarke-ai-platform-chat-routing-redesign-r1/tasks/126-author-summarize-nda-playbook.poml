@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="126" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Author summarize-nda playbook + action (SKL-003 + KNW-006 + KNW-005 via JPS $ref)</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>127</dependencies>
+    <blocks>131</blocks>
+    <tags>dataverse, ai, playbook</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Playbook + action authoring; JPS $ref composition (Skills/Knowledge); output schema must align with FR-39 7-section pattern; FULL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-39: author the `summarize-nda` playbook + action via JPS `$ref` to existing SKL-003 (NDA Review) + KNW-006 (NDA Standards) + KNW-005 (Defined Terms). Single-node playbook; action systemPrompt uses JPS-v1 schema; outputSchema implements the 7-section pattern (parties + direction, definition, exclusions, term + survival, permittedUse, remedies, redFlags); configJson sets destination=workspace + widgetType=structured-output-stream. Coexists alongside PB-009 (whose rewrite happens in task 130). Note: PB-009 will use code `summarize-nda` per task 121 plan; this task creates a NEW playbook with a DIFFERENT code (e.g., `summarize-nda-v2`) if PB-009 already claims the canonical code — verify against the audit findings before finalizing.
+  </prompt>
+
+  <role>SPAARKE AI playbook author. Familiar with JPS-v1 schema + Dataverse playbook seed pattern.</role>
+
+  <goal>
+    A NEW playbook JSON file authored at `scripts/seed-data/playbooks/summarize-nda.playbook.json` (or equivalent path) following the design §WP6 sketch. The playbook is single-node with one action; action systemPrompt is JPS-v1 with `$ref`s to NDA Review skill + NDA Standards knowledge + Defined Terms knowledge; outputSchema enforces 7-section NDA structure; configJson routes to Workspace destination with structured-output-stream widget. Deployed to Dataverse + verified via `sprk_analysisplaybook` query. Code is `summarize-nda` if PB-009 does not already claim it (per task 121 plan), else `summarize-nda-v2` (TBD per audit).
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-39 + design §WP6 sketch. Three specialized playbooks (`summarize-nda`, `summarize-patent`, `extract-invoice`) added in WP6. This task authors the NDA one. SKL-003 + KNW-006 + KNW-005 already exist (per design §WP6 inventory table); JPS `$ref` resolves at runtime via the engine extension from task 122. Code-naming check: task 121 remediation plan assigns code `summarize-nda` to PB-009 rewrite. If that's the case, this NEW playbook uses a different code (per audit finding); else this playbook claims `summarize-nda`.
+    </background>
+    <relevant-files>
+      <file>scripts/seed-data/playbooks/</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/121-pb009-remediation-plan.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-39 acceptance — playbook indexed; vector match for "summarize this NDA" + NDA upload returns it as top-1.</constraint>
+    <constraint source="project">Use existing SKL-003 + KNW-006 + KNW-005 — do NOT invent new primitives for NDA.</constraint>
+    <constraint source="project">Output schema: 7 sections (parties + direction, definition, exclusions, term + survival, permittedUse, remedies, redFlags) per design §WP6 sketch.</constraint>
+    <constraint source="project">Kebab-case code, no `@v1` suffix per §1.7.</constraint>
+    <constraint source="project">Coordinate code naming with task 121 remediation plan output — avoid collision with PB-009 rewrite.</constraint>
+    <constraint source="project">Single-node, destination=workspace + widgetType=structured-output-stream per design §WP6 sketch.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/121-pb009-remediation-plan.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `notes/handoffs/121-pb009-remediation-plan.md` to confirm whether PB-009 claims `summarize-nda` code. Resolve naming conflict — this task uses whatever code is NOT claimed by PB-009.</step>
+    <step order="2">Read design.md §WP6 sketch (line ~1278) for the canonical NDA playbook JSON shape.</step>
+    <step order="3">Author `summarize-nda.playbook.json` (or named per resolved code) following the design sketch: action with JPS `$ref` to NDA Review + NDA Standards + Defined Terms; 7-section outputSchema; configJson with destination=workspace + widgetType=structured-output-stream.</step>
+    <step order="4">Add `sprk_jpsmatchingmetadata` JSON to the playbook: documentTypes (`nda`, `non-disclosure-agreement`, `confidentiality-agreement`), intents (`summarize`), triggerPhrases (`summarize this NDA`, `review NDA`, `NDA summary`).</step>
+    <step order="5">Validate the JPS-v1 schema in the action's systemPrompt parses correctly (use any local JSON schema validator).</step>
+    <step order="6">Deploy via `Deploy-Playbook.ps1` (or equivalent). Note: indexing happens in task 131 — do NOT trigger send-to-index here.</step>
+    <step order="7">Verify via Dataverse query: `sprk_analysisplaybook` row with the assigned code exists; `sprk_actioncode` populated; `sprk_jpsmatchingmetadata` populated.</step>
+    <step order="8">Document the final code + path in `notes/handoffs/126-summarize-nda.md`.</step>
+    <step order="9">Update TASK-INDEX.md: task 126 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">design.md §WP6, task 121 plan, existing playbook JSONs</tool>
+    <tool name="Write">scripts/seed-data/playbooks/summarize-nda.playbook.json (or resolved name)</tool>
+    <tool name="Bash">Deploy-Playbook.ps1 + Dataverse query</tool>
+    <tool name="Edit">TASK-INDEX.md status flip</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">scripts/seed-data/playbooks/summarize-nda.playbook.json — new playbook JSON</output>
+    <output type="dataverse">sprk_analysisplaybook row with new code, sprk_jpsmatchingmetadata populated</output>
+    <output type="docs">notes/handoffs/126-summarize-nda.md — code + path documented</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Playbook JSON file exists and parses.</criterion>
+    <criterion testable="true">JPS `$ref` composition references SKL-003 + KNW-006 + KNW-005 only.</criterion>
+    <criterion testable="true">OutputSchema has all 7 required sections.</criterion>
+    <criterion testable="true">configJson sets destination=workspace + widgetType=structured-output-stream.</criterion>
+    <criterion testable="true">Dataverse row deployed; `sprk_jpsmatchingmetadata` populated.</criterion>
+    <criterion testable="true">Code-naming collision with PB-009 resolved per audit.</criterion>
+    <criterion testable="true">Handoff document records final code + path.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Indexing happens in task 131 (deploy-serialized via Send-to-Index UX). Do NOT trigger embed here. If PB-009 claims `summarize-nda`, this task uses `summarize-nda-v2` or another name per the audit; either way, log the decision clearly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol.</protocol>
+  </execution>
+</task>

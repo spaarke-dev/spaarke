@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Delete LegalWorkspace CreateMatter/Project/WorkAssignment dead code</title>
+    <phase>0: §1.7 Pattern C Cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>000</dependencies>
+    <blocks>004</blocks>
+    <tags>cleanup, frontend, legacy-removal, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Will delete files (modifies code surface); has explicit constraint (OC-R4-05); STANDARD applies per task-execute Step 0.5</rigor-reason>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Delete the retired LegalWorkspace CreateMatter / CreateProject / CreateWorkAssignment scaffolding per spec.md §1.7 Pattern C cleanup. These components were retired by OC-R4-05 (LegalWorkspace standalone code-page retirement) but their files remain in the tree, creating noise during Pattern A/B migration and risking accidental modification. Confirm zero production consumers before deleting.
+  </prompt>
+
+  <role>SPAARKE platform developer with frontend / React expertise. Follow ADRs strictly.</role>
+
+  <goal>
+    The 3 retired wizard CreateRecordStep components (Matter, Project, WorkAssignment) deleted from `src/solutions/LegalWorkspace/`. Build (npm run build for LegalWorkspace) passes. Phase 0 smoke test (task 004) confirms no consumers broken.
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md §1.7.3 Pattern C: cleanup precedes Pattern A + Pattern B migrations to keep the blast-radius matching the documented 9-consumer inventory. Per design §1.5 and OC-R4-05, LegalWorkspace standalone code-page was retired in R4; these CreateRecordStep components are residual dead code. Removing them clears noise from grep results during stable-code migration.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/CreateRecordStep.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateProject/CreateRecordStep.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateWorkAssignment/CreateRecordStep.tsx</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Pattern C cleanup precedes Pattern A and Pattern B migrations (spec §1.7.3 sequencing).</constraint>
+    <constraint source="project">Do NOT delete components that still have production consumers. Verify via grep for component import paths.</constraint>
+    <constraint source="project">Verify PR #406 (smart-todo-r4-uat4-fixes) does not also touch these files before deletion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep across `src/` for imports of the three CreateRecordStep paths. If any production consumer found, STOP and document in notes/debug/ — do not delete.</step>
+    <step order="2">Confirm PR #406 file list via `gh pr view 406 --json files` does not include the same paths.</step>
+    <step order="3">Delete `src/solutions/LegalWorkspace/src/components/CreateMatter/CreateRecordStep.tsx`.</step>
+    <step order="4">Delete `src/solutions/LegalWorkspace/src/components/CreateProject/CreateRecordStep.tsx`.</step>
+    <step order="5">Delete `src/solutions/LegalWorkspace/src/components/CreateWorkAssignment/CreateRecordStep.tsx`.</step>
+    <step order="6">Run `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build` in `src/solutions/LegalWorkspace/` to verify build still passes.</step>
+    <step order="7">Update TASK-INDEX.md: change task 001 status to ✅ completed.</step>
+    <step order="8">Update current-task.md per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Search for consumer imports</tool>
+    <tool name="Bash">Run gh pr view, npm install, npm run build</tool>
+    <tool name="Edit">Update TASK-INDEX.md + current-task.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="deletion">src/solutions/LegalWorkspace/src/components/CreateMatter/CreateRecordStep.tsx (deleted)</output>
+    <output type="deletion">src/solutions/LegalWorkspace/src/components/CreateProject/CreateRecordStep.tsx (deleted)</output>
+    <output type="deletion">src/solutions/LegalWorkspace/src/components/CreateWorkAssignment/CreateRecordStep.tsx (deleted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All three files no longer exist; `git status` shows them as deleted.</criterion>
+    <criterion testable="true">`grep -r "CreateRecordStep" src/solutions/LegalWorkspace/` returns no references except potential test fixtures.</criterion>
+    <criterion testable="true">`npm run build` in `src/solutions/LegalWorkspace/` exits 0.</criterion>
+    <criterion testable="true">No production consumer was found in step 1 (or if found, deletion was skipped with documentation in notes/debug/).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per CLAUDE.md §11: do not use `npm ci` for Vite solutions; use `npm install --legacy-peer-deps --no-audit --no-fund`. If a consumer is found, the task pivots to "migrate the consumer first" — do not force-delete in that case.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

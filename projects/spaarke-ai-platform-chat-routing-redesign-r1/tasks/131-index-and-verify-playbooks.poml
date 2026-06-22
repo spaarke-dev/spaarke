@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="131" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Index 4 playbooks via Send-to-Index UX; verify each top-1 for representative queries</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>126,128,129,130</dependencies>
+    <blocks>132</blocks>
+    <tags>ai, azure-search, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy-side action; uses existing Phase 2 Send-to-Index UX; verifies vector match top-1 for representative queries; STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy serialization required if same Dataverse env; indexing is sequential per playbook via Send-to-Index UX; task 132 depends on indexed state</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Index the 4 Phase 6 playbooks (PB-009 rewritten, summarize-nda new, summarize-patent new, extract-invoice new) via the Phase 2 Send-to-Index UX (Power Apps button on `sprk_analysisplaybook` form). For each, verify the vector match returns it as top-1 for its representative trigger queries. Document indexing outcomes + match scores at `notes/handoffs/131-playbook-indexing.md`.
+  </prompt>
+
+  <role>SPAARKE platform developer + AI Search operator. Familiar with Phase 2 indexing pipeline.</role>
+
+  <goal>
+    All 4 Phase 6 playbooks indexed in `playbook-embeddings` (or whatever index Phase 2 stood up). `sprk_indexstatus = "indexed"`, `sprk_lastindexedat` populated. Each playbook verified top-1 for its representative queries: PB-009 → "summarize this NDA"; summarize-nda → similar (TBD per task 126 final code); summarize-patent → "summarize this patent"; extract-invoice → "extract invoice". Top-1 verification results documented at `notes/handoffs/131-playbook-indexing.md`.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-39, FR-40, FR-41, FR-43 (all four require indexed verification). Phase 2 (tasks 030-040) shipped the Send-to-Index UX + drift job + admin view. This task uses that UX to index the 4 Phase 6 playbooks and verify top-1 match for representative queries. Task 132 (integration tests) depends on these being indexed.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/126-summarize-nda.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/128-summarize-patent.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/129-extract-invoice.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/130-pb009-rewrite-applied.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-39/FR-40/FR-41/FR-43 acceptance — each playbook is top-1 for representative queries.</constraint>
+    <constraint source="project">Deploy serialization — index ONE playbook at a time via the Send-to-Index UX to avoid race conditions if same Dataverse env.</constraint>
+    <constraint source="project">If PB-009 and summarize-nda compete for "summarize this NDA" top-1, document the disambiguation strategy + score gap.</constraint>
+    <constraint source="ADR-015">Indexing telemetry tier-1 safe — no document content; counts + scores only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the 4 Phase 6 handoffs (126, 128, 129, 130) to capture each playbook's final code, name, and representative queries.</step>
+    <step order="2">Open the Power Apps form for `sprk_analysisplaybook`; for each playbook, click Send-to-Index.</step>
+    <step order="3">After each index operation, verify `sprk_indexstatus` updates to `indexed` and `sprk_lastindexedat` populated.</step>
+    <step order="4">For PB-009 (rewritten as NDA): submit query "summarize this NDA" to the routing layer; assert PB-009 is top-1.</step>
+    <step order="5">For summarize-nda new (if code differs from PB-009): submit its representative query; assert top-1.</step>
+    <step order="6">For summarize-patent: submit "summarize this patent" + "review this patent"; assert top-1 for both.</step>
+    <step order="7">For extract-invoice: submit "extract invoice" + "invoice details"; assert top-1.</step>
+    <step order="8">Record match scores + runner-up scores for each query at `notes/handoffs/131-playbook-indexing.md`. Document any PB-009 vs summarize-nda-new disambiguation strategy if both compete.</step>
+    <step order="9">If any playbook is NOT top-1, escalate per CLAUDE.md §6 — do not proceed to task 132.</step>
+    <step order="10">Update TASK-INDEX.md: task 131 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Dataverse query for index status; routing layer query for top-1 verification</tool>
+    <tool name="Write">notes/handoffs/131-playbook-indexing.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="azure-search">4 playbooks indexed in playbook-embeddings index</output>
+    <output type="docs">notes/handoffs/131-playbook-indexing.md — indexing outcomes + match scores</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 playbooks have `sprk_indexstatus = "indexed"`.</criterion>
+    <criterion testable="true">PB-009 is top-1 for "summarize this NDA".</criterion>
+    <criterion testable="true">summarize-patent is top-1 for "summarize this patent".</criterion>
+    <criterion testable="true">extract-invoice is top-1 for "extract invoice".</criterion>
+    <criterion testable="true">PB-009 vs summarize-nda-new disambiguation documented if relevant.</criterion>
+    <criterion testable="true">Match scores + runner-up scores recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deploy serialization — one playbook at a time. If a query returns a non-Phase-6 playbook top-1, that's a routing precision issue; document and escalate. Indexing is a Phase 2 capability; this task USES that capability, doesn't extend it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

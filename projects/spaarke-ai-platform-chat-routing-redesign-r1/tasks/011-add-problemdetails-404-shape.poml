@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Add ProblemDetails 404 shape per ADR-019 + integration test</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>013</blocks>
+    <tags>bff-api, testing, ADR-019</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Endpoint shape change + new integration test; tags include 'bff-api' + 'testing'; not a new endpoint surface (010 added it); STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Ensure the `GET /api/ai/playbooks/by-code/{code}` endpoint returns an RFC 7807 ProblemDetails response shape on 404 (code not found) per ADR-019. Add an integration test asserting the response shape (`type`, `title`, `status`, `detail`, `instance`). This is independent of task 010 (endpoint mapping) and task 012 (WorkspaceOptions extension) — operates on a separate response path.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in ASP.NET Core ProblemDetails + xUnit integration testing.</role>
+
+  <goal>
+    `GET /api/ai/playbooks/by-code/nonexistent-code` returns HTTP 404 with content-type `application/problem+json` and an RFC 7807 body. Integration test in `tests/integration/Sprk.Bff.Api.IntegrationTests/` asserts the shape. ProblemDetails `type` URI follows existing Spaarke convention; `title` is human-readable; `detail` includes the missing code.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-01 acceptance + ADR-019. Task 010 stands up the `/by-code/` endpoint; this task ensures the 404 path conforms to the RFC 7807 ProblemDetails contract that Spaarke clients (PCF, code-pages, agents) expect. ProblemDetails on 404 lets clients distinguish "playbook not found" from generic errors without parsing free-text strings.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ProblemDetails/</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">404 response MUST follow RFC 7807 ProblemDetails shape; content-type `application/problem+json`.</constraint>
+    <constraint source="ADR-001">Minimal API — use `Results.Problem(...)` or existing Spaarke ProblemDetails factory; do NOT introduce a Controller.</constraint>
+    <constraint source="ADR-015">ProblemDetails `detail` field MAY include the requested code (it is user-supplied input, not memory content); MUST NOT include user message text or memory facts.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement required; expect ≤0.1 MB delta.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10 F) — add integration test asserting RFC 7807 shape.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect `Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs` — find the `/by-code/` mapping from task 010. Locate the 404 / lookup-miss branch.</step>
+    <step order="2">Inspect existing Spaarke ProblemDetails infrastructure (e.g., `Infrastructure/ProblemDetails/` or convention helpers) to reuse `type` URI prefix + title format.</step>
+    <step order="3">Replace the 404 return with `Results.Problem(detail: $"Playbook with code '{code}' not found.", statusCode: 404, type: "...", title: "Playbook Not Found", instance: $"/api/ai/playbooks/by-code/{code}")` (or call existing factory).</step>
+    <step order="4">Create integration test `tests/integration/Sprk.Bff.Api.IntegrationTests/PlaybookByCodeProblemDetailsTests.cs` asserting: 404 status, `application/problem+json` content-type, JSON body has `type`, `title`, `status`, `detail`, `instance` fields, `detail` contains the requested code.</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/` — both pass.</step>
+    <step order="6">Measure BFF publish size: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; record delta in handoff note.</step>
+    <step order="7">Update TASK-INDEX.md: task 011 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookEmbeddingEndpoints.cs + existing ProblemDetails infrastructure</tool>
+    <tool name="Edit">Modify 404 return path</tool>
+    <tool name="Write">Create new integration test file</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs — 404 returns ProblemDetails</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/PlaybookByCodeProblemDetailsTests.cs — asserts RFC 7807 shape</output>
+    <output type="docs">notes/handoffs/011-bff-publish-delta.md — publish size delta</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GET /api/ai/playbooks/by-code/nonexistent-code-xyz` returns HTTP 404.</criterion>
+    <criterion testable="true">Response content-type is `application/problem+json`.</criterion>
+    <criterion testable="true">Response body has fields: `type`, `title`, `status`, `detail`, `instance`.</criterion>
+    <criterion testable="true">`detail` field includes the requested code string.</criterion>
+    <criterion testable="true">Integration test exits 0.</criterion>
+    <criterion testable="true">`dotnet build` exits 0; publish-size delta reported and within NFR-01 thresholds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Coordinate with task 010 (endpoint mapping) — if 010 already added a ProblemDetails 404, this task simplifies to "add the integration test and verify". Do NOT re-author the endpoint. The 404 path is the only response shape this task owns; success (200) shape is governed by task 010.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — code-review + adr-check skipped at Step 9.5; build + test verification required.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Migrate WorkspaceAiService to stable code (Pattern A — consumes AiSummaryPlaybookCode)</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>020,021</blocks>
+    <tags>bff-api, refactoring, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies AI service; FULL per Step 0.5</rigor-reason>
+    <parallel-group>1-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Replace the hardcoded GUID at `WorkspaceAiService.cs:41-44` with a stable-code lookup via `IPlaybookLookupService.GetByCodeAsync(WorkspaceOptions.AiSummaryPlaybookCode, tenantId)`. Confirm the target stable code value (deferred decision in task 013 — likely `summarize-new-files` or `document-profile`); update `WorkspaceOptions.AiSummaryPlaybookCode` default + appsettings if needed. Pattern A migration shape.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in workspace AI summarization layer + Pattern A migrations.</role>
+
+  <goal>
+    `WorkspaceAiService.cs` resolves the summary playbook via `IPlaybookLookupService.GetByCodeAsync(options.AiSummaryPlaybookCode, tenantId)`. Hardcoded GUID removed. The `AiSummaryPlaybookCode` value populated in `appsettings.Development.json` matches the intended production playbook (decision documented in handoff). Unit + integration tests pass.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-02 + §1.7 Pattern A. `WorkspaceAiService.cs:41-44` carries a hardcoded GUID for the workspace-side AI summary playbook. Spec §1.7.3 codes table includes `summarize-new-files` and `document-profile`; the deferred-decision item in task 013 leaves the exact target for resolution here. Trace the GUID at `:41-44` to its production playbook via Dataverse `read_query` to confirm which code to bind.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/WorkspaceAiService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs (read-only — set in task 013; may need value-only update)</file>
+      <file>config/appsettings.Development.json (value-only update if AiSummaryPlaybookCode default was empty)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/WorkspaceAiServiceTests.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/WorkspaceAiIntegrationTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Inject `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService` directly.</constraint>
+    <constraint source="ADR-013">Service inside `Services/Ai/` — consumer crosses AI facade; preserve public contract.</constraint>
+    <constraint source="ADR-014">Cached lookup.</constraint>
+    <constraint source="ADR-018">Typed options.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">NFR-02: production-bound playbook (matching the hardcoded GUID) unchanged in name/GUID/output schema.</constraint>
+    <constraint source="project">DO NOT modify `WorkspaceOptions.cs` structure (task 013 owns property definition); MAY update the DEFAULT VALUE on `AiSummaryPlaybookCode` to the resolved code, and matching `appsettings.Development.json` key.</constraint>
+    <constraint source="project">DO NOT modify sibling Pattern A targets (016/017/019).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `WorkspaceAiService.cs:41-44` — locate the hardcoded GUID.</step>
+    <step order="2">Trace the GUID to its Dataverse playbook (use MCP `read_query` on `sprk_analysisplaybook` filtered by `sprk_analysisplaybookid`) to resolve which stable code to bind (`summarize-new-files` vs `document-profile` vs other).</step>
+    <step order="3">Document the resolved code in `notes/handoffs/018-aisummary-code-decision.md`.</step>
+    <step order="4">Update `WorkspaceOptions.AiSummaryPlaybookCode` default to the resolved code; update matching `appsettings.Development.json` key. (Scope: value-only — do NOT add new properties.)</step>
+    <step order="5">Refactor `WorkspaceAiService.cs`: inject `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService`; replace hardcoded GUID with `await _playbookLookup.GetByCodeAsync(_options.Value.AiSummaryPlaybookCode, tenantId, ct)`.</step>
+    <step order="6">Verify public contract unchanged.</step>
+    <step order="7">Update unit tests with stable code fixtures.</step>
+    <step order="8">Add integration test asserting end-to-end summarize flow.</step>
+    <step order="9">Run `dotnet build` + `dotnet test`. Pass.</step>
+    <step order="10">Measure publish size; report delta.</step>
+    <step order="11">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="12">Update TASK-INDEX.md: task 018 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">WorkspaceAiService.cs + WorkspaceOptions.cs</tool>
+    <tool name="Edit">Apply Pattern A migration + populate AiSummaryPlaybookCode default + update tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+    <tool name="Grep">Verify zero hardcoded GUID remains</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/WorkspaceAiService.cs — refactored to stable code</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs — AiSummaryPlaybookCode default populated (value-only)</output>
+    <output type="config">config/appsettings.Development.json — AiSummaryPlaybookCode value populated</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/WorkspaceAiServiceTests.cs — fixtures use stable code</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/WorkspaceAiIntegrationTests.cs — end-to-end test</output>
+    <output type="docs">notes/handoffs/018-aisummary-code-decision.md — resolved code + Dataverse trace evidence</output>
+    <output type="docs">notes/handoffs/018-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WorkspaceAiService.cs` injects `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService`.</criterion>
+    <criterion testable="true">No hardcoded GUID for AI summary playbook remains.</criterion>
+    <criterion testable="true">`WorkspaceOptions.AiSummaryPlaybookCode` default is non-empty (populated to resolved code).</criterion>
+    <criterion testable="true">Handoff note documents which stable code was bound + Dataverse evidence.</criterion>
+    <criterion testable="true">Unit tests + integration test exit 0.</criterion>
+    <criterion testable="true">Publish-size delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The value-only edit to `WorkspaceOptions.cs` (changing default from `""` to resolved code) is the minimum-scope override of task 013's deferred-decision item. It does NOT conflict with siblings 016, 017, 019 because the line edited is the property initializer — siblings touch different property initializers. If task 013 already populated `AiSummaryPlaybookCode` with the correct value, skip step 4.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

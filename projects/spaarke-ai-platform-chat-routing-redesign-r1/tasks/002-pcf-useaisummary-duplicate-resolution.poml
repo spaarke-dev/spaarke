@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Delete or migrate PCF UniversalQuickCreate useAiSummary.ts duplicate</title>
+    <phase>0: §1.7 Pattern C Cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>000</dependencies>
+    <blocks>004,021</blocks>
+    <tags>cleanup, pcf, legacy-removal, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modifies code surface (delete or migrate); tags include 'pcf'</rigor-reason>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Resolve the PCF `UniversalQuickCreate/control/services/useAiSummary.ts` duplicate — it duplicates the shared hook at `src/client/shared/.../useAiSummary.ts`. Either migrate the PCF to use the shared hook OR delete the PCF copy if no production consumer.
+  </prompt>
+
+  <role>SPAARKE platform developer with PCF + React expertise.</role>
+
+  <goal>
+    Single canonical `useAiSummary` hook in the shared lib; PCF either imports from shared or has the duplicate deleted. Build (npm run build:prod) passes.
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md §1.7.3 Pattern C task list. The duplicate hook will become a source of name-resolve drift during the §1.7 stable-code migration (Pattern B) — Task 020 will migrate `useAiSummary.ts:285` to use stable codes. Two copies would force the same migration twice.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/control/services/useAiSummary.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useAiSummary.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">PCF over web resources — PCF code lives in `src/client/pcf/`; shared utilities live in shared lib.</constraint>
+    <constraint source="ADR-012">Shared components — duplication across PCFs and pages is anti-pattern; reuse via shared lib.</constraint>
+    <constraint source="project">If migrating PCF to import from shared lib, follow PCF deployment protocol (version bump per `PCF-DEPLOYMENT-GUIDE.md`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Compare both `useAiSummary.ts` files via diff. Note shape divergence.</step>
+    <step order="2">Grep PCF UniversalQuickCreate for actual consumers of the PCF-local hook.</step>
+    <step order="3">Decision: (a) If divergent shape required by PCF → migrate PCF to import from shared lib with adapter layer; (b) If identical or trivially adaptable → delete PCF copy and import from shared.</step>
+    <step order="4">Execute chosen path. If migration: follow PCF-DEPLOYMENT-GUIDE.md — bump version in 4 locations.</step>
+    <step order="5">Run `npm run build:prod` (NOT `npm run build` — per CLAUDE.md AP-1) in `src/client/pcf/UniversalQuickCreate/`.</step>
+    <step order="6">Update TASK-INDEX.md: task 002 → ✅.</step>
+    <step order="7">Update current-task.md per protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read both files for comparison</tool>
+    <tool name="Grep">Find consumers</tool>
+    <tool name="Edit">Update files</tool>
+    <tool name="Bash">npm run build:prod</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/ updated (either deleted file or migrated import)</output>
+    <output type="docs">Decision rationale documented in notes/drafts/002-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Single canonical hook implementation in shared lib.</criterion>
+    <criterion testable="true">PCF UniversalQuickCreate `npm run build:prod` exits 0.</criterion>
+    <criterion testable="true">No duplicate `useAiSummary.ts` hook content across the repo.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    PCF prod build uses `npm run build:prod` not `npm run build` (CLAUDE.md AP-1 / FAILURE-MODES.md). Migration option requires version bump per PCF-DEPLOYMENT-GUIDE.md. If PCF is deployed elsewhere (other solutions), migration is preferred over deletion.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Follow STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

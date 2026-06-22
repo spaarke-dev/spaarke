@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Migrate ProjectPreFillService to stable code (Pattern A — consumes ProjectPreFillPlaybookCode)</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>020,021</blocks>
+    <tags>bff-api, refactoring, services, NFR-07</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; refactors hot pre-fill path; NFR-07 binding — pre-fill flow signatures + 45s timeout + $choices contract preserved; FULL per Step 0.5</rigor-reason>
+    <parallel-group>1-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Replace the hardcoded GUID at `ProjectPreFillService.cs:42-43` with a stable-code lookup via `IPlaybookLookupService.GetByCodeAsync(WorkspaceOptions.ProjectPreFillPlaybookCode, tenantId)`. Per Pattern A, the typed option is already pre-added in task 013. Also scrub the stale `3f21cec1-` GUID COMMENT at line 40 if task 003 did not already remove it (verify pre-flight). NFR-07 BINDING: do NOT modify the pre-fill flow signature, `useAiPrefill` consumer, 45s timeout, or `$choices` output contract.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in pre-fill orchestration + NFR-07 binding invariants.</role>
+
+  <goal>
+    `ProjectPreFillService.cs` resolves the pre-fill playbook via `IPlaybookLookupService.GetByCodeAsync(options.ProjectPreFillPlaybookCode, tenantId)`. Hardcoded GUID removed. Stale `3f21cec1-` comment scrubbed (or confirmed already-removed by task 003). Public contract (signature, 45s timeout, `$choices` output) unchanged. Unit + integration tests pass.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-02 + §1.7 Pattern A + NFR-07. `ProjectPreFillService.cs:42-43` is the project-creation companion to matter-creation (task 016) and follows the identical Pattern A shape. The line-40 stale comment is documented in task 003 — verify removal status; if 003 missed it, this task removes it.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs (read-only — set in task 013)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookLookupService.cs (read-only — existing)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ProjectPreFillServiceTests.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/ProjectPreFillIntegrationTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Inject `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService` directly.</constraint>
+    <constraint source="ADR-013">`ProjectPreFillService` is inside `Services/Ai/`; CRUD consumer crosses AI facade — preserve current public contract.</constraint>
+    <constraint source="ADR-014">Lookup uses cached `IPlaybookLookupService`.</constraint>
+    <constraint source="ADR-018">Read via typed options; no `IConfiguration[]` indexer.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">NFR-07 BINDING: pre-fill signature + 45s timeout + `useAiPrefill` contract + `$choices` output unchanged.</constraint>
+    <constraint source="spec">NFR-02: production-bound playbook `"Create New Project Pre-Fill"` (now `sprk_playbookcode = "create-project-prefill"`) unchanged.</constraint>
+    <constraint source="project">DO NOT modify `WorkspaceOptions.cs` (task 013 owns); DO NOT modify sibling Pattern A targets (016/018/019).</constraint>
+    <constraint source="project">Test update obligation per CLAUDE.md §10 F.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `ProjectPreFillService.cs:40-44`. Locate hardcoded GUID + stale `3f21cec1-` comment.</step>
+    <step order="2">If `3f21cec1-` comment still present, remove it (task 003 may have missed); otherwise note in handoff.</step>
+    <step order="3">Verify `WorkspaceOptions.ProjectPreFillPlaybookCode = "create-project-prefill"` exists (task 013).</step>
+    <step order="4">Verify `GET /api/ai/playbooks/by-code/create-project-prefill` returns 200 (task 014 backfill).</step>
+    <step order="5">Refactor: inject `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService`; replace hardcoded GUID with `await _playbookLookup.GetByCodeAsync(_options.Value.ProjectPreFillPlaybookCode, tenantId, ct)`.</step>
+    <step order="6">Verify public method signature (consumed by `useAiPrefill`) unchanged. 45s timeout preserved. `$choices` output preserved.</step>
+    <step order="7">Update unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ProjectPreFillServiceTests.cs` — fixtures use stable code.</step>
+    <step order="8">Add/update integration test asserting end-to-end project pre-fill returns `$choices`-shaped output within 45s.</step>
+    <step order="9">Run `dotnet build` + `dotnet test`. Pass.</step>
+    <step order="10">Measure publish size; report delta.</step>
+    <step order="11">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="12">Update TASK-INDEX.md: task 017 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">ProjectPreFillService.cs + WorkspaceOptions.cs + PlaybookLookupService.cs</tool>
+    <tool name="Edit">Apply Pattern A migration + update tests + remove stale comment</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+    <tool name="Grep">Verify zero hardcoded GUID remains</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs — refactored to stable code</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ProjectPreFillServiceTests.cs — fixtures use stable code</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/ProjectPreFillIntegrationTests.cs — NFR-07 regression test</output>
+    <output type="docs">notes/handoffs/017-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ProjectPreFillService.cs` injects `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService`.</criterion>
+    <criterion testable="true">No hardcoded GUID for project pre-fill playbook remains.</criterion>
+    <criterion testable="true">`grep "3f21cec1" src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs` returns zero matches.</criterion>
+    <criterion testable="true">Public method signature consumed by `useAiPrefill` unchanged.</criterion>
+    <criterion testable="true">45s timeout invariant preserved.</criterion>
+    <criterion testable="true">`$choices` output shape preserved.</criterion>
+    <criterion testable="true">Unit tests + integration test exit 0.</criterion>
+    <criterion testable="true">Publish-size delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with 016, 018, 019 — different service file, different typed option. Do not touch sibling Pattern A files.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

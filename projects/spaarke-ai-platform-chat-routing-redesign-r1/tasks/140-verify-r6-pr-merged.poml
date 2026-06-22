@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="140" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Verify R6 PR #401 merged to master (HARD GATE for Phase 7)</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>132</dependencies>
+    <blocks>141,142,143,144,145,146,147,148,150</blocks>
+    <tags>coordination, verification</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Pure verification + handoff document; no code modification; MINIMAL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>7-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Hard gate — blocks all of Phase 7; must complete sequentially before any 7-B parallelism</parallel-reason>
+  </metadata>
+
+  <prompt>
+    HARD GATE: verify R6 hotfix PR #401 has merged to master before Phase 7 begins. The WP4 CapabilityRouter deletion (task 141) must run on an R6-hotfix-clean master to avoid losing the 3 R6 UAT hotfix commits (`be95dfc7d`, `35462f807`, `a74ee9fdb`) that guard against silent `toolCount=0` regressions. Output: handoff document at `notes/handoffs/140-r6-pr-merge-verification.md` confirming PR #401 status.
+  </prompt>
+
+  <role>SPAARKE project coordinator + git operator. Verifies cross-project sequencing.</role>
+
+  <goal>
+    PR #401 confirmed merged to master via `gh pr view 401`. The 3 hotfix commits (`be95dfc7d`, `35462f807`, `a74ee9fdb`) confirmed present in `git log master` via cherry-pick check or direct presence. Handoff document records confirmation timestamp + commit SHAs verified. If PR #401 NOT merged, this task BLOCKS — do NOT proceed to task 141.
+  </goal>
+
+  <context>
+    <background>
+      Per spec Dependencies + project CLAUDE.md "Related PRs" section. PR #401 contains R6 UAT hotfix series #1–4 that defensively guard the CapabilityRouter layer this project retires wholesale. If WP4 deletion (task 141) runs before #401 lands on master, those defensive guards are lost mid-flight. Per CRIT-7 audit fix: explicit HARD GATE.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">HARD GATE — task 141 MUST NOT begin until this task confirms PR #401 merged.</constraint>
+    <constraint source="project">If PR #401 NOT merged, this task remains 🔲 + Phase 7 blocked; do not work around.</constraint>
+    <constraint source="project">Verification via `gh pr view 401` is authoritative; do not rely on indirect signals.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `gh pr view 401 --json state,mergedAt,mergeCommit` to retrieve PR status.</step>
+    <step order="2">If `state` != `MERGED`, STOP. Mark task 140 as 🚧 BLOCKED. Document the blocking condition at `notes/handoffs/140-r6-pr-merge-verification.md` (status: BLOCKED, requested action: coordinate with R6 project owner for PR #401 merge).</step>
+    <step order="3">If merged: verify the 3 hotfix commits (`be95dfc7d`, `35462f807`, `a74ee9fdb`) present in `git log master --oneline` (or via `git merge-base --is-ancestor`).</step>
+    <step order="4">Author the handoff at `notes/handoffs/140-r6-pr-merge-verification.md` with: PR #401 merge timestamp, merge commit SHA, presence-check results for the 3 hotfix SHAs, confirmation that Phase 7 may proceed.</step>
+    <step order="5">Update TASK-INDEX.md: task 140 → ✅ (if merge verified) or 🚧 (if blocked).</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">gh pr view + git log + git merge-base</tool>
+    <tool name="Write">notes/handoffs/140-r6-pr-merge-verification.md</tool>
+    <tool name="Edit">TASK-INDEX.md status flip</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/140-r6-pr-merge-verification.md — PR #401 merge confirmation (or blocking report)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`gh pr view 401` returns `state: MERGED` (or task is correctly marked 🚧 BLOCKED).</criterion>
+    <criterion testable="true">3 R6 hotfix commits (`be95dfc7d`, `35462f807`, `a74ee9fdb`) present in `git log master`.</criterion>
+    <criterion testable="true">Handoff document records confirmation timestamp + commit SHAs.</criterion>
+    <criterion testable="true">If blocked, Phase 7 entry blocked accordingly.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a HARD GATE. If PR #401 has not landed, do NOT proceed to task 141 — escalate per CLAUDE.md §6 instead. The cost of running task 141 prematurely is loss of R6 defensive guards mid-deletion.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol.</protocol>
+  </execution>
+</task>

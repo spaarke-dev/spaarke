@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="142" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Remove SoftSlashRouter.SOFT_SLASH_TO_INTENT dict from frontend</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>141</dependencies>
+    <blocks>143,144,145,146,147,148,150</blocks>
+    <tags>frontend, refactoring, legacy-removal</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Frontend-only refactor; removes a small dict; STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>7-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after backend CapabilityRouter deletion (141) — frontend dict mirrors backend dict; remove only after backend confirms no consumer</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-20 + design §WP4: remove the `SoftSlashRouter.SOFT_SLASH_TO_INTENT` dict from `src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts:139-144`. The dict mirrors the backend `SoftSlashIntentToCapabilityName` dict deleted in task 141. `SoftSlashRouter.decorateBody` still emits `commandIntent` (now as a vector-query bias hint per WP2 Phase B), but the dict-based capability mapping is dead. `CommandRouter.parse()` is unchanged.
+  </prompt>
+
+  <role>SPAARKE frontend developer. Familiar with the SpaarkeAi conversation layer.</role>
+
+  <goal>
+    `SoftSlashRouter.SOFT_SLASH_TO_INTENT` dict deleted from `SoftSlashRouter.ts`. `decorateBody` still emits `commandIntent` (wire format unchanged). `npm run build` for SpaarkeAi solution succeeds. Existing chat UX continues working — slashes still parse + decorate the request body.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-20 + design §WP4 frontend surface section. The backend dict was deleted in task 141; the frontend mirror lives in `SoftSlashRouter.ts` lines 139-144. `commandIntent` continues to be sent on the wire (backend now treats it as vector-query bias in WP2 Phase B per FR-20), but the dict-to-capability lookup is no longer needed.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-20 acceptance — `SoftSlashIntentToCapabilityName` dict removed; slash + NL flows produce identical routing for same query text.</constraint>
+    <constraint source="project">`CommandRouter.parse()` UNCHANGED — still parses slash + references + intents.</constraint>
+    <constraint source="project">`decorateBody` still emits `commandIntent` — wire format unchanged.</constraint>
+    <constraint source="project">Per CLAUDE.md §11 — use `npm install --legacy-peer-deps --no-audit --no-fund`; do NOT use `npm ci` for Vite solutions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts` to locate the dict at lines 139-144 + identify any internal references.</step>
+    <step order="2">Remove the `SOFT_SLASH_TO_INTENT` const + any helper functions that consumed it (e.g., `classifySoftSlashIntent`).</step>
+    <step order="3">Verify `decorateBody` still emits `commandIntent` (the slash command itself, not the looked-up capability). Wire format unchanged.</step>
+    <step order="4">Update any consumers in the file that referenced the dict — likely a no-op since the dict was internal.</step>
+    <step order="5">Update tests in the same area (`__tests__/SoftSlashRouter.test.ts` or equivalent) — assert decorateBody still emits commandIntent; remove tests asserting capability-name lookup.</step>
+    <step order="6">Run `cd src/solutions/SpaarkeAi && npm install --legacy-peer-deps --no-audit --no-fund && npm run build`. Must pass.</step>
+    <step order="7">Run frontend unit tests (likely `npm test`). Must pass.</step>
+    <step order="8">Smoke-test in browser/dev: slash command still parses + chat request still sent with `commandIntent` field.</step>
+    <step order="9">Update TASK-INDEX.md: task 142 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">SoftSlashRouter.ts + tests</tool>
+    <tool name="Edit">Remove dict + update tests</tool>
+    <tool name="Bash">npm install / build / test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts — dict removed</output>
+    <output type="test">src/solutions/SpaarkeAi/__tests__/SoftSlashRouter.test.ts (or equivalent) — updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "SOFT_SLASH_TO_INTENT" src/solutions/SpaarkeAi/` returns 0 hits.</criterion>
+    <criterion testable="true">`decorateBody` still emits `commandIntent` field.</criterion>
+    <criterion testable="true">`npm run build` in SpaarkeAi solution succeeds.</criterion>
+    <criterion testable="true">Frontend unit tests pass.</criterion>
+    <criterion testable="true">Browser smoke test: slash command UX unchanged.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wire format preserved — `commandIntent` field still sent on chat requests; backend treats it as vector-query bias (not capability lookup) per WP2 Phase B. The frontend doesn't care about the backend's interpretation; it just sends the slash command.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>
