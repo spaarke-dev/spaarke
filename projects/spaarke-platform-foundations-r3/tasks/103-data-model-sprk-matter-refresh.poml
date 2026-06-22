@@ -1,7 +1,9 @@
 <task id="R3-103" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Refresh `docs/data-model/sprk_matter-related-tables.md` with actual `sprk_matter` columns</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>Refreshed docs/data-model/sprk_matter-related-tables.md (NFR-06 / AC-X.4). Added §1 "Membership-relevant sprk_assigned* columns" table with all 8 Q4-scope fields: sprk_assignedattorney1/2 (Contact), sprk_assignedparalegal1/2 (Contact), sprk_assignedlawfirm1/2 (sprk_organization — Q4 binding correction noted with attribution), sprk_assignedtointernal (SystemUser), sprk_assignedtoexternal (Contact). Each row carries logical name, display name, Lookup target, identity-type produced by MembershipFieldDiscoveryService, auto-derived role (lowercase per CamelCase strategy), operator override role (assignedLawFirm for the disambiguator), and notes. Source provenance reconciled across 3 sources (test fixture MembershipFieldDiscoveryServiceTests.cs:77-86 = primary, spec NFR-06, service code comment); no live Dataverse MCP fetch required because in-repo sources are fully congruent and the test is the regression guard. Added §1.3 global-exclusions note (4 touch-history fields per ADR-034). Added §1.4 cross-references: .claude/adr/ADR-034 + docs/adr/ADR-034 + forward link to docs/architecture/membership-resolution-pattern.md (task 104, may not exist yet). Added §2 sprk_organization section restating Q4 + R3 Option (b) decision link. Preserved §3 raw metadata dump unchanged but added explicit caveat that the dump predates the sprk_assigned* columns and §1 is the authoritative human-readable source. No source code, .claude/, or test changes. STANDARD rigor — docs only, no quality gates.</completion-notes>
     <phase>P10</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>

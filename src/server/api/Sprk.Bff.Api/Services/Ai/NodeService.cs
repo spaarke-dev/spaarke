@@ -983,7 +983,7 @@ public class NodeService : INodeService
         // IMembershipResolverService in-process (R3 P5 / task 042; pairs with
         // ActionType.LookupUserMembership = 52 + LookupUserMembershipNodeExecutor).
         "createTask" or "sendEmail" or "updateRecord" or "callWebhook" or "sendTeamsMessage"
-            or "lookupUserMembership" => NodeType.Workflow,
+            or "lookupUserMembership" or "createNotification" => NodeType.Workflow,
         _ => NodeType.AIAnalysis // Default to AI for unknown types
     };
 
@@ -1010,6 +1010,16 @@ public class NodeService : INodeService
         // R3 P5 / task 042 — pairs with LookupUserMembershipNodeExecutor (task 041)
         // and the client-side PlaybookNodeType.LookupUserMembership canvas string.
         "lookupUserMembership" => ActionType.LookupUserMembership,
+        // R3 P7.1 / task 065 — pre-existing drift discovered by the canvas-server mapping
+        // drift integration test (FR-3H3.1 / AC-H3.1): the canvas has emitted
+        // `createNotification` since R2 (with __actionType=50 baked into configJson client-side
+        // via NodeTypeToActionType), but this server-side BFF-driven sync path was missing
+        // the arm — meaning a server-initiated SyncCanvasToNodesAsync() persisted
+        // `__actionType=0` (AiAnalysis fallback) instead of CreateNotification=50. The
+        // client-driven sync path (playbookNodeSync.ts) was unaffected because that path
+        // bakes __actionType from NodeTypeToActionType directly. Fix is minimal-scope and
+        // surgical; full G6-class drift prevention is the test itself going forward.
+        "createNotification" => ActionType.CreateNotification,
         _ => ActionType.AiAnalysis // Default for unknown types
     };
 

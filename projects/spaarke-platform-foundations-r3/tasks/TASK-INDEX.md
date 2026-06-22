@@ -53,11 +53,11 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 055 | 1-hop max enforcement on `includeRelated` | P6.5 | ✅ | 054 | — | true | STANDARD |
 | 056 | Transitive membership perf integration tests | P6.5 | ✅ | 054, 055 | — | true | STANDARD |
 | 060 | P7.0 — `sprk_searchindexed` consumer inventory | P7.0 | ✅ | none | **M** main-only | false | STANDARD |
-| 061 | `sprk_searchindexed` schema migration (dual-field) | P7.1 | 🔲 | 060 | **N** | true | FULL |
+| 061 | `sprk_searchindexed` schema migration (dual-field) | P7.1 | ✅ | 060 | **N** | true | FULL |
 | 062 | `DeliverToIndexNodeExecutor` dual-write | P7.1 | 🔲 | 061 | **N** | true | FULL |
 | 063 | Migrate UI tile consumers | P7.1 | 🔲 | 061, 062 | **O** | true | STANDARD |
 | 064 | Migrate FetchXML/OData query consumers | P7.1 | 🔲 | 061, 062 | **O** | true | STANDARD |
-| 065 | Canvas-server mapping drift integration test | P7.1 | 🔲 | 042 | **O** | true | FULL |
+| 065 | Canvas-server mapping drift integration test | P7.1 | ✅ | 042 | **O** | true | FULL |
 | 066 | Author `.claude/patterns/ai/node-executor-authoring.md` | P7.1 | 🔲 | 041 | — main-only | false | FULL |
 | 070 | Create `sprk_userentityassociation` entity + indexes | P7.5 | ✅ | 010 | **P** | true | FULL |
 | 071 | Provision Service Bus topic `sprk-membership-changes` | P7.5 | ❌ blocked-operator | 010 | **P** | true | FULL |
@@ -80,7 +80,7 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 100 | ADR-034 final polish + INDEX update | P10 | 🔲 | 037, 087 | **U** main-only | false | STANDARD |
 | 101 | ADR-036 final polish + INDEX update | P10 | 🔲 | 017, 023, 025 | **U** main-only | false | STANDARD |
 | 102 | Refresh `playbook-architecture.md` Known Pitfalls | P10 | 🔲 | 005, 065, 066 | — | true | STANDARD |
-| 103 | Refresh `sprk_matter-related-tables.md` data model doc | P10 | 🔲 | 030 | — | true | STANDARD |
+| 103 | Refresh `sprk_matter-related-tables.md` data model doc | P10 | ✅ | 030 | — | true | STANDARD |
 | 104 | Author `membership-resolution-pattern.md` architecture doc | P10 | 🔲 | 037, 087 | — | true | STANDARD |
 | 110 | Project wrap-up (lessons-learned + code-review + cleanup) | P11 | 🔲 | all prior | — | false | FULL |
 
