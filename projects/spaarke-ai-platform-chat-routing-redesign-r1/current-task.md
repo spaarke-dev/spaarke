@@ -14,9 +14,9 @@
 | **Origin status** | Pushed. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
 | **Last commit** | `c556702ee` — project init (137 files, +15,822 lines) |
 | **Pipeline state** | `/project-pipeline` COMPLETE. Ready for `/task-execute` runs. |
-| **Active task** | Wave 1-B ✅ closed (013). Wave 1-C in flight (task 014 — Dataverse data update). |
+| **Active task** | **STOPPED** end of Wave 1-B. Wave 1-C blocked at task 014 read-only assessment (S6 — Dataverse data conflicts; see Blockers § B-014). |
 | **Execution mode** | **OVERNIGHT AUTONOMOUS** (user explicitly requested 2026-06-21) |
-| **Next Action** | Spawn `task-execute` on task 004 (Wave 0-B Phase 0 smoke test) — STANDARD rigor, ~1h. Then continue wave-by-wave through Phase 1 onwards. |
+| **Next Action** | **HUMAN INPUT REQUIRED**. Read Blockers § B-014 + `notes/debug/014-playbookcode-conflict.md`. Pick options for the 3 conflicts (a/b/c/d) and the missing row (a'/b'/c'). Then resume `continue`. |
 
 ### Critical context (3-sentence version)
 
@@ -125,7 +125,7 @@ When the human user returns, post a single concise summary in the next response 
 | **0-B** | 004 | ✅ done | 2026-06-21 | 2026-06-21 | (Wave 0-B commit pending) | **Phase 0 ✅ GO**. BFF: 0 errors, 16 warnings. Tests: 7313/0/110. Publish: 44.75 MB compressed (under 45.65 baseline). PCF/LW build failures match KNOWN BASELINE (B-002 + separate daily-briefing-components issue) — pre-existing, unrelated to Wave 0-A. Grep: 0 broken refs. Baseline note at `notes/handoffs/phase-0-baseline.md`. |
 | **1-A** | 010, 011, 012 | ✅ done | 2026-06-21 | 2026-06-22 | (Wave 1-A commit pending) | **010 ✅**: `/by-code/` endpoint authored at `PlaybookEndpoints.cs` (797 lines, +94 LoC); ADR-014 5-min cache keyed `(tenantId, code-upper)`; 5 integration tests green; +887 B publish delta; code-review + adr-check clean. **011 ✅**: 404 refined to full RFC 7807 (`type` https://spaarke.com/problems/playbook-not-found + `instance` URI); 3 new tests (8/8 total `PlaybookByCode*` pass); ~0 publish delta. Agent stalled on watchdog after step 4; main session resumed steps 5-8. **012 ✅**: `WorkspaceOptions.SummarizePlaybookCode` + `SummarizePlaybookId` added; `WorkspaceFileEndpoints.cs:30,254` migrated from `IConfiguration[]` to `IOptions<>`; 6/6 unit tests green; FR-04 grep verified 0 live matches; both gates clean. **CRIT-runtime**: tasks 010+011 share `PlaybookEndpoints.cs` — dispatched sequentially (010→011) despite TASK-INDEX marking parallel-safe; documented for future audit. Cumulative publish: 44.74 MB (essentially zero delta vs 44.75 baseline). |
 | **1-B** | 013 | ✅ done | 2026-06-22 | 2026-06-22 | (Wave 1-B commit pending) | CRIT-1 satisfied. 4 properties added (`ChatSummarize/MatterPreFill/ProjectPreFill/AiSummary`PlaybookCode). 7 new tests; 13/13 pass total. Publish +0.01 MB (44.75 MB). code-review + adr-check clean. Wave 1-E now parallel-safe. |
-| **1-C** | 014 | 🔄 in-progress | 2026-06-22 | — | — | Dataverse data update: backfill `sprk_playbookcode` on 6 production-bound playbooks |
+| **1-C** | 014 | 🚧 blocked | 2026-06-22 | — | — | **S6 fired** at read-only assessment: 3 conflicts + 1 missing playbook. Pre-existing `PB-NNN` codes on `Document Profile` (PB-002) + `Create New Matter Pre-Fill` (PB-008) differ from spec §1.7.3 kebab-case targets. `Summarize New File(s)` NOT FOUND in DEV. See Blockers § B-014. |
 | **0-B** | 004 | 🔲 pending | — | — | — | |
 | **1-A** | 010, 011, 012 | 🔲 pending | — | — | — | |
 | **1-B** | 013 | 🔲 pending | — | — | — | CRIT-1 fix: pre-extend WorkspaceOptions |
@@ -245,7 +245,30 @@ Anything new from overnight execution will be tracked here by the post-compact a
 
 ## Blockers
 
-**Status**: ✅ **B-001 RESOLVED** (option b — defer task 001 to post-Phase-1). Wave 0-B dispatched. **B-002 INFORMATIONAL** (shared-lib drift; separate team handoff requested; elaborated report 2026-06-21).
+**Status**: ✅ **B-001 RESOLVED** (option b). ✅ **B-002 INFORMATIONAL** (shared-lib drift; separate team handoff filed 2026-06-21). 🚧 **B-014 OPEN — autonomous run STOPPED at end of Wave 1-B** (Dataverse data conflicts in task 014).
+
+### Blocker B-014 — Task 014 Dataverse `sprk_playbookcode` backfill conflicts (OPEN 2026-06-22)
+
+**Stop condition**: S6 (ambiguous requirement / conflicting state). Triggered at task 014 POML step 2 ("STOP if any existing `sprk_playbookcode` differs from spec §1.7.3 target").
+
+**Read-only assessment** (no writes performed) found 3 conflicts + 1 missing playbook out of the 6 spec §1.7.3 target rows:
+
+| Spec name | Spec target | DEV state | Status |
+|---|---|---|---|
+| `summarize-document-for-chat@v1` | `summarize-document-chat` | NULL | ✅ safe |
+| `summarize-document-for-workspace@v1` | `summarize-document-workspace` | NULL | ✅ safe |
+| `"Summarize New File(s)"` | `summarize-new-files` | **NOT FOUND in DEV** | 🚧 missing |
+| `"Document Profile"` | `document-profile` | **`PB-002`** | 🚧 conflict |
+| `"Create New Matter Pre-Fill"` | `create-matter-prefill` | **`PB-008`** | 🚧 conflict |
+| `"Create New Project Pre-Fill"` | `create-project-prefill` | NULL | ✅ safe |
+
+**Wider context**: A scan finds other playbooks (`Summarize File` → `PB-015`, `Summarize a NDA` → `PB-009`) also using a `PB-NNN` numbering convention parallel to spec §1.7.3's kebab-case convention. The conflicts are NOT one-offs — they reflect a coexisting code scheme.
+
+**Full evidence + 4 unblock options**: see [`notes/debug/014-playbookcode-conflict.md`](notes/debug/014-playbookcode-conflict.md). Owner picks ONE for the 3 conflicts: **(a) overwrite**, **(b) update spec to existing PB-NNN codes**, **(c) dual-code with new column**, **(d) survey consumers first**. Plus a SEPARATE pick for the missing row: **(a') author it**, **(b') drop from spec**, **(c') map to existing `Summarize File`**.
+
+**Recommendation (advisory only)**: (d) → (b) for the conflicts (preserve existing `PB-NNN`; update spec — lowest blast radius); investigate (c') for the missing row.
+
+#### Original B-001 finding (preserved for traceability)
 
 ### Blocker B-001 — Task 001 stale POML target paths + in-island consumer collision (RESOLVED 2026-06-21)
 
