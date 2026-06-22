@@ -1,6 +1,6 @@
 # Spaarke Platform Foundations (R3)
 
-> **Status**: Planning → Implementation (initialized 2026-06-20)
+> **Status**: ✅ **Code-Complete** (2026-06-22 — 65/69 tasks ✅; 4 operator/human-gated follow-ups: 071 topic deploy, 073 topic smoke, 095 manual UAT, all transitively gated by 071)
 > **Branch**: `work/spaarke-platform-foundations-r3`
 > **Predecessor**: [`projects/spaarke-daily-update-service-r2/`](../spaarke-daily-update-service-r2/) (R2 — surfaced the gaps this project resolves)
 > **Type**: Multi-part cross-cutting platform infrastructure (Part 1: User-record membership; Part 2: Background-job framework; Part 3: Playbook engine hardening)

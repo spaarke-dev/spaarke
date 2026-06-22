@@ -1,7 +1,9 @@
 <task id="R3-104" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Author `docs/architecture/membership-resolution-pattern.md`</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>Authored `docs/architecture/membership-resolution-pattern.md` following the architecture-doc convention. 11 sections covering Purpose, Naming-Collision Register (binding ⚠️ disambiguation from `src/client/pcf/AssociationResolver/` + `sprk_fieldmappingprofile`/`sprk_fieldmappingrule`), Contract (user endpoint + admin endpoints + DTOs), Discovery Model (5-step algorithm with file:line refs), Identity Normalization (6-path table), Orchestration, Phase 2 Junction Architecture (with ASCII event-flow diagram and Q4 nightly-recon load-bearing rationale per task 080 inventory), Reference Consumers, Performance Targets, Failure Modes & Recovery, Configuration, Related ADRs/Patterns, Code Entry Points (Phase 1A + Phase 2 split — ~25 file:line refs across MembershipFieldDiscoveryService, IdentityNormalizationService, MembershipResolverService, MembershipEndpoints, MembershipAdminEndpoints, OrganizationMembershipResolver, MembershipChangedEvent, MembershipJunctionUpdater, MembershipReconciliationJob, MembershipCacheInvalidator, and Null peers), Known Pitfalls, See Also. Cross-linked from `docs/architecture/INDEX.md` AI section (new row, Status: New (r3)). ADR-034 concise (`.claude/adr/`) already contained the "See Also → architecture page" pointer per task 100's polish — no coordination edit needed in this task. Naming-collision register cites spec.md line 59 + line 428 + ADR-034 alternatives-considered table. NO source code changes, NO `.claude/` writes.</completion-notes>
     <phase>P10</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>

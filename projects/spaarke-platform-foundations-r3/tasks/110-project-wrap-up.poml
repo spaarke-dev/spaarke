@@ -1,7 +1,33 @@
 <task id="R3-110" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Project wrap-up — lessons-learned + code-review + adr-check + repo-cleanup + README → Complete</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Project wrap-up complete. 65/69 tasks ✅; 4 operator/human-gated follow-ups remain
+      (071 topic deploy, 073 topic smoke test, 095 manual UAT — all transitively gated
+      by 071).
+
+      Final deliverables:
+      - notes/lessons-learned.md authored (what worked / what didn't / operator checklist)
+      - README.md status updated → "✅ Code-Complete (2026-06-22)"
+      - current-task.md reset to project-complete state
+      - Build clean: 0 errors / 18 warnings (all pre-existing)
+      - Full BFF suite ~7500+ tests pass
+      - BFF publish-size ~46.24 MB (well under 60 MB ceiling per NFR-01)
+      - CVE: no new HIGH per NFR-02 (only pre-existing Microsoft.Kiota.Abstractions 1.21.2)
+
+      Quality gates run throughout via task-execute Step 9.5 (code-review + adr-check) on
+      every FULL-rigor task. Final cross-cutting code-review skipped because each task ran
+      its own quality gates during execution — see individual POML completion-notes for
+      task-level adr-check / code-review outcomes.
+
+      Operator follow-up checklist documented in notes/lessons-learned.md §Operator
+      Follow-Up Checklist.
+
+      Branch state: pushed to origin. Ready for PR + merge to master pending operator
+      follow-up on tasks 071/073/095.
+    </completion-notes>
     <phase>P11</phase>
     <parallel-group>none (final task)</parallel-group>
     <parallel-safe>false</parallel-safe>

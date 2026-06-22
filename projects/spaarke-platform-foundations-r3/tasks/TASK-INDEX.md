@@ -81,8 +81,8 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 101 | ADR-036 final polish + INDEX update | P10 | ✅ | 017, 023, 025 | **U** main-only | false | STANDARD |
 | 102 | Refresh `playbook-architecture.md` Known Pitfalls | P10 | ✅ | 005, 065, 066 | — | true | STANDARD |
 | 103 | Refresh `sprk_matter-related-tables.md` data model doc | P10 | ✅ | 030 | — | true | STANDARD |
-| 104 | Author `membership-resolution-pattern.md` architecture doc | P10 | 🔲 | 037, 087 | — | true | STANDARD |
-| 110 | Project wrap-up (lessons-learned + code-review + cleanup) | P11 | 🔲 | all prior | — | false | FULL |
+| 104 | Author `membership-resolution-pattern.md` architecture doc | P10 | ✅ | 037, 087 | — | true | STANDARD |
+| 110 | Project wrap-up (lessons-learned + code-review + cleanup) | P11 | ✅ | all prior | — | false | FULL |
 
 **Total: 69 tasks** (was estimated 50–70).
 
