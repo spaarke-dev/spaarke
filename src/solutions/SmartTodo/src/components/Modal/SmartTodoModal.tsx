@@ -247,6 +247,27 @@ export const SmartTodoModal: React.FC<SmartTodoModalProps> = ({
     }
   }, [iframeSrc, onClose]);
 
+  // ── UAT 2026-06-21 round 8 — Save & Close interceptor protocol.
+  //
+  // The iframe-side form script `sprk_todo_dirty_check.js` (v1.1.0)
+  // monkey-patches `formContext.ui.close` and `Xrm.Page.ui.close` so the
+  // OOB "Save & Close" button posts a `sprk_todo_form_close_intent`
+  // message to us instead of navigating the iframe's parent. We dismiss
+  // the modal on receipt. This preserves the OOB command bar UX (user
+  // still clicks the same Save & Close button) while keeping the parent
+  // page (Code Page modal / embedded Code Page / SpaarkeAi) intact —
+  // closing only the SmartTodoModal layer.
+  React.useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const data = event?.data;
+      if (data && typeof data === 'object' && (data as { type?: unknown }).type === 'sprk_todo_form_close_intent') {
+        onClose();
+      }
+    };
+    window.addEventListener('message', handler, false);
+    return () => window.removeEventListener('message', handler, false);
+  }, [onClose]);
+
   // ── Navigation handler ──────────────────────────────────────────────────
   // Shell guarantees `direction` is 'prev' | 'next' and is only invoked when
   // the corresponding affordance is enabled (i.e. within bounds). Still
