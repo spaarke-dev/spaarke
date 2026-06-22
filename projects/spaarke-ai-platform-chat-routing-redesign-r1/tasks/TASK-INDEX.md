@@ -253,8 +253,8 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 022 | Rename `commandIntent` → `intentHint` (owner-confirmed 2026-06-22) — atomic FE+BE wire-format change | ✅ | FULL | false | 1-G | 020,021 | `bff-api`, `frontend`, `refactoring` — 5 BE + 3 FE + 5 test files; 8 new round-trip tests (NFR-11 backward compat verified — old key silently ignored); 0 publish delta; 5 ADRs clean |
 | 023 | Action code reform: drop `@v1` + backward-compat normalization in `InsightsActionRouter.LoadActionByCodeAsync` | ✅ | STANDARD | true | 1-H | 022 | `dataverse`, `refactoring` — 12 new + 3 updated tests; `ActionCodeFormat` telemetry tag; +826 bytes |
 | 024 | Add deprecation telemetry to `/by-name/` endpoint (warning log + Activity tags) | ✅ | STANDARD | true | 1-H | 022 | `bff-api`, `telemetry`, `ADR-015` — 3 integration tests; 6 KQL dashboard queries documented; +0.01 MB |
-| 025 | Phase 1 integration test suite (9 consumer surfaces × pre/post) | 🔲📝 | STANDARD | true | 1-I | 023,024 | `testing`, `integration-test` |
-| 026 | Deploy Phase 1 to bff-dev environment | 🔲📝 | STANDARD | true | 1-I | 023,024 | `deploy`, `azure`, `bff-api` |
+| 025 | Phase 1 stable-ID migration regression suite (10 facts × 9 consumer surfaces) | ✅ | STANDARD | true | 1-I | 023,024 | `testing`, `integration-test` — `Phase1StableIdMigrationSuite.cs`; 10/10 pass in 43ms; recommended as task 027 first gate check |
+| 026 | Deploy Phase 1 to bff-dev environment | ⏭️ DEFERRED | STANDARD | true | 1-I | 023,024 | `deploy`, `azure`, `bff-api` — **DEFERRED 2026-06-22 per owner**: deploy held until later managed window. Code/tests verified locally — Phase 1 work is solid in code regardless of when bff-dev catches up. Task 027 exit gate uses LOCAL test suite (task 025) instead of deployed smoke tests. |
 | 027 | Phase 1 exit gate — verify zero hardcoded GUIDs/names in `Services/Ai/` via grep | 🔲📝 | MINIMAL | true | 1-J | 025,026 | `verification` |
 
 ## Phase 2 — WP1.5 Index Governance
