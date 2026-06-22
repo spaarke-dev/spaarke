@@ -45,6 +45,59 @@ Per task constraints (CLAUDE.md §10 + spec.md NFR-01 + general infra-as-code hy
 
 ---
 
+## ⚠️ BLOCKER DISCOVERED 2026-06-22 (deploy attempt)
+
+A `what-if` + `create` deploy was attempted against the dev environment on **2026-06-22** and **failed** with:
+
+```
+SubCode=40000. Cannot operate on type Topic because the namespace
+'spaarke-servicebus-dev' is using 'Basic' tier.
+```
+
+### Current Service Bus tier inventory (subscription `484bc857-3802-427f-9ea5-ca47b43db0f0`)
+
+| Namespace | RG | Tier | Topics supported? |
+|---|---|---|---|
+| `spaarke-servicebus-dev` | `SharePointEmbedded` | **Basic** | ❌ No |
+| `spaarke-demo-prod-sbus` | `rg-spaarke-demo-prod` | Standard | ✅ Yes |
+
+### Decision Required (coordinate with team before proceeding)
+
+The dev environment cannot host the `sprk-membership-changes` topic until ONE of:
+
+**Option A — Upgrade `spaarke-servicebus-dev` Basic → Standard**
+- One-way upgrade (per Azure docs — can't downgrade afterwards)
+- Existing `sdap-jobs` queue keeps working (queue is supported on both tiers)
+- Cost delta: Basic (~$0.05/M ops) → Standard ($10/mo base + per-op)
+- Blast radius: shared dev infra; affects all consumers of this namespace
+- Pros: simplest; one namespace for all dev SB workload (queues + topics)
+- Cons: irreversible; cost increase; would need budget/governance sign-off
+
+**Option B — Create a new dedicated Standard namespace for topics**
+- E.g., `spaarke-sbtopics-dev` in a R3-owned RG
+- Leaves existing Basic namespace untouched for queue consumers
+- Operator runbook (this file) + Bicep `serviceBusNamespaceName` param changes to point at the new namespace
+- BFF App Service config `Membership:JunctionUpdater:ServiceBusNamespace` likewise points at the new namespace
+- Pros: zero impact on existing queue consumers; recoverable (just delete the new namespace to revert)
+- Cons: 2 SB namespaces to operate in dev; minor cognitive overhead
+
+**Option C — Defer Phase 2 in dev**
+- Keep all 3 R3 kill-switches (`Membership:EventPublisher`, `JunctionUpdater`, `CacheInvalidator`) at `Enabled=false`
+- Phase 1A (membership endpoints + admin endpoints + nightly recon) works without the topic
+- Run UAT against Phase 1A only in dev; deploy Phase 2 directly to UAT/staging where the SB namespace is Standard
+- Pros: zero infra change in dev; preserves the team-coordination pause; testing path is clear
+- Cons: real-time event flow is never exercised in dev; recon-only operation is the only freshness mechanism
+
+**Recommendation**: **Option C for immediate UAT** + **Option B for medium-term** (gives Phase 2 a verifiable dev surface without the irreversibility of Option A). Owner makes the call.
+
+### Status of this task pending decision
+- Bicep artifact: ✅ authored + `az bicep build` clean + `az deployment group what-if` shows 4 resources to create with no destructive changes
+- Bicep deploy: ❌ FAILED on dev tier mismatch; not attempted on other envs
+- BFF code: ✅ ready (publisher + handler + invalidator with ADR-032 Null peers default OFF; recon job ENABLED by default since it's topic-independent)
+- Operator follow-up: pick Option A / B / C; coordinate with shared-dev consumers; re-run this runbook section "Operator deployment steps" against the right namespace
+
+---
+
 ## Operator deployment steps
 
 ### Prerequisites
