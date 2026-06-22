@@ -54,7 +54,7 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 056 | Transitive membership perf integration tests | P6.5 | ✅ | 054, 055 | — | true | STANDARD |
 | 060 | P7.0 — `sprk_searchindexed` consumer inventory | P7.0 | ✅ | none | **M** main-only | false | STANDARD |
 | 061 | `sprk_searchindexed` schema migration (dual-field) | P7.1 | ✅ | 060 | **N** | true | FULL |
-| 062 | `DeliverToIndexNodeExecutor` dual-write | P7.1 | 🔲 | 061 | **N** | true | FULL |
+| 062 | `DeliverToIndexNodeExecutor` dual-write | P7.1 | ✅ | 061 | **N** | true | FULL |
 | 063 | Migrate UI tile consumers | P7.1 | 🔲 | 061, 062 | **O** | true | STANDARD |
 | 064 | Migrate FetchXML/OData query consumers | P7.1 | 🔲 | 061, 062 | **O** | true | STANDARD |
 | 065 | Canvas-server mapping drift integration test | P7.1 | ✅ | 042 | **O** | true | FULL |
@@ -75,7 +75,7 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 091 | `OutputVariable` rename guard | P9 | ✅ | 090 | **T** | true | FULL |
 | 092 | Branch wiring auto-generation | P9 | ✅ | 090 | **T** | true | FULL |
 | 093 | Edge perf hint advisory | P9 | ✅ | 090 | **T** | true | FULL |
-| 094 | PlaybookBuilder component tests + snapshots | P9 | 🔲 | 091, 092, 093 | — | true | STANDARD |
+| 094 | PlaybookBuilder component tests + snapshots | P9 | ✅ | 091, 092, 093 | — | true | STANDARD |
 | 095 | Manual UAT — H2 scenarios in spaarkedev1 | P9 | 🔲 | 091-094 | — | true | STANDARD |
 | 100 | ADR-034 final polish + INDEX update | P10 | 🔲 | 037, 087 | **U** main-only | false | STANDARD |
 | 101 | ADR-036 final polish + INDEX update | P10 | 🔲 | 017, 023, 025 | **U** main-only | false | STANDARD |
