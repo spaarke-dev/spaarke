@@ -232,7 +232,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 001 | Delete LegalWorkspace CreateMatter/CreateRecordStep + Project + WorkAssignment siblings | ⏭️ | STANDARD | true | 0-A | 000 | `cleanup`, `frontend`, `legacy-removal` — DEFERRED to post-Phase-1 per owner 2026-06-21 (B-001 option b) |
 | 002 | Delete or migrate PCF UniversalQuickCreate `useAiSummary.ts` duplicate | ✅ | STANDARD | true | 0-A | 000 | `cleanup`, `pcf`, `legacy-removal` |
 | 003 | Scrub stale `3f21cec1-` GUID comments in `WorkspaceOptions.cs:35` + `ProjectPreFillService.cs:40` | ✅ | MINIMAL | true | 0-A | 000 | `cleanup`, `documentation` |
-| 004 | Phase 0 smoke test — verify deletions don't break consumers | 🔲📝 | STANDARD | true | 0-B | 002,003 | `testing`, `integration-test` — deps relaxed (001 ⏭️ deferred per B-001 option b) |
+| 004 | Phase 0 smoke test — verify deletions don't break consumers | ✅ | STANDARD | true | 0-B | 002,003 | `testing`, `integration-test` — deps relaxed (001 ⏭️ deferred per B-001 option b); baseline note at `notes/handoffs/phase-0-baseline.md` |
 
 ## Phase 1 — §1.7 Stable Codes Migration (renumber cascade applied)
 
