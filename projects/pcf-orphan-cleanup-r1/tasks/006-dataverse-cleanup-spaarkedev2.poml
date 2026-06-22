@@ -1,0 +1,103 @@
+<task id="006" project="pcf-orphan-cleanup-r1">
+  <metadata>
+    <title>Dataverse cleanup session — spaarkedev2 replay</title>
+    <phase>P6</phase>
+    <status>not-started</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <dependencies>005</dependencies>
+    <blocks>007</blocks>
+    <tags>pcf, dataverse, cleanup, destructive, environment-replication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Destructive Dataverse mutations in a second environment. Lower risk than Task 003 (we've done it once) but still FULL rigor per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>(sequential)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on Task 005 + spaarkedev1's 7-day soak completion (per NFR-03).</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+  </metadata>
+
+  <prompt>
+    Replay Task 003 against spaarkedev2. Same procedure (§3 Part C), same controls, same gates — but in a different environment.
+
+    **Pre-requisites**:
+    - Task 003 completed in spaarkedev1
+    - 7 calendar days elapsed since Task 003 completion (per NFR-03)
+    - No regression reports filed during the soak window
+    - Task 005 (VisualHost re-pin) merged + deployed
+
+    The replay benefits from the spaarkedev1 cleanup log: per-control deletion order, FormXML grep results, and smoke-test outcomes are reference data. Re-run all gates fresh against spaarkedev2 — do NOT skip §1.2 4-check just because spaarkedev1 was clean.
+
+    Resurrection spot-test is NOT required for the replay (already validated in Task 003).
+  </prompt>
+
+  <role>Dataverse administrator performing cleanup replay in a second environment with full pre-flight rigor.</role>
+
+  <goal>
+    spaarkedev2 mirrors spaarkedev1's cleaned state:
+    - 11 customcontrols deleted
+    - 4-6 canvas apps deleted
+    - VisualHost v1.4.17 deployed (from Task 005)
+    - Per-control log entries appended to `notes/dataverse-cleanup-log.md` (separate section: `## spaarkedev2 cleanup — YYYY-MM-DD`)
+  </goal>
+
+  <inputs>
+    <file purpose="procedure-section">projects/ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md</file>
+    <file purpose="spec">projects/pcf-orphan-cleanup-r1/spec.md</file>
+    <file purpose="design">projects/pcf-orphan-cleanup-r1/design.md</file>
+    <file purpose="claude-md">projects/pcf-orphan-cleanup-r1/CLAUDE.md</file>
+    <file purpose="spaarkedev1-reference">projects/pcf-orphan-cleanup-r1/notes/dataverse-cleanup-log.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-06">spaarkedev2 replay after 7-day soak</constraint>
+    <constraint source="NFR-02">§1.2 4-check per control fresh against spaarkedev2 (do NOT assume spaarkedev1 results apply)</constraint>
+    <constraint source="NFR-03">7-day soak completed; no regression reports</constraint>
+    <constraint source="D-05">7-day soak between environments</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/pcf-orphan-cleanup-r1/notes/research-findings-2026-06-22.md</file>
+      <file>projects/pcf-orphan-cleanup-r1/notes/dataverse-cleanup-log.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify pre-requisites: (a) Task 005 ✅; (b) Task 003 completion date + 7 calendar days ≤ today; (c) no regression reports for the soak window — confirm via project log or stakeholder check-in.</step>
+    <step order="2">Authenticate to spaarkedev2: `pac auth select --name spaarkedev2`.</step>
+    <step order="3">Capture spaarkedev2 baseline backups per procedure §1.1 (mirror of Task 001). Store in `backups-2026-06-22/spaarkedev2/`.</step>
+    <step order="4">Run §1.2 4-check fresh against spaarkedev2 for all 11 controls + 4-6 canvas apps. Spaarkedev2 may have references that spaarkedev1 didn't (different forms, different ribbon JS deployment cadence). Document in `notes/preflight-results-spaarkedev2.md`.</step>
+    <step order="5">Any deviations → file in `notes/preflight-deviations.md` (append spaarkedev2 section). STOP for that control if reference found.</step>
+    <step order="6">For each `ready-to-delete` control: execute the 9-step per-control sequence per procedure §3.2 against spaarkedev2.</step>
+    <step order="7">Append per-control log entries to `notes/dataverse-cleanup-log.md` under a new `## spaarkedev2 cleanup — YYYY-MM-DD` section.</step>
+    <step order="8">Smoke-test in spaarkedev2: same surface as spaarkedev1 (Matter/Documents, Event/calendar filter, AnalysisWorkspace Code Page) + ensure VisualHost v1.4.17 (deployed in Task 005) renders correctly with its newly-aligned React 16 type pins.</step>
+    <step order="9">Verify counts: spaarkedev2 customcontrol count matches spaarkedev1 post-Task 003 (13 deployed Spaarke PCFs).</step>
+    <step order="10">Run quality gates per CLAUDE.md §8 FULL rigor: invoke `code-review` skill (log accuracy) + `adr-check` skill.</step>
+    <step order="11">Update [`current-task.md`](../current-task.md) + [`tasks/TASK-INDEX.md`](TASK-INDEX.md) (Task 006 → ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">PAC CLI for spaarkedev2 auth + backup export</tool>
+    <tool name="mcp__dataverse__read_query">spaarkedev2 customcontrol + canvasapp queries</tool>
+    <tool name="Write">notes/preflight-results-spaarkedev2.md; append to notes/dataverse-cleanup-log.md</tool>
+    <tool name="Skill">code-review + adr-check</tool>
+  </tools>
+
+  <outputs>
+    <output type="state-change">spaarkedev2: orphan PCFs + canvas apps cleaned (mirrors spaarkedev1)</output>
+    <output type="docs">notes/preflight-results-spaarkedev2.md</output>
+    <output type="docs">notes/dataverse-cleanup-log.md (with spaarkedev2 section appended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">spaarkedev2 customcontrol query returns same 13-count post-cleanup as spaarkedev1</criterion>
+    <criterion testable="true">All 11 customcontrol per-name queries return empty in spaarkedev2</criterion>
+    <criterion testable="true">Canvas-app cleanup mirrors spaarkedev1 (pending verification on eventspage + playbookbuilder)</criterion>
+    <criterion testable="true">Smoke tests pass: Matter/Documents, Event/calendar, AnalysisWorkspace Code Page, VisualHost v1.4.17 chart rendering</criterion>
+    <criterion testable="true">spaarkedev2-section of dataverse-cleanup-log.md has 11+4-6 entries</criterion>
+    <criterion testable="true">code-review + adr-check skills invoked and pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. FULL rigor.
+  </execution>
+</task>

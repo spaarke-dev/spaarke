@@ -1,0 +1,103 @@
+<task id="002" project="pcf-orphan-cleanup-r1">
+  <metadata>
+    <title>Source-tree deletion PR (UQC + DTW + SDV)</title>
+    <phase>P1</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>003</blocks>
+    <tags>pcf, source-cleanup, git, react-types</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Folder deletions + grep verification. No new feature code; no API changes. Fully reversible via `git revert`. STANDARD rigor per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>P1-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes to `src/client/pcf/{UQC,DTW,SDV}/` (deletions). Disjoint from Task 001 (which writes to `backups-2026-06-22/`).</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+  </metadata>
+
+  <prompt>
+    Delete three orphan PCF source folders via one focused PR. Follow [procedure §2 Part B](../../ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md#2-part-b--source-tree-deletion-pr-1) verbatim.
+
+    The three folders going away:
+    - `src/client/pcf/UniversalQuickCreate/` — orphan per ribbon migration (sprk_subgrid_commands.js v4.0.0)
+    - `src/client/pcf/DrillThroughWorkspace/` — built but never deployed
+    - `src/client/pcf/SpeDocumentViewer/` — confirmed unused 2026-06-22 (no external importers)
+
+    Verification gate: the residual-importers grep from procedure §2.2 step 1 MUST return only the expected matches (inside the three deleted folders + the sprk_subgrid_commands.js version-history comment). Any unexpected match → STOP and reconcile.
+  </prompt>
+
+  <role>Software engineer performing surgical source-tree deletion with rigorous pre-delete verification.</role>
+
+  <goal>
+    One merged PR that:
+    - Removes `src/client/pcf/UniversalQuickCreate/` entirely (including the broken `useSseStream.ts` re-export stub flagged as bucket B in the chat-routing-redesign-r1 audit)
+    - Removes `src/client/pcf/DrillThroughWorkspace/` entirely
+    - Removes `src/client/pcf/SpeDocumentViewer/` entirely
+    - Updates any deploy scripts that hard-coded these PCFs
+    - Builds clean: `dotnet build src\server\api\Sprk.Bff.Api\` passes; `npm run build` from `src\client\pcf\` passes
+
+    After this PR, the source tree has 11 PCFs (down from 14) with `ControlManifest.Input.xml`.
+  </goal>
+
+  <inputs>
+    <file purpose="procedure-section">projects/ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md</file>
+    <file purpose="spec">projects/pcf-orphan-cleanup-r1/spec.md</file>
+    <file purpose="design">projects/pcf-orphan-cleanup-r1/design.md</file>
+    <file purpose="claude-md">projects/pcf-orphan-cleanup-r1/CLAUDE.md</file>
+    <file purpose="evidence">src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-01">Delete UQC + DTW + SDV folders</constraint>
+    <constraint source="D-01">All three in ONE PR (not three separate)</constraint>
+    <constraint source="NFR-04">Must not be undone by parallel project work during execution window</constraint>
+    <constraint source="NFR-06">One PR per workstream</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/pcf-orphan-cleanup-r1/notes/research-findings-2026-06-22.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/pcf-deployment-inventory-2026-06-22.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run the residual-importers grep per procedure §2.2 step 1: `Select-String -Path "src\**\*.ts","src\**\*.tsx","src\**\*.js" -Pattern "UniversalQuickCreate|UniversalDocumentUpload|DrillThroughWorkspace|SpeDocumentViewer|@spaarke/ui-components/src/services/document-upload|@spaarke/ui-components/dist/utils/themeStorage" -SimpleMatch`</step>
+    <step order="2">Verify expected-only matches: (a) inside the three deleted folders, (b) `src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js` lines 582-585 (version-history comment). Any other match → STOP.</step>
+    <step order="3">Delete the three folders: `git rm -r src/client/pcf/UniversalQuickCreate/`; `git rm -r src/client/pcf/DrillThroughWorkspace/`; `git rm -r src/client/pcf/SpeDocumentViewer/`.</step>
+    <step order="4">Verify the broken `useSseStream.ts` re-export stub from bucket B is gone (it lived under UQC). Confirm no other file imports from it: `Select-String -Path "src\**\*.ts","src\**\*.tsx" -Pattern "from ['""].*UniversalQuickCreate.*useSseStream"`. Expected: zero matches.</step>
+    <step order="5">Search deploy scripts: `Select-String -Path "scripts\**\*.ps1","scripts\**\*.sh","scripts\**\*.js" -Pattern "UniversalQuickCreate|UniversalDocumentUpload|DrillThroughWorkspace|SpeDocumentViewer"`. Update any hits that hard-coded the three controls.</step>
+    <step order="6">Build the workspace: `dotnet build src\server\api\Sprk.Bff.Api\` (BFF still builds). `pushd src\client\pcf; npm run build; popd` (PCF workspace builds — 11 PCFs, not 14).</step>
+    <step order="7">Run `git status` — confirm only the three folder deletions + any deploy script updates from step 5.</step>
+    <step order="8">Commit with the message specified in procedure §2.2 step 6 (single commit; cite ribbon migration evidence + bundle-audit reference for DTW + 2026-06-22 owner confirmation for SDV).</step>
+    <step order="9">Push branch + open PR. Title: `chore(pcf): retire 3 orphan PCFs (UQC + DrillThroughWorkspace + SpeDocumentViewer)`.</step>
+    <step order="10">Update [`current-task.md`](../current-task.md) + [`tasks/TASK-INDEX.md`](TASK-INDEX.md) (Task 002 status → ✅ on merge).</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">residual-importer verification across `src/`, `scripts/`</tool>
+    <tool name="Bash">`git rm -r`, build commands, `git commit`, `gh pr create`</tool>
+    <tool name="Edit">deploy scripts if hardcoded refs found in step 5</tool>
+  </tools>
+
+  <outputs>
+    <output type="pr">One merged PR retiring three orphan PCF folders</output>
+    <output type="state-change">Source tree: 14 → 11 PCFs with ControlManifest.Input.xml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/client/pcf/UniversalQuickCreate/` does not exist on `main` post-merge</criterion>
+    <criterion testable="true">`src/client/pcf/DrillThroughWorkspace/` does not exist on `main` post-merge</criterion>
+    <criterion testable="true">`src/client/pcf/SpeDocumentViewer/` does not exist on `main` post-merge</criterion>
+    <criterion testable="true">`Glob src/client/pcf/*/ControlManifest.Input.xml` + `Glob src/client/pcf/*/*/ControlManifest.Input.xml` returns 11 total (was 14)</criterion>
+    <criterion testable="true">`dotnet build src\server\api\Sprk.Bff.Api\` succeeds post-merge</criterion>
+    <criterion testable="true">`npm run build` in `src\client\pcf\` succeeds post-merge</criterion>
+    <criterion testable="true">Residual-importer grep from step 1 returns zero unexpected matches (only expected ones inside deleted folders + sprk_subgrid_commands.js comment block)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (folder deletions + grep verification; fully reversible).
+  </execution>
+</task>
