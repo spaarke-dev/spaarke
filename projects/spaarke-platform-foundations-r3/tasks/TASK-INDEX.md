@@ -2,7 +2,7 @@
 
 > **Project**: `spaarke-platform-foundations-r3`
 > **Last Updated**: 2026-06-21 (tasks 017 + 037 — ADR-036 + ADR-034 authored by main session; .claude/ + docs/ ADR INDEX updated)
-> **Status**: 27 / 69 complete; 1 blocked-operator (071)
+> **Status**: 28 / 69 complete; 1 blocked-operator (071)
 > **Branch**: `work/spaarke-platform-foundations-r3`
 > **Parallel-optimized**: Yes (per user directive 2026-06-20)
 
@@ -48,9 +48,9 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 050 | Migrate `notification-new-documents.json` | P6 | ✅ | 041, 042 | **L** | true | FULL |
 | 051 | Audit + migrate `notification-new-emails.json` | P6 | ✅ | 041, 042 | **L** | true | STANDARD |
 | 052 | Audit + migrate `notification-new-events.json` | P6 | ✅ | 041, 042 | **L** | true | STANDARD |
-| 053 | Migrated playbook integration tests | P6 | 🔲 | 050, 051, 052 | — | true | STANDARD |
+| 053 | Migrated playbook integration tests | P6 | ✅ | 050, 051, 052 | — | true | STANDARD |
 | 054 | `includeRelated` chained-discovery implementation | P6.5 | ✅ | 033, 035 | — | true | FULL |
-| 055 | 1-hop max enforcement on `includeRelated` | P6.5 | 🔲 | 054 | — | true | STANDARD |
+| 055 | 1-hop max enforcement on `includeRelated` | P6.5 | ✅ | 054 | — | true | STANDARD |
 | 056 | Transitive membership perf integration tests | P6.5 | 🔲 | 054, 055 | — | true | STANDARD |
 | 060 | P7.0 — `sprk_searchindexed` consumer inventory | P7.0 | 🔲 | none | **M** main-only | false | STANDARD |
 | 061 | `sprk_searchindexed` schema migration (dual-field) | P7.1 | 🔲 | 060 | **N** | true | FULL |

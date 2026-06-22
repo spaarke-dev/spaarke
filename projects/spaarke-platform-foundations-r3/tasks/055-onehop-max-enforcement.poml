@@ -1,7 +1,8 @@
 <task id="R3-055" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>1-hop max enforcement on `includeRelated` chains</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
     <phase>P6.5</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -38,4 +39,43 @@
     <criterion testable="true">2+ hop request returns 400 with ProblemDetails</criterion>
     <criterion testable="true">1-hop request works correctly</criterion>
   </acceptance-criteria>
+  <completion-notes date="2026-06-21">
+    <summary>Verified subsumed by task 054's implementation (commit 0bb09ecfa). No additional code added; verification only.</summary>
+    <decision>Outcome A — task 054's coverage is sufficient. Closed as redundant-but-verified per task 055 wave instructions.</decision>
+    <ac-mapping>
+      <ac id="AC-1" criterion="2+ hop request returns 400 with ProblemDetails">
+        <implementation>
+          <file lines="287-309">src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs</file>
+          <detail>`catch (MembershipDepthExceededException ex)` returns Results.Problem(400) with extensions { offendingEntry, reasonTag, maxHops=1 }.</detail>
+        </implementation>
+        <resolver-enforcement>
+          <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+          <detail>Throws MembershipDepthExceededException for three rejection paths: (1) explicit-chain-syntax (dot/slash, pre-I/O), (2) unknown-entity (metadata fetch fails), (3) not-a-direct-lookup-target (no 1-hop Lookup back to primary).</detail>
+        </resolver-enforcement>
+        <tests>
+          <test file="tests/unit/Sprk.Bff.Api.Tests/Api/Membership/MembershipEndpointsTests.cs">GetMyMemberships_Returns400_WhenResolverThrowsDepthExceeded_ExplicitChainSyntax (lines 312-338) — asserts 400 + offendingEntry + reasonTag + maxHops=1 in body.</test>
+          <test file="tests/unit/Sprk.Bff.Api.Tests/Api/Membership/MembershipEndpointsTests.cs">GetMyMemberships_Returns400_WhenResolverThrowsDepthExceeded_NotADirectLookupTarget (lines 340-363).</test>
+          <test file="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs">ResolveAsync_WithExplicitChainSyntax_ThrowsDepthExceeded (lines 531-551) — verifies pre-I/O rejection (VerifyNoOtherCalls on dataverse mock).</test>
+          <test file="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs">ResolveAsync_WithUnknownRelatedEntity_ThrowsDepthExceeded (lines 553-578).</test>
+          <test file="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs">ResolveAsync_WithRelatedEntityLackingBackReference_ThrowsDepthExceeded (lines 580-606).</test>
+          <test file="tests/integration/Sprk.Bff.Api.IntegrationTests/Membership/TransitiveMembershipTests.cs">Two end-to-end 400 scenarios (lines 112-141, 147-170) asserting same body shape.</test>
+        </tests>
+      </ac>
+      <ac id="AC-2" criterion="1-hop request works correctly">
+        <tests>
+          <test file="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs">ResolveAsync_WithIncludeRelated_ReturnsTransitiveMemberships (lines 403-459) — happy-path 1-hop returns RelatedByRole map.</test>
+          <test file="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs">ResolveAsync_WithMultipleIncludeRelated_ReturnsAllNestedKeys (lines 461-513).</test>
+          <test file="tests/integration/Sprk.Bff.Api.IntegrationTests/Membership/TransitiveMembershipTests.cs">AC-1D.1 happy path (lines 42-92).</test>
+        </tests>
+      </ac>
+      <ac id="constraint-ADR-019" criterion="ProblemDetails for errors">
+        <evidence>MembershipEndpoints.cs:298-308 uses Results.Problem(...) with type URI "https://tools.ietf.org/html/rfc7231#section-6.5.1" + structured extensions dictionary — RFC 7807 compliant.</evidence>
+      </ac>
+      <ac id="constraint-Q3" criterion="1 hop max enforced explicitly">
+        <evidence>Three independent rejection paths in MembershipDepthExceededException.cs (explicit-chain-syntax, unknown-entity, not-a-direct-lookup-target) covering syntactic, metadata, and structural hop-depth violations. Resolver throws BEFORE Dataverse I/O for syntactic case (test ResolveAsync_WithExplicitChainSyntax asserts VerifyNoOtherCalls).</evidence>
+      </ac>
+    </ac-mapping>
+    <gaps-found>None.</gaps-found>
+    <action-taken>Closed as verified. No new test file (IncludeRelatedValidationTests.cs) created — proposed scope is fully covered by existing tests above; adding a parallel file would duplicate without new coverage.</action-taken>
+  </completion-notes>
 </task>
