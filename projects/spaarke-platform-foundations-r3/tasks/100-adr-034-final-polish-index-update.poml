@@ -1,7 +1,27 @@
 <task id="R3-100" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>ADR-034 final polish + INDEX update (post-implementation pass)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Post-implementation polish applied to `.claude/adr/ADR-034-user-record-membership.md`:
+      - Status updated: "Accepted — shipped in R3 (2026-06-22; Phase 2 sync code-complete +
+        ADR-032 kill-switched until operator deploys topic per task 071)"
+      - Last Updated bumped to 2026-06-22
+      - Phase 2 section updated with as-built reality:
+        * Junction table sprk_userentityassociation deployed (task 070)
+        * Publisher (task 081) + Junction Updater (task 084) + Cache Invalidator (task 086)
+          all ship with ADR-032 Null-peer kill-switches (default Enabled=false)
+        * Nightly MembershipReconciliationJob (task 085) marked LOAD-BEARING per task 080
+          inventory finding (the 8 Q4 sprk_assigned* fields are exclusively maker-portal
+          edits, NOT mutated by any BFF endpoint)
+        * Strangler-fig contract preservation noted
+      Full `docs/adr/ADR-034` doc + both INDEX.md files were authored by task 037 and
+      remain authoritative — no INDEX updates needed since cross-refs to ADR-032 + ADR-036
+      already correct. Architecture doc `docs/architecture/membership-resolution-pattern.md`
+      authored by parallel-sibling task 104; "See Also" pointer already present from task 037.
+      Main-session execution per `.claude/` write boundary (CLAUDE.md §3).
+    </completion-notes>
     <phase>P10</phase>
     <parallel-group>U (sequential — main-session-only — .claude/ write boundary)</parallel-group>
     <parallel-safe>false</parallel-safe>

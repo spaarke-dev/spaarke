@@ -77,7 +77,7 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 093 | Edge perf hint advisory | P9 | ✅ | 090 | **T** | true | FULL |
 | 094 | PlaybookBuilder component tests + snapshots | P9 | ✅ | 091, 092, 093 | — | true | STANDARD |
 | 095 | Manual UAT — H2 scenarios in spaarkedev1 | P9 | 🔲 | 091-094 | — | true | STANDARD |
-| 100 | ADR-034 final polish + INDEX update | P10 | 🔲 | 037, 087 | **U** main-only | false | STANDARD |
+| 100 | ADR-034 final polish + INDEX update | P10 | ✅ | 037, 087 | **U** main-only | false | STANDARD |
 | 101 | ADR-036 final polish + INDEX update | P10 | ✅ | 017, 023, 025 | **U** main-only | false | STANDARD |
 | 102 | Refresh `playbook-architecture.md` Known Pitfalls | P10 | ✅ | 005, 065, 066 | — | true | STANDARD |
 | 103 | Refresh `sprk_matter-related-tables.md` data model doc | P10 | ✅ | 030 | — | true | STANDARD |

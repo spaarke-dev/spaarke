@@ -1,8 +1,8 @@
 # ADR-034: User-Record Membership Resolution Pattern (Concise)
 
-> **Status**: Accepted
+> **Status**: Accepted — shipped in R3 (2026-06-22; Phase 2 sync code-complete + ADR-032 kill-switched until operator deploys topic per task 071)
 > **Domain**: BFF API / Dataverse Membership / Identity Normalization
-> **Last Updated**: 2026-06-21
+> **Last Updated**: 2026-06-22 (post-implementation polish per R3 task 100)
 > **Source project**: `spaarke-platform-foundations-r3` Part 1 (closes the "no canonical mechanism for records this user is associated with" gap surfaced during R2 UAT — notification-new-documents.json silently produced zero rows because its FetchXML joined through a non-existent `sprk_matterteammember` entity).
 > **Cross-references**: extends ADR-013 (AI architecture); reinforces ADR-009 (Redis caching), ADR-010 (DI minimalism), ADR-024 (polymorphic resolver pattern), ADR-028 (Spaarke Auth v2 cross-ref via `azureactivedirectoryobjectid`); aligns with CLAUDE.md §10.
 
@@ -29,7 +29,7 @@ GET /api/users/me/memberships/{entityType}
 
 Standard Spaarke Auth v2 OBO. Response shape per design.md endpoint contract: `{entityType, personIdentity, ids[], byRole, count, cacheExpiresAt, continuationToken?}`.
 
-**Phase 2** (firm in-scope for R3 per owner decision 2026-06-20): materialized junction table `sprk_userentityassociation` (7 cols + composite alternate key) + event-driven Service Bus sync via topic `sprk-membership-changes` (D3 owner decision: topic + subscription-per-consumer, NOT queue, NOT reuse `ServiceBusJobProcessor` queue) + nightly `MembershipReconciliationJob` (defense-in-depth backstop per Q2 fire-and-forget publishing) + Redis pub/sub cache invalidation (FR-2P2.8). The Phase 1A endpoint contract is unchanged when Phase 2 swaps in — strangler-fig pattern.
+**Phase 2** (shipped in R3 as code; runtime gated by operator deploy of task 071 Service Bus topic Bicep): materialized junction table `sprk_userentityassociation` (deployed via R3 task 070) + event-driven Service Bus sync via topic `sprk-membership-changes` (D3 owner decision: topic + subscription-per-consumer, NOT queue, NOT reuse `ServiceBusJobProcessor` queue) + nightly `MembershipReconciliationJob` (R3 task 085 — defense-in-depth backstop per Q2 fire-and-forget publishing; **LOAD-BEARING** because per task 080 inventory the 8 Q4 sprk_assigned* fields are exclusively maker-portal edits, NOT mutated by any BFF endpoint) + Redis pub/sub cache invalidation (R3 task 086, FR-2P2.8). Publisher (task 081), Junction Updater (task 084), and Cache Invalidator (task 086) each ship with ADR-032 Null-peer kill-switches (`Membership:EventPublisher:Enabled`, `Membership:JunctionUpdater:Enabled`, `Membership:CacheInvalidator:Enabled` — all default `false`) so the code is operational today without topic deploy; operator flips flags after task 071 deploys. The Phase 1A endpoint contract is unchanged — strangler-fig pattern preserved.
 
 **Naming-collision register** (binding): "Membership" terminology is used throughout to disambiguate from the existing `AssociationResolver` PCF (a DIFFERENT concept — record-to-record FieldMapping for copying values when an Event's Regarding lookup is set). Do not confuse the two surfaces.
 
