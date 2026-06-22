@@ -323,6 +323,17 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
     });
 
     const data = (await response.json()) as NarrateResponse;
+    // R2.2 hotfix — defensive normalization of TldrResult.keyTakeaways.
+    // The BFF should always emit this as an empty array (TldrResult record
+    // default), but if any deploy is mid-flight or the response omits the
+    // field for any reason, render code on `keyTakeaways.length` would
+    // crash. Normalize at the boundary so downstream components never see
+    // undefined for this field.
+    if (data?.tldr) {
+      data.tldr.keyTakeaways = Array.isArray(data.tldr.keyTakeaways) ? data.tldr.keyTakeaways : [];
+      data.tldr.summary = data.tldr.summary ?? '';
+      data.tldr.topAction = data.tldr.topAction ?? '';
+    }
     return { status: 'success', data };
   } catch (err: unknown) {
     // authenticatedFetch throws ApiError for non-2xx responses
