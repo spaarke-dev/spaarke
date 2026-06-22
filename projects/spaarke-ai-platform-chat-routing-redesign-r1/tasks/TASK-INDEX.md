@@ -228,7 +228,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|
-| **000 (NEW)** | R6 closeout readiness check — verify tasks 089 + 090 complete + UAT regression passed | 🔲📝 | MINIMAL | true | 0-A0 | none (external) | `verification`, `coordination` |
+| **000 (NEW)** | R6 closeout readiness check — verify tasks 089 + 090 complete + UAT regression passed | ✅ | MINIMAL | true | 0-A0 | none (external) | `verification`, `coordination` |
 | 001 | Delete LegalWorkspace CreateMatter/CreateRecordStep + Project + WorkAssignment siblings | 🔲📝 | STANDARD | true | 0-A | 000 | `cleanup`, `frontend`, `legacy-removal` |
 | 002 | Delete or migrate PCF UniversalQuickCreate `useAiSummary.ts` duplicate | 🔲📝 | STANDARD | true | 0-A | 000 | `cleanup`, `pcf`, `legacy-removal` |
 | 003 | Scrub stale `3f21cec1-` GUID comments in `WorkspaceOptions.cs:35` + `ProjectPreFillService.cs:40` | 🔲📝 | MINIMAL | true | 0-A | 000 | `cleanup`, `documentation` |

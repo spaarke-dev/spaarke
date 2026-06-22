@@ -14,7 +14,7 @@
 | **Origin status** | Pushed. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
 | **Last commit** | `c556702ee` — project init (137 files, +15,822 lines) |
 | **Pipeline state** | `/project-pipeline` COMPLETE. Ready for `/task-execute` runs. |
-| **Active task** | none — about to start Wave 0-A0 (task 000) |
+| **Active task** | Wave 0-A in flight (tasks 001, 002, 003 — 3 parallel agents) |
 | **Execution mode** | **OVERNIGHT AUTONOMOUS** (user explicitly requested 2026-06-21) |
 | **Next Action** | **Spawn `task-execute` skill on task 000 (R6 readiness check). Then proceed wave-by-wave through TASK-INDEX following autonomous mode rules below.** |
 
@@ -120,8 +120,8 @@ When the human user returns, post a single concise summary in the next response 
 
 | Wave | Tasks | Status | Started | Completed | Commit SHA | Notes |
 |---|---|---|---|---|---|---|
-| **0-A0** | 000 | 🔲 pending | — | — | — | Next |
-| **0-A** | 001, 002, 003 | 🔲 pending | — | — | — | |
+| **0-A0** | 000 | ✅ done | 2026-06-21 | 2026-06-21 | (pending commit) | CONDITIONAL GO — handoff note at `notes/handoffs/000-r6-readiness-confirmation.md`. Phases 0–6 GO; Phase 7-A blocked pending R6 PR #401 merge (S1). |
+| **0-A** | 001, 002, 003 | 🔄 in-progress | 2026-06-21 | — | — | 3 parallel agents (Phase 0 §1.7 Pattern C cleanup) |
 | **0-B** | 004 | 🔲 pending | — | — | — | |
 | **1-A** | 010, 011, 012 | 🔲 pending | — | — | — | |
 | **1-B** | 013 | 🔲 pending | — | — | — | CRIT-1 fix: pre-extend WorkspaceOptions |
