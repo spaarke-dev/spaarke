@@ -1,7 +1,20 @@
 <task id="R3-090" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Research existing PlaybookBuilder patterns (rename refs, edge handling, validation infra)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+Survey complete (17 files). Research doc at projects/spaarke-platform-foundations-r3/notes/playbookbuilder-pattern-research.md (8 sections).
+
+H2 → extension seams identified:
+- 091 (OutputVariable rename guard): intercept at NodePropertiesForm.tsx:217-227 + NodePropertiesDialog.tsx:281-289; reuse canvasValidation TEMPLATE_REF_RE (line 97) + extractTemplateRefs + parseDownstreamNode; add 'outputvar-collision' rule via task-043 per-type loop pattern (canvasValidation.ts:180-184); confirmation dialog via Fluent UI v9 Dialog (NodePropertiesDialog precedent); auto-rename action in canvasStore.
+- 092 (Branch wiring auto-generation): extend canvasStore.onConnect (canvasStore.ts:149-182) to prompt when sourceHandle unset on condition node; reuse existing 'trueBranch'/'falseBranch' edge types (edges/index.ts:21-24) — 'both' option creates TWO edges (no new edge type). ConditionEditor labels (ConditionEditor.tsx:152-159) feed picker dialog read-only.
+- 093 (Edge perf hint advisory): add new per-edge iteration loop in canvasValidation.ts (sibling to per-type loop at 180-184); rule 'edge-no-data-dependency'; reuse extractTemplateRefs; surface via NodeValidationBadge existing 'warnings' prop (line 103) — recommend attaching warnings to source node rather than to the edge renderer.
+
+Anti-patterns called out (10) — most critical: do NOT invent new validation framework, new template regex, new edge type for 'both', new dialog framework, new badge component, new NodeFormProps contract.
+
+Shared coordination note for 091/092/093: there is no built-in connector wiring groupValidationsByNode results into node.data.validationErrors/warnings. Recommend a canvasStore subscription that runs validation on every change. Suggested file-region split for canvasValidation.ts in research doc Section 8.
+    </completion-notes>
     <phase>P9</phase>
     <parallel-group>none (sequential — main-session only)</parallel-group>
     <parallel-safe>false</parallel-safe>

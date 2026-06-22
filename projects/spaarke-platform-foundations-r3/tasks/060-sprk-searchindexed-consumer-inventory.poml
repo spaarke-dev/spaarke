@@ -1,7 +1,9 @@
 <task id="R3-060" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>P7.0 — Inventory all consumers of `sprk_searchindexed`</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>Inventory authored at `projects/spaarke-platform-foundations-r3/notes/sprk-searchindexed-consumer-inventory.md`. Headline: 24 in-repo files reference the field. Writers: 3 upstream call-sites (RagIndexingJobHandler.cs:211, RagEndpoints.cs:558+702) via Spaarke.Dataverse.Models.SearchIndexed property → mapped to `sprk_searchindexed` string in 2 mapping-layer files (DataverseWebApiService.cs, DataverseServiceClientImpl.cs). Readers: ZERO in-repo (UI cluster 0, API cluster 0, PCF cluster 0) — the field is write-mostly today. Recommend (a) task 062 concentrate dual-write in the Spaarke.Dataverse mapping layer (single change covers all 3 upstream writers), (b) tasks 063/064 re-scope to "verify-empty + escalate maker-side solution audit" mode since no in-repo readers exist. Documentation hits (9 files) deferred to P10 sweep. Test fixture (DataverseEntitySchemaTests.cs:85) extension folded into task 062. Risks called out: no current "enqueue" timestamp source — task 062 must instrument enqueue site for sprk_searchindexqueuedon. Migration order: 061 → 062 → (063 ‖ 064 ‖ 065 parallel).</completion-notes>
     <phase>P7.0</phase>
     <parallel-group>M (sequential — main-session only)</parallel-group>
     <parallel-safe>false</parallel-safe>

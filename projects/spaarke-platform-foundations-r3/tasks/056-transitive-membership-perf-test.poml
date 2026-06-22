@@ -1,7 +1,51 @@
 <task id="R3-056" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Transitive membership perf integration tests + p95 check</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Authored canary perf integration test
+      `tests/integration/Sprk.Bff.Api.IntegrationTests/Membership/TransitiveMembershipPerfTests.cs`
+      mirroring task 054's fixture (`TransitiveMembershipIntegrationFixture` —
+      WebApplicationFactory + mocked `IMembershipResolverService` + fake auth handler).
+
+      Fixture scale (NFR-04 envelope):
+        - 500 seeded primary memberships ("sprk_matter").
+        - 5 documents per matter → 2500 transitive document IDs in a single response.
+
+      Measurement protocol:
+        - 10 warmup iterations (timings discarded — WAF JIT, route table, JSON metadata cache settle).
+        - 100 measured iterations (per-call elapsed-ms via `Stopwatch`).
+        - Distributional stats computed via nearest-rank (R-1) percentile.
+
+      Measured (single CI-class runner, in-process, mocked resolver):
+        - p50 =   0 ms
+        - p95 =   1 ms
+        - p99 =   7 ms
+        - max =   8 ms
+        - mean=   0.3 ms
+
+      Soft 300ms NFR-04 target: **MET in-process** (p95 1ms &lt;&lt; 300ms).
+      Hard 3000ms gross-regression gate (asserted): **PASS**.
+
+      Per AC-1A.5 (owner clarification 2026-06-20) the canonical production NFR-04
+      measurement is via **Application Insights server-side request telemetry** —
+      this in-process test is a canary regression catcher, NOT the production
+      measurement. The mocked resolver returns instantly so the measurement
+      isolates the BFF pipeline overhead (auth, routing, JSON serialization at
+      transitive scale, ProblemDetails handling). No production performance limit
+      observed in-process that would require documenting in spec.md AC-1D.2.
+
+      Asymmetric-registration (bff-extensions.md §F.1): NOT TRIGGERED — no DI
+      module touched, no new service registered, test-only addition.
+
+      Test results: 1 new test (passes); full integration suite 64/64 pass (0 failures,
+      0 regressions). Build: 0 errors, 16 warnings (all pre-existing in unrelated modules,
+      not introduced by this task).
+
+      No BFF source code modified → no publish-size verification required; no NuGet
+      package added → no CVE recheck required.
+    </completion-notes>
     <phase>P6.5</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
