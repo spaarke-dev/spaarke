@@ -2,7 +2,45 @@
 
 > **Date**: 2026-06-22
 > **Author**: Main session post-Wave-2-B closeout
-> **Status**: Wave 2-C cannot complete cleanly without owner direction on missing send-to-index BFF endpoint
+> **Status**: ⚠️ **PARTIALLY RETRACTED 2026-06-22 by owner challenge** — endpoint EXISTS at `POST /api/ai/playbooks/{id}/index` (different URL than I grepped for). See "Retraction" section below. Original analysis remains for Power Apps infra blocker (still valid for tasks 033/035).
+
+---
+
+## Retraction (owner-flagged 2026-06-22)
+
+**My original analysis was wrong on the endpoint claim.** The user pointed out that the `playbook-embeddings` Azure AI Search index has playbook entries — which is impossible if no indexing endpoint exists. Re-grepping with the correct noun:
+
+- `PlaybookEmbeddingEndpoints.cs:32` exposes `POST /api/ai/playbooks/{playbookId:guid}/index`
+- Endpoint returns 202 Accepted, enqueues via `PlaybookIndexingBackgroundService.Instance.EnqueueIndexing(playbookId)`
+- Called by Dataverse plugin on `sprk_analysisplaybook` create/update + admin tooling
+- Plus `scripts/Index-ExistingPlaybooks.ps1` for bulk seeding (bypasses BFF; calls Azure OpenAI + AI Search directly)
+
+My grep for `send-to-index|SendToIndex|sendToIndex` missed the actual endpoint URL pattern `/index`.
+
+### Corrected task statuses
+
+| Task | Original (wrong) status | Corrected status | Reason |
+|---|---|---|---|
+| 033 | 🚫 BLOCKED (no endpoint) | 🟡 PARTIAL — Power Apps infra still missing | Endpoint EXISTS; ribbon-button JS just needs to POST to `/api/ai/playbooks/{id}/index`. But `src/dataverse/web-resources/` and `src/dataverse/solutions/` directories don't exist — Power Apps layout unknown |
+| 035 | 🟡 PARTIAL (ribbon blocked) | 🟡 PARTIAL — Power Apps infra still missing | Same as 033 — view itself shippable + ribbon can call endpoint; just need Power Apps source-layout direction |
+| 036 | 🚫 BLOCKED (no endpoint) | 🟢 **UNBLOCKED — DO-ABLE** | Validation gate goes in the existing endpoint handler at `PlaybookEmbeddingEndpoints.cs:53-78` |
+| 034 | 🟢 DO-ABLE | 🟢 DO-ABLE | Unchanged — drift job is independent |
+
+### Remaining real blocker (Power Apps infra, NOT endpoint)
+
+The genuine block on tasks 033 + 035 is: **Where do Spaarke's Power Apps web-resources + solutions live in the repo?** The POMLs reference `src/dataverse/web-resources/` and `src/dataverse/solutions/` but those dirs don't exist. Either:
+
+- Power Apps source lives elsewhere (e.g., `src/solutions/SpaarkeAi/` or `src/solutions/SpaarkeCommon/` or maker-portal-only with no repo source)
+- Solution layout was reorganized after the POMLs were authored
+- Power Apps work is done out-of-band via maker portal (no repo source)
+
+This blocker is real and warrants owner direction (or a brief discovery sub-task to find the correct paths). For autonomous mode, 033 and 035 remain partial-blocked; tasks 036 and 034 can proceed.
+
+---
+
+## Original Wave 2-C analysis (pre-retraction)
+
+This section preserved as audit trail; the endpoint-blocker claim was wrong.
 
 ---
 
