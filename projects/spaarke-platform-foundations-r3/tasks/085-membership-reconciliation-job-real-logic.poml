@@ -1,7 +1,9 @@
 <task id="R3-085" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>`MembershipReconciliationJob` — real logic (nightly source-vs-junction recon)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>Wave 22 (2026-06-22): authored MembershipReconciliationJob (IScheduledJob) at src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs + MembershipReconciliationOptions (entity-list + cron + page-size knobs). Algorithm: discover identity-Lookup fields via IMembershipFieldDiscoveryService → scan parents paginated with NotNull-OR filter → dispatch Updated events per populated lookup (handler's idempotent Update-or-Create self-heals missing rows) → scan junction for orphans (entity-logical-name + sourceField filter; in-memory set-difference vs expected) → dispatch Removed events. Lifetime: Singleton + IServiceScopeFactory.CreateScope() per ExecuteAsync (mirrors PlaybookSchedulerJob task 023). REUSES task 084's IMembershipJunctionUpdater for the write path — no duplicated upsert logic. Independence from topic-deploy (task 071): TRUE — the job writes the junction directly via the handler; does NOT publish to the topic. Safe to ship enabled-by-default. Cron: 0 2 * * * (02:00 UTC daily, configurable). Bootstrap hosted service in MembershipModule seeds the BackgroundJobDefinition row + registers the handler with ScheduledJobRegistry before ScheduledJobHost's first tick (mirrors SchedulingModule.SchedulingBootstrapHostedService pattern). 27 unit tests pass; full BFF sweep 7557 pass / 0 fail. Publish 46.23 MB (+0.01 vs 46.22 task-084 baseline). No new HIGH CVE. Per inventory §3A / §3D / §3E, this is the load-bearing path for the 8 Q4 sprk_assigned* fields + sprk_task + sprk_opportunity (all maker-portal-only mutations).</completion-notes>
     <phase>P8</phase>
     <parallel-group>S (with 084)</parallel-group>
     <parallel-safe>true</parallel-safe>

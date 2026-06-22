@@ -1,7 +1,8 @@
 <task id="R3-082" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Wire event-publishing into document + event mutation endpoints</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
     <phase>P8</phase>
     <parallel-group>R (with 081, 083)</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -9,9 +10,48 @@
     <estimated-effort>3-4h</estimated-effort>
     <tags>bff-api,membership,event-publishing,phase2</tags>
     <relevant-files>
-      <file>(per inventory — document + event cluster endpoints)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Documents/DataverseDocumentsEndpointsMembershipPublishingTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Events/EventEndpointsMembershipPublishingTests.cs</file>
     </relevant-files>
     <dependencies>080, 081</dependencies>
+    <completion-notes>
+      Wired MembershipChangedEvent publishing into Document + Event clusters per
+      event-source-inventory §3B + §3C. REUSED task 081's IMembershipEventPublisher
+      infrastructure (no duplication; no new publisher impl).
+
+      Endpoints wired:
+        Document cluster (3 hookup sites of 5 inventoried):
+          1. POST /api/v1/documents/ — Added/ownerid (implicit, OBO caller)
+          2. POST /office/save (via OfficeService.SaveAsync after CreateDocumentWithSpePointersAsync) — Added/ownerid
+          3. DELETE /api/v1/documents/{id} — intentional NO-PUBLISH per inventory §6.1:
+             DocumentEntity does not expose ownerid; nightly recon (FR-2P2.7/task 085)
+             is the load-bearing path for orphan cleanup (24h max staleness).
+          4. PUT /api/v1/documents/{id} — n/a per inventory (no identity-Lookup mutation)
+          5. POST /api/ai/document-intelligence/associate-record — n/a per inventory (Matter/Project/Invoice are non-identity FKs)
+
+        Event cluster (1 hookup site of 5 inventoried):
+          1. POST /api/v1/events/ — Added/ownerid (implicit, OBO caller)
+          2-5. UPDATE/COMPLETE/CANCEL/DELETE — n/a per inventory (no identity-Lookup mutation)
+
+      Q2 fire-and-forget enforced via discard pattern (`_ = publisher.PublishAsync(...)`).
+      NFR-08 correlationId propagated via HttpContext.TraceIdentifier on every event.
+      ADR-032 P2 honored — when MembershipEventPublisherOptions.Enabled=false (default),
+      NullMembershipEventPublisher peer logs + returns with no Service Bus call.
+
+      Tests added (6 new): payload-shape contract tests in
+        tests/unit/Sprk.Bff.Api.Tests/Api/Documents/DataverseDocumentsEndpointsMembershipPublishingTests.cs (3)
+        tests/unit/Sprk.Bff.Api.Tests/Api/Events/EventEndpointsMembershipPublishingTests.cs (3)
+      Lock the exact wire-format (EntityLogicalName, SourceField, Role, MutationType, PersonIdType)
+      so PR drift surfaces immediately in review.
+
+      Build: 0 errors, no new warnings.
+      Test run: 7530 passed / 0 failed / 110 pre-existing skips.
+      Publish size: ~45 MB compressed (well under 60 MB ceiling; -1.22 MB vs 46.22 baseline).
+      CVE check: no new HIGH (pre-existing Microsoft.Kiota.Abstractions 1.21.2).
+    </completion-notes>
   </metadata>
   <prompt>Per inventory, hook MembershipChangedEvent publishing into document + event cluster mutation endpoints. Same pattern as 081 (matter).</prompt>
   <goal>Document + event cluster endpoints publish events on lookup mutations.</goal>
