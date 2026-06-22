@@ -1,7 +1,25 @@
 <task id="R3-080" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>P-event-1 — Inventory BFF mutation endpoints touching person/team/BU lookups</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+Scanned 151 BFF mutation endpoints across `src/server/api/Sprk.Bff.Api/`. Inventory authored at `projects/spaarke-platform-foundations-r3/notes/event-source-inventory.md` with 7-section structure mirroring task 060's inventory format.
+
+Headline finding: **only 1 BFF endpoint** (`POST /office/quickcreate/{entityType=matter}`) explicitly mutates a sprk_matter membership-served entity, and even that one only mutates the implicit `ownerid` (Dataverse-defaulted, not BFF-explicit). The eight Q4-scoped `sprk_assigned*` Lookups on sprk_matter are NOT mutated by any BFF endpoint — they are exclusively maker-portal-edited, so the nightly MembershipReconciliationJob (FR-2P2.7, task 085) becomes the load-bearing path for junction freshness on matter assignments (24h max staleness, not real-time).
+
+Per-cluster breakdown for tasks 081–083:
+- Matter cluster (081): 1 endpoint (QuickCreate matter)
+- Document cluster (082-A): 5 endpoints, ~3 with implicit ownerid event coverage
+- Event cluster (082-B): 5 endpoints, 1 with implicit ownerid event coverage (Create)
+- Task cluster (083-A): 0 endpoints — empty for in-repo BFF code
+- Opportunity cluster (083-B): 0 endpoints — empty for in-repo BFF code
+- Other (informational, NOT in R3 scope): 10+ touchpoints across precedent, work-assignment, todo, communication, memory, workspace-layout
+
+Cross-cutting infrastructure recommendation: task 081 MUST author a shared `MembershipEventPublisher` helper (singleton, fire-and-forget per FR-2P2.6 + Q2) at `src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/MembershipEventPublisher.cs`. ADR-032 Null-Object Kill-Switch pattern applies during the task-071 deploy gap. Tasks 082 + 083 reuse the helper without modification.
+
+Acceptance: FR-2P2.5 + AC-1P2.3 satisfied (file at canonical location).
+    </completion-notes>
     <phase>P8</phase>
     <parallel-group>Q (sequential — main-session only)</parallel-group>
     <parallel-safe>false</parallel-safe>

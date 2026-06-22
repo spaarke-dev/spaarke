@@ -1,7 +1,36 @@
 <task id="R3-072" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>`MembershipChangedEvent` payload contract + serialization</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Wave 20 execution. Pure code-only contract definition per POML — no publisher / Service Bus client wiring (deferred to tasks 081-083 once topic 071 is operator-deployed).
+
+      Files created (3 src, 1 test):
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/MembershipMutationType.cs (enum Added=1, Removed=2, Updated=3)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/PersonIdentityType.cs (closed enum: User, Contact, Team, Organization)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/MembershipChangedEvent.cs (record class, 9 fields)
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/Events/MembershipChangedEventTests.cs (6 tests, Theory expands to 9 cases)
+
+      Key decisions:
+      - PersonIdentityType: NEW closed enum (NOT reused from MembershipDescriptor/MembershipOptions which use open strings). Rationale documented in PersonIdentityType.cs header: discovery surface is open (operator-configurable identity tables); event wire contract is closed (stable + version-safe for subscribers). Per Q4 owner clarification 2026-06-20, includes `Organization` for sprk_organization lookups (NOT Contact).
+      - MembershipMutationType: numeric values pinned (1/2/3) for stability in any future binary capture (App Insights custom dimensions). Default JSON serialization uses enum-as-string for human readability + schemaVersion-bump-safety.
+      - schemaVersion: defaults to 1. Forward/backward compatibility — older payloads omitting the field deserialize cleanly to v1 (test: Deserialize_OlderSchemaVersion_DefaultsToOne).
+      - OccurredOnUtc: INCLUDED as optional (nullable DateTime, defaults null). Rationale: operators reconstructing a timeline need the actual mutation timestamp, not Service Bus enqueue time. Publishers that do not yet capture it leave null (and JsonIgnore.WhenWritingNull omits it from JSON for a cleaner wire payload).
+      - NFR-08 enforcement: `required` init-only property on CorrelationId. System.Text.Json (.NET 7+) throws JsonException on deserialize when a `required` member is absent. Confirmed by test Deserialize_MissingCorrelationId_ThrowsJsonException. No silent-empty-string default path.
+      - JSON serialization: canonical `MembershipChangedEvent.SerializerOptions` static field — PropertyNamingPolicy=CamelCase + JsonStringEnumConverter. Mirrors MembershipResponse.cs convention (explicit JsonPropertyName per-field + override for OccurredOnUtc to apply JsonIgnore.WhenWritingNull).
+
+      No DI wiring, no service registration, no Service Bus client. NO new NuGet packages.
+
+      Verification:
+      - Build: 0 errors, 18 warnings (all pre-existing — none in new files).
+      - Unit tests new: 9/9 passing (15 ms).
+      - Full BFF unit tests: 7501 passed / 1 failed / 110 skipped. The 1 failure is R5SummarizeTelemetryTests.BothInvocationPaths_RecordViaSameCounter — passes in isolation (re-run = 1/1 pass). Flaky telemetry-counter race; pre-existing, unrelated to this task.
+      - Compressed publish size: 44.88 MB vs 46.21 MB baseline = -1.33 MB (well under +1 MB ceiling per NFR-01; recorded in notes/bff-publish-size-task072.md).
+      - CVE: Microsoft.Kiota.Abstractions 1.21.2 HIGH (GHSA-7j59-v9qr-6fq9) — pre-existing transitive dependency, documented in 14 prior task notes (tasks 005, 010, 012, 013, 014, 020, 021, 030, 031, 032, 035, 036, 042, this one). NO NEW HIGH CVE introduced by this task.
+
+      Operator-deploy gap acknowledged: task 071 (Bicep for topic `sprk-membership-changes`) is blocked-operator — Azure topic does not yet exist. This task is intentionally code-only contract definition; downstream publisher wiring deferred to tasks 081-083.
+    </completion-notes>
     <phase>P7.5</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
