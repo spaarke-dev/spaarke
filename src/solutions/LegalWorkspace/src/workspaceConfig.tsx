@@ -299,11 +299,11 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
       // -----------------------------------------------------------------------
       // My To Do List — SmartToDo
       //
-      // UAT 2026-06-21 round 5 — height was pinned at 560px which capped the
-      // widget regardless of viewport size. Switched to viewport-relative
-      // `calc(100vh - 200px)` so the widget grows to fill the available
-      // vertical space (minus tab chrome + header). Internal scroll inside
-      // the kanban handles overflow when there are many cards.
+      // UAT 2026-06-21 round 7 — removed inline height. The structural fix
+      // in SectionPanel.card { height: 100% } + WorkspaceShell.row { flex: 1
+      // 1 0, alignItems: stretch } now propagates pane height down to the
+      // card automatically. Widgets fill whatever vertical space the
+      // workspace pane offers, no per-section hardcoding needed.
       // -----------------------------------------------------------------------
       {
         id: "todo",
@@ -311,7 +311,6 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
         title: "My To Do List",
         badgeCount: p.todoCount,
         toolbar: todoToolbar,
-        style: { height: "calc(100vh - 200px)", minHeight: "560px" },
         renderContent: () => (
           <SmartToDo
             embedded

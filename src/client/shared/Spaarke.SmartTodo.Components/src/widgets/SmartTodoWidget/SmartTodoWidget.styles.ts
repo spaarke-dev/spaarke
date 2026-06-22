@@ -362,13 +362,13 @@ export const useSmartTodoWidgetStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     flex: '1 1 0',
-    // UAT 2026-06-21 round 6: removed the artificial `minHeight: max(400px,
-    // 60vh)` floor that was preventing pure responsive fill. The parent
-    // chain (SectionPanel.card height → SectionPanel.content flex → widget
-    // root height:100% → kanbanContainer flex:1 1 0) now correctly lets the
-    // container size to the section's available space. The 400px floor is
-    // kept only as a hard minimum so the kanban never collapses to nothing.
-    minHeight: '400px',
+    // UAT 2026-06-21 round 7: dropped all floor constraints. With the
+    // SectionPanel.card { height: 100% } + WorkspaceShell.row { flex: 1 1 0
+    // } structural fix in place, the parent chain now reliably delivers
+    // the full workspace pane height to this container. `minHeight: 0` is
+    // required to allow the container to shrink in tight viewports without
+    // pushing the toolbar / title row above it offscreen.
+    minHeight: 0,
     minWidth: 0,
   },
 

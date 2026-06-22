@@ -86,6 +86,18 @@ const useStyles = makeStyles({
     // win. Same fix pattern as in DataGrid root/innerCard/gridScroll +
     // DataverseEntityViewWidget root — this completes the chain.
     minWidth: 0,
+    // smart-todo-r4 UAT round 7 (2026-06-21): make the card actually claim
+    // its parent grid cell's full height by default. Without this, the
+    // card defaults to intrinsic content height — which forces every
+    // embedded widget to either hard-code a per-section
+    // `style: { height: '560px' }` (the legacy workaround) or live with a
+    // ~content-height container that doesn't fill the Workspace pane.
+    //
+    // The fix pairs with WorkspaceShell.row { height: 100%, alignItems:
+    // stretch } so grid rows fill the shell and cards stretch to fill rows.
+    // Existing per-section inline `style: { height: ... }` overrides still
+    // win (inline style trumps class), so this is back-compat safe.
+    height: '100%',
   },
   titleBar: {
     display: 'flex',
