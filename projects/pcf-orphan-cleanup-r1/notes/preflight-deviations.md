@@ -71,7 +71,25 @@ Three steps to verify before deciding:
 
 ### Status
 
-`OPEN — awaiting owner triage`
+`RESOLVED — 2026-06-22 — outcome 1 (PERMANENT HOLD)`
+
+### Owner decision (2026-06-22)
+
+**"Leave the command bar ribbon button (even though broken) because we may rewire it to a new analysis code page wizard modal."**
+
+Decision implications:
+
+- **`sprk_Spaarke.Controls.AnalysisWorkspace` PCF (`286d7717-…`) — DO NOT DELETE.** Stays deployed in spaarkedev1 + spaarkedev2 indefinitely.
+- **`sprk_analysisworkspace_8bc0b` canvas page (`ff384002-…`) — DO NOT DELETE.** Stays deployed indefinitely. The PCF lives inside it; both must remain together.
+- **`Spaarke_OpenAnalysisWorkspace()` ribbon function — LEAVE IN PLACE.** May be broken in steady-state today (form-onload migration incomplete) but is preserved for a planned future rewire to a new analysis Code Page wizard modal.
+- **`AnalysisWorkspaceSolution` baseline backup — KEEP** in `backups-2026-06-22/` for future reference / rewire-planning context.
+
+### Future-work flag (for the planned rewire project)
+
+When the rewire happens:
+- The new code-page wizard modal should be wired via `Xrm.Navigation.navigateTo({ pageType: 'webresource', webresourceName: 'sprk_...' })` (NOT `pageType: 'custom'`) — mirroring the DocumentUploadWizard pattern that drove UQC's retirement (sprk_subgrid_commands.js v4.0.0).
+- After the rewire ships, `sprk_analysisworkspace_8bc0b` canvas page + AnalysisWorkspace PCF + `Spaarke_OpenAnalysisWorkspace()` ribbon function become genuinely orphan and can be retired in a follow-on cleanup pass.
+- The original 11-control / 6-canvas Task 003 scope can be revisited at that point.
 
 ---
 

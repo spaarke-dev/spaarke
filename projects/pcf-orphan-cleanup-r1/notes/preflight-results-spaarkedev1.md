@@ -17,7 +17,7 @@
 | 1 | `sprk_Spaarke.Controls.UniversalDocumentUpload` | ✅ **ready-to-delete** | Ribbon migrated (sprk_subgrid_commands.js v4.0.0); no FormXML refs in dedicated solution |
 | 2 | `sprk_Spaarke.SpeDocumentViewer` | ✅ **ready-to-delete** | No external importers; no FormXML refs in dedicated solution. **Live form-binding re-check MANDATORY at Task 003 per D-02.** |
 | 3 | `sprk_Spaarke.Controls.AnalysisBuilder` | ✅ **ready-to-delete** | Superseded by Playbook Library Code Page; only in Default solution (no dedicated solution to back up) |
-| 4 | `sprk_Spaarke.Controls.AnalysisWorkspace` (PCF) | ⚠ **deviation-blocked** | `Spaarke_OpenAnalysisWorkspace()` in `sprk_analysis_commands.js:167` opens `sprk_analysisworkspace_8bc0b` canvas page → which hosts this PCF. See [`preflight-deviations.md` DEV-001](preflight-deviations.md#dev-001) |
+| 4 | `sprk_Spaarke.Controls.AnalysisWorkspace` (PCF) | ⏭ **PERMANENT HOLD** (owner decision 2026-06-22) | Live ribbon ref in `sprk_analysis_commands.js:167`; preserved for future rewire to a new analysis Code Page wizard modal. See [`preflight-deviations.md` DEV-001](preflight-deviations.md#dev-001) — RESOLVED. |
 | 5 | `sprk_Spaarke.Controls.DueDatesWidget` | ✅ **ready-to-delete** | No external importers; backup captured |
 | 6 | `sprk_Spaarke.Controls.EventAutoAssociate` | ✅ **ready-to-delete** | No external importers; backup captured |
 | 7 | `sprk_Spaarke.Controls.EventCalendarFilter` | ✅ **ready-to-delete** | Superseded by `@spaarke/events-components` CalendarFilterPane; backup captured |
@@ -32,17 +32,17 @@
 |---:|---|---|---|
 | 1 | `sprk_documentuploaddialog_e52db` | UQC PCF | ✅ ready-to-delete (ribbon migrated v4.0.0) |
 | 2 | `sprk_analysisbuilder_40af8` | AnalysisBuilder PCF | ✅ ready-to-delete |
-| 3 | `sprk_analysisworkspace_8bc0b` | AnalysisWorkspace PCF | ⚠ **deviation-blocked** ([DEV-001](preflight-deviations.md#dev-001)) |
+| 3 | `sprk_analysisworkspace_8bc0b` | AnalysisWorkspace PCF | ⏭ **PERMANENT HOLD** ([DEV-001](preflight-deviations.md#dev-001) — RESOLVED 2026-06-22; preserved for future rewire) |
 | 4 | `sprk_visualizationdrillthroughworkspace_e48a5` | DrillThroughWorkspace PCF (never deployed) | ✅ ready-to-delete (empty host; PCF was never deployed) |
 | 5 | `sprk_eventspage_786f4` | (predecessor of EventsPage Code Page) | ✅ ready-to-delete |
 | 6 | `sprk_playbookbuilder_eb5ad` | PlaybookBuilderHost PCF | ⏭ **OUT OF SCOPE** (per D-03 — separate triage) |
 
-### Counts
+### Counts (final, post owner triage)
 
-- **Customcontrols**: 10 ready-to-delete, 1 deviation-blocked = **10/11 cleared**
-- **Canvas apps**: 4 ready-to-delete, 1 deviation-blocked, 1 out-of-scope = **4/6 cleared**
-- **Baseline backups captured**: **10 dedicated unmanaged solution ZIPs** in [`backups-2026-06-22/`](../backups-2026-06-22/)
-- **Deviations filed**: 1 (DEV-001 — AnalysisWorkspace live ribbon call)
+- **Customcontrols**: 10 ready-to-delete, **1 permanent hold (AnalysisWorkspace PCF — owner-preserved for future rewire)** = **10/11 cleared for Task 003**
+- **Canvas apps**: 4 ready-to-delete, **1 permanent hold (analysisworkspace_8bc0b — preserved with the PCF)**, 1 out-of-scope (playbookbuilder per D-03) = **4/6 cleared for Task 003**
+- **Baseline backups captured**: **10 dedicated unmanaged solution ZIPs** in [`backups-2026-06-22/`](../backups-2026-06-22/) (including AnalysisWorkspaceSolution backup — kept as future-rewire reference)
+- **Deviations filed**: 1 (DEV-001 — RESOLVED 2026-06-22 with owner decision to preserve)
 
 ---
 
@@ -180,10 +180,10 @@ All marked ✅ **ready-to-delete** per §1 summary. Per-control deletion order p
 | Row 1 (UQC) | Proceed |
 | Row 2 (SDV) | Proceed — but MANDATORY live-form re-check via Maker portal first |
 | Row 3 (AnalysisBuilder) | Proceed — AnalysisBuilder backup gap accepted (see §2.1) |
-| **Row 4 (AnalysisWorkspace PCF)** | **HOLD — deviation-blocked per DEV-001** |
+| **Row 4 (AnalysisWorkspace PCF)** | **PERMANENT HOLD (DEV-001 RESOLVED owner-preserved for future rewire)** |
 | Rows 5–11 (DueDatesWidget through LegalWorkspace PCF) | Proceed |
 | Canvas apps 1, 2, 4, 5 (documentuploaddialog, analysisbuilder, visualizationdrillthroughworkspace, eventspage_786f4) | Proceed |
-| **Canvas app 3 (analysisworkspace_8bc0b)** | **HOLD — deviation-blocked per DEV-001** |
+| **Canvas app 3 (analysisworkspace_8bc0b)** | **PERMANENT HOLD (DEV-001 RESOLVED — preserved with its hosted PCF)** |
 | Canvas app 6 (playbookbuilder) | Out of scope (D-03) |
 
 ### 7.2 Resurrection drill — pick low-stakes control
