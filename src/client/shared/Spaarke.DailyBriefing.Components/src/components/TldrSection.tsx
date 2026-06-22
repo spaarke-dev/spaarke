@@ -224,7 +224,7 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
           {tldr.summary}
         </Text>
       )}
-      {tldr.keyTakeaways.length > 0 && (
+      {Array.isArray(tldr.keyTakeaways) && tldr.keyTakeaways.length > 0 && (
         <ul className={styles.takeawaysList} aria-label="Key takeaways">
           {tldr.keyTakeaways.map((takeaway, idx) => (
             <li key={idx} className={styles.takeawayItem}>
