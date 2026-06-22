@@ -131,11 +131,22 @@ const useStyles = makeStyles({
     flex: "1 1 0",
     minHeight: "400px",
   },
-  /** Borderless, height-flexible root for use inside a tabbed container. */
+  /**
+   * Borderless, height-flexible root for use inside a tabbed container.
+   *
+   * UAT 2026-06-22 round 10: switched from `flex: 1 1 0` to `height: 100%`
+   * to match the working DailyBriefingApp pattern. In a SectionPanel.content
+   * flex container with `flex: 1 1 auto` (basis: auto), a child `flex: 1 1 0`
+   * doesn't reliably claim the parent's full height because the parent's
+   * own basis is the intrinsic size — the chain doesn't propagate height
+   * unless the child explicitly says `height: 100%`. DailyBriefingApp uses
+   * this exact pattern and fills correctly; this brings SmartToDo into
+   * parity.
+   */
   embeddedRoot: {
     display: "flex",
     flexDirection: "column",
-    flex: "1 1 0",
+    height: "100%",
     overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1,
   },
