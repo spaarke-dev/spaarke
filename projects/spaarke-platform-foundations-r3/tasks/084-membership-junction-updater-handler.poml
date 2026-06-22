@@ -1,7 +1,51 @@
 <task id="R3-084" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>`MembershipJunctionUpdater` handler (subscription consumer, idempotent)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Wave 21 Group S. Created IMembershipJunctionUpdater (Scoped handler contract — also reused
+      directly by task 085's MembershipReconciliationJob) + MembershipJunctionUpdater (real impl,
+      composite-alternate-key idempotency on the 5-tuple {personId, personIdType, entityLogicalName,
+      entityRecordId, sourceField} — retrieve-then-create/update/delete branching, Added/Updated
+      both upsert role+lastSyncedOn, Removed deletes-if-present and no-ops-if-absent) +
+      MembershipJunctionUpdaterHost (Service Bus subscription consumer BackgroundService —
+      DefaultAzureCredential per ADR-028, ServiceBusProcessor pump, AbandonMessageAsync on
+      transient error, DeadLetterMessageAsync on JSON deserialization failure, 30s drain on
+      StopAsync per NFR-07 with `DrainTimeout` constant locked at the type-system level) +
+      NullMembershipJunctionUpdaterHost (ADR-032 hosted-service-peer pattern — logs once on
+      start, performs no Service Bus work) + MembershipJunctionUpdaterOptions (bound from
+      "Membership:JunctionUpdater" section, distinct from task 081's "Membership:EventPublisher"
+      sub-key so the publisher + consumer kill-switches flip independently). Extended
+      MembershipModule.AddMembership() with symmetric registration per bff-extensions.md §F.1:
+      both Enabled=true and Enabled=false branches register an IHostedService (real or Null) —
+      symmetric registration eliminates operator-flag-flip-time DI surprises. Updated
+      appsettings.Development.json.template with "Membership:JunctionUpdater" subsection
+      (Enabled=false by default; operator populates ServiceBusNamespace + flips Enabled to true
+      after task 071 topic deploy completes). Tests: 14 new unit tests across
+      MembershipJunctionUpdaterTests (12) + MembershipJunctionUpdaterHostTests (2) — all pass.
+      Test coverage: Added_CreatesRowWhenMissing, Added_UpdatesWhenRowExists (idempotency on
+      duplicate Added), Updated_OverwritesRoleAndLastSyncedOn, Updated_CreatesRowWhenMissing
+      (recon self-heal), Removed_DeletesExistingRow, Removed_IsNoOpWhenRowAbsent (idempotency on
+      duplicate Removed), DuplicateDelivery_IsIdempotent (canonical at-least-once duplicate-delivery
+      test — stateful mock toggles row existence; verifies Create once + Update once on the second
+      delivery), CancellationRequested_Propagates, NullEvent_Throws, NullHost_LogsAndReturnsImmediately,
+      RealHost_StopAsync_DoesNotDeadlock_WhenNeverStarted, DrainTimeout_Is30Seconds (locks
+      NFR-07 at the type level). Full BFF unit-test run: 7524 pass / 110 skip (pre-existing) /
+      0 fail (1m30s). Build: 0 errors, no new warnings. Publish: 46.22 MB (+0.01 MB vs task 081
+      baseline 46.21 MB — within +1 MB per-task ceiling; cumulative still well under 60 MB
+      hard ceiling). CVE: pre-existing Microsoft.Kiota.Abstractions 1.21.2 HIGH only; no new HIGH
+      CVEs introduced. Sub-agent boundary respected — no .claude/ writes. Coordinated with parallel
+      sibling 081: no file overlap (081 owns Events/MembershipEventPublisher*, 084 owns the rest);
+      both extend MembershipModule with distinct config sub-keys so the publisher (publish-side) +
+      consumer (subscription-side) kill-switches are flipped independently. Topic + subscription
+      names match task 071 Bicep: "sprk-membership-changes" + "recon-junction-updater".
+      Cross-cutting: IMembershipJunctionUpdater is now available for task 085's
+      MembershipReconciliationJob to reuse directly — recon synthesizes MembershipChangedEvent
+      payloads from source-of-truth scans and invokes HandleAsync through the same idempotency
+      contract, so a single write path (junction-row upsert/delete) services both event-driven +
+      nightly-recon paths.
+    </completion-notes>
     <phase>P8</phase>
     <parallel-group>S (with 085)</parallel-group>
     <parallel-safe>true</parallel-safe>

@@ -1,8 +1,8 @@
 # Task Index — Spaarke Platform Foundations (R3)
 
 > **Project**: `spaarke-platform-foundations-r3`
-> **Last Updated**: 2026-06-22 (Waves 17-19 — tasks 062 + 094 + 063 + 064 + 066 + 102 + 101 closed)
-> **Status**: 54 / 69 complete; 1 blocked-operator (071); 14 pending (operator/human-gated by 071 deploy)
+> **Last Updated**: 2026-06-22 (Wave 21 — task 081 closed; cross-cutting MembershipEventPublisher + Null peer)
+> **Status**: 55 / 69 complete; 1 blocked-operator (071); 13 pending (operator/human-gated by 071 deploy)
 > **Branch**: `work/spaarke-platform-foundations-r3`
 > **Parallel-optimized**: Yes (per user directive 2026-06-20)
 
@@ -64,10 +64,10 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 072 | `MembershipChangedEvent` payload contract | P7.5 | ✅ | 070, 071 | — | true | STANDARD | Wave 20 (2026-06-22): pure code-only contract definition (3 src + 1 test); 9/9 tests pass; publish 44.88 MB (-1.33 vs baseline). NOTE: topic-deploy task 071 still blocked-operator — Azure topic `sprk-membership-changes` does not yet exist. Publisher wiring deferred to tasks 081-083 once topic is provisioned. |
 | 073 | Bicep deploy + topic/subscription smoke test | P7.5 | 🔲 | 071, 072 | — | true | STANDARD |
 | 080 | P-event-1 — Event-source endpoint inventory | P8 | ✅ | 070, 071, 072 | **Q** main-only | false | STANDARD |
-| 081 | Wire event-publishing into matter cluster | P8 | 🔲 | 080 | **R** | true | FULL |
+| 081 | Wire event-publishing into matter cluster | P8 | ✅ | 080 | **R** | true | FULL | Wave 21 (2026-06-22): authored cross-cutting IMembershipEventPublisher + real impl + NullMembershipEventPublisher (ADR-032 P2 Quiet no-op); SYMMETRIC DI registration (real when Membership:EventPublisher:Enabled=true; Null peer otherwise — default state until task 071 deploys topic). Matter cluster wired: Office QuickCreate matter endpoint publishes Added event for implicit ownerid (per inventory §3A — only BFF-side mutation site for sprk_matter). Fire-and-forget via discard (`_ = publisher.PublishAsync(...)`); endpoint succeeds even on publish failure (Q2). 10 unit tests pass. Build 0 errors / 16 warnings (no new). Publish 44.89 MB (+0.01 vs 44.88 Wave 20 baseline). Cross-cutting infrastructure ready for sibling tasks 082+083 reuse. |
 | 082 | Wire event-publishing into document + event cluster | P8 | 🔲 | 080, 081 | **R** | true | FULL |
 | 083 | Wire event-publishing into task + opportunity cluster | P8 | 🔲 | 080, 081 | **R** | true | FULL |
-| 084 | `MembershipJunctionUpdater` handler (subscription) | P8 | 🔲 | 070, 071, 072 | **S** | true | FULL |
+| 084 | `MembershipJunctionUpdater` handler (subscription) | P8 | ✅ | 070, 071, 072 | **S** | true | FULL |
 | 085 | `MembershipReconciliationJob` real logic | P8 | 🔲 | 013, 070, 084 | **S** | true | FULL |
 | 086 | Redis pub/sub cache invalidation | P8 | 🔲 | 033, 084, 085 | — | true | FULL |
 | 087 | Phase 2 E2E integration tests | P8 | 🔲 | 081-086 | — | true | STANDARD |
