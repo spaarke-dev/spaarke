@@ -14,7 +14,7 @@
 | **Origin status** | Pushed. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
 | **Last commit** | `c556702ee` — project init (137 files, +15,822 lines) |
 | **Pipeline state** | `/project-pipeline` COMPLETE. Ready for `/task-execute` runs. |
-| **Active task** | **STOPPED** end of Wave 1-B. Wave 1-C blocked at task 014 read-only assessment (S6 — Dataverse data conflicts; see Blockers § B-014). |
+| **Active task** | Q&A 2026-06-22 decisions applied. Stage 1 governance pushed (`6efaef577`). Stage 2 artifact revisions in progress. Wave 1-A refactor (`*PlaybookCode` → `*PlaybookId`) up next; B-014 resolved by Q1 decision. |
 | **Execution mode** | **OVERNIGHT AUTONOMOUS** (user explicitly requested 2026-06-21) |
 | **Next Action** | **HUMAN INPUT REQUIRED**. Read Blockers § B-014 + `notes/debug/014-playbookcode-conflict.md`. Pick options for the 3 conflicts (a/b/c/d) and the missing row (a'/b'/c'). Then resume `continue`. |
 
@@ -245,7 +245,7 @@ Anything new from overnight execution will be tracked here by the post-compact a
 
 ## Blockers
 
-**Status**: ✅ **B-001 RESOLVED** (option b). ✅ **B-002 INFORMATIONAL** (shared-lib drift; separate team handoff filed 2026-06-21). 🚧 **B-014 OPEN — autonomous run STOPPED at end of Wave 1-B** (Dataverse data conflicts in task 014).
+**Status**: ❌ **B-001 CANCELLED with prejudice** (2026-06-22 Q&A Q3 — OC-R4-05 misreading; LegalWorkspace components explicitly preserved per retirement doc). ✅ **B-002 INFORMATIONAL** (shared-lib drift; separate team handoff filed 2026-06-21). ✅ **B-014 RESOLVED** (2026-06-22 Q&A Q1 — switching to `sprk_playbookid` lookup eliminates the conflict; existing `PB-NNN` values in `sprk_playbookcode` left untouched). 📋 **B-015 FILED for separate triage** (multi-file summarize wizard runtime error; out of scope this project).
 
 ### Blocker B-014 — Task 014 Dataverse `sprk_playbookcode` backfill conflicts (OPEN 2026-06-22)
 

@@ -48,11 +48,11 @@ Task IDs use **10-gap convention** (001, 010, 020, 030, ...) leaving 9 slots per
 | **1** | §1.7 Stable Codes Migration | 010–027 | 18 | ~1.5 weeks | Chat-summarize first (FR-05); WorkspaceOptions extended FIRST to enable parallel-safe migrations |
 | **2** | WP1.5 Index Governance | 030–040 | 11 | ~1 week | Dataverse schema first; UX + drift job parallel |
 | **3** | WP3 Destination Metadata Wiring | 045–055 | 11 | ~3–4 days | Additive; mostly parallel; can begin during Phase 2 (wave 3-A prereq is 1-J) |
-| **4** | WP5 6-Tier Memory Subsystem | 060–105 | 42 | ~3–4 weeks | LARGEST PHASE; bound by architecture doc §3–§11; 21 waves |
-| **5** | WP2 File-Aware Classification | 110–119 | 10 | ~1 week | Depends on Phase 4 upload manifest (FR-17 Hybrid C) |
+| **4** | WP5 6-Tier Memory Subsystem | 060–105 | 42 total / **12 MVP-active** (30 deferred ⏭️ — see banner) | ~1 week MVP (vs ~3-4 weeks original) | MVP cut 2026-06-22; substrate lock-ins preserved |
+| **5** | WP2 File-Aware Classification | 110–119 | 10 total / **6 MVP-active** (4 deferred ⏭️ — see banner) | ~3 days MVP (vs ~1 week original) | MVP cut 2026-06-22; suggested-playbooks UX retained, auto-routing engine deferred |
 | **6** | WP6 Specialized Playbooks + Path 3 | 120–132 | 13 | ~1.5 weeks | Dataverse audit first; then author |
 | **7** | WP4 Retirement + Project Wrap-up | 140–148, 150 | 10 | ~1 week | Depends on R6 PR #401 merge; quality gates BEFORE UAT; ends with 150 |
-| | **TOTAL** | | **120** | **6–10 weeks** | |
+| | **TOTAL** | | **120 / ~85 MVP-active** | **6–10 weeks original / 3.5–6 weeks MVP** | MVP cut 2026-06-22 owner decision; 1 cancelled (001) + 34 deferred (Phase 4 + 5) + 1 demoted-to-verify (030) |
 
 ---
 
@@ -229,7 +229,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|
 | **000 (NEW)** | R6 closeout readiness check — verify tasks 089 + 090 complete + UAT regression passed | ✅ | MINIMAL | true | 0-A0 | none (external) | `verification`, `coordination` |
-| 001 | Delete LegalWorkspace CreateMatter/CreateRecordStep + Project + WorkAssignment siblings | ⏭️ | STANDARD | true | 0-A | 000 | `cleanup`, `frontend`, `legacy-removal` — DEFERRED to post-Phase-1 per owner 2026-06-21 (B-001 option b) |
+| 001 | ~~Delete LegalWorkspace CreateMatter/CreateRecordStep + Project + WorkAssignment siblings~~ | ❌ CANCELLED | STANDARD | n/a | 0-A | 000 | `cleanup`, `frontend`, `legacy-removal` — **CANCELLED with prejudice 2026-06-22** per Q&A Q3 review: OC-R4-05 retirement doc EXPLICITLY PRESERVES these as library code; spec misread "retired" as "delete". Also 2 of 3 named files never existed (each island uses its own step-component name). Documented in spec.md §Affected-Areas + B-001 closeout in current-task.md. |
 | 002 | Delete or migrate PCF UniversalQuickCreate `useAiSummary.ts` duplicate | ✅ | STANDARD | true | 0-A | 000 | `cleanup`, `pcf`, `legacy-removal` |
 | 003 | Scrub stale `3f21cec1-` GUID comments in `WorkspaceOptions.cs:35` + `ProjectPreFillService.cs:40` | ✅ | MINIMAL | true | 0-A | 000 | `cleanup`, `documentation` |
 | 004 | Phase 0 smoke test — verify deletions don't break consumers | ✅ | STANDARD | true | 0-B | 002,003 | `testing`, `integration-test` — deps relaxed (001 ⏭️ deferred per B-001 option b); baseline note at `notes/handoffs/phase-0-baseline.md` |
@@ -242,7 +242,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 011 | Add ProblemDetails 404 shape per ADR-019 + integration test | ✅ | STANDARD | true (CRIT-runtime: file overlap with 010 — actually sequential after 010) | 1-A | 004 | `bff-api`, `testing`, `ADR-019` |
 | 012 | Add `WorkspaceOptions.SummarizePlaybookCode` (FR-04) + fix ADR-018 violation at `WorkspaceFileEndpoints.cs:30,254` | ✅ | FULL | true | 1-A | 004 | `bff-api`, `config`, `ADR-018` |
 | **013 (NEW)** | **Extend `WorkspaceOptions.cs` with 4 typed code options**: `ChatSummarizePlaybookCode`, `MatterPreFillPlaybookCode`, `ProjectPreFillPlaybookCode`, `AiSummaryPlaybookCode`. Resolves CRIT-1 file overlap. | ✅ | FULL | false | 1-B | 010,011,012 | `bff-api`, `config`, `ADR-018`, `architecture-binding` |
-| 014 | Backfill `sprk_playbookcode` on 6 production-bound playbooks (Dataverse data update) | 🔲📝 | STANDARD | false | 1-C | 013 | `dataverse`, `data`, `migration` |
+| 014 | **REVISED 2026-06-22 (Q1)**: Backfill `sprk_playbookid` (NOT `sprk_playbookcode`) on the 2 production playbooks where it's currently NULL (`summarize-document-for-chat@v1`, `summarize-document-for-workspace@v1`) — set value to the row's `sprk_analysisplaybookid` PK GUID per existing convention. 3 of 5 rows already follow this. `sprk_playbookcode` (`PB-NNN` values) left untouched. | 🔲📝 | STANDARD | false | 1-C | 013 (post-refactor) | `dataverse`, `data`, `migration` |
 | 015 | Migrate `SessionSummarizeOrchestrator` to stable code (FR-05 first — lowest blast radius) | 🔲📝 | FULL | false | 1-D | 014 | `bff-api`, `refactoring`, `services` |
 | 016 | Migrate `MatterPreFillService` to stable code (Pattern A — consumes `MatterPreFillPlaybookCode`) | 🔲📝 | FULL | true | 1-E | 015 | `bff-api`, `refactoring`, `services`, `NFR-07` |
 | 017 | Migrate `ProjectPreFillService` to stable code (Pattern A — consumes `ProjectPreFillPlaybookCode`) | 🔲📝 | FULL | true | 1-E | 015 | `bff-api`, `refactoring`, `services`, `NFR-07` |
@@ -261,7 +261,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|
-| 030 | Add 4 tracking fields to `sprk_analysisplaybook`: `sprk_lastindexedat`, `sprk_indexstatus`, `sprk_lastindexerror`, `sprk_indexhash` | 🔲📝 | STANDARD | false | 2-A | 027 | `dataverse`, `solution`, `fields` |
+| 030 | **DEMOTED 2026-06-22 (Q4)**: VERIFY 4 tracking fields on `sprk_analysisplaybook` (`sprk_lastindexedat`, `sprk_indexstatus`, `sprk_lastindexerror`, `sprk_indexhash`) — Dataverse describe confirms all 4 already exist with correct types + option values. No schema work. 30-min verification + spec.md note. | 🔲📝 | MINIMAL | true | 2-A | 027 | `dataverse`, `verification` |
 | 031 | Add `sprk_jpsmatchingmetadata` (MultilineText) + document JSON schema | 🔲📝 | STANDARD | false | 2-A | 030 | `dataverse`, `solution`, `fields` |
 | 032 | Extend `PlaybookEmbeddingService.cs:28-30` embed-input to include `documentTypes + intents + triggerPhrases` | 🔲📝 | FULL | true | 2-B | 031 | `bff-api`, `ai`, `services` |
 | 033 | Power Apps "Send to Index" button on `sprk_analysisplaybook` form | 🔲📝 | STANDARD | true | 2-B | 031 | `dataverse`, `power-apps`, `forms` |
@@ -290,6 +290,20 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 055 | Phase 3 exit gate | 🔲📝 | MINIMAL | true | 3-D | 054 | `verification` |
 
 ## Phase 4 — WP5 6-Tier Memory Subsystem (LARGEST PHASE — Architecture doc binding; 42 tasks; 21 waves)
+
+> **MVP Scope Cut applied 2026-06-22** (owner decision Q5b). Phase 4 reduced from 42 → **12 active tasks**; 30 tasks deferred ⏭️ with substrate lock-ins preserved. See [`spec.md` § MVP Scope Cut](../spec.md#mvp-scope-cut-owner-decision-2026-06-22) and [`plan.md` § 8.5 Post-MVP Roadmap](../plan.md#85-post-mvp-roadmap-added-2026-06-22-owner-mvp-cut-decision).
+>
+> **Active MVP tasks** (12): **071, 072, 074** (file upload persistence) + **078, 080** (unify dual pipelines + FR-45 invariant test — substrate lock-ins) + **085** (`RecallSessionFileHandler` — the ONE excellent retrieval tool) + **091** (DI for the 1 handler) + **092** (Seed-TypedHandlers script update) + **100** (Tier 5 wrapper over `spaarke-session-files`) + **103, 104, 105** (integration test + deploy + exit gate).
+>
+> **Deferred** (30 tasks; lock-ins documented in spec.md to keep additive post-MVP):
+> - **4a PaneEventBus `memory` channel** (5): 060, 061, 062, 063, 064 — defer; ADR-030 v2 amendment already landed (channel exists in union)
+> - **4b enrichment pipeline** (6 of 9): 066 (`SessionFileEnrichmentService`), 067 (classification), 068 (summarization), 069 (manifest), 070 (DI for these 4), 073 (perf test for deferred services)
+> - **4c per-turn optimizations** (3 of 5): 076 (`LayeredContextCardBuilder`), 077 (`TrustFrameInstructionInjector`), 079 (static-prefix cacheable composition)
+> - **4d handler surface** (7 of 8): 083 (`ListSessionFiles`), 084 (`GetFileManifest`), 086 (`WriteSessionMemory`), 087 (`RetrieveMatterMemory`), 088 (`PromoteToMatterMemory`), 089 (`GetUserPreferences`), 090 (`GetOrgTemplates`) — defer per "one excellent handler beats five partial" principle
+> - **4e promotion workflow** (entire sub-phase, 7 tasks): 093, 094, 095, 096, 097, 098, 099 — defer to post-MVP project; Cosmos doc-type schema documented in spec.md as lock-in
+> - **4f audit cleanup** (2 of 6): 101 (`ChatDataverseRepository` rename), 102 (verify `sprk_aichatmessage` write-only)
+>
+> Tasks below retain their original row data; treat any row NOT in the Active MVP list above as ⏭️ deferred unless explicitly re-prioritized.
 
 ### Phase 4a — ADR-030 v2 PaneEventBus extension (wave 4-A split into 4-A1 + 4-A2 per CRIT-2 fix)
 
@@ -364,6 +378,18 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 105 | Phase 4 exit gate — all 25+ WP5 FRs satisfied; architecture §8 tool surface verified | 🔲📝 | MINIMAL | true | 4-S | 104 | `verification`, `architecture-binding` |
 
 ## Phase 5 — WP2 File-Aware Classification
+
+> **MVP Scope Cut applied 2026-06-22** (owner decision Q5a). Phase 5 reduced from 10 → **6 active tasks**; 4 tasks deferred ⏭️ (the auto-routing engine). Suggested-playbooks UX preserved via single-stage vector match.
+>
+> **Active MVP tasks** (6): **110** (accept attachments in `PlaybookDispatcher.DispatchAsync`) + **112-simplified** (single-stage vector match via existing `PlaybookEmbeddingService`; skip the manifest-pre-filter that depends on deferred classification pipeline) + **115** (`commandIntent` as vector-query bias — cheap quality boost) + **116** (remove `SoftSlashIntentToCapabilityName` dict — hygiene) + **117** (routing telemetry ADR-015 tier-1 safe) + **119** (acceptance test).
+>
+> **Deferred** (4 tasks; the 3-stage auto-routing engine — only valuable for AUTO-EXECUTE which MVP doesn't do):
+> - **111** Phase A fingerprint — cheap rejection stage; only useful when auto-routing
+> - **113** Phase C reconciliation — only matters when A and B disagree
+> - **114** gpt-4o-mini decider — the "skip the user click" stage; MVP keeps the user click
+> - **118** Load test p95 ≤1.5s — auto-routing latency target; not applicable to simpler suggestions UX
+>
+> Tasks below retain their original row data; treat 111, 113, 114, 118 as ⏭️ deferred.
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|

@@ -508,6 +508,49 @@ See [README.md](README.md) Graduation Criteria — 16 items.
 
 ---
 
+## 8.5. Post-MVP Roadmap (added 2026-06-22 owner MVP-cut decision)
+
+The owner authorized an MVP cut to ship the end-to-end use case faster while preserving architectural lock-ins for future expansion. See [`spec.md` § MVP Scope Cut](spec.md#mvp-scope-cut-owner-decision-2026-06-22) for the full table.
+
+### Deferred — to be picked up post-MVP
+
+| Sub-area | Deferred tasks (TASK-INDEX) | Estimated cost when picked up | Substrate lock-in already shipped in MVP |
+|---|---|---|---|
+| **PaneEventBus `memory` channel implementation** | 060, 061, 062, 063, 064 (5 tasks) | ~1 week | ADR-030 v2 amendment landed in MVP; channel exists in the union. Implementation is additive when needed. |
+| **Upload-time enrichment pipeline (classification + summarization + manifest)** | 066, 067, 068, 069, 070, 073 (6 of 9 tasks) | ~2 weeks | `ChatSession.UploadedFiles` shape + `SessionPersistenceService.UpdateUploadedFilesAsync` (tasks 071, 072) land in MVP — the substrate for the deferred services |
+| **Per-turn prompt assembly optimizations (LayeredContextCardBuilder, TrustFrameInjector, static-prefix caching)** | 076, 077, 079 (3 of 5 tasks) | ~1 week | Task 078 unifies the dual pipelines in MVP — prevents post-MVP rewrite |
+| **7 of 8 tool handlers (`ListSessionFiles`, `GetFileManifest`, `WriteSessionMemory`, `RetrieveMatterMemory`, `PromoteToMatterMemory`, `GetUserPreferences`, `GetOrgTemplates`)** | 083, 084, 086, 087, 088, 089, 090 (7 tasks) | ~2 weeks | `RecallSessionFileHandler` ships in MVP (task 085) — covers the load-bearing MVP use case; remaining 7 are additive |
+| **Promotion workflow + Q8 conflict check (T2 → T3 + Context-pane Accept/Reject UI)** | 093–099 (7 tasks) | ~2 weeks | `MemoryPaneEvent` discriminant shapes documented in spec.md (lock-in); Cosmos `matter-memory-promotion` doc-type schema documented in spec.md (lock-in) |
+| **Audit-repo refactor (`ChatDataverseRepository` → `IChatAuditRepository` rename + retire placeholder methods)** | 101, 102 (2 tasks) | ~3 days | Verify `sprk_aichatmessage` is write-only stays in MVP (task 102) — confirms the invariant; rename is additive |
+| **WP2 auto-routing engine (3-phase fingerprint + reconciliation + LLM decider)** | 111, 113, 114, 118 (4 of 10 tasks) | ~1 week | Suggested-playbooks UX ships in MVP via single-stage vector match (tasks 110, 112, 115-117, 119) |
+
+### When to pick up the deferred work
+
+Triggers for promoting deferred work to a follow-up project:
+
+1. **Cross-session memory becomes a customer demo killer** in head-to-head evaluations vs. Harvey → pick up 4e + 4d remaining 7 handlers
+2. **Long conversations hit the 8K budget repeatedly** in production telemetry → pick up 4c remaining 3 tasks (LayeredContextCardBuilder + static prefix)
+3. **Upload latency tolerated; users want richer file metadata** → pick up 4b remaining 6 tasks (classification + summarization + manifest pre-compute)
+4. **Promotion UX explicitly requested by users** → pick up 4e + 4a (PaneEventBus `memory` channel implementation)
+5. **Auto-routing UX shows value over user-pick** → pick up 5 remaining 4 tasks (fingerprint + reconciliation + LLM decider)
+
+### Updated effort estimate
+
+Original: 6–10 weeks (120 tasks).
+**MVP-cut**: 3.5–6 weeks (~83 active tasks; remainder deferred with lock-ins).
+
+### Architecture-doc bindings (preserved verbatim in MVP)
+
+These remain unchanged from the original spec/architecture:
+- 6-tier memory model documented in `architecture/stateful-chat-architecture.md` — stays as the post-MVP target architecture
+- ADR-015 tier-1 governance — applies to MVP (recall handler payloads)
+- ADR-030 v2 `memory` channel amendment — landed
+- ADR-013 AI facade boundary — applies to MVP handlers
+- ADR-014 5-min cache TTL on lookups — applies to MVP
+- FR-45 invariant at `PlaybookChatContextProvider.cs:627` — task 080 preserves it
+
+---
+
 ## 9. Next Steps
 
 1. **Review this plan.md** (and README, CLAUDE.md, TASK-INDEX once generated) before executing any task.

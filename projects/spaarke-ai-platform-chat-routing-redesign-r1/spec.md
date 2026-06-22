@@ -11,27 +11,78 @@ R6 left two parallel playbook-routing mechanisms, three parallel playbook-execut
 
 ### Canonical field naming (binding — disambiguation)
 
-To eliminate confusion with similarly-named fields throughout this project:
+**REVISED (Q&A 2026-06-22)**: Previous table was incorrect — `sprk_playbookid` is a NVARCHAR(100) Text column ON `sprk_analysisplaybook` itself (not a lookup FK on related entities), and `sprk_playbookcode` is NOT the stable lookup field. The correct field roles per Dataverse describe + owner confirmation:
 
 | Purpose | Canonical field | Type | Notes |
 |---|---|---|---|
-| **Stable identifier for a playbook (environment-portable)** | `sprk_playbookcode` | Text (alternate key) | Already exists. `PlaybookLookupService` already supports `/by-code/` resolution. THIS is the field consumers must adopt. |
-| **Database PK of `sprk_analysisplaybook`** | `sprk_analysisplaybookid` | GUID (PK) | Already exists. Do NOT use for cross-environment references. |
-| **Lookup FK to a playbook (e.g. on `sprk_playbooknode`)** | `sprk_playbookid` | Lookup | Already exists on related entities. Distinct from the PK above. Do NOT confuse with `sprk_analysisplaybookid`. |
-| **Stable identifier for an action (environment-portable)** | `sprk_actioncode` | Text | Already exists. Reuse for action-code reform — drop `@v1` suffix on new actions; existing `@v1`-suffixed values remain valid in this same field until cutover. Do NOT create `sprk_actioncode_clean` (rejected — invented field). |
-| **Database PK of `sprk_analysisaction`** | `sprk_analysisactionid` | GUID (PK) | Already exists. |
-| **Lookup FK to an action (e.g. on `sprk_playbooknode`)** | `sprk_actionid` | Lookup | Already exists. Reserved name. If — and only if — a genuinely new code field for actions is required during task design (not anticipated), the new field MUST be named `sprk_actionid` to align with the playbook FK naming pattern; default is to reuse `sprk_actioncode`. |
+| **Immutable opaque ID for a playbook — used by code for lookups; environment-portable** | **`sprk_playbookid`** | **Text NVARCHAR(100) on `sprk_analysisplaybook`** | **Already exists. Locked across environments. Convention: value mirrors the row's `sprk_analysisplaybookid` PK GUID (3 of 5 production playbooks already follow this; 2 need backfill). THIS is the field code resolves by.** |
+| Admin-facing descriptive slug for a playbook | `sprk_playbookcode` | Text NVARCHAR(10) (alternate key) on `sprk_analysisplaybook` | Already exists with `PB-NNN` convention on some rows (`PB-002`, `PB-008`, `PB-009`, `PB-015`). Human-readable code admins use in UI. NOT used by code for lookups. This project does NOT modify these values. |
+| Database PK of `sprk_analysisplaybook` | `sprk_analysisplaybookid` | GUID (PK) | Already exists. PK regenerates on environment imports without explicit preservation; do NOT use for cross-environment references unless you've also preserved the GUID via solution import settings. |
+| **Immutable opaque ID for an action — used by code for lookups** | **`sprk_actionid`** | **Text NVARCHAR(100) on `sprk_analysisaction`** | **Already exists. Parallel role to `sprk_playbookid`. Convention: value mirrors the row's `sprk_analysisactionid` PK GUID.** |
+| Admin-facing descriptive slug for an action | `sprk_actioncode` | Text NVARCHAR(64) on `sprk_analysisaction` | Already exists. Admin convention; not a lookup field for code. |
+| Database PK of `sprk_analysisaction` | `sprk_analysisactionid` | GUID (PK) | Already exists. |
+
+**Implications for this project**:
+- All `WorkspaceOptions.*PlaybookCode` properties shipped in Wave 1-A → rename to `*PlaybookId` and bind to GUID values
+- The `/api/ai/playbooks/by-code/{code}` endpoint shipped in Wave 1-A → rename route to `/by-id/{id}`; query the `sprk_playbookid` field instead of `sprk_playbookcode`
+- `PlaybookLookupService` alternate-key lookup → change key column from `sprk_playbookcode` to `sprk_playbookid`
+- Task 014 backfill → simplified to "write `sprk_playbookid = <PK GUID value>` on the 2 rows where it's currently NULL"
+- `sprk_playbookcode` (`PB-NNN` values) — left untouched; this project does not modify it
+
+### MVP Scope Cut (Owner decision 2026-06-22)
+
+The owner prioritized shipping a working end-to-end MVP over the full sophisticated subsystem. **MVP delivers the core use case in full**:
+
+> *"User engages with the Spaarke AI via Assistant + Workspace + Context → uploads a file → selects a playbook → executes the playbook → asks questions → refines/modifies the output."*
+
+#### MVP cuts at a glance
+
+| Phase / WP | Original tasks | MVP tasks | Deferred (with substrate lock-ins preserved) |
+|---|---|---|---|
+| Phase 4 — WP5 6-tier memory | 42 | **~13** | 4a PaneEventBus `memory` channel (5 tasks), 4b enrichment pipeline classification/summarization/manifest (6 of 9), 4c LayeredContextCardBuilder + TrustFrameInjector + static-prefix (3 of 5), 4d 7 of 8 tool handlers, 4e entire promotion workflow (7), 4f audit-repo refactor (2 of 6). Total ~29 tasks. |
+| Phase 5 — WP2 file-aware classification | 10 | **6** | Auto-routing engine (fingerprint + reconciliation + gpt-4o-mini decider + multi-file load test). Suggested-playbooks UX preserved via single-stage vector match. |
+
+#### What the MVP delivers (user can do these on day 1)
+- Upload file → file persisted in session memory (T2)
+- Pick playbook from Library modal (Flow A) OR pick from chat-suggested cards (Flow B simplified)
+- Execute playbook → output streams to Workspace (per WP3 destination wiring)
+- Ask follow-up questions; agent reads uploaded file content with citations (T5 single-index recall)
+- Refine output via chat (T1 + T2)
+
+#### What the MVP defers (visible gaps)
+- Cross-session matter memory ("remember about this matter") — user re-tells each session
+- User-level preferences ("I always want bullet lists") — no personalization
+- Promote-to-matter-memory UX (T2 → T3 workflow + Context-pane Accept/Reject cards)
+- Multi-doc corpus reasoning over more than the current session's uploaded files
+- Long-conversation summarization (>~30 turns hits 8K budget → truncation)
+
+#### Future-proofing lock-ins (INCLUDED in MVP — cheap now, expensive later)
+1. **Task 078** — unify `MemoryCompositionService` with `PlaybookChatContextProvider` (prevents post-MVP per-turn pipeline rewrite)
+2. **Task 080** — FR-45 regression test at `PlaybookChatContextProvider.cs:627` (preserves the binding invariant)
+3. **Spec artifact**: lock the 5 `MemoryPaneEvent` discriminant JSON shapes (channel exists per ADR-030 v2; payloads documented now for forward compatibility)
+4. **Spec artifact**: lock the Cosmos `matter-memory-promotion` doc-type schema (prevents migration script post-MVP)
+5. **`RecallSessionFileHandler`** tool-description contract: distinguishes "session" vs "matter" scope so post-MVP additions (7 more handlers) don't confuse the agent
+
+These 5 lock-ins keep post-MVP work additive (~2-3 weeks for deferred features) instead of a substrate rewrite (~6-8 weeks).
+
+#### Honest competitive position of MVP (June 2026)
+- **Wins**: workflow flexibility (playbook authoring), enterprise auth + governance, tri-pane Workspace+Assistant+Context UX
+- **Ties** (table stakes): document upload + Q&A + cite, within-session refinement, streaming output
+- **Loses** to Harvey on cross-session matter memory; to Hebbia on multi-doc corpus reasoning; to M365 Copilot personal memory on user-level preferences
+- Pitch: *"Spaarke ships a flexible, customizable, enterprise-grade single-matter document analysis + workflow tool. Cross-session memory is our next horizon; the architecture was designed to scale to it."*
+
+Full deferred-feature inventory + post-MVP roadmap: see [`plan.md`](plan.md) §"Post-MVP Roadmap".
 
 ## Scope
 
 ### In Scope
 
-**§1.7 Stable-code consumer migration** (existing `sprk_playbookcode` column; consumers must adopt it)
-- Add `/api/ai/playbooks/by-code/{code}` resolution endpoint (5-min TTL per ADR-014; tenant-scoped); `PlaybookLookupService` already supports the alternate-key lookup.
-- Migrate 9 hardcoded consumers (5 GUID-based, 4 name-based) to resolve by code; see Owner Clarifications for sequencing.
-- Pattern C cleanup first (LegalWorkspace dead code, PCF UniversalQuickCreate duplicate `useAiSummary`, stale GUID comments) → Pattern A (typed-options + code) → Pattern B (name-resolve → code-resolve).
+**§1.7 Stable-ID consumer migration** (existing `sprk_playbookid` column; consumers must adopt it) — **REVISED 2026-06-22** (was "Stable-code", now "Stable-ID" per the corrected field-role table above)
+- Add `/api/ai/playbooks/by-id/{id}` resolution endpoint (5-min TTL per ADR-014; tenant-scoped); `PlaybookLookupService` already supports alternate-key lookup — extend to query `sprk_playbookid`.
+- Migrate 9 hardcoded consumers (5 GUID-based, 4 name-based) to resolve by `sprk_playbookid`; see Owner Clarifications for sequencing.
+- Pattern C cleanup first (PCF UniversalQuickCreate duplicate `useAiSummary` stub + stale GUID comments — both completed; LegalWorkspace deletion was REMOVED, see Out-of-Scope) → Pattern A (typed-options `*PlaybookId` + `sprk_playbookid` lookup) → Pattern B (name-resolve → ID-resolve).
 - Deprecate `/by-name/` endpoint with telemetry warnings; remove after stabilization window.
-- Action-code reform in scope: drop `@v1` suffix on new actions; backward-compat layer for existing `@v1`-suffixed action codes via new `sprk_actioncode_clean` column or rename per migration.
+- Action-ID reform in scope: parallel pattern with playbooks — code resolves actions by `sprk_actionid`; `sprk_actioncode` remains admin slug. Drop `@v1` suffix on new action slugs.
 
 **WP1.5 Index governance** (additive Dataverse schema + Power Apps UX)
 - Add `sprk_lastindexedat`, `sprk_indexstatus`, `sprk_lastindexerror`, `sprk_indexhash`, `sprk_jpsmatchingmetadata` to `sprk_analysisplaybook` (per owner: confirmed approved).
@@ -97,7 +148,7 @@ All sub-WPs ship in this project; sequenced to allow internal milestones. The WP
 ### Out of Scope
 
 - **R6 closeout WP1 description rewrite** for the pre-existing 5+ production summary playbooks — that text-cleanup pass lands in R6 Phase E micro-wave + tasks 089/090, NOT here. (WP1.5 index governance + new specialized playbook descriptions ARE in scope here.)
-- **Modification of any of the 6 production-bound playbooks** per design §1.5: `summarize-document-for-chat@v1`, `summarize-document-for-workspace@v1`, `"Summarize New File(s)"`, `"Document Profile"`, `"Create New Matter Pre-Fill"`, `"Create New Project Pre-Fill"`. Migration in place via stable code only; no delete; no rename; no output-schema change.
+- **Modification of any of the 5 production-bound playbooks** per design §1.5: `summarize-document-for-chat@v1`, `summarize-document-for-workspace@v1`, `"Document Profile"`, `"Create New Matter Pre-Fill"`, `"Create New Project Pre-Fill"`. Migration in place via stable ID only; no delete; no rename; no output-schema change. **NOTE (Q&A 2026-06-22)**: spec previously included `"Summarize New File(s)"` as a 6th row — DROPPED. Dataverse describe shows no such record exists in DEV; closest match is `Summarize File` (PB-015). The multi-file wizard's runtime error ("An error occurred while summarizing the uploaded documents.") is filed as B-015 for separate triage; out of scope for this project.
 - **NFR-07 pre-fill flow signatures + 45s timeout + `useAiPrefill` hook + `$choices` constraint** — preserved verbatim.
 - **NFR-08 11 production node executors** — preserved.
 - **Insights Engine `sprk_performancesummary` semantics** — DO NOT touch.
@@ -152,7 +203,7 @@ All sub-WPs ship in this project; sequenced to allow internal milestones. The WP
 - `src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts` — extend with `agent-editable` flag
 - `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx` — unchanged
 - `src/client/code-pages/UniversalQuickCreate/control/services/useAiSummary.ts` — migrate or delete (duplicate of shared hook)
-- `src/solutions/LegalWorkspace/src/components/CreateMatter/CreateRecordStep.tsx` (+ Project / WorkAssignment siblings) — delete (dead code per OC-R4-05)
+- ~~`src/solutions/LegalWorkspace/src/components/CreateMatter/CreateRecordStep.tsx` (+ Project / WorkAssignment siblings) — delete (dead code per OC-R4-05)~~ — **REMOVED (Q&A 2026-06-22)**: spec misread OC-R4-05. Per [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](../../docs/architecture/LEGALWORKSPACE-RETIREMENT.md) §3, OC-R4-05 retires ONLY the `sprk_corporateworkspace` Dataverse WEB RESOURCE; component source is EXPLICITLY PRESERVED as library code ("Authors MUST NOT delete LegalWorkspace component code on the grounds of 'R3 FR-25 is superseded'; the components are the dashboard engine"). Also: 2 of 3 named files don't exist (`CreateProject/CreateRecordStep.tsx` and `CreateWorkAssignment/CreateRecordStep.tsx` — each island uses its own step-component name; the spec assumed parallel naming that never existed). Task 001 was CANCELLED with prejudice. The remaining Pattern C cleanup (PCF `useAiSummary` duplicate stub + stale `3f21cec1-` GUID comments) was legitimate and proceeded.
 
 **Frontend shared**
 - `src/client/code-pages/.../useAiSummary.ts:285` — Pattern B: name → code
@@ -174,9 +225,31 @@ All sub-WPs ship in this project; sequenced to allow internal milestones. The WP
 - `src/solutions/SpaarkeAi/src/components/conversation/sseToPaneEventBridge.ts:174-256` — coordinate so handler-driven Workspace dispatch replaces implicit-streaming behavior
 
 **Dataverse schema (additive)**
-- `sprk_analysisplaybook` — add 5 fields: `sprk_lastindexedat`, `sprk_indexstatus`, `sprk_lastindexerror`, `sprk_indexhash`, `sprk_jpsmatchingmetadata`. DO NOT duplicate existing `sprk_playbookcode` (Text alternate key) or `sprk_playbookid` (lookup FK on related entities) or `sprk_analysisplaybookid` (GUID PK).
-- `sprk_analysisaction` — NO new field for action code. REUSE existing `sprk_actioncode` (Text). DO NOT create `sprk_actioncode_clean`. If task design later determines a separate field is structurally required (not anticipated), the new field MUST be named `sprk_actionid` to align with playbook lookup-FK naming.
-- Migration: backfill `sprk_playbookcode` on the 6 production-bound playbooks per §1.7.3 codes table (codes are: `summarize-document-chat`, `summarize-document-workspace`, `summarize-new-files`, `document-profile`, `create-matter-prefill`, `create-project-prefill`).
+
+**Field-role clarification (Q&A 2026-06-22)** — both entities have parallel fields for two distinct purposes:
+
+| Entity | Field | Role | Format | This project uses for lookup? |
+|---|---|---|---|---|
+| `sprk_analysisplaybook` | `sprk_analysisplaybookid` (GUID PK) | Primary key | GUID | No (env-changing) |
+| `sprk_analysisplaybook` | **`sprk_playbookid`** (Text 100) | **Immutable opaque ID — locked across environments** | **GUID-format string (mirrors PK)** | **YES — code resolves by this field** |
+| `sprk_analysisplaybook` | `sprk_playbookcode` (Text 10) | Admin-facing descriptive slug | `PB-NNN` convention (existing) | No — admin/UI only |
+| `sprk_analysisaction` | `sprk_analysisactionid` (GUID PK) | Primary key | GUID | No |
+| `sprk_analysisaction` | **`sprk_actionid`** (Text 100) | **Immutable opaque ID** | **GUID-format string (mirrors PK)** | **YES (for actions)** |
+| `sprk_analysisaction` | `sprk_actioncode` (Text 64) | Admin-facing descriptive slug | (admin convention) | No — admin/UI only |
+
+Schema verification (Dataverse describe, 2026-06-21): the 4 WP1.5 index-tracking fields **already exist** on `sprk_analysisplaybook`:
+- `sprk_lastindexedat` (DATETIME) ✅
+- `sprk_indexstatus` (CHOICE with 5 options: Not Indexed 100000000 / Pending 100000001 / Indexed 100000002 / Stale 100000003 / Failed 100000004) ✅
+- `sprk_lastindexerror` (NVARCHAR(1000)) ✅
+- `sprk_indexhash` (NVARCHAR(100)) ✅
+- `sprk_jpsmatchingmetadata` — **NOT YET PRESENT**; task 031 adds it.
+
+**Project work to do**:
+- ❌ DO NOT add the 4 index-tracking fields (already exist) — task 030 demoted to verification.
+- ✅ ADD `sprk_jpsmatchingmetadata` (MultilineText) — task 031.
+- ✅ Migration: backfill **`sprk_playbookid`** on the production-bound playbooks per §1.7.3 (target value = the row's `sprk_analysisplaybookid` GUID, per existing convention). 3 of 5 rows already have this populated; only 2 (`summarize-document-for-chat@v1`, `summarize-document-for-workspace@v1`) need backfill. Task 014 simplified.
+- ❌ DO NOT modify `sprk_playbookcode` values — admin-facing field, existing `PB-NNN` convention preserved.
+- ❌ DO NOT create new code/id fields — existing pair satisfies both roles.
 
 ## Requirements
 
@@ -184,12 +257,14 @@ All sub-WPs ship in this project; sequenced to allow internal milestones. The WP
 
 #### Stable-code consumer migration
 
-1. **FR-01**: `GET /api/ai/playbooks/by-code/{code}` resolution endpoint returns the playbook by `sprk_playbookcode` with 5-min ADR-014 cache TTL, tenant-scoped, 404 clean error model. — **Acceptance**: integration test resolves `summarize-document-chat` to the chat-summarize playbook within 100ms warm cache; cold path under 500ms.
-2. **FR-02**: All 5 GUID-based consumers (MatterPreFill, ProjectPreFill, WorkspaceAiService, WorkspaceFileEndpoints, SessionSummarizeOrchestrator) resolve playbooks by stable code via typed options (`*PlaybookCode`), not raw GUIDs. — **Acceptance**: code search for `Guid.Parse("44285d15` / `2d660cad` / `fc343e9c` / `4a72f99c` / `18cf3cc8` returns zero hits in `Services/Ai/`.
-3. **FR-03**: All 4 name-based consumers (`AppOnlyAnalysisService` x2, `useAiSummary.ts:285`, `DocumentEmailWizard.tsx:628`, `ChatContextMappingService`) resolve playbooks by stable code, not literal name strings. — **Acceptance**: `/by-name/` endpoint emits deprecation warning per call; calls drop to zero after migration.
-4. **FR-04**: `WorkspaceOptions.cs` fixes the ADR-018 violation by adding `SummarizePlaybookCode` typed property; `WorkspaceFileEndpoints.cs` reads via `IOptions<WorkspaceOptions>`, not raw `IConfiguration[]` indexer. — **Acceptance**: `IConfiguration["Workspace:SummarizePlaybookId"]` returns zero call sites.
+**Field semantics correction (Q&A 2026-06-22)**: FR-01 through FR-06 below were drafted before the `sprk_playbookcode` vs `sprk_playbookid` field-role clarification. The corrected semantics: **stable-ID lookups resolve by `sprk_playbookid` (immutable opaque ID, GUID-format)**; `sprk_playbookcode` is the admin-facing descriptive slug (existing `PB-NNN` convention preserved). Where the original FRs say "`*PlaybookCode`" or "`sprk_playbookcode`" in a lookup context, read "`*PlaybookId`" / "`sprk_playbookid`". Routes named `/by-code/{code}` become `/by-id/{id}`. The two-field-role separation aligns with the matching pair on `sprk_analysisaction` (`sprk_actionid` for lookups; `sprk_actioncode` for admin slug).
+
+1. **FR-01**: `GET /api/ai/playbooks/by-id/{id}` resolution endpoint returns the playbook by `sprk_playbookid` with 5-min ADR-014 cache TTL, tenant-scoped, 404 RFC 7807 ProblemDetails. — **Acceptance**: integration test resolves the chat-summarize playbook by its GUID within 100ms warm cache; cold path under 500ms.
+2. **FR-02**: All 5 GUID-based consumers (MatterPreFill, ProjectPreFill, WorkspaceAiService, WorkspaceFileEndpoints, SessionSummarizeOrchestrator) resolve playbooks by `sprk_playbookid` via typed options (`*PlaybookId`), not raw `Guid.Parse(...)` calls. — **Acceptance**: code search for `Guid.Parse("44285d15` / `2d660cad` / `fc343e9c` / `4a72f99c` / `18cf3cc8` returns zero hits in `Services/Ai/`.
+3. **FR-03**: All 4 name-based consumers (`AppOnlyAnalysisService` x2, `useAiSummary.ts:285`, `DocumentEmailWizard.tsx:628`, `ChatContextMappingService`) resolve playbooks by `sprk_playbookid`, not literal name strings. — **Acceptance**: `/by-name/` endpoint emits deprecation warning per call; calls drop to zero after migration.
+4. **FR-04**: `WorkspaceOptions.cs` fixes the ADR-018 violation by adding `SummarizePlaybookId` typed property; `WorkspaceFileEndpoints.cs` reads via `IOptions<WorkspaceOptions>`, not raw `IConfiguration[]` indexer. — **Acceptance**: `IConfiguration["Workspace:SummarizePlaybookId"]` returns zero call sites.
 5. **FR-05**: Migration sequencing per owner: chat-summarize (`SessionSummarizeOrchestrator`) migrates first, proves resolver infrastructure, then pre-fill flows, then name-resolve consumers. Pattern C cleanup precedes both. — **Acceptance**: PR sequence + task ordering reflects this.
-6. **FR-06**: Action codes — REUSE the existing `sprk_actioncode` field (do NOT create a new field). Drop `@v1` suffix on new actions; existing `@v1`-suffixed values in `sprk_actioncode` remain valid until cutover window closes. If task design later determines a separate code field is structurally required, the new field MUST be named `sprk_actionid` (not `sprk_actioncode_clean`) to align with the playbook lookup-FK naming pattern — but the default is to reuse `sprk_actioncode`. — **Acceptance**: 3 new specialized actions populate `sprk_actioncode` with `summarize-nda`, `summarize-patent`, `extract-invoice` (no `@v1`); no new schema column added for action codes.
+6. **FR-06**: Action codes — REUSE the existing `sprk_actionid` field for lookups (per the parallel field-role pattern with playbooks); `sprk_actioncode` remains the admin-facing descriptive slug. New actions populate `sprk_actionid` with a GUID-format opaque ID and `sprk_actioncode` with a kebab-case slug per admin convention. Drop `@v1` suffix on new action slugs; existing `@v1`-suffixed values remain valid until cutover. — **Acceptance**: 3 new specialized actions populate both fields; lookups use `sprk_actionid`; no new schema columns created.
 7. **FR-07**: Frontend `SoftSlashRouter` wire-format renamed to align with purpose (Q5: no back-compat needed). — **Acceptance**: field name reflects "intent hint" semantics; backend treats as vector-query bias parameter to Phase B.
 
 #### Index governance
