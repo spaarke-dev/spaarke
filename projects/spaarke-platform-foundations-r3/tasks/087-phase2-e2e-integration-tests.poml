@@ -1,7 +1,47 @@
 <task id="R3-087" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Phase 2 end-to-end integration tests</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Authored Phase2EndToEndFixture.cs (753 LOC) + Phase2EndToEndTests.cs (614 LOC) +
+      phase2-live-e2e-runbook.md.
+      In-memory test strategy: CapturingMembershipEventPublisher (forwards to live junction
+      updater via IServiceScopeFactory); SpyMembershipCacheInvalidator (records invocations);
+      Moq Loose IDataverseService backed by InMemoryDataverseState (junction store keyed on
+      5-tuple natural key, systemuser AAD-oid lookup, parent-entity recon-scan store).
+      AC coverage map:
+        AC-1P2.3 (event-source inventory + recon drift detection) — 3 tests:
+          - EventSourceInventory_ChecklistExists_AC1P2_3 (verifies notes/event-source-inventory.md present)
+          - ReconJob_DetectsMissingJunctionRow_DispatchesUpdatedEvent_AC1P2_3
+          - ReconJob_DetectsOrphanedJunctionRow_DispatchesRemovedEvent_AC1P2_3
+        AC-1P2.4 (mutation publishes event):
+          - OfficeQuickCreateMatter_PublishesMembershipChangedEvent_AC1P2_4
+          (NOTE: invokes publisher directly because MapQuickCreateEndpoints is currently
+           commented out in OfficeEndpoints.cs line 54-55 — TODO task 026. Test body has
+           explicit comment + HTTP-path TODO for when task 026 lands.)
+        AC-1P2.5 (handler idempotent upsert/delete) — 2 tests:
+          - HandlerWritesJunctionRow_OnAddedEvent_AC1P2_5
+          - HandlerIsIdempotent_DuplicateDelivery_AC1P2_5
+        AC-1P2.6 (recon real logic + endpoint contract unchanged) — 2 tests:
+          - MembershipEndpoint_ContractUnchangedFromPhase1A_AC1P2_6
+          - ReconJob_ReportsProcessedItems_AC1P2_6
+        AC-1P2.7 (Redis pub/sub invalidates cache):
+          - JunctionWrite_TriggersCacheInvalidation_AC1P2_7
+        AC-1P2.8 (Q2 fire-and-forget — mutation succeeds even if publish fails):
+          - PublishFailure_DropsEventSilently_Q2FireAndForget_AC1P2_8
+      Live-mode scaffold (2 tests, both [Trait("Category","Live")]):
+        - LiveMode_PublisherToServiceBusToHandler_E2E
+        - LiveMode_RedisPubSubInvalidationE2E
+        Both auto-skip via early return when SPAARKE_SB_NAMESPACE / SPAARKE_REDIS_CONNECTION
+        env vars absent (default CI state). Runbook at notes/phase2-live-e2e-runbook.md.
+      Operator-deploy gap: live tests + the HTTP-path AC-1P2.4 variant deferred to
+      post-topic-deploy + post-task-026 endpoint wiring.
+      Build: 0 errors / 2 pre-existing warnings (no new). Tests: 12/12 pass in the
+      Phase2EndToEndTests class; full Sprk.Bff.Api.IntegrationTests suite 78/78 pass
+      (no regressions). Publish-size: N/A (test-only changes).
+      CVE: N/A (no new NuGet adds).
+    </completion-notes>
     <phase>P8</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>

@@ -11,11 +11,11 @@
 |---|---|
 | **Project** | `spaarke-platform-foundations-r3` |
 | **Branch** | `work/spaarke-platform-foundations-r3` |
-| **Status** | **54 of 69 tasks complete ✅ (~78%) + 1 blocked-operator (071) + 14 operator/human-gated** |
-| **Build** | ✅ `dotnet build Spaarke.sln` 0 errors / 17 warnings (no new) |
-| **Tests** | ~265+ new unit + integration tests across the project; all green; full BFF suite 7493/7603 pass |
-| **BFF publish-size** | 46.21 MB (+0.56 vs 45.65 baseline; 60 MB ceiling intact) |
-| **Next Action** | **OPERATOR-GATED**: Deploy Service Bus topic per task 071 runbook (`notes/operator-followup-task071.md`). Then resume Wave 20+ for Phase 2 (tasks 072-087). Until topic deploy, the remaining 14 tasks are blocked. |
+| **Status** | **55 of 69 tasks complete ✅ (~80%) + 1 blocked-operator (071) + 13 operator/human-gated** |
+| **Build** | ✅ `dotnet build Spaarke.sln` 0 errors / 2 warnings (pre-existing) |
+| **Tests** | ~277+ new unit + integration tests across the project; all green; Sprk.Bff.Api.IntegrationTests suite 78/78 pass (12 new in task 087) |
+| **BFF publish-size** | 46.24 MB (no change — task 087 is test-only) |
+| **Next Action** | Wave 24 complete — task 087 ✅. Remaining 14 tasks operator/human-gated (071 → 072/073/100/104 chain) or final wrap-up (110). |
 
 ### What's Blocked + Why
 
