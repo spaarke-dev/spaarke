@@ -1,7 +1,54 @@
 <task id="R3-092" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Branch wiring auto-generation for Condition node edges</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Implemented FR-3H2.2 / AC-H2.2. Seams used per task-090 research §6:
+      - stores/canvasStore.ts onConnect (lines 178-220): intercepts Condition-source connections
+        with no sourceHandle and parks them in new `pendingBranchConnection: Connection | null`
+        state instead of creating the edge immediately. Existing `sourceHandle === 'true' | 'false'`
+        path preserved unchanged for users who drag from the two handles directly.
+      - stores/canvasStore.ts (new actions): `confirmBranchSelection(choice)` and
+        `cancelBranchSelection()`. The "both" choice creates TWO edges (one trueBranch + one
+        falseBranch) using addEdge twice — NO new `bothBranch` edge type (per Q5 / research §7
+        anti-pattern list). New exported type `BranchChoice = 'true' | 'false' | 'both'`.
+      - components/properties/BranchPickerDialog.tsx (NEW): Fluent v9 Dialog mirroring
+        TestOptionsDialog precedent — DialogSurface + DialogTitle + DialogBody + DialogContent
+        + DialogActions + Radio/RadioGroup. Reads source Condition node's `conditionJson` via
+        a defensive readBranchLabels() helper (mirrors ConditionEditor.parseCondition fallback
+        contract — does NOT mutate). Surfaces author-set labels (e.g. "Approved"/"Rejected")
+        in the option text. Three radios: True / False / Both, default True. Connect/Cancel
+        buttons. Reset on each pending connection.
+      - components/properties/index.ts: barrel export added (alphabetized adjacent to
+        ConditionEditor, no conflict with task 091's RenameGuardDialog landing in same barrel).
+      - components/canvas/PlaybookCanvas.tsx: mounted &lt;BranchPickerDialog /&gt; inside the
+        canvas wrapper div so it auto-shows when pendingBranchConnection becomes non-null.
+      Edge metadata round-trip: confirmed via playbookNodeSync.ts review — `dependsOn` is
+      derived from `edge.source` only (line 211), and the edges array round-trips through
+      `exportToCanvasJson` → `sprk_canvaslayoutjson` → `loadFromCanvasJson` preserving `type`,
+      `sourceHandle`, and `data: { branch }`. My new edges are shaped identically to the
+      pre-existing onConnect output, so no new serialization path needed.
+      Edge rendering: TrueBranchEdge (green via colorPaletteGreenForeground1) and
+      FalseBranchEdge (red via colorPaletteRedForeground1) already implement ADR-021-compliant
+      semantic-token rendering with "True"/"False" labels. No edge-renderer changes needed.
+      BranchPickerDialog's "Both" option uses a linear-gradient(90deg, green 50%, red 50%)
+      composed from the same two semantic tokens — NO hardcoded hex.
+      Build: webpack reports 5 pre-existing errors in `Spaarke.UI.Components` shared lib
+      (Kanban needs @hello-pangea/dnd; SprkChat needs pdfjs-dist + mammoth; AppInsights needs
+      @microsoft/applicationinsights-web; EntityCreationService needs @spaarke/sdap-client).
+      None reference any of my changed files. `npx tsc --noEmit` shows zero errors in
+      BranchPickerDialog.tsx or my canvasStore additions; only the pre-existing baseline
+      drift remains (sibling task 091's lines + JSX/window typing noise).
+      Tests: PlaybookBuilder has no test infrastructure (package.json has no test script;
+      no .test.ts* files anywhere in src/). Skipped per task 043 precedent — noted in PR
+      description for the merge-in step. Manual verification path documented in research
+      §6 (drag from condition body to downstream → dialog opens → pick True/False/Both/Cancel).
+      Coordination: Task 091 (parallel sibling) added `renameOutputVariableReferences` to
+      canvasStore in a separate region. Task 093 (parallel sibling) adds canvasValidation
+      per-edge rule — touches different files. No overlap detected; canvasStore co-edits
+      live in distinct regions.
+    </completion-notes>
     <phase>P9</phase>
     <parallel-group>T (with 091, 093)</parallel-group>
     <parallel-safe>true</parallel-safe>

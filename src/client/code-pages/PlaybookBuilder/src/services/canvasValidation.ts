@@ -9,6 +9,8 @@
  *   - Output coverage (warning): downstream template refs without matching output fields
  *   - Choice consistency (warning): downstream choice fields without $choices or enum
  *   - Type compatibility (warning): output field types don't match downstream expectations
+ *   - Edge perf hint (warning, R3 task 093 / FR-3H2.3): edge has no data dependency
+ *     between source and target — advisory only, does NOT block save
  *
  * @see design.md Section "Canvas-Time Validation (PlaybookBuilder UI)"
  */
@@ -40,7 +42,18 @@ export interface PromptSchemaValidation {
     // server LookupUserMembershipNodeExecutor (task 041) contract — entityType
     // + outputVariable are required; roles + includeRelated are optional.
     | 'lookup-user-membership-missing-entity-type'
-    | 'lookup-user-membership-missing-output-variable';
+    | 'lookup-user-membership-missing-output-variable'
+    // R3 P9 H2 (task 091): safety-net for duplicate OutputVariable names across
+    // nodes. The primary defense is the rename-guard dialog in
+    // NodePropertiesForm/Dialog; this rule catches the case where a user
+    // hand-edits two nodes to share a non-empty outputVariable, which would
+    // silently break {{name.output.*}} resolution at runtime.
+    | 'outputvar-collision'
+    // R3 P9 H2 (task 093, FR-3H2.3): per-edge advisory — edge connects two nodes
+    // whose target config does NOT reference the source's outputVariable via
+    // {{<source.outputVariable>.output.*}}. Severity 'warning' ONLY — does NOT
+    // block save (FR-3H2.3 binding constraint; enforced by hasValidationErrors).
+    | 'edge-no-data-dependency';
   /** Human-readable validation message. */
   message: string;
 }
@@ -181,6 +194,21 @@ export function validatePromptSchemaNodes(nodes: Node<PlaybookNodeData>[], edges
     if (node.data.type === 'lookupUserMembership') {
       results.push(...validateLookupUserMembershipNode(node.id, node));
     }
+  }
+
+  // R3 P9 H2 (task 091): OutputVariable collision safety net (FR-3H2.1).
+  // Catches the case where two nodes share a non-empty outputVariable —
+  // the primary UX defense is the rename-guard dialog in
+  // NodePropertiesForm/Dialog, but a user can still hand-edit a second node
+  // to collide. Runs over the full nodes array (cross-node rule), not per-type.
+  results.push(...validateOutputVariableCollisions(nodes));
+
+  // Per-edge advisory rules (task 093) — sibling to the per-NODE-type loop above.
+  // Iterates edges (not nodes) to flag edges that lack a data dependency between
+  // their source and target nodes. Warnings only — does NOT block save.
+  // R3 P9 H2 (task 093, FR-3H2.3): edge-no-data-dependency advisory.
+  for (const edge of edges) {
+    results.push(...validateEdgePerfHint(edge, nodeById));
   }
 
   if (results.length > 0) {
@@ -541,6 +569,211 @@ function validateLookupUserMembershipNode(nodeId: string, node: Node<PlaybookNod
       message:
         'Lookup User Membership: Output Variable is required so downstream nodes can reference the resolved user IDs.',
     });
+  }
+
+  return results;
+}
+
+/**
+ * R3 P9 H2 (task 091): Validate OutputVariable uniqueness across all nodes.
+ *
+ * Emits an 'error' for every node whose non-empty outputVariable is shared by
+ * at least one other node. Each colliding node receives its own result so the
+ * NodeValidationBadge can surface the message inline on every offender.
+ *
+ * Trim()'d empty values are skipped (the missing-output-variable rules cover
+ * those cases for node types that require an outputVariable).
+ */
+function validateOutputVariableCollisions(nodes: Node<PlaybookNodeData>[]): PromptSchemaValidation[] {
+  const results: PromptSchemaValidation[] = [];
+
+  // Build outputVariable -> [nodeIds] map (only non-empty values).
+  const byVar = new Map<string, string[]>();
+  for (const node of nodes) {
+    const ov = typeof node.data.outputVariable === 'string' ? node.data.outputVariable.trim() : '';
+    if (ov === '') continue;
+    if (!byVar.has(ov)) byVar.set(ov, []);
+    byVar.get(ov)!.push(node.id);
+  }
+
+  for (const [name, ids] of byVar.entries()) {
+    if (ids.length < 2) continue;
+    for (const id of ids) {
+      results.push({
+        nodeId: id,
+        severity: 'error',
+        rule: 'outputvar-collision',
+        message: `Duplicate OutputVariable name "${name}". Each node must have a unique OutputVariable so {{${name}.output.*}} references resolve unambiguously.`,
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * R3 P9 H2 (task 093, FR-3H2.3): Per-edge advisory — flags edges where the
+ * target node's serialized configuration does NOT reference the source node's
+ * `outputVariable` via `{{<source.outputVariable>.output.*}}`.
+ *
+ * Such edges force sequential execution without communicating any data, which
+ * usually means the author wired them by accident (e.g. dragged a connection
+ * to enforce ordering when none is needed). The author may have a legitimate
+ * reason (side-effect-only sequencing), so this is **advisory only** —
+ * severity 'warning', NOT 'error'. Save remains allowed (per FR-3H2.3 binding;
+ * enforced by `hasValidationErrors` in `playbookNodeSync.validateAndSyncNodes`).
+ *
+ * Skips when:
+ *   - Source node missing or has no non-empty outputVariable (nothing to reference)
+ *   - Target node missing
+ *   - Target's configuration cannot be parsed (graceful degradation)
+ *
+ * Reuses `parseDownstreamNode` for reference enumeration so the scan covers the
+ * same field set as the other downstream-graph rules (configJson.fieldMappings,
+ * legacy fields dict, template/body/subject/description, plus node.data
+ * template / emailBody / emailSubject).
+ */
+function validateEdgePerfHint(edge: Edge, nodeById: Map<string, Node<PlaybookNodeData>>): PromptSchemaValidation[] {
+  const sourceNode = nodeById.get(edge.source);
+  const targetNode = nodeById.get(edge.target);
+  if (!sourceNode || !targetNode) return [];
+
+  // No outputVariable to look for — can't have a data dependency.
+  const sourceOutputVar =
+    typeof sourceNode.data.outputVariable === 'string' ? sourceNode.data.outputVariable.trim() : '';
+  if (sourceOutputVar === '') return [];
+
+  // Reuse the same scanner the other downstream rules use. Graceful on parse failure.
+  const targetInfo = parseDownstreamNode(targetNode);
+  if (!targetInfo) return [];
+
+  const hasDataDependency = targetInfo.templateRefs.some(ref => ref.outputVariable === sourceOutputVar);
+  if (hasDataDependency) return [];
+
+  // No reference — emit advisory warning attached to the SOURCE node so the
+  // existing NodeValidationBadge surface (consumed by NodePropertiesForm) picks
+  // it up via the badge's existing `warnings` prop. Attaching to source mirrors
+  // the existing per-rule pattern of "validation on the node the user is
+  // typically editing when they wire the edge".
+  return [
+    {
+      nodeId: sourceNode.id,
+      severity: 'warning',
+      rule: 'edge-no-data-dependency',
+      message:
+        `Edge from "${sourceNode.data.label || sourceNode.id}" to "${targetNode.data.label || targetNode.id}" ` +
+        `does not reference {{${sourceOutputVar}.output.*}} in the target's configuration. ` +
+        'This edge forces sequential execution. Confirm or remove?',
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Public helpers — exposed for the OutputVariable rename guard (task 091)
+// ---------------------------------------------------------------------------
+
+/**
+ * A discovered reference to a node's OutputVariable found inside another
+ * node's serialized configuration. Returned by {@link findOutputVariableReferences}.
+ */
+export interface OutputVariableReference {
+  /** Canvas node ID where the reference was found. */
+  nodeId: string;
+  /** Human-friendly node label (falls back to nodeId). */
+  nodeLabel: string;
+  /** Node type (e.g. 'updateRecord', 'sendEmail'). */
+  nodeType: string;
+  /** All distinct raw template strings (e.g. `{{output_classify.output.documentType}}`). */
+  rawRefs: string[];
+}
+
+/**
+ * Scan every node in the canvas (except `selfNodeId`) for `{{<oldName>.output.*}}`
+ * references in its serialized configuration. Reuses the same field-set that
+ * the existing downstream-info parser walks (configJson.fieldMappings,
+ * configJson.fields, configJson.{template,body,subject,description}, and the
+ * `template` / `emailBody` / `emailSubject` fields on node.data).
+ *
+ * Used by the rename-guard dialog in NodePropertiesForm / NodePropertiesDialog
+ * to ask the user how to handle existing downstream references when they
+ * rename an OutputVariable.
+ *
+ * @param oldName       The OutputVariable name to search for.
+ * @param nodes         All canvas nodes.
+ * @param selfNodeId    The node currently being renamed (excluded from scan).
+ * @returns One entry per node that has at least one matching template reference;
+ *          empty array if no references exist anywhere.
+ */
+export function findOutputVariableReferences(
+  oldName: string,
+  nodes: Node<PlaybookNodeData>[],
+  selfNodeId: string
+): OutputVariableReference[] {
+  const trimmedOld = oldName.trim();
+  if (trimmedOld === '') return [];
+
+  const results: OutputVariableReference[] = [];
+
+  for (const node of nodes) {
+    if (node.id === selfNodeId) continue;
+
+    const matched = new Set<string>();
+    const collect = (value: unknown) => {
+      if (typeof value !== 'string' || value.length === 0) return;
+      const refs = extractTemplateRefs(value);
+      for (const ref of refs) {
+        if (ref.outputVariable === trimmedOld) {
+          matched.add(ref.raw);
+        }
+      }
+    };
+
+    // Scan node.data direct template-like fields (same set as parseDownstreamNode).
+    collect(node.data.template as unknown);
+    collect(node.data.emailBody as unknown);
+    collect(node.data.emailSubject as unknown);
+    collect(node.data.conditionJson as unknown);
+
+    // Scan configJson — defensive JSON.parse mirrors parseDownstreamNode.
+    const configJsonStr = node.data.configJson;
+    if (typeof configJsonStr === 'string' && configJsonStr.length > 0) {
+      try {
+        const parsed = JSON.parse(configJsonStr) as Record<string, unknown>;
+
+        // fieldMappings[].value
+        const fm = parsed.fieldMappings;
+        if (Array.isArray(fm)) {
+          for (const entry of fm) {
+            if (entry && typeof entry === 'object' && 'value' in entry) {
+              collect((entry as Record<string, unknown>).value);
+            }
+          }
+        }
+
+        // legacy fields {key: value}
+        if (parsed.fields && typeof parsed.fields === 'object' && !Array.isArray(parsed.fields)) {
+          for (const value of Object.values(parsed.fields as Record<string, unknown>)) {
+            collect(value);
+          }
+        }
+
+        // Top-level template fields (deliverOutput, sendEmail, etc.)
+        for (const key of ['template', 'body', 'subject', 'description']) {
+          collect(parsed[key]);
+        }
+      } catch {
+        // Malformed configJson — skip silently (graceful degradation, matches parseDownstreamNode).
+      }
+    }
+
+    if (matched.size > 0) {
+      results.push({
+        nodeId: node.id,
+        nodeLabel: typeof node.data.label === 'string' && node.data.label.trim() !== '' ? node.data.label : node.id,
+        nodeType: node.data.type,
+        rawRefs: Array.from(matched),
+      });
+    }
   }
 
   return results;

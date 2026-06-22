@@ -72,9 +72,9 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 086 | Redis pub/sub cache invalidation | P8 | 🔲 | 033, 084, 085 | — | true | FULL |
 | 087 | Phase 2 E2E integration tests | P8 | 🔲 | 081-086 | — | true | STANDARD |
 | 090 | PlaybookBuilder pattern research | P9 | ✅ | 042, 043 | — main-only | false | STANDARD |
-| 091 | `OutputVariable` rename guard | P9 | 🔲 | 090 | **T** | true | FULL |
-| 092 | Branch wiring auto-generation | P9 | 🔲 | 090 | **T** | true | FULL |
-| 093 | Edge perf hint advisory | P9 | 🔲 | 090 | **T** | true | FULL |
+| 091 | `OutputVariable` rename guard | P9 | ✅ | 090 | **T** | true | FULL |
+| 092 | Branch wiring auto-generation | P9 | ✅ | 090 | **T** | true | FULL |
+| 093 | Edge perf hint advisory | P9 | ✅ | 090 | **T** | true | FULL |
 | 094 | PlaybookBuilder component tests + snapshots | P9 | 🔲 | 091, 092, 093 | — | true | STANDARD |
 | 095 | Manual UAT — H2 scenarios in spaarkedev1 | P9 | 🔲 | 091-094 | — | true | STANDARD |
 | 100 | ADR-034 final polish + INDEX update | P10 | 🔲 | 037, 087 | **U** main-only | false | STANDARD |
