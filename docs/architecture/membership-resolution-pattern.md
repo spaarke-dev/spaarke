@@ -1,9 +1,9 @@
 # Membership Resolution Pattern
 
 > **Last Updated**: 2026-06-22
-> **Last Reviewed**: 2026-06-22 (post-implementation refresh — all 65 tasks shipped)
-> **Reviewed By**: spaarke-platform-foundations-r3 task 104 (initial author) + AS-BUILT refresh
-> **Status**: Verified against shipped code (Wave 26 final)
+> **Last Reviewed**: 2026-06-22 (Wave 28 W28C update — Daily Briefing wiring gap closed)
+> **Reviewed By**: spaarke-platform-foundations-r3 task 104 (initial author) + AS-BUILT refresh (Wave 26) + Daily Briefing wiring closeout (Wave 28 / GitHub #229)
+> **Status**: Verified against shipped code (Wave 28 — Daily Briefing now consumes the resolver)
 > **Parent**: [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) (Spaarke AI platform overview)
 > **Source**: [ADR-034 concise](../../.claude/adr/ADR-034-user-record-membership.md) · [ADR-034 full](../adr/ADR-034-user-record-membership.md) · [R3 spec](../../projects/spaarke-platform-foundations-r3/spec.md) FR-1A.* / FR-1B.* / FR-1D.* / FR-2P2.*
 
@@ -298,6 +298,7 @@ This section enumerates every BFF surface that currently consumes the membership
 |---|---|---|---|
 | `LookupUserMembershipNodeExecutor` | `Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs:70` | **Shipped — production wired** | Playbook node executor for `ActionType=52` (added task 040). Singleton-with-Scoped DI pattern via `IServiceScopeFactory`. Binds `{ids[], byRole, count, continuationToken, cacheExpiresAt}` to the node's `OutputVariable` for Handlebars consumption (e.g., `{{joinIds myMatters.ids}}`). |
 | `GET /api/users/me/memberships/{entityType}` | `Api/Membership/MembershipEndpoints.cs:102` | **Shipped — production wired** | Single user-facing HTTP endpoint. Auth: `RequireAuthorization()` default JWT (line 93). |
+| `BriefingService.GetTopPriorityMatterAsync` (`GET /api/workspace/briefing`) | `Services/Workspace/BriefingService.cs:172` | **Shipped — production wired (Wave 28 / GitHub #229 closeout, 2026-06-22)** | Replaces the prior STUB that returned hardcoded mock matter data. Resolves AAD `oid` → `systemuserid` via the same `systemuser.azureactivedirectoryobjectid` cross-reference algorithm as `MembershipEndpoints.ResolveSystemUserIdAsync` (10-min Redis cache under sibling prefix `membership:briefing-currentuser:`), calls `IMembershipResolverService.ResolveAsync(systemUserId, "sprk_matter", options: null, ct)`, queries Dataverse for matter detail rows by resolved IDs, applies the deterministic heuristic (max overdue events; tie-break = highest utilization; final tie-break = matter name). Failure-soft: any AAD-oid/resolver/Dataverse failure returns `null` TopMatter (briefing remains fully populated). Non-Guid `oid` short-circuits to `null` without I/O. Unit tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/BriefingServiceTests.cs` (7 scenarios). |
 
 > **Notes**: `Services/Ai/NodeService.cs:983` and `Services/Ai/Nodes/INodeExecutor.cs:139` contain only documentation references in comments — neither consumes the resolver.
 
@@ -337,10 +338,11 @@ Handler is registered unconditionally (no kill-switch) at `MembershipModule.cs:2
 
 | Surface | Expected to consume? | Reality | Severity |
 |---|---|---|---|
-| **Daily Briefing endpoint** (`Api/Ai/DailyBriefingEndpoints.cs`) + `Services/Workspace/BriefingService.cs` + `Services/Ai/PublicContracts/BriefingAi.cs` | YES — "your matters" / "top priority matter" semantics are textbook membership queries | **Does NOT consume `IMembershipResolverService`.** `BriefingService.GetTopPriorityMatterAsync` currently returns mock data with `STUB: Querying top-priority matter from Dataverse. UserId={UserId} — returning mock data. See GitHub #229.` | **P0 follow-up** — once the stub is replaced, route the matter discovery through `IMembershipResolverService.ResolveAsync(systemUserId, "sprk_matter", ...)` per ADR-034 MUST. Filing as gap. |
 | **SprkChat / AI Assistant** (`Services/Ai/Chat/*`) | Possibly — depending on whether host-context "my matters" filtering uses membership semantics | **Does NOT consume `IMembershipResolverService`** (grep confirmed: `Services/Ai/Chat` contains zero references). Chat scoping is currently driven by `HostContext` entity binding + `RagService` filters, not by user-record membership. | **Acceptable for current scope** — Chat operates on a specific bound entity, not on "show me my X". If a future chat surface needs "what matters do I own", route via `IMembershipResolverService`. |
 | **Workspace UI surfaces ("My Matters", "My Events")** | YES — per R3 design's reference-consumer list | **Not yet shipped** — R4 work. UI calls the user-facing endpoint via `@spaarke/auth` `authenticatedFetch` with entity-scoped session caching. | Tracked as R4 scope, not an R3 gap. |
 | **Cache-warming subscriber** | Future Phase 2 enhancement | Not implemented in R3. Topic subscription beside `recon-junction-updater` is the natural extension. | R4+ scope. |
+
+> **Closed (Wave 28 / GitHub #229, 2026-06-22)**: The Daily Briefing endpoint (`BriefingService.GetTopPriorityMatterAsync`) previously returned mock data via an in-process STUB. It now consumes `IMembershipResolverService` per ADR-034 — see the "Confirmed Consumers" table above (row 3). Operator follow-up: verify the briefing card's "top priority matter" reflects the caller's actual highest-overdue matter post-deploy (the existing integration tests assert only the response shape, not the matter identity, because the test fixture's `oid` is a non-Guid sentinel that intentionally degrades to `null` TopMatter via the failure-soft path).
 
 ---
 
@@ -542,7 +544,7 @@ All paths relative to `src/server/api/Sprk.Bff.Api/` unless noted. Every line ci
 | Pitfall | Mitigation |
 |---|---|
 | **Confusing `AssociationResolver` (PCF) with Membership resolution (BFF)** | See Naming-Collision Register above. Different surfaces, different concepts, both stable. |
-| **Re-deriving membership in ad-hoc FetchXML** | This is the R2-UAT root cause (A1 / D5). Always go through `IMembershipResolverService`. The Daily Briefing stub at `BriefingService.GetTopPriorityMatterAsync` is the active P0 follow-up. |
+| **Re-deriving membership in ad-hoc FetchXML** | This is the R2-UAT root cause (A1 / D5). Always go through `IMembershipResolverService`. (Historical: Daily Briefing's `BriefingService.GetTopPriorityMatterAsync` STUB was the last known offender; closed Wave 28 / 2026-06-22 — see Confirmed Consumers table.) |
 | **Joining through `sprk_matterteammember` or other non-existent entity** | The R2-broken `notification-new-documents.json` playbook was migrated in R3 task 050 to use `LookupUserMembership` node + `joinIds` Handlebars helper. Same for `notification-new-emails.json` (task 051) and `notification-new-events.json` (task 052). |
 | **Assuming Phase 1A FetchXml scales forever** | Monitor AC-1A.5 p95. Phase 2 junction-write path + recon + invalidation already shipped in R3; the read-path swap (resolver queries junction table instead of FetchXml) is the R4 escape hatch when sustained p95 > 500ms. |
 | **Creating new `PlatformAdmin` policy** | Forbidden (Q6). Reuse existing `SystemAdmin` policy at `AuthorizationModule.cs:241`. |

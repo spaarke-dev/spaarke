@@ -233,6 +233,7 @@ Every executor implements three methods: `SupportedActionTypes` (which ActionTyp
 | `DeliverToIndexNodeExecutor.cs` | DeliverToIndex (41) | Spaarke code | Enqueues RAG semantic indexing job via Service Bus |
 | `CreateNotificationNodeExecutor.cs` | CreateNotification (50) | Spaarke code | Creates Dataverse appnotification records with idempotency check |
 | `QueryDataverseNodeExecutor.cs` | QueryDataverse (51) | Spaarke code | Executes FetchXML queries with date/user variable resolution |
+| `LookupUserMembershipNodeExecutor.cs` | LookupUserMembership (52) | Spaarke code | Resolves caller's record memberships for a given entity type via `IMembershipResolverService` (in-process). See "Membership-aware playbook authoring (R3)" below. |
 
 ### AiAnalysisNodeExecutor (ActionType 0)
 
@@ -263,6 +264,33 @@ Creates Dataverse `appnotification` records with **idempotency check** (skips if
 
 Executes FetchXML via OData Web API with variable resolution: `{{todayUtc}}`, `{{dueSoonWindowUtc}}` (+7d), `{{timeWindowStartUtc}}` (-24h), `{{run.userId}}`. Replaces `operator="eq-userid"` with resolved user ID.
 
+### LookupUserMembershipNodeExecutor (ActionType 52)
+
+Added in R3 (Part 1 — user-record membership resolution). Resolves the executing user's record memberships for a given Dataverse entity type by calling `IMembershipResolverService` **in-process** (NOT an HTTP round-trip to `/api/users/me/memberships/{entityType}`). The resolver is the same one that backs the public membership endpoint, so node-driven results match endpoint-driven results exactly.
+
+Config (`PlaybookNodeDto.ConfigJson`):
+- `entityType` (required, string) — Dataverse logical entity name (e.g., `sprk_matter`).
+- `roles` (optional, string[]) — case-insensitive role filter (e.g., `["owner", "assignedAttorney"]`). Empty/missing means all discovered roles.
+- `includeRelated` (optional, bool, default false) — Phase 1D transitive expansion flag. **1-hop max** per Q3 owner clarification (multi-hop deliberately not supported).
+- `outputVariable` (required) — lives on `PlaybookNodeDto` itself, NOT inside `ConfigJson`.
+
+Output (`NodeOutput.StructuredData`):
+
+```jsonc
+{
+  "entityType": "sprk_matter",
+  "count": 47,
+  "ids": ["...", "..."],                              // de-duplicated; ready for downstream FetchXML IN
+  "byRole": { "owner": [...], "assignedAttorney": [...] },
+  "continuationToken": null,
+  "cacheExpiresAt": "2026-06-22T15:34:00Z"
+}
+```
+
+DI pattern: Singleton executor + Scoped resolver via `IServiceScopeFactory.CreateScope()` per invocation (mirrors `AgentServiceNodeExecutor` / `AiAnalysisNodeExecutor`). User identity comes from `NodeExecutionContext.UserId` (set by `PlaybookSchedulerJob` for per-user scheduled runs) with a fallback scan of previous node outputs.
+
+See [Membership-aware playbook authoring (R3)](#membership-aware-playbook-authoring-r3) for authoring patterns and worked examples.
+
 ### SendEmailNodeExecutor (ActionType 21)
 
 Sends email via Microsoft Graph (OBO). Config: `to`, `cc`, `subject`, `body`, `isHtml` -- all template-enabled.
@@ -289,6 +317,142 @@ Renders Handlebars.NET templates against a context built from previous node outp
 ```
 
 Arrays are automatically flattened to `"- item1\n- item2"` bullet strings for Dataverse text fields.
+
+### Handlebars helpers (R3 additions)
+
+R3 registered two new helpers in `TemplateEngine.cs` to close gaps that surfaced during R2 UAT:
+
+| Helper | Syntax | Behavior | Replaces |
+|--------|--------|---------|----------|
+| `default` | `{{default X 'Y'}}` | Returns `X` when it resolves to a non-empty value; otherwise renders `Y`. Handlebars.NET represents unresolved bindings as `UndefinedBindingResult` (NOT null), and the helper treats those as empty. | The unsupported `{{X ?? 'Y'}}` null-coalescing operator pattern that emitted literal text (see Pitfall G1). |
+| `joinIds` | `{{joinIds varName.ids}}` | Converts an `IEnumerable` (List, array, `JsonElement` array) into a comma-separated string suitable for FetchXML `operator='in' value='...'` clauses. Returns empty string for null, unresolved bindings, scalars, or empty enumerables. Treats strings as scalars (NOT as `IEnumerable<char>`). | Hand-written `{{#each}}…{{/each}}` patterns that produced fragile CSV joins; pairs directly with `LookupUserMembershipNodeExecutor` output. |
+
+Both helpers ship unconditionally — no feature flag. Implementation: `src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs` lines 57–73 (registration), 81–107 (`JoinIds`), 114–127 (`IsNonEmptyValue`). See R3 tasks 001 (default helper), 002 (joinIds helper), 050–052 (playbook migration).
+
+### Runtime unrendered-template detection (R3 — FR-3H1.4)
+
+After each node executes, `PlaybookOrchestrationService.cs` scans `NodeOutput` text/structured fields for literal `{{` substrings. When detected, it logs a structured warning AND emits a `PlaybookStreamEvent` of type `UnrenderedTemplateDetected` (visible to SSE consumers in real time). This lets authors discover broken variable references during a run rather than after downstream consumers misbehave. Non-fatal — node output is still delivered downstream.
+
+See `PlaybookOrchestrationService.ScanForUnrenderedTemplatesAsync` (line 1363) and Pitfall G10.
+
+---
+
+## Membership-aware playbook authoring (R3)
+
+> **Section status**: Added 2026-06-22 per R3 FR-1B + FR-3H2 + AC-Docs.
+> **Audience**: Developers + architects designing playbooks that need to filter Dataverse data to "records the current user is associated with" (matters, opportunities, documents, events, …).
+> **Maker-facing companion**: [`docs/guides/PLAYBOOK-AUTHOR-GUIDE.md`](../guides/PLAYBOOK-AUTHOR-GUIDE.md).
+
+R3 introduced a coordinated set of capabilities that together let a playbook author answer "what are MY records of type T?" without writing fragile FetchXML against junction tables that may or may not exist. The five pieces compose:
+
+1. The `LookupUserMembership` node executor (ActionType=52) — server-side resolution
+2. The `joinIds` Handlebars helper — output binding for downstream FetchXML
+3. The `default` Handlebars helper — graceful fallback for missing template parameters
+4. PlaybookBuilder UI affordances — rename guard, branch picker, edge perf hint
+5. The canvas↔server drift CI test — prevents the canvas/server mapping skew that caused G6
+
+### 1. The `LookupUserMembership` node — what it does
+
+`LookupUserMembershipNodeExecutor` (`src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs`) implements ActionType=52 (declared in `INodeExecutor.cs` lines 137–142). At execution time it:
+
+1. Reads `entityType`, `roles`, `includeRelated` from `ConfigJson`.
+2. Resolves the caller's `systemuserid` from `NodeExecutionContext.UserId` (set by `PlaybookSchedulerJob` for per-user scheduled runs; fallback scans previous node outputs for a `userId` property).
+3. Bridges the Singleton executor to the Scoped `IMembershipResolverService` via `IServiceScopeFactory.CreateScope()` per invocation (Pitfall G7 pattern).
+4. Calls `resolver.ResolveAsync(userId, entityType, options, cancellationToken)` — the SAME entry point used by `GET /api/users/me/memberships/{entityType}`. Authors get identical results whether they call the endpoint from a UI or wire the node into a playbook.
+5. Binds the response to the node's `OutputVariable` as `StructuredData`: `{ entityType, count, ids[], byRole{}, continuationToken, cacheExpiresAt }`.
+
+The membership endpoint contract is documented in [`docs/guides/MEMBERSHIP-RESOLUTION-GUIDE.md`](../guides/MEMBERSHIP-RESOLUTION-GUIDE.md) (operator-facing) and ADR-034 (binding rules). The node executor adds NO new resolution logic — it is a thin adapter over the existing service.
+
+### 2. The downstream FetchXML pattern — `{{joinIds X.ids}}`
+
+The canonical use of `LookupUserMembership` is to feed a downstream `QueryDataverse` (or any FetchXML-bearing) node with an IN-clause built from the resolved IDs:
+
+```xml
+<fetch top="50">
+  <entity name="sprk_document">
+    <attribute name="sprk_name" />
+    <filter type="and">
+      <condition attribute="sprk_matter" operator="in" value="{{joinIds myMatters.ids}}" />
+      <condition attribute="createdon" operator="last-x-hours" value="{{timeWindowHours}}" />
+    </filter>
+  </entity>
+</fetch>
+```
+
+`joinIds` renders `myMatters.ids` (a `List<Guid>` from the `LookupUserMembership` output) as `"<guid>,<guid>,<guid>"` — exactly the shape FetchXML's `operator="in"` expects. Empty lists render as `""` so the IN clause becomes `value=""` (matches zero rows — fail-closed, which is what an author wants when "user has zero matters" means "no notifications").
+
+Authors should NOT hand-roll `{{#each}}` joins for this — it duplicates `joinIds` behavior without the empty-handling and scalar-defensiveness.
+
+### 3. The `default` helper — graceful fallback
+
+When a playbook reads a template parameter that may be unset (e.g., a per-user preference column that hasn't been populated), wrap the reference in `default`:
+
+```jsonc
+"templateParameters": {
+  "timeWindow": "{{default userPreferences.timeWindow '24h'}}"
+}
+```
+
+This replaces the broken `{{userPreferences.timeWindow ?? '24h'}}` pattern that emitted raw literal text in R2 UAT (Pitfall G1). `default` correctly handles `UndefinedBindingResult` (the type Handlebars.NET returns for unresolved bindings) and treats empty strings as "missing."
+
+### 4. PlaybookBuilder UI affordances (R3 H2)
+
+The builder ships three new safety affordances. They follow the existing per-ActionType form pattern documented in `projects/spaarke-platform-foundations-r3/notes/playbookbuilder-pattern-research.md` (Q5 owner directive: do NOT invent new patterns).
+
+#### a. OutputVariable rename guard (FR-3H2.1)
+
+When a user changes a node's `OutputVariable` in `NodePropertiesForm.tsx` / `NodePropertiesDialog.tsx`, the canvas first scans every other node for `{{<oldName>.output.*}}` template references (reusing the existing `TEMPLATE_REF_RE` regex in `services/canvasValidation.ts`). If any are found, `RenameGuardDialog.tsx` opens with three actions:
+
+- **Auto-rename references** (PRIMARY) — applies the new name AND find/replaces every downstream reference via `canvasStore.renameOutputVariableReferences(oldName, newName)`.
+- **Keep old name** — reverts the field; downstream references unchanged.
+- **Cancel rename** — same effect as Keep, presented as the escape hatch for users who reflexively look for "Cancel."
+
+A complementary validation rule `outputvar-collision` (severity=error) fires when two nodes share the same non-empty OutputVariable — prevents the ambiguity-by-design state.
+
+#### b. Branch wiring picker (FR-3H2.2)
+
+When an edge is dragged from a Condition node body (no `sourceHandle`), `canvasStore.onConnect` opens `BranchPickerDialog.tsx` with three options:
+
+- **True** — single edge, `sourceHandle='true'`, type=`trueBranch` (green).
+- **False** — single edge, `sourceHandle='false'`, type=`falseBranch` (red).
+- **Both** — TWO edges (one True + one False). The dialog deliberately does NOT invent a `bothBranch` edge type; reuses the existing renderers.
+
+Labels for "True"/"False" come from the Condition node's `conditionJson.trueBranch` / `falseBranch` strings (managed by `ConditionEditor.tsx`), so authors who renamed the branches to "Approved" / "Rejected" see those labels in the picker.
+
+#### c. Edge perf hint advisory (FR-3H2.3)
+
+A new per-edge validation rule `edge-no-data-dependency` (severity=warning) scans every edge: if the target node's serialized config does NOT reference the source node's `outputVariable` via `{{<source.outputVariable>.output.*}}`, the rule emits an advisory warning attached to the source node's `NodeValidationBadge`:
+
+> "Edge from \"X\" to \"Y\" does not reference {{X.output.*}} in the target's configuration. This edge forces sequential execution. Confirm or remove?"
+
+**Advisory only** — save remains allowed. The author may have a legitimate side-effect-only sequencing need (the rule is intentionally non-blocking). See Pitfall G9.
+
+Implementation: `services/canvasValidation.ts` lines 207–212 (per-edge loop), 636–669 (`validateEdgePerfHint`). Reuses `parseDownstreamNode` so the scan covers the same field set as the other rules (configJson fieldMappings, legacy fields dict, template/body/subject/description, node.data template/emailBody/emailSubject).
+
+### 5. The canvas↔server drift CI test (FR-3H3.1)
+
+`tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/CanvasServerMappingDriftTests.cs` is a parse-the-source xUnit test that runs on every CI build. It asserts two invariants:
+
+1. Every canvas node type emitted by the `buildConfigJson()` switch in `src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts` MUST have a matching arm in `MapCanvasTypeToActionType()` in `src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs` — otherwise authoring a playbook with that node type persists a record the server cannot dispatch (Pitfall G6).
+2. Every `ActionType` slot referenced by the client's `NodeTypeToActionType` lookup MUST exist as a named member of the server-side `ActionType` enum in `INodeExecutor.cs`.
+
+The test uses regex (no Roslyn, no Node subprocess) so it runs on every CI image without extra tooling. To verify locally: `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/ --filter "FullyQualifiedName~CanvasServerMappingDriftTests"`. Failure messages name the missing entry exactly — repair is mechanical. See the test file's header comment for the "intentional drift" verification procedure.
+
+### Worked examples — migrated R3 notification playbooks
+
+Three notification playbooks were migrated as part of R3 to exercise the new pattern end-to-end. All three live at `projects/spaarke-daily-update-service/notes/playbooks/`:
+
+| Playbook | Before (R2 defect) | After (R3) |
+|----------|---------------------|------------|
+| `notification-new-documents.json` | FetchXML joined through `sprk_matterteammember` — an entity that does not exist in production Dataverse; returned zero rows silently (R3 FR-1C.1 / A1 defect) | `LookupUserMembership` node resolves `sprk_matter` memberships for roles `owner`, `assignedAttorney`, `assignedParalegal`; downstream `QueryDataverse` filters via `{{joinIds myMatters.ids}}` |
+| `notification-new-emails.json` | Query had NO user-membership filter at all — would have returned inbound emails on every matter in the tenant (R3 FR-1C.2 / A1 defect) | Same `LookupUserMembership` node; `regardingobjectid` filtered by `{{joinIds myMatters.ids}}` |
+| `notification-new-events.json` | Same defect class as emails | Same fix |
+
+The "before" defects were silent failures — the playbook ran to completion and produced empty notifications, so operators saw "system working, no new items." This is precisely the failure mode the membership endpoint + node + drift CI test together prevent.
+
+### Pattern doc cross-reference
+
+Developers adding **new** node types (not just configuring existing ones) should read `.claude/patterns/ai/node-executor-authoring.md` (R3 FR-3H3.5). It documents the Singleton-executor-depends-on-Scoped-service pattern, the registry plumbing, the validation contract, and the canvas↔server mapping checklist that the drift CI test enforces. `LookupUserMembershipNodeExecutor` and `AgentServiceNodeExecutor` are the canonical worked examples.
 
 ---
 
@@ -513,6 +677,7 @@ The following pitfalls are explicitly **deferred** out of R3 and tracked for the
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-06-22 | 2.2 | Added "Membership-aware playbook authoring (R3)" major section + `LookupUserMembershipNodeExecutor` row in Node Executor Framework + `default` / `joinIds` Handlebars helper subsection + runtime unrendered-template detection subsection. Cross-references to maker guide (`PLAYBOOK-AUTHOR-GUIDE.md`), pattern doc (`node-executor-authoring.md`), and 3 migrated playbooks. Per R3 FR-1B + FR-3H2 + AC-Docs. |
 | 2026-06-22 | 2.1 | Refreshed Known Pitfalls section per R3 FR-3G4 + AC-Docs: restructured to canonical G1-G11 catalog, added Fixed-(R3) attribution for G1/G2/G3/G5/G6/G7/G8/G9/G10, added explicit G4 doc (idempotency-on-unread semantics), marked G11/H4 deferred to R4 (ADR-035 reserved). Task 102. |
 | 2026-04-05 | 2.0 | Restored depth: execution engine dual mode, all 9 node executors (including CreateNotification/QueryDataverse), builder subsystem, scheduler, integration points, known pitfalls, constraints |
 | 2026-03-13 | 1.0 | Initial version -- extracted from AI-ARCHITECTURE.md (v3.3). Added DeliverToIndex node documentation. |
