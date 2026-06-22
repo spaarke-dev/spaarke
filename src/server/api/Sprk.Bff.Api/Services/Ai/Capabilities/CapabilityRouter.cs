@@ -101,7 +101,7 @@ public sealed class CapabilityRouter : ICapabilityRouter
     // ── Layer 0.5: soft-slash command-intent pre-pass (R6 Pillar 8 / task 082 / FR-50) ──
     //
     // BEFORE the Layer 1 keyword classifier runs, we honour an optional
-    // `commandIntent` value supplied by the frontend `SoftSlashRouter`. The
+    // `intentHint` value supplied by the frontend `SoftSlashRouter`. The
     // closed Q6 vocabulary maps four soft slashes (`/summarize`, `/draft`,
     // `/extract-entities`, `/analyze`) → four synthetic capability names that
     // pre-select the correct route on FIRST try, satisfying spec FR-50
@@ -111,7 +111,7 @@ public sealed class CapabilityRouter : ICapabilityRouter
     // pre-pass is a single dictionary lookup; well inside NFR-03 budget.
     //
     // ADR-015 audit: the keys in this table are config-side capability names
-    // (Tier-1 safe). The values come from the client-supplied `commandIntent`
+    // (Tier-1 safe). The values come from the client-supplied `intentHint`
     // field — which itself is a closed-vocabulary string set by
     // `SoftSlashRouter.decorateBody`, NEVER raw user text. The pre-pass emits
     // ONE context.decision_made event with the synthetic capability name; the
@@ -122,7 +122,7 @@ public sealed class CapabilityRouter : ICapabilityRouter
     // is invoked downstream (after the agent selects the matched capability's
     // playbook); this pre-pass only HINTS the router.
     //
-    // NFR-11 binding: when `commandIntent` is null (the common path — natural
+    // NFR-11 binding: when `intentHint` is null (the common path — natural
     // language, hard slashes, unrecognised slashes), this pre-pass falls
     // through to the existing Layer 0 voice memory check + Layer 1 keyword
     // classification UNCHANGED. Natural-language equivalents ("summarize this")
@@ -143,7 +143,7 @@ public sealed class CapabilityRouter : ICapabilityRouter
     internal const string SoftSlashDecisionConfident = "soft_slash";
 
     /// <summary>
-    /// Closed-vocabulary mapping from a frontend-supplied `commandIntent` to its
+    /// Closed-vocabulary mapping from a frontend-supplied `intentHint` to its
     /// synthetic capability name. Vocabulary is owner-locked at exactly 4 per
     /// Q6 — do NOT extend without spec FR sign-off. Ordinal (case-sensitive)
     /// comparison: the client emits lowercase identifiers from a TypeScript
@@ -258,7 +258,7 @@ public sealed class CapabilityRouter : ICapabilityRouter
     // ── ICapabilityRouter ─────────────────────────────────────────────────────
 
     /// <inheritdoc />
-    public CapabilityRoutingResult RouteSync(string userMessage, string? activePlaybookName, string? commandIntent = null)
+    public CapabilityRoutingResult RouteSync(string userMessage, string? activePlaybookName, string? intentHint = null)
     {
         // R6 Pillar 7 / task 069 / FR-47 — Layer 0 voice command pre-pass.
         //
@@ -278,13 +278,13 @@ public sealed class CapabilityRouter : ICapabilityRouter
         // R6 Pillar 8 / task 082 / FR-50 — Layer 0.5 soft-slash pre-pass.
         //
         // When the frontend `SoftSlashRouter` decorated the outbound payload
-        // with a closed-vocabulary `commandIntent`, the pre-pass deterministically
+        // with a closed-vocabulary `intentHint`, the pre-pass deterministically
         // selects the matching synthetic capability — so the agent's tool
         // selection sees a Confident routing result on FIRST try. When
-        // `commandIntent` is null (natural language, hard slashes, unrecognised
+        // `intentHint` is null (natural language, hard slashes, unrecognised
         // slashes), this returns null and the existing Layer 1 keyword scoring
         // runs unchanged (NFR-11 binding).
-        var softSlashResult = TryClassifySoftSlash(commandIntent);
+        var softSlashResult = TryClassifySoftSlash(intentHint);
         if (softSlashResult is not null)
         {
             return softSlashResult;
@@ -435,12 +435,12 @@ public sealed class CapabilityRouter : ICapabilityRouter
     /// frontend `SoftSlashRouter.decorateBody()`: <c>summarize</c>, <c>draft</c>,
     /// <c>extract-entities</c>, <c>analyze</c>. Returns a Confident result selecting
     /// the synthetic capability for the matched intent; returns <c>null</c> when
-    /// <paramref name="commandIntent"/> is null/whitespace OR not in the closed
+    /// <paramref name="intentHint"/> is null/whitespace OR not in the closed
     /// vocabulary (per Q6 — owner-locked at 4).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ADR-015 audit: <paramref name="commandIntent"/> is a closed-vocabulary
+    /// ADR-015 audit: <paramref name="intentHint"/> is a closed-vocabulary
     /// identifier emitted by the client, NEVER raw user message text. The
     /// emitted telemetry surface is (a) the synthetic capability name (config
     /// identifier — Tier-1 safe) and (b) the <c>context.decision_made</c> event
@@ -452,24 +452,24 @@ public sealed class CapabilityRouter : ICapabilityRouter
     /// any new public-contract surface in <c>Services/Ai/PublicContracts/</c>.
     /// </para>
     /// <para>
-    /// NFR-11 binding: when <paramref name="commandIntent"/> is null the
+    /// NFR-11 binding: when <paramref name="intentHint"/> is null the
     /// pre-pass returns null and downstream Layer 1 keyword classification runs
     /// UNCHANGED, preserving the natural-language path.
     /// </para>
     /// </remarks>
-    private CapabilityRoutingResult? TryClassifySoftSlash(string? commandIntent)
+    private CapabilityRoutingResult? TryClassifySoftSlash(string? intentHint)
     {
-        if (string.IsNullOrWhiteSpace(commandIntent))
+        if (string.IsNullOrWhiteSpace(intentHint))
         {
             return null;
         }
 
-        if (!SoftSlashIntentToCapabilityName.TryGetValue(commandIntent, out var capabilityName))
+        if (!SoftSlashIntentToCapabilityName.TryGetValue(intentHint, out var capabilityName))
         {
             // Unrecognised intent — fall through so Layer 1 keyword scoring still
             // has a chance to classify by literal command text in the message.
             _logger.LogDebug(
-                "CapabilityRouter.Layer0.5: unrecognised commandIntent — falling through to Layer 1.");
+                "CapabilityRouter.Layer0.5: unrecognised intentHint — falling through to Layer 1.");
             return null;
         }
 
@@ -486,7 +486,7 @@ public sealed class CapabilityRouter : ICapabilityRouter
         _logger.LogDebug(
             "CapabilityRouter.Layer0.5: soft-slash pre-pass matched — capability={Capability}, intent={Intent}.",
             capabilityName,
-            commandIntent);
+            intentHint);
 
         return CapabilityRoutingResult.Confident(
             selectedCapabilities: new[] { capabilityName },
@@ -770,10 +770,10 @@ public sealed class CapabilityRouter : ICapabilityRouter
         string userMessage,
         string? activePlaybookName,
         CancellationToken ct = default,
-        string? commandIntent = null)
+        string? intentHint = null)
     {
         // ── Layer 1: synchronous keyword classifier (with Layer 0 + 0.5 pre-passes) ─
-        var layer1Result = RouteSync(userMessage, activePlaybookName, commandIntent);
+        var layer1Result = RouteSync(userMessage, activePlaybookName, intentHint);
         if (layer1Result.IsConfident)
         {
             _logger.LogDebug(
