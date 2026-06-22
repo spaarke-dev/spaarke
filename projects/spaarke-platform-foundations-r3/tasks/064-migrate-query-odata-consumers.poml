@@ -1,7 +1,29 @@
 <task id="R3-064" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Migrate FetchXML / OData query consumers</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      VERIFY-EMPTY + CLOSE. Re-grep of `src/server/**` + `src/dataverse/**` for server-side
+      filter call-sites (FetchXML `<condition attribute='sprk_searchindexed' .../>`, OData
+      `$filter=sprk_searchindexed eq …`, LINQ `.Where(x =&gt; x.SearchIndexed)`, C# property
+      predicates) returned **zero hits**. All 23 `SearchIndexed` symbol hits and 11
+      `sprk_searchindexed` literal hits across 5 files are writers (PATCH payloads, post-index
+      `= true` assignments), round-trip column-select preservation in GET, model property
+      definitions, log lines, or XML-doc comments — none are filter clauses.
+
+      Result independently confirms task 060 inventory §3B and matches task 061's flag that
+      "063+064 likely re-scope to verify-empty + escalate maker-side audit". Disposition note
+      authored at `projects/spaarke-platform-foundations-r3/notes/task-064-verify-empty.md`
+      documenting greps run, per-file categorization, cross-references, and maker-side audit
+      escalation path (export `Spaarke` solution → grep `Views/*.xml`, `Workflows/*.xml`,
+      `BusinessRules/*.xml`, `PluginAssemblies/*.xml` for `sprk_searchindexed` before the
+      eventual drop-old-field step, which is itself deferred beyond R3 per spec FR-3H3.4).
+
+      No code changes; no tests changed; no BFF publish (no `.cs` edits). FR-3H3.4 satisfied
+      for in-repo scope; AC-H3.2 satisfied. Sibling task 063 (UI cluster) ran in parallel
+      with zero file overlap.
+    </completion-notes>
     <phase>P7.1</phase>
     <parallel-group>O (with 063, 065)</parallel-group>
     <parallel-safe>true</parallel-safe>

@@ -1,7 +1,19 @@
 <task id="R3-066" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Author `.claude/patterns/ai/node-executor-authoring.md`</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Authored `.claude/patterns/ai/node-executor-authoring.md` (25-line pointer-style per
+      `.claude/patterns/` convention). Cites 3 worked examples: AgentServiceNodeExecutor
+      (canonical Singleton+Scoped pattern), LookupUserMembershipNodeExecutor (R3 task 041),
+      QueryDataverseNodeExecutor (closest analog). Includes canvas↔server drift checklist
+      (3 sides + CI drift test cite). INDEX.md updated with new entry. Main-session
+      execution per .claude/ write boundary (sub-agent boundary). Cross-refs: ADR-013
+      (AI framework extension), ADR-010 (DI minimalism — Singleton+Scoped via
+      IServiceScopeFactory), bff-extensions.md §A (pre-merge checklist) + §F (test
+      obligation), task 065 (drift CI guard). FR-3H3.5 + AC-H3.3 satisfied.
+    </completion-notes>
     <phase>P7.1</phase>
     <parallel-group>none (main-session-only — .claude/ write boundary)</parallel-group>
     <parallel-safe>false</parallel-safe>

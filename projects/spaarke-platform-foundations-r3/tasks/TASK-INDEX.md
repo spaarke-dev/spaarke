@@ -55,10 +55,10 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 060 | P7.0 — `sprk_searchindexed` consumer inventory | P7.0 | ✅ | none | **M** main-only | false | STANDARD |
 | 061 | `sprk_searchindexed` schema migration (dual-field) | P7.1 | ✅ | 060 | **N** | true | FULL |
 | 062 | `DeliverToIndexNodeExecutor` dual-write | P7.1 | ✅ | 061 | **N** | true | FULL |
-| 063 | Migrate UI tile consumers | P7.1 | 🔲 | 061, 062 | **O** | true | STANDARD |
-| 064 | Migrate FetchXML/OData query consumers | P7.1 | 🔲 | 061, 062 | **O** | true | STANDARD |
+| 063 | Migrate UI tile consumers | P7.1 | ✅ | 061, 062 | **O** | true | STANDARD |
+| 064 | Migrate FetchXML/OData query consumers | P7.1 | ✅ | 061, 062 | **O** | true | STANDARD |
 | 065 | Canvas-server mapping drift integration test | P7.1 | ✅ | 042 | **O** | true | FULL |
-| 066 | Author `.claude/patterns/ai/node-executor-authoring.md` | P7.1 | 🔲 | 041 | — main-only | false | FULL |
+| 066 | Author `.claude/patterns/ai/node-executor-authoring.md` | P7.1 | ✅ | 041 | — main-only | false | FULL |
 | 070 | Create `sprk_userentityassociation` entity + indexes | P7.5 | ✅ | 010 | **P** | true | FULL |
 | 071 | Provision Service Bus topic `sprk-membership-changes` | P7.5 | ❌ blocked-operator | 010 | **P** | true | FULL |
 | 072 | `MembershipChangedEvent` payload contract | P7.5 | 🔲 | 070, 071 | — | true | STANDARD |
