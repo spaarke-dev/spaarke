@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Claims;
 using Microsoft.Extensions.Caching.Memory;
 using Sprk.Bff.Api.Api.Filters;
@@ -305,14 +306,50 @@ public static class PlaybookEndpoints
     }
 
     /// <summary>
-    /// Get a playbook by name.
+    /// Get a playbook by name. DEPRECATED — migrate callers to <see cref="GetPlaybookById"/>
+    /// (FR-03 / spec §1.7). The endpoint stays mapped during the deprecation stabilization
+    /// window so legacy clients keep working while the call-rate-to-zero gate is measured.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per task 024 (FR-03 acceptance): every call emits a warning-level log entry +
+    /// <see cref="Activity"/> tag <c>deprecated.endpoint = "playbooks-by-name"</c> so the
+    /// stabilization-window owner can dashboard the call-rate decay. See
+    /// <c>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/024-deprecation-dashboard.md</c>
+    /// for the App Insights KQL queries.
+    /// </para>
+    /// <para>
+    /// ADR-015 tier-1 audit: payload contains ONLY (a) the endpoint identifier, (b) the
+    /// playbook-name parameter (a stable identifier, NOT user content), (c) the tenant id
+    /// from the JWT <c>tid</c> claim, and (d) the caller User-Agent. No user message text,
+    /// no document content, no memory facts, no recall results.
+    /// </para>
+    /// </remarks>
     private static async Task<IResult> GetPlaybookByName(
         string name,
         IPlaybookService playbookService,
+        HttpContext httpContext,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        // ── Deprecation telemetry (FR-03 / task 024 / ADR-015 tier-1 safe). ────────────
+        // Tenant id from JWT 'tid' claim (mirrors GetPlaybookById's tenant resolution).
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? "unknown-tenant";
+        var userAgent = httpContext.Request.Headers.UserAgent.ToString();
+        if (string.IsNullOrEmpty(userAgent))
+        {
+            userAgent = "unknown-ua";
+        }
+
+        logger.LogWarning(
+            "Deprecated endpoint /api/ai/playbooks/by-name/ called for {PlaybookName} by tenant {TenantId} ua={UserAgent}",
+            name, tenantId, userAgent);
+        Activity.Current?.SetTag("deprecated.endpoint", "playbooks-by-name");
+        Activity.Current?.SetTag("deprecated.name", name);
+        // ───────────────────────────────────────────────────────────────────────────────
 
         try
         {
