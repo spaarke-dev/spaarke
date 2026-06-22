@@ -29,6 +29,19 @@
 // enabled-by-default and provides the 24h-max-staleness backstop for
 // maker-portal-only mutation paths (sprk_assigned*, sprk_task,
 // sprk_opportunity — per event-source inventory §3A/§3D/§3E).
+// Task 086 (2026-06-22): Adds IMembershipCacheInvalidator (FR-2P2.8 +
+// AC-1P2.7). SYMMETRIC registration per bff-extensions.md §F.1 + ADR-032
+// P2 Quiet no-op:
+//   - Membership:CacheInvalidator:Enabled=true AND IConnectionMultiplexer
+//     resolvable → real MembershipCacheInvalidator + subscriber hosted
+//     service that evicts MembershipResolverService cache entries on
+//     channel `membership-cache-invalidate`.
+//   - Else → NullMembershipCacheInvalidator (logs once, no Redis calls,
+//     no subscriber). The 5-min cache TTL on MembershipResolverService is
+//     the correctness backstop; pub/sub is the latency optimization.
+// MembershipJunctionUpdater (task 084) consumes IMembershipCacheInvalidator
+// unconditionally; the recon job (task 085) reuses the same handler so
+// invalidations fire from both paths automatically.
 // Remaining registrations (endpoint mappings) arrive in later P4 tasks (035-036).
 //
 // ADR-010 (DI Minimalism): Feature-module pattern — one Add{Module}() per
@@ -149,6 +162,46 @@ public static class MembershipModule
                 sp.GetRequiredService<NullMembershipEventPublisher>());
         }
 
+        // Task 086: Membership cache invalidator (FR-2P2.8 + AC-1P2.7).
+        // Options bound from "Membership:CacheInvalidator" section.
+        services.Configure<MembershipCacheInvalidatorOptions>(
+            configuration.GetSection(MembershipCacheInvalidatorOptions.SectionName));
+
+        // SYMMETRIC registration per bff-extensions.md §F.1 + ADR-032 P2
+        // Quiet no-op. Real impl wins only when BOTH:
+        //   (a) Membership:CacheInvalidator:Enabled=true (operator
+        //       explicitly opted in), AND
+        //   (b) IConnectionMultiplexer is registered in the container
+        //       (CacheModule only registers it when Redis:Enabled=true).
+        // Either gate fails → Null peer wins. This guarantees that
+        // local-dev / CI environments without Redis still resolve
+        // IMembershipCacheInvalidator cleanly via minimal-API param
+        // inference.
+        var cacheInvalidatorEnabled = configuration
+            .GetSection(MembershipCacheInvalidatorOptions.SectionName)
+            .GetValue<bool>("Enabled");
+        var redisRegistered = services.Any(d =>
+            d.ServiceType == typeof(StackExchange.Redis.IConnectionMultiplexer));
+
+        if (cacheInvalidatorEnabled && redisRegistered)
+        {
+            services.AddSingleton<MembershipCacheInvalidator>();
+            services.AddSingleton<IMembershipCacheInvalidator>(sp =>
+                sp.GetRequiredService<MembershipCacheInvalidator>());
+
+            // Subscriber hosted service — runs on every BFF instance, evicts
+            // cache entries on channel messages. Singleton + IHostedService.
+            services.AddSingleton<MembershipCacheInvalidationSubscriber>();
+            services.AddHostedService(sp =>
+                sp.GetRequiredService<MembershipCacheInvalidationSubscriber>());
+        }
+        else
+        {
+            services.AddSingleton<NullMembershipCacheInvalidator>();
+            services.AddSingleton<IMembershipCacheInvalidator>(sp =>
+                sp.GetRequiredService<NullMembershipCacheInvalidator>());
+        }
+
         // Task 084: Subscription consumer (consumer side).
         // Options bound from "Membership:JunctionUpdater" section (distinct
         // from "Membership:EventPublisher" so the publisher + consumer
@@ -160,6 +213,10 @@ public static class MembershipModule
         // MembershipReconciliationJob reuses it directly, regardless of
         // whether the Service Bus consumer host is enabled. Scoped per
         // IDataverseService lifetime (matches ADR-010 standard pattern).
+        // The handler injects IMembershipCacheInvalidator (registered
+        // SYMMETRICALLY above per task 086) — invalidation fires from
+        // both the SB consumer path AND the recon path (task 085 reuses
+        // this same handler) automatically.
         services.AddScoped<IMembershipJunctionUpdater, MembershipJunctionUpdater>();
 
         // TimeProvider — used by the handler for sprk_lastsyncedon

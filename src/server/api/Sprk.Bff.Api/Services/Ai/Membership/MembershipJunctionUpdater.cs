@@ -97,15 +97,18 @@ public sealed class MembershipJunctionUpdater : IMembershipJunctionUpdater
 
     private readonly IDataverseService _dataverse;
     private readonly TimeProvider _clock;
+    private readonly IMembershipCacheInvalidator _cacheInvalidator;
     private readonly ILogger<MembershipJunctionUpdater> _logger;
 
     public MembershipJunctionUpdater(
         IDataverseService dataverse,
         TimeProvider clock,
+        IMembershipCacheInvalidator cacheInvalidator,
         ILogger<MembershipJunctionUpdater> logger)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _cacheInvalidator = cacheInvalidator ?? throw new ArgumentNullException(nameof(cacheInvalidator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -252,5 +255,25 @@ public sealed class MembershipJunctionUpdater : IMembershipJunctionUpdater
                 throw new InvalidOperationException(
                     $"Unknown MembershipMutationType: {evt.MutationType}");
         }
+
+        // R3 Part 1 Phase 2 — Task 086 (FR-2P2.8 + AC-1P2.7).
+        // After ANY successful junction-row write (Create / Update / Delete),
+        // publish a cache-invalidation message so peer BFF instances evict
+        // any cached membership results for (PersonId, EntityLogicalName).
+        // Fire-and-forget: the invalidator's resilience contract guarantees
+        // PublishInvalidationAsync never throws (Redis failures → log +
+        // continue; the 5-min cache TTL is the backstop).
+        //
+        // Reuse path: task 085's MembershipReconciliationJob invokes
+        // HandleAsync directly (no Service Bus topic involved); recon-driven
+        // junction writes therefore fire the same invalidation through this
+        // shared code path. No separate wiring needed on the recon side.
+        await _cacheInvalidator
+            .PublishInvalidationAsync(
+                personId: evt.PersonId,
+                entityLogicalName: evt.EntityLogicalName,
+                correlationId: evt.CorrelationId,
+                ct: ct)
+            .ConfigureAwait(false);
     }
 }

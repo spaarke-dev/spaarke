@@ -40,6 +40,11 @@
       "SubscriptionName": "recon-junction-updater",
       "ServiceBusNamespace": "",
       "MaxConcurrentCalls": 5
+    },
+    "CacheInvalidator": {
+      "_comment": "Task 086 (R3 Part 1 Phase 2 — FR-2P2.8 + AC-1P2.7 Redis pub/sub cache invalidation). Enabled=false (default) registers NullMembershipCacheInvalidator (ADR-032 P2 Quiet no-op) — no Redis subscription is opened. Flip Enabled=true ONLY when Redis:Enabled=true AND IConnectionMultiplexer is registered (the DI module also gates on resolvability). When enabled, MembershipJunctionUpdater (task 084) + MembershipReconciliationJob (task 085, via shared handler) publish to the channel after every junction-row write, and MembershipCacheInvalidationSubscriber on every BFF instance evicts matching MembershipResolverService cache entries. The 5-min cache TTL is the correctness backstop.",
+      "Enabled": false,
+      "Channel": "membership-cache-invalidate"
     }
   }
 }

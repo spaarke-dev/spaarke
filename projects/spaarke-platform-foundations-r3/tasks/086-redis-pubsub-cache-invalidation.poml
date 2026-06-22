@@ -1,7 +1,48 @@
 <task id="R3-086" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Redis pub/sub cache invalidation on junction-row writes</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      R3 task 086 complete. Implements FR-2P2.8 + AC-1P2.7 Redis pub/sub cache invalidation.
+
+      Channel: `membership-cache-invalidate` (configurable via `Membership:CacheInvalidator:Channel`).
+
+      Payload: `MembershipCacheInvalidationMessage(PersonId, EntityLogicalName, PublishedAtUtc, CorrelationId?)` — JSON-serialized camelCase via System.Text.Json.
+
+      Publish wiring: `MembershipJunctionUpdater` (task 084) now injects `IMembershipCacheInvalidator` and calls `PublishInvalidationAsync` after every successful Create/Update/Delete junction-row write. Recon job (task 085) reuses the same handler so invalidations fire from BOTH the SB consumer path AND the recon path automatically — no separate wiring needed.
+
+      Subscribe wiring: New `MembershipCacheInvalidationSubscriber` IHostedService — separate from `MembershipResolverService` to keep subscription lifecycle distinct from request orchestration (SRP). StartAsync subscribes via `IConnectionMultiplexer.GetSubscriber()`; on each message deserializes the payload + SCANs/DELetes cache keys matching `{InstanceName}membership:resolved:{personId:D}:{entityLogicalName}:*` (wipes all option-hash variants for that user/entity tuple). StopAsync unsubscribes cleanly.
+
+      Symmetric DI registration per `bff-extensions.md` §F.1 + ADR-032 P2 Quiet no-op: real `MembershipCacheInvalidator` + subscriber registered ONLY when `Membership:CacheInvalidator:Enabled=true` AND `IConnectionMultiplexer` is registered (CacheModule only registers it when `Redis:Enabled=true`). Either gate fails → `NullMembershipCacheInvalidator` wins. Endpoints + handlers unconditionally inject `IMembershipCacheInvalidator`.
+
+      Resilience contract (per `.claude/patterns/api/resilience.md`): publisher catches `RedisConnectionException` + generic `Exception` → logs Warning + returns; never throws. Subscriber consume loop catches per-message exceptions and continues. Eviction failure is logged + returns. The 5-min TTL on `MembershipResolverService.CacheTtl` is the correctness backstop — pub/sub is the latency optimization.
+
+      Files (new):
+        - Services/Ai/Membership/MembershipCacheInvalidationMessage.cs
+        - Services/Ai/Membership/IMembershipCacheInvalidator.cs
+        - Services/Ai/Membership/MembershipCacheInvalidator.cs
+        - Services/Ai/Membership/NullMembershipCacheInvalidator.cs
+        - Services/Ai/Membership/MembershipCacheInvalidatorOptions.cs
+        - Services/Ai/Membership/MembershipCacheInvalidationSubscriber.cs
+        - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipCacheInvalidatorTests.cs
+
+      Files (modified):
+        - Services/Ai/Membership/MembershipJunctionUpdater.cs (constructor + post-switch publish call)
+        - Infrastructure/DI/MembershipModule.cs (SYMMETRIC registration)
+        - appsettings.Development.json.template (Membership:CacheInvalidator block)
+        - tests/.../MembershipJunctionUpdaterTests.cs (constructor update + 2 new tests asserting invalidator called on Added + Removed)
+
+      Tests: 9 new (8 in MembershipCacheInvalidatorTests; 2 in MembershipJunctionUpdaterTests — `HandleAsync_Added_InvalidatesCacheAfterCreate`, `HandleAsync_Removed_InvalidatesCacheAfterDelete`). All 196 Membership tests + 7568 total BFF tests pass.
+
+      Build: 0 errors, 16 pre-existing warnings (none introduced).
+
+      Publish size: 46.24 MB (delta +0.01 MB vs 46.23 baseline — well under +5 MB threshold; ceiling 60 MB).
+
+      CVE: no new HIGH-severity. Pre-existing Microsoft.Kiota.Abstractions 1.21.2 advisory unchanged.
+
+      ADR-032 compliance: Null peer pattern; symmetric registration; minimal-API param inference unaffected. ADR-009 compliance: Redis TTL + pub/sub invalidation contract honored. ADR-010 compliance: interface kept narrow (single `PublishInvalidationAsync` method); subscription lifecycle isolated to a dedicated hosted service.
+    </completion-notes>
     <phase>P8</phase>
     <parallel-group>none (sequential — depends on 084)</parallel-group>
     <parallel-safe>true</parallel-safe>

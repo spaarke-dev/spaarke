@@ -61,9 +61,23 @@ public class MembershipJunctionUpdaterTests
     {
         var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
         var clock = new FakeTimeProvider(FixedNow);
+        // R3 task 086: invalidator dep injected — default Loose mock returns
+        // CompletedTask on PublishInvalidationAsync. Tests that need to assert
+        // invalidation use CreateSutWithInvalidator instead.
+        var invalidator = new Mock<IMembershipCacheInvalidator>();
         var sut = new MembershipJunctionUpdater(
-            dataverse.Object, clock, NullLogger<MembershipJunctionUpdater>.Instance);
+            dataverse.Object, clock, invalidator.Object, NullLogger<MembershipJunctionUpdater>.Instance);
         return (sut, dataverse);
+    }
+
+    private static (MembershipJunctionUpdater sut, Mock<IDataverseService> dataverse, Mock<IMembershipCacheInvalidator> invalidator) CreateSutWithInvalidator()
+    {
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        var clock = new FakeTimeProvider(FixedNow);
+        var invalidator = new Mock<IMembershipCacheInvalidator>(MockBehavior.Strict);
+        var sut = new MembershipJunctionUpdater(
+            dataverse.Object, clock, invalidator.Object, NullLogger<MembershipJunctionUpdater>.Instance);
+        return (sut, dataverse, invalidator);
     }
 
     private static void SetupRetrieveMiss(Mock<IDataverseService> dataverse) =>
@@ -245,8 +259,9 @@ public class MembershipJunctionUpdaterTests
         // lastSyncedOn match the latest event.
         var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
         var clock = new FakeTimeProvider(FixedNow);
+        var invalidator = new Mock<IMembershipCacheInvalidator>();
         var sut = new MembershipJunctionUpdater(
-            dataverse.Object, clock, NullLogger<MembershipJunctionUpdater>.Instance);
+            dataverse.Object, clock, invalidator.Object, NullLogger<MembershipJunctionUpdater>.Instance);
 
         // First delivery: row absent → CREATE.
         // Second delivery: row present → UPDATE (no second CREATE).
@@ -290,6 +305,51 @@ public class MembershipJunctionUpdaterTests
             It.IsAny<Dictionary<string, object>>(),
             It.IsAny<CancellationToken>()),
             Times.Once, "duplicate delivery must re-apply role + timestamp via update");
+    }
+
+    // ─── R3 task 086: cache invalidation after junction write ──────────────
+
+    [Fact]
+    public async Task HandleAsync_Added_InvalidatesCacheAfterCreate()
+    {
+        // FR-2P2.8 + AC-1P2.7: every successful junction write must publish
+        // a cache invalidation (PersonId, EntityLogicalName, correlationId).
+        var (sut, dataverse, invalidator) = CreateSutWithInvalidator();
+        SetupRetrieveMiss(dataverse);
+        dataverse
+            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+        invalidator
+            .Setup(i => i.PublishInvalidationAsync(
+                PersonId, EntityLogicalName, CorrelationId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .Verifiable();
+
+        await sut.HandleAsync(BuildEvent(MembershipMutationType.Added), CancellationToken.None);
+
+        invalidator.Verify();
+    }
+
+    [Fact]
+    public async Task HandleAsync_Removed_InvalidatesCacheAfterDelete()
+    {
+        var (sut, dataverse, invalidator) = CreateSutWithInvalidator();
+        SetupRetrieveHit(dataverse, ExistingRowId);
+        dataverse
+            .Setup(d => d.DeleteAsync(
+                JunctionEntityName,
+                ExistingRowId,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        invalidator
+            .Setup(i => i.PublishInvalidationAsync(
+                PersonId, EntityLogicalName, CorrelationId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .Verifiable();
+
+        await sut.HandleAsync(BuildEvent(MembershipMutationType.Removed), CancellationToken.None);
+
+        invalidator.Verify();
     }
 
     // ─── Cancellation (NFR-07) ─────────────────────────────────────────────
