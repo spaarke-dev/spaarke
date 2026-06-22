@@ -45,9 +45,9 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 041 | Implement `LookupUserMembershipNodeExecutor` | P5 | ✅ | 033, 040 | **J** | true | FULL |
 | 042 | Canvas-server mapping update (client + server) | P5 | ✅ | 040, 041 | **K** | true | FULL |
 | 043 | `LookupUserMembershipForm.tsx` in PlaybookBuilder | P5 | ✅ | 040 | **K** | true | FULL |
-| 050 | Migrate `notification-new-documents.json` | P6 | 🔲 | 041, 042 | **L** | true | FULL |
-| 051 | Audit + migrate `notification-new-emails.json` | P6 | 🔲 | 041, 042 | **L** | true | STANDARD |
-| 052 | Audit + migrate `notification-new-events.json` | P6 | 🔲 | 041, 042 | **L** | true | STANDARD |
+| 050 | Migrate `notification-new-documents.json` | P6 | ✅ | 041, 042 | **L** | true | FULL |
+| 051 | Audit + migrate `notification-new-emails.json` | P6 | ✅ | 041, 042 | **L** | true | STANDARD |
+| 052 | Audit + migrate `notification-new-events.json` | P6 | ✅ | 041, 042 | **L** | true | STANDARD |
 | 053 | Migrated playbook integration tests | P6 | 🔲 | 050, 051, 052 | — | true | STANDARD |
 | 054 | `includeRelated` chained-discovery implementation | P6.5 | ✅ | 033, 035 | — | true | FULL |
 | 055 | 1-hop max enforcement on `includeRelated` | P6.5 | 🔲 | 054 | — | true | STANDARD |

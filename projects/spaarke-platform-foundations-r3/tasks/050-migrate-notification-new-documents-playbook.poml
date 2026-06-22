@@ -1,7 +1,59 @@
 <task id="R3-050" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Migrate `notification-new-documents.json` to use `LookupUserMembership` node</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Migrated `notification-new-documents.json` away from the A1-defect FetchXML join.
+
+      **Broken pattern removed** (verbatim from old `Query New Documents` node):
+      `&lt;link-entity name='sprk_matter' from='sprk_matterid' to='sprk_matter' link-type='inner'&gt;
+        &lt;link-entity name='sprk_matterteammember' from='sprk_matter' to='sprk_matterid' link-type='inner'&gt;
+          &lt;filter type='and'&gt;&lt;condition attribute='sprk_user' operator='eq-userid'/&gt;&lt;/filter&gt;
+        &lt;/link-entity&gt;
+      &lt;/link-entity&gt;`
+      The `sprk_matterteammember` entity does not exist in the Dataverse schema.
+
+      **Migration applied** (per FR-1C.1):
+      1. Inserted a new `Lookup My Matters` node (canvasType=`lookupUserMembership`, actionType=52)
+         between `Start` and `Query New Documents`. Config:
+         entityType=`sprk_matter`, roles=[`owner`, `assignedAttorney`, `assignedParalegal`]
+         (canonical camelCase form per `MembershipResponse` docstring; resolver filter is
+         case-insensitive per `LookupUserMembershipNodeExecutor` docstring line 17),
+         includeRelated=false, outputVariable=`myMatters`.
+      2. Rewrote `Query New Documents` fetchXml to remove both nested link-entity joins and
+         add `&lt;condition attribute='sprk_matter' operator='in' value='{{joinIds myMatters.ids}}'/&gt;`
+         to the existing `&lt;filter type='and'&gt;` block. Attribute `sprk_matter` is the document's
+         matter lookup (confirmed from the original FetchXML `to='sprk_matter'` clause).
+      3. Updated `Query New Documents.dependsOn` from `["Start"]` to `["Lookup My Matters"]`
+         and added the matching edge `{source: "Lookup My Matters", target: "Query New Documents"}`.
+         Repositioned downstream nodes (positionX offsets) to leave room for the new node.
+
+      **Verifications**:
+      - `grep sprk_matterteammember` against migrated file returns 0 matches (AC-1C.2).
+      - JSON parses; 5 nodes / 4 edges; all edge endpoints resolve to existing node names.
+      - Lookup node config keys match `LookupUserMembershipNodeConfig` (entityType, roles,
+        includeRelated) per task 041 executor; `{{joinIds myMatters.ids}}` template matches
+        the helper registered in task 002 (`TemplateEngine.cs` line 71-72).
+      - Mirrors `notification-tasks-due-soon.json` shape conventions for `__actionType`,
+        `templateParameters`, and dependsOn/edges authoring.
+
+      **Deferred to P11 UAT (task 110)**: actual smoke-test execution against `spaarkedev1`.
+      Seeded-fixture procedure:
+      - Seed at least 3 `sprk_matter` rows assigned to the test user across all 3 roles
+        (owner, assignedAttorney, assignedParalegal) — the resolver must return non-empty
+        `myMatters.ids` before the Query node can produce results.
+      - Seed at least 1 `sprk_document` with `sprk_matter` lookup pointing at one of the
+        seeded matters AND `createdon` within the configured time window AND `createdby !=
+        test user` (the existing `last-x-hours` + `ne-userid` filters remain).
+      - Expected: `newDocsQuery.output.count &gt; 0`; `Check Results` evaluates true;
+        `Create Notification` emits at least 1 per-item notification (iterateItems=true).
+      - Re-run point: `tests/integration/` playbook integration tests under task 053 — or
+        manual P11 UAT trigger via `/api/admin/jobs/{id}/trigger` for the scheduled playbook.
+
+      Sibling tasks 051 (notification-new-emails.json) and 052 (notification-new-events.json)
+      run in parallel; no file overlap.
+    </completion-notes>
     <phase>P6</phase>
     <parallel-group>L (with 051, 052)</parallel-group>
     <parallel-safe>true</parallel-safe>

@@ -3,7 +3,7 @@
   "playbook": {
     "id": "NP-004",
     "name": "New Emails on Matters",
-    "description": "Notifies users when new emails have been received on their assigned matters since the last check. Queries email activity records linked to matters where the user is a team member, filtered by the configurable timeWindow parameter.",
+    "description": "Notifies users when new emails have been received on their assigned matters since the last check. Resolves matter memberships via the LookupUserMembership node (R3 FR-1C.2 / A1 defect remediation) and filters inbound emails by those matter IDs within the configurable timeWindow parameter.",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,
@@ -45,7 +45,24 @@
       "configJson": {
         "scope": "user-matters",
         "resolveUserId": true,
-        "description": "Scoped to the current user's assigned matters"
+        "description": "Scoped to the current user's assigned matters (resolved via LookupUserMembership node)"
+      }
+    },
+    {
+      "name": "Lookup My Matters",
+      "nodeType": "Workflow",
+      "actionType": 52,
+      "canvasType": "lookupUserMembership",
+      "outputVariable": "myMatters",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 52,
+        "entityType": "sprk_matter",
+        "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+        "includeRelated": false,
+        "description": "Resolve the executing user's matter memberships (owner + assigned attorney + assigned paralegal). Replaces the original query that lacked any user-membership filter and would return inbound emails on every matter in the tenant (R3 FR-1C.2 / A1 defect). Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
       }
     },
     {
@@ -54,18 +71,18 @@
       "actionType": 22,
       "canvasType": "updateRecord",
       "outputVariable": "newEmails",
-      "positionX": 350,
+      "positionX": 450,
       "positionY": 200,
-      "dependsOn": ["Start"],
+      "dependsOn": ["Lookup My Matters"],
       "configJson": {
         "__actionType": 22,
         "queryMode": true,
         "entityLogicalName": "email",
-        "fetchXml": "<fetch top='50'><entity name='email'><attribute name='subject'/><attribute name='sender'/><attribute name='createdon'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><condition attribute='directioncode' operator='eq' value='0'/><condition attribute='createdon' operator='ge' value='{{sinceTimestamp}}'/></filter><link-entity name='sprk_matter' from='sprk_matterid' to='regardingobjectid' link-type='inner'><attribute name='sprk_name'/></link-entity><order attribute='createdon' descending='true'/></entity></fetch>",
+        "fetchXml": "<fetch top='50'><entity name='email'><attribute name='subject'/><attribute name='sender'/><attribute name='createdon'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><condition attribute='directioncode' operator='eq' value='0'/><condition attribute='createdon' operator='ge' value='{{sinceTimestamp}}'/><condition attribute='regardingobjectid' operator='in' value='{{joinIds myMatters.ids}}'/></filter><link-entity name='sprk_matter' from='sprk_matterid' to='regardingobjectid' link-type='inner' alias='matter'><attribute name='sprk_name'/></link-entity><order attribute='createdon' descending='true'/></entity></fetch>",
         "parameters": {
           "sinceTimestamp": "{{timeWindow}}"
         },
-        "description": "Retrieve inbound emails linked to user's matters received within the configured time window"
+        "description": "Retrieve inbound emails regarding the executing user's matters (matter IDs from myMatters.ids) received within the configured time window."
       }
     },
     {
@@ -74,7 +91,7 @@
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasNewEmails",
-      "positionX": 600,
+      "positionX": 700,
       "positionY": 200,
       "dependsOn": ["Query New Emails"],
       "configJson": {
@@ -89,7 +106,7 @@
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "notification",
-      "positionX": 900,
+      "positionX": 1000,
       "positionY": 150,
       "dependsOn": ["Has New Emails?"],
       "configJson": {
@@ -120,7 +137,8 @@
     }
   ],
   "edges": [
-    { "source": "Start", "target": "Query New Emails" },
+    { "source": "Start", "target": "Lookup My Matters" },
+    { "source": "Lookup My Matters", "target": "Query New Emails" },
     { "source": "Query New Emails", "target": "Has New Emails?" },
     { "source": "Has New Emails?", "target": "Create Notification", "condition": "true" }
   ]

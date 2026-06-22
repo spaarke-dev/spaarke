@@ -1,7 +1,9 @@
 <task id="R3-051" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Audit + migrate `notification-new-emails.json`</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>Audit found one A1-class defect: the original FetchXML had NO user-membership filter at all (only `directioncode=0` + `createdon>=X` + inner-join to `sprk_matter`), so it would have returned inbound emails on EVERY matter in the tenant — not just the executing user's matters — directly contradicting the playbook description. No `sprk_matterteammember` reference (so not the literal A1 broken-join pattern), but the same root cause (no working membership scoping). Migrated using the same pattern as task 050: added `Lookup My Matters` LookupUserMembership node (actionType=52, entityType=sprk_matter, roles=[owner,assignedAttorney,assignedParalegal], outputVariable=myMatters) between Start and Query New Emails; added `<condition attribute='regardingobjectid' operator='in' value='{{joinIds myMatters.ids}}'/>` to the email filter; preserved the `sprk_matter` link-entity (added `alias='matter'`) so the body template's `regardingMatterName` keeps working. Edges updated (Start→Lookup My Matters→Query New Emails). Positions shifted +100x to make room. JSON re-validated.</completion-notes>
     <phase>P6</phase>
     <parallel-group>L (with 050, 052)</parallel-group>
     <parallel-safe>true</parallel-safe>
