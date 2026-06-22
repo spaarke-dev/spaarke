@@ -48,6 +48,7 @@ import { AiCompletionForm } from './AiCompletionForm';
 import { WaitForm } from './WaitForm';
 import { UpdateRecordForm } from './UpdateRecordForm';
 import { CreateNotificationForm } from './CreateNotificationForm';
+import { LookupUserMembershipForm } from './LookupUserMembershipForm';
 import { NodeValidationBadge } from './NodeValidationBadge';
 import { PromptSchemaForm } from './PromptSchemaForm';
 import { PromptSchemaEditor } from './PromptSchemaEditor';
@@ -116,6 +117,7 @@ const NODE_TYPE_LABELS: Record<string, string> = {
   createTask: 'Create Task',
   sendEmail: 'Send Email',
   createNotification: 'Create Notification',
+  lookupUserMembership: 'Lookup User Membership',
   wait: 'Wait',
 };
 
@@ -143,6 +145,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({ node }: Nod
     'createNotification',
     'aiCompletion',
     'wait',
+    'lookupUserMembership',
   ].includes(nodeType);
 
   // Generic field updater
@@ -323,6 +326,13 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({ node }: Nod
               )}
               {nodeType === 'wait' && (
                 <WaitForm
+                  nodeId={node.id}
+                  configJson={node.data.configJson ?? '{}'}
+                  onConfigChange={handleConfigChange}
+                />
+              )}
+              {nodeType === 'lookupUserMembership' && (
+                <LookupUserMembershipForm
                   nodeId={node.id}
                   configJson={node.data.configJson ?? '{}'}
                   onConfigChange={handleConfigChange}

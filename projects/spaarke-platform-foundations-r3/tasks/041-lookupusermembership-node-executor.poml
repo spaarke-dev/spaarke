@@ -1,7 +1,34 @@
 <task id="R3-041" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Implement `LookupUserMembershipNodeExecutor`</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Implemented LookupUserMembershipNodeExecutor following the AgentServiceNodeExecutor
+      Singleton+Scoped DI pattern (IServiceScopeFactory.CreateScope() per execution) and
+      QueryDataverseNodeExecutor config-JSON + identity-extraction conventions.
+
+      Files:
+        - NEW: src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs
+        - MODIFIED: src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (register Singleton INodeExecutor after AgentServiceNodeExecutor line ~870)
+        - NEW: tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/LookupUserMembershipNodeExecutorTests.cs (17 tests, all pass)
+
+      Config shape (camelCase, mirroring QueryDataverseNodeConfig):
+        { "entityType": "sprk_matter", "roles": ["owner","assignedAttorney"]?, "includeRelated": bool? }
+      Output structured data: { entityType, count, ids[], byRole, continuationToken, cacheExpiresAt }
+
+      Identity resolution: Uses NodeExecutionContext.UserId (set by PlaybookSchedulerService) with
+      previous-output fallback (mirrors QueryDataverseNodeExecutor.ResolveUserId). When UserId
+      is missing/empty, returns a NodeErrorCodes.ValidationFailed result without calling the resolver.
+
+      Q3 (includeRelated 1-hop): passed to resolver as ["*"] sentinel; resolver
+      accepts-but-ignores in Phase 1A per task 033 (task 054 implements transitive expansion).
+
+      Build: 0 errors / 16 pre-existing warnings.
+      Tests: 17 new tests pass; full Sprk.Bff.Api.Tests = 7475 passed / 0 failed / 110 skipped.
+      Publish: 46.20 MB compressed (0 MB delta vs post-task-023 baseline of 46.20 MB).
+      CVE: no new HIGH (existing transitive Microsoft.Kiota.Abstractions 1.21.2 remains pre-existing).
+    </completion-notes>
     <phase>P5</phase>
     <parallel-group>J (with 040)</parallel-group>
     <parallel-safe>true</parallel-safe>

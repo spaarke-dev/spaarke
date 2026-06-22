@@ -30,7 +30,17 @@ export interface PromptSchemaValidation {
   /** Severity: "error" prevents save, "warning" is informational. */
   severity: 'error' | 'warning';
   /** Machine-readable rule identifier. */
-  rule: 'missing-task' | 'unresolvable-choices' | 'output-coverage' | 'choice-consistency' | 'type-compatibility';
+  rule:
+    | 'missing-task'
+    | 'unresolvable-choices'
+    | 'output-coverage'
+    | 'choice-consistency'
+    | 'type-compatibility'
+    // R3 P5 (task 043): LookupUserMembership node required-field rules. Mirrors
+    // server LookupUserMembershipNodeExecutor (task 041) contract — entityType
+    // + outputVariable are required; roles + includeRelated are optional.
+    | 'lookup-user-membership-missing-entity-type'
+    | 'lookup-user-membership-missing-output-variable';
   /** Human-readable validation message. */
   message: string;
 }
@@ -162,6 +172,15 @@ export function validatePromptSchemaNodes(nodes: Node<PlaybookNodeData>[], edges
 
     // Rule (e): Type compatibility
     results.push(...validateTypeCompatibility(node.id, schema, downstreamInfos));
+  }
+
+  // R3 P5 (task 043): per-ActionType config-shape validation for non-AI nodes.
+  // Currently covers LookupUserMembership (FR-1B.4); extend here when other
+  // per-ActionType forms add required fields that must block save.
+  for (const node of nodes) {
+    if (node.data.type === 'lookupUserMembership') {
+      results.push(...validateLookupUserMembershipNode(node.id, node));
+    }
   }
 
   if (results.length > 0) {
@@ -466,6 +485,62 @@ function validateTypeCompatibility(
         }
       }
     }
+  }
+
+  return results;
+}
+
+/**
+ * R3 P5 (task 043): Validate a LookupUserMembership node's config.
+ *
+ * Mirrors the server-side LookupUserMembershipNodeExecutor (task 041) contract:
+ *   - entityType (string, required) — Dataverse logical name; resolver validates at runtime
+ *   - outputVariable (string, required) — canvas variable bound to resolved user IDs
+ *   - roles (string[], optional) — empty = all roles
+ *   - includeRelated (boolean, optional, default false) — 1-hop transitive per owner Q3
+ *
+ * Per spec FR-1B.4 + owner Q4 (entityType is free-text — no allow-list).
+ * Missing required fields produce 'error' severity which blocks playbook save
+ * via the existing hasValidationErrors() consumer in playbookNodeSync.ts.
+ */
+function validateLookupUserMembershipNode(nodeId: string, node: Node<PlaybookNodeData>): PromptSchemaValidation[] {
+  const results: PromptSchemaValidation[] = [];
+
+  // Parse configJson defensively (matches LookupUserMembershipForm.parseConfig).
+  let entityType = '';
+  const configJsonStr = node.data.configJson;
+  if (typeof configJsonStr === 'string' && configJsonStr.length > 0) {
+    try {
+      const parsed = JSON.parse(configJsonStr) as { entityType?: unknown };
+      if (typeof parsed.entityType === 'string') {
+        entityType = parsed.entityType;
+      }
+    } catch {
+      // Malformed configJson — treat entityType as missing; rule below fires.
+    }
+  }
+
+  if (entityType.trim() === '') {
+    results.push({
+      nodeId,
+      severity: 'error',
+      rule: 'lookup-user-membership-missing-entity-type',
+      message:
+        'Lookup User Membership: Entity Type is required (Dataverse logical name of the parent record, e.g. sprk_matter).',
+    });
+  }
+
+  // outputVariable lives on node.data (NOT configJson) — the shared field set
+  // by the Basic section, consumed by IMembershipResolverService binding.
+  const outputVariable = typeof node.data.outputVariable === 'string' ? node.data.outputVariable.trim() : '';
+  if (outputVariable === '') {
+    results.push({
+      nodeId,
+      severity: 'error',
+      rule: 'lookup-user-membership-missing-output-variable',
+      message:
+        'Lookup User Membership: Output Variable is required so downstream nodes can reference the resolved user IDs.',
+    });
   }
 
   return results;

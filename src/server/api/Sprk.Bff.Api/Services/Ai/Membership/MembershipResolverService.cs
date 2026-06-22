@@ -139,6 +139,34 @@ public sealed class MembershipResolverService : IMembershipResolverService
         var normalizedEntity = entityType.Trim().ToLowerInvariant();
         var effectiveOptions = options ?? new MembershipResolveOptions();
 
+        // ── R3 Part 1D — pre-validate includeRelated for >1-hop syntax ─────
+        // FR-1D.2 / Q3 (owner 2026-06-20): max chain depth is 1 hop. Reject
+        // explicit chain syntax (e.g., "documents.events") at the front door
+        // before any I/O — depth violations are caller errors, not server
+        // errors, so the endpoint surfaces them as 400 BadRequest.
+        if (effectiveOptions.IncludeRelated is { Count: > 0 } preflight)
+        {
+            foreach (var entry in preflight)
+            {
+                if (string.IsNullOrWhiteSpace(entry))
+                {
+                    continue;
+                }
+                var trimmed = entry.Trim();
+                if (trimmed.Contains('.', StringComparison.Ordinal) ||
+                    trimmed.Contains('/', StringComparison.Ordinal))
+                {
+                    throw new MembershipDepthExceededException(
+                        offendingEntry: trimmed,
+                        reasonTag: "explicit-chain-syntax",
+                        message: $"includeRelated entry '{trimmed}' uses chain syntax that " +
+                                 "exceeds the 1-hop maximum. Each entry must name a single " +
+                                 "related entity (e.g., 'sprk_document'); chained syntax " +
+                                 "such as 'sprk_document.sprk_event' is not supported.");
+                }
+            }
+        }
+
         // ── Cache lookup ────────────────────────────────────────────────────
         var cacheKey = BuildCacheKey(systemUserId, normalizedEntity, effectiveOptions);
         var cached = await TryGetFromCacheAsync(cacheKey, ct).ConfigureAwait(false);
@@ -155,14 +183,16 @@ public sealed class MembershipResolverService : IMembershipResolverService
             "MembershipResolverService cache MISS for systemUserId={SystemUserId} entity={EntityType} — resolving",
             systemUserId, normalizedEntity);
 
-        // ── Phase 1D guard (accepted-but-ignored) ──────────────────────────
-        if (effectiveOptions.IncludeRelated is { Count: > 0 } related)
+        // ── R3 Part 1D — log requested transitive expansion ────────────────
+        // The actual resolution happens after the primary resolution below so
+        // we have the matched primary ids[] to join from. Validation already
+        // ran above (explicit chain syntax → MembershipDepthExceededException).
+        var includeRelatedList = effectiveOptions.IncludeRelated;
+        if (includeRelatedList is { Count: > 0 } requested)
         {
-            _logger.LogInformation(
-                "MembershipResolverService: includeRelated={IncludeRelated} requested by caller — " +
-                "Phase 1D transitive expansion is not yet implemented (task 054). Returning direct " +
-                "memberships only.",
-                string.Join(",", related));
+            _logger.LogDebug(
+                "MembershipResolverService: includeRelated={IncludeRelated} requested for systemUserId={SystemUserId} entity={EntityType} (Phase 1D transitive expansion)",
+                string.Join(",", requested), systemUserId, normalizedEntity);
         }
 
         // ── a) Discovery ────────────────────────────────────────────────────
@@ -186,7 +216,18 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 effectiveOptions.Roles is null ? "all" : string.Join(",", effectiveOptions.Roles),
                 effectiveOptions.IdentityTypes is null ? "all" : string.Join(",", effectiveOptions.IdentityTypes));
 
-            var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors);
+            // No primary ids → transitive map is also empty (but shape-preserved
+            // so clients see "requested but none matched"). Validation still
+            // runs so unknown related entities are reported even when primary
+            // resolution returns nothing.
+            var emptyTransitive = includeRelatedList is { Count: > 0 }
+                ? await ResolveTransitiveAsync(
+                        normalizedEntity,
+                        primaryIds: Array.Empty<Guid>(),
+                        includeRelated: includeRelatedList,
+                        ct).ConfigureAwait(false)
+                : null;
+            var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors, emptyTransitive);
             await TrySetCacheAsync(cacheKey, emptyResponse, ct).ConfigureAwait(false);
             return emptyResponse;
         }
@@ -214,7 +255,14 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 "(descriptors={DescriptorCount}, but no identity values matched) — returning empty",
                 normalizedEntity, descriptors.Count);
 
-            var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors);
+            var emptyTransitive = includeRelatedList is { Count: > 0 }
+                ? await ResolveTransitiveAsync(
+                        normalizedEntity,
+                        primaryIds: Array.Empty<Guid>(),
+                        includeRelated: includeRelatedList,
+                        ct).ConfigureAwait(false)
+                : null;
+            var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors, emptyTransitive);
             await TrySetCacheAsync(cacheKey, emptyResponse, ct).ConfigureAwait(false);
             return emptyResponse;
         }
@@ -238,6 +286,20 @@ public sealed class MembershipResolverService : IMembershipResolverService
             nextToken = EncodeContinuationSkip(fetchSkip + effectiveLimit);
         }
 
+        // ── R3 Part 1D — transitive expansion (only when requested) ────────
+        // Validation + per-related-entity FetchXml join. Throws
+        // MembershipDepthExceededException if a requested related entity has
+        // no 1-hop Lookup back to the primary entity (FR-1D.2 / Q3).
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<Guid>>>? relatedByRole = null;
+        if (includeRelatedList is { Count: > 0 })
+        {
+            relatedByRole = await ResolveTransitiveAsync(
+                normalizedEntity,
+                primaryIds: ids,
+                includeRelated: includeRelatedList,
+                ct).ConfigureAwait(false);
+        }
+
         // ── h) Build + cache response ───────────────────────────────────────
         var expiresAt = DateTimeOffset.UtcNow.Add(CacheTtl);
         var response = new MembershipResponse(
@@ -247,7 +309,8 @@ public sealed class MembershipResolverService : IMembershipResolverService
             ByRole: byRole,
             Count: ids.Count,
             CacheExpiresAt: expiresAt,
-            ContinuationToken: nextToken);
+            ContinuationToken: nextToken,
+            RelatedByRole: relatedByRole);
 
         await TrySetCacheAsync(cacheKey, response, ct).ConfigureAwait(false);
 
@@ -255,9 +318,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
         _logger.LogInformation(
             "MembershipResolverService resolved systemUserId={SystemUserId} entity={EntityType} " +
             "in {ElapsedMs}ms (descriptors={DescriptorCount}, conditions={ConditionCount}, " +
-            "rows={RowCount}, roles={RoleCount}, hasMore={HasMore})",
+            "rows={RowCount}, roles={RoleCount}, hasMore={HasMore}, relatedEntities={RelatedCount})",
             systemUserId, normalizedEntity, sw.ElapsedMilliseconds,
-            descriptors.Count, fetchSummary.ConditionCount, ids.Count, byRole.Count, hasMore);
+            descriptors.Count, fetchSummary.ConditionCount, ids.Count, byRole.Count, hasMore,
+            relatedByRole?.Count ?? 0);
 
         return response;
     }
@@ -542,7 +606,8 @@ public sealed class MembershipResolverService : IMembershipResolverService
     private static MembershipResponse BuildEmptyResponse(
         string entityType,
         PersonIdentity identity,
-        IReadOnlyList<MembershipDescriptor> descriptors)
+        IReadOnlyList<MembershipDescriptor> descriptors,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<Guid>>>? relatedByRole = null)
     {
         var emptyByRole = new Dictionary<string, IReadOnlyList<Guid>>(StringComparer.Ordinal);
         foreach (var d in descriptors)
@@ -556,7 +621,285 @@ public sealed class MembershipResolverService : IMembershipResolverService
             ByRole: emptyByRole,
             Count: 0,
             CacheExpiresAt: DateTimeOffset.UtcNow.Add(CacheTtl),
-            ContinuationToken: null);
+            ContinuationToken: null,
+            RelatedByRole: relatedByRole);
+    }
+
+    // ── R3 Part 1D — transitive expansion (task 054) ───────────────────────
+    /// <summary>
+    /// Resolves transitive memberships per FR-1D.1 / FR-1D.2 / FR-1D.3. For
+    /// each entry in <paramref name="includeRelated"/>:
+    ///   1. Discover Lookup fields on the related entity whose Targets[] include
+    ///      <paramref name="primaryEntity"/> (1-hop verification per Q3).
+    ///   2. If no such Lookups exist → throw <see cref="MembershipDepthExceededException"/>
+    ///      with reason "not-a-direct-lookup-target" — the caller's request cannot
+    ///      be satisfied within the 1-hop budget.
+    ///   3. Build a single FetchXml query against the related entity:
+    ///        - Filter type='or' over (lookupField, primaryId) pairs using
+    ///          the <c>in</c> operator so all primary ids are joined in one
+    ///          condition per lookup field (efficient — single round trip).
+    ///        - Project the related entity's id + each back-reference lookup
+    ///          field so MaterializeResults can attribute rows to per-lookup
+    ///          "roles" (e.g., a document's <c>sprk_matter</c> back-reference).
+    ///   4. Materialize: dedupe ids, sort, build per-role buckets keyed by
+    ///      derived role name (CamelCase strategy mirrors the primary resolver).
+    ///
+    /// Empty <paramref name="primaryIds"/> short-circuits the FetchXml — the
+    /// 1-hop discovery still runs (so unknown-entity validation surfaces) but
+    /// the result is the empty inner map (role keys → empty id lists).
+    ///
+    /// Throws <see cref="MembershipDepthExceededException"/> for any entry whose
+    /// related entity cannot be resolved (unknown-entity) OR has no 1-hop Lookup
+    /// back to the primary entity (not-a-direct-lookup-target). The endpoint
+    /// layer maps this to 400 BadRequest per the 1-hop binding in FR-1D.2.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<Guid>>>>
+        ResolveTransitiveAsync(
+            string primaryEntity,
+            IReadOnlyList<Guid> primaryIds,
+            IReadOnlyList<string> includeRelated,
+            CancellationToken ct)
+    {
+        // Outer dict: related entity → per-role inner map. Ordinal keys
+        // (Dataverse logical names are lowercase ASCII) so output is stable
+        // across .NET releases.
+        var outer = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<Guid>>>(
+            StringComparer.Ordinal);
+
+        // De-dup + normalize the requested entries (the endpoint may already
+        // do this, but the resolver is the policy enforcement point — defense
+        // in depth).
+        var requested = new List<string>(includeRelated.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in includeRelated)
+        {
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                continue;
+            }
+            var normalized = entry.Trim().ToLowerInvariant();
+            if (seen.Add(normalized))
+            {
+                requested.Add(normalized);
+            }
+        }
+
+        foreach (var relatedEntity in requested)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // ── 1-hop verification via metadata discovery ──────────────────
+            IReadOnlyList<string> backRefLookups;
+            try
+            {
+                backRefLookups = await _discovery
+                    .DiscoverLookupsTargetingAsync(relatedEntity, primaryEntity, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Unknown related entity (metadata fetch failed). Surface as a
+                // 1-hop-not-possible error so the endpoint returns 400, not 500.
+                throw new MembershipDepthExceededException(
+                    offendingEntry: relatedEntity,
+                    reasonTag: "unknown-entity",
+                    message: $"includeRelated entry '{relatedEntity}' could not be resolved: " +
+                             $"{ex.Message}",
+                    inner: ex);
+            }
+
+            if (backRefLookups.Count == 0)
+            {
+                throw new MembershipDepthExceededException(
+                    offendingEntry: relatedEntity,
+                    reasonTag: "not-a-direct-lookup-target",
+                    message: $"includeRelated entry '{relatedEntity}' has no Lookup field " +
+                             $"targeting '{primaryEntity}'. The 1-hop max enforced by " +
+                             $"FR-1D.2 requires a direct relationship; transitive expansion " +
+                             $"beyond a single hop is not supported.");
+            }
+
+            // ── No primary ids → empty inner map but preserve role keys ────
+            if (primaryIds.Count == 0)
+            {
+                var emptyInner = new Dictionary<string, IReadOnlyList<Guid>>(StringComparer.Ordinal);
+                foreach (var field in backRefLookups)
+                {
+                    emptyInner[DeriveRoleFromField(field)] = Array.Empty<Guid>();
+                }
+                outer[relatedEntity] = emptyInner;
+                continue;
+            }
+
+            // ── Build FetchXml: OR-joined `in` conditions per back-ref lookup
+            // Strategy: single Fetch projects (id + each back-ref lookup field);
+            // filter type='or' contains one <condition operator='in'> per lookup
+            // field with all primary ids as <value> children. Materialization
+            // mirrors MaterializeResults' descriptor-based row attribution.
+            var fetchXml = BuildTransitiveFetchXml(relatedEntity, backRefLookups, primaryIds);
+            var fetch = new FetchExpression(fetchXml);
+            var entityCollection = await _dataverse
+                .RetrieveMultipleAsync(fetch, ct)
+                .ConfigureAwait(false);
+
+            var inner = MaterializeTransitiveResults(entityCollection, backRefLookups);
+            outer[relatedEntity] = inner;
+        }
+
+        return outer;
+    }
+
+    /// <summary>
+    /// Builds the FetchXml for a single related-entity transitive query.
+    /// Projects entity id + each back-ref lookup; filter type='or' contains
+    /// one <c>in</c> condition per back-ref lookup with all primary ids as
+    /// value children. The <c>in</c> operator handles up to 500 values per
+    /// condition in standard Dataverse — primary ids[] is already bounded by
+    /// the resolver's effectiveLimit (default 500, max 5000).
+    /// </summary>
+    private static string BuildTransitiveFetchXml(
+        string relatedEntity,
+        IReadOnlyList<string> backRefLookups,
+        IReadOnlyList<Guid> primaryIds)
+    {
+        // Cap to MaxLimit defensively — the primary resolver already truncates
+        // ids[] to effectiveLimit (<= MaxLimit), but a future caller of this
+        // helper might not.
+        var capped = primaryIds.Count <= MembershipResolveOptions.MaxLimit
+            ? primaryIds
+            : primaryIds.Take(MembershipResolveOptions.MaxLimit).ToList();
+
+        var sb = new StringBuilder(512);
+        // top is generous — transitive results are 1-hop only and naturally
+        // bounded by the related-entity volume. We use the primary MaxLimit
+        // as a sane ceiling.
+        sb.Append("<fetch distinct='true' top='").Append(MembershipResolveOptions.MaxLimit).Append('\'');
+        sb.Append("><entity name='").Append(EscapeXml(relatedEntity)).Append("'>");
+
+        // Project each back-ref lookup field so MaterializeTransitiveResults
+        // can attribute rows to roles.
+        foreach (var field in backRefLookups)
+        {
+            sb.Append("<attribute name='").Append(EscapeXml(field)).Append("' />");
+        }
+
+        sb.Append("<filter type='or'>");
+        foreach (var field in backRefLookups)
+        {
+            sb.Append("<condition attribute='").Append(EscapeXml(field)).Append("' operator='in'>");
+            foreach (var id in capped)
+            {
+                if (id == Guid.Empty)
+                {
+                    continue;
+                }
+                sb.Append("<value>")
+                  .Append(id.ToString("D", CultureInfo.InvariantCulture))
+                  .Append("</value>");
+            }
+            sb.Append("</condition>");
+        }
+        sb.Append("</filter></entity></fetch>");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Materializes a transitive-query EntityCollection into the inner
+    /// <c>role → ids</c> map. Mirrors <see cref="MaterializeResults"/> but
+    /// scoped to back-reference lookups (no IdentityType branching needed —
+    /// every Lookup is treated as one role).
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlyList<Guid>> MaterializeTransitiveResults(
+        EntityCollection entityCollection,
+        IReadOnlyList<string> backRefLookups)
+    {
+        var byRoleAccum = new Dictionary<string, HashSet<Guid>>(StringComparer.Ordinal);
+        foreach (var field in backRefLookups)
+        {
+            byRoleAccum[DeriveRoleFromField(field)] = new HashSet<Guid>();
+        }
+
+        foreach (var row in entityCollection.Entities)
+        {
+            if (row.Id == Guid.Empty)
+            {
+                continue;
+            }
+            foreach (var field in backRefLookups)
+            {
+                if (!row.Contains(field))
+                {
+                    continue;
+                }
+                var value = row[field];
+                var matches = value switch
+                {
+                    EntityReference er => er.Id != Guid.Empty,
+                    Guid g => g != Guid.Empty,
+                    _ => false
+                };
+                if (matches)
+                {
+                    byRoleAccum[DeriveRoleFromField(field)].Add(row.Id);
+                }
+            }
+        }
+
+        var inner = new Dictionary<string, IReadOnlyList<Guid>>(StringComparer.Ordinal);
+        foreach (var (role, set) in byRoleAccum)
+        {
+            inner[role] = set.OrderBy(g => g).ToList();
+        }
+        return inner;
+    }
+
+    /// <summary>
+    /// Derive a public-facing role name from a back-reference Lookup field
+    /// name using the same CamelCase strategy as the primary discovery service
+    /// (strip <c>sprk_</c> prefix + strip trailing digits + first char lowercase).
+    /// Kept as a local helper rather than calling into
+    /// <see cref="MembershipFieldDiscoveryService.DeriveRoleNameCamelCase"/>
+    /// directly to keep the transitive code self-contained (avoids reaching
+    /// across a sibling internal API).
+    /// </summary>
+    private static string DeriveRoleFromField(string field)
+    {
+        if (string.IsNullOrWhiteSpace(field))
+        {
+            return field ?? string.Empty;
+        }
+
+        var trimmed = field.Trim();
+        var working = trimmed;
+
+        const string prefix = "sprk_";
+        if (working.Length > prefix.Length &&
+            working.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            working = working.Substring(prefix.Length);
+        }
+
+        // Strip trailing digits.
+        var endTrim = working.Length;
+        while (endTrim > 0 && char.IsDigit(working[endTrim - 1]))
+        {
+            endTrim--;
+        }
+        if (endTrim > 0)
+        {
+            working = working.Substring(0, endTrim);
+        }
+
+        if (working.Length == 0)
+        {
+            return trimmed;
+        }
+
+        var first = char.ToLower(working[0], CultureInfo.InvariantCulture);
+        return working.Length == 1
+            ? first.ToString(CultureInfo.InvariantCulture)
+            : first + working.Substring(1);
     }
 
     // ── Paging helpers ─────────────────────────────────────────────────────

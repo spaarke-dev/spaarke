@@ -1,7 +1,11 @@
 <task id="R3-042" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Update `playbookNodeSync.ts` (client) + `NodeService.cs` (server) canvas-server mapping</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Added LookupUserMembership = 52 to client ActionType enum, PlaybookNodeType ('lookupUserMembership' canvas string), NodeTypeToDataverse (Workflow), NodeTypeToActionType, NODE_TYPE_INFO (action category), and PlaybookNodeData fields (membershipEntityType, membershipRoles, membershipIncludeRelated). Added 'lookupUserMembership' case to playbookNodeSync.ts buildConfigJson remapping canvas membership* prefix to server-expected entityType/roles/includeRelated keys. Server NodeService.cs: added 'lookupUserMembership' arm to both MapCanvasTypeToNodeType (Workflow) and MapCanvasTypeToActionType (LookupUserMembership), mirroring the existing createTask/sendEmail/updateRecord switch entries verbatim per Q5 owner directive. Server build: 0 errors / 16 warnings (all pre-existing in unrelated files). Client TypeScript pre-existing error count unchanged (35 lines, identical with/without my changes -- verified by git stash). NodeServiceTests: 32/32 pass. BFF publish-size: 46.21 MB (+0.02 MB vs task 036 baseline 46.19 MB; cumulative +0.56 MB vs 45.65 MB Phase 5 Outcome A baseline; well under +1 MB per-task threshold). CVE: no new HIGH (only pre-existing Microsoft.Kiota.Abstractions 1.21.2). Drift integration test (task 065) is the canonical contract verification per spec FR-3H3.1 and is intentionally deferred -- spot-checked alignment manually: server ActionType.LookupUserMembership = 52 in INodeExecutor.cs matches client; canvas string 'lookupUserMembership' consumed identically by both sides. Coordination with sibling task 043: 043 has already added 'lookupUserMembership' to the separate types/canvas.ts PlaybookNodeType discriminated union; field names agreed on the membership* prefix.
+    </completion-notes>
     <phase>P5</phase>
     <parallel-group>K (with 043)</parallel-group>
     <parallel-safe>true</parallel-safe>

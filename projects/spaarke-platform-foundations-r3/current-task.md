@@ -11,7 +11,7 @@
 |---|---|
 | **Project** | `spaarke-platform-foundations-r3` |
 | **Branch** | `work/spaarke-platform-foundations-r3` — pushed to origin at `bb78dc9c9` (clean, no uncommitted work) |
-| **Status** | **27 of 69 tasks complete ✅ + 1 blocked-operator (071) — ~41%** |
+| **Status** | **27 of 69 tasks complete ✅ + 1 blocked-operator (071) — ~41%** (Wave 11 task 043 in flight: LookupUserMembershipForm.tsx) |
 | **Build** | ✅ `dotnet build Spaarke.sln` 0 errors / 16 pre-existing warnings |
 | **Tests** | ~150+ unit tests added across Spaarke.Scheduling.Tests + Sprk.Bff.Api.Tests; all green |
 | **BFF publish-size** | 46.20 MB (~+0.55 vs 45.65 baseline; 60 MB ceiling intact) |

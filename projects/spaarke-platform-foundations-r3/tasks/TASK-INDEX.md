@@ -31,8 +31,8 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 021 | `POST /api/admin/jobs/{jobId}/trigger` | P3 | ✅ | 013, 014, 015, 016 | **F** | true | FULL |
 | 022 | `GET /history` + `POST /enable` + `POST /disable` | P3 | ✅ | 013, 014, 015, 016 | **F** | true | FULL |
 | 023 | Migrate `PlaybookSchedulerService` to Spaarke.Scheduling | P3 | ✅ | 013, 020, 021 | — | true | FULL |
-| 024 | Migrate `sprk_analysisplaybook.sprk_configjson` schedule | P3 | 🔲 | 023 | — | true | STANDARD |
-| 025 | Admin endpoints + scheduler integration tests | P3 | 🔲 | 020-024 | — | true | STANDARD |
+| 024 | Migrate `sprk_analysisplaybook.sprk_configjson` schedule | P3 | ✅ | 023 | — | true | STANDARD |
+| 025 | Admin endpoints + scheduler integration tests | P3 | ✅ | 020-024 | — | true | STANDARD |
 | 030 | `MembershipFieldDiscoveryService` | P4 | ✅ | 005, 012 | **G** | true | FULL |
 | 031 | `IdentityNormalizationService` | P4 | ✅ | 012 | **G** | true | FULL |
 | 032 | Define + implement `sprk_organization` user-mapping | P4 | ✅ | 012 | **G** | true | FULL |
@@ -42,14 +42,14 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 036 | Membership admin endpoints (discovered + refresh-metadata) | P4 | ✅ | 030 | **I** | true | FULL |
 | 037 | Author ADR-034 — User-record membership pattern | P4 | ✅ | 030, 031, 032, 033 | **I** main-only | false | FULL |
 | 040 | Add `LookupUserMembership = 52` to ActionType enum | P5 | ✅ | 035 | **J** | true | STANDARD |
-| 041 | Implement `LookupUserMembershipNodeExecutor` | P5 | 🔲 | 033, 040 | **J** | true | FULL |
-| 042 | Canvas-server mapping update (client + server) | P5 | 🔲 | 040, 041 | **K** | true | FULL |
-| 043 | `LookupUserMembershipForm.tsx` in PlaybookBuilder | P5 | 🔲 | 040 | **K** | true | FULL |
+| 041 | Implement `LookupUserMembershipNodeExecutor` | P5 | ✅ | 033, 040 | **J** | true | FULL |
+| 042 | Canvas-server mapping update (client + server) | P5 | ✅ | 040, 041 | **K** | true | FULL |
+| 043 | `LookupUserMembershipForm.tsx` in PlaybookBuilder | P5 | ✅ | 040 | **K** | true | FULL |
 | 050 | Migrate `notification-new-documents.json` | P6 | 🔲 | 041, 042 | **L** | true | FULL |
 | 051 | Audit + migrate `notification-new-emails.json` | P6 | 🔲 | 041, 042 | **L** | true | STANDARD |
 | 052 | Audit + migrate `notification-new-events.json` | P6 | 🔲 | 041, 042 | **L** | true | STANDARD |
 | 053 | Migrated playbook integration tests | P6 | 🔲 | 050, 051, 052 | — | true | STANDARD |
-| 054 | `includeRelated` chained-discovery implementation | P6.5 | 🔲 | 033, 035 | — | true | FULL |
+| 054 | `includeRelated` chained-discovery implementation | P6.5 | ✅ | 033, 035 | — | true | FULL |
 | 055 | 1-hop max enforcement on `includeRelated` | P6.5 | 🔲 | 054 | — | true | STANDARD |
 | 056 | Transitive membership perf integration tests | P6.5 | 🔲 | 054, 055 | — | true | STANDARD |
 | 060 | P7.0 — `sprk_searchindexed` consumer inventory | P7.0 | 🔲 | none | **M** main-only | false | STANDARD |

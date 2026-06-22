@@ -1,7 +1,38 @@
 <task id="R3-025" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Integration tests for admin endpoints + scheduler migration</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+28 new integration tests added; all pass. Two test files authored:
+(1) tests/integration/Sprk.Bff.Api.IntegrationTests/Admin/JobsEndpointsTests.cs — 15 tests
+    via WebApplicationFactory&lt;Program&gt; against the full BFF bootstrap + production
+    SystemAdmin policy + real SchedulingModule DI graph. Covers AC-2.1 (discovery),
+    AC-2.3 (status + manual trigger with 202+Location+TriggerResponse), AC-2.5 (Theory:
+    6 endpoints × non-admin → 403 AND unauthenticated → 401 — total 12 theory rows),
+    AC-2.6 (enable/disable flip + correlationId on run records), AC-2.7 (failed-job
+    error surfacing via /status). Includes dedicated AdminJobsIntegrationFixture
+    mirroring the canonical configuration-key set from DataverseIntegrationTestFixture
+    so all Program.cs option validators pass (per test-fixture-contracts.md §F.2).
+(2) tests/integration/Sprk.Bff.Api.IntegrationTests/Scheduling/PlaybookSchedulerJobTests.cs
+    — 13 tests driving PlaybookSchedulerJob.ExecuteAsync directly against in-memory
+    FakeGenericEntityService + FakePlaybookOrchestrationService wired through a real
+    IServiceProvider (no WebApplicationFactory needed — the job is a pure
+    IScheduledJob handler). Covers AC-2.4 fan-out (7 playbooks single-row), AC-2.4
+    cadence preservation (Theory: 6 boundary rows + 1 full-tick test mixing hourly/
+    daily/weekly playbooks), Q1 fresh correlationId per child (uniqueness AND distinct
+    from parent), AC-2.4 sprk_lastrundate advancement.
+
+Hard constraints honored: no production code modified (test-only), no .claude/ paths
+touched, no new NuGet packages added (no CVE delta possible), in-memory fakes used
+throughout (no live Dataverse / SB needed). Test-update obligation per
+bff-extensions.md §F-test-update-obligation satisfied for tasks 020-024 deliverables.
+
+Coverage complements the in-process unit-flavored tests at
+tests/unit/Sprk.Bff.Api.Tests/Api/Admin/JobsEndpointsTests.cs (~30 tests) without
+duplication — the integration suite focuses on headline AC paths through full
+production wiring; the unit suite covers exhaustive 4xx/5xx + edge cases.
+    </completion-notes>
     <phase>P3</phase>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -10,6 +41,7 @@
     <tags>integration-test,admin-endpoints,scheduler</tags>
     <relevant-files>
       <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Admin/JobsEndpointsTests.cs (new)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Admin/AdminJobsIntegrationFixture.cs (new)</file>
       <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Scheduling/PlaybookSchedulerJobTests.cs (new)</file>
     </relevant-files>
     <dependencies>020, 021, 022, 023, 024</dependencies>

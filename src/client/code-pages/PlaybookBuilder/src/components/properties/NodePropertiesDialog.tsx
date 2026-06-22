@@ -50,6 +50,7 @@ import { CreateTaskForm } from './CreateTaskForm';
 import { AiCompletionForm } from './AiCompletionForm';
 import { WaitForm } from './WaitForm';
 import { UpdateRecordForm } from './UpdateRecordForm';
+import { LookupUserMembershipForm } from './LookupUserMembershipForm';
 import { PromptSchemaForm } from './PromptSchemaForm';
 import { PromptSchemaEditor } from './PromptSchemaEditor';
 import type { PromptSchema } from '../../types/promptSchema';
@@ -168,6 +169,7 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
     'createTask',
     'aiCompletion',
     'wait',
+    'lookupUserMembership',
   ].includes(nodeType);
   const hasConfigTab = hasTypeForm || isConditionNode || !isStartNode;
 
@@ -429,6 +431,13 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                         )}
                         {nodeType === 'wait' && (
                           <WaitForm
+                            nodeId={selectedNode.id}
+                            configJson={selectedNode.data.configJson ?? '{}'}
+                            onConfigChange={handleConfigChange}
+                          />
+                        )}
+                        {nodeType === 'lookupUserMembership' && (
+                          <LookupUserMembershipForm
                             nodeId={selectedNode.id}
                             configJson={selectedNode.data.configJson ?? '{}'}
                             onConfigChange={handleConfigChange}

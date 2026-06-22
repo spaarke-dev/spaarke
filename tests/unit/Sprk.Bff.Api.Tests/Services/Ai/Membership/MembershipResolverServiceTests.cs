@@ -393,6 +393,301 @@ public class MembershipResolverServiceTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // R3 Part 1D — task 054 — transitive includeRelated
+    // ─────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid DocumentIdA = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddd01");
+    private static readonly Guid DocumentIdB = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddd02");
+    private static readonly Guid EventIdA = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeee01");
+
+    [Fact]
+    public async Task ResolveAsync_WithIncludeRelated_ReturnsTransitiveMemberships()
+    {
+        // AC-1D.1: includeRelated=documents returns documents on matters the user is on.
+        // Primary: user owns MatterA. Related: DocumentA + DocumentB on MatterA via sprk_matter Lookup.
+        var discovery = BuildDiscoveryMock(Descriptor("ownerid", "owner", "SystemUser"));
+        // Back-ref lookups: sprk_document.sprk_matter → sprk_matter
+        var discoveryMock = (Mock<IMembershipFieldDiscoveryService>)discovery;
+        discoveryMock.Setup(d => d.DiscoverLookupsTargetingAsync(
+                "sprk_document", "sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { "sprk_matter" });
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        // Two FetchExpression calls expected (primary + transitive). Sequence them.
+        var fetchCalls = new List<FetchExpression>();
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => fetchCalls.Add(fe))
+            .ReturnsAsync(() =>
+            {
+                // First call → primary matter rows. Second call → documents.
+                if (fetchCalls.Count == 1)
+                {
+                    return new EntityCollection(new List<Entity>
+                    {
+                        MatterRow(MatterIdA, ("ownerid", new EntityReference("systemuser", TestSystemUserId)))
+                    });
+                }
+                var docA = new Entity("sprk_document") { Id = DocumentIdA };
+                docA["sprk_matter"] = new EntityReference("sprk_matter", MatterIdA);
+                var docB = new Entity("sprk_document") { Id = DocumentIdB };
+                docB["sprk_matter"] = new EntityReference("sprk_matter", MatterIdA);
+                return new EntityCollection(new List<Entity> { docA, docB });
+            });
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        // Act
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(IncludeRelated: new[] { "sprk_document" }),
+            CancellationToken.None);
+
+        // Assert — primary surface unchanged
+        result.Ids.Should().BeEquivalentTo(new[] { MatterIdA });
+        result.ByRole["owner"].Should().BeEquivalentTo(new[] { MatterIdA });
+
+        // R3 Part 1D — RelatedByRole populated with nested role → ids map
+        result.RelatedByRole.Should().NotBeNull();
+        result.RelatedByRole!.Should().ContainKey("sprk_document");
+        var docs = result.RelatedByRole!["sprk_document"];
+        docs.Should().ContainKey("matter"); // sprk_matter → "matter" via CamelCase strategy
+        docs!["matter"].Should().BeEquivalentTo(new[] { DocumentIdA, DocumentIdB });
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithMultipleIncludeRelated_ReturnsAllNestedKeys()
+    {
+        // includeRelated=sprk_document,sprk_event → both nested under RelatedByRole.
+        var discovery = BuildDiscoveryMock(Descriptor("ownerid", "owner", "SystemUser"));
+        var discoveryMock = (Mock<IMembershipFieldDiscoveryService>)discovery;
+        discoveryMock.Setup(d => d.DiscoverLookupsTargetingAsync(
+                "sprk_document", "sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { "sprk_matter" });
+        discoveryMock.Setup(d => d.DiscoverLookupsTargetingAsync(
+                "sprk_event", "sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { "sprk_matter" });
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        var fetchCalls = new List<FetchExpression>();
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => fetchCalls.Add(fe))
+            .ReturnsAsync(() =>
+            {
+                if (fetchCalls.Count == 1)
+                {
+                    return new EntityCollection(new List<Entity>
+                    {
+                        MatterRow(MatterIdA, ("ownerid", new EntityReference("systemuser", TestSystemUserId)))
+                    });
+                }
+                if (fetchCalls.Count == 2)
+                {
+                    var docA = new Entity("sprk_document") { Id = DocumentIdA };
+                    docA["sprk_matter"] = new EntityReference("sprk_matter", MatterIdA);
+                    return new EntityCollection(new List<Entity> { docA });
+                }
+                var evt = new Entity("sprk_event") { Id = EventIdA };
+                evt["sprk_matter"] = new EntityReference("sprk_matter", MatterIdA);
+                return new EntityCollection(new List<Entity> { evt });
+            });
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(IncludeRelated: new[] { "sprk_document", "sprk_event" }),
+            CancellationToken.None);
+
+        result.RelatedByRole.Should().NotBeNull();
+        result.RelatedByRole!.Should().ContainKeys("sprk_document", "sprk_event");
+        result.RelatedByRole!["sprk_document"]["matter"].Should().BeEquivalentTo(new[] { DocumentIdA });
+        result.RelatedByRole!["sprk_event"]["matter"].Should().BeEquivalentTo(new[] { EventIdA });
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithoutIncludeRelated_RelatedByRoleIsNull()
+    {
+        // Absence-of-request guarantees null (so JsonIgnore omits the key).
+        var discovery = BuildDiscoveryMock(Descriptor("ownerid", "owner", "SystemUser"));
+        var identity = BuildIdentityMock(BuildFullIdentity());
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA, ("ownerid", new EntityReference("systemuser", TestSystemUserId))));
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        var result = await sut.ResolveAsync(TestSystemUserId, EntityType, options: null, CancellationToken.None);
+
+        result.RelatedByRole.Should().BeNull("absence of includeRelated must yield null RelatedByRole");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithExplicitChainSyntax_ThrowsDepthExceeded()
+    {
+        // FR-1D.2 / Q3: dot syntax (e.g., "documents.events") rejected immediately.
+        var discovery = BuildDiscoveryMock(Descriptor("ownerid", "owner", "SystemUser"));
+        var identity = BuildIdentityMock(BuildFullIdentity());
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        Func<Task> act = () => sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(IncludeRelated: new[] { "sprk_document.sprk_event" }),
+            CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<MembershipDepthExceededException>();
+        ex.Which.ReasonTag.Should().Be("explicit-chain-syntax");
+        ex.Which.OffendingEntry.Should().Be("sprk_document.sprk_event");
+        dataverse.VerifyNoOtherCalls(); // Validation runs before any I/O.
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithUnknownRelatedEntity_ThrowsDepthExceeded()
+    {
+        // Related entity's metadata fetch fails → 1-hop verification cannot succeed.
+        var discovery = BuildDiscoveryMock(Descriptor("ownerid", "owner", "SystemUser"));
+        var discoveryMock = (Mock<IMembershipFieldDiscoveryService>)discovery;
+        discoveryMock.Setup(d => d.DiscoverLookupsTargetingAsync(
+                "sprk_unknown", "sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Entity 'sprk_unknown' not found in Dataverse metadata."));
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA, ("ownerid", new EntityReference("systemuser", TestSystemUserId))));
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        Func<Task> act = () => sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(IncludeRelated: new[] { "sprk_unknown" }),
+            CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<MembershipDepthExceededException>();
+        ex.Which.ReasonTag.Should().Be("unknown-entity");
+        ex.Which.OffendingEntry.Should().Be("sprk_unknown");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithRelatedEntityLackingBackReference_ThrowsDepthExceeded()
+    {
+        // FR-1D.2: requested related entity has no 1-hop Lookup to the primary entity.
+        // Discovery returns empty → reject as "not-a-direct-lookup-target" → endpoint 400.
+        var discovery = BuildDiscoveryMock(Descriptor("ownerid", "owner", "SystemUser"));
+        var discoveryMock = (Mock<IMembershipFieldDiscoveryService>)discovery;
+        discoveryMock.Setup(d => d.DiscoverLookupsTargetingAsync(
+                "sprk_unrelated", "sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<string>());
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA, ("ownerid", new EntityReference("systemuser", TestSystemUserId))));
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        Func<Task> act = () => sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(IncludeRelated: new[] { "sprk_unrelated" }),
+            CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<MembershipDepthExceededException>();
+        ex.Which.ReasonTag.Should().Be("not-a-direct-lookup-target");
+        ex.Which.OffendingEntry.Should().Be("sprk_unrelated");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithIncludeRelatedAndNoPrimaryMatches_ReturnsEmptyNested()
+    {
+        // Primary returns zero rows → transitive still validates entity but inner map empty.
+        var discovery = BuildDiscoveryMock(Descriptor("ownerid", "owner", "SystemUser"));
+        var discoveryMock = (Mock<IMembershipFieldDiscoveryService>)discovery;
+        discoveryMock.Setup(d => d.DiscoverLookupsTargetingAsync(
+                "sprk_document", "sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { "sprk_matter" });
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+        var dataverse = BuildDataverseMockReturning(/* zero matter rows */);
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(IncludeRelated: new[] { "sprk_document" }),
+            CancellationToken.None);
+
+        result.Count.Should().Be(0);
+        result.RelatedByRole.Should().NotBeNull("requested entity must appear with empty inner map, not be absent");
+        result.RelatedByRole!.Should().ContainKey("sprk_document");
+        result.RelatedByRole!["sprk_document"].Should().ContainKey("matter");
+        result.RelatedByRole!["sprk_document"]["matter"].Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MembershipResponse_NestedRelatedByRole_SerializesAsRelatedByRoleCamelCase()
+    {
+        // FR-1D.3: response shape extends byRole with nested relatedByRole map.
+        // JSON shape: { "relatedByRole": { "sprk_document": { "matter": [guid, ...] } } }
+        var systemUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var doc = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddd01");
+        var related = (IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<Guid>>>)
+            new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<Guid>>>
+            {
+                ["sprk_document"] = new Dictionary<string, IReadOnlyList<Guid>>
+                {
+                    ["matter"] = new[] { doc },
+                },
+            };
+
+        var response = new MembershipResponse(
+            EntityType: "sprk_matter",
+            PersonIdentity: new PersonIdentity(systemUserId),
+            Ids: Array.Empty<Guid>(),
+            ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
+            Count: 0,
+            CacheExpiresAt: DateTimeOffset.UtcNow,
+            ContinuationToken: null,
+            RelatedByRole: related);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(response);
+
+        json.Should().Contain("\"relatedByRole\":");
+        json.Should().Contain("\"sprk_document\":");
+        json.Should().Contain("\"matter\":");
+        json.Should().Contain(doc.ToString("D"));
+    }
+
+    [Fact]
+    public void MembershipResponse_NullRelatedByRole_OmittedFromJson()
+    {
+        // Absence of transitive request → null → not emitted (clients see no key).
+        var response = new MembershipResponse(
+            EntityType: "sprk_matter",
+            PersonIdentity: new PersonIdentity(Guid.NewGuid()),
+            Ids: Array.Empty<Guid>(),
+            ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
+            Count: 0,
+            CacheExpiresAt: DateTimeOffset.UtcNow,
+            ContinuationToken: null,
+            RelatedByRole: null);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(response);
+
+        json.Should().NotContain("\"relatedByRole\"",
+            "JsonIgnore(WhenWritingNull) must omit the key when caller did not request includeRelated");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────
 

@@ -88,6 +88,41 @@ public interface IMembershipFieldDiscoveryService
     /// refresh-all on a cold process). Always non-null.
     /// </returns>
     Task<IReadOnlyList<string>> InvalidateCacheAsync(string? entityLogicalName, CancellationToken ct);
+
+    /// <summary>
+    /// Discovers the set of Lookup fields on <paramref name="sourceEntity"/>
+    /// whose <c>Targets[]</c> include <paramref name="targetEntity"/>. Used by
+    /// the transitive-membership pipeline (R3 Part 1D, task 054) to find the
+    /// "back-reference" Lookups on a related entity (e.g., <c>sprk_document</c>)
+    /// that point at the primary entity (e.g., <c>sprk_matter</c>).
+    /// </summary>
+    /// <param name="sourceEntity">
+    /// The entity whose Lookup attributes are being inspected (e.g., the
+    /// related entity in a transitive query). Case-insensitive; normalized to
+    /// lowercase. MUST NOT be null/empty/whitespace.
+    /// </param>
+    /// <param name="targetEntity">
+    /// The entity that the returned Lookups must target (e.g., the primary
+    /// entity in a transitive query). Case-insensitive; normalized to
+    /// lowercase. MUST NOT be null/empty/whitespace.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// The lowercase logical attribute names of Lookup fields on
+    /// <paramref name="sourceEntity"/> whose <c>Targets[]</c> include
+    /// <paramref name="targetEntity"/>. Empty list when no such Lookups exist
+    /// (caller surfaces empty as the 1-hop-not-possible case). Always non-null.
+    /// </returns>
+    /// <exception cref="ArgumentException">
+    /// Either argument is null, empty, or whitespace.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="sourceEntity"/> is not found in Dataverse metadata.
+    /// </exception>
+    Task<IReadOnlyList<string>> DiscoverLookupsTargetingAsync(
+        string sourceEntity,
+        string targetEntity,
+        CancellationToken ct);
 }
 
 /// <summary>

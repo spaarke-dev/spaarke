@@ -1,7 +1,8 @@
 <task id="R3-043" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Create `LookupUserMembershipForm.tsx` in PlaybookBuilder properties</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
     <phase>P5</phase>
     <parallel-group>K (with 042)</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -46,4 +47,35 @@
     <criterion testable="true">Dark mode parity (semantic tokens; no hardcoded colors)</criterion>
     <criterion testable="true">Validation: missing entityType blocks save</criterion>
   </acceptance-criteria>
+  <completion-notes>
+Created `LookupUserMembershipForm.tsx` mirroring `CreateNotificationForm.tsx` pattern (NodeFormProps shape, useMemo+useCallback, makeStyles+tokens, parse/serialize JSON helpers). Four fields per backend contract (LookupUserMembershipNodeExecutor, task 041):
+- entityType (Input, required) — free-text per Q4; no allow-list
+- roles (Input, comma-separated → string[]; optional) — aligned existing pattern; no chip primitives (Fluent v9 TagPicker not used elsewhere in PlaybookBuilder per Q5 "do not invent new patterns")
+- outputVariable (Input, required) — binds canvas variable
+- includeRelated (Switch, default false) — Q3 1-hop UI only; multi-hop NOT exposed
+
+Wired into BOTH form hosts (NodePropertiesDialog tabs + NodePropertiesForm Accordion) and registered in properties/index.ts.
+
+Extended PlaybookNodeType union in canvas.ts to include `'lookupUserMembership'`. Confirmed task 042 already extended the enum + ActionType=52 + NodeTypeToDataverse + NodeTypeToActionType in playbook.ts — no edits needed there. Added matching entries to two exhaustiveness-checked Records: `NODE_TYPE_INFO` in commands.ts and `nodeColorSchemes` in BaseNode.tsx (green palette consistent with updateRecord — Workflow data-ops semantic).
+
+Added validation in canvasValidation.ts: new `validateLookupUserMembershipNode()` invoked from existing `validatePromptSchemaNodes()` for all `'lookupUserMembership'` typed nodes. Two error-severity rules: `lookup-user-membership-missing-entity-type` (parses configJson) + `lookup-user-membership-missing-output-variable` (reads node.data.outputVariable). Errors integrate with existing `hasValidationErrors()` consumer in playbookNodeSync.ts which blocks save.
+
+ADR-021 verified: zero hardcoded colors (only `tokens.*` semantic tokens) — dark-mode parity automatic via FluentProvider theme switching.
+
+Build verification: webpack build fails with 5 pre-existing transitive-dep errors in @spaarke/ui-components (`@hello-pangea/dnd`, `pdfjs-dist`, `mammoth`, `@microsoft/applicationinsights-web`, `@spaarke/sdap-client`) — confirmed identical on baseline (without my changes). `tsc --noEmit` shows 35 errors, identical count to baseline — net contribution from task 043 = 0 errors. The 3 NodePropertiesDialog errors that *mention* lookupUserMembership in their printed unions are about the `nodeType ?? ''` empty-string fallback, not about my new union value.
+
+Tests: skipped per project reality — PlaybookBuilder has no test infrastructure (no jest/vitest, no `npm test` script, no *.test.ts(x) files; sibling forms have no tests either). Documented as N/A.
+
+Coordination with parallel siblings: respected sub-agent boundary — did NOT touch playbookNodeSync.ts (task 042's territory). Did NOT create a visual node component LookupUserMembershipNode.tsx (out of scope; 042 added the enum/mappings sufficient for sync). Did NOT touch backend Membership endpoints (task 054).
+
+Files (8 total):
+- NEW: src/client/code-pages/PlaybookBuilder/src/components/properties/LookupUserMembershipForm.tsx (200+ lines)
+- MOD: src/client/code-pages/PlaybookBuilder/src/components/properties/index.ts (added export)
+- MOD: src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx (import + hasTypeForm + dispatch)
+- MOD: src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesForm.tsx (import + label + hasTypeForm + dispatch)
+- MOD: src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts (extended rule union + new validator function + call from validatePromptSchemaNodes)
+- MOD: src/client/code-pages/PlaybookBuilder/src/types/canvas.ts (added `'lookupUserMembership'` to PlaybookNodeType union)
+- MOD: src/client/code-pages/PlaybookBuilder/src/components/ai-assistant/commands.ts (added NODE_TYPE_INFO entry)
+- MOD: src/client/code-pages/PlaybookBuilder/src/components/nodes/BaseNode.tsx (added nodeColorSchemes entry)
+  </completion-notes>
 </task>

@@ -869,6 +869,11 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.AgentServiceClient>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AgentServiceNodeExecutor>();
 
+        // LookupUserMembershipNodeExecutor — ActionType.LookupUserMembership = 52 (R3 Part 1, FR-1B.1, task 041).
+        // Singleton+Scoped DI pattern: injects IServiceScopeFactory to resolve the Scoped
+        // IMembershipResolverService per execution. In-process call (NOT HTTP round-trip).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.LookupUserMembershipNodeExecutor>();
+
         // CodeInterpreterBridge — thin wrapper around AgentServiceClient for Code Interpreter sandbox
         // invocations (AIPU-070). Singleton: stateless, thread-safe. Kill switch: CodeInterpreter:Enabled.
         // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory

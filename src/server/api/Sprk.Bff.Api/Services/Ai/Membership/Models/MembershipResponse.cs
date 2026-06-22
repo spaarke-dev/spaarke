@@ -97,6 +97,19 @@ namespace Sprk.Bff.Api.Services.Ai.Membership.Models;
 /// design example shows <c>"continuationToken": null</c> — we preserve that
 /// shape by NOT applying <c>JsonIgnore(WhenWritingNull)</c>.
 /// </param>
+/// <param name="RelatedByRole">
+/// R3 Part 1D / FR-1D.3 — per-related-entity nested role attribution map.
+/// Outer key: related entity logical name (e.g., <c>"sprk_document"</c>,
+/// <c>"sprk_event"</c>). Inner key: role on the related entity (e.g.,
+/// <c>"owner"</c>, <c>"matter"</c>). Inner value: entity-instance ids of the
+/// related entity that the user has that role on, reached transitively via
+/// 1 hop from the primary entity. <c>null</c> (and omitted from JSON) when
+/// the caller did NOT request <c>includeRelated</c>; populated (possibly with
+/// empty inner maps) when the caller did request transitive expansion. The
+/// 1-hop max enforced by spec.md FR-1D.2 (per owner clarification Q3,
+/// 2026-06-20) guarantees this is at most one nesting level deep — deeper
+/// requests are rejected with 400 BadRequest.
+/// </param>
 public sealed record MembershipResponse(
     [property: JsonPropertyName("entityType")] string EntityType,
     [property: JsonPropertyName("personIdentity")] PersonIdentity PersonIdentity,
@@ -104,4 +117,6 @@ public sealed record MembershipResponse(
     [property: JsonPropertyName("byRole")] IReadOnlyDictionary<string, IReadOnlyList<Guid>> ByRole,
     [property: JsonPropertyName("count")] int Count,
     [property: JsonPropertyName("cacheExpiresAt")] DateTimeOffset CacheExpiresAt,
-    [property: JsonPropertyName("continuationToken")] string? ContinuationToken = null);
+    [property: JsonPropertyName("continuationToken")] string? ContinuationToken = null,
+    [property: JsonPropertyName("relatedByRole"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<Guid>>>? RelatedByRole = null);

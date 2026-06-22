@@ -284,6 +284,29 @@ public static class MembershipEndpoints
                 detail: ex.Message,
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
+        catch (MembershipDepthExceededException ex)
+        {
+            // R3 Part 1D / FR-1D.2 / Q3 (owner 2026-06-20): includeRelated is 1-hop
+            // max. The resolver surfaces depth violations as MembershipDepthExceededException
+            // so we can return a structured 400 with the specific offending entry,
+            // rather than burying it in a generic 500. The extensions block carries
+            // the offendingEntry + reasonTag so SDK/UI callers can present targeted
+            // remediation without parsing the human-readable detail string.
+            logger.LogInformation(
+                "Membership endpoint: 1-hop depth violation — offendingEntry='{Entry}' reason={Reason} caller={CallerOid}",
+                ex.OffendingEntry, ex.ReasonTag, callerOid);
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: ex.Message,
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["offendingEntry"] = ex.OffendingEntry,
+                    ["reasonTag"] = ex.ReasonTag,
+                    ["maxHops"] = 1,
+                });
+        }
         catch (OperationCanceledException)
         {
             throw;

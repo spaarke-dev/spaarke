@@ -306,6 +306,63 @@ public sealed class MembershipEndpointsTests : IClassFixture<MembershipEndpoints
     }
 
     // ================================================================================
+    // ===== R3 Part 1D — task 054 — includeRelated 400 mapping ======================
+    // ================================================================================
+
+    [Fact]
+    public async Task GetMyMemberships_Returns400_WhenResolverThrowsDepthExceeded_ExplicitChainSyntax()
+    {
+        // FR-1D.2 / Q3: explicit chain syntax in includeRelated → 400 BadRequest with
+        // structured offendingEntry + reasonTag extensions.
+        var aadOid = Guid.NewGuid();
+        var systemUserId = Guid.NewGuid();
+        _fixture.SeedSystemUserLookup(aadOid, systemUserId);
+
+        _fixture.ResolverMock
+            .Setup(r => r.ResolveAsync(systemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new MembershipDepthExceededException(
+                offendingEntry: "sprk_document.sprk_event",
+                reasonTag: "explicit-chain-syntax",
+                message: "includeRelated entry 'sprk_document.sprk_event' exceeds 1-hop max."));
+
+        using var client = _fixture.CreateAuthenticatedClient(aadOid);
+
+        var response = await client.GetAsync(
+            "/api/users/me/memberships/sprk_matter?includeRelated=sprk_document.sprk_event");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("\"offendingEntry\":\"sprk_document.sprk_event\"");
+        body.Should().Contain("\"reasonTag\":\"explicit-chain-syntax\"");
+        body.Should().Contain("\"maxHops\":1");
+    }
+
+    [Fact]
+    public async Task GetMyMemberships_Returns400_WhenResolverThrowsDepthExceeded_NotADirectLookupTarget()
+    {
+        // Related entity exists but has no 1-hop Lookup back to the primary → 400.
+        var aadOid = Guid.NewGuid();
+        var systemUserId = Guid.NewGuid();
+        _fixture.SeedSystemUserLookup(aadOid, systemUserId);
+
+        _fixture.ResolverMock
+            .Setup(r => r.ResolveAsync(systemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new MembershipDepthExceededException(
+                offendingEntry: "sprk_unrelated",
+                reasonTag: "not-a-direct-lookup-target",
+                message: "includeRelated entry 'sprk_unrelated' has no Lookup targeting 'sprk_matter'."));
+
+        using var client = _fixture.CreateAuthenticatedClient(aadOid);
+
+        var response = await client.GetAsync(
+            "/api/users/me/memberships/sprk_matter?includeRelated=sprk_unrelated");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("\"reasonTag\":\"not-a-direct-lookup-target\"");
+    }
+
+    // ================================================================================
     // ===== Helper unit tests (no host) =============================================
     // ================================================================================
 

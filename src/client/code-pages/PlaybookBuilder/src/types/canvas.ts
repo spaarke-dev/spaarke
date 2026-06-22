@@ -25,6 +25,7 @@ export type PlaybookNodeType =
   | 'createTask'
   | 'sendEmail'
   | 'createNotification'
+  | 'lookupUserMembership'
   | 'wait';
 
 /**

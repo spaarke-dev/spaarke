@@ -979,7 +979,11 @@ public class NodeService : INodeService
         "aiAnalysis" or "aiCompletion" or "aiEmbedding" => NodeType.AIAnalysis,
         "deliverOutput" or "deliverToIndex" => NodeType.Output,
         "condition" or "parallel" or "wait" or "start" => NodeType.Control,
-        "createTask" or "sendEmail" or "updateRecord" or "callWebhook" or "sendTeamsMessage" => NodeType.Workflow,
+        // "lookupUserMembership" is a data-ops Workflow node — invokes
+        // IMembershipResolverService in-process (R3 P5 / task 042; pairs with
+        // ActionType.LookupUserMembership = 52 + LookupUserMembershipNodeExecutor).
+        "createTask" or "sendEmail" or "updateRecord" or "callWebhook" or "sendTeamsMessage"
+            or "lookupUserMembership" => NodeType.Workflow,
         _ => NodeType.AIAnalysis // Default to AI for unknown types
     };
 
@@ -1003,6 +1007,9 @@ public class NodeService : INodeService
         "updateRecord" => ActionType.UpdateRecord,
         "callWebhook" => ActionType.CallWebhook,
         "sendTeamsMessage" => ActionType.SendTeamsMessage,
+        // R3 P5 / task 042 — pairs with LookupUserMembershipNodeExecutor (task 041)
+        // and the client-side PlaybookNodeType.LookupUserMembership canvas string.
+        "lookupUserMembership" => ActionType.LookupUserMembership,
         _ => ActionType.AiAnalysis // Default for unknown types
     };
 

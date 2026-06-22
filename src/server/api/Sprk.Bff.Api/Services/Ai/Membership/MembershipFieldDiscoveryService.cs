@@ -614,6 +614,71 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         return invalidated;
     }
 
+    // ── R3 Part 1D — transitive Lookup discovery (task 054) ─────────────────
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<string>> DiscoverLookupsTargetingAsync(
+        string sourceEntity,
+        string targetEntity,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(sourceEntity))
+        {
+            throw new ArgumentException(
+                "sourceEntity must not be null, empty, or whitespace.",
+                nameof(sourceEntity));
+        }
+        if (string.IsNullOrWhiteSpace(targetEntity))
+        {
+            throw new ArgumentException(
+                "targetEntity must not be null, empty, or whitespace.",
+                nameof(targetEntity));
+        }
+
+        ct.ThrowIfCancellationRequested();
+
+        var normalizedSource = sourceEntity.Trim().ToLowerInvariant();
+        var normalizedTarget = targetEntity.Trim().ToLowerInvariant();
+
+        // Re-use the metadata-fetch seam. Per-call cost is one metadata fetch
+        // for sourceEntity; production Dataverse cache (60-min TTL within the
+        // SDK ServiceClient) keeps repeated calls inexpensive. We intentionally
+        // do NOT add a dedicated Redis cache for this method — the existing
+        // discovery cache covers same-entity calls; transitive callers run
+        // immediately after the primary DiscoverAsync() so the metadata for
+        // sourceEntity is typically already warmed in the SDK layer.
+        var lookups = await FetchLookupAttributesAsync(normalizedSource, ct)
+            .ConfigureAwait(false);
+
+        var matches = new List<string>();
+        foreach (var lookup in lookups)
+        {
+            if (string.IsNullOrWhiteSpace(lookup.LogicalName))
+            {
+                continue;
+            }
+            if (lookup.Targets is null || lookup.Targets.Count == 0)
+            {
+                continue;
+            }
+            foreach (var target in lookup.Targets)
+            {
+                if (string.IsNullOrWhiteSpace(target))
+                {
+                    continue;
+                }
+                if (string.Equals(target.Trim(), normalizedTarget, StringComparison.OrdinalIgnoreCase))
+                {
+                    matches.Add(lookup.LogicalName.Trim().ToLowerInvariant());
+                    break;
+                }
+            }
+        }
+
+        // Stable ordering — deterministic FetchXml emitted by callers.
+        matches.Sort(StringComparer.Ordinal);
+        return matches;
+    }
+
     /// <summary>
     /// Internal projection of a Dataverse <see cref="LookupAttributeMetadata"/>
     /// down to just the fields the discovery algorithm needs. Decoupling from
