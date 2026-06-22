@@ -75,4 +75,65 @@ public class WorkspaceOptions
     /// <see cref="SummarizePlaybookId"/> for backward-compat.
     /// </remarks>
     public string SummarizePlaybookCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Stable playbook code for the chat "summarize document" path (spec FR-05).
+    /// </summary>
+    /// <remarks>
+    /// Bound from <c>Workspace:ChatSummarizePlaybookCode</c> config key
+    /// (expected value: <c>summarize-document-chat</c>, per spec §1.7.3 codes table).
+    /// Pre-seated by chat-routing-redesign-r1 task 013 (CRIT-1 race-condition fix)
+    /// so wave 1-E consumer migrations (task 016) can land in parallel without
+    /// colliding on <see cref="WorkspaceOptions"/>. Resolved at runtime via
+    /// <c>IPlaybookLookupService.GetByCodeAsync</c> per ADR-018 typed-options +
+    /// Pattern A stable-code resolution.
+    /// </remarks>
+    public string ChatSummarizePlaybookCode { get; set; } = "summarize-document-chat";
+
+    /// <summary>
+    /// Stable playbook code for the "Create New Matter Pre-Fill" playbook
+    /// (spec FR-02, NFR-07 pre-fill flow).
+    /// </summary>
+    /// <remarks>
+    /// Bound from <c>Workspace:MatterPreFillPlaybookCode</c> config key
+    /// (expected value: <c>create-matter-prefill</c>, per spec §1.7.3 codes table).
+    /// Pre-seated by chat-routing-redesign-r1 task 013 (CRIT-1 race-condition fix)
+    /// so wave 1-E consumer migrations (task 017) can land in parallel without
+    /// colliding on <see cref="WorkspaceOptions"/>. NFR-07 contract preserved:
+    /// the 45s timeout, <c>useAiPrefill</c> flag, and <c>$choices</c> envelope must
+    /// remain unchanged when task 017 migrates <c>MatterPreFillService</c> to
+    /// resolve this code via <c>IPlaybookLookupService.GetByCodeAsync</c>.
+    /// </remarks>
+    public string MatterPreFillPlaybookCode { get; set; } = "create-matter-prefill";
+
+    /// <summary>
+    /// Stable playbook code for the "Create New Project Pre-Fill" playbook
+    /// (spec FR-02, NFR-07 pre-fill flow).
+    /// </summary>
+    /// <remarks>
+    /// Bound from <c>Workspace:ProjectPreFillPlaybookCode</c> config key
+    /// (expected value: <c>create-project-prefill</c>, per spec §1.7.3 codes table).
+    /// Pre-seated by chat-routing-redesign-r1 task 013 (CRIT-1 race-condition fix)
+    /// so wave 1-E consumer migrations (task 018) can land in parallel without
+    /// colliding on <see cref="WorkspaceOptions"/>. NFR-07 contract preserved:
+    /// the 45s timeout, <c>useAiPrefill</c> flag, and <c>$choices</c> envelope must
+    /// remain unchanged when task 018 migrates <c>ProjectPreFillService</c> to
+    /// resolve this code via <c>IPlaybookLookupService.GetByCodeAsync</c>.
+    /// </remarks>
+    public string ProjectPreFillPlaybookCode { get; set; } = "create-project-prefill";
+
+    /// <summary>
+    /// Stable playbook code for the AI summary playbook used by
+    /// <see cref="Sprk.Bff.Api.Services.Workspace.WorkspaceAiService"/> (spec FR-02).
+    /// </summary>
+    /// <remarks>
+    /// Bound from <c>Workspace:AiSummaryPlaybookCode</c> config key. Default is
+    /// empty string — the canonical stable-code value is confirmed in task 018
+    /// and populated then (deferred decision per spec §1.7.3; default falls back
+    /// to the existing <see cref="AiSummaryPlaybookId"/> GUID path until task 018
+    /// migrates the consumer). Pre-seated by chat-routing-redesign-r1 task 013
+    /// (CRIT-1 race-condition fix) so wave 1-E consumer migration (task 018) can
+    /// land in parallel without colliding on <see cref="WorkspaceOptions"/>.
+    /// </remarks>
+    public string AiSummaryPlaybookCode { get; set; } = string.Empty;
 }
