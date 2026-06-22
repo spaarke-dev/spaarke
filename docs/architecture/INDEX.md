@@ -87,6 +87,7 @@ This directory contains comprehensive architecture documentation covering system
 |----------|-------------|--------------|---------------|--------|
 | [jobs-architecture.md](jobs-architecture.md) | Service Bus job processing: contract, routing, 13 handlers, idempotency, dead-letter management | 2026-04-05 | 2026-04-05 | New |
 | [background-workers-architecture.md](background-workers-architecture.md) | All 17 BackgroundService/IHostedService implementations: queue processors, timers, channels, migrations | 2026-04-05 | 2026-04-05 | New |
+| [spaarke-scheduling-architecture.md](spaarke-scheduling-architecture.md) | Spaarke.Scheduling framework (R3): IScheduledJob contract, ScheduledJobHost, IBackgroundJobStore, admin endpoints, sprk_backgroundjob*/run entities, 2 reference consumers (PlaybookSchedulerJob, MembershipReconciliationJob), migration story for the 26 ad-hoc workers | 2026-06-22 | 2026-06-22 | New (r3) |
 
 ### Cross-Cutting Concerns
 
