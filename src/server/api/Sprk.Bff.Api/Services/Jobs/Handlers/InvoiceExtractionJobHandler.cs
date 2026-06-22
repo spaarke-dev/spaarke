@@ -304,10 +304,12 @@ public class InvoiceExtractionJobHandler : IJobHandler
                 context.Variables.Count, invoiceId);
 
             // Apply outputMapping via OutputOrchestrator
-            // Look up playbook by portable code (works in all environments - DEV/QA/PROD)
-            // Uses alternate key "sprk_playbookcode" = "PB-013" instead of environment-specific GUID
-            // Result is cached for 1 hour to minimize Dataverse queries
-            var playbook = await _playbookLookup.GetByCodeAsync("PB-013", ct);
+            // Look up playbook by stable-ID alternate key (sprk_playbookid).
+            // Per Q&A 2026-06-22 Q1 the lookup column changed from sprk_playbookcode → sprk_playbookid.
+            // TODO (separate scope): the literal "PB-013" is a sprk_playbookcode slug; this consumer
+            // must be migrated to use the row's sprk_playbookid GUID (mirrors sprk_analysisplaybookid PK)
+            // or to resolve via IPlaybookService.GetByNameAsync. Tracked outside chat-routing-redesign-r1.
+            var playbook = await _playbookLookup.GetByIdAsync("PB-013", ct);
             var outputResult = await _outputOrchestrator.ApplyOutputMappingAsync(playbook.Id, context, ct);
 
             if (!outputResult.Success)

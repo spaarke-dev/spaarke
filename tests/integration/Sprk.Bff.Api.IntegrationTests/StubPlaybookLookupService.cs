@@ -4,7 +4,8 @@ using Sprk.Bff.Api.Services.Ai;
 namespace Sprk.Bff.Api.IntegrationTests;
 
 /// <summary>
-/// Deterministic stub for <see cref="IPlaybookLookupService"/> for the by-code endpoint integration tests.
+/// Deterministic stub for <see cref="IPlaybookLookupService"/> for the by-id endpoint integration tests.
+/// Per Q&amp;A 2026-06-22 Q1: stable-ID lookup via the <c>sprk_playbookid</c> alt-key (GUID-format).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -14,19 +15,19 @@ namespace Sprk.Bff.Api.IntegrationTests;
 /// <para>
 /// The endpoint's tenant scoping is implemented in the cache key (per ADR-008) — this stub does not
 /// itself enforce tenant scoping because the real <see cref="PlaybookLookupService"/> doesn't either.
-/// Tenant isolation is therefore a property of the <c>PlaybookEndpoints.GetPlaybookByCode</c> cache-key
+/// Tenant isolation is therefore a property of the <c>PlaybookEndpoints.GetPlaybookById</c> cache-key
 /// shape, not the service. The cross-tenant 404 test verifies this by configuring the stub to throw
-/// <see cref="PlaybookNotFoundException"/> for one tenant's code while returning a hit for another.
+/// <see cref="PlaybookNotFoundException"/> for one tenant's id while returning a hit for another.
 /// </para>
 /// </remarks>
 public sealed class StubPlaybookLookupService : IPlaybookLookupService
 {
-    private readonly Dictionary<string, PlaybookResponse> _codeToPlaybook = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PlaybookResponse> _idToPlaybook = new(StringComparer.OrdinalIgnoreCase);
     private TimeSpan _coldPathDelay = TimeSpan.Zero;
     private int _invocationCount = 0;
     private readonly object _lock = new();
 
-    /// <summary>Total times <see cref="GetByCodeAsync"/> was invoked (across all tenants / codes).</summary>
+    /// <summary>Total times <see cref="GetByIdAsync"/> was invoked (across all tenants / ids).</summary>
     public int InvocationCount
     {
         get
@@ -39,13 +40,13 @@ public sealed class StubPlaybookLookupService : IPlaybookLookupService
     }
 
     /// <summary>
-    /// Configure a known code to resolve to a playbook response. Call before issuing the request.
+    /// Configure a known id to resolve to a playbook response. Call before issuing the request.
     /// </summary>
-    public void Setup(string code, PlaybookResponse playbook)
+    public void Setup(string id, PlaybookResponse playbook)
     {
         lock (_lock)
         {
-            _codeToPlaybook[code] = playbook;
+            _idToPlaybook[id] = playbook;
         }
     }
 
@@ -65,13 +66,13 @@ public sealed class StubPlaybookLookupService : IPlaybookLookupService
     {
         lock (_lock)
         {
-            _codeToPlaybook.Clear();
+            _idToPlaybook.Clear();
             _coldPathDelay = TimeSpan.Zero;
             _invocationCount = 0;
         }
     }
 
-    public async Task<PlaybookResponse> GetByCodeAsync(string playbookCode, CancellationToken ct = default)
+    public async Task<PlaybookResponse> GetByIdAsync(string playbookId, CancellationToken ct = default)
     {
         TimeSpan delay;
         bool hit;
@@ -81,7 +82,7 @@ public sealed class StubPlaybookLookupService : IPlaybookLookupService
         {
             _invocationCount++;
             delay = _coldPathDelay;
-            hit = _codeToPlaybook.TryGetValue(playbookCode, out response);
+            hit = _idToPlaybook.TryGetValue(playbookId, out response);
         }
 
         if (delay > TimeSpan.Zero)
@@ -91,13 +92,13 @@ public sealed class StubPlaybookLookupService : IPlaybookLookupService
 
         if (!hit || response is null)
         {
-            throw new PlaybookNotFoundException($"Playbook with code '{playbookCode}' not found.");
+            throw new PlaybookNotFoundException($"Playbook with id '{playbookId}' not found.");
         }
 
         return response;
     }
 
-    public void ClearCache(string playbookCode) { /* no-op for stub */ }
+    public void ClearCache(string playbookId) { /* no-op for stub */ }
 
     public void ClearAllCache() { /* no-op for stub */ }
 }

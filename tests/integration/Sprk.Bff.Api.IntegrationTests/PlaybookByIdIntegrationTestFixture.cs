@@ -22,12 +22,13 @@ using Sprk.Bff.Api.Services.Ai;
 namespace Sprk.Bff.Api.IntegrationTests;
 
 /// <summary>
-/// Shared constants for the GET /api/ai/playbooks/by-code/{code} integration tests (task 010).
+/// Shared constants for the GET /api/ai/playbooks/by-id/{id} integration tests (task 010).
+/// Per Q&amp;A 2026-06-22 Q1: stable-ID alt-key lookup (sprk_playbookid, GUID-format).
 /// </summary>
-internal static class PlaybookByCodeTestConstants
+internal static class PlaybookByIdTestConstants
 {
     public const string TestUserOid = "11111111-1111-1111-1111-111111111111";
-    public const string TestBearerToken = "playbook-by-code-test-bearer";
+    public const string TestBearerToken = "playbook-by-id-test-bearer";
 
     /// <summary>Tenant A — the "current" caller's tenant.</summary>
     public const string TenantA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -35,24 +36,25 @@ internal static class PlaybookByCodeTestConstants
     /// <summary>Tenant B — used to verify cross-tenant lookup returns 404.</summary>
     public const string TenantB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
-    public const string KnownGoodCode = "summarize-document-chat";
-    public const string KnownMissingCode = "nonexistent-playbook-code";
-    public const string TenantBOnlyCode = "tenant-b-only-code";
+    // Stable-ID values are GUID-format (mirror row's sprk_analysisplaybookid PK).
+    public const string KnownGoodId = "11111111-2222-3333-4444-555555555555";
+    public const string KnownMissingId = "00000000-0000-0000-0000-000000000000";
+    public const string TenantBOnlyId = "99999999-9999-9999-9999-999999999999";
 }
 
 /// <summary>
-/// WebApplicationFactory for the <c>GET /api/ai/playbooks/by-code/{code}</c> endpoint (task 010).
+/// WebApplicationFactory for the <c>GET /api/ai/playbooks/by-id/{id}</c> endpoint (task 010).
 /// </summary>
 /// <remarks>
 /// <para>
 /// Substitutes <see cref="IPlaybookLookupService"/> with a <see cref="StubPlaybookLookupService"/> so
 /// tests can deterministically control cold-path latency, miss behavior, and tenant routing without
 /// requiring a live Dataverse connection. The endpoint's tenant scoping is implemented in
-/// <c>PlaybookEndpoints.GetPlaybookByCode</c> via the cache key — the stub records calls so the
+/// <c>PlaybookEndpoints.GetPlaybookById</c> via the cache key — the stub records calls so the
 /// warm-hit test can verify cache hit.
 /// </para>
 /// </remarks>
-public class PlaybookByCodeIntegrationTestFixture : WebApplicationFactory<Program>
+public class PlaybookByIdIntegrationTestFixture : WebApplicationFactory<Program>
 {
     /// <summary>
     /// Test stub for <see cref="IPlaybookLookupService"/>. Tracks invocation count + simulated latency.
@@ -148,16 +150,16 @@ public class PlaybookByCodeIntegrationTestFixture : WebApplicationFactory<Progra
             // Fake JWT auth — tenant claim is configurable per-request via X-Test-Tenant header.
             services.AddAuthentication(options =>
             {
-                options.DefaultAuthenticateScheme = PlaybookByCodeFakeAuthHandler.SchemeName;
-                options.DefaultChallengeScheme = PlaybookByCodeFakeAuthHandler.SchemeName;
+                options.DefaultAuthenticateScheme = PlaybookByIdFakeAuthHandler.SchemeName;
+                options.DefaultChallengeScheme = PlaybookByIdFakeAuthHandler.SchemeName;
             })
-            .AddScheme<AuthenticationSchemeOptions, PlaybookByCodeFakeAuthHandler>(
-                PlaybookByCodeFakeAuthHandler.SchemeName, _ => { });
+            .AddScheme<AuthenticationSchemeOptions, PlaybookByIdFakeAuthHandler>(
+                PlaybookByIdFakeAuthHandler.SchemeName, _ => { });
 
             services.PostConfigure<AuthenticationOptions>(options =>
             {
-                options.DefaultAuthenticateScheme = PlaybookByCodeFakeAuthHandler.SchemeName;
-                options.DefaultChallengeScheme = PlaybookByCodeFakeAuthHandler.SchemeName;
+                options.DefaultAuthenticateScheme = PlaybookByIdFakeAuthHandler.SchemeName;
+                options.DefaultChallengeScheme = PlaybookByIdFakeAuthHandler.SchemeName;
             });
 
             services.RemoveAll<IHostedService>();
@@ -178,7 +180,7 @@ public class PlaybookByCodeIntegrationTestFixture : WebApplicationFactory<Progra
     /// Creates an authenticated HttpClient. The tenant id can be overridden via X-Test-Tenant header
     /// so individual tests can simulate cross-tenant lookups.
     /// </summary>
-    public HttpClient CreateAuthenticatedClient(string tenantId = PlaybookByCodeTestConstants.TenantA)
+    public HttpClient CreateAuthenticatedClient(string tenantId = PlaybookByIdTestConstants.TenantA)
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -186,7 +188,7 @@ public class PlaybookByCodeIntegrationTestFixture : WebApplicationFactory<Progra
         });
 
         client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", PlaybookByCodeTestConstants.TestBearerToken);
+            new AuthenticationHeaderValue("Bearer", PlaybookByIdTestConstants.TestBearerToken);
         client.DefaultRequestHeaders.Add("X-Test-Tenant", tenantId);
 
         return client;
@@ -197,11 +199,11 @@ public class PlaybookByCodeIntegrationTestFixture : WebApplicationFactory<Progra
 /// Fake auth handler. Reads the X-Test-Tenant header (if present) and projects it into the
 /// <c>tid</c> claim so the endpoint's tenant scoping uses it. Defaults to Tenant A.
 /// </summary>
-internal sealed class PlaybookByCodeFakeAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+internal sealed class PlaybookByIdFakeAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
-    public const string SchemeName = "PlaybookByCodeFakeAuth";
+    public const string SchemeName = "PlaybookByIdFakeAuth";
 
-    public PlaybookByCodeFakeAuthHandler(
+    public PlaybookByIdFakeAuthHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder)
@@ -225,15 +227,15 @@ internal sealed class PlaybookByCodeFakeAuthHandler : AuthenticationHandler<Auth
         // Tenant override via header (defaults to Tenant A).
         var tenantId = Request.Headers.TryGetValue("X-Test-Tenant", out var tidHeader)
             ? tidHeader.ToString()
-            : PlaybookByCodeTestConstants.TenantA;
+            : PlaybookByIdTestConstants.TenantA;
 
         var claims = new[]
         {
-            new Claim("oid", PlaybookByCodeTestConstants.TestUserOid),
+            new Claim("oid", PlaybookByIdTestConstants.TestUserOid),
             new Claim("tid", tenantId),
-            new Claim(ClaimTypes.NameIdentifier, PlaybookByCodeTestConstants.TestUserOid),
-            new Claim(ClaimTypes.Name, "Playbook By-Code Integration Test User"),
-            new Claim("name", "Playbook By-Code Integration Test User"),
+            new Claim(ClaimTypes.NameIdentifier, PlaybookByIdTestConstants.TestUserOid),
+            new Claim(ClaimTypes.Name, "Playbook By-Id Integration Test User"),
+            new Claim("name", "Playbook By-Id Integration Test User"),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

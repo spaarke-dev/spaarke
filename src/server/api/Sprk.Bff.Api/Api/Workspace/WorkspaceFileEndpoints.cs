@@ -31,8 +31,10 @@ public static class WorkspaceFileEndpoints
     // Bound via WorkspaceOptions.SummarizePlaybookId (ADR-018 typed-options).
     // Task 012 / spec FR-04 (chat-routing-redesign-r1) lifted the prior
     // raw IConfiguration["Workspace:SummarizePlaybookId"] indexer read into
-    // WorkspaceOptions. Task 019 will subsequently migrate this to
-    // WorkspaceOptions.SummarizePlaybookCode + IPlaybookLookupService.
+    // WorkspaceOptions. Per Q&A 2026-06-22 Q1, SummarizePlaybookId is now the canonical
+    // stable-ID lookup value (GUID; mirrors row's sprk_analysisplaybookid PK).
+    // Task 019 will migrate this consumer to resolve via
+    // IPlaybookLookupService.GetByIdAsync(WorkspaceOptions.SummarizePlaybookId).
     private static readonly Guid DefaultSummarizePlaybookId =
         Guid.Parse("4a72f99c-a119-f111-8343-7ced8d1dc988");
 
@@ -257,9 +259,8 @@ public static class WorkspaceFileEndpoints
         }
 
         // Typed-options read replaces raw IConfiguration[...] indexer (ADR-018 / task 012 / FR-04).
-        // Existing SummarizePlaybookId property preserved for backward-compat; task 019 will swap
-        // to stable-code resolution via WorkspaceOptions.SummarizePlaybookCode +
-        // IPlaybookLookupService.GetByCodeAsync.
+        // SummarizePlaybookId is now the canonical stable-ID lookup value (Q&A 2026-06-22 Q1).
+        // Task 019 will swap to runtime resolution via IPlaybookLookupService.GetByIdAsync.
         var playbookIdStr = workspaceOptions.Value.SummarizePlaybookId;
         var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
             ? parsed

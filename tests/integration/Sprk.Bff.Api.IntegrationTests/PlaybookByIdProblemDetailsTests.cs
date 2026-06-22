@@ -6,8 +6,9 @@ using Xunit;
 namespace Sprk.Bff.Api.IntegrationTests;
 
 /// <summary>
-/// Integration tests asserting that <c>GET /api/ai/playbooks/by-code/{code}</c> returns a full
+/// Integration tests asserting that <c>GET /api/ai/playbooks/by-id/{id}</c> returns a full
 /// RFC 7807 ProblemDetails payload on 404 per ADR-019 (task 011 / FR-01).
+/// Per Q&amp;A 2026-06-22 Q1: stable-ID lookup uses the <c>sprk_playbookid</c> alt-key.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -17,29 +18,29 @@ namespace Sprk.Bff.Api.IntegrationTests;
 ///   <item>HTTP 404 status.</item>
 ///   <item>Content-type is <c>application/problem+json</c>.</item>
 ///   <item>Body has fields: <c>type</c>, <c>title</c>, <c>status</c>, <c>detail</c>, <c>instance</c>.</item>
-///   <item><c>detail</c> includes the requested code string (ADR-015 — code is user-supplied input, not memory content).</item>
+///   <item><c>detail</c> includes the requested id string (ADR-015 — id is user-supplied input, not memory content).</item>
 ///   <item><c>type</c> is a non-empty URI (Spaarke convention <c>https://spaarke.com/problems/...</c>).</item>
 /// </list>
 /// </remarks>
-public class PlaybookByCodeProblemDetailsTests : IClassFixture<PlaybookByCodeIntegrationTestFixture>
+public class PlaybookByIdProblemDetailsTests : IClassFixture<PlaybookByIdIntegrationTestFixture>
 {
-    private readonly PlaybookByCodeIntegrationTestFixture _fixture;
+    private readonly PlaybookByIdIntegrationTestFixture _fixture;
 
-    public PlaybookByCodeProblemDetailsTests(PlaybookByCodeIntegrationTestFixture fixture)
+    public PlaybookByIdProblemDetailsTests(PlaybookByIdIntegrationTestFixture fixture)
     {
         _fixture = fixture;
         _fixture.PlaybookLookup.Reset();
     }
 
     [Fact]
-    public async Task GetByCode_404_HasRfc7807ProblemDetailsContentType()
+    public async Task GetById_404_HasRfc7807ProblemDetailsContentType()
     {
-        // Arrange — code NOT configured in stub; stub will throw PlaybookNotFoundException.
-        using var client = _fixture.CreateAuthenticatedClient(PlaybookByCodeTestConstants.TenantA);
+        // Arrange — id NOT configured in stub; stub will throw PlaybookNotFoundException.
+        using var client = _fixture.CreateAuthenticatedClient(PlaybookByIdTestConstants.TenantA);
 
         // Act
         var response = await client.GetAsync(
-            $"/api/ai/playbooks/by-code/{PlaybookByCodeTestConstants.KnownMissingCode}");
+            $"/api/ai/playbooks/by-id/{PlaybookByIdTestConstants.KnownMissingId}");
 
         // Assert — status + content-type per RFC 7807 (ADR-019).
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -50,14 +51,14 @@ public class PlaybookByCodeProblemDetailsTests : IClassFixture<PlaybookByCodeInt
     }
 
     [Fact]
-    public async Task GetByCode_404_BodyHasAllRfc7807Fields()
+    public async Task GetById_404_BodyHasAllRfc7807Fields()
     {
-        // Arrange — code NOT configured; stub throws PlaybookNotFoundException.
-        const string missingCode = "definitely-not-a-real-playbook-code-1234";
-        using var client = _fixture.CreateAuthenticatedClient(PlaybookByCodeTestConstants.TenantA);
+        // Arrange — id NOT configured; stub throws PlaybookNotFoundException.
+        const string missingId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+        using var client = _fixture.CreateAuthenticatedClient(PlaybookByIdTestConstants.TenantA);
 
         // Act
-        var response = await client.GetAsync($"/api/ai/playbooks/by-code/{missingCode}");
+        var response = await client.GetAsync($"/api/ai/playbooks/by-id/{missingId}");
         var body = await response.Content.ReadAsStringAsync();
 
         // Assert — 404 + parse body as JSON and assert all 5 RFC 7807 fields are present.
@@ -79,21 +80,21 @@ public class PlaybookByCodeProblemDetailsTests : IClassFixture<PlaybookByCodeInt
 
         titleProp.GetString().Should().Be("Playbook Not Found");
         statusProp.GetInt32().Should().Be(404);
-        detailProp.GetString().Should().Contain(missingCode,
-            "detail must include the requested code (user-supplied input, permitted by ADR-015)");
-        instanceProp.GetString().Should().Be($"/api/ai/playbooks/by-code/{missingCode}",
+        detailProp.GetString().Should().Contain(missingId,
+            "detail must include the requested id (user-supplied input, permitted by ADR-015)");
+        instanceProp.GetString().Should().Be($"/api/ai/playbooks/by-id/{missingId}",
             "instance must identify the specific request URI per RFC 7807");
     }
 
     [Fact]
-    public async Task GetByCode_404_TypeUriFollowsSpaarkeProblemsConvention()
+    public async Task GetById_404_TypeUriFollowsSpaarkeProblemsConvention()
     {
         // Arrange
-        using var client = _fixture.CreateAuthenticatedClient(PlaybookByCodeTestConstants.TenantA);
+        using var client = _fixture.CreateAuthenticatedClient(PlaybookByIdTestConstants.TenantA);
 
         // Act
         var response = await client.GetAsync(
-            $"/api/ai/playbooks/by-code/{PlaybookByCodeTestConstants.KnownMissingCode}");
+            $"/api/ai/playbooks/by-id/{PlaybookByIdTestConstants.KnownMissingId}");
         var body = await response.Content.ReadAsStringAsync();
 
         // Assert — Spaarke convention is `https://spaarke.com/problems/<slug>` (cf. OwnershipValidator.cs).
