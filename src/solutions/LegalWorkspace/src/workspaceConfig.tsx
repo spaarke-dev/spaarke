@@ -299,11 +299,12 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
       // -----------------------------------------------------------------------
       // My To Do List — SmartToDo
       //
-      // UAT 2026-06-21 round 7 — removed inline height. The structural fix
-      // in SectionPanel.card { height: 100% } + WorkspaceShell.row { flex: 1
-      // 1 0, alignItems: stretch } now propagates pane height down to the
-      // card automatically. Widgets fill whatever vertical space the
-      // workspace pane offers, no per-section hardcoding needed.
+      // UAT 2026-06-21 round 7 (REVERT): the structural SectionPanel /
+      // WorkspaceShell.row fix collapsed the entire workspace to 40px
+      // because the height chain has an unresolved break above the shell
+      // that the per-section inline height was masking. Restored
+      // `calc(100vh - 200px)` with 560px floor until the deeper audit
+      // lands.
       // -----------------------------------------------------------------------
       {
         id: "todo",
@@ -311,6 +312,7 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
         title: "My To Do List",
         badgeCount: p.todoCount,
         toolbar: todoToolbar,
+        style: { height: "calc(100vh - 200px)", minHeight: "560px" },
         renderContent: () => (
           <SmartToDo
             embedded

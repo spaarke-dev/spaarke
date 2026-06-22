@@ -28,27 +28,19 @@ export const useWorkspaceShellStyles = makeStyles({
 
   /**
    * A grid row within the shell.
-   *
    * Column layout is supplied inline via `style.gridTemplateColumns`.
    *
-   * smart-todo-r4 UAT round 7 (2026-06-21): the row now claims available
-   * vertical space from the flex `shell` via `flex: 1 1 0` (with `minHeight:
-   * 0` so it can shrink in tight viewports). `alignItems: stretch` is the
-   * grid default but expressed explicitly so SectionPanel cards stretch to
-   * the row's height — combined with `SectionPanel.card { height: 100% }`,
-   * this establishes the height contract from viewport → pane → row → card
-   * → widget without per-section inline `style: { height: "560px" }` hacks.
-   *
-   * For multi-row workspaces, all rows share the shell's vertical space
-   * equally (each gets `flex-basis: 0`); to size a row to content instead,
-   * pass `style: { flex: '0 0 auto' }` on the row config.
+   * NOTE: a UAT round 7 attempt to add `flex: 1 1 0, alignItems: stretch`
+   * here collapsed the workspace to ~40px (only the tab bar visible) in
+   * the SpaarkeAi embedded context because the parent shell's
+   * `flex: 1 1 auto` couldn't resolve a determinate height through every
+   * layer above. Reverted to default grid behaviour; per-section
+   * `style: { height: ... }` remains the height-supply mechanism until a
+   * deeper layout audit identifies the true break point above the shell.
    */
   row: {
     display: 'grid',
     gap: tokens.spacingHorizontalL,
-    flex: '1 1 0',
-    minHeight: 0,
-    alignItems: 'stretch',
   },
 });
 
