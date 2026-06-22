@@ -14,9 +14,9 @@
 | **Origin status** | Pushed. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
 | **Last commit** | `c556702ee` — project init (137 files, +15,822 lines) |
 | **Pipeline state** | `/project-pipeline` COMPLETE. Ready for `/task-execute` runs. |
-| **Active task** | **STOPPED** at end of Wave 0-A. S6 (ambiguous requirement) — task 001 needs owner re-scope. |
+| **Active task** | B-001 RESOLVED (option b): task 001 ⏭️ deferred to post-Phase-1; task 004 deps relaxed to 002+003. Dispatching Wave 0-B (task 004 smoke test). |
 | **Execution mode** | **OVERNIGHT AUTONOMOUS** (user explicitly requested 2026-06-21) |
-| **Next Action** | **HUMAN ATTENTION REQUIRED**. Pick option (a/b/c) for task 001 (see Blockers § B-001). Then resume with `continue`. Wave 0-B (task 004) cannot proceed until B-001 is cleared. |
+| **Next Action** | Spawn `task-execute` on task 004 (Wave 0-B Phase 0 smoke test) — STANDARD rigor, ~1h. Then continue wave-by-wave through Phase 1 onwards. |
 
 ### Critical context (3-sentence version)
 
@@ -121,8 +121,8 @@ When the human user returns, post a single concise summary in the next response 
 | Wave | Tasks | Status | Started | Completed | Commit SHA | Notes |
 |---|---|---|---|---|---|---|
 | **0-A0** | 000 | ✅ done | 2026-06-21 | 2026-06-21 | `5bb72dd93` | CONDITIONAL GO — handoff note at `notes/handoffs/000-r6-readiness-confirmation.md`. Phases 0–6 GO; Phase 7-A blocked pending R6 PR #401 merge (S1). |
-| **0-A** | 001 🚧, 002 ✅, 003 ✅ | ⚠️ partial | 2026-06-21 | 2026-06-21 | (Wave 0-A commit pending) | **001 BLOCKED**: POML target paths stale (2 of 3 files don't exist) + in-island consumers found on the surviving file. **002 ✅**: PCF stub deleted, useRecordMatch.ts repointed, v3.15.3→3.15.4 bumped, decision doc at `notes/drafts/002-decision.md`. **003 ✅**: Stale GUID comments scrubbed in `Configuration/WorkspaceOptions.cs:35` + `Services/Workspace/ProjectPreFillService.cs:39`. |
-| **0-B** | 004 | 🚧 blocked | — | — | — | Depends on 001 ✅ — cannot proceed until 001 is re-scoped + completed. |
+| **0-A** | 001 ⏭️, 002 ✅, 003 ✅ | ✅ done (partial; 001 deferred) | 2026-06-21 | 2026-06-21 | `ec1d188e7` | **001 ⏭️ DEFERRED** to post-Phase-1 (owner decision 2026-06-21, B-001 option b). **002 ✅**: PCF stub deleted, useRecordMatch.ts repointed, v3.15.3→3.15.4 bumped, decision doc at `notes/drafts/002-decision.md`. **003 ✅**: Stale GUID comments scrubbed in `Configuration/WorkspaceOptions.cs:35` + `Services/Workspace/ProjectPreFillService.cs:39`. |
+| **0-B** | 004 | 🔄 in-progress | 2026-06-21 | — | — | Phase 0 smoke test. Deps relaxed to 002+003 (001 ⏭️ deferred). Verifies BFF + LegalWorkspace + UniversalQuickCreate builds + existing tests + publish-size baseline. |
 | **0-B** | 004 | 🔲 pending | — | — | — | |
 | **1-A** | 010, 011, 012 | 🔲 pending | — | — | — | |
 | **1-B** | 013 | 🔲 pending | — | — | — | CRIT-1 fix: pre-extend WorkspaceOptions |
@@ -242,9 +242,13 @@ Anything new from overnight execution will be tracked here by the post-compact a
 
 ## Blockers
 
-**Status**: 🚧 **STOPPED at end of Wave 0-A. Owner re-scope required for task 001.**
+**Status**: ✅ **B-001 RESOLVED** (option b — defer task 001 to post-Phase-1). Wave 0-B dispatched. **B-002 INFORMATIONAL** (shared-lib drift; separate team handoff requested; elaborated report 2026-06-21).
 
-### Blocker B-001 — Task 001 stale POML target paths + in-island consumer collision
+### Blocker B-001 — Task 001 stale POML target paths + in-island consumer collision (RESOLVED 2026-06-21)
+
+**Resolution**: Owner chose **option (b)** — defer task 001 to post-Phase-1. Task 001 marked ⏭️ in TASK-INDEX. Task 004 dependencies relaxed from `001,002,003` → `002,003`. Phase 1 + Phase 2 proceed without it; cleanup revisited after stable-code migration reduces cross-references.
+
+#### Original finding (preserved for traceability)
 
 - **Wave + task**: Wave 0-A, task 001 "Delete LegalWorkspace CreateMatter/CreateRecordStep + Project + WorkAssignment siblings"
 - **Stop condition**: **S6** (ambiguous requirement — POML prescription contradicts repo reality)
