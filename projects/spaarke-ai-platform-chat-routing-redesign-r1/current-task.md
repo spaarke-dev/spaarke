@@ -15,7 +15,7 @@
 | **Last commit (pushed)** | `1347b8c92` — task 032 PlaybookEmbeddingService extension (FR-10) |
 | **Phase status** | Phase 0 ✅ · Phase 1 ✅ · Wave 2-A ✅ · Wave 2-B partial (032 ✅; 033 🚫) · **Wave 2-C SCOPE-BLOCKED** (034 doable; 035 partial-blocked; 036 BLOCKED) |
 | **Execution mode** | Autonomous wave-by-wave; **STOPPED at Wave 2-C** pending owner direction on the cascading send-to-index endpoint blocker |
-| **Next Action** | **OWNER DECISION REQUIRED** — see `notes/handoffs/wave-2-c-scope-assessment.md` for 4-option menu (A: stand up endpoint; B: server-side auto-index; C: skip UX, keep drift job; D: skip Wave 2-C entirely, jump to Phase 3). Recommended: **C or D**. If user says "continue", autonomous safe path is to pivot to Phase 3 Wave 3-A (tasks 045/046/047 — BFF model extensions; 3 parallel-safe; depend only on task 027 ✅). |
+| **Next Action** | **OWNER DECISION (refined 2026-06-22)** — original endpoint-block was wrong (endpoint exists at `POST /api/ai/playbooks/{id}/index`); separately, task 032 has a loader gap (extension dormant in production). See `notes/handoffs/032-loader-gap-and-036-bundling.md` for E1/E2/E3 options. Recommended **E2**: dispatch tight-scope sub-agent for the 6-change bundle (3-5h work; covers FR-10 production wiring + FR-12 validation gate); main session does build/test/publish/commit. Phase 3 Wave 3-A (045/046/047) is unaffected — pivotable at any time. |
 
 ### Critical context (3-sentence version)
 
