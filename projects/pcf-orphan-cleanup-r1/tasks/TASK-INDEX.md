@@ -9,9 +9,9 @@
 
 | # | Title | Status | Effort | Dependencies | Parallel group | Rigor | Notes |
 |---:|---|:---:|:---:|---|:---:|:---:|---|
-| 001 | Pre-flight: solution backups + per-control 4-check (spaarkedev1) | 🔲 | 2-4h | — | P1-W1 | STANDARD | Captures §1.1 backups + §1.2 verification |
-| 002 | Source-tree deletion PR (UQC + DTW + SDV) | 🔲 | 1-2h | — | P1-W1 | STANDARD | One PR, three folders, `git rm -r` each |
-| 003 | Dataverse cleanup session — spaarkedev1 (11 customcontrols + 4-6 canvas apps) | 🔲 | 4-6h | 001, 002 | (sequential) | **FULL** | Single focused block; logged per FR-07 |
+| 001 | Pre-flight: solution backups + per-control 4-check (spaarkedev1) | ✅ 2026-06-22 | 2-4h | — | P1-W1 | STANDARD | 10 baseline ZIPs captured; 10/11 controls ready-to-delete; 1 deviation filed (DEV-001 AnalysisWorkspace) |
+| 002 | Source-tree deletion PR (UQC + DTW + SDV) | ✅ 2026-06-22 (PR #412) | 1-2h | — | P1-W1 | STANDARD | UQC + DTW + SDV deleted; tsconfig + CLAUDE.md refreshed |
+| 003 | Dataverse cleanup session — spaarkedev1 (10 customcontrols + 4 canvas apps; AnalysisWorkspace held per DEV-001) | 🔲 | 4-6h | 001, 002 | (sequential) | **FULL** | Single focused block; logged per FR-07 |
 | **(soak)** | **7-day calendar wait — monitor for regressions** | — | 7 days | 003 | (sequential) | — | NO work; calendar gate only |
 | 004 | Shared lib `@types/react` peerDep declaration (PR-D1) | 🔲 | 2-4h | 003+soak | (sequential) | **FULL** | Includes React 18+ API audit pre-merge |
 | 005 | VisualHost re-pin to React 16 (PR-D2) — deploy + smoke | 🔲 | 3-5h | 004 | (sequential) | **FULL** | Re-verify VisualHost source pre-merge; bump v1.4.16 → v1.4.17 |
