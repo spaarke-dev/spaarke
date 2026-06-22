@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="032" project="spaarke-ai-platform-chat-routing-redesign-r1">
   <metadata>
-    <title>Extend PlaybookEmbeddingService embed-input with documentTypes + intents + triggerPhrases from sprk_jpsmatchingmetadata</title>
+    <title>Extend PlaybookEmbeddingService embed-input with documentTypes + intents + triggerPhrases from sprk_jps_matching_metadata</title>
     <phase>2: WP1.5 Index Governance</phase>
     <status>not-started</status>
     <estimated-hours>3</estimated-hours>
@@ -15,18 +15,18 @@
   </metadata>
 
   <prompt>
-    Extend `PlaybookEmbeddingService.cs:28-30` embed-input composition to include `documentTypes + intents + triggerPhrases` from `sprk_jpsmatchingmetadata` (the JSON field added in task 031). The augmented embed-input becomes: `playbookName + description + triggerPhrases + tags + documentTypes + intents + jpsTriggerPhrases`. Implements spec FR-10.
+    Extend `PlaybookEmbeddingService.cs:28-30` embed-input composition to include `documentTypes + intents + triggerPhrases` from `sprk_jps_matching_metadata` (the JSON field added in task 031). The augmented embed-input becomes: `playbookName + description + triggerPhrases + tags + documentTypes + intents + jpsTriggerPhrases`. Implements spec FR-10.
   </prompt>
 
   <role>SPAARKE platform BFF developer. Expert in `PlaybookEmbeddingService` + Azure AI Search embedding ingestion + ADR-013 facade discipline.</role>
 
   <goal>
-    `PlaybookEmbeddingService` composes embed input from existing 4 sources PLUS 3 new fields read from `sprk_jpsmatchingmetadata` JSON. Unit test verifies the composed string. Integration smoke (warm tier) confirms a re-indexed playbook with `sprk_jpsmatchingmetadata.documentTypes = ["nda"]` plus `triggerPhrases = ["summarize this NDA"]` becomes searchable via "summarize this NDA" query (full benchmark in task 038).
+    `PlaybookEmbeddingService` composes embed input from existing 4 sources PLUS 3 new fields read from `sprk_jps_matching_metadata` JSON. Unit test verifies the composed string. Integration smoke (warm tier) confirms a re-indexed playbook with `sprk_jps_matching_metadata.documentTypes = ["nda"]` plus `triggerPhrases = ["summarize this NDA"]` becomes searchable via "summarize this NDA" query (full benchmark in task 038).
   </goal>
 
   <context>
     <background>
-      Per spec FR-10 + design.md WP1.5. Current state at `PlaybookEmbeddingService.cs:28-30` is `playbookName + description + triggerPhrases + tags`. The new field `sprk_jpsmatchingmetadata` is JSON; the service must JSON-parse it tolerantly (treat malformed JSON as "no extra signal" rather than failing) and append its `documentTypes + intents + triggerPhrases` arrays to the embed input string.
+      Per spec FR-10 + design.md WP1.5. Current state at `PlaybookEmbeddingService.cs:28-30` is `playbookName + description + triggerPhrases + tags`. The new field `sprk_jps_matching_metadata` is JSON; the service must JSON-parse it tolerantly (treat malformed JSON as "no extra signal" rather than failing) and append its `documentTypes + intents + triggerPhrases` arrays to the embed input string.
     </background>
     <relevant-files>
       <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs</file>
@@ -39,7 +39,7 @@
     <constraint source="ADR-013">Stay inside `Services/Ai/` boundary — embedding service is AI-internal; CRUD code must consume via PublicContracts facade only.</constraint>
     <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs Phase 2 baseline.</constraint>
     <constraint source="spec">FR-10 acceptance: search for "summarize this NDA" returns Summarize-NDA top-1 on 100-doc benchmark (task 038 validates with real data).</constraint>
-    <constraint source="project">JSON parse must be tolerant — null / malformed `sprk_jpsmatchingmetadata` falls back to existing 4-source composition (no breaking change for un-backfilled playbooks).</constraint>
+    <constraint source="project">JSON parse must be tolerant — null / malformed `sprk_jps_matching_metadata` falls back to existing 4-source composition (no breaking change for un-backfilled playbooks).</constraint>
     <constraint source="project">CLAUDE.md §10 test obligation — add unit tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookEmbedding/`.</constraint>
   </constraints>
 
@@ -61,7 +61,7 @@
 
   <steps>
     <step order="1">Read `PlaybookEmbeddingService.cs:28-30` — capture current embed-input composition shape exactly.</step>
-    <step order="2">Add a tolerant JSON parse helper that reads `sprk_jpsmatchingmetadata` from the playbook entity and returns `(documentTypes, intents, triggerPhrases)` arrays (empty arrays on null / malformed JSON).</step>
+    <step order="2">Add a tolerant JSON parse helper that reads `sprk_jps_matching_metadata` from the playbook entity and returns `(documentTypes, intents, triggerPhrases)` arrays (empty arrays on null / malformed JSON).</step>
     <step order="3">Extend the embed-input string composition: existing 4 sources + the 3 new arrays joined consistently (e.g., comma-separated within each section, newline between sections).</step>
     <step order="4">Add unit tests for: (a) baseline composition with no JPS metadata; (b) full JPS metadata composition; (c) malformed JSON tolerance; (d) partial JPS metadata (only `documentTypes`).</step>
     <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`.</step>
@@ -83,7 +83,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">`PlaybookEmbeddingService` reads `sprk_jpsmatchingmetadata`; composed embed-input includes `documentTypes + intents + triggerPhrases` when JSON is well-formed.</criterion>
+    <criterion testable="true">`PlaybookEmbeddingService` reads `sprk_jps_matching_metadata`; composed embed-input includes `documentTypes + intents + triggerPhrases` when JSON is well-formed.</criterion>
     <criterion testable="true">Malformed/null JSON path returns baseline composition without exception.</criterion>
     <criterion testable="true">Unit tests for all 4 cases pass.</criterion>
     <criterion testable="true">`dotnet build` + `dotnet test` exit 0.</criterion>
