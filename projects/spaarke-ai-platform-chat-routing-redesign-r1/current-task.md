@@ -1,7 +1,7 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-21 (by `/context-handoff` post-project-init commit, pre-overnight-autonomous-run)
-> **Recovery**: Read "Quick Recovery" section first. After compact, the user wants **overnight autonomous execution starting at Wave 0-A0 (task 000)**.
+> **Last Updated**: 2026-06-22 (by `/context-handoff` pre-compact; Phase 1 nearly complete; rebased onto master)
+> **Recovery**: Read "Quick Recovery" section first. User will run `/compact` after this handoff; on resume, continue with Wave 1-J task 027.
 
 ---
 
@@ -11,16 +11,73 @@
 |-------|-------|
 | **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
-| **Origin status** | Pushed. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
-| **Last commit** | `c556702ee` — project init (137 files, +15,822 lines) |
-| **Pipeline state** | `/project-pipeline` COMPLETE. Ready for `/task-execute` runs. |
-| **Active task** | Q&A 2026-06-22 decisions applied. Stage 1 governance pushed (`6efaef577`). Stage 2 artifact revisions in progress. Wave 1-A refactor (`*PlaybookCode` → `*PlaybookId`) up next; B-014 resolved by Q1 decision. |
-| **Execution mode** | **OVERNIGHT AUTONOMOUS** (user explicitly requested 2026-06-21) |
-| **Next Action** | **HUMAN INPUT REQUIRED**. Read Blockers § B-014 + `notes/debug/014-playbookcode-conflict.md`. Pick options for the 3 conflicts (a/b/c/d) and the missing row (a'/b'/c'). Then resume `continue`. |
+| **Origin status** | Rebased onto `origin/master` + force-pushed clean. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
+| **Last commit (post-rebase)** | `6b0d74605` — task 025 commit `7a33b37ee` rebased on top of master's Daily Update Service r2.2 work |
+| **Phase status** | Phase 0 ✅ closed · Phase 1 nearly done (waves 1-A through 1-I/025 ✅; **026 ⏭️ DEFERRED**; **1-J/027 IS NEXT**) |
+| **Execution mode** | Autonomous wave-by-wave per `current-task.md` rules; user explicitly authorized Phase 0-6 |
+| **Next Action** | **Dispatch Wave 1-J task 027** (Phase 1 exit gate — local verification only since 026 deferred). Read POML at `tasks/027-phase-1-exit-gate.poml`. STANDARD rigor. After 027 ✅, proceed to Phase 2 (WP1.5 index governance, MVP-trimmed). |
 
 ### Critical context (3-sentence version)
 
-The project is fully scaffolded and committed — 120 POML task files across 8 phases and ~55 execution waves are on origin/work-branch with draft PR #409 open. User wants overnight autonomous execution starting from Wave 0-A0 (task 000: R6 readiness check), continuing wave-by-wave through TASK-INDEX without prompts unless escalation criteria are hit. Phase 7 is **blocked** until R6 PR #401 merges to master — when reached, mark waves 7-A through 7-H as `🚧 blocked` and stop overnight execution at that point.
+Phase 1 stable-ID migration shipped cleanly: 9 consumer surfaces migrated to `WorkspaceOptions.*PlaybookId` + `IPlaybookLookupService.GetByIdAsync(sprk_playbookid)`, with 10/10 `Phase1StableIdMigrationSuite` integration tests passing. Owner deferred Wave 1-I task 026 (Azure bff-dev deploy) to a managed window — exit gate uses LOCAL test verification. Q&A 2026-06-22 decisions are LOCKED IN: sprk_playbookid is the canonical lookup field, task 001 cancelled (OC-R4-05 misreading), Phase 4 MVP-cut to ~13 tasks + 5 lock-ins, Phase 5 trimmed to 6 tasks (suggested-playbooks UX preserved; auto-routing engine removed).
+
+### Critical decisions this session (Q&A 2026-06-22 — LOCKED)
+
+1. **Q1 — Field semantics**: `sprk_playbookid` (Text(100), GUID-format) is the immutable opaque ID used by code; `sprk_playbookcode` (Text(10), `PB-NNN`) is admin slug, untouched by project. All Wave 1-A refactored accordingly.
+2. **Q2 — "Summarize New File(s)" dropped** from spec §1.7.3 (does not exist in DEV; wizard error filed as B-015 separate triage).
+3. **Q3 — Task 001 CANCELLED** with prejudice (OC-R4-05 retirement doc preserves LegalWorkspace components as library, NOT delete).
+4. **Q4 — Task 030 demoted** to verification-only (4 WP1.5 fields already exist in Dataverse).
+5. **Q5a — WP2 auto-routing engine removed** (10 → 6 tasks); suggested-playbooks UX preserved.
+6. **Q5b — Phase 4 MVP cut** (42 → ~13 active tasks + 5 lock-ins: task 078 unify pipelines, task 080 FR-45 invariant, MemoryPaneEvent shapes in spec, Cosmos `matter-memory-promotion` doc-type schema in spec, `RecallSessionFileHandler` tool-description contract).
+7. **Governance — CLAUDE.md §11 "Component Justification"** added repo-wide (3-question template; task-create Step 3.5.6 + code-review Step 6.6 enforce).
+
+### Files Modified This Session (uncommitted at handoff time)
+
+- `.husky/_/post-checkout`, `.husky/_/post-commit`, `.husky/_/post-merge`, `.husky/_/pre-push` — husky tooling drift, transient (NOT load-bearing; auto-regenerated by `prepare` script)
+- `src/client/pcf/package-lock.json` — transient lockfile drift from `npm install` calls, NOT load-bearing
+
+**No work product is uncommitted.** Last work commit `7a33b37ee` rebased to `6b0d74605`. The husky/pcf drift can be ignored or `git checkout -- .husky/ src/client/pcf/package-lock.json` to clean.
+
+### Branch state numbers (post-rebase verification)
+
+- Commits ahead of origin/master: **22** (up from 21 pre-rebase since we added task 025 commit before rebasing)
+- BFF build: 0 errors, 16 pre-existing warnings
+- Phase 1 regression suite: **10/10 pass** (43 ms pre-rebase / 246 ms post-rebase — both clean)
+- BFF publish baseline: ~44.75 MB compressed (15+ MB headroom under NFR-01 60 MB ceiling)
+- PR #409: still DRAFT (force-push updates the PR view; CI may re-run)
+
+### Where exactly to resume
+
+```
+1. Read projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/027-phase-1-exit-gate.poml
+2. Dispatch task-execute (or sub-agent under STANDARD rigor protocol):
+   - Run Phase 1 regression suite: dotnet test --filter "FullyQualifiedName~Phase1StableId"
+   - Run wider Phase 1 sweep (per-consumer tests)
+   - Verify no hardcoded GUIDs / name strings remain in Services/Ai/ (grep audit)
+   - Mark phase exit if all gates green
+3. After Wave 1-J ✅: continue to Phase 2 (Wave 2-A → 2-E):
+   - Task 030 is demoted to verification-only (per Q4)
+   - Task 031 adds sprk_jpsmatchingmetadata (new field)
+   - Phase 2 = 11 tasks total
+4. Then Phase 3 (WP3 destination wiring; 11 tasks; CRIT-8 sequential 3-B fix preserved)
+5. Then Phase 4 (WP5 MVP — only 12 active tasks: 071, 072, 074, 078, 080, 085, 091, 092, 100, 103, 104, 105)
+6. Then Phase 5 (WP2 MVP — 6 tasks; auto-routing engine deferred)
+7. Then Phase 6 (WP6 specialized playbooks)
+8. Phase 7-A STOPS per S1 (R6 PR #401 not merged)
+```
+
+### Deferred / blocked / open follow-ups
+
+| ID | Status | What |
+|---|---|---|
+| **Task 001** | ❌ CANCELLED (OC-R4-05 misreading) | LegalWorkspace components preserved as library; nothing to delete |
+| **Task 026** | ⏭️ DEFERRED (owner 2026-06-22) | bff-dev Azure deploy held for managed window; task 027 exit gate uses local tests |
+| **B-002** | INFORMATIONAL | Shared lib `@spaarke/ui-components` has 9-10 pre-existing TS errors + 1 newer one in `EntityCreationService.ts` — separate team handoff filed |
+| **B-015** | FILED for separate triage | Multi-file summarize wizard runtime error ("An error occurred while summarizing the uploaded documents.") — out of scope this project |
+| **POML defect tracker** | Documentation cleanup | Several POMLs had stale paths (e.g., `Services/Ai/` → `Services/Workspace/`) discovered during execution; not blocking |
+| **InvoiceExtractionJobHandler** | ✅ RESOLVED (commit `34aef1d01`) | PB-013 literal replaced with typed option `FinanceOptions.InvoiceExtractionPlaybookId` |
+| **WorkspaceOptions.cs:72 stale XML doc** | Cosmetic; not blocking | References removed `4a72f99c` fallback; doc cleanup follow-up |
+| **Publish-size measurement-method drift** | Cosmetic | Different agents used different compression methods; true deltas are noise-level |
 
 ---
 
