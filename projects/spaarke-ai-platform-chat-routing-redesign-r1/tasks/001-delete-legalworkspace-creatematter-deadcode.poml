@@ -3,7 +3,7 @@
   <metadata>
     <title>Delete LegalWorkspace CreateMatter/Project/WorkAssignment dead code</title>
     <phase>0: §1.7 Pattern C Cleanup</phase>
-    <status>not-started</status>
+    <status>blocked</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>000</dependencies>
     <blocks>004</blocks>

@@ -35,10 +35,9 @@ public sealed class ProjectPreFillService
 
     // Default: "Create New Project Pre-Fill" playbook (Extract Project Fields, gpt-4o)
     // Mirrors MatterPreFillService.DefaultPreFillPlaybookId pattern — fallback when
-    // Workspace:ProjectPreFillPlaybookId config is missing. The prior GUID
-    // (3f21cec1-7d19-f111-8343-7ced8d1dc988) did not correspond to any Dataverse row,
-    // making the fallback path silently broken. Updated 2026-06-09 (R6 Wave B-G7 flag #3
-    // remediation) to the actual deployed playbook id discovered during R6 task 035 evidence.
+    // Workspace:ProjectPreFillPlaybookId config is missing.
+    // Use IOptions<WorkspaceOptions>.ProjectPreFillPlaybookId; Pattern A code-based
+    // resolution planned (see ADR-018 / chat-routing-redesign-r1 tasks 012 + 016).
     private static readonly Guid DefaultPreFillPlaybookId =
         Guid.Parse("fc343e9c-3460-f111-ab0b-7c1e521b425f");
 

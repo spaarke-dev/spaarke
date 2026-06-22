@@ -31,8 +31,9 @@ public class WorkspaceOptions
     /// <summary>
     /// Default playbook ID for the "Create New Project Pre-Fill" playbook (Extract Project Fields, gpt-4o).
     /// Used by <see cref="Sprk.Bff.Api.Services.Workspace.ProjectPreFillService"/>.
-    /// When unset, the service falls back to the hardcoded default
-    /// <c>3f21cec1-7d19-f111-8343-7ced8d1dc988</c>.
+    /// When unset, the service falls back to a hardcoded default — see
+    /// <see cref="Sprk.Bff.Api.Services.Workspace.ProjectPreFillService"/> DefaultPreFillPlaybookId
+    /// (Pattern A code-based resolution planned; see ADR-018).
     /// </summary>
     public string? ProjectPreFillPlaybookId { get; set; }
 

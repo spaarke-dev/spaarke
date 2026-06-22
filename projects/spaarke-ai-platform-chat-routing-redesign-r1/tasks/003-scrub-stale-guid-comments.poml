@@ -3,7 +3,7 @@
   <metadata>
     <title>Scrub stale 3f21cec1- GUID comments in WorkspaceOptions.cs and ProjectPreFillService.cs</title>
     <phase>0: §1.7 Pattern C Cleanup</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>000</dependencies>
     <blocks>004,012,013</blocks>

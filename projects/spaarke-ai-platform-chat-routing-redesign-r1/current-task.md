@@ -14,9 +14,9 @@
 | **Origin status** | Pushed. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
 | **Last commit** | `c556702ee` — project init (137 files, +15,822 lines) |
 | **Pipeline state** | `/project-pipeline` COMPLETE. Ready for `/task-execute` runs. |
-| **Active task** | Wave 0-A in flight (tasks 001, 002, 003 — 3 parallel agents) |
+| **Active task** | **STOPPED** at end of Wave 0-A. S6 (ambiguous requirement) — task 001 needs owner re-scope. |
 | **Execution mode** | **OVERNIGHT AUTONOMOUS** (user explicitly requested 2026-06-21) |
-| **Next Action** | **Spawn `task-execute` skill on task 000 (R6 readiness check). Then proceed wave-by-wave through TASK-INDEX following autonomous mode rules below.** |
+| **Next Action** | **HUMAN ATTENTION REQUIRED**. Pick option (a/b/c) for task 001 (see Blockers § B-001). Then resume with `continue`. Wave 0-B (task 004) cannot proceed until B-001 is cleared. |
 
 ### Critical context (3-sentence version)
 
@@ -120,8 +120,9 @@ When the human user returns, post a single concise summary in the next response 
 
 | Wave | Tasks | Status | Started | Completed | Commit SHA | Notes |
 |---|---|---|---|---|---|---|
-| **0-A0** | 000 | ✅ done | 2026-06-21 | 2026-06-21 | (pending commit) | CONDITIONAL GO — handoff note at `notes/handoffs/000-r6-readiness-confirmation.md`. Phases 0–6 GO; Phase 7-A blocked pending R6 PR #401 merge (S1). |
-| **0-A** | 001, 002, 003 | 🔄 in-progress | 2026-06-21 | — | — | 3 parallel agents (Phase 0 §1.7 Pattern C cleanup) |
+| **0-A0** | 000 | ✅ done | 2026-06-21 | 2026-06-21 | `5bb72dd93` | CONDITIONAL GO — handoff note at `notes/handoffs/000-r6-readiness-confirmation.md`. Phases 0–6 GO; Phase 7-A blocked pending R6 PR #401 merge (S1). |
+| **0-A** | 001 🚧, 002 ✅, 003 ✅ | ⚠️ partial | 2026-06-21 | 2026-06-21 | (Wave 0-A commit pending) | **001 BLOCKED**: POML target paths stale (2 of 3 files don't exist) + in-island consumers found on the surviving file. **002 ✅**: PCF stub deleted, useRecordMatch.ts repointed, v3.15.3→3.15.4 bumped, decision doc at `notes/drafts/002-decision.md`. **003 ✅**: Stale GUID comments scrubbed in `Configuration/WorkspaceOptions.cs:35` + `Services/Workspace/ProjectPreFillService.cs:39`. |
+| **0-B** | 004 | 🚧 blocked | — | — | — | Depends on 001 ✅ — cannot proceed until 001 is re-scoped + completed. |
 | **0-B** | 004 | 🔲 pending | — | — | — | |
 | **1-A** | 010, 011, 012 | 🔲 pending | — | — | — | |
 | **1-B** | 013 | 🔲 pending | — | — | — | CRIT-1 fix: pre-extend WorkspaceOptions |
@@ -179,17 +180,19 @@ Before launching the first agent in Wave 0-A0:
 
 ## Next Action (explicit)
 
+**The overnight autonomous run STOPPED at end of Wave 0-A per S6** (task 001 blocked — see Blockers § B-001).
+
 ```
-Invoke Skill task-execute on:
-  projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/000-r6-closeout-readiness-check.poml
+HUMAN REQUIRED:
+  1. Read Blockers § B-001 (3 unblock options)
+  2. Pick option (a / b / c) for task 001
+  3. Reply with the choice (e.g., "go with option b" or "rewrite task 001 with option a scope")
 
-Wave: 0-A0 (single sequential task)
-Rigor: MINIMAL
-Expected duration: ~10–20 min
+Once unblocked:
+  - If option (a) or (c): task 001 POML re-authored, then resume `continue` for new Wave 0-A' (task 001 only)
+  - If option (b): mark task 001 ⏭️ deferred in TASK-INDEX, relax task 004 deps to 002+003, resume `continue` for Wave 0-B
 
-Outcome of 000:
-  - IF R6 PR #401 merged + R6 UAT regression complete → mark 000 ✅, proceed to Wave 0-A (tasks 001, 002, 003 — parallel, 3 agents)
-  - IF R6 NOT ready → mark 000 ✅ but note "Phase 7 blocked"; still proceed to Wave 0-A (Phases 0–6 don't depend on R6)
+Wave 0-B (task 004) cannot run until B-001 is cleared (it depends on 001+002+003 all ✅).
 ```
 
 ---
@@ -239,13 +242,37 @@ Anything new from overnight execution will be tracked here by the post-compact a
 
 ## Blockers
 
-**Status**: None at this moment. Pre-overnight-run.
+**Status**: 🚧 **STOPPED at end of Wave 0-A. Owner re-scope required for task 001.**
 
-If overnight run produces blockers, append entries here with:
-- Wave + task ID
-- Stop condition that fired (S1–S11)
-- Failing command output (if relevant)
-- Recommended unblock action
+### Blocker B-001 — Task 001 stale POML target paths + in-island consumer collision
+
+- **Wave + task**: Wave 0-A, task 001 "Delete LegalWorkspace CreateMatter/CreateRecordStep + Project + WorkAssignment siblings"
+- **Stop condition**: **S6** (ambiguous requirement — POML prescription contradicts repo reality)
+- **Sub-agent finding** (full report at `notes/debug/001-consumer-found.md`):
+  1. `src/solutions/LegalWorkspace/src/components/CreateProject/CreateRecordStep.tsx` — **DOES NOT EXIST** (already removed; folder has `CreateProjectStep.tsx` with a different name)
+  2. `src/solutions/LegalWorkspace/src/components/CreateWorkAssignment/CreateRecordStep.tsx` — **DOES NOT EXIST** (folder has `EnterInfoStep.tsx` / `SelectWorkStep.tsx`)
+  3. `src/solutions/LegalWorkspace/src/components/CreateMatter/CreateRecordStep.tsx` — **EXISTS** but is referenced by `WizardDialog.tsx:27` and `index.ts:17` inside the same dead-code island. Vite/TSC compiles all `.tsx` regardless of reachability, so narrow deletion of just `CreateRecordStep.tsx` breaks the LegalWorkspace build.
+  4. `CreateMatter/matterService.ts` IS consumed externally by `CreateEvent`, `CreateProject`, `CreateWorkAssignment`, `FilePreview` — broader island deletion must preserve or extract `matterService.ts` exports first.
+- **Recommended unblock options** (owner pick one):
+  - **(a)** Widen the deletion to the full LegalWorkspace `CreateMatter/` dead-code island (`WizardDialog.tsx` + `index.ts` + transitively-only-internal step files) while preserving `matterService.ts` as a standalone export. Re-author task 001 with the widened scope + the `matterService.ts` preservation step.
+  - **(b)** Defer Pattern C `CreateMatter/` cleanup to a later wave after Phase 1 consumer migrations reduce cross-references. Mark task 001 as "deferred to post-Phase-1" in TASK-INDEX. Phase 1 + Phase 2 proceed without it. Wave 0-B (task 004) can run as a smoke test on the partial cleanup (002 + 003 only) if its dependency is relaxed to 002+003.
+  - **(c)** Some hybrid — narrow the task 001 scope to *only* `CreateRecordStep.tsx` deletion + a follow-on patch to `WizardDialog.tsx` + `index.ts` to remove the import/export, then verify build. This is small but no longer trivial; STANDARD rigor still appropriate.
+
+### Note B-002 (informational, NOT blocking) — Shared-lib build drift surfaced by task 002
+
+- During task 002's `npm run build:prod` verification of the PCF UniversalQuickCreate (after the useAiSummary stub deletion), the build failed with **10 pre-existing TypeScript errors in the shared lib `@spaarke/ui-components`** — none touch `useAiSummary` / `ExtractedEntities` / `useRecordMatch`. Errors include:
+  - `useSseStream.ts` — missing exports `SseStreamStatus`, `SseDataChunk`, `UseSseStreamOptions`, `UseSseStreamResult`
+  - `themeStorage` — dist path issues
+  - `useForceSimulation.ts` — `SimNode.x/y` typing
+  - `CustomCommandFactory.ts` — `ReactElement<any>` typing
+  - `useChatFileAttachment.ts` — dynamic import module flag
+- These are **pre-existing** (NOT caused by task 002). Task 002's acceptance criteria are met (single canonical hook; no duplicate content). BFF build still clean (verified post-wave; 0 errors, 16 warnings — same baseline as pre-flight).
+- **Recommend**: a separate Phase 0 / Phase 1 task for shared-lib build health restoration. Not blocking the autonomous run resumption.
+
+### POML defect tracker (cumulative — for project documentation hygiene)
+
+- Task 003 noted path drift: POML said `Options/WorkspaceOptions.cs` + `Services/Ai/ProjectPreFillService.cs`; actual paths are `Configuration/WorkspaceOptions.cs` + `Services/Workspace/ProjectPreFillService.cs`. Task 003 proceeded by content match (unambiguous); paths to be corrected in spec.md §1.7.3a + design.md when convenient.
+- Task 001 noted 2 of 3 target files don't exist; remaining file has tighter coupling than the POML anticipated. POML re-author needed.
 
 ---
 
