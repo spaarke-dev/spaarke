@@ -238,9 +238,9 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|
-| 010 | Verify/stand up `GET /api/ai/playbooks/by-code/{code}` endpoint | 🔲📝 | FULL | true | 1-A | 004 | `bff-api`, `endpoints`, `ADR-001`, `ADR-014` |
-| 011 | Add ProblemDetails 404 shape per ADR-019 + integration test | 🔲📝 | STANDARD | true | 1-A | 004 | `bff-api`, `testing`, `ADR-019` |
-| 012 | Add `WorkspaceOptions.SummarizePlaybookCode` (FR-04) + fix ADR-018 violation at `WorkspaceFileEndpoints.cs:30,254` | 🔲📝 | FULL | true | 1-A | 004 | `bff-api`, `config`, `ADR-018` |
+| 010 | Verify/stand up `GET /api/ai/playbooks/by-code/{code}` endpoint | ✅ | FULL | true | 1-A | 004 | `bff-api`, `endpoints`, `ADR-001`, `ADR-014` |
+| 011 | Add ProblemDetails 404 shape per ADR-019 + integration test | ✅ | STANDARD | true (CRIT-runtime: file overlap with 010 — actually sequential after 010) | 1-A | 004 | `bff-api`, `testing`, `ADR-019` |
+| 012 | Add `WorkspaceOptions.SummarizePlaybookCode` (FR-04) + fix ADR-018 violation at `WorkspaceFileEndpoints.cs:30,254` | ✅ | FULL | true | 1-A | 004 | `bff-api`, `config`, `ADR-018` |
 | **013 (NEW)** | **Extend `WorkspaceOptions.cs` with 4 typed code options**: `ChatSummarizePlaybookCode`, `MatterPreFillPlaybookCode`, `ProjectPreFillPlaybookCode`, `AiSummaryPlaybookCode`. Resolves CRIT-1 file overlap. | 🔲📝 | FULL | false | 1-B | 010,011,012 | `bff-api`, `config`, `ADR-018`, `architecture-binding` |
 | 014 | Backfill `sprk_playbookcode` on 6 production-bound playbooks (Dataverse data update) | 🔲📝 | STANDARD | false | 1-C | 013 | `dataverse`, `data`, `migration` |
 | 015 | Migrate `SessionSummarizeOrchestrator` to stable code (FR-05 first — lowest blast radius) | 🔲📝 | FULL | false | 1-D | 014 | `bff-api`, `refactoring`, `services` |

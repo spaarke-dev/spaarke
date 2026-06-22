@@ -14,7 +14,7 @@
 | **Origin status** | Pushed. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
 | **Last commit** | `c556702ee` — project init (137 files, +15,822 lines) |
 | **Pipeline state** | `/project-pipeline` COMPLETE. Ready for `/task-execute` runs. |
-| **Active task** | Wave 1-A in flight (tasks 010, 011, 012 — 3 parallel agents). Phase 0 ✅ closed. |
+| **Active task** | Wave 1-A ✅ closed (010 + 011 + 012). Wave 1-B next (task 013 sequential — WorkspaceOptions 4-code extension). |
 | **Execution mode** | **OVERNIGHT AUTONOMOUS** (user explicitly requested 2026-06-21) |
 | **Next Action** | Spawn `task-execute` on task 004 (Wave 0-B Phase 0 smoke test) — STANDARD rigor, ~1h. Then continue wave-by-wave through Phase 1 onwards. |
 
@@ -123,7 +123,8 @@ When the human user returns, post a single concise summary in the next response 
 | **0-A0** | 000 | ✅ done | 2026-06-21 | 2026-06-21 | `5bb72dd93` | CONDITIONAL GO — handoff note at `notes/handoffs/000-r6-readiness-confirmation.md`. Phases 0–6 GO; Phase 7-A blocked pending R6 PR #401 merge (S1). |
 | **0-A** | 001 ⏭️, 002 ✅, 003 ✅ | ✅ done (partial; 001 deferred) | 2026-06-21 | 2026-06-21 | `ec1d188e7` | **001 ⏭️ DEFERRED** to post-Phase-1 (owner decision 2026-06-21, B-001 option b). **002 ✅**: PCF stub deleted, useRecordMatch.ts repointed, v3.15.3→3.15.4 bumped, decision doc at `notes/drafts/002-decision.md`. **003 ✅**: Stale GUID comments scrubbed in `Configuration/WorkspaceOptions.cs:35` + `Services/Workspace/ProjectPreFillService.cs:39`. |
 | **0-B** | 004 | ✅ done | 2026-06-21 | 2026-06-21 | (Wave 0-B commit pending) | **Phase 0 ✅ GO**. BFF: 0 errors, 16 warnings. Tests: 7313/0/110. Publish: 44.75 MB compressed (under 45.65 baseline). PCF/LW build failures match KNOWN BASELINE (B-002 + separate daily-briefing-components issue) — pre-existing, unrelated to Wave 0-A. Grep: 0 broken refs. Baseline note at `notes/handoffs/phase-0-baseline.md`. |
-| **1-A** | 010, 011, 012 | 🔄 in-progress | 2026-06-21 | — | — | Phase 1 starter: endpoint + ProblemDetails 404 + WorkspaceOptions ADR-018 fix; 3 parallel agents (independent files) |
+| **1-A** | 010, 011, 012 | ✅ done | 2026-06-21 | 2026-06-22 | (Wave 1-A commit pending) | **010 ✅**: `/by-code/` endpoint authored at `PlaybookEndpoints.cs` (797 lines, +94 LoC); ADR-014 5-min cache keyed `(tenantId, code-upper)`; 5 integration tests green; +887 B publish delta; code-review + adr-check clean. **011 ✅**: 404 refined to full RFC 7807 (`type` https://spaarke.com/problems/playbook-not-found + `instance` URI); 3 new tests (8/8 total `PlaybookByCode*` pass); ~0 publish delta. Agent stalled on watchdog after step 4; main session resumed steps 5-8. **012 ✅**: `WorkspaceOptions.SummarizePlaybookCode` + `SummarizePlaybookId` added; `WorkspaceFileEndpoints.cs:30,254` migrated from `IConfiguration[]` to `IOptions<>`; 6/6 unit tests green; FR-04 grep verified 0 live matches; both gates clean. **CRIT-runtime**: tasks 010+011 share `PlaybookEndpoints.cs` — dispatched sequentially (010→011) despite TASK-INDEX marking parallel-safe; documented for future audit. Cumulative publish: 44.74 MB (essentially zero delta vs 44.75 baseline). |
+| **1-B** | 013 | 🔄 in-progress | 2026-06-22 | — | — | Single sequential task (CRIT-1 fix): pre-extend `WorkspaceOptions.cs` with 4 typed code options to unblock parallel Pattern A wave 1-E |
 | **0-B** | 004 | 🔲 pending | — | — | — | |
 | **1-A** | 010, 011, 012 | 🔲 pending | — | — | — | |
 | **1-B** | 013 | 🔲 pending | — | — | — | CRIT-1 fix: pre-extend WorkspaceOptions |

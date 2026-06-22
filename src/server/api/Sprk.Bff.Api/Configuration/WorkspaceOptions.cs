@@ -44,4 +44,35 @@ public class WorkspaceOptions
     /// <c>18cf3cc8-02ec-f011-8406-7c1e520aa4df</c>.
     /// </summary>
     public string? AiSummaryPlaybookId { get; set; }
+
+    /// <summary>
+    /// Default playbook ID for the "Summarize New File(s)" playbook used by
+    /// <see cref="Sprk.Bff.Api.Api.Workspace.WorkspaceFileEndpoints"/> (POST
+    /// <c>/api/workspace/files/summarize</c>).
+    /// </summary>
+    /// <remarks>
+    /// Bound from <c>Workspace:SummarizePlaybookId</c> config key.
+    /// This property replaces the prior raw <c>IConfiguration["Workspace:SummarizePlaybookId"]</c>
+    /// indexer read at <c>WorkspaceFileEndpoints.cs:30,254</c> (ADR-018 violation fix
+    /// — see chat-routing-redesign-r1 task 012 / spec FR-04).
+    /// When unset, the endpoint falls back to the hardcoded default
+    /// <c>4a72f99c-a119-f111-8343-7ced8d1dc988</c>.
+    /// Preserved alongside <see cref="SummarizePlaybookCode"/> for backward-compat
+    /// until task 019 migrates the consumer to stable-code resolution.
+    /// </remarks>
+    public string? SummarizePlaybookId { get; set; }
+
+    /// <summary>
+    /// Stable playbook code for the "Summarize New File(s)" playbook.
+    /// </summary>
+    /// <remarks>
+    /// Bound from <c>Workspace:SummarizePlaybookCode</c> config key (expected value:
+    /// <c>summarize-document-workspace</c>). Introduced by chat-routing-redesign-r1
+    /// task 012 / spec FR-04 to enable the Pattern A stable-code resolution migration
+    /// performed by task 019 (which resolves the code → GUID at runtime via
+    /// <c>IPlaybookLookupService.GetByCodeAsync</c>). Until task 019 lands, this
+    /// property exists but is unconsumed; the endpoint continues to use
+    /// <see cref="SummarizePlaybookId"/> for backward-compat.
+    /// </remarks>
+    public string SummarizePlaybookCode { get; set; } = string.Empty;
 }

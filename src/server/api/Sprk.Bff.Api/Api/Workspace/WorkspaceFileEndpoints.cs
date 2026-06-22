@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
@@ -26,8 +27,12 @@ public static class WorkspaceFileEndpoints
 
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
 
-    // Summarize playbook — "Summarize New File(s)" playbook in Dataverse
-    private const string SummarizePlaybookIdConfigKey = "Workspace:SummarizePlaybookId";
+    // Summarize playbook — "Summarize New File(s)" playbook in Dataverse.
+    // Bound via WorkspaceOptions.SummarizePlaybookId (ADR-018 typed-options).
+    // Task 012 / spec FR-04 (chat-routing-redesign-r1) lifted the prior
+    // raw IConfiguration["Workspace:SummarizePlaybookId"] indexer read into
+    // WorkspaceOptions. Task 019 will subsequently migrate this to
+    // WorkspaceOptions.SummarizePlaybookCode + IPlaybookLookupService.
     private static readonly Guid DefaultSummarizePlaybookId =
         Guid.Parse("4a72f99c-a119-f111-8343-7ced8d1dc988");
 
@@ -141,7 +146,7 @@ public static class WorkspaceFileEndpoints
         IFormFileCollection files,
         ITextExtractor textExtractor,
         IPlaybookOrchestrationService playbookService,
-        IConfiguration configuration,
+        IOptions<WorkspaceOptions> workspaceOptions,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -201,7 +206,7 @@ public static class WorkspaceFileEndpoints
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("analyzing", "Analyzing..."), ct);
 
             await RunSummarizePlaybookAsSSEAsync(
-                extractedText, playbookService, configuration, response, httpContext, logger, ct);
+                extractedText, playbookService, workspaceOptions, response, httpContext, logger, ct);
 
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("delivering", "Delivering results..."), ct);
             await response.WriteAsync("data: [DONE]\n\n", ct);
@@ -237,7 +242,7 @@ public static class WorkspaceFileEndpoints
     private static async Task RunSummarizePlaybookAsSSEAsync(
         string documentText,
         IPlaybookOrchestrationService playbookService,
-        IConfiguration configuration,
+        IOptions<WorkspaceOptions> workspaceOptions,
         HttpResponse response,
         HttpContext httpContext,
         ILogger logger,
@@ -251,7 +256,11 @@ public static class WorkspaceFileEndpoints
             documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
         }
 
-        var playbookIdStr = configuration[SummarizePlaybookIdConfigKey];
+        // Typed-options read replaces raw IConfiguration[...] indexer (ADR-018 / task 012 / FR-04).
+        // Existing SummarizePlaybookId property preserved for backward-compat; task 019 will swap
+        // to stable-code resolution via WorkspaceOptions.SummarizePlaybookCode +
+        // IPlaybookLookupService.GetByCodeAsync.
+        var playbookIdStr = workspaceOptions.Value.SummarizePlaybookId;
         var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
             ? parsed
             : DefaultSummarizePlaybookId;
