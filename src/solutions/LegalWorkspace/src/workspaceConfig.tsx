@@ -299,12 +299,14 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
       // -----------------------------------------------------------------------
       // My To Do List — SmartToDo
       //
-      // UAT 2026-06-21 round 7 (REVERT): the structural SectionPanel /
-      // WorkspaceShell.row fix collapsed the entire workspace to 40px
-      // because the height chain has an unresolved break above the shell
-      // that the per-section inline height was masking. Restored
-      // `calc(100vh - 200px)` with 560px floor until the deeper audit
-      // lands.
+      // UAT 2026-06-21 round 8: matching the working pattern from
+      // Daily Briefing's workspaceConfig (no `height` cap, just
+      // `minHeight: 'auto'`). The SectionPanel's flex chain delivers the
+      // full pane height down to the widget; the widget's internal
+      // `kanbanContainer { flex 1 1 auto, minHeight 0 }` claims that
+      // height and scrolls internally on overflow. Previous rounds set
+      // `height: 'calc(100vh - 200px)'` here which CAPPED the section
+      // (not just floored it), preventing fill in tall viewports.
       // -----------------------------------------------------------------------
       {
         id: "todo",
@@ -312,7 +314,7 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
         title: "My To Do List",
         badgeCount: p.todoCount,
         toolbar: todoToolbar,
-        style: { height: "calc(100vh - 200px)", minHeight: "560px" },
+        style: { minHeight: "auto" },
         renderContent: () => (
           <SmartToDo
             embedded
