@@ -40,6 +40,7 @@ function makeItem(overrides: Partial<NotificationItem>): NotificationItem {
     isRead: false,
     isAiGenerated: false,
     createdOn: new Date().toISOString(),
+    dueDate: null,
     ...overrides,
   } as NotificationItem;
 }
