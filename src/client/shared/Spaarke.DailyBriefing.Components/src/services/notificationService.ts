@@ -294,9 +294,13 @@ export async function markAllNotificationsRead(
     let succeeded = 0;
     let failed = 0;
 
-    // Use Promise.allSettled for parallel mark-read operations
+    // Use Promise.allSettled for parallel mark-read operations.
+    // Write toasttype=200000000 to match the single-record markNotificationRead path
+    // and the read/filter paths above (line 123, 156). The previous {isread:true} was
+    // either a no-op (isread not on appnotification schema) or wrote to a different
+    // field than the read path checks — bulk dismiss was therefore silently broken.
     const results = await Promise.allSettled(
-      unread.data.map(item => webApi.updateRecord('appnotification', item.id, { isread: true }))
+      unread.data.map(item => webApi.updateRecord('appnotification', item.id, { toasttype: 200000000 }))
     );
 
     for (const r of results) {
