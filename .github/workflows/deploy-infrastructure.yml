@@ -111,7 +111,12 @@ jobs:
 
           echo "All Bicep files passed linting" >> $GITHUB_STEP_SUMMARY
 
+      # AZURE_CONFIG_DIR per-step (same reason as Lint step above —
+      # runner context not available at job-level; without this az bicep build
+      # fails on missing ~/.azure/azureProfile.json).
       - name: Build Bicep templates
+        env:
+          AZURE_CONFIG_DIR: ${{ runner.temp }}/.azure
         run: |
           # Compile all stack files to verify they produce valid ARM templates
           for stack in infrastructure/bicep/stacks/*.bicep; do
