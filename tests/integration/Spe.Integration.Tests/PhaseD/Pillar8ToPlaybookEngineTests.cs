@@ -427,6 +427,16 @@ public sealed class Pillar8ToPlaybookEngineTests
         public void PlaybookNodeExecuting(Guid playbookId, Guid nodeId, string nodeType, Guid? sessionId, string? tenantId) { }
         public void PlaybookNodeCompleted(Guid playbookId, Guid nodeId, string decision, long durationMs, Guid? sessionId, string? tenantId) { }
 
+        // chat-routing-redesign-r1 task 074 — Upload-pipeline context.upload_* events (no-op stubs;
+        // this test only audits routing decisions, not upload telemetry).
+        public void UploadStarted(Guid? sessionId, string fileId, string contentType, long fileSizeBytes, string? tenantId) { }
+        public void UploadClassified(Guid? sessionId, string fileId, string documentType, double confidence, long durationMs, string? tenantId) { }
+        public void UploadSummarized(Guid? sessionId, string fileId, int summaryCharCount, long durationMs, string? tenantId) { }
+        public void UploadManifestExtracted(Guid? sessionId, string fileId, int sectionCount, int tableCount, int pageCount, long durationMs, string? tenantId) { }
+        public void UploadIndexed(Guid? sessionId, string fileId, int chunkCount, long durationMs, string? tenantId) { }
+        public void UploadPersisted(Guid? sessionId, string fileId, long durationMs, string? tenantId) { }
+        public void UploadCompleted(Guid? sessionId, string fileId, long totalDurationMs, string? tenantId) { }
+
         public sealed record DecisionEvent(
             string Layer,
             string Decision,
