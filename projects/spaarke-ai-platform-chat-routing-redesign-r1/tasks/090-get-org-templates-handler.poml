@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>GetOrgTemplatesHandler (T4 read-only) — reads org templates from Dataverse</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>091</blocks>
+    <tags>bff-api, services, handlers, tool-handler, ai, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'dataverse'; creates new `.cs` handler file; T4 read-only boundary; ADR-013/ADR-015/ADR-033 binding</rigor-reason>
+    <parallel-group>4-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `GetOrgTemplatesHandler` (NEW) at `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GetOrgTemplatesHandler.cs` implementing the T4 `get_org_templates(category?)` tool per architecture §8.1. READ-ONLY: reads org-level template entities from Dataverse via `IOrgTemplatesService` (architecture §4.4 — verify or create as a thin read-only service). Optional `category` filter. Returns `Array<{ templateId, name, type, content }>`. Implements FR-30 (get_org_templates row of the 8-tool surface).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat tool-handler authoring + Dataverse org-template entity read patterns.</role>
+
+  <goal>
+    `GetOrgTemplatesHandler` lives at `Services/Ai/Handlers/GetOrgTemplatesHandler.cs` implementing `IToolHandler`. Reads via `IOrgTemplatesService` (existing if shared; else minimal new service). Optional `category` parameter filters results. Returns `Array<{ templateId, name, type, content }>` per §8.1. Graceful degradation on read failure: returns empty array + Warning log per §9.1. Single `ToolResult`; tier-1-safe telemetry; ≤+0.1 MB delta. Unit tests cover hit, category filter, empty result, defaults-on-failure, ADR-015 telemetry safety.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §3.1 (T4) + §4.4 (OrgTemplatesService — verify or create) + §8.1 schema + §8.2 routing (always-on). T4 is bound by ADR-013 facade; chat code READS via this handler; WRITES go through org-admin UI (out of scope here).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint.</constraint>
+    <constraint source="ADR-010">Auto-discovered; `IOrgTemplatesService` is registered by task 091.</constraint>
+    <constraint source="ADR-013">T4 reads via service abstraction; NO direct `IDataverseClient` injection into the handler.</constraint>
+    <constraint source="ADR-015">Telemetry payload: handlerName + sessionId + tenantId + decision (`hit_<n>` | `empty` | `failure`) + durationMs ONLY. NEVER template names, content, or category strings.</constraint>
+    <constraint source="ADR-029">≤+0.1 MB delta.</constraint>
+    <constraint source="ADR-033">SINGLE `ToolResult` return.</constraint>
+    <constraint source="architecture">§3.2 rule 3 — T4 bound by ADR-013; chat reads only; writes via org-admin UI.</constraint>
+    <constraint source="architecture">§9.1 — graceful degradation on read failure: empty array + Warning.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §3.1, §4.4, §8.1, §9.1.</step>
+    <step order="2">Grep across `src/server/api/Sprk.Bff.Api/` for `OrgTemplate` (and `sprk_template` if a Dataverse entity is established) to confirm presence; if absent, author `Services/Ai/Memory/IOrgTemplatesService.cs` + `OrgTemplatesService.cs` as minimal read-only wrapper. Confirm the actual Dataverse entity name (e.g., `sprk_orgtemplate`); if the entity does not yet exist, return an empty array (graceful) and document the gap in `notes/debug/090-org-templates-entity-gap.md` for follow-up.</step>
+    <step order="3">Author `Services/Ai/Handlers/GetOrgTemplatesHandler.cs` implementing `IToolHandler`. Parameter: `category` (optional).</step>
+    <step order="4">Implement `ExecuteAsync`: call `IOrgTemplatesService.ListAsync(tenantId, category, ct)`; map results to `Array<{ templateId, name, type, content }>`; empty array on failure with Warning log per §9.1.</step>
+    <step order="5">Add Dataverse seed-row JSON at `infra/dataverse/sprk_analysistool-get-org-templates-row.json`.</step>
+    <step order="6">Author unit tests: hit, category filter, empty result, defaults-on-failure, ADR-015 telemetry safety.</step>
+    <step order="7">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="8">Measure BFF publish-size delta; write `notes/handoffs/090-bff-publish-delta.md`.</step>
+    <step order="9">Run code-review + adr-check (Step 9.5).</step>
+    <step order="10">Update TASK-INDEX.md: 090 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Reference handlers + architecture</tool>
+    <tool name="Grep">Locate existing OrgTemplatesService / sprk_orgtemplate</tool>
+    <tool name="Write">Handler + (possibly) service + tests + seed-row JSON</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GetOrgTemplatesHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IOrgTemplatesService.cs (if not present)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/OrgTemplatesService.cs (if not present)</output>
+    <output type="code">infra/dataverse/sprk_analysistool-get-org-templates-row.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/GetOrgTemplatesHandlerTests.cs</output>
+    <output type="docs">notes/handoffs/090-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler exists at the specified path and implements `IToolHandler`.</criterion>
+    <criterion testable="true">Single `ToolResult` return.</criterion>
+    <criterion testable="true">Read-only — `grep "UpdateAsync\|SaveAsync\|CreateAsync" src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GetOrgTemplatesHandler.cs` returns ZERO matches.</criterion>
+    <criterion testable="true">Empty array returned on read failure (graceful per §9.1).</criterion>
+    <criterion testable="true">Optional `category` parameter filters; unit test verifies.</criterion>
+    <criterion testable="true">Telemetry payload contains no template content/names.</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Read-only T4 surface. If the Dataverse org-template entity is not yet established in this environment, return empty array (graceful) and document the gap; do NOT block this task waiting for entity creation. The handler interface is stable regardless of underlying entity shape.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

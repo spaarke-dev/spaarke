@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Add WorkspaceOptions.SummarizePlaybookCode (FR-04) + fix ADR-018 violation at WorkspaceFileEndpoints.cs:30,254</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>013,019</blocks>
+    <tags>bff-api, config, ADR-018</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies typed-options surface + endpoint code; tags include 'bff-api'; ADR-018 binding; FR-04 acceptance is exact-zero-call-sites grep</rigor-reason>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add `SummarizePlaybookCode` (string) property to `WorkspaceOptions.cs` and migrate `WorkspaceFileEndpoints.cs:30,254` from raw `IConfiguration["Workspace:SummarizePlaybookId"]` indexer reads to `IOptions&lt;WorkspaceOptions&gt;.Value.SummarizePlaybookCode` typed reads. Implements FR-04 + fixes the existing ADR-018 violation. This task does NOT migrate the consumer to stable-code resolution — that is task 019; this task only fixes the option shape so 019 can complete cleanly.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in IOptions binding + ASP.NET Core minimal-API DI.</role>
+
+  <goal>
+    `WorkspaceOptions.cs` has a new `SummarizePlaybookCode` string property bound from `Workspace:SummarizePlaybookCode` config key. `WorkspaceFileEndpoints.cs:30,254` uses `IOptions&lt;WorkspaceOptions&gt;` (or `IOptionsMonitor`) instead of `IConfiguration["..."]` indexer. Existing config keys preserved (`Workspace:SummarizePlaybookId` continues to bind to existing GUID property for backward-compat until task 019 retires it). Unit test asserts the option binds correctly.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-04 acceptance: `IConfiguration["Workspace:SummarizePlaybookId"]` returns zero call sites. The current code at `WorkspaceFileEndpoints.cs:30,254` violates ADR-018 (raw indexer reads). This task is the prerequisite shape fix that unblocks task 013 (4-code extension) and task 019 (consumer migration to stable code). Task 019 will REPLACE the `SummarizePlaybookCode` use in the endpoint with `IPlaybookLookupService.GetByCodeAsync(options.SummarizePlaybookCode, ...)`; this task only ensures the typed-option exists to feed it.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>config/appsettings.Development.json (or appsettings.json)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Options/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-018">Typed options REQUIRED; raw `IConfiguration[]` indexer reads BANNED in new/modified code.</constraint>
+    <constraint source="ADR-010">DI minimalism — inject `IOptions&lt;WorkspaceOptions&gt;` (or `IOptionsMonitor`) directly; no `IServiceProvider.GetService&lt;T&gt;()`.</constraint>
+    <constraint source="ADR-013">Endpoint stays in `Api/Workspace/` — no AI facade boundary change.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect ≤0.05 MB delta.</constraint>
+    <constraint source="spec">FR-04 acceptance: `grep "IConfiguration\\[\"Workspace:SummarizePlaybookId\"\\]" src/` returns zero matches AFTER this task.</constraint>
+    <constraint source="project">Do NOT modify the endpoint's resolution logic (task 019 owns that). This task only changes the option shape.</constraint>
+    <constraint source="project">Preserve backward-compat — existing `SummarizePlaybookId` property remains so deployed configs don't break mid-migration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `Sprk.Bff.Api/Options/WorkspaceOptions.cs` — note existing properties (esp. `SummarizePlaybookId` GUID).</step>
+    <step order="2">Add `public string SummarizePlaybookCode { get; set; } = string.Empty;` to `WorkspaceOptions` with XML doc comment referencing FR-04.</step>
+    <step order="3">Verify `WorkspaceOptions` is registered via `services.Configure&lt;WorkspaceOptions&gt;(config.GetSection("Workspace"))` in `Program.cs` or a module file. Add if missing.</step>
+    <step order="4">Read `WorkspaceFileEndpoints.cs:30,254`. Replace `IConfiguration["Workspace:SummarizePlaybookId"]` indexer reads with `IOptions&lt;WorkspaceOptions&gt;.Value.SummarizePlaybookId` (existing GUID property — backward-compat preserved).</step>
+    <step order="5">Add `IOptions&lt;WorkspaceOptions&gt;` to the endpoint handler signature; remove the raw `IConfiguration` injection if no longer used.</step>
+    <step order="6">Update `appsettings.Development.json` (or relevant config file) — add `Workspace:SummarizePlaybookCode = "summarize-document-workspace"` so task 019 can consume it.</step>
+    <step order="7">Add unit test in `tests/unit/Sprk.Bff.Api.Tests/Options/WorkspaceOptionsTests.cs` asserting `SummarizePlaybookCode` binds correctly from config section.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — pass.</step>
+    <step order="9">Measure publish size; report delta.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 012 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">WorkspaceOptions.cs + WorkspaceFileEndpoints.cs</tool>
+    <tool name="Edit">Modify options + endpoint + config + add test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+    <tool name="Grep">Verify zero `IConfiguration["Workspace:SummarizePlaybookId"]` remains</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs — new SummarizePlaybookCode property</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs — typed-option read</output>
+    <output type="config">config/appsettings.Development.json — Workspace:SummarizePlaybookCode = "summarize-document-workspace"</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Options/WorkspaceOptionsTests.cs — binding test</output>
+    <output type="docs">notes/handoffs/012-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WorkspaceOptions.SummarizePlaybookCode` property exists and binds from config.</criterion>
+    <criterion testable="true">`grep "IConfiguration\\[\"Workspace:SummarizePlaybookId\"\\]" src/server/api/Sprk.Bff.Api/` returns zero matches.</criterion>
+    <criterion testable="true">`WorkspaceFileEndpoints.cs` injects `IOptions&lt;WorkspaceOptions&gt;` (or `IOptionsMonitor`).</criterion>
+    <criterion testable="true">Existing `SummarizePlaybookId` GUID property preserved for backward-compat.</criterion>
+    <criterion testable="true">Unit test exits 0.</criterion>
+    <criterion testable="true">Publish-size delta reported within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 013 will EXTEND `WorkspaceOptions` with 3 additional code properties (`ChatSummarizePlaybookCode`, `MatterPreFillPlaybookCode`, `ProjectPreFillPlaybookCode`, `AiSummaryPlaybookCode`). Task 013 is gated on this task (1-A → 1-B). Keep this task's edits surgical to avoid merge conflicts with 013.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

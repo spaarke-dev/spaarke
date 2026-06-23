@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>FileClassificationService — gpt-4o-mini documentType + confidence (NEW)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4b)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>064</dependencies>
+    <blocks>070,073</blocks>
+    <tags>bff-api, services, ai, azure-openai, ADR-013, ADR-015</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF service with LLM call; tags include `bff-api`, `ai`, `azure-openai`; ADR-013 + ADR-015 binding</rigor-reason>
+    <parallel-group>4-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NEW file — no overlap with peer 4-B tasks</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author `FileClassificationService` (NEW) in `src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/` (or `Services/Ai/Files/`). Uses `gpt-4o-mini` via the existing `IOpenAiClient` facade to classify uploaded file content into `{ documentType, confidence }` per architecture §6.1. Target latency: ~250ms (parallel path with 068, 069). Returns `FileClassificationResult { string DocumentType, double Confidence }`. Strict ADR-015 tier-1 logging — NEVER log file content or the classification text.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in Azure OpenAI structured-output classification + ADR-013 AI facade boundary + ADR-015 tier-1 logging.</role>
+
+  <goal>
+    `FileClassificationService.cs` exists with `IFileClassificationService` interface + `ClassifyAsync(string textContent, string fileName, string contentType, CancellationToken ct) → FileClassificationResult`. Implementation calls gpt-4o-mini with structured-output prompt asking for `documentType` (e.g., "NDA", "patent", "invoice", "contract", "other") + `confidence` (0.0–1.0). Returns the parsed result.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §4.4 + §6.1 (Upload pipeline). One of three parallel enrichment services orchestrated by `SessionFileEnrichmentService` (066). The `documentType` output flows into the layered context card (task 076) and is later consumed by WP2 file-aware routing (Phase 5 Hybrid C pre-filter — FR-17). Confidence enables downstream confidence-based routing decisions.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Chat/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Service lives INSIDE the AI module (`Services/Ai/`). MAY consume `IOpenAiClient` directly — this is NOT CRUD code. CRUD code consuming this service must go through `PublicContracts/`.</constraint>
+    <constraint source="ADR-014">Optional: cache classification result per (sha256 of textContent, contentType) for 5 min — only if hot-path benchmark justifies; otherwise skip caching for v1.</constraint>
+    <constraint source="ADR-015">Tier-1 logging only: fileId, sessionId, durationMs, resultDocumentType (the LABEL is safe — it's a discrete category), confidence value. NEVER log textContent (input) or any free-text from the LLM response beyond the discrete label.</constraint>
+    <constraint source="ADR-029">Per-task publish-size measurement; new service should add &lt;0.5 MB.</constraint>
+    <constraint source="architecture §6.1">Uses `gpt-4o-mini` (NOT gpt-4o); structured output preferred (JSON schema). Target latency ~250ms parallel.</constraint>
+    <constraint source="project">No new external API (no Document Intelligence per CLAUDE.md "MUST NOT add new external API surface"). Use existing Azure OpenAI client only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IOpenAiClient.cs` + `OpenAiClient.cs` to identify the structured-output / chat-completion methods + their typed-options patterns.</step>
+    <step order="2">Read peer service examples (any existing classification or summarization service) for style alignment.</step>
+    <step order="3">Define `IFileClassificationService` + `FileClassificationResult` record.</step>
+    <step order="4">Implement `FileClassificationService`:
+      - Constructor takes `IOpenAiClient`, `IOptions&lt;AiModelOptions&gt;` (or equivalent), `ILogger`
+      - `ClassifyAsync` constructs a system prompt: "Classify this document into one of: NDA, patent, invoice, contract, lease, motion, other. Return JSON `{documentType, confidence}`."
+      - User prompt truncated to first 4K chars of textContent (avoid full-doc cost for cheap classifier)
+      - Calls gpt-4o-mini via `IOpenAiClient` with response-format=json
+      - Parses + validates result (defensive: fallback to `{ documentType: "other", confidence: 0.0 }` on parse failure)
+      - Logs fileId, sessionId, durationMs, resultDocumentType, confidence (tier-1 safe)</step>
+    <step order="5">Author unit test stub in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/FileClassificationServiceTests.cs` — mock `IOpenAiClient`; assert tier-1 logging + JSON parse + fallback path.</step>
+    <step order="6">Run `dotnet build` + `dotnet test` for the new tests.</step>
+    <step order="7">Measure BFF publish size.</step>
+    <step order="8">code-review + adr-check (Step 9.5).</step>
+    <step order="9">Update TASK-INDEX.md: 067 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">IOpenAiClient + peer services</tool>
+    <tool name="Write">Service + interface + record + test stub</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+    <tool name="Grep">Locate structured-output patterns in existing AI services</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/FileClassificationService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/IFileClassificationService.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/FileClassificationServiceTests.cs (NEW)</output>
+    <output type="docs">notes/handoffs/067-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`FileClassificationService.cs` exists.</criterion>
+    <criterion testable="true">Uses gpt-4o-mini via `IOpenAiClient`.</criterion>
+    <criterion testable="true">Returns `FileClassificationResult` with `DocumentType` + `Confidence`.</criterion>
+    <criterion testable="true">No log line carries raw textContent.</criterion>
+    <criterion testable="true">Fallback path returns `{ "other", 0.0 }` on parse failure.</criterion>
+    <criterion testable="true">`dotnet build` + new tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.5 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DI registration is task 070. Do NOT touch `AiModule.cs` here. The classification result label list ("NDA", "patent", "invoice", "contract", "lease", "motion", "other") is illustrative — verify against any existing categorical scheme via grep before finalizing; if a canonical list exists in the codebase, use it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

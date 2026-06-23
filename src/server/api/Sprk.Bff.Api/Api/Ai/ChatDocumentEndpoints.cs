@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
@@ -9,6 +10,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -139,9 +141,16 @@ public static class ChatDocumentEndpoints
         ITextExtractor textExtractor,
         IDistributedCache cache,
         ChatSessionManager sessionManager,
+        IContextEventEmitter contextEventEmitter,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
+
+        // chat-routing-redesign-r1 task 074 — total-pipeline stopwatch for context.upload_completed.
+        // Started AFTER validation passes (after tenantId + session checks) so durationMs reflects
+        // actual pipeline work, not request entry. ADR-015 binding: numeric metric only.
+        var pipelineStopwatch = Stopwatch.StartNew();
+        var sessionGuidForEmit = Guid.TryParse(sessionId, out var parsedSessionGuid) ? parsedSessionGuid : (Guid?)null;
 
         // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys).
         // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
@@ -253,6 +262,25 @@ public static class ChatDocumentEndpoints
             "Processing document upload: DocumentId={DocumentId}, Filename={Filename}, " +
             "Size={SizeBytes} bytes, Extension={Extension}, SessionId={SessionId}",
             documentId, filename, file.Length, extension, sessionId);
+
+        // chat-routing-redesign-r1 task 074 — emit context.upload_started.
+        // ADR-015 Tier 1 SAFE: deterministic IDs + contentType + numeric size only.
+        // Resolve contentType from extension (mirrors the switch later in step 10a) so the
+        // started-event carries the same MIME enum string as downstream events.
+        var startedContentType = extension switch
+        {
+            ".pdf" => "application/pdf",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            _ => file.ContentType ?? "application/octet-stream"
+        };
+        contextEventEmitter.UploadStarted(
+            sessionId: sessionGuidForEmit,
+            fileId: documentId,
+            contentType: startedContentType,
+            fileSizeBytes: file.Length,
+            tenantId: tenantId);
 
         // 8. Read original binary into memory for both extraction and optional SPE persistence (R2-014)
         byte[] originalBinary;
@@ -457,6 +485,9 @@ public static class ChatDocumentEndpoints
                 // carry both partition keys. Pass documentId as both documentId and speFileId
                 // (the latter is a "best effort" link for future SPE persistence; for
                 // session-uploads we use the chat-document GUID as both per task POML §3.1).
+                //
+                // chat-routing-redesign-r1 task 074 — indexing stopwatch for context.upload_indexed.
+                var indexingStopwatch = Stopwatch.StartNew();
                 var indexingResult = await ragIndexingPipeline.IndexSessionFileAsync(
                     document: parsedDocument,
                     documentId: documentId,
@@ -465,6 +496,16 @@ public static class ChatDocumentEndpoints
                     fileName: filename,
                     speFileId: documentId,
                     cancellationToken: httpContext.RequestAborted);
+                indexingStopwatch.Stop();
+
+                // chat-routing-redesign-r1 task 074 — emit context.upload_indexed.
+                // ADR-015 Tier 1 SAFE: chunkCount + durationMs only.
+                contextEventEmitter.UploadIndexed(
+                    sessionId: sessionGuidForEmit,
+                    fileId: documentId,
+                    chunkCount: indexingResult.KnowledgeChunksIndexed,
+                    durationMs: indexingStopwatch.ElapsedMilliseconds,
+                    tenantId: tenantId);
 
                 // Reconstruct chunk IDs from the deterministic pattern used by
                 // BuildKnowledgeDocuments (chunkIdSuffix "s" for session-files, per
@@ -549,6 +590,15 @@ public static class ChatDocumentEndpoints
             "Document upload complete: DocumentId={DocumentId}, Filename={Filename}, " +
             "Status=ready, TokenEstimate={TokenEstimate}, WasTruncated={WasTruncated}, SessionId={SessionId}",
             documentId, filename, tokenEstimate, wasTruncated, sessionId);
+
+        // chat-routing-redesign-r1 task 074 — emit context.upload_completed (end-of-pipeline).
+        // ADR-015 Tier 1 SAFE: totalDurationMs (numeric) + IDs only — never filename, content, token text.
+        pipelineStopwatch.Stop();
+        contextEventEmitter.UploadCompleted(
+            sessionId: sessionGuidForEmit,
+            fileId: documentId,
+            totalDurationMs: pipelineStopwatch.ElapsedMilliseconds,
+            tenantId: tenantId);
 
         return Results.Accepted(
             uri: $"/api/ai/chat/sessions/{sessionId}/documents/{documentId}",

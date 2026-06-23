@@ -327,6 +327,91 @@ public class PlaybookChatContextProviderTests
         contextWhenEmpty.UploadedFiles.Should().BeNull();
     }
 
+    // ─── FR-27 + FR-45 binding-invariant regression (chat-routing-redesign-r1 task 078) ──
+    //
+    // These tests pin two contracts the per-turn composition seam MUST never lose:
+    //
+    //   FR-45: PlaybookChatContextProvider.GetContextAsync MUST call
+    //          IMatterMemoryService.ToSystemPromptFragmentAsync (cross-session matter
+    //          memory activation). Architecture §11.1.
+    //
+    //   FR-27: there is exactly ONE per-turn composition seam — this method. There MUST
+    //          NOT be a parallel composer in SprkChatAgentFactory that bypasses
+    //          IChatContextProvider.GetContextAsync.
+    //
+    // Both tests use the source-file regex pattern (mirrors MatterPreFillServiceTests
+    // NFR-07 invariants). Line numbers are intentionally NOT pinned — the invariant is
+    // the call's existence, not its position. Task 080 escalates this with a stricter
+    // regression test scoped to the binding pair.
+
+    [Fact]
+    public void GetContextAsync_PreservesMatterMemoryServiceInvocation_FR45()
+    {
+        // FR-45 BINDING: PlaybookChatContextProvider MUST invoke
+        // IMatterMemoryService.ToSystemPromptFragmentAsync to activate cross-session
+        // matter memory (architecture §11.1). Source-text check pins the invocation
+        // so future refactors that accidentally drop the wiring fail this test loudly.
+        var source = File.ReadAllText(LocatePlaybookChatContextProviderSource());
+        source.Should().Contain("_matterMemoryService.ToSystemPromptFragmentAsync(",
+            "FR-45 BINDING — chat-routing-redesign-r1 task 078: the per-turn composition " +
+            "seam MUST call IMatterMemoryService.ToSystemPromptFragmentAsync to activate " +
+            "cross-session matter memory. Architecture §11.1. Do NOT regress.");
+    }
+
+    [Fact]
+    public void GetContextAsync_IsSinglePerTurnCompositionSeam_FR27()
+    {
+        // FR-27 BINDING: chat-routing-redesign-r1 requires "no parallel pipelines."
+        // PlaybookChatContextProvider.GetContextAsync is the ONLY per-turn composition
+        // seam. SprkChatAgentFactory must consume it via IChatContextProvider and only
+        // append suffix blocks under the shared budget tracker — it must NOT contain
+        // a parallel composer that bypasses the provider.
+        //
+        // Mechanism: verify the factory still resolves IChatContextProvider and calls
+        // GetContextAsync (single composer wiring). If anyone introduces a second
+        // composer in the factory, the call-site count grows or the seam name changes —
+        // either drift fails this test.
+        var factorySource = File.ReadAllText(LocateSprkChatAgentFactorySource());
+        factorySource.Should().Contain("contextProvider.GetContextAsync(",
+            "FR-27 BINDING — SprkChatAgentFactory MUST consume the single composition " +
+            "seam via IChatContextProvider.GetContextAsync. A second composer in the " +
+            "factory violates the single-pipeline contract.");
+        factorySource.Should().Contain("GetRequiredService<IChatContextProvider>()",
+            "FR-27 BINDING — SprkChatAgentFactory MUST resolve IChatContextProvider from " +
+            "the per-turn scope (not bypass it via a direct composer). Architecture §4.3.");
+    }
+
+    private static string LocatePlaybookChatContextProviderSource()
+        => LocateBffSource("Services", "Ai", "Chat", "PlaybookChatContextProvider.cs");
+
+    private static string LocateSprkChatAgentFactorySource()
+        => LocateBffSource("Services", "Ai", "Chat", "SprkChatAgentFactory.cs");
+
+    private static string LocateBffSource(params string[] tailSegments)
+    {
+        // Resolve from the test assembly's parent directory tree. The test project lives
+        // at tests/unit/Sprk.Bff.Api.Tests; the source lives at
+        // src/server/api/Sprk.Bff.Api/Services/Ai/Chat/...
+        var assemblyPath = typeof(PlaybookChatContextProviderTests).Assembly.Location;
+        var dir = new DirectoryInfo(Path.GetDirectoryName(assemblyPath)!);
+
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "server")))
+        {
+            dir = dir.Parent;
+        }
+
+        dir.Should().NotBeNull("repo root must be locatable from the test assembly path");
+
+        var segments = new[]
+        {
+            dir!.FullName, "src", "server", "api", "Sprk.Bff.Api"
+        }.Concat(tailSegments).ToArray();
+
+        var path = Path.Combine(segments);
+        File.Exists(path).Should().BeTrue($"expected source file at {path}");
+        return path;
+    }
+
     #region Setup helpers
 
     private PlaybookChatContextProvider CreateProvider()

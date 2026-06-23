@@ -100,13 +100,22 @@ public record ChatSession(
 ///   - The session-files cleanup <c>IHostedService</c> (R5 task 007 — uses
 ///     <see cref="SearchDocumentIdsCsv"/> to identify abandoned-session leftovers).
 ///   - The chat-pane file-chip UX (R5 task 020).
+///   - The 6-Tier Memory Subsystem upload pipeline (chat-routing-redesign-r1 task 071+):
+///     enriched fields (<see cref="SummaryText"/>, <see cref="ClassifiedDocType"/>,
+///     <see cref="Sections"/>, <see cref="TableMetadata"/>, <see cref="Citations"/>,
+///     <see cref="PageCount"/>, <see cref="Language"/>, <see cref="ClassifiedConfidence"/>)
+///     populated by <c>SessionFileEnrichmentService</c> and consumed by
+///     <c>LayeredContextCardBuilder</c> + recall tools.
 ///
 /// Tenant isolation: <see cref="ChatSession.TenantId"/> on the parent session is the
 /// authoritative tenant boundary (ADR-014). This record intentionally does NOT carry a
 /// redundant <c>TenantId</c>.
 ///
-/// Shape: matches design.md §4.4 verbatim (six fields). Do NOT add fields without
-/// updating design.md §4.4 + spec NFR-02 first.
+/// Shape (chat-routing-redesign-r1, task 071): the original 6 R5 fields are preserved
+/// verbatim; the 8 enriched fields are additive per stateful-chat-architecture.md §11.2.
+/// All 8 enriched fields are nullable / default-initialised so older Cosmos and Redis
+/// payloads (pre-enrichment) deserialize cleanly. Do NOT remove or rename fields without
+/// updating stateful-chat-architecture.md §11.2 + spec NFR-02 first.
 /// </summary>
 /// <param name="FileId">
 /// Stable session-scoped file ID. Used as the foreign key on
@@ -137,4 +146,159 @@ public record ChatSessionFile(
     string ContentType,
     long SizeBytes,
     string SearchDocumentIdsCsv,
-    DateTimeOffset UploadedAt);
+    DateTimeOffset UploadedAt)
+{
+    /// <summary>
+    /// Precomputed 1-paragraph summary produced by <c>FileSummarizationService</c>
+    /// (gpt-4o-mini, chat-routing-redesign-r1 task 068). Marked "NOT authoritative"
+    /// by <c>TrustFrameInstructionInjector</c> in the static-prefix trust frame —
+    /// downstream agents MUST verify via recall before citing.
+    ///
+    /// Null until the upload-pipeline enrichment completes for this file
+    /// (architecture §6.1). Length target: ≤120 chars per architecture §6.1.
+    /// </summary>
+    public string? SummaryText { get; init; }
+
+    /// <summary>
+    /// Document type label produced by <c>FileClassificationService</c>
+    /// (chat-routing-redesign-r1 task 067). Examples: "NDA", "patent", "invoice",
+    /// "contract", "memo". Null until classification completes.
+    /// </summary>
+    public string? ClassifiedDocType { get; init; }
+
+    /// <summary>
+    /// Classifier confidence in <see cref="ClassifiedDocType"/> on the closed interval [0, 1].
+    /// Null until classification completes. Downstream consumers SHOULD treat values
+    /// below ~0.6 as "unclassified" per architecture §6.1 trust-frame rules.
+    /// </summary>
+    public double? ClassifiedConfidence { get; init; }
+
+    /// <summary>
+    /// Detected section structure produced by <c>FileManifestExtractor</c>
+    /// (chat-routing-redesign-r1 task 069). Empty list when the extractor has not
+    /// yet run or no sections were detected (e.g., a flat-text upload). Consumed by
+    /// <c>LayeredContextCardBuilder</c> + <c>get_file_manifest</c> tool.
+    /// </summary>
+    public IReadOnlyList<SectionInfo> Sections { get; init; } = Array.Empty<SectionInfo>();
+
+    /// <summary>
+    /// Detected table metadata produced by <c>FileManifestExtractor</c>
+    /// (chat-routing-redesign-r1 task 069). Empty list when the extractor has not
+    /// yet run or no tables were detected. The name <c>TableMetadata</c> (vs <c>Tables</c>)
+    /// is intentional: peer R5 sibling fields use noun phrases, and "Tables" alone is
+    /// ambiguous when log lines mention table-rendering.
+    /// </summary>
+    public IReadOnlyList<TableInfo> TableMetadata { get; init; } = Array.Empty<TableInfo>();
+
+    /// <summary>
+    /// Citation references this file has produced or had attributed to it during the
+    /// session (chat-routing-redesign-r1 task 071/076). Empty list when no citation
+    /// activity has occurred for this file. Populated incrementally by recall tools
+    /// (e.g., <c>recall_session_file</c>) as they emit citations.
+    /// </summary>
+    public IReadOnlyList<CitationReference> Citations { get; init; } = Array.Empty<CitationReference>();
+
+    /// <summary>
+    /// Total page count produced by <c>FileManifestExtractor</c>
+    /// (chat-routing-redesign-r1 task 069). Null until extraction completes.
+    /// For non-paginated formats (plain text, markdown), the extractor falls back to
+    /// <c>Math.Max(1, textContent.Length / 3000)</c> per task 069 design.
+    /// </summary>
+    public int? PageCount { get; init; }
+
+    /// <summary>
+    /// Detected language as an ISO-639-1 code (e.g., "en", "fr", "de") produced by
+    /// <c>FileManifestExtractor</c> (chat-routing-redesign-r1 task 069). Null until
+    /// detection completes. Intentionally NOT defaulted to "en": an explicit
+    /// <c>null</c> signals "not yet detected", which downstream tooling can
+    /// distinguish from a confident English detection. Downstream consumers MAY
+    /// default to "en" at the point of use.
+    /// </summary>
+    public string? Language { get; init; }
+}
+
+/// <summary>
+/// Detected section heading in an uploaded file's text content.
+///
+/// Produced by <c>FileManifestExtractor</c> (chat-routing-redesign-r1 task 069) using
+/// deterministic regex heuristics (no LLM call). Persisted on
+/// <see cref="ChatSessionFile.Sections"/> for Redis hot-tier + Cosmos warm-tier read
+/// by <c>LayeredContextCardBuilder</c> and the <c>get_file_manifest</c> tool.
+///
+/// Page fields are nullable because formats without page delimiters (plain text,
+/// markdown) cannot report a meaningful page range — only character offsets.
+/// </summary>
+/// <param name="Name">The detected section heading text (display only).</param>
+/// <param name="StartCharOffset">
+/// Character offset (inclusive) of the heading within the original extracted text content.
+/// Used by downstream tooling to slice the source for full-section retrieval.
+/// </param>
+/// <param name="EndCharOffset">
+/// Character offset (exclusive) of the end of the section within the original extracted
+/// text content. May equal <see cref="StartCharOffset"/> when extraction cannot
+/// determine the section boundary.
+/// </param>
+/// <param name="StartPage">
+/// 1-based start page number, or null when the source format is not paginated
+/// (e.g., extracted from plain text / markdown without form-feed delimiters).
+/// </param>
+/// <param name="EndPage">
+/// 1-based end page number (inclusive), or null when the source format is not paginated.
+/// </param>
+public sealed record SectionInfo(
+    string Name,
+    int StartCharOffset,
+    int EndCharOffset,
+    int? StartPage = null,
+    int? EndPage = null);
+
+/// <summary>
+/// Detected table metadata in an uploaded file's text content.
+///
+/// Produced by <c>FileManifestExtractor</c> (chat-routing-redesign-r1 task 069) using
+/// deterministic heuristics (3+ consecutive pipe/tab-delimited rows or markdown table
+/// headers — no LLM call). Persisted on <see cref="ChatSessionFile.TableMetadata"/>
+/// for Redis hot-tier + Cosmos warm-tier read by <c>LayeredContextCardBuilder</c> and
+/// the <c>get_file_manifest</c> tool.
+/// </summary>
+/// <param name="Name">
+/// Display label for the table (e.g., preceding heading line, or "Table 1" when no
+/// label is detectable).
+/// </param>
+/// <param name="StartCharOffset">
+/// Character offset (inclusive) of the table within the original extracted text content.
+/// </param>
+/// <param name="Page">
+/// 1-based page number the table appears on, or null when the source format is not
+/// paginated.
+/// </param>
+public sealed record TableInfo(
+    string Name,
+    int StartCharOffset,
+    int? Page = null);
+
+/// <summary>
+/// Citation reference attributed to an uploaded file during the session.
+///
+/// Populated by recall tools (e.g., <c>recall_session_file</c>) as they emit citations
+/// during their response shaping (chat-routing-redesign-r1 task 071 + downstream
+/// recall handlers). Persisted on <see cref="ChatSessionFile.Citations"/> so the
+/// layered context card and audit pipeline can report "how this file has been used"
+/// across the session.
+/// </summary>
+/// <param name="SourceId">
+/// The AI Search document ID (within <c>spaarke-session-files</c>) the citation
+/// points at, OR a free-form symbolic source ID for non-search-backed citations.
+/// </param>
+/// <param name="Quote">
+/// Optional verbatim quote text the citation surfaces. May be null when the citation
+/// is structural (e.g., "Section 4.2" with no inline quote).
+/// </param>
+/// <param name="Page">
+/// 1-based page number the citation points at, or null for non-paginated sources or
+/// section-level citations.
+/// </param>
+public sealed record CitationReference(
+    string SourceId,
+    string? Quote = null,
+    int? Page = null);

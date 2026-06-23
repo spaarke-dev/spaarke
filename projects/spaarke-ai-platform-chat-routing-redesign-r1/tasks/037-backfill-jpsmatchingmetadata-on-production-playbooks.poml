@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Backfill sprk_jpsmatchingmetadata on 6 production-bound playbooks</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>034,035,036</dependencies>
+    <blocks>038</blocks>
+    <tags>dataverse, data, migration, content-authoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data update to production-bound playbooks; preserves output schema/name/GUID (NFR-02); no code change — STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>2-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential data update to the same 6 production-bound playbooks; do not interleave with other index-touching tasks</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Backfill `sprk_jpsmatchingmetadata` JSON content on each of the 6 production-bound playbooks identified in spec §1.5. Each playbook receives a curated JSON payload matching the schema (`documentTypes`, `intents`, `triggerPhrases`, `preferredOver`, `outputDestination`, `scopeHints`, `exclusionHints`). Output schemas, names, and GUIDs of these playbooks MUST remain unchanged (NFR-02). After backfill, each playbook is ready for indexing (task 038).
+  </prompt>
+
+  <role>SPAARKE Dataverse data engineer + AI playbook content author. Expert in production-bound playbook constraints + JPS metadata authoring.</role>
+
+  <goal>
+    All 6 production-bound playbooks have well-formed `sprk_jpsmatchingmetadata` JSON values validated against the schema in `projects/.../architecture/jpsmatchingmetadata-schema.json`. Outputs / names / GUIDs unchanged. `sprk_indexstatus` set to 'not-indexed' (default) or unchanged — actual reindex happens in task 038.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-08 + NFR-02 (production-bound playbook preservation) + design §1.4. Backfill is content authoring informed by each playbook's actual purpose: the chat-summarize playbook gets `documentTypes: []` + `intents: ["summarize"]` etc.; matter pre-fill gets `outputDestination: "form-prefill"`; etc. The 6 playbooks per CLAUDE.md / spec §1.5 are specific instances — identify them from spec §1.5 enumeration before authoring.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/jpsmatchingmetadata-schema.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR-02: 6 production-bound playbooks output schemas / names / GUIDs unchanged. Backfill modifies ONLY `sprk_jpsmatchingmetadata`.</constraint>
+    <constraint source="spec">FR-09: each JSON payload must validate against the JPS matching metadata schema.</constraint>
+    <constraint source="spec">FR-12 (validation gate from task 036): each payload must include `description` (already on playbook), non-empty `documentTypes`, and non-empty `outputDestination` to pass send-to-index later.</constraint>
+    <constraint source="project">Sequential — do not interleave with other tasks touching the same playbooks.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-002-no-heavy-plugins.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec §1.5 + design §1.5 to enumerate the 6 production-bound playbooks with their GUIDs and names.</step>
+    <step order="2">Verify current `sprk_jpsmatchingmetadata` is null on all 6 (no overwrite of existing data).</step>
+    <step order="3">For each playbook, draft a curated JSON payload (documentTypes / intents / triggerPhrases / outputDestination at minimum; preferredOver / scopeHints / exclusionHints as relevant). Save drafts to `notes/handoffs/037-backfill-payloads.md` for owner review.</step>
+    <step order="4">Validate each draft payload against `projects/.../architecture/jpsmatchingmetadata-schema.json`.</step>
+    <step order="5">Apply backfill via Dataverse Web API PATCH (one row at a time; verify each write).</step>
+    <step order="6">After backfill, verify: name unchanged, GUID unchanged, output schema (any associated node config) unchanged. Spot-check sample dispatch of the chat-summarize playbook to confirm runtime parity.</step>
+    <step order="7">Set `sprk_indexstatus` to 'not-indexed' if not already set (so it shows in the admin drift view).</step>
+    <step order="8">Update TASK-INDEX.md: task 037 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">spec.md §1.5 + design.md</tool>
+    <tool name="Write">backfill payload drafts</tool>
+    <tool name="Bash">PowerShell / Web API PATCH</tool>
+    <tool name="Skill">dataverse-deploy</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">6 production-bound playbooks with `sprk_jpsmatchingmetadata` populated</output>
+    <output type="docs">notes/handoffs/037-backfill-payloads.md — JSON drafts per playbook</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 playbooks have non-null `sprk_jpsmatchingmetadata`.</criterion>
+    <criterion testable="true">Each payload validates against the JPS matching metadata JSON schema.</criterion>
+    <criterion testable="true">Each payload has non-empty `documentTypes` and non-empty `outputDestination` (passes task 036 validation gate).</criterion>
+    <criterion testable="true">Playbook names + GUIDs unchanged (NFR-02 preserved).</criterion>
+    <criterion testable="true">Spot-check dispatch of chat-summarize playbook returns same shape post-backfill.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Content authoring requires playbook-purpose understanding. If any payload requires owner input (e.g., for nuanced `preferredOver` ranking), pause and escalate per CLAUDE.md §6.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

@@ -3,8 +3,15 @@
  *
  * The four soft slashes (FR-50, Q6 closed) are intent SHORTCUTS that ROUTE
  * through the agent — they do NOT bypass the LLM. The router decorates the
- * outbound BFF chat payload with a `commandIntent` metadata field that the
+ * outbound BFF chat payload with an `intentHint` metadata field that the
  * existing `CapabilityRouter` Layer 1 consumes for strong-intent routing.
+ *
+ * Wire-format field name renamed `commandIntent` → `intentHint` per
+ * spaarke-ai-platform-chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
+ * The TypeScript value-vocabulary type `CommandIntent` is intentionally
+ * retained (it names the *set of values*, not the wire field) — see
+ * `projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/
+ * 022-commandintent-rename-decision.md`.
  *
  * Soft-slash vocabulary (Q6 closed at exactly 4 — do NOT extend):
  *   - `/summarize`        → `summarize`         → invoke_playbook(SUM-CHAT@v1)
@@ -18,7 +25,7 @@
  *   `/summarize #engagement-letter.docx` produces
  *   `{ command: '/summarize', isSoftSlash: true, references: [{kind:'filename',...}] }`
  *   from `CommandRouter.parse()`. The BFF payload then carries BOTH
- *   `commandIntent: 'summarize'` AND attachment metadata when the references
+ *   `intentHint: 'summarize'` AND attachment metadata when the references
  *   are resolved by task 083 (ReferenceResolver). Reference resolution itself
  *   is out of this module's scope.
  *
@@ -27,13 +34,13 @@
  *     soft slash; follow-up messages without a slash route through the
  *     existing CapabilityRouter natural-language path UNCHANGED.
  *   - NFR-11 (backward compat): when no slash is detected, the payload is
- *     RETURNED UNCHANGED (no `commandIntent` field). Natural-language
+ *     RETURNED UNCHANGED (no `intentHint` field). Natural-language
  *     equivalents like "summarize this" still work via Layer 1 keyword
  *     scoring.
  *
  * ADR contracts:
  *   - ADR-013: no new public-contract surface in `Services/Ai/PublicContracts/`.
- *     The BFF reads `commandIntent` via an internal pre-pass in
+ *     The BFF reads `intentHint` via an internal pre-pass in
  *     `CapabilityRouter` (mirroring task 069's voice-memory Layer 0 pattern).
  *     The router-side change is an additive optional parameter; no new
  *     interface, no new DI registration.
@@ -60,7 +67,7 @@ import type { Intent, SoftSlashCommand } from './CommandRouter';
 // ---------------------------------------------------------------------------
 
 /**
- * Closed vocabulary of `commandIntent` values mirroring the 4 soft slashes.
+ * Closed vocabulary of `intentHint` values mirroring the 4 soft slashes.
  * The BFF `CapabilityRouter` recognises EXACTLY these four strings; passing
  * any other value is undefined behaviour (the BFF will fall through to
  * normal Layer 1 keyword scoring).
@@ -78,7 +85,7 @@ export type CommandIntent =
  *
  * Mirrors `ChatSendMessageRequest` on the BFF (`ChatEndpoints.cs`) — fields
  * are camelCase to match the BFF's `JsonSerializerOptions.PropertyNamingPolicy`.
- * The router only TOUCHES the `commandIntent` field; other fields pass through
+ * The router only TOUCHES the `intentHint` field; other fields pass through
  * unchanged. Using a structurally-typed shape (rather than importing the
  * BFF DTO) keeps the frontend bundle free of BFF-side imports.
  *
@@ -89,7 +96,7 @@ export interface DecoratedChatBody {
   /**
    * The user's literal message text. May contain the soft-slash command and
    * any reference tokens (`#`, `@`). The BFF Layer 1 pre-pass reads
-   * `commandIntent` FIRST; `message` continues to flow into the LLM
+   * `intentHint` FIRST; `message` continues to flow into the LLM
    * conversation as-is.
    */
   message: string;
@@ -114,12 +121,12 @@ export interface DecoratedChatBody {
    * `SoftSlashIntentToCapabilityName`) and short-circuits to a Confident
    * result selecting that capability.
    */
-  commandIntent?: CommandIntent;
+  intentHint?: CommandIntent;
 
   /**
    * Allow forward-compatible passthrough of any other fields the BFF DTO
    * accepts now or in the future (e.g., HostContext overrides). This module
-   * decorates `commandIntent` only — everything else is untouched.
+   * decorates `intentHint` only — everything else is untouched.
    */
   [extraField: string]: unknown;
 }
@@ -184,17 +191,17 @@ export function toCommandIntent(intent: Intent): CommandIntent | null {
 }
 
 /**
- * Decorate the outbound BFF chat-message payload with a `commandIntent`
+ * Decorate the outbound BFF chat-message payload with an `intentHint`
  * metadata field when the parsed intent is a soft slash. Otherwise return
  * the body UNCHANGED (NFR-11 passthrough).
  *
  * Contract:
- *   - When `intent.isSoftSlash === true`: adds `commandIntent: <value>` to
+ *   - When `intent.isSoftSlash === true`: adds `intentHint: <value>` to
  *     the returned body. References (`intent.references[]`) are NOT touched
  *     here — task 083 (ReferenceResolver) handles them in a separate step,
  *     and both decorations COMPOSE on the same body without conflict.
  *   - When `intent.isSoftSlash === false` (hard slash, no slash, or
- *     unrecognized slash): returns the body verbatim with NO `commandIntent`
+ *     unrecognized slash): returns the body verbatim with NO `intentHint`
  *     field. The BFF treats a missing field as "no soft-slash hint" and
  *     falls through to existing Layer 1 keyword scoring.
  *
@@ -208,7 +215,7 @@ export function toCommandIntent(intent: Intent): CommandIntent | null {
  *                references: [{kind:'filename', value:'engagement-letter.docx', ...}] }
  *   decorateBody(intent, { message: '/summarize #engagement-letter.docx' })
  *     → { message: '/summarize #engagement-letter.docx',
- *         commandIntent: 'summarize' }
+ *         intentHint: 'summarize' }
  *   (task 083 then adds resolved file content to `attachments[]`)
  *
  * @param intent The structured intent emitted by `CommandRouter.parse()`.
@@ -227,6 +234,6 @@ export function decorateBody(intent: Intent, body: DecoratedChatBody): Decorated
 
   return {
     ...body,
-    commandIntent: intentValue,
+    intentHint: intentValue,
   };
 }

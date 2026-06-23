@@ -28,19 +28,24 @@ public sealed class ProjectPreFillService
 {
     private readonly SpeFileStore _speFileStore;
     private readonly ITextExtractor _textExtractor;
+    private readonly IPlaybookLookupService _playbookLookup;
     private readonly IWorkspacePrefillAi? _prefillAi;
     private readonly WorkspaceOptions _workspaceOptions;
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<ProjectPreFillService> _logger;
 
-    // Default: "Create New Project Pre-Fill" playbook (Extract Project Fields, gpt-4o)
-    // Mirrors MatterPreFillService.DefaultPreFillPlaybookId pattern — fallback when
-    // Workspace:ProjectPreFillPlaybookId config is missing. The prior GUID
-    // (3f21cec1-7d19-f111-8343-7ced8d1dc988) did not correspond to any Dataverse row,
-    // making the fallback path silently broken. Updated 2026-06-09 (R6 Wave B-G7 flag #3
-    // remediation) to the actual deployed playbook id discovered during R6 task 035 evidence.
-    private static readonly Guid DefaultPreFillPlaybookId =
-        Guid.Parse("fc343e9c-3460-f111-ab0b-7c1e521b425f");
+    // FR-05 stable-ID resolution (chat-routing-redesign-r1 task 017 / Pattern A):
+    // The prior hardcoded "Create New Project Pre-Fill" playbook GUID
+    // (fc343e9c-3460-f111-ab0b-7c1e521b425f) has been removed. The playbook is now
+    // resolved at runtime by looking up WorkspaceOptions.ProjectPreFillPlaybookId
+    // (typed-options per ADR-018) through IPlaybookLookupService.GetByIdAsync,
+    // which queries the sprk_playbookid alternate key on sprk_analysisplaybook
+    // (Q&A 2026-06-22 Q1) with 1-hour caching (ADR-014). NFR-07 BINDING preserved:
+    // pre-fill flow signature, 45s timeout, useAiPrefill consumer contract, and
+    // $choices output shape are unchanged — only the internal playbook-ID lookup
+    // mechanism has been migrated. Mirrors the MatterPreFillService pattern landed
+    // by task 016 (which itself mirrors SessionSummarizeOrchestrator task 015,
+    // commit c3f65e975).
 
     // Reuse same file constraints as MatterPreFillService
     private static readonly HashSet<string> AllowedExtensions =
@@ -65,6 +70,7 @@ public sealed class ProjectPreFillService
     public ProjectPreFillService(
         SpeFileStore speFileStore,
         ITextExtractor textExtractor,
+        IPlaybookLookupService playbookLookup,
         IOptions<WorkspaceOptions> workspaceOptions,
         IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<ProjectPreFillService> logger,
@@ -72,6 +78,7 @@ public sealed class ProjectPreFillService
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
+        _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _workspaceOptions = (workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions))).Value;
         _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -264,10 +271,44 @@ public sealed class ProjectPreFillService
             documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
         }
 
-        var playbookIdStr = _workspaceOptions.ProjectPreFillPlaybookId;
-        var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
-            ? parsed
-            : DefaultPreFillPlaybookId;
+        // FR-05 stable-ID resolution (chat-routing-redesign-r1 task 017 / Pattern A):
+        // Resolve the project pre-fill playbook GUID at runtime via the stable-ID alternate
+        // key (sprk_playbookid) per Q&A 2026-06-22 Q1, replacing the prior hardcoded
+        // fc343e9c-3460-f111-ab0b-7c1e521b425f GUID + the legacy ProjectPreFillPlaybookId
+        // option Guid.TryParse fallback. The lookup service caches results for 1 hour
+        // (ADR-014); per-environment values come from WorkspaceOptions.ProjectPreFillPlaybookId.
+        // Fail-fast on missing config — no hardcoded fallback at this Pattern A consumer
+        // (mirrors MatterPreFillService task-016 / SessionSummarizeOrchestrator task-015 /
+        // commit c3f65e975). NFR-07 BINDING preserved: the 45s timeout below, useAiPrefill
+        // consumer contract, and $choices output schema are unchanged — only the internal
+        // lookup mechanism has been migrated.
+        var configuredPlaybookId = _workspaceOptions.ProjectPreFillPlaybookId;
+        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        {
+            _logger.LogError(
+                "Workspace:ProjectPreFillPlaybookId is not configured. Cannot resolve project " +
+                "pre-fill playbook. RequestId={RequestId}. Configure the per-environment GUID " +
+                "(mirrors sprk_analysisplaybookid PK) for the 'Create New Project Pre-Fill' row.",
+                requestId);
+            return ProjectPreFillResponse.Empty();
+        }
+
+        Guid playbookId;
+        try
+        {
+            var playbook = await _playbookLookup
+                .GetByIdAsync(configuredPlaybookId, cancellationToken)
+                .ConfigureAwait(false);
+            playbookId = playbook.Id;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to resolve project pre-fill playbook by stable ID '{StableId}'. " +
+                "RequestId={RequestId}",
+                configuredPlaybookId, requestId);
+            return ProjectPreFillResponse.Empty();
+        }
 
         _logger.LogInformation(
             "Invoking playbook for project field extraction. PlaybookId={PlaybookId}, " +

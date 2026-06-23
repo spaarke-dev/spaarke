@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>GetFileManifestHandler (T2) — return structural manifest for a session file</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>091</blocks>
+    <tags>bff-api, services, handlers, tool-handler, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; creates new `.cs` handler file; new tool surface; ADR-013/ADR-015/ADR-033 binding</rigor-reason>
+    <parallel-group>4-G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `GetFileManifestHandler` (NEW) at `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GetFileManifestHandler.cs` implementing the T2 `get_file_manifest(fileId)` tool per architecture §8.1. Returns the structural manifest for a specific uploaded session file: fileName, pageCount, sections[{name, startPage, endPage}], tables[{name, page}], citations count, language, extractedText{chars, tokens}, classifiedDocType, classifiedConfidence, sha256. Reads from `ChatSession.UploadedFiles[fileId]` populated by the upload pipeline (tasks 066–074). Implements FR-30 (get_file_manifest row of the 8-tool surface).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat tool-handler authoring + auto-discovered `sprk_analysistool` registration.</role>
+
+  <goal>
+    `GetFileManifestHandler` lives at `Services/Ai/Handlers/GetFileManifestHandler.cs` implementing `IToolHandler`. Single `ToolResult` (no streaming, ADR-033). Auto-discovered via `AddToolHandlersFromAssembly`. Returns the §8.1 manifest shape verbatim. Returns a structured `not_found` payload when `fileId` is not in the session (graceful error per architecture §9.2). Telemetry: handlerName + sessionId + fileId (deterministic ID — tier-1 safe per ADR-015) + duration. Unit tests cover hit, miss, partial-manifest (no tables), and ADR-015 telemetry safety.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §3.1 (T2) + §8.1 schema + §8.2 routing (T2 read; always-on). The manifest is populated at upload time by `FileManifestExtractor` (task 069) and stored on `ChatSession.UploadedFiles[i]` (task 071). The handler simply wraps the read.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint added.</constraint>
+    <constraint source="ADR-010">Auto-discovered via `AddToolHandlersFromAssembly`; ZERO manual DI line here.</constraint>
+    <constraint source="ADR-013">Handler lives under `Services/Ai/Handlers/`; reads existing T2 session storage directly. No facade required for BFF-internal session state.</constraint>
+    <constraint source="ADR-015">Telemetry carries handlerName + sessionId + fileId + durationMs + decision discriminator (`returned` | `not_found`). NEVER manifest content, section names, table names.</constraint>
+    <constraint source="ADR-029">≤+0.1 MB publish-size delta.</constraint>
+    <constraint source="ADR-033">SINGLE `ToolResult` return; no streaming.</constraint>
+    <constraint source="architecture">§8.1 — return shape matches schema verbatim.</constraint>
+    <constraint source="architecture">§9.2 — `fileId` not in session returns structured `not_found` payload; agent apologizes + asks user (not an exception).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §8.1 + §8.2 + §9.2 (not_found handling).</step>
+    <step order="2">Read `ManagePinnedContextHandler.cs` for the `IToolHandler` exemplar.</step>
+    <step order="3">Confirm `ChatSession.UploadedFiles[i]` manifest fields exist (extended by task 071 — sections, tables, pageCount, language, sha256).</step>
+    <step order="4">Author `Services/Ai/Handlers/GetFileManifestHandler.cs` implementing `IToolHandler` with `fileId` required parameter; metadata description references the §8.1 schema.</step>
+    <step order="5">Implement `ExecuteAsync`: locate `ChatSession.UploadedFiles[]` matching `fileId`; return manifest shape; on miss return structured `{ status: "not_found", fileId }` payload.</step>
+    <step order="6">Add Dataverse seed-row JSON at `infra/dataverse/sprk_analysistool-get-file-manifest-row.json` (task 092 wires it into Seed-TypedHandlers.ps1).</step>
+    <step order="7">Author unit tests covering hit + miss + telemetry-safety (no manifest content in log payloads).</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="9">Measure BFF publish-size delta; write `notes/handoffs/084-bff-publish-delta.md`.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5).</step>
+    <step order="11">Update TASK-INDEX.md: 084 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Reference handlers + ChatSession model</tool>
+    <tool name="Write">Handler + tests + seed-row JSON</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GetFileManifestHandler.cs</output>
+    <output type="code">infra/dataverse/sprk_analysistool-get-file-manifest-row.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/GetFileManifestHandlerTests.cs</output>
+    <output type="docs">notes/handoffs/084-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler exists at the specified path and implements `IToolHandler`.</criterion>
+    <criterion testable="true">Single `ToolResult` return (no streaming).</criterion>
+    <criterion testable="true">`not_found` returns a structured payload (NOT an exception) — unit test verifies.</criterion>
+    <criterion testable="true">Telemetry payload omits manifest content (only fileId + decision discriminator).</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Read-only T2 wrapper — should be a thin handler. Avoid recomputation: manifest is computed once at upload (task 069) and persisted; this handler ONLY reads.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

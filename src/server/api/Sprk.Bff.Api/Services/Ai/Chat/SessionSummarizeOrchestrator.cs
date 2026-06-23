@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
@@ -58,6 +60,17 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <c>RetrieveByAlternateKeyAsync</c> reference in this orchestrator.
 /// </para>
 /// <para>
+/// <b>FR-05 stable-ID resolution</b> (chat-routing-redesign-r1 task 015): the prior
+/// hardcoded <c>44285d15-1360-f111-ab0b-70a8a59455f4</c> GUID constant has been removed.
+/// The playbook is now resolved at runtime by looking up
+/// <see cref="WorkspaceOptions.ChatSummarizePlaybookId"/> (typed-options per ADR-018)
+/// through <see cref="IPlaybookLookupService.GetByIdAsync"/>, which queries the
+/// <c>sprk_playbookid</c> alternate key on <c>sprk_analysisplaybook</c> (Q&amp;A 2026-06-22 Q1)
+/// with 1-hour caching (ADR-014). This is the FIRST stable-ID consumer migration (spec
+/// FR-05) — no config override existed previously. Fail-fast on missing config — no
+/// hardcoded fallback at this convergence point per FR-26.
+/// </para>
+/// <para>
 /// <b>ADR-010</b>: concrete class with NO orchestrator-authored interface (unit tests target the
 /// concrete type per ADR-010 — interface-for-testability-alone is explicitly forbidden).
 /// Non-sealed to permit the <see cref="NullSessionSummarizeOrchestrator"/> kill-switch subclass
@@ -67,28 +80,23 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </remarks>
 public class SessionSummarizeOrchestrator
 {
-    /// <summary>
-    /// Dataverse playbook ID for <c>summarize-document-for-chat@v1</c>. The chat /summarize
-    /// path is currently single-playbook, so this is hardcoded with intent (matches the R6
-    /// task 024 evidence note). If a future use-case requires per-tenant or per-environment
-    /// playbook selection, lift this to <c>AnalysisOptions.ChatSummarizePlaybookId</c> and
-    /// inject via <see cref="Microsoft.Extensions.Options.IOptions{T}"/> — no callers depend
-    /// on this being a constant.
-    /// </summary>
-    internal static readonly Guid ChatSummarizePlaybookId =
-        Guid.Parse("44285d15-1360-f111-ab0b-70a8a59455f4");
-
     private readonly ChatSessionManager _sessionManager;
     private readonly IPlaybookExecutionEngine _executionEngine;
+    private readonly IPlaybookLookupService _playbookLookup;
+    private readonly IOptions<WorkspaceOptions> _workspaceOptions;
     private readonly ILogger<SessionSummarizeOrchestrator> _logger;
 
     public SessionSummarizeOrchestrator(
         ChatSessionManager sessionManager,
         IPlaybookExecutionEngine executionEngine,
+        IPlaybookLookupService playbookLookup,
+        IOptions<WorkspaceOptions> workspaceOptions,
         ILogger<SessionSummarizeOrchestrator> logger)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _executionEngine = executionEngine ?? throw new ArgumentNullException(nameof(executionEngine));
+        _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
+        _workspaceOptions = workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -105,6 +113,8 @@ public class SessionSummarizeOrchestrator
     {
         _sessionManager = null!;
         _executionEngine = null!;
+        _playbookLookup = null!;
+        _workspaceOptions = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -158,6 +168,33 @@ public class SessionSummarizeOrchestrator
 
         var uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
 
+        // FR-05 stable-ID resolution (chat-routing-redesign-r1 task 015):
+        // Resolve the chat-summarize playbook GUID at runtime via the stable-ID alternate key
+        // (sprk_playbookid) per Q&A 2026-06-22 Q1, replacing the prior hardcoded
+        // 44285d15-1360-f111-ab0b-70a8a59455f4 GUID. The lookup service caches results
+        // for 1 hour (ADR-014); per-environment values come from WorkspaceOptions.
+        // Fail-fast on missing config — there is no hardcoded fallback at the orchestrator
+        // boundary (this is the chat /summarize convergence point per R6 FR-26 and must
+        // not silently downgrade). Matches the InvoiceExtractionJobHandler empty-string
+        // guard pattern (commit 34aef1d01) adapted to throw rather than mark-failed.
+        var configuredPlaybookId = _workspaceOptions.Value.ChatSummarizePlaybookId;
+        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        {
+            _logger.LogError(
+                "Workspace:ChatSummarizePlaybookId is not configured. Cannot resolve chat-summarize " +
+                "playbook for tenant={TenantId} session={SessionId}. Configure the per-environment " +
+                "GUID (mirrors sprk_analysisplaybookid PK) for the summarize-document-for-chat@v1 row.",
+                request.TenantId, request.SessionId);
+            throw new InvalidOperationException(
+                "Workspace:ChatSummarizePlaybookId is not configured. Chat /summarize cannot resolve " +
+                "its playbook without per-environment configuration.");
+        }
+
+        var playbook = await _playbookLookup
+            .GetByIdAsync(configuredPlaybookId, cancellationToken)
+            .ConfigureAwait(false);
+        var resolvedPlaybookId = playbook.Id;
+
         var engineRequest = new ChatSummarizeRequest(
             TenantId: request.TenantId,
             SessionId: request.SessionId,
@@ -170,13 +207,13 @@ public class SessionSummarizeOrchestrator
         _logger.LogDebug(
             "R6 SessionSummarizeOrchestrator forwarding to PlaybookExecutionEngine.ExecuteChatSummarizeAsync " +
             "(playbookId={PlaybookId} tenant={TenantId} session={SessionId} path={Path})",
-            ChatSummarizePlaybookId, request.TenantId, request.SessionId, request.Path.ToTelemetryValue());
+            resolvedPlaybookId, request.TenantId, request.SessionId, request.Path.ToTelemetryValue());
 
         // Forward the engine stream unchanged. The engine owns chunk-shape contract, telemetry,
         // and all preserved behaviors (FR-04 interjection, ADR-014 session filter, Structured
         // Outputs schema, field-delta streaming, mid-stream error → FromError, terminal Completed).
         await foreach (var chunk in _executionEngine
-            .ExecuteChatSummarizeAsync(ChatSummarizePlaybookId, engineRequest, cancellationToken)
+            .ExecuteChatSummarizeAsync(resolvedPlaybookId, engineRequest, cancellationToken)
             .ConfigureAwait(false))
         {
             yield return chunk;

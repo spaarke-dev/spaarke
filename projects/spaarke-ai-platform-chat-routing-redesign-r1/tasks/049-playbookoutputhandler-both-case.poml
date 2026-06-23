@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>PlaybookOutputHandler Both case — Workspace + templated chat ack</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>045,046,047</dependencies>
+    <blocks>052,054</blocks>
+    <tags>bff-api, services, ADR-013, ADR-029</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies output handler `.cs` file; new branch with chat ack — FULL per Step 0.5</rigor-reason>
+    <parallel-group>3-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares PlaybookOutputHandler.cs switch with tasks 048, 050, 051 — sequential within wave 3-B per task-create Step 3.8 file-overlap auto-demotion rule (CRIT-8 fix)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a `Both` case to `PlaybookOutputHandler.HandleOutputAsync`. The Both case performs the same Workspace-tab-open + streaming-delegate as task 048's Workspace case, PLUS emits a templated chat ack via the existing `EmitTextResponseAsync` pattern: "I've added a {playbookName} result to the Workspace." Implements spec FR-14d Both branch.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `PlaybookOutputHandler` switch surface + chat text emission.</role>
+
+  <goal>
+    `PlaybookOutputHandler.HandleOutputAsync` Both case opens a Workspace tab AND emits a chat ack with the templated string. End-to-end test of a Both-destination playbook dispatch shows: (a) `workspace.tab_open` SSE event, (b) `FieldDelta` streaming preserved, (c) chat sidebar shows "I've added a {playbookName} result to the Workspace." Spec FR-14d Both branch acceptance met.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14d Both branch + design §1.3 (WP3 "Both"). Both is the Workspace + chat-ack combination — used when an action is workspace-primary but the user benefits from a textual confirmation in the chat. The template string is hardcoded English per design ("Start hardcoded English. Defer per-playbook customization until proven necessary.").
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookOutputHandler.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Chat/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Handler in `Services/Ai/Chat/`; AI-internal.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="ADR-033">Streaming preserved (same as task 048).</constraint>
+    <constraint source="spec">FR-14d Both: Workspace flow PLUS templated chat ack.</constraint>
+    <constraint source="design">Hardcoded English ack template "I've added a {playbookName} result to the Workspace." Defer per-playbook customization.</constraint>
+    <constraint source="project">Wave 3-B parallel safe — distinct switch arm. Coordinate with 048/050/051.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookOutputHandler.cs` switch (after 048's Workspace case may be merged or in flight).</step>
+    <step order="2">Add `Both` case branch:
+      (a) Reuse / call into the Workspace case logic (tab_open + delegate streaming);
+      (b) After/before stream delegation, emit chat ack via `EmitTextResponseAsync`("I've added a {playbookName} result to the Workspace.").</step>
+    <step order="3">Per design diagram, the chat ack typically fires AFTER the workspace.tab_open event but BEFORE streaming completion (sequence: tab_open → typing_start → ack token → typing_end → streaming proceeds). Confirm sequence in implementation.</step>
+    <step order="4">Add integration test: dispatch a Both-destination test playbook → assert workspace.tab_open + ack chat token + FieldDelta stream.</step>
+    <step order="5">Verify chat ack contains exact "{playbookName}" substitution (no GUIDs / no code names).</step>
+    <step order="6">Run `dotnet build` + tests; measure publish delta.</step>
+    <step order="7">Quality gates per task-execute Step 9.5 (FULL rigor).</step>
+    <step order="8">Update TASK-INDEX.md: task 049 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookOutputHandler.cs</tool>
+    <tool name="Edit">Add Both case + test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookOutputHandler.cs — Both case</output>
+    <output type="test">tests/integration/.../PlaybookOutputHandlerBothCaseTests.cs</output>
+    <output type="docs">notes/handoffs/049-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both-destination dispatch emits BOTH `workspace.tab_open` SSE AND chat ack token.</criterion>
+    <criterion testable="true">Ack content: "I've added a {playbookName} result to the Workspace." (with substituted playbook name).</criterion>
+    <criterion testable="true">Streaming preserved — `FieldDelta` events fire.</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reuse the Workspace case implementation by extracting a shared helper (e.g., `EmitWorkspaceTabOpenAndStreamAsync`) — DRY principle. Both = Workspace + ack; FormPrefill = no-op; SideEffect = telemetry only. Each task adds a distinct case branch.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol.</protocol>
+  </execution>
+</task>

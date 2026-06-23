@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>PlaybookOutputHandler SideEffect case — telemetry only (no user-visible content)</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>045,046,047</dependencies>
+    <blocks>052,054</blocks>
+    <tags>bff-api, services, telemetry, ADR-013, ADR-015, ADR-029</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies output handler `.cs` file with telemetry-only branch — STANDARD per Step 0.5 (small surface; ADR-015 binding)</rigor-reason>
+    <parallel-group>3-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares PlaybookOutputHandler.cs switch with tasks 048, 049, 050 — sequential within wave 3-B per task-create Step 3.8 file-overlap auto-demotion rule (CRIT-8 fix)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a `SideEffect` case to `PlaybookOutputHandler.HandleOutputAsync` that emits NO user-visible chat or workspace content but DOES emit structured telemetry (tier-1 safe per ADR-015) recording the side-effect dispatch event with `{playbookId, playbookName, tenantId}`. Implements spec FR-14d SideEffect branch.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `PlaybookOutputHandler` + ADR-015 audit telemetry (tier-1 safe: no user-content fields).</role>
+
+  <goal>
+    `PlaybookOutputHandler.HandleOutputAsync` SideEffect case logs a structured telemetry event (no PII, no user-message content, no file content). No SSE event emitted; no chat token emitted. Unit test verifies telemetry captured + no user-visible output. ADR-015 audit memory tier compliance preserved.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14d SideEffect branch + design §1.3. SideEffect destinations are for playbooks that do background work (e.g., logging, telemetry, batch processing) without user-visible output. The telemetry-only branch makes these dispatches observable for ops without surfacing them to the user.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookOutputHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Telemetry/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Handler in `Services/Ai/Chat/`; AI-internal.</constraint>
+    <constraint source="ADR-015">Telemetry tier-1 safe: no user message content, no file content, no recall results. Fields limited to deterministic IDs + names.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-14d SideEffect: emit NO user-visible content.</constraint>
+    <constraint source="project">Wave 3-B parallel safe — distinct switch arm.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookOutputHandler.cs` switch.</step>
+    <step order="2">Add `SideEffect` case branch:
+      (a) Emit structured telemetry event "playbook.side_effect_dispatched" with tier-1 safe fields `{playbookId, playbookName, tenantId, durationMs}`;
+      (b) Explicitly return without emitting SSE or chat tokens.</step>
+    <step order="3">Add unit test:
+      (a) Invoke handler with `NodeDestination = SideEffect`;
+      (b) Assert no SSE event captured + no chat token emitted;
+      (c) Assert telemetry event captured with the expected tier-1 safe fields ONLY.</step>
+    <step order="4">Verify ADR-015 compliance: grep test for absence of `userMessage` / `fileContent` / `userPrompt` in telemetry call.</step>
+    <step order="5">Run `dotnet build` + tests; measure publish delta.</step>
+    <step order="6">Update TASK-INDEX.md: task 051 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookOutputHandler.cs + Telemetry directory</tool>
+    <tool name="Edit">Add SideEffect case + test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookOutputHandler.cs — SideEffect telemetry-only case</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookOutputHandlerSideEffectTests.cs</output>
+    <output type="docs">notes/handoffs/051-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SideEffect case emits telemetry with `{playbookId, playbookName, tenantId, durationMs}` ONLY (no user content fields).</criterion>
+    <criterion testable="true">No SSE event emitted for SideEffect dispatch.</criterion>
+    <criterion testable="true">No chat token emitted for SideEffect dispatch.</criterion>
+    <criterion testable="true">ADR-015 tier-1 safety verified by test (no `userMessage` / `fileContent` in telemetry payload).</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta within NFR-01 thresholds.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

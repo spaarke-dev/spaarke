@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>FileSummarizationService — gpt-4o-mini 1-paragraph precomputed summary (NEW)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4b)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>064</dependencies>
+    <blocks>070,073,076</blocks>
+    <tags>bff-api, services, ai, azure-openai, ADR-013, ADR-015</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF service with LLM call; ADR-013 + ADR-015 binding; output marked NOT authoritative per P3 trust framing</rigor-reason>
+    <parallel-group>4-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NEW file — no overlap with peer 4-B tasks</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author `FileSummarizationService` (NEW). Uses `gpt-4o-mini` to produce a 1-paragraph precomputed summary of an uploaded file per architecture §4.4 + §6.1. Output is explicitly marked as "NOT authoritative" per architecture P3 (P3: citation-bearing trust model — precomputed summaries are upload-time approximations). The summary feeds the layered context card (task 076) but the persona instruction (task 077) tells the LLM not to quote it as the source.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in Azure OpenAI summarization + trust-framing semantics per architecture P3.</role>
+
+  <goal>
+    `FileSummarizationService.cs` exists with `IFileSummarizationService` interface + `SummarizeAsync(string textContent, string fileName, string contentType, CancellationToken ct) → FileSummarizationResult`. Returns 1-paragraph summary ≤120 chars (architecture §6.1 target). Implementation calls gpt-4o-mini with a system prompt that produces concise factual summary. ADR-015 tier-1 logging — NEVER log textContent OR the summary text body.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer.</role>
+
+  <goal>
+    `FileSummarizationService.cs` shipped with `IFileSummarizationService` + `SummarizeAsync` returning a 1-paragraph (≤120 chars) precomputed summary marked as upload-time approximation. The summary becomes part of the layered context card (076) but the trust-framing instruction (077) ensures the agent calls `recall_session_file` for any legally-precise answer.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §4.4 + §6.1 + P3. Companion service to 067 (classification) and 069 (manifest). Output stored in `ChatSession.UploadedFiles[].SummaryText` after task 071 extension; persisted by task 072. The 120-char target keeps the static prefix budget under 6K tokens (architecture §10.2). Summary is INPUT to layered context card builder (076) — it is NOT meant to be cited; the trust frame (077) reinforces this.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Service lives in `Services/Ai/` — direct `IOpenAiClient` consumption OK.</constraint>
+    <constraint source="ADR-015">Tier-1 logging: fileId, sessionId, durationMs, summary CHAR LENGTH only. NEVER the summary text or input textContent.</constraint>
+    <constraint source="ADR-029">Per-task publish-size measurement.</constraint>
+    <constraint source="architecture P3">Output is "NOT authoritative" — the architectural responsibility of the summarization service is to PRODUCE the summary; the trust-framing responsibility (telling the LLM not to quote it) lives in task 077.</constraint>
+    <constraint source="architecture §6.1">Uses `gpt-4o-mini`; target ~250ms parallel; output ≤120 chars.</constraint>
+    <constraint source="project">No new external API (no Document Intelligence). Use Azure OpenAI only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing summarization patterns (`SessionSummarizationService.cs`, `SummarizationCompressionService.cs`) for style + signatures.</step>
+    <step order="2">Define `IFileSummarizationService` + `FileSummarizationResult { string SummaryText, int SourceCharCount, string ModelUsed }`.</step>
+    <step order="3">Implement service:
+      - Constructor takes `IOpenAiClient`, options, `ILogger`
+      - `SummarizeAsync` system prompt: "Produce a 1-paragraph (≤120 char) factual summary of this document. Be neutral; do not editorialize."
+      - User prompt truncated to first ~8K chars (manageable input for cheap summarizer)
+      - Calls gpt-4o-mini
+      - Validates response length; truncates to 120 chars if model overshoots
+      - Logs sessionId, fileId, durationMs, summaryCharCount (tier-1 safe)</step>
+    <step order="4">Author unit test stub in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/FileSummarizationServiceTests.cs`.</step>
+    <step order="5">Run `dotnet build` + `dotnet test`.</step>
+    <step order="6">Measure BFF publish size.</step>
+    <step order="7">code-review + adr-check.</step>
+    <step order="8">Update TASK-INDEX.md: 068 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing summarization services + IOpenAiClient</tool>
+    <tool name="Write">Service + interface + record + test stub</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/FileSummarizationService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/IFileSummarizationService.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/FileSummarizationServiceTests.cs (NEW)</output>
+    <output type="docs">notes/handoffs/068-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`FileSummarizationService.cs` exists and uses gpt-4o-mini.</criterion>
+    <criterion testable="true">Summary output ≤120 chars.</criterion>
+    <criterion testable="true">No log statement carries textContent OR summary text body.</criterion>
+    <criterion testable="true">`dotnet build` + new tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.5 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Trust framing is task 077's responsibility — this service produces the summary; 077 tells the LLM it is NOT authoritative. The two responsibilities are separated by design (architecture P3).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="128" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Author summarize-patent playbook + action (Patent Review skill + Patent Standards knowledge from task 127)</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>127</dependencies>
+    <blocks>131</blocks>
+    <tags>dataverse, ai, playbook</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Playbook + action authoring; depends on new primitives from task 127; FULL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-40: author the `summarize-patent` playbook + action via JPS `$ref` to the NEW Patent Review skill + Patent Standards knowledge seeded by task 127. Single-node playbook; action systemPrompt JPS-v1; output schema specific to patent (claims, abstract, inventors, assignees, jurisdiction, filing date, term, prior-art mentions, novelty arguments); configJson destination=workspace + widgetType=structured-output-stream.
+  </prompt>
+
+  <role>SPAARKE AI playbook author. Patent-domain output-schema design.</role>
+
+  <goal>
+    A new `scripts/seed-data/playbooks/summarize-patent.playbook.json` deployed to Dataverse with code `summarize-patent`, referencing Patent Review skill + Patent Standards knowledge via JPS `$ref`. `sprk_jpsmatchingmetadata` populated for patent document detection. Output schema enforces patent-specific structure.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-40 + design §WP6 specialized playbook table. Task 127 ships the Patent Review + Patent Standards primitives; this task ships the playbook that composes them. Same single-node + JPS `$ref` pattern as `summarize-nda` (task 126).
+    </background>
+    <relevant-files>
+      <file>scripts/seed-data/playbooks/</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/127-patent-primitives.md</file>
+      <file>scripts/seed-data/skills.json</file>
+      <file>scripts/seed-data/knowledge.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-40 acceptance — skill + knowledge seeded (task 127); playbook indexed (task 131); routing test confirms patent uploads route to it.</constraint>
+    <constraint source="project">Use Patent Review + Patent Standards (codes from task 127).</constraint>
+    <constraint source="project">Kebab-case code `summarize-patent`, no `@v1` suffix.</constraint>
+    <constraint source="project">Single-node, destination=workspace + widgetType=structured-output-stream.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/127-patent-primitives.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `notes/handoffs/127-patent-primitives.md` to get the exact skill + knowledge code names.</step>
+    <step order="2">Read `summarize-nda.playbook.json` (task 126 output) as a structural template.</step>
+    <step order="3">Design the patent output schema: `inventors[]`, `assignees[]`, `abstract`, `jurisdiction`, `filingDate`, `termYears`, `claims[] (independent/dependent)`, `priorArtMentions[]`, `noveltyArguments[]`, `redFlags[]`.</step>
+    <step order="4">Author `summarize-patent.playbook.json`: action with JPS `$ref` to Patent Review + Patent Standards; outputSchema as above; configJson with destination=workspace + widgetType=structured-output-stream.</step>
+    <step order="5">Add `sprk_jpsmatchingmetadata` JSON: documentTypes (`patent`, `patent-application`, `utility-patent`), intents (`summarize`, `review`), triggerPhrases (`summarize this patent`, `patent summary`, `review patent`).</step>
+    <step order="6">Validate the JPS-v1 schema in the action systemPrompt.</step>
+    <step order="7">Deploy via `Deploy-Playbook.ps1`. Indexing in task 131.</step>
+    <step order="8">Verify via Dataverse query: `sprk_analysisplaybook` row with code `summarize-patent` exists.</step>
+    <step order="9">Document deployment outcome at `notes/handoffs/128-summarize-patent.md`.</step>
+    <step order="10">Update TASK-INDEX.md: task 128 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">task 127 handoff, summarize-nda playbook</tool>
+    <tool name="Write">scripts/seed-data/playbooks/summarize-patent.playbook.json</tool>
+    <tool name="Bash">Deploy-Playbook.ps1 + Dataverse query</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">scripts/seed-data/playbooks/summarize-patent.playbook.json</output>
+    <output type="dataverse">sprk_analysisplaybook row code=summarize-patent</output>
+    <output type="docs">notes/handoffs/128-summarize-patent.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Playbook JSON file exists, parses, validates against JPS-v1.</criterion>
+    <criterion testable="true">JPS `$ref` references Patent Review + Patent Standards (codes from task 127).</criterion>
+    <criterion testable="true">Output schema includes patent-specific fields (inventors, claims, prior-art).</criterion>
+    <criterion testable="true">configJson destination=workspace + widgetType=structured-output-stream.</criterion>
+    <criterion testable="true">Dataverse row deployed; metadata populated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Patent output schema is more complex than NDA — get the claim taxonomy structure right. Independent claims vs dependent claims is a load-bearing distinction in patent practice.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol.</protocol>
+  </execution>
+</task>

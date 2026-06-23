@@ -11,6 +11,29 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
 /**
+ * Stable playbook ID (GUID format) for the "Document Profile" playbook used by
+ * this hook. Resolved via `/api/ai/playbooks/by-id/{id}` (stable, immutable
+ * `sprk_playbookid` alt-key) per spec FR-03 Pattern B migration (task 021).
+ *
+ * Previously this hook resolved the playbook by literal name via
+ * `/api/ai/playbooks/by-name/Document%20Profile` — that path is being retired
+ * (zero production callers expected post-migration).
+ *
+ * The constant lives at module scope (not in shared config) because:
+ *   1. The hook is a context-agnostic shared library function; no backend
+ *      `WorkspaceOptions` value is plumbed through to consumers.
+ *   2. The playbook ID is immutable per Q1 (2026-06-22) — the
+ *      `sprk_playbookid` column mirrors the row's primary key and is portable
+ *      across environments by convention.
+ *   3. Lifting to a shared `playbookIds.ts` module would only be justified if
+ *      a second hook needed the same ID; today this is the sole consumer.
+ *
+ * DEV environment GUID (also the production value per existing convention):
+ *   `18cf3cc8-02ec-f011-8406-7c1e520aa4df` — Document Profile playbook (PB-002).
+ */
+const DOCUMENT_PROFILE_PLAYBOOK_ID = '18cf3cc8-02ec-f011-8406-7c1e520aa4df';
+
+/**
  * Extracted entities from document analysis
  */
 export interface ExtractedEntities {
@@ -279,10 +302,12 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
       };
 
       try {
-        // Step 1: Resolve Document Profile playbook
+        // Step 1: Resolve Document Profile playbook via stable-ID lookup
+        // (spec FR-03 Pattern B migration — task 021). Replaces prior
+        // by-name resolution that used the literal "Document Profile" string.
         let playbookId: string;
         try {
-          const playbookUrl = `${apiBaseUrl}/api/ai/playbooks/by-name/Document%20Profile`;
+          const playbookUrl = `${apiBaseUrl}/api/ai/playbooks/by-id/${encodeURIComponent(DOCUMENT_PROFILE_PLAYBOOK_ID)}`;
           const authHeaders = await getAuthHeaders();
           const playbookResponse = await fetch(playbookUrl, {
             method: 'GET',
@@ -294,15 +319,39 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
           });
 
           if (!playbookResponse.ok) {
-            throw new Error(`Failed to resolve playbook: HTTP ${playbookResponse.status}`);
+            // Per ADR-019, the BFF returns RFC 7807 ProblemDetails for 404
+            // (`type: https://spaarke.com/problems/playbook-not-found`). Map to
+            // a user-friendly message instead of leaking raw status / IDs.
+            // ADR-015 logging hygiene: we log only status + an opaque event,
+            // never the playbook ID or any response body content.
+            if (playbookResponse.status === 404) {
+              console.warn('[useAiSummary] Playbook resolution: 404 not-found');
+              throw new Error('Playbook unavailable. Please contact your administrator.');
+            }
+            console.warn('[useAiSummary] Playbook resolution failed with HTTP', playbookResponse.status);
+            throw new Error('Playbook unavailable. Please contact your administrator.');
           }
 
           const playbook = await playbookResponse.json();
           playbookId = playbook.playbookId || playbook.id;
-          console.log('[useAiSummary] Resolved Document Profile playbook:', playbookId);
+          // ADR-015: log identifier only, never name / content.
+          console.log('[useAiSummary] Resolved Document Profile playbook id:', playbookId);
         } catch (playbookError) {
-          console.error('[useAiSummary] Failed to resolve playbook:', playbookError);
-          throw new Error('Failed to resolve Document Profile playbook');
+          // Preserve the user-friendly message from the 404/HTTP branch above;
+          // surface a generic message for network/abort failures while keeping
+          // the underlying error in the console for triage (ADR-015: status
+          // / category only, no response-body content).
+          if (playbookError instanceof Error && playbookError.name === 'AbortError') {
+            throw playbookError;
+          }
+          console.error(
+            '[useAiSummary] Failed to resolve playbook (category):',
+            playbookError instanceof Error ? playbookError.name : 'Unknown'
+          );
+          if (playbookError instanceof Error && playbookError.message.startsWith('Playbook unavailable')) {
+            throw playbookError;
+          }
+          throw new Error('Playbook unavailable. Please contact your administrator.');
         }
 
         // Step 2: Execute analysis with new unified endpoint

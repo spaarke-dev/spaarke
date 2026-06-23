@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="119" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Acceptance test "summarize this NDA" → Summarize-NDA top-1; Phase 5 exit gate</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>117,118</dependencies>
+    <blocks>120</blocks>
+    <tags>testing, e2e-test, verification, architecture-binding</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'testing' + 'e2e-test' + 'verification'; exit-gate verification; STANDARD per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the binding acceptance test for Phase 5 — "summarize this NDA" + NDA upload routes to Summarize-NDA playbook as top-1 candidate. Also produce the Phase 5 exit-gate report verifying FR-15 through FR-21 are satisfied. Note: PB-009 (Summarize-NDA) is authored in Phase 6 (tasks 126/130) — for Phase 5 exit, the acceptance test asserts that the dispatcher would route correctly when the playbook is present (use a stub playbook if PB-009 is not yet authored).
+  </prompt>
+
+  <role>SPAARKE platform program lead + test engineer. Verification + exit-gate role.</role>
+
+  <goal>
+    Acceptance test passes: "summarize this NDA" + NDA PDF → dispatcher returns `summarize-nda` (or `summarize-document-chat` if `summarize-nda` playbook not yet indexed) as top-1 with confidence ≥0.7. Phase 5 exit-gate report at `notes/handoffs/119-phase5-exit-gate.md` confirms FR-15-21 + supporting telemetry/load-test artifacts. Gate transitions to Phase 6.
+  </prompt>
+
+  <context>
+    <background>
+      Per spec Success Criteria T-006 + FR-43. The NDA acceptance test is the binding signal that file-aware classification works end-to-end. Caveat: `summarize-nda` playbook isn't authored until Phase 6 tasks 126/130. For Phase 5 exit, the test can assert: (a) when a playbook indexed with `documentTypes: ["nda"]` is present, the dispatcher routes to it top-1 for "summarize this NDA" + NDA upload; (b) all FR-15 through FR-21 acceptance criteria from spec.md hold. The full Phase 6 binding test (132) re-runs this with the real PB-009.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Phase5/</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-15-21">All Phase 5 functional requirements satisfied per acceptance criteria.</constraint>
+    <constraint source="spec T-006">"Summarize this NDA" + NDA upload routes to NDA-specific playbook top-1.</constraint>
+    <constraint source="ADR-015">Test fixtures use synthetic NDA — no real client data.</constraint>
+    <constraint source="project">If acceptance test or FR fails verification, escalate per CLAUDE.md §6.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate or seed a stub playbook indexed with `sprk_jpsmatchingmetadata.documentTypes = ["nda"]` for the acceptance-test environment (if `summarize-nda` from Phase 6 is not yet indexed). Document the seed approach.</step>
+    <step order="2">Author acceptance test in `tests/integration/Sprk.Bff.Api.IntegrationTests/Phase5/NdaAcceptanceTests.cs`:
+      - Upload a synthetic NDA PDF (`tests/integration/Fixtures/nda-synthetic.pdf`)
+      - Send chat message "summarize this NDA" with the attachment
+      - Assert `DispatchResult.PlaybookId` resolves to the NDA-typed playbook
+      - Assert confidence ≥0.7
+      - Assert `decidersInvoked` = 0 (single-file path; FR-18).</step>
+    <step order="3">Run the test against deployed `bff-dev`. Confirm pass.</step>
+    <step order="4">Enumerate FR-15 through FR-21 from spec.md. For each, locate the verification evidence (test result, prior task acceptance):
+      FR-15 (DispatchAsync new signature) — task 110
+      FR-16 (Phase A ≤50ms total) — task 111 benchmark
+      FR-17 (Phase B manifest pre-filter ≤100ms) — task 112
+      FR-18 (Phase C decider only on disagreement) — task 113 + 114
+      FR-19 (≤2s total budget) — task 118 load test
+      FR-20 (slash + NL identical routing) — task 115 + 116
+      FR-21 (text-embedding-3-large; no voyage) — verify via grep `voyage` returns zero hits.</step>
+    <step order="5">Compile exit-gate report at `notes/handoffs/119-phase5-exit-gate.md` with per-FR pass/fail table + evidence links.</step>
+    <step order="6">If ANY FR fails verification, escalate per CLAUDE.md §6 — do NOT mark task ✅.</step>
+    <step order="7">Update TASK-INDEX.md: task 119 → ✅; current-task.md → ready for 120 (Phase 6 start).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Spec FRs + prior task evidence in notes/handoffs/</tool>
+    <tool name="Edit">Author acceptance test + stub playbook seed if needed</tool>
+    <tool name="Bash">dotnet test for acceptance test; integration against bff-dev</tool>
+    <tool name="Grep">Verify FR-21 (no `voyage` references); verify no leakage in test output</tool>
+    <tool name="Write">Exit-gate report at notes/handoffs/</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Phase5/NdaAcceptanceTests.cs</output>
+    <output type="test">tests/integration/Fixtures/nda-synthetic.pdf</output>
+    <output type="docs">notes/handoffs/119-phase5-exit-gate.md — per-FR pass/fail table</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NDA acceptance test passes: dispatcher routes "summarize this NDA" + NDA PDF to NDA-typed playbook top-1.</criterion>
+    <criterion testable="true">Confidence ≥0.7 on the NDA case.</criterion>
+    <criterion testable="true">`decidersInvoked = 0` for single-file path.</criterion>
+    <criterion testable="true">All FRs FR-15-21 report PASS with linked evidence.</criterion>
+    <criterion testable="true">`grep "voyage" src/server/api/Sprk.Bff.Api/` returns ZERO hits (FR-21).</criterion>
+    <criterion testable="true">Exit-gate report committed.</criterion>
+    <criterion testable="true">TASK-INDEX updated; current-task.md ready for Phase 6.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 6 task 132 re-runs this acceptance test with the real PB-009 + new specialized playbooks indexed; treat task 119 as the Phase 5 readiness gate, not the final spec.md T-006 sign-off (that lives in Phase 6 + 7 UAT).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — verification + integration test.</protocol>
+  </execution>
+</task>

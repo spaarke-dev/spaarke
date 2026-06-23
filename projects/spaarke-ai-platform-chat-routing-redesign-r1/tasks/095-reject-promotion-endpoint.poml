@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>POST /api/memory/promotions/{id}/reject endpoint</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4e)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>092</dependencies>
+    <blocks>096,097</blocks>
+    <tags>bff-api, endpoints, ADR-001, ADR-019</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'endpoints'; new public-facing endpoint surface; ADR-001 + ADR-008 + ADR-019 binding</rigor-reason>
+    <parallel-group>4-K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the `POST /api/memory/promotions/{id}/reject` Minimal API endpoint per architecture §6.4 + spec FR-32. Tenant-scoped (ADR-008). On call: invokes `IMatterMemoryPromotionService.RejectAsync(id, ct)` (task 093); on success returns 200 with `{ promotionId, status: "rejected" }`; on `not_found` returns 404 ProblemDetails per ADR-019; on `already_resolved` returns 409 ProblemDetails. Event dispatch (`memory.promotion_resolved` with `decision: 'rejected'`) is task 097 work.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in Minimal API + Spaarke Auth v2 endpoint filters + ProblemDetails error shape.</role>
+
+  <goal>
+    Endpoint `POST /api/memory/promotions/{id}/reject` mapped via the `MemoryPromotionEndpoints.cs` file (shared with task 094 — file is already created by 094 OR created here if 094 hasn't landed yet). Tenant scoping enforced. ProblemDetails 404/409 per ADR-019. Integration test covers 200/404/409/cross-tenant/unauthorized matrix. BFF publish-size delta reported. No durable T3 write occurs (architecture §6.4 — reject path is metadata-only).
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.4 (promote-to-matter flow — Reject branch posts to this endpoint), spec FR-32. The frontend ContextPane subscriber (task 098) calls this endpoint on user Reject click. Service-side logic in task 093.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs (from task 093)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Memory/MemoryPromotionEndpoints.cs (created by 094 or this task)</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API `MapPost`.</constraint>
+    <constraint source="ADR-008">Tenant scoping via endpoint filter; cross-tenant → 404.</constraint>
+    <constraint source="ADR-010">Inject `IMatterMemoryPromotionService` directly.</constraint>
+    <constraint source="ADR-013">Endpoint in `Api/Memory/`; service BFF-internal.</constraint>
+    <constraint source="ADR-015">Telemetry: endpoint + promotionId + tenantId + decision (`rejected` | `not_found` | `already_resolved`) + durationMs ONLY.</constraint>
+    <constraint source="ADR-019">404 + 409 returns ProblemDetails.</constraint>
+    <constraint source="ADR-029">≤+0.1 MB delta.</constraint>
+    <constraint source="architecture">§6.4 — reject path is metadata-only; no T3 write. Verified at code-review.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §6.4 + ADR-001 + ADR-008 + ADR-019.</step>
+    <step order="2">Read `MemoryPromotionEndpoints.cs` (likely created by task 094); if absent, author it per task 094 pattern with the `MapPost` for `/reject`.</step>
+    <step order="3">Map `POST /api/memory/promotions/{id}/reject`:
+      - Endpoint filter: `RequireAuthorization` + tenant-scoping
+      - Handler: inject `IMatterMemoryPromotionService`; call `RejectAsync(id, ct)`; map to 200 / 404 / 409.
+    </step>
+    <step order="4">If a `Program.cs` registration is needed for this endpoint group (and not already present from task 094), wire `app.MapMemoryPromotionEndpoints()`.</step>
+    <step order="5">Author integration test at `tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Memory/MemoryPromotionRejectEndpointTests.cs`:
+      - 200 happy path
+      - 404 missing
+      - 409 already-resolved
+      - Cross-tenant → 404
+      - Unauthorized → 401
+    </step>
+    <step order="6">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="7">Run grep across new endpoint code: `grep "AppendFactAsync" src/server/api/Sprk.Bff.Api/Api/Memory/MemoryPromotionEndpoints.cs` must return ZERO matches (reject does NOT write to T3).</step>
+    <step order="8">Measure BFF publish-size delta; write `notes/handoffs/095-bff-publish-delta.md`.</step>
+    <step order="9">Run code-review + adr-check (Step 9.5).</step>
+    <step order="10">Update TASK-INDEX.md: 095 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">MemoryPromotionEndpoints.cs (if present), Program.cs</tool>
+    <tool name="Write">/reject endpoint + integration test</tool>
+    <tool name="Edit">MemoryPromotionEndpoints.cs to add MapPost</tool>
+    <tool name="Grep">Verify no AppendFactAsync calls in reject path</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Memory/MemoryPromotionEndpoints.cs (extended)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Memory/MemoryPromotionRejectEndpointTests.cs</output>
+    <output type="docs">notes/handoffs/095-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Endpoint `POST /api/memory/promotions/{id}/reject` mapped via Minimal API.</criterion>
+    <criterion testable="true">Tenant filter applied; cross-tenant returns 404.</criterion>
+    <criterion testable="true">404 + 409 returns ProblemDetails shape per ADR-019.</criterion>
+    <criterion testable="true">`grep "AppendFactAsync" src/server/api/Sprk.Bff.Api/Api/Memory/MemoryPromotionEndpoints.cs` returns ZERO matches.</criterion>
+    <criterion testable="true">Integration tests pass (200/404/409/cross-tenant/unauthorized matrix).</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Symmetric with task 094 — same shared endpoints file. If 094 lands first, this task just adds the second `MapPost` line. If 094 has not yet landed, this task is responsible for creating the file per the 094 pattern.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

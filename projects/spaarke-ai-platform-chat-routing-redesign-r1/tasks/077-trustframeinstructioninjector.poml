@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="077" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>TrustFrameInstructionInjector — canonical persona text per architecture §8.3 (NEW)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4c)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>074</dependencies>
+    <blocks>080</blocks>
+    <tags>bff-api, services, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF service in per-turn hot path; tags include `bff-api`, `ai`; architecture P3 binding (citation-bearing trust model)</rigor-reason>
+    <parallel-group>4-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NEW file; no overlap with peer 4-E tasks</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author `TrustFrameInstructionInjector` (NEW) per architecture §8.3 (citation enforcement model) + P3. Produces the canonical persona instruction text that tells the LLM:
+    (1) precomputed summaries on file cards are upload-time approximations marked "NOT authoritative";
+    (2) for any legally-precise question (specific clauses, exact wording, dates, parties, dollar amounts), call `recall_session_file` with `requireCitations: true` and cite the source in the answer;
+    (3) do not quote precomputed summaries from the file cards as if they were the source.
+    The injection is a `string` (≤500 tokens) that the per-turn composer adds between persona + user content.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in persona injection + architecture P3 trust framing + legal-domain accuracy semantics.</role>
+
+  <goal>
+    `TrustFrameInstructionInjector.cs` exists with `ITrustFrameInstructionInjector` interface + `BuildAsync(ChatInvocationContext ctx, CancellationToken ct) → string`. Returns the canonical trust-frame text from architecture §8.3, optionally customized per session context (e.g., when no files uploaded, abbreviate the file-related instructions).
+  </goal>
+
+  <context>
+    <background>
+      Per architecture P3 + §8.3. Load-bearing for legal-domain accuracy — the trust frame is what STOPS the LLM from quoting hallucinated precomputed summaries as "the source." Task 076 produces the cards; this task tells the LLM how to TREAT them.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryCompositionService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="architecture P3">Canonical text per architecture §8.3 — quote it verbatim as the seed; allow per-context customization (e.g., when no files exist, condense).</constraint>
+    <constraint source="ADR-013">Service lives in `Services/Ai/Memory/` (per-turn composition layer) — within AI module.</constraint>
+    <constraint source="ADR-014">Output is byte-stable across turns when session context fingerprint unchanged — supports static prefix cache hit.</constraint>
+    <constraint source="ADR-015">Tier-1 logging: sessionId, instructionLength. NEVER instruction body.</constraint>
+    <constraint source="ADR-029">Per-task publish-size measurement; small expected.</constraint>
+    <constraint source="project">Instruction text is STATELESS code (no LLM call); deterministic output.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read architecture §8.3 (citation enforcement model) for the canonical persona text.</step>
+    <step order="2">Read `PlaybookChatContextProvider.cs` to understand the persona-injection seam (especially line 130-154 mentioned in architecture §6.2).</step>
+    <step order="3">Define `ITrustFrameInstructionInjector` + `BuildAsync` signature.</step>
+    <step order="4">Implement:
+      - Constant base text from architecture §8.3 (verbatim seed)
+      - Conditional condensation: if session has zero uploaded files, drop the file-specific paragraph
+      - Output deterministic + byte-stable for cache-hit support</step>
+    <step order="5">Author unit test: assert verbatim base text + condensation logic + byte-stability across two calls with same context.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`.</step>
+    <step order="7">Measure BFF publish size.</step>
+    <step order="8">code-review + adr-check.</step>
+    <step order="9">Update TASK-INDEX.md: 077 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookChatContextProvider + SprkChatAgentFactory + architecture §8.3</tool>
+    <tool name="Write">Injector + interface + tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/TrustFrameInstructionInjector.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/ITrustFrameInstructionInjector.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/TrustFrameInstructionInjectorTests.cs (NEW)</output>
+    <output type="docs">notes/handoffs/077-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Injector produces architecture §8.3 canonical text verbatim (seed assertion).</criterion>
+    <criterion testable="true">Condensation logic drops file-specific paragraph when no files uploaded.</criterion>
+    <criterion testable="true">Byte-stability: two calls with same context return identical strings.</criterion>
+    <criterion testable="true">Length ≤500 tokens (~2K chars).</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 4-E parallel-safe alongside 076, 078, 079.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

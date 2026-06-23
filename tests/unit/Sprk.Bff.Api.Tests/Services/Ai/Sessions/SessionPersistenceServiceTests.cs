@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Services.Ai.Sessions;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Sessions;
@@ -61,7 +62,11 @@ public class SessionPersistenceServiceTests
             _cacheMock.Object,
             _cosmosClientMock.Object,
             _configuration,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            // chat-routing-redesign-r1 task 074 — IContextEventEmitter dep added for
+            // context.upload_persisted emission. Tests in this file do not exercise
+            // UpdateUploadedFilesAsync, so a Loose mock suffices.
+            new Mock<IContextEventEmitter>().Object);
     }
 
     // =========================================================================

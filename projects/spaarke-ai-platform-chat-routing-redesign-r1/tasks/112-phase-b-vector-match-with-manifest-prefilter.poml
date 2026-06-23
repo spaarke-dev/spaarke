@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="112" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase B — vector match with manifest documentType pre-filter (Hybrid C primary)</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>111</dependencies>
+    <blocks>113</blocks>
+    <tags>bff-api, services, ai, azure-openai, azure-search</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'ai' + 'azure-openai'; modifies `PlaybookDispatcher.cs`; performance budget binding (FR-17); FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same `PlaybookDispatcher.cs` file as task 111; sequential within wave 5-B.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement Phase B of WP2 Hybrid C file-aware classification: per-file vector match against `playbook-embeddings` using the manifest `documentType` from the WP5.5 upload pipeline (Phase 4b) as a STRUCTURED PRE-FILTER against `sprk_jpsmatchingmetadata.documentTypes`. This is the Hybrid C primary path. Per FR-17 v2, manifest-present path target ≤100ms; manifest-absent fallback (parallel per-file vector match) target ≤300ms for 3 files.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer with Azure AI Search expertise. Familiar with `playbook-embeddings` index, `text-embedding-3-large`, and the WP5.5 upload-manifest contract.</role>
+
+  <goal>
+    `PlaybookDispatcher` Phase B logic: when `ChatSession.UploadedFiles[fileId].ClassifiedDocType` is present (from Phase 4b upload pipeline), use it as `documentTypes` pre-filter against `sprk_jpsmatchingmetadata.documentTypes` (added by Phase 2 FR-08/FR-13). Run vector search over filtered set. Manifest-absent path falls through to parallel per-file vector match with per-file query composition: `$"{userMessage} | Document: {filename} | Type hint: {contentType} | Content: {textPrefix}"`. Integration test confirms manifest-present p95 ≤100ms; manifest-absent ≤300ms for 3 files.
+  </prompt>
+
+  <context>
+    <background>
+      Per spec FR-17 v2 + design §1.2 Phase B + architecture §6.1 cross-ref. Hybrid C decision (Owner clarification 2026-06-21) — primary path uses precomputed manifest's `documentType` from the WP5.5 upload pipeline (Phase 4b `SessionFileEnrichmentService` + `FileClassificationService`) as a structured filter rather than computing per-routing classification on each turn. Synergy with WP1.5 `sprk_jpsmatchingmetadata.documentTypes` (Phase 2). Manifest-absent fallback preserves correctness for older sessions. Embedding model stays `text-embedding-3-large` (FR-21 — no voyage-law-2).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbeddingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-17 v2">Manifest-present path ≤100ms; manifest-absent ≤300ms for 3 files; cross-WP integration test confirms WP2 reads enriched `ChatSessionFile` fields (`ClassifiedDocType`, `Sections`, etc.).</constraint>
+    <constraint source="spec FR-21">Embedding model stays `text-embedding-3-large`; no Azure-external API calls.</constraint>
+    <constraint source="spec FR-19">Total dispatch budget within existing 2s `PlaybookDispatcher.TotalTimeout`.</constraint>
+    <constraint source="design §1.2 Phase B">Include user message in per-file query so intent biases the match; `commandIntent` integration is task 115.</constraint>
+    <constraint source="architecture §6.1">Cross-WP integration: read enriched `ChatSession.UploadedFiles[].ClassifiedDocType` from Phase 4b.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary.</constraint>
+    <constraint source="ADR-014">5-min TTL cache on stable (queryText, tenantId) key where appropriate.</constraint>
+    <constraint source="ADR-015">Tier-1 logging — log `(filesCount, manifestPresent, decidersInvoked=0 at this phase, topKPerFile)`; NEVER log query text or embedding values.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>knowledge/azure-ai-search/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookDispatcher.cs` current state post-111; read `PlaybookEmbeddingService.cs` to understand query composition; read `ChatSession.UploadedFiles[].ClassifiedDocType` shape from Phase 4b.</step>
+    <step order="2">Author `Phase B` logic: per-file resolution — given `FileFingerprint` from Phase A + session-side enriched `ClassifiedDocType`, choose path:
+      (a) Manifest-present: build filter expression `search.in(documentTypes, '{classifiedDocType}')` against `playbook-embeddings` records (filter on `sprk_jpsmatchingmetadata.documentTypes`).
+      (b) Manifest-absent: parallel per-file vector match — compose queryText = `$"{userMessage} | Document: {filename} | Type hint: {contentType} | Content: {textPrefix}"`; embed + search topK=5.</step>
+    <step order="3">Use `Task.WhenAll` for parallel fan-out across files. Each per-file branch returns top-K candidate playbooks with scores.</step>
+    <step order="4">Cache: 5-min TTL keyed on `(tenantId, normalizedQueryText)` for manifest-absent path; manifest-present filtered queries cached on `(tenantId, classifiedDocType, normalizedMessage)`.</step>
+    <step order="5">Emit ADR-015 tier-1 telemetry: log `(filesCount, manifestPresent, perFileLatencyMs[], totalLatencyMs, topKCount)`. Never log query content.</step>
+    <step order="6">Add unit test asserting manifest-present path: mocked `playbook-embeddings` filter call; assert `documentTypes` filter applied. Add integration test asserting manifest-present p95 ≤100ms (mocked Azure Search; latency from filter overhead only).</step>
+    <step order="7">Add integration test asserting manifest-absent fallback ≤300ms for 3 files (mocked embedder; per-call 80-150ms).</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. All pass.</step>
+    <step order="9">Measure BFF publish size; report delta.</step>
+    <step order="10">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 112 → ✅; current-task.md → ready for 113.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookDispatcher + PlaybookEmbeddingService + ChatSession enriched fields</tool>
+    <tool name="Edit">Add Phase B logic; update tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (Phase B added)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookDispatcherTests.cs (Phase B cases)</output>
+    <output type="docs">notes/handoffs/112-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Phase B branches on `ClassifiedDocType` presence; manifest-present path filters on `sprk_jpsmatchingmetadata.documentTypes`.</criterion>
+    <criterion testable="true">Manifest-absent fallback uses parallel per-file vector match.</criterion>
+    <criterion testable="true">Embedding model stays `text-embedding-3-large` (FR-21).</criterion>
+    <criterion testable="true">Manifest-present test p95 ≤100ms.</criterion>
+    <criterion testable="true">Manifest-absent test ≤300ms for 3 files.</criterion>
+    <criterion testable="true">Telemetry tier-1 compliant — no query content leakage.</criterion>
+    <criterion testable="true">BFF publish-size delta reported.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase B is the Hybrid C primary value-add — the manifest pre-filter dramatically reduces routing cost vs parallel per-file vector match. Falls back gracefully when manifest is absent (e.g., older sessions). Phase C reconciliation (task 113) handles cross-file conflicts when multiple files disagree.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>
