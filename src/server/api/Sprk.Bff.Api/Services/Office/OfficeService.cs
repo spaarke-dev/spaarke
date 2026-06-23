@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai.Membership.Events;
 
 namespace Sprk.Bff.Api.Services.Office;
 
@@ -34,6 +35,7 @@ public class OfficeService : IOfficeService
     private readonly OfficeJobQueue _jobQueue;
     private readonly OfficeStorageUploader _storageUploader;
     private readonly EmailProcessingOptions _emailProcessingOptions;
+    private readonly IMembershipEventPublisher _membershipEventPublisher;
     private readonly ILogger<OfficeService> _logger;
 
     // In-memory job storage for development/testing (fallback when Dataverse unavailable)
@@ -47,6 +49,7 @@ public class OfficeService : IOfficeService
         OfficeJobQueue jobQueue,
         OfficeStorageUploader storageUploader,
         IOptions<EmailProcessingOptions> emailProcessingOptions,
+        IMembershipEventPublisher membershipEventPublisher,
         ILogger<OfficeService> logger)
     {
         _jobStatusService = jobStatusService;
@@ -56,6 +59,7 @@ public class OfficeService : IOfficeService
         _jobQueue = jobQueue;
         _storageUploader = storageUploader;
         _emailProcessingOptions = emailProcessingOptions.Value;
+        _membershipEventPublisher = membershipEventPublisher;
         _logger = logger;
     }
 
@@ -304,6 +308,34 @@ public class OfficeService : IOfficeService
                     fileSize,
                     userId,
                     cancellationToken);
+
+                // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
+                // Per event-source-inventory §3B (line 64), POST /office/save
+                // creates a sprk_document with ownerid defaulted by Dataverse to
+                // the OBO caller. Publish Added event so the junction-updater
+                // (task 084) + nightly recon (task 085) observe the new
+                // association. When MembershipEventPublisherOptions.Enabled=false
+                // (default), the NullMembershipEventPublisher peer logs + returns
+                // (ADR-032 P2). The Task is discarded explicitly to signal
+                // fire-and-forget semantics — publisher contract guarantees no
+                // exceptions propagate to this site.
+                if (Guid.TryParse(userId, out var callerOid))
+                {
+                    var membershipEvent = new MembershipChangedEvent
+                    {
+                        PersonId = callerOid,
+                        PersonIdType = PersonIdentityType.User,
+                        EntityLogicalName = "sprk_document",
+                        EntityRecordId = documentId,
+                        SourceField = "ownerid",
+                        Role = "owner",
+                        MutationType = MembershipMutationType.Added,
+                        CorrelationId = correlationId,
+                        OccurredOnUtc = DateTime.UtcNow,
+                    };
+
+                    _ = _membershipEventPublisher.PublishAsync(membershipEvent, cancellationToken);
+                }
 
                 // Update job status to records created
                 await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "RecordsCreated", 50, null, cancellationToken);

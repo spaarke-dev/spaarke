@@ -77,6 +77,10 @@ export const NODE_TYPE_INFO: Record<PlaybookNodeType, { label: string; descripti
     label: 'Create Notification',
     description: 'Create an in-app notification for a user',
   },
+  lookupUserMembership: {
+    label: 'Lookup User Membership',
+    description: 'Resolve user record IDs that have membership on a parent entity (e.g. matter team members)',
+  },
   wait: {
     label: 'Wait',
     description: 'Pause workflow for a duration',

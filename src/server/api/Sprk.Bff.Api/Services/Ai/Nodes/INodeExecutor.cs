@@ -134,6 +134,13 @@ public enum ActionType
     /// <summary>Execute a FetchXML query against Dataverse and return results.</summary>
     QueryDataverse = 51,
 
+    /// <summary>
+    /// Resolves the current user's record memberships for a given entity type via
+    /// <c>IMembershipResolverService</c> (FR-1B.1). Emits the memberships into
+    /// <c>NodeOutput.StructuredData</c> for downstream filter/template consumption.
+    /// </summary>
+    LookupUserMembership = 52,
+
     /// <summary>Routes the playbook node to Azure AI Foundry Agent Service (Phase 2).</summary>
     AgentService = 60,
 

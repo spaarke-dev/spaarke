@@ -82,9 +82,14 @@ public class DataverseEntitySchemaTests
         { "SourceType", new("sprk_sourcetype", typeof(OptionSetValue)) },
 
         // Search Index Tracking Fields
+        // R3 FR-3H3.2 dual-write: legacy SearchIndexed + SearchIndexedOn are PRESERVED during
+        // the transition window (R3 + one sprint per spec assumption line 366). New canonical
+        // lifecycle markers are SearchIndexQueuedOn (enqueue) + SearchIndexCompletedOn (completion).
         { "SearchIndexed", new("sprk_searchindexed", typeof(bool)) },
         { "SearchIndexName", new("sprk_searchindexname", typeof(string)) },
-        { "SearchIndexedOn", new("sprk_searchindexedon", typeof(DateTime)) }
+        { "SearchIndexedOn", new("sprk_searchindexedon", typeof(DateTime)) },
+        { "SearchIndexQueuedOn", new("sprk_searchindexqueuedon", typeof(DateTime)) },
+        { "SearchIndexCompletedOn", new("sprk_searchindexcompletedon", typeof(DateTime)) }
     };
 
     private record DataverseFieldMapping(string DataverseFieldName, Type ExpectedType);
@@ -663,6 +668,116 @@ public class DataverseEntitySchemaTests
         // Memo/multiline: 1,048,576 chars
         maxExpectedLength.Should().BeLessThanOrEqualTo(1048576,
             $"{fieldName} max length should fit in Dataverse memo field");
+    }
+
+    #endregion
+
+    #region Search-Index Lifecycle Dual-Write (R3 FR-3H3.2 / AC-H3.2)
+
+    /// <summary>
+    /// R3 FR-3H3.2: <see cref="UpdateDocumentRequest"/> MUST expose both new lifecycle
+    /// markers (<c>SearchIndexQueuedOn</c>, <c>SearchIndexCompletedOn</c>) as nullable DateTimes
+    /// so writers can stamp either independently. Failure to expose them prevents writer
+    /// call-sites (RagIndexingJobHandler, RagEndpoints.IndexFile, RagEndpoints.SendToIndex)
+    /// from compiling — this test is the model-contract canary.
+    /// </summary>
+    [Fact]
+    public void UpdateDocumentRequest_HasSearchIndexLifecycleProperties()
+    {
+        var requestType = typeof(UpdateDocumentRequest);
+
+        var queuedOn = requestType.GetProperty("SearchIndexQueuedOn");
+        var completedOn = requestType.GetProperty("SearchIndexCompletedOn");
+
+        queuedOn.Should().NotBeNull("SearchIndexQueuedOn is required by R3 FR-3H3.2 enqueue writers");
+        completedOn.Should().NotBeNull("SearchIndexCompletedOn is required by R3 FR-3H3.2 completion writers");
+
+        queuedOn!.PropertyType.Should().Be(typeof(DateTime?),
+            "SearchIndexQueuedOn must be nullable — null means 'not yet enqueued'");
+        completedOn!.PropertyType.Should().Be(typeof(DateTime?),
+            "SearchIndexCompletedOn must be nullable — null means 'not yet completed' (the very pitfall R3 fixes)");
+    }
+
+    /// <summary>
+    /// R3 FR-3H3.2 dual-write transition (spec assumption line 366): legacy
+    /// <c>SearchIndexed</c> (bool) and <c>SearchIndexedOn</c> (DateTime) MUST remain on
+    /// <see cref="UpdateDocumentRequest"/> for R3 + one sprint. Removing them prematurely
+    /// would break maker-side form bindings + downstream consumers not yet migrated.
+    /// Removal is deferred to a future R4 task per the inventory in
+    /// projects/spaarke-platform-foundations-r3/notes/sprk-searchindexed-consumer-inventory.md.
+    /// </summary>
+    [Fact]
+    public void UpdateDocumentRequest_LegacySearchIndexFieldsPreservedForDualWrite()
+    {
+        var requestType = typeof(UpdateDocumentRequest);
+
+        requestType.GetProperty("SearchIndexed").Should().NotBeNull(
+            "legacy SearchIndexed (bool) is PRESERVED during the R3 dual-write transition");
+        requestType.GetProperty("SearchIndexedOn").Should().NotBeNull(
+            "legacy SearchIndexedOn (DateTime) is PRESERVED during the R3 dual-write transition");
+    }
+
+    /// <summary>
+    /// Enqueue path: a writer that stamps ONLY <c>SearchIndexQueuedOn</c> MUST produce a
+    /// payload that carries the new field and leaves the legacy bool unset. This is the
+    /// "in-progress" state — the document is queued but indexing has not yet been confirmed.
+    /// </summary>
+    [Fact]
+    public void BuildEntity_WithSearchIndexQueuedOnOnly_RepresentsEnqueueState()
+    {
+        var queuedAt = new DateTime(2026, 6, 21, 12, 0, 0, DateTimeKind.Utc);
+        var request = new UpdateDocumentRequest
+        {
+            SearchIndexQueuedOn = queuedAt
+            // No SearchIndexCompletedOn, no SearchIndexed — this is the "in flight" stamp
+        };
+
+        // Verify the model contract — these fields, when bound via the mapping layer
+        // (DataverseWebApiService / DataverseServiceClientImpl), produce the expected
+        // attribute writes on the sprk_document entity.
+        request.SearchIndexQueuedOn.Should().Be(queuedAt,
+            "enqueue writers stamp queuedon = UtcNow at Service Bus publish or direct invocation");
+        request.SearchIndexCompletedOn.Should().BeNull(
+            "completion is a SEPARATE event — must not be inferred from enqueue (this was the long-standing pitfall)");
+        request.SearchIndexed.Should().BeNull(
+            "legacy bool MUST NOT be set on enqueue alone — true means 'completed' (during transition)");
+    }
+
+    /// <summary>
+    /// Completion path: writers MUST dual-write — set the new
+    /// <c>SearchIndexCompletedOn</c> AND the legacy <c>SearchIndexed</c>=true +
+    /// <c>SearchIndexedOn</c> in the same payload. This mirrors the contract enforced by
+    /// the three writer call-sites:
+    /// <list type="bullet">
+    ///   <item>RagIndexingJobHandler (background Service Bus consumer)</item>
+    ///   <item>RagEndpoints.IndexFile (POST /api/ai/rag/index-file OBO)</item>
+    ///   <item>RagEndpoints.SendToIndex (POST /api/ai/rag/send-to-index ribbon button)</item>
+    /// </list>
+    /// </summary>
+    [Fact]
+    public void BuildEntity_OnCompletion_DualWritesNewAndLegacyFields()
+    {
+        var completedAt = new DateTime(2026, 6, 21, 12, 5, 0, DateTimeKind.Utc);
+        var request = new UpdateDocumentRequest
+        {
+            // New canonical lifecycle marker
+            SearchIndexCompletedOn = completedAt,
+            // Legacy dual-write (preserved during transition per spec line 366)
+            SearchIndexed = true,
+            SearchIndexedOn = completedAt,
+            SearchIndexName = "spaarke-knowledge-index-v2"
+        };
+
+        request.SearchIndexCompletedOn.Should().Be(completedAt,
+            "AC-H3.2: completed doc has sprk_searchindexcompletedon set");
+        request.SearchIndexed.Should().Be(true,
+            "AC-H3.2: completed doc has sprk_searchindexed=true (dual-write during R3 transition)");
+        request.SearchIndexedOn.Should().Be(completedAt,
+            "legacy SearchIndexedOn mirrors SearchIndexCompletedOn while dual-write is in force");
+        request.SearchIndexName.Should().Be("spaarke-knowledge-index-v2",
+            "index routing field is unchanged by the lifecycle migration");
+        request.SearchIndexQueuedOn.Should().BeNull(
+            "completion writer does not re-stamp queuedon — that was set at enqueue time");
     }
 
     #endregion

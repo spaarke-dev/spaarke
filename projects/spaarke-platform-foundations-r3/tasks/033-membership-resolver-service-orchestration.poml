@@ -1,0 +1,137 @@
+<task id="R3-033" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`MembershipResolverService` — orchestration (discovery + normalization + FetchXML query)</title>
+    <status>completed</status>
+    <phase>P4</phase>
+    <parallel-group>H (with 034)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>4-6h</estimated-effort>
+    <tags>bff-api,membership,orchestration,fetchxml</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>030, 031, 032</dependencies>
+  </metadata>
+  <prompt>Implement the top-level orchestration that combines FieldDiscovery + IdentityNormalization + OrganizationMembership + per-user Redis cache (5-min TTL) and builds FetchXML to query the target entity for matching rows.</prompt>
+  <goal>MembershipResolverService.ResolveAsync(systemUserId, entityType, options) returns MembershipResponse with ids[], byRole map, identity, count. Per-user cache 5-min TTL (Phase 1A; Phase 2 lengthens TTL with pub/sub invalidation).</goal>
+  <constraints>
+    <constraint source="spec FR-1A.8">Per-user cache 5-min TTL (Phase 1A); no write invalidation</constraint>
+    <constraint source="ADR-009">Redis</constraint>
+    <constraint source="ADR-016">Cache + retry pattern</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>membership-orchestration</topic>
+    <files>
+      <file>docs/adr/ADR-009-redis-caching.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-016-rate-limits.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/QueryDataverseNodeExecutor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1A.5 through FR-1A.8</step>
+    <step order="1">Implement IMembershipResolverService.ResolveAsync(systemUserId, entityType, options)</step>
+    <step order="2">Pull discovered descriptors (from FieldDiscoveryService)</step>
+    <step order="3">Pull PersonIdentity (from IdentityNormalizationService)</step>
+    <step order="4">For each descriptor, build FetchXML condition matching the user's identity values</step>
+    <step order="5">Combine into single OR-joined FetchXML; execute against target entity</step>
+    <step order="6">Group results by role; return MembershipResponse</step>
+    <step order="7">Per-user cache 5-min TTL keyed on {systemUserId, entityType, optionsHash}</step>
+    <step order="8">Unit tests: orchestration paths; integration test against spaarkedev1 fixture</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">ResolveAsync returns expected IDs for seeded user (AC-1A.3)</criterion>
+    <criterion testable="true">byRole map populated correctly</criterion>
+    <criterion testable="true">Cache hit on second call within 5min</criterion>
+    <criterion testable="true">p95 ≤300ms for ≤500-membership user on 50K-row entity (AC-1A.5; verify via App Insights post-deploy)</criterion>
+  </acceptance-criteria>
+  <notes>
+    **Task 033 completed 2026-06-21**
+
+    **Implementation summary**: Implemented `MembershipResolverService` orchestrating
+    discovery + identity normalization + per-user Redis cache (5-min TTL Phase 1A per
+    FR-1A.8) + OR-joined FetchXml query. Materialization deduplicates ids, sorts ascending,
+    and builds byRole map by re-inspecting each returned row's lookup fields against the
+    descriptor set. Multi-role per row supported (a row with both ownerid and
+    sprk_assignedattorney1 populated is attributed to BOTH roles).
+
+    **Coordination with task 034**: Task 034 had already created `MembershipResponse.cs`
+    when this task ran. The shape matches the design.md contract; the only divergence
+    from the task brief was `CacheExpiresAt` being non-nullable (`DateTimeOffset` not
+    `DateTimeOffset?`) — task 033 was adapted to always emit a `CacheExpiresAt` value
+    (including for empty responses, since the empty response is also cached for 5 min).
+
+    **Pagination implementation**: Decided on `top=limit+1` sentinel + base64url-encoded
+    skip-count continuation tokens (NOT Dataverse FetchXml paging cookies). Rationale:
+    (1) stateless — token is just the skip-count, no server-side paging state;
+    (2) deterministic — relies on the OR-joined sort being stable; (3) avoids the FetchXml
+    page-cookie format which requires the consumer to round-trip an opaque CDATA blob.
+    `MaxLimit` capped server-side at 5000 to protect against runaway requests.
+
+    **FetchXml construction**: Inline `StringBuilder` (NOT XDocument). Rationale: the
+    output is a fixed, well-formed template with O(N) condition appends; XDocument would
+    add unneeded indirection + memory overhead. XML escaping applied defensively to field
+    + entity names even though Dataverse identifiers are restricted to alphanumeric +
+    underscore. Single `<filter type='or'>` containing per-(descriptor, identity-value)
+    `<condition operator='eq' value='{guid:D}' />` rows.
+
+    **Cache key**: `membership:resolved:{systemUserId:D}:{entityType}:{optionsHash}` where
+    optionsHash is the first 8 bytes of SHA-256 over the canonicalized (sorted, lowered)
+    Roles + IdentityTypes + IncludeRelated + Limit + ContinuationToken. Namespace prefix
+    `membership:` aligns with the Phase 2 pub/sub invalidation channel (FR-2P2.8 — task 086).
+
+    **Phase 1D (includeRelated) handling**: Accepted-but-ignored per task brief. When the
+    caller passes includeRelated, the resolver logs an Info entry and returns DIRECT
+    memberships only. Task 054 implements transitive expansion as a downstream layer.
+
+    **Test coverage**: 14 unit tests pass:
+      - Happy path (3 descriptors, 3 distinct rows, all roles populated correctly)
+      - byRole map: multi-role per row (same matter attributed to both owner AND assignedAttorney)
+      - Empty buckets: roles queried with zero matches return [] not absent key
+      - Cache hit: second call within 5min hits cache (FakeDistributedCache call-count probes;
+        Discovery + Identity + Dataverse each called Times.Once across both calls)
+      - Roles filter: descriptor narrowing verified via FetchXml inspection (capturedFetch)
+      - IdentityTypes filter: descriptor narrowing verified via FetchXml inspection
+      - Empty descriptors → empty response (no Dataverse query)
+      - Zero identity values for descriptors → empty response (no Dataverse query)
+      - Dataverse returns 0 rows → empty response (descriptors still populate byRole keys)
+      - Cancellation: pre-cancelled token throws OCE
+      - Input guards: Guid.Empty + null/empty/whitespace entityType throw ArgumentException
+
+    **Files created (src)**:
+      - `Services/Ai/Membership/IMembershipResolverService.cs` (interface + MembershipResolveOptions)
+      - `Services/Ai/Membership/MembershipResolverService.cs` (implementation)
+
+    **Files modified (src)**:
+      - `Infrastructure/DI/MembershipModule.cs` (added IMembershipResolverService singleton registration)
+
+    **Files created (tests)**: `MembershipResolverServiceTests.cs` (14 tests)
+
+    **Build**: 0 errors, 16 pre-existing warnings unchanged.
+    **Tests**: 14/14 new pass; 65/65 Membership-namespace regression pass.
+    **Publish size**: 44.62 MB compressed (no new NuGet packages — pure orchestration
+    using existing IDataverseService + IDistributedCache).
+    **CVE check**: No new HIGH-severity CVE (only pre-existing `Microsoft.Kiota.Abstractions
+    1.21.2` HIGH advisory, tracked at project level — not introduced by this task).
+
+    **AC-1A.3 integration test**: deferred to task 035 (endpoint task) + AC-1A.5 perf
+    measurement deferred to P4 wrap-up UAT against spaarkedev1 (per task brief).
+
+    **adr-check (self)**: PASS — ADR-001 (in-process singleton), ADR-009 (Redis 5-min TTL
+    exactly per FR-1A.8), ADR-010 (interface as testing seam, concrete via DI),
+    ADR-013 (lives under Services/Ai/Membership/), ADR-016 (cache + fail-open retry pattern),
+    ADR-032 N/A (unconditional registration).
+
+    **bff-extensions §A/§F**: PASS — no BFF csproj changes, no new conditional DI, no
+    new HIGH CVE, 14 unit tests cover new behavior, asymmetric-registration §F.1 N/A
+    (unconditional registration).
+
+    **Not committed per task brief.**
+  </notes>
+</task>

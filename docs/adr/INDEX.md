@@ -39,6 +39,8 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-027](ADR-027-subscription-isolation-and-dataverse-solution-management.md) | Subscription Isolation & Dataverse Solution Management | Operations | Proposed |
 | [ADR-029](ADR-029-bff-publish-hygiene.md) | BFF Publish Hygiene (framework-dependent linux-x64, sourcemap exclusion, transitive CVE overrides, size baseline) | Backend / Operations | Accepted |
 | [ADR-030](ADR-030-bff-nullobject-kill-switch.md) | BFF Null-Object Kill-Switch Pattern (P1/P2/P3 patterns; `FeatureDisabledException` → 503 ProblemDetails; closes RB-T028 cluster) | Backend / API | Accepted |
+| [ADR-034](ADR-034-user-record-membership.md) | User-Record Membership Resolution Pattern (discovery-based `MembershipResolverService` + 6-path identity normalization + Phase 2 junction table `sprk_userentityassociation` + Service Bus topic `sprk-membership-changes`; `LookupUserMembership` playbook node ActionType=52; closes A1/D5 root cause from R2 UAT) | Backend / AI / Dataverse | Accepted (R3 Part 1, 2026-06-21) |
+| [ADR-036](ADR-036-background-job-infrastructure.md) | Background-Job Infrastructure (Spaarke.Scheduling — shared lib + `IScheduledJob` contract + `ScheduledJobHost` + Cronos cron parsing + `sprk_backgroundjob*` Dataverse entities + `/api/admin/jobs/*` admin surface; two reference consumers: `MembershipReconciliationJob` + migrated `PlaybookSchedulerJob`) | Backend / Scheduling | Accepted (R3 Part 2, 2026-06-21) |
 
 ## ADRs by Domain
 

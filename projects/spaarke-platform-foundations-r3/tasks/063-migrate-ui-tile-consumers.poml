@@ -1,0 +1,40 @@
+<task id="R3-063" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Migrate UI tile consumers of `sprk_searchindexed`</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>Verify-empty closure. Re-grep on 2026-06-21 (after tasks 061+062 landed) confirmed task 060's inventory finding: ZERO in-repo UI tile readers of `sprk_searchindexed` exist. PCF (0 matches), code-pages (0 matches), shared client lib (1 JSDoc-only match in `EntityCreationService.ts:187`), solutions (1 JSDoc-only match in `uploadOrchestrator.ts:480`) — both JSDoc matches are documentation describing what the BFF does, NOT runtime reads, and are deferred to the P10 documentation sweep. No code migration performed. FR-3H3.4 in-repo scope (UI tile cluster) satisfied vacuously. Maker-side residual scope (forms/views/flows/canvas+model-driven apps/plugin steps/solution-exported playbooks) escalated to operator follow-up — these live outside the repo and are not in-repo migration scope. Authored `notes/task-063-verify-empty.md` documenting grep commands, results, cross-reference to inventory §3A, maker-side audit checklist (7 categories), and acceptance against POML criteria. Coordinated with parallel sibling 064 (API/FetchXML cluster) — no overlap; sibling 065 also independent. Acceptance criteria from POML both satisfied: "each UI tile consumer migrated" (vacuously, 0 consumers) and "status display unchanged from user perspective" (no UI code modified, no UX regression risk).</completion-notes>
+    <phase>P7.1</phase>
+    <parallel-group>O (with 064, 065)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>frontend,pcf,code-pages,migration</tags>
+    <relevant-files>
+      <file>(per inventory — UI tiles that read sprk_searchindexed)</file>
+    </relevant-files>
+    <dependencies>061, 062</dependencies>
+  </metadata>
+  <prompt>Per P7.0 inventory, migrate UI tiles (PCF, code-pages) that read `sprk_searchindexed` to read `sprk_searchindexcompletedon` (treat non-null as "indexed").</prompt>
+  <goal>UI tile cluster migrated. Status display still works (binary completed/not).</goal>
+  <constraints>
+    <constraint source="spec FR-3H3.4">Consumer migration per inventory</constraint>
+  </constraints>
+  <knowledge>
+    <topic>consumer-migration</topic>
+    <files>
+      <file>projects/spaarke-platform-foundations-r3/notes/sprk-searchindexed-consumer-inventory.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + inventory UI cluster</step>
+    <step order="1">Update each UI consumer to read sprk_searchindexcompletedon (non-null = indexed)</step>
+    <step order="2">Component tests / snapshots</step>
+    <step order="3">Manual smoke per consumer</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Each UI tile consumer migrated</criterion>
+    <criterion testable="true">Status display unchanged from user perspective</criterion>
+  </acceptance-criteria>
+</task>

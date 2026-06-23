@@ -293,6 +293,35 @@ public record PlaybookStreamEvent
         PlaybookId = playbookId,
         Done = true
     };
+
+    /// <summary>
+    /// Creates an UnrenderedTemplateDetected event (R3 FR-3H1.4 / AC-H1.2).
+    /// Emitted as a non-fatal warning when a completed node's output contains
+    /// literal <c>{{</c> substrings (an unrendered Handlebars template leaked
+    /// into the output stream). Carries node identification + a sample of the
+    /// leaked text for observability. Output continues to flow downstream
+    /// (degradation, not failure) — runId on this event doubles as the
+    /// correlationId per NFR-08.
+    /// </summary>
+    /// <param name="runId">Run ID (used as correlation ID).</param>
+    /// <param name="playbookId">Playbook ID being executed.</param>
+    /// <param name="nodeId">ID of the node whose output leaked an unrendered template.</param>
+    /// <param name="nodeName">Display name of the node (for stream consumers).</param>
+    /// <param name="sample">First ~200 chars of the offending output for diagnostics.</param>
+    public static PlaybookStreamEvent UnrenderedTemplateDetected(
+        Guid runId,
+        Guid playbookId,
+        Guid nodeId,
+        string nodeName,
+        string sample) => new()
+        {
+            Type = PlaybookEventType.UnrenderedTemplateDetected,
+            RunId = runId,
+            PlaybookId = playbookId,
+            NodeId = nodeId,
+            NodeName = nodeName,
+            Content = sample
+        };
 }
 
 /// <summary>
@@ -325,7 +354,14 @@ public enum PlaybookEventType
     RunFailed,
 
     /// <summary>Playbook execution was cancelled.</summary>
-    RunCancelled
+    RunCancelled,
+
+    /// <summary>
+    /// A completed node's output contains a literal <c>{{</c> substring —
+    /// indicating a Handlebars template leaked unrendered into the output.
+    /// Non-fatal warning (R3 FR-3H1.4 / AC-H1.2); execution continues.
+    /// </summary>
+    UnrenderedTemplateDetected
 }
 
 /// <summary>

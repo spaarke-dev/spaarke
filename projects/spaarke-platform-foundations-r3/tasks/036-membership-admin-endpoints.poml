@@ -1,0 +1,44 @@
+<task id="R3-036" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`GET /api/admin/membership/discovered/{entityType}` + `POST /api/admin/membership/refresh-metadata`</title>
+    <status>completed</status>
+    <phase>P4</phase>
+    <parallel-group>I (with 035, 037)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>bff-api,membership,admin-endpoint,operator-tooling</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Membership/MembershipAdminEndpoints.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Membership/MembershipAdminEndpointsTests.cs</file>
+    </relevant-files>
+    <dependencies>030</dependencies>
+  </metadata>
+  <prompt>Implement operator audit + cache refresh endpoints per spec.md FR-1A.10, FR-1A.11. Both behind SystemAdmin policy.</prompt>
+  <goal>Operator can audit discovery for any entity (which fields are auto/override/excluded/ignored) + force metadata cache refresh.</goal>
+  <constraints>
+    <constraint source="ADR-008">Endpoint-filter auth</constraint>
+    <constraint source="spec Q6">Use existing SystemAdmin policy</constraint>
+  </constraints>
+  <knowledge>
+    <topic>admin-endpoint-pattern</topic>
+    <files>
+      <file>docs/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1A.10 + FR-1A.11</step>
+    <step order="1">GET /discovered/{entityType}: invoke FieldDiscoveryService + return discovered/excluded/ignored arrays</step>
+    <step order="2">POST /refresh-metadata: invalidate per-entity metadata cache</step>
+    <step order="3">Both register with .RequireAuthorization("SystemAdmin")</step>
+    <step order="4">Unit tests: shape + 403 for non-admin</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-1A.2 passes — discovered report matches expectations</criterion>
+    <criterion testable="true">AC-1A.7 passes — cache invalidates on POST</criterion>
+    <criterion testable="true">403 for non-admin</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,3 +1,75 @@
+# `sprk_matter` and Related Tables — Data Model
+
+> **Last Refreshed**: 2026-06-21 (task R3-103, spec NFR-06 / AC-X.4)
+> **Source environment**: `spaarkedev1`
+> **Purpose**: Authoritative reference for the `sprk_matter` entity and its reference tables (`sprk_mattersubtype_ref`, `sprk_mattertype_ref`). The "Membership-relevant `sprk_assigned*` columns" section below is the human-readable counterpart to what [`MembershipFieldDiscoveryService`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipFieldDiscoveryService.cs) reports programmatically at runtime — they MUST stay aligned (NFR-06 binding refresh).
+
+---
+
+## 1. Membership-relevant `sprk_assigned*` columns
+
+This section documents the `sprk_matter` Lookup columns that the **R3 user-record membership resolution pattern** ([`.claude/adr/ADR-034`](../../.claude/adr/ADR-034-user-record-membership.md) · full ADR: [`docs/adr/ADR-034`](../adr/ADR-034-user-record-membership.md)) auto-discovers as membership-bearing. The runtime discovery service classifies each Lookup by target table → identity type, then derives a role name via the CamelCase strategy (strip `sprk_` prefix + strip trailing digits + lowercase first char). For the canonical algorithm + override mechanism, see ADR-034 §"Identity Normalization Contract" and the forward-linked architecture page [`docs/architecture/membership-resolution-pattern.md`](../architecture/membership-resolution-pattern.md) *(authored in task R3-104 — link target may not yet exist until 104 lands)*.
+
+### 1.1 Field table
+
+| Field (logical name) | Display name | Type | Lookup target | Identity type | Role (auto-derived) | Role (operator override) | Notes |
+|---|---|---|---|---|---|---|---|
+| `sprk_assignedattorney1` | Assigned Attorney 1 | Lookup | `contact` | `Contact` | `assignedattorney` | — | Primary attorney for the matter. Both `1` + `2` collapse to the same auto-derived role; operators that need to distinguish them should configure `FieldRoleOverrides` per `Membership:EntityOverrides:sprk_matter` (see ADR-034 §Constraints). |
+| `sprk_assignedattorney2` | Assigned Attorney 2 | Lookup | `contact` | `Contact` | `assignedattorney` | — | Secondary attorney. Same role-collapse note as `1`. |
+| `sprk_assignedparalegal1` | Assigned Paralegal 1 | Lookup | `contact` | `Contact` | `assignedparalegal` | — | Primary paralegal. |
+| `sprk_assignedparalegal2` | Assigned Paralegal 2 | Lookup | `contact` | `Contact` | `assignedparalegal` | — | Secondary paralegal. |
+| `sprk_assignedlawfirm1` | Assigned Law Firm 1 | Lookup | **`sprk_organization`** | **`Organization`** | `assignedlawfirm` | `assignedLawFirm` *(canonical)* | **Per Q4 owner clarification (2026-06-20)** the target is `sprk_organization` — NOT Contact, NOT Account. The R3 spec's `design.md` Discovery Report example originally showed Contact for these fields; that was wrong and Q4 corrects it. The shipping `appsettings.json` `Membership:EntityOverrides:sprk_matter:FieldRoleOverrides` maps both `1`/`2` to the override role `"assignedLawFirm"` to disambiguate from the all-lowercase auto-derivation. |
+| `sprk_assignedlawfirm2` | Assigned Law Firm 2 | Lookup | **`sprk_organization`** | **`Organization`** | `assignedlawfirm` | `assignedLawFirm` *(canonical)* | Same Q4 attribution as `1`. |
+| `sprk_assignedtointernal` | Assigned To Internal | Lookup | `systemuser` | `SystemUser` | `assignedtointernal` | — | Generic "internal assignee" slot — resolves against the requesting user's own `systemUserId`. |
+| `sprk_assignedtoexternal` | Assigned To External | Lookup | `contact` | `Contact` | `assignedtoexternal` | — | Generic "external assignee" slot — resolves against the requesting user's `contactId` (cross-referenced via `azureactivedirectoryobjectid` per ADR-028). |
+| `sprk_assignedoutsidecounsel` | Assigned Outside Counsel | Lookup | *(see §3 dump row)* | — | — | — | Pre-existing field — **NOT** classified as a Q4-scoped membership field. Listed here for completeness; the discovery service will classify it per its actual target if/when an operator force-includes it. |
+
+### 1.2 Source provenance
+
+The field list above comes from three reconciled sources, all of which agree:
+
+1. **Test fixture** [`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipFieldDiscoveryServiceTests.cs:77-86`](../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipFieldDiscoveryServiceTests.cs) — exact canned `LookupAttributeRow` set with target tables. This is the **primary source** for this refresh (R3 test contract is binding through CI).
+2. **Spec** [`projects/spaarke-platform-foundations-r3/spec.md`](../../projects/spaarke-platform-foundations-r3/spec.md) NFR-06 — enumerates the same eight `sprk_assigned*` fields.
+3. **Code comment** [`MembershipFieldDiscoveryService.cs:25-28`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipFieldDiscoveryService.cs) — restates Q4 (`sprk_assignedlawfirm1/2 → sprk_organization`).
+
+A direct `spaarkedev1` metadata pull via `mcp__dataverse__describe` was **not** required for this refresh because the three in-repo sources are fully congruent and the test fixture is the regression guard if metadata ever drifts.
+
+### 1.3 Globally-excluded fields (touch-history — not membership)
+
+Per ADR-034 §Constraints, the discovery service applies four global exclusions across **every** entity (these are write-audit fields, not association):
+
+- `createdby`
+- `modifiedby`
+- `createdonbehalfby`
+- `modifiedonbehalfby`
+
+These appear in the raw dump in §3 below; they are classified as `ExcludedField` with reason `"global-exclusion"` by the discovery service and never surface in a `MembershipResponse`.
+
+### 1.4 Cross-references
+
+- **ADR (concise)**: [`.claude/adr/ADR-034-user-record-membership.md`](../../.claude/adr/ADR-034-user-record-membership.md)
+- **ADR (full)**: [`docs/adr/ADR-034-user-record-membership.md`](../adr/ADR-034-user-record-membership.md)
+- **Architecture page (forward link — task R3-104)**: [`docs/architecture/membership-resolution-pattern.md`](../architecture/membership-resolution-pattern.md) *(may not exist until task 104 completes)*
+- **Discovery service**: [`src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipFieldDiscoveryService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipFieldDiscoveryService.cs)
+- **Admin endpoint** (operator audit of what was auto-discovered): `GET /api/admin/membership/discovered/sprk_matter` (requires `SystemAdmin` policy per ADR-034 Q6)
+- **Junction table** (Phase 2 materialization): [`docs/data-model/sprk_userentityassociation.md`](sprk_userentityassociation.md)
+
+---
+
+## 2. `sprk_organization` — Q4 target table
+
+`sprk_assignedlawfirm1/2` Lookups target the custom **`sprk_organization`** entity (NOT the OOTB `account` or `contact` entities). The full `sprk_organization` schema is documented in its own data-model file (when authored). Key facts for membership consumers:
+
+- **Logical name**: `sprk_organization`
+- **Identity-type** (per `Membership:IncludedIdentityTables`): `Organization`
+- **Resolution path** for a user: configured `Membership:OrganizationLookup:UserLookupField` returns the user's `organizationIds[]`. R3 chose **Option (b) config-driven** (default empty = fail-soft empty result). See ADR-034 §Identity Normalization Contract and decision note [`projects/spaarke-platform-foundations-r3/notes/sprk-organization-mapping-decision.md`](../../projects/spaarke-platform-foundations-r3/notes/sprk-organization-mapping-decision.md).
+
+---
+
+## 3. `sprk_matter` raw column dump (and reference tables)
+
+Below is the unfiltered `EntityDefinitions` dump of `sprk_matter`, `sprk_mattersubtype_ref`, and `sprk_mattertype_ref` from `spaarkedev1`. **Note**: the dump as of this refresh date does **NOT** include the `sprk_assigned*` membership fields from §1 above — those columns exist on the entity (per the discovery test fixture + spec NFR-06) but the dump itself predates their addition / has not been re-pulled. The §1 table is authoritative for membership-relevant columns; rerun the dump against `spaarkedev1` when convenient to backfill the rows below (recommended via `mcp__dataverse__describe` + table-flatten script).
+
 | Entity Display Name | Entity Logical Name    | Logical Name                          | Schema Name                           | Display Name                       | Attribute Type   | Description                                                                                  |
 | ------------------- | ---------------------- | ------------------------------------- | ------------------------------------- | ---------------------------------- | ---------------- | -------------------------------------------------------------------------------------------- |
 | Matter              | sprk_matter            | createdby                             | CreatedBy                             | Created By                         | Lookup           | Unique identifier of the user who created the record.                                        |
