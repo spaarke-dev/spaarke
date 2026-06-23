@@ -493,7 +493,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             ["priority"] = priority,
             ["toasttype"] = toastType,
             ["ownerid@odata.bind"] = $"/systemusers({recipientId})",
-            ["ttlinseconds"] = 259200  // 3 days default TTL
+            ["ttlinseconds"] = 604800  // 7 days default TTL (increased from 3d on 2026-06-22 after UAT showed 36 notifications TTL-purged before user could review them)
         };
 
         // Add category (custom field for idempotency grouping)
