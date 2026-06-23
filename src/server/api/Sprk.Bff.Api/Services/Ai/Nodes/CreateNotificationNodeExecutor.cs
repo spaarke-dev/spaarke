@@ -1,5 +1,7 @@
-using System.Net;
 using System.Text.Json;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
@@ -30,6 +32,12 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// Priority values follow Dataverse appnotification convention:
 ///   100000000 = Informational, 200000000 = Important (default), 300000000 = Urgent
 /// </para>
+/// <para>
+/// Uses the canonical <see cref="IGenericEntityService"/> shared library
+/// (which forwards to <c>DataverseServiceClientImpl</c>) rather than an
+/// app-private named HttpClient. This gives correct BaseAddress + token
+/// acquisition + lifecycle management for app-only execution paths.
+/// </para>
 /// </remarks>
 public sealed class CreateNotificationNodeExecutor : INodeExecutor
 {
@@ -54,16 +62,16 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     private const int DefaultToastType = 200_000_000;
 
     private readonly ITemplateEngine _templateEngine;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IGenericEntityService _entityService;
     private readonly ILogger<CreateNotificationNodeExecutor> _logger;
 
     public CreateNotificationNodeExecutor(
         ITemplateEngine templateEngine,
-        IHttpClientFactory httpClientFactory,
+        IGenericEntityService entityService,
         ILogger<CreateNotificationNodeExecutor> logger)
     {
         _templateEngine = templateEngine;
-        _httpClientFactory = httpClientFactory;
+        _entityService = entityService;
         _logger = logger;
     }
 
@@ -227,16 +235,16 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 }
             }
 
-            // Build appnotification payload
-            var notificationPayload = BuildNotificationPayload(
+            // Build appnotification entity
+            var entity = BuildNotificationEntity(
                 title, body, category, config.Priority ?? DefaultPriority,
                 config.ToastType ?? DefaultToastType,
                 actionUrl, recipientId.Value, regardingId, regardingType,
                 dueDate,
                 context);
 
-            // Create the notification via Dataverse Web API
-            var notificationId = await CreateAppNotificationAsync(notificationPayload, cancellationToken);
+            // Create the notification via shared Dataverse client
+            var notificationId = await _entityService.CreateAsync(entity, cancellationToken);
 
             _logger.LogInformation(
                 "CreateNotification node {NodeId} completed — notification {NotificationId} created for user {UserId}: {Title}",
@@ -277,9 +285,6 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         }
     }
 
-    /// <summary>
-    /// Resolves the recipient systemuserid from config template or run context.
-    /// </summary>
     /// <summary>
     /// Executes the iterate-items path: loops over items from upstream query output,
     /// creates one notification per item using the itemNotification template.
@@ -366,12 +371,12 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 if (isDuplicate) { skipped++; continue; }
             }
 
-            var payload = BuildNotificationPayload(
+            var entity = BuildNotificationEntity(
                 title, body, category, itemConfig.Priority ?? DefaultPriority,
                 itemConfig.ToastType ?? DefaultToastType,
                 actionUrl, recipientId.Value, regardingId, regardingType,
                 dueDate, context);
-            await CreateAppNotificationAsync(payload, cancellationToken);
+            await _entityService.CreateAsync(entity, cancellationToken);
             created++;
         }
 
@@ -387,6 +392,9 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
     }
 
+    /// <summary>
+    /// Resolves the recipient systemuserid from config template or run context.
+    /// </summary>
     private Guid? ResolveRecipientId(NotificationNodeConfig config, Dictionary<string, object?> templateContext)
     {
         if (!string.IsNullOrWhiteSpace(config.RecipientId))
@@ -423,32 +431,19 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     {
         try
         {
-            var client = _httpClientFactory.CreateClient("DataverseApi");
-
-            // Query for unread notifications matching user + regarding + category
-            // appnotification: statecode 0 = Active (unread)
-            var filter = $"_ownerid_value eq '{recipientId}' " +
-                         $"and sprk_category eq '{category}' " +
-                         $"and _regardingobjectid_value eq '{regardingId}' " +
-                         $"and statecode eq 0";
-
-            var requestUrl = $"appnotifications?$filter={Uri.EscapeDataString(filter)}&$top=1&$select=activityid";
-
-            var response = await client.GetAsync(requestUrl, cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
+            var query = new QueryExpression("appnotification")
             {
-                _logger.LogWarning(
-                    "Idempotency check failed with status {StatusCode} — proceeding with creation",
-                    response.StatusCode);
-                return false;
-            }
+                ColumnSet = new ColumnSet("activityid"),
+                TopCount = 1,
+                Criteria = new FilterExpression(LogicalOperator.And)
+            };
+            query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, recipientId);
+            query.Criteria.AddCondition("sprk_category", ConditionOperator.Equal, category);
+            query.Criteria.AddCondition("sprk_regardingid", ConditionOperator.Equal, regardingId.ToString());
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
 
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            using var doc = JsonDocument.Parse(content);
-
-            var values = doc.RootElement.GetProperty("value");
-            return values.GetArrayLength() > 0;
+            var result = await _entityService.RetrieveMultipleAsync(query, cancellationToken);
+            return result.Entities.Count > 0;
         }
         catch (Exception ex)
         {
@@ -462,7 +457,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     }
 
     /// <summary>
-    /// Builds the appnotification OData payload for Dataverse Web API.
+    /// Builds an SDK <see cref="Entity"/> representing the appnotification to create.
     /// </summary>
     /// <remarks>
     /// Per FR-18 (P3): when <paramref name="actionUrl"/> is present, <c>data</c> is serialized as
@@ -473,7 +468,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     /// icon shows a clickable "Open" button. Hidden-toast notifications skip <c>data.actions</c>
     /// because no visible surface renders them.
     /// </remarks>
-    private static Dictionary<string, object?> BuildNotificationPayload(
+    private static Entity BuildNotificationEntity(
         string title,
         string body,
         string? category,
@@ -486,20 +481,18 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         string? dueDate,
         NodeExecutionContext context)
     {
-        var payload = new Dictionary<string, object?>
-        {
-            ["title"] = title,
-            ["body"] = body,
-            ["priority"] = priority,
-            ["toasttype"] = toastType,
-            ["ownerid@odata.bind"] = $"/systemusers({recipientId})",
-            ["ttlinseconds"] = 604800  // 7 days default TTL (increased from 3d on 2026-06-22 after UAT showed 36 notifications TTL-purged before user could review them)
-        };
+        var entity = new Entity("appnotification");
+        entity["title"] = title;
+        entity["body"] = body;
+        entity["priority"] = new OptionSetValue(priority);
+        entity["toasttype"] = new OptionSetValue(toastType);
+        entity["ownerid"] = new EntityReference("systemuser", recipientId);
+        entity["ttlinseconds"] = 604800; // 7 days default TTL (increased from 3d on 2026-06-22 after UAT showed 36 notifications TTL-purged before user could review them)
 
         // Add category (custom field for idempotency grouping)
         if (!string.IsNullOrWhiteSpace(category))
         {
-            payload["sprk_category"] = category;
+            entity["sprk_category"] = category;
         }
 
         // FR-18 (P3): build appnotification.data payload.
@@ -512,7 +505,6 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         var hasDueDate = !string.IsNullOrWhiteSpace(dueDate);
         if (hasActionUrl || hasDueDate)
         {
-            // Build customData as a dictionary so we conditionally include only the populated fields.
             var customData = new Dictionary<string, object?>();
             if (hasActionUrl) customData["actionUrl"] = actionUrl;
             if (hasDueDate) customData["dueDate"] = dueDate;
@@ -533,58 +525,24 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 }
                 : (object)new { customData };
 
-            payload["data"] = JsonSerializer.Serialize(dataObject);
+            entity["data"] = JsonSerializer.Serialize(dataObject);
         }
 
-        // Add regarding object if specified
+        // Add regarding info if specified. appnotification is NOT an activity entity
+        // (no polymorphic regardingobjectid lookup), so we store regarding as two text
+        // fields: sprk_regardingid (GUID string) + sprk_regardingtype (entity logical name).
+        // These are also used in CheckForDuplicateNotificationAsync for idempotency.
         if (regardingId.HasValue && !string.IsNullOrWhiteSpace(regardingType))
         {
-            var entitySetName = GetEntitySetName(regardingType);
-            payload[$"regardingobjectid_{regardingType}@odata.bind"] = $"/{entitySetName}({regardingId.Value})";
+            entity["sprk_regardingid"] = regardingId.Value.ToString();
+            entity["sprk_regardingtype"] = regardingType;
         }
 
         // Add AI metadata (playbook run info)
-        payload["sprk_source"] = "playbook";
-        payload["sprk_playbookrunid"] = context.RunId.ToString();
+        entity["sprk_source"] = "playbook";
+        entity["sprk_playbookrunid"] = context.RunId.ToString();
 
-        return payload;
-    }
-
-    /// <summary>
-    /// Creates an appnotification record via Dataverse Web API.
-    /// </summary>
-    private async Task<Guid> CreateAppNotificationAsync(
-        Dictionary<string, object?> payload,
-        CancellationToken cancellationToken)
-    {
-        var client = _httpClientFactory.CreateClient("DataverseApi");
-
-        var jsonContent = JsonSerializer.Serialize(payload, JsonOptions);
-        var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-
-        var response = await client.PostAsync("appnotifications", content, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        // Extract the created record ID from the OData-EntityId header
-        if (response.Headers.TryGetValues("OData-EntityId", out var entityIdValues))
-        {
-            var entityIdUrl = entityIdValues.FirstOrDefault();
-            if (entityIdUrl is not null)
-            {
-                // Format: https://{org}.crm.dynamics.com/api/data/v9.2/appnotifications({guid})
-                var guidStart = entityIdUrl.LastIndexOf('(') + 1;
-                var guidEnd = entityIdUrl.LastIndexOf(')');
-                if (guidStart > 0 && guidEnd > guidStart)
-                {
-                    var guidStr = entityIdUrl[guidStart..guidEnd];
-                    if (Guid.TryParse(guidStr, out var createdId))
-                        return createdId;
-                }
-            }
-        }
-
-        // Fallback: return a new GUID if we can't extract the ID
-        return Guid.NewGuid();
+        return entity;
     }
 
     /// <summary>
@@ -625,23 +583,6 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         };
 
         return templateContext;
-    }
-
-    /// <summary>
-    /// Gets the OData entity set name (plural) for a Dataverse entity.
-    /// </summary>
-    private static string GetEntitySetName(string entityLogicalName)
-    {
-        return entityLogicalName switch
-        {
-            "sprk_document" => "sprk_documents",
-            "sprk_matter" => "sprk_matters",
-            "sprk_project" => "sprk_projects",
-            "account" => "accounts",
-            "contact" => "contacts",
-            "task" => "tasks",
-            _ => entityLogicalName.EndsWith("s") ? entityLogicalName : entityLogicalName + "s"
-        };
     }
 }
 
