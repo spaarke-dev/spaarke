@@ -1,14 +1,31 @@
 <task id="R3-071" project="spaarke-platform-foundations-r3">
   <metadata>
     <title>Provision Service Bus topic `sprk-membership-changes` + subscription `recon-junction-updater` (Bicep)</title>
-    <status>blocked-operator</status>
+    <status>completed</status>
+    <completion-date>2026-06-23</completion-date>
     <completion-notes>
-      Bicep authored + compiled clean (az bicep build, all 3 files: membership-topic.bicep, customer.bicep, stacks/model2-full.bicep — no errors, no new warnings).
-      New module: infrastructure/bicep/modules/membership-topic.bicep (topic sprk-membership-changes + subscription recon-junction-updater + BFF MI Sender/Receiver RBAC).
-      Wired into customer.bicep (new param `bffPrincipalId`) + stacks/model2-full.bicep (uses bffApi.outputs.appServicePrincipalId directly).
-      Doc updated: docs/architecture/background-workers-architecture.md (new "Service Bus Topic Subscriptions (R3 Phase 2)" section).
-      Operator runbook: projects/spaarke-platform-foundations-r3/notes/operator-followup-task071.md (3 deployment recipes + verification steps).
-      Deployment deferred to operator per task constraints — Bicep is the deliverable; AC-1P2.2 graduation gate completes when operator runs `az deployment ... create` per runbook.
+      DEPLOYED to dev 2026-06-23 after owner approval of Option A (upgrade spaarke-servicebus-dev Basic→Standard).
+      Prerequisite: Basic-tier namespace doesn't support topics. Cross-project analysis showed
+      R3 + ai-spaarke-insights-engine-r1 + future cross-cutting events all need topic support;
+      one Standard namespace is cleaner than alternatives. Owner authorized 2026-06-23.
+
+      Upgrade succeeded in-place (Basic → Standard); all 7 existing queues preserved + active
+      sdap-jobs traffic continued without disruption.
+
+      Topic deploy succeeded:
+      - Topic sprk-membership-changes (1024 MB, P14D TTL, batched, non-partitioned, Active)
+      - Subscription recon-junction-updater (10 max delivery, PT5M lock, DLQ-on-expiry, Active)
+      - RBAC: BFF MI 9fd47efb-7962-492b-ac44-e5ccd0268ebb granted
+        Azure Service Bus Data Sender on topic + Data Receiver on subscription
+
+      Original artifacts (preserved):
+      - infrastructure/bicep/modules/membership-topic.bicep (NEW module; deployed)
+      - infrastructure/bicep/customer.bicep (modified — bffPrincipalId param + module wiring)
+      - infrastructure/bicep/stacks/model2-full.bicep (modified — module + outputs)
+      - docs/architecture/background-workers-architecture.md (Phase 2 topic section)
+      - projects/spaarke-platform-foundations-r3/notes/operator-followup-task071.md (now reflects as-deployed state)
+
+      AC-1P2.2 graduation gate satisfied. Next: task 073 (smoke test) ready to run.
     </completion-notes>
     <phase>P7.5</phase>
     <parallel-group>P (with 070)</parallel-group>
