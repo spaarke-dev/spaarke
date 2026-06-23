@@ -155,11 +155,13 @@ export class TodoService {
           entity[`${assignedNav.navPropName}@odata.bind`] = `/contacts(${formValues.assignedToId})`;
         } else {
           // Fallback: use the lookup attribute name directly
-          entity['sprk_assignedto@odata.bind'] = `/contacts(${formValues.assignedToId})`;
+          // UAT 2026-06-22 round 13: PascalCase nav-prop name required
+          entity['sprk_AssignedTo@odata.bind'] = `/contacts(${formValues.assignedToId})`;
         }
       } catch (err) {
         console.warn('[TodoService] Failed to resolve sprk_assignedto nav-prop, using fallback:', err);
-        entity['sprk_assignedto@odata.bind'] = `/contacts(${formValues.assignedToId})`;
+        // UAT 2026-06-22 round 13: PascalCase nav-prop name required
+        entity['sprk_AssignedTo@odata.bind'] = `/contacts(${formValues.assignedToId})`;
       }
     }
 
