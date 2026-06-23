@@ -31,35 +31,30 @@ namespace Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 /// debugging, but the default logging path keeps even that out.
 /// </para>
 /// <para>
-/// <b>Open scoping gaps (flagged for main session — see task 034 report)</b>:
+/// <b>Wired data path (task 034 follow-up bundle, 2026-06-22)</b>: The four data-path
+/// gaps originally flagged with the task 034 scaffolding are now closed:
 /// </para>
 /// <list type="number">
-///   <item><description><b>Active-playbook enumeration gap</b>: <see cref="IPlaybookService"/>
-///   currently exposes only user-scoped (<c>ListUserPlaybooksAsync</c>) and public-only
-///   (<c>ListPublicPlaybooksAsync</c>) enumeration. Neither returns ALL active playbooks
-///   irrespective of owner/IsPublic, which is what FR-13 requires. The marked TODO at
-///   <see cref="EnumerateActivePlaybooksAsync"/> documents the contract a future
-///   <c>ListAllActivePlaybooksAsync</c> method must satisfy.</description></item>
-///   <item><description><b>Tracking fields not surfaced on <see cref="PlaybookResponse"/></b>:
-///   the model does NOT expose <c>sprk_indexstatus</c>, <c>sprk_indexhash</c>, or
-///   <c>sprk_lastindexedat</c>. Comparison + skip-on-Pending/Failed/NotIndexed therefore
-///   cannot run end-to-end until the model is extended. Task 035 (admin view) shares
-///   this dependency.</description></item>
-///   <item><description><b>No per-tenant scoping in existing handlers</b>: tenancy in this
-///   codebase flows via <see cref="JobContract.SubjectId"/> + <see cref="JobContract.CorrelationId"/>;
-///   <see cref="IPlaybookService"/> does not currently take a tenant parameter. The producer
-///   is expected to enqueue one job per tenant if multi-tenant scoping is required.</description></item>
-///   <item><description><b>Write-back path</b>: <see cref="IPlaybookService"/> has no
-///   public method to write <c>sprk_indexstatus</c> / <c>sprk_lastindexerror</c> on the
-///   playbook row. The marked TODO at <see cref="MarkStaleAsync"/> documents the
-///   contract a future <c>UpdateIndexStatusAsync(playbookId, statusCode, error?)</c> method
-///   must satisfy.</description></item>
+///   <item><description><b>Gap 1 — Tenant-wide enumeration</b>: this job uses
+///   <see cref="IPlaybookService.ListAllActivePlaybooksAsync"/>, which pages through
+///   ALL <c>statecode=0</c> playbooks with the FR-13 tracking-field projection.</description></item>
+///   <item><description><b>Gap 2 — Tracking fields on PlaybookResponse</b>: the model now
+///   exposes <c>IndexStatusCode</c>, <c>IndexHash</c>, <c>LastIndexedAt</c>
+///   (defaults <c>IndexStatusCode</c> to <see cref="IndexStatusNotIndexed"/> when Dataverse
+///   returns null so consumers don't null-check).</description></item>
+///   <item><description><b>Gap 3 — Write-back path</b>: this job calls
+///   <see cref="IPlaybookService.UpdateIndexStatusAsync"/> on drift detection, which
+///   PATCHes the four tracking columns on the playbook row.</description></item>
+///   <item><description><b>Gap 5 — Hash-on-index</b>: <see cref="PlaybookIndexingService"/>
+///   writes <c>sprk_indexhash</c> at successful index completion (Indexed transition) and
+///   <see cref="IndexStatusFailed"/> with truncated error on the failure path.</description></item>
 /// </list>
 /// <para>
-/// Until these gaps are closed, the job runs with the loop wired to the existing
-/// <see cref="IPlaybookService.ListPublicPlaybooksAsync"/> placeholder enumeration. The
-/// shape is correct — counts + telemetry + handler contract — so once the gaps are
-/// closed, the job runs end-to-end without further refactor.
+/// <b>Gap 4 (deferred)</b>: a Service Bus producer for the nightly drift schedule is not
+/// yet in place. The producer is expected to enqueue a <see cref="JobContract"/> with
+/// <see cref="JobType"/> = <c>"PlaybookIndexDriftDetection"</c> per tenant nightly, setting
+/// <see cref="JobContract.SubjectId"/> to the tenant identifier. Implementation deferred
+/// to a follow-up infrastructure task.
 /// </para>
 /// </remarks>
 internal sealed class PlaybookIndexDriftDetectionJob : IJobHandler
@@ -176,63 +171,28 @@ internal sealed class PlaybookIndexDriftDetectionJob : IJobHandler
     }
 
     /// <summary>
-    /// Enumerates active playbooks for drift evaluation.
+    /// Enumerates active playbooks for drift evaluation. Delegates to
+    /// <see cref="IPlaybookService.ListAllActivePlaybooksAsync"/> (chat-routing-redesign-r1
+    /// task 034 follow-up — Gap 1 closed). Pages through ALL <c>statecode=0</c> playbooks
+    /// across the tenant, projection includes the three FR-13 tracking fields
+    /// (<c>sprk_indexstatus</c>, <c>sprk_indexhash</c>, <c>sprk_lastindexedat</c>).
     /// </summary>
-    /// <remarks>
-    /// TODO (task 034 follow-up): replace this with a dedicated
-    /// <c>IPlaybookService.ListAllActivePlaybooksAsync(CancellationToken)</c> overload that:
-    /// <list type="bullet">
-    ///   <item><description>Pages through ALL <c>statecode=0</c> playbooks (no owner / IsPublic filter)</description></item>
-    ///   <item><description>Includes <c>sprk_indexstatus</c>, <c>sprk_indexhash</c>, <c>sprk_lastindexedat</c> in the projection (see Open scoping gap #2)</description></item>
-    ///   <item><description>Streams via <see cref="IAsyncEnumerable{T}"/> to bound memory on large tenants</description></item>
-    /// </list>
-    /// Placeholder uses <see cref="IPlaybookService.ListPublicPlaybooksAsync"/> (single page,
-    /// 100 max) so the job is runnable for smoke tests and the shape stays correct.
-    /// </remarks>
-    private async IAsyncEnumerable<PlaybookResponse> EnumerateActivePlaybooksAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var query = new PlaybookQueryParameters { Page = 1, PageSize = 100 };
-        var page = await _playbookService.ListPublicPlaybooksAsync(query, ct);
-
-        foreach (var summary in page.Items)
-        {
-            ct.ThrowIfCancellationRequested();
-            var full = await _playbookService.GetPlaybookAsync(summary.Id, ct);
-            if (full is not null)
-            {
-                yield return full;
-            }
-        }
-    }
+    private IAsyncEnumerable<PlaybookResponse> EnumerateActivePlaybooksAsync(CancellationToken ct) =>
+        _playbookService.ListAllActivePlaybooksAsync(ct);
 
     /// <summary>
     /// Reads the <c>sprk_indexstatus</c> numeric option code from the playbook.
+    /// Surfaces the field exposed on <see cref="PlaybookResponse"/> by the task 034
+    /// follow-up (Gap 2 closed). Null in Dataverse is projected to
+    /// <see cref="IndexStatusNotIndexed"/> at the service layer.
     /// </summary>
-    /// <remarks>
-    /// TODO (task 034 follow-up — Open scoping gap #2): <see cref="PlaybookResponse"/>
-    /// does not yet expose <c>sprk_indexstatus</c>. Until it does, this method returns
-    /// <see cref="IndexStatusNotIndexed"/> so the skip-on-non-Indexed guard fires
-    /// (no false stale flagging). Extending the model is a one-line PlaybookDto change
-    /// + a one-line projection change in <see cref="PlaybookService"/>.
-    /// </remarks>
-    private static int GetIndexStatusCode(PlaybookResponse playbook)
-    {
-        _ = playbook;
-        return IndexStatusNotIndexed;
-    }
+    private static int GetIndexStatusCode(PlaybookResponse playbook) => playbook.IndexStatusCode;
 
     /// <summary>
-    /// Reads the <c>sprk_indexhash</c> string from the playbook.
+    /// Reads the <c>sprk_indexhash</c> string from the playbook. Null until the playbook
+    /// has been successfully indexed (Gap 5 closure populates this at index time).
     /// </summary>
-    /// <remarks>
-    /// TODO (task 034 follow-up — Open scoping gap #2): see <see cref="GetIndexStatusCode"/>.
-    /// </remarks>
-    private static string? GetStoredIndexHash(PlaybookResponse playbook)
-    {
-        _ = playbook;
-        return null;
-    }
+    private static string? GetStoredIndexHash(PlaybookResponse playbook) => playbook.IndexHash;
 
     /// <summary>
     /// Builds the <see cref="PlaybookEmbeddingDocument"/> used to feed the hash calculator.
@@ -270,22 +230,29 @@ internal sealed class PlaybookIndexDriftDetectionJob : IJobHandler
     }
 
     /// <summary>
-    /// Writes <c>sprk_indexstatus = Stale</c> on the playbook row.
+    /// Writes <c>sprk_indexstatus = Stale</c> on the playbook row via
+    /// <see cref="IPlaybookService.UpdateIndexStatusAsync"/> (chat-routing-redesign-r1
+    /// task 034 follow-up — Gap 3 closed). Passes <c>indexHash: null</c> so the existing
+    /// fingerprint is intentionally preserved on Dataverse (per WhenWritingNull policy in
+    /// PlaybookService.JsonOptions — admins want to see what the hash WAS at last
+    /// successful index time). Passes <c>lastError: null</c> so the lastError column is
+    /// cleared (drift is not an error per se — it's an expected content-shift signal).
     /// </summary>
     /// <remarks>
-    /// TODO (task 034 follow-up — Open scoping gap #4): <see cref="IPlaybookService"/> does
-    /// not currently expose a tracking-field write. Until it does, this method only logs
-    /// (ADR-015 safe — playbook ID only, no content) and returns. The contract for the
-    /// future <c>UpdateIndexStatusAsync(Guid playbookId, int statusCode, string? lastError, CancellationToken)</c>
-    /// method is: PATCH <c>sprk_indexstatus</c> + <c>sprk_lastindexerror</c> + (optionally)
-    /// <c>sprk_lastindexedat</c> via the existing OData PATCH path used by
-    /// <see cref="IPlaybookService.UpdatePlaybookAsync"/>.
+    /// ADR-015 safe: only the playbook ID + status code are logged here; the underlying
+    /// service is responsible for keeping its own logs ADR-015-clean.
     /// </remarks>
-    private Task MarkStaleAsync(Guid playbookId, CancellationToken ct)
+    private async Task MarkStaleAsync(Guid playbookId, CancellationToken ct)
     {
+        await _playbookService.UpdateIndexStatusAsync(
+            playbookId,
+            statusCode: IndexStatusStale,
+            indexHash: null,
+            lastError: null,
+            cancellationToken: ct);
+
         _logger.LogInformation(
-            "Drift detected for playbook {PlaybookId} — would set sprk_indexstatus={StaleCode} (write-back gap; see task 034 report)",
+            "Drift detected for playbook {PlaybookId} — flipped sprk_indexstatus={StaleCode}",
             playbookId, IndexStatusStale);
-        return Task.CompletedTask;
     }
 }

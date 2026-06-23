@@ -108,6 +108,36 @@ public record PlaybookResponse
     public string? JpsMatchingMetadata { get; init; }
 
     /// <summary>
+    /// Numeric option-set value for <c>sprk_indexstatus</c> (chat-routing-redesign-r1 task 030
+    /// schema verification). Allowed values:
+    /// <list type="bullet">
+    ///   <item><description><c>100000000</c> — NotIndexed (default for newly-created rows)</description></item>
+    ///   <item><description><c>100000001</c> — Pending (queued for indexing)</description></item>
+    ///   <item><description><c>100000002</c> — Indexed (successfully embedded)</description></item>
+    ///   <item><description><c>100000003</c> — Stale (drift detected — needs reindex)</description></item>
+    ///   <item><description><c>100000004</c> — Failed (last index attempt failed)</description></item>
+    /// </list>
+    /// Defaulted to <c>100000000</c> (NotIndexed) when Dataverse returns null so consumers
+    /// don't need to null-check (FR-13 — task 034 follow-up).
+    /// </summary>
+    public int IndexStatusCode { get; init; }
+
+    /// <summary>
+    /// SHA-256 hex digest of the canonical embed-input string (chat-routing-redesign-r1 FR-13).
+    /// Written by <see cref="Sprk.Bff.Api.Services.Ai.PlaybookEmbedding.PlaybookEmbeddingService"/>
+    /// at successful index time and recomputed nightly by
+    /// <see cref="Sprk.Bff.Api.Services.Ai.PlaybookEmbedding.PlaybookIndexDriftDetectionJob"/>
+    /// to detect content drift. Null until the playbook has been successfully indexed.
+    /// </summary>
+    public string? IndexHash { get; init; }
+
+    /// <summary>
+    /// UTC timestamp of the most recent successful index operation (chat-routing-redesign-r1
+    /// FR-13). Null until the playbook has been successfully indexed.
+    /// </summary>
+    public DateTime? LastIndexedAt { get; init; }
+
+    /// <summary>
     /// Output type ID.
     /// </summary>
     public Guid? OutputTypeId { get; init; }

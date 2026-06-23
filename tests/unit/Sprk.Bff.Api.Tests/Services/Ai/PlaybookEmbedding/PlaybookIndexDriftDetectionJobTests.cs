@@ -19,24 +19,12 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.PlaybookEmbedding;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Two scoping gaps surfaced during scaffolding (documented in the task 034 report and the
-/// XML doc-comments on <see cref="PlaybookIndexDriftDetectionJob"/>) constrain what is
-/// testable today:
-/// </para>
-/// <list type="number">
-///   <item><description><b>Tracking-field gap</b>: <see cref="PlaybookResponse"/> does not yet
-///   expose <c>sprk_indexstatus</c> / <c>sprk_indexhash</c>. Until the model is extended,
-///   the "drift flipped to Stale" and "skipped when Pending/Failed/NotIndexed" scenarios
-///   cannot be exercised end-to-end. They are marked <see cref="SkipAttribute"/>-style with
-///   explicit Skip reasons so a future PR closing the gap unmasks them automatically.</description></item>
-///   <item><description><b>Enumeration gap</b>: <see cref="IPlaybookService"/> has no
-///   tenant-wide active-playbook enumeration; the job currently calls
-///   <c>ListPublicPlaybooksAsync</c> as a placeholder.</description></item>
-/// </list>
-/// <para>
-/// The runnable tests below pin: (a) handler contract surface, (b) success path with zero
-/// drift, (c) telemetry fields, (d) cancellation propagation. The skipped tests document
-/// the contract the closed-gap implementation MUST satisfy.
+/// Task 034 follow-up (Gaps 1+2+3 closed, 2026-06-22): the previously-Skip'd scenarios
+/// are now active and pin: drift-flip-to-Stale on hash mismatch, leave-unchanged on
+/// hash match, and skip-on-non-Indexed status (Pending/Failed/NotIndexed). The runnable
+/// tests below pin: (a) handler contract surface, (b) success path with zero drift,
+/// (c) drift comparison + write-back via <see cref="IPlaybookService.UpdateIndexStatusAsync"/>,
+/// (d) cancellation propagation, (e) ADR-015 telemetry contract.
 /// </para>
 /// </remarks>
 public class PlaybookIndexDriftDetectionJobTests
@@ -80,8 +68,37 @@ public class PlaybookIndexDriftDetectionJobTests
     private void SetupEmptyEnumeration()
     {
         _playbookServiceMock
-            .Setup(p => p.ListPublicPlaybooksAsync(It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookListResponse { Items = Array.Empty<PlaybookSummary>(), TotalCount = 0, Page = 1 });
+            .Setup(p => p.ListAllActivePlaybooksAsync(It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableHelper.Empty<PlaybookResponse>());
+    }
+
+    /// <summary>
+    /// Configures the mock to yield the supplied playbooks via the FR-13 tenant-wide
+    /// enumeration path (task 034 follow-up — Gap 1 closure).
+    /// </summary>
+    private void SetupEnumeration(params PlaybookResponse[] playbooks)
+    {
+        _playbookServiceMock
+            .Setup(p => p.ListAllActivePlaybooksAsync(It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableHelper.From(playbooks));
+    }
+
+    /// <summary>
+    /// Internal helper that wraps a synchronous sequence as <see cref="IAsyncEnumerable{T}"/>
+    /// for Moq <c>.Returns(...)</c> setups on async-enumerable methods.
+    /// </summary>
+    private static class AsyncEnumerableHelper
+    {
+        public static IAsyncEnumerable<T> Empty<T>() => From(Array.Empty<T>());
+
+        public static async IAsyncEnumerable<T> From<T>(IEnumerable<T> source)
+        {
+            foreach (var item in source)
+            {
+                yield return item;
+                await Task.Yield();
+            }
+        }
     }
 
     [Fact]
@@ -116,22 +133,13 @@ public class PlaybookIndexDriftDetectionJobTests
     }
 
     [Fact]
-    public async Task ProcessAsync_InvokesHashCalculator_OncePerEnumeratedPlaybook()
+    public async Task ProcessAsync_SkipsHashCalculator_ForNotIndexedRow()
     {
-        // Arrange — until tracking-field gap closes (see class remarks), every enumerated
-        // row is treated as "Not Indexed" and skipped before the hash call. This test pins
-        // the current placeholder behavior so a future PR closing the gap MUST update the
-        // assertion (the skip-path will move to OutOfBox cases) and unmasks the proper
-        // drift assertions.
-        var playbook = BuildPlaybook();
-        var summary = new PlaybookSummary { Id = playbook.Id, Name = playbook.Name };
-
-        _playbookServiceMock
-            .Setup(p => p.ListPublicPlaybooksAsync(It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookListResponse { Items = new[] { summary }, TotalCount = 1, Page = 1 });
-        _playbookServiceMock
-            .Setup(p => p.GetPlaybookAsync(playbook.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
+        // Arrange — a NotIndexed row (the default for newly-created or never-indexed
+        // playbooks) MUST be skipped by the drift job; only Indexed rows are subject to
+        // drift comparison. This test pins the skip-on-non-Indexed guard.
+        var playbook = BuildPlaybook() with { IndexStatusCode = 100_000_000 /* NotIndexed */ };
+        SetupEnumeration(playbook);
 
         var contract = BuildJobContract();
         var job = BuildJob();
@@ -139,9 +147,12 @@ public class PlaybookIndexDriftDetectionJobTests
         // Act
         var outcome = await job.ProcessAsync(contract, CancellationToken.None);
 
-        // Assert — placeholder behavior: status == NotIndexed → skip → no hash call.
+        // Assert
         outcome.Status.Should().Be(JobStatus.Completed);
         _hashCalculatorMock.Verify(c => c.ComputeHash(It.IsAny<PlaybookEmbeddingDocument>()), Times.Never);
+        _playbookServiceMock.Verify(
+            p => p.UpdateIndexStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -168,8 +179,8 @@ public class PlaybookIndexDriftDetectionJobTests
         // Arrange — runtime failures (e.g., Dataverse 5xx) return Failure (retryable), not
         // Poisoned. Service Bus / ServiceBusJobProcessor will retry up to MaxAttempts.
         _playbookServiceMock
-            .Setup(p => p.ListPublicPlaybooksAsync(It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("Dataverse 503"));
+            .Setup(p => p.ListAllActivePlaybooksAsync(It.IsAny<CancellationToken>()))
+            .Returns(ThrowingEnumerable<PlaybookResponse>(new HttpRequestException("Dataverse 503")));
 
         var contract = BuildJobContract();
         var job = BuildJob();
@@ -180,6 +191,20 @@ public class PlaybookIndexDriftDetectionJobTests
         // Assert
         outcome.Status.Should().Be(JobStatus.Failed);
         outcome.ErrorMessage.Should().Contain("Dataverse 503");
+    }
+
+    /// <summary>
+    /// Builds an <see cref="IAsyncEnumerable{T}"/> that throws the supplied exception when
+    /// iterated. Mirrors the original <c>ThrowsAsync</c> setup but for async-enumerable
+    /// returns.
+    /// </summary>
+    private static async IAsyncEnumerable<T> ThrowingEnumerable<T>(Exception ex)
+    {
+        await Task.Yield();
+        throw ex;
+#pragma warning disable CS0162
+        yield break;
+#pragma warning restore CS0162
     }
 
     [Fact]
@@ -202,42 +227,112 @@ public class PlaybookIndexDriftDetectionJobTests
         act.Should().Throw<ArgumentNullException>().WithParameterName("playbookService");
     }
 
-    // ── Deferred scenarios — unmask after the tracking-field gap closes ─────────────────
-    // The three skipped tests below document the contract the closed-gap implementation
-    // MUST satisfy. Once PlaybookResponse exposes sprk_indexstatus + sprk_indexhash AND
-    // IPlaybookService gains an UpdateIndexStatusAsync method, drop the Skip reasons and
-    // wire the assertions to the real shape.
+    // ── Drift-comparison scenarios — task 034 follow-up (Gaps 1+2+3 closed) ─────────────
 
-    [Fact(Skip = "Pending PlaybookResponse extension (sprk_indexstatus + sprk_indexhash) — see task 034 report")]
-    public Task ProcessAsync_FlipsToStale_WhenHashMismatchesStoredValue()
+    [Fact]
+    public async Task ProcessAsync_FlipsToStale_WhenHashMismatchesStoredValue()
     {
-        // Contract:
-        //   Given a playbook with sprk_indexstatus = Indexed (100000002) and sprk_indexhash = "abc..."
-        //   And the recomputed hash via IPlaybookEmbeddingHashCalculator is "def..."
-        //   Then the job MUST call IPlaybookService.UpdateIndexStatusAsync(playbookId, 100000003 /* Stale */)
-        //   And driftCount in telemetry MUST increment by 1
-        return Task.CompletedTask;
+        // Contract: Indexed row whose recomputed hash differs from sprk_indexhash MUST
+        // be flipped to Stale via UpdateIndexStatusAsync(_, 100000003, null, null, _).
+        const string storedHash = "abc123";
+        const string recomputedHash = "def456";
+
+        var playbook = BuildPlaybook() with
+        {
+            IndexStatusCode = 100_000_002 /* Indexed */,
+            IndexHash = storedHash,
+        };
+
+        SetupEnumeration(playbook);
+
+        _hashCalculatorMock
+            .Setup(c => c.ComputeHash(It.IsAny<PlaybookEmbeddingDocument>()))
+            .Returns(recomputedHash);
+
+        _playbookServiceMock
+            .Setup(p => p.UpdateIndexStatusAsync(
+                It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var contract = BuildJobContract();
+        var job = BuildJob();
+
+        // Act
+        var outcome = await job.ProcessAsync(contract, CancellationToken.None);
+
+        // Assert
+        outcome.Status.Should().Be(JobStatus.Completed);
+        _hashCalculatorMock.Verify(c => c.ComputeHash(It.IsAny<PlaybookEmbeddingDocument>()), Times.Once);
+        _playbookServiceMock.Verify(
+            p => p.UpdateIndexStatusAsync(
+                playbook.Id,
+                100_000_003 /* Stale */,
+                null,
+                null,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
-    [Fact(Skip = "Pending PlaybookResponse extension (sprk_indexstatus + sprk_indexhash) — see task 034 report")]
-    public Task ProcessAsync_LeavesStatusUnchanged_WhenHashMatchesStoredValue()
+    [Fact]
+    public async Task ProcessAsync_LeavesStatusUnchanged_WhenHashMatchesStoredValue()
     {
-        // Contract:
-        //   Given a playbook with sprk_indexstatus = Indexed and sprk_indexhash = "abc..."
-        //   And the recomputed hash equals "abc..."
-        //   Then no UpdateIndexStatusAsync call is made
-        //   And driftCount in telemetry remains 0
-        return Task.CompletedTask;
+        // Contract: Indexed row whose recomputed hash equals sprk_indexhash MUST NOT
+        // be touched — no UpdateIndexStatusAsync call.
+        const string sameHash = "abc123";
+
+        var playbook = BuildPlaybook() with
+        {
+            IndexStatusCode = 100_000_002 /* Indexed */,
+            IndexHash = sameHash,
+        };
+
+        SetupEnumeration(playbook);
+
+        _hashCalculatorMock
+            .Setup(c => c.ComputeHash(It.IsAny<PlaybookEmbeddingDocument>()))
+            .Returns(sameHash);
+
+        var contract = BuildJobContract();
+        var job = BuildJob();
+
+        // Act
+        var outcome = await job.ProcessAsync(contract, CancellationToken.None);
+
+        // Assert
+        outcome.Status.Should().Be(JobStatus.Completed);
+        _hashCalculatorMock.Verify(c => c.ComputeHash(It.IsAny<PlaybookEmbeddingDocument>()), Times.Once);
+        _playbookServiceMock.Verify(
+            p => p.UpdateIndexStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
-    [Fact(Skip = "Pending PlaybookResponse extension (sprk_indexstatus + sprk_indexhash) — see task 034 report")]
-    public Task ProcessAsync_SkipsRow_WhenStatusIsPendingOrFailedOrNotIndexed()
+    [Theory]
+    [InlineData(100_000_000)] // NotIndexed
+    [InlineData(100_000_001)] // Pending
+    [InlineData(100_000_004)] // Failed
+    public async Task ProcessAsync_SkipsRow_WhenStatusIsPendingOrFailedOrNotIndexed(int statusCode)
     {
-        // Contract:
-        //   For each playbook where sprk_indexstatus ∈ {Pending, Failed, NotIndexed}:
-        //     - IPlaybookEmbeddingHashCalculator.ComputeHash is NOT called
-        //     - IPlaybookService.UpdateIndexStatusAsync is NOT called
-        //     - The row counts toward skippedCount but NOT driftCount
-        return Task.CompletedTask;
+        // Contract: rows in non-Indexed states are owned by other state machines; the
+        // drift job MUST NOT touch them — no hash compute, no UpdateIndexStatus call.
+        var playbook = BuildPlaybook() with
+        {
+            IndexStatusCode = statusCode,
+            IndexHash = "abc123" /* even with a stored hash, non-Indexed rows are skipped */,
+        };
+
+        SetupEnumeration(playbook);
+
+        var contract = BuildJobContract();
+        var job = BuildJob();
+
+        // Act
+        var outcome = await job.ProcessAsync(contract, CancellationToken.None);
+
+        // Assert
+        outcome.Status.Should().Be(JobStatus.Completed);
+        _hashCalculatorMock.Verify(c => c.ComputeHash(It.IsAny<PlaybookEmbeddingDocument>()), Times.Never);
+        _playbookServiceMock.Verify(
+            p => p.UpdateIndexStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }
