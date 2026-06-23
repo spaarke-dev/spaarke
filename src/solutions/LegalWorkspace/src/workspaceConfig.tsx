@@ -297,7 +297,15 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
       },
 
       // -----------------------------------------------------------------------
-      // My To Do List — SmartToDo (height: 560px, 50% width)
+      // My To Do List — SmartToDo
+      //
+      // UAT 2026-06-22 round 9 (REVERT round 8): the `minHeight: auto`
+      // change collapsed the widget because LegalWorkspace's parent chain
+      // doesn't deliver flex height through SectionPanel without an
+      // explicit supply. The Explore-agent comparison to DailyBriefing
+      // may be measuring a different layout context. Restoring the
+      // viewport-relative `calc(100vh - 200px)` that worked in rounds 5/6
+      // until a deeper layout audit identifies the structural break.
       // -----------------------------------------------------------------------
       {
         id: "todo",
@@ -305,7 +313,7 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
         title: "My To Do List",
         badgeCount: p.todoCount,
         toolbar: todoToolbar,
-        style: { height: "560px" },
+        style: { height: "calc(100vh - 200px)", minHeight: "560px" },
         renderContent: () => (
           <SmartToDo
             embedded

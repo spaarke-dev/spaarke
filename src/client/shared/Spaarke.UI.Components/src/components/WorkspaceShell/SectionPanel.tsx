@@ -86,6 +86,11 @@ const useStyles = makeStyles({
     // win. Same fix pattern as in DataGrid root/innerCard/gridScroll +
     // DataverseEntityViewWidget root — this completes the chain.
     minWidth: 0,
+    // NOTE: a UAT round 7 attempt to add `height: 100%` here (paired with
+    // WorkspaceShell.row { flex: 1 1 0 }) collapsed the SpaarkeAi embedded
+    // workspace to 40px because the height couldn't resolve up the chain.
+    // Reverted; per-section `style: { height: ... }` remains the supply
+    // mechanism until a deeper layout audit identifies the true break.
   },
   titleBar: {
     display: 'flex',

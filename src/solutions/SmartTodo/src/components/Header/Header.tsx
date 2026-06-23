@@ -350,9 +350,88 @@ export const Header: React.FC<HeaderProps> = ({
   const handleQuickAddAssignedToChange = React.useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
       setQuickAddAssignedTo(data.value);
+      // Typing invalidates a previously selected contactId unless the user
+      // re-selects from the typeahead. Empty → fall back to default user.
+      if (data.value.trim() === '') {
+        setQuickAddAssignedToContactId(defaultAssignedToContactId || '');
+      } else {
+        setQuickAddAssignedToContactId('');
+      }
     },
-    [],
+    [defaultAssignedToContactId],
   );
+
+  // UAT 2026-06-20 round 4 — typeahead picker for the Assigned To field.
+  // Mirrors the widget's implementation: debounced search of the OOB
+  // `contact` entity by fullname; user selects from a small popup. Uses
+  // Xrm.WebApi (always available inside the MDA-hosted Code Page).
+  const [assignedToResults, setAssignedToResults] = React.useState<Array<{ id: string; name: string }>>([]);
+  const [isSearchingContacts, setIsSearchingContacts] = React.useState<boolean>(false);
+  const [showAssignedToResults, setShowAssignedToResults] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    const q = quickAddAssignedTo.trim();
+    if (q.length < 2) {
+      setAssignedToResults([]);
+      setShowAssignedToResults(false);
+      setIsSearchingContacts(false);
+      return;
+    }
+    if (defaultAssignedToName && q === defaultAssignedToName.trim()) {
+      setShowAssignedToResults(false);
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrmAny = (globalThis as any).Xrm;
+    const webApi = xrmAny?.WebApi;
+    if (!webApi?.retrieveMultipleRecords) {
+      setShowAssignedToResults(false);
+      setIsSearchingContacts(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingContacts(true);
+    const handle = window.setTimeout(() => {
+      const escaped = q.replace(/'/g, "''");
+      const url = `?$select=contactid,fullname&$filter=statecode eq 0 and contains(fullname,'${encodeURIComponent(escaped)}')&$top=8&$orderby=fullname asc`;
+      webApi
+        .retrieveMultipleRecords('contact', url)
+        .then((result: { entities?: Array<{ contactid?: string; fullname?: string }> }) => {
+          if (cancelled) return;
+          const mapped = (result.entities ?? [])
+            .filter(e => !!e.contactid && !!e.fullname)
+            .map(e => ({ id: e.contactid as string, name: e.fullname as string }));
+          setAssignedToResults(mapped);
+          setShowAssignedToResults(true);
+          setIsSearchingContacts(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setAssignedToResults([]);
+          setShowAssignedToResults(false);
+          setIsSearchingContacts(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [quickAddAssignedTo, defaultAssignedToName]);
+
+  const handleSelectAssignedTo = React.useCallback((id: string, name: string) => {
+    setQuickAddAssignedTo(name);
+    setQuickAddAssignedToContactId(id);
+    setShowAssignedToResults(false);
+  }, []);
+
+  const handleAssignedToBlur = React.useCallback(() => {
+    window.setTimeout(() => setShowAssignedToResults(false), 150);
+  }, []);
+
+  const handleAssignedToFocus = React.useCallback(() => {
+    if (assignedToResults.length > 0) setShowAssignedToResults(true);
+  }, [assignedToResults.length]);
 
   const handleQuickAddKeyDown = React.useCallback(
     (ev: React.KeyboardEvent<HTMLInputElement>) => {
@@ -436,14 +515,51 @@ export const Header: React.FC<HeaderProps> = ({
             aria-label="Due date"
             className={styles.quickAddDateInput}
           />
-          <Input
-            size="small"
-            value={quickAddAssignedTo}
-            onChange={handleQuickAddAssignedToChange}
-            placeholder="Assigned to"
-            aria-label="Assigned to"
-            className={styles.quickAddAssignedInput}
-          />
+          <div className={styles.assignedToWrap}>
+            <Input
+              size="small"
+              value={quickAddAssignedTo}
+              onChange={handleQuickAddAssignedToChange}
+              onFocus={handleAssignedToFocus}
+              onBlur={handleAssignedToBlur}
+              placeholder="Assigned to"
+              aria-label="Assigned to"
+              aria-autocomplete="list"
+              aria-expanded={showAssignedToResults}
+              aria-controls="smart-todo-header-assignedto-results"
+              role="combobox"
+            />
+            {showAssignedToResults && (
+              <div
+                id="smart-todo-header-assignedto-results"
+                role="listbox"
+                className={styles.assignedToResults}
+              >
+                {isSearchingContacts && (
+                  <div className={styles.assignedToResultsHint}>Searching…</div>
+                )}
+                {!isSearchingContacts && assignedToResults.length === 0 && (
+                  <div className={styles.assignedToResultsHint}>No contacts found</div>
+                )}
+                {!isSearchingContacts &&
+                  assignedToResults.map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      role="option"
+                      aria-selected={c.id === quickAddAssignedToContactId}
+                      className={styles.assignedToResultItem}
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        handleSelectAssignedTo(c.id, c.name);
+                      }}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
           <Tooltip
             content="Add to-do (Enter)"
             relationship="label"

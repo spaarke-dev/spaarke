@@ -170,6 +170,74 @@ export const useSmartTodoWidgetStyles = makeStyles({
   },
 
   /**
+   * UAT 2026-06-20 round 4 — Typeahead container for the inline Assigned To
+   * input. Wraps the Input + the floating results dropdown so the dropdown
+   * positions relative to the input.
+   */
+  assignedToWrap: {
+    position: 'relative',
+    flex: '0 1 220px',
+    minWidth: '140px',
+  },
+
+  /** Results dropdown — absolutely positioned just below the Assigned To input. */
+  assignedToResults: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 50,
+    marginTop: '2px',
+    maxHeight: '220px',
+    overflowY: 'auto',
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderTopWidth: '1px',
+    borderRightWidth: '1px',
+    borderBottomWidth: '1px',
+    borderLeftWidth: '1px',
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke2,
+    borderRightColor: tokens.colorNeutralStroke2,
+    borderBottomColor: tokens.colorNeutralStroke2,
+    borderLeftColor: tokens.colorNeutralStroke2,
+    borderTopLeftRadius: tokens.borderRadiusMedium,
+    borderTopRightRadius: tokens.borderRadiusMedium,
+    borderBottomLeftRadius: tokens.borderRadiusMedium,
+    borderBottomRightRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow8,
+  },
+
+  /** Each search result row in the Assigned To dropdown. */
+  assignedToResultItem: {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalSNudge}`,
+    backgroundColor: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground1,
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+    ':focus': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      outlineStyle: 'none',
+    },
+  },
+
+  /** Empty / no-results / loading state inside the Assigned To dropdown. */
+  assignedToResultsHint: {
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalSNudge}`,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+
+  /**
    * UAT 2026-06-19 — Inline filter SearchBox shown in the right toolbar
    * cluster when Filter is active. Takes the horizontal space that the
    * action buttons (Open/Refresh/Orient) normally occupy.
@@ -251,6 +319,15 @@ export const useSmartTodoWidgetStyles = makeStyles({
 
   /** Scrollable body — owns internal scroll for the cards list. */
   body: {
+    // UAT 2026-06-22 round 11: ADDED `display: flex, flexDirection: column`.
+    // Without these, this div is `display: block` (the div default), and its
+    // child (the kanbanContainer with `flex: 1 1 auto`) cannot use flex to
+    // claim height — falling back to content height = the kanban's 400px
+    // min-height floor. Console diagnostics confirmed this is the ONE break
+    // in the height chain that was capping the widget at ~400px even when
+    // the SectionPanel had 900+ available pixels.
+    display: 'flex',
+    flexDirection: 'column',
     flex: '1 1 auto',
     minHeight: 0,
     overflowY: 'auto',
@@ -293,8 +370,12 @@ export const useSmartTodoWidgetStyles = makeStyles({
   kanbanContainer: {
     display: 'flex',
     flexDirection: 'column',
-    flex: '1 1 0',
-    minHeight: 'max(400px, 60vh)',
+    flex: '1 1 auto',
+    // UAT 2026-06-22 round 9 (REVERT round 8): restoring the defensive
+    // 400px floor so the kanban renders even when the parent section's
+    // calc(100vh-200px) height supplies less than expected. minHeight 0
+    // exposed a collapse bug when the parent chain wasn't reliable.
+    minHeight: '400px',
     minWidth: 0,
   },
 

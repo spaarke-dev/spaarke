@@ -79,16 +79,32 @@ export interface IUseKanbanColumnsResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Determine which column an unpinned item belongs to based on its To Do Score.
+ * UAT 2026-06-21 — bucket by DUE DATE, not score (parity fix with shared lib).
+ *
+ * Same rationale as Spaarke.SmartTodo.Components/useKanbanColumns.ts:
+ * column names Today/Tomorrow/Future are date concepts so the bucketing
+ * must follow due date. Threshold args kept for back-compat with callers
+ * but unused.
+ *
+ *   - Today    = due today OR overdue (no due date counts as Future)
+ *   - Tomorrow = due tomorrow
+ *   - Future   = due day-after-tomorrow or later, OR no due date set
  */
 function assignColumnByScore(
   todo: ITodo,
-  todayThreshold: number,
-  tomorrowThreshold: number
+  _todayThreshold: number,
+  _tomorrowThreshold: number
 ): TodoColumn {
-  const { todoScore } = computeTodoScore(todo);
-  if (todoScore >= todayThreshold) return 'Today';
-  if (todoScore >= tomorrowThreshold) return 'Tomorrow';
+  if (!todo.sprk_duedate) return 'Future';
+  const due = new Date(todo.sprk_duedate);
+  if (isNaN(due.getTime())) return 'Future';
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const diffDays = Math.round((dueDay.getTime() - today.getTime()) / msPerDay);
+  if (diffDays <= 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
   return 'Future';
 }
 
@@ -129,9 +145,9 @@ function buildColumns(
   }
 
   return [
-    { id: 'Today', title: 'Today', subtitle: `Score \u2265 ${todayThreshold}`, items: today, accentColor: tokens.colorPaletteRedBorder2 },
-    { id: 'Tomorrow', title: 'Tomorrow', subtitle: `Score ${tomorrowThreshold}\u2013${todayThreshold - 1}`, items: tomorrow, accentColor: tokens.colorPaletteDarkOrangeBorder2 },
-    { id: 'Future', title: 'Future', subtitle: `Score < ${tomorrowThreshold}`, items: future, accentColor: tokens.colorPaletteGreenBorder2 },
+    { id: 'Today', title: 'Today', subtitle: 'Due today or overdue', items: today, accentColor: tokens.colorPaletteRedBorder2 },
+    { id: 'Tomorrow', title: 'Tomorrow', subtitle: 'Due tomorrow', items: tomorrow, accentColor: tokens.colorPaletteDarkOrangeBorder2 },
+    { id: 'Future', title: 'Future', subtitle: 'Due later or undated', items: future, accentColor: tokens.colorPaletteGreenBorder2 },
   ];
 }
 
