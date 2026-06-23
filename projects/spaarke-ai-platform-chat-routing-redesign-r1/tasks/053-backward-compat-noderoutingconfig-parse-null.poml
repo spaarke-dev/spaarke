@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Backward-compat verification — NodeRoutingConfig.Parse(null) returns Chat default</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>048,049,050,051</dependencies>
+    <blocks>054</blocks>
+    <tags>testing, regression, binding-invariant, ADR-029</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'testing' + 'regression'; new test files; binding invariant — STANDARD per Step 0.5 (no source modification beyond test)</rigor-reason>
+    <parallel-group>3-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a binding-invariant regression test asserting that `NodeRoutingConfig.Parse(null)` and `NodeRoutingConfig.Parse(string.Empty)` and `NodeRoutingConfig.Parse("")` all return `{ Destination = NodeDestination.Chat, WidgetType = null }`. This is the structural backward-compatibility guarantee per spec FR-14f — existing playbooks with no `sprk_configjson` MUST continue to render in chat. Implements spec FR-14f acceptance.
+  </prompt>
+
+  <role>SPAARKE platform BFF test engineer. Expert in regression test authoring + binding-invariant assertions.</role>
+
+  <goal>
+    Regression test added that pins the `NodeRoutingConfig.Parse(null|""|whitespace)` → Chat default behavior. Test runs as part of the regular Sprk.Bff.Api unit test suite. Test commit message + class name make the binding-invariant nature explicit ("do not regress").
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14f. The default-Chat behavior is the structural compat guarantee that lets us add `NodeDestination` to `DispatchResult` (task 046) without breaking the 6 production-bound playbooks (whose `sprk_configjson` is null). If a future change to `NodeRoutingConfig.Parse` accidentally removes the null guard, this test catches it immediately.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/NodeRoutingConfig.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Models/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-14f acceptance: dispatch of a playbook with empty configJson produces `DispatchResult { NodeDestination: Chat }`; no regression in default behavior.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement (small; test-only).</constraint>
+    <constraint source="project">Test class name should signal binding-invariant: e.g., `NodeRoutingConfigBackwardCompatInvariantTests`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `NodeRoutingConfig.cs` — confirm `Parse(null)` behavior post-task-045 changes.</step>
+    <step order="2">Author test class `NodeRoutingConfigBackwardCompatInvariantTests` (or extend an existing one) with cases:
+      (a) `Parse(null)` → Destination = Chat, WidgetType = null;
+      (b) `Parse("")` → Destination = Chat, WidgetType = null;
+      (c) `Parse("   ")` → Destination = Chat, WidgetType = null;
+      (d) `Parse("{}")` (empty JSON object) → Destination = Chat, WidgetType = null (depends on Parse semantics; verify and pin actual behavior).</step>
+    <step order="3">Add XMLDoc / comment on the class header naming spec FR-14f and the "do not regress" invariant.</step>
+    <step order="4">Add integration-level test: dispatch a playbook with null `sprk_configjson` → `DispatchResult.NodeDestination = Chat`.</step>
+    <step order="5">Run `dotnet build` + `dotnet test` — confirm all pass.</step>
+    <step order="6">Measure publish delta (test-only; expect near-zero).</step>
+    <step order="7">Update TASK-INDEX.md: task 053 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">NodeRoutingConfig.cs</tool>
+    <tool name="Write">test class</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Models/Ai/NodeRoutingConfigBackwardCompatInvariantTests.cs</output>
+    <output type="test">tests/integration/.../NodeRoutingConfigParseNullIntegrationTests.cs (optional integration-level test)</output>
+    <output type="docs">notes/handoffs/053-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`Parse(null)` → Chat default verified.</criterion>
+    <criterion testable="true">`Parse("")` → Chat default verified.</criterion>
+    <criterion testable="true">`Parse("   ")` → Chat default verified.</criterion>
+    <criterion testable="true">Dispatch of playbook with null `sprk_configjson` returns `NodeDestination = Chat`.</criterion>
+    <criterion testable="true">Test class XMLDoc/comment cites FR-14f as binding-invariant.</criterion>
+    <criterion testable="true">`dotnet build` + `dotnet test` exit 0.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

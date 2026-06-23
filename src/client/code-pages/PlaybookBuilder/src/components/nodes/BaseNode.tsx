@@ -129,6 +129,12 @@ export const nodeColorSchemes: Record<PlaybookNodeType, { background: string; ic
     background: tokens.colorPaletteBerryBackground2,
     iconColor: tokens.colorNeutralForegroundOnBrand,
   },
+  // LookupUserMembership is a Dataverse-data-ops Workflow node (alongside
+  // updateRecord); reuse the green palette to signal "writes/reads Dataverse data".
+  lookupUserMembership: {
+    background: tokens.colorPaletteGreenBackground3,
+    iconColor: tokens.colorNeutralForegroundOnBrand,
+  },
   wait: {
     background: tokens.colorPaletteMagentaBackground2,
     iconColor: tokens.colorNeutralForegroundOnBrand,

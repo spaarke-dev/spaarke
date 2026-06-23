@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Deploy Phase 2 to dev (Dataverse solution + BFF)</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>038</dependencies>
+    <blocks>040</blocks>
+    <tags>deploy, dataverse, bff-api, azure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy operation; no code changes; runs verified deployment skills — STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>2-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy Phase 2 artifacts to the dev environment: (a) Dataverse solution (containing 5 new fields on `sprk_analysisplaybook` + ribbon + view) via `dataverse-deploy` skill, and (b) BFF API updates (extended `PlaybookEmbeddingService`, drift job, validation gate) via `bff-deploy` skill. Verify deployment by re-running the FR-10 benchmark from task 038 against the dev environment.
+  </prompt>
+
+  <role>SPAARKE deployment engineer. Expert in `dataverse-deploy` + `bff-deploy` skills + Azure App Service deployment patterns.</role>
+
+  <goal>
+    Phase 2 changes live in dev environment. Dev BFF reflects task 032 + 034 + 036 code. Dev Dataverse reflects task 030 + 031 + 033 + 035 schema/form/view. FR-10 benchmark in dev returns NDA-targeted playbook top-1. BFF publish size measured + within NFR-01 thresholds.
+  </goal>
+
+  <context>
+    <background>
+      Phase 2 deploy gate. All Phase 2 implementation tasks (030-038) must be ✅ before this runs. Deployment via the dedicated skills which embed the deployment script invocation pattern. Per ADR-029, publish-size measurement is mandatory.
+    </background>
+    <relevant-files>
+      <file>scripts/Deploy-BFF.ps1</file>
+      <file>scripts/Deploy-DataverseSolution.ps1</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta + cumulative.</constraint>
+    <constraint source="project">CLAUDE.md §11 — `npm install --legacy-peer-deps --no-audit --no-fund`, NOT `npm ci` for Vite projects.</constraint>
+    <constraint source="project">Use `bff-deploy` skill (not raw script invocation) per CLAUDE.md skill prescription.</constraint>
+    <constraint source="project">Use `dataverse-deploy` skill for solution import.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all dependency tasks ✅ (030, 031, 032, 033, 034, 035, 036, 037, 038).</step>
+    <step order="2">Export the Dataverse unmanaged solution containing the 5 new fields + ribbon web resource + "Playbook Index Drift" view.</step>
+    <step order="3">Invoke `dataverse-deploy` skill to import the solution to dev environment.</step>
+    <step order="4">Build + publish BFF: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed size.</step>
+    <step order="5">Compare against Phase 1 baseline (recorded in task 026 notes); report delta.</step>
+    <step order="6">Verify no new HIGH-severity CVE: `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="7">Invoke `bff-deploy` skill to deploy to dev App Service.</step>
+    <step order="8">Smoke test in dev: hit `/healthz`; verify `/api/ai/playbooks/by-code/summarize-document-chat` resolves.</step>
+    <step order="9">Re-run FR-10 benchmark from task 038 against dev — confirm NDA query top-1.</step>
+    <step order="10">Capture deployment notes + size delta in `notes/handoffs/039-phase-2-deploy.md`.</step>
+    <step order="11">Update TASK-INDEX.md: task 039 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">dataverse-deploy</tool>
+    <tool name="Skill">bff-deploy</tool>
+    <tool name="Bash">dotnet publish; CVE scan; smoke test</tool>
+    <tool name="Write">deployment notes</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Dataverse solution imported to dev environment</output>
+    <output type="deployment">BFF API deployed to dev App Service</output>
+    <output type="docs">notes/handoffs/039-phase-2-deploy.md — size delta + smoke results + benchmark replay</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dataverse solution import succeeded; 5 new fields visible in dev Power Apps.</criterion>
+    <criterion testable="true">BFF App Service health endpoint returns 200 post-deploy.</criterion>
+    <criterion testable="true">BFF publish-size delta within NFR-01 (cumulative ≤55 MB triggers architecture review; ≥60 MB HARD STOP).</criterion>
+    <criterion testable="true">FR-10 benchmark passes in dev environment.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE from `dotnet list package --vulnerable --include-transitive`.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

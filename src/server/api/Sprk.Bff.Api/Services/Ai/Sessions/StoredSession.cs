@@ -99,4 +99,24 @@ public class StoredSession
     /// </summary>
     [JsonPropertyName("summary")]
     public SessionSummary? Summary { get; set; }
+
+    /// <summary>
+    /// Per-file manifest of files uploaded into this session by the end user, enriched with
+    /// classify / summarize / manifest-extraction outputs from the upload pipeline
+    /// (chat-routing-redesign-r1 architecture §6.1, task 072).
+    ///
+    /// Written by <see cref="SessionPersistenceService.UpdateUploadedFilesAsync"/> after the
+    /// parallel enrichment paths complete. Empty list for sessions with no uploads or for
+    /// Cosmos documents that pre-date this field (additive schema evolution per ADR-015 —
+    /// older docs deserialize cleanly to an empty list).
+    ///
+    /// Cap: hard-limited to 20 per session by the writing service
+    /// (mirrors <c>ChatSession.MaxUploadedFiles</c>). Manifest order is preserved.
+    ///
+    /// The shape mirrors <c>Sprk.Bff.Api.Models.Ai.Chat.ChatSessionFile</c> (6 R5 fields +
+    /// 8 chat-routing-redesign-r1 enrichment fields). camelCase wire format matches the rest
+    /// of this document.
+    /// </summary>
+    [JsonPropertyName("uploadedFiles")]
+    public List<StoredUploadedFile> UploadedFiles { get; set; } = [];
 }

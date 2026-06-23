@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Extend DispatchResult.cs:37-46 with NodeDestination (default Chat) + WidgetType (default null)</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>027</dependencies>
+    <blocks>047,048,049</blocks>
+    <tags>bff-api, models, ADR-013, ADR-029</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies dispatch contract `.cs` record — FULL per Step 0.5</rigor-reason>
+    <parallel-group>3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend the `DispatchResult` record at `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatchResult.cs:37-46` with two new properties: `NodeDestination NodeDestination = NodeDestination.Chat` (default preserves current behavior) and `string? WidgetType = null` (default null unless workspace). Default values MUST preserve all existing call sites unchanged — no caller code modified. Implements spec FR-14b.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in C# record types + default-parameter additive evolution.</role>
+
+  <goal>
+    `DispatchResult` carries `NodeDestination` and `WidgetType` properties. Defaults preserve binary compat: `dotnet build` of `Sprk.Bff.Api` passes without modifying any caller; existing unit tests pass without change. Spec FR-14b acceptance met.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14b + design §1.3 (WP3 step 2). Today `DispatchResult` doesn't carry `NodeDestination` or `WidgetType` at all. Adding them with defaults means task 047 can populate them while leaving the 20+ existing call sites untouched. The default `Chat` preserves the implicit-chat-destination behavior the codebase relies on today.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatchResult.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/NodeRoutingConfig.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Models/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Model lives in `Models/Ai/Chat/`; consumed via PublicContracts facade by CRUD callers.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-14b: defaults preserve all existing call sites. `dotnet build` passes without modifying ANY caller.</constraint>
+    <constraint source="project">No caller code modified in this task. Caller modifications happen in task 047 (`PlaybookDispatcher`) and task 048+ (output handler cases).</constraint>
+    <constraint source="project">CLAUDE.md §10 test obligation — add tests covering default + non-default construction.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `DispatchResult.cs:37-46` to capture current record signature.</step>
+    <step order="2">Append two new positional parameters with defaults: `NodeDestination NodeDestination = NodeDestination.Chat` and `string? WidgetType = null` (at end of parameter list to preserve binary compat).</step>
+    <step order="3">Confirm no caller anywhere uses positional construction past existing index (search for `new DispatchResult(...)` patterns; record types with named arguments preserve compat regardless).</step>
+    <step order="4">Add unit tests: (a) default construction omits new params; (b) explicit `NodeDestination = Workspace, WidgetType = "structured-output-stream"`; (c) existing tests unchanged.</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` — MUST pass without modifying any caller.</step>
+    <step order="6">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — all existing tests must pass unchanged.</step>
+    <step order="7">Measure publish-size delta.</step>
+    <step order="8">Quality gates per task-execute Step 9.5 (FULL rigor).</step>
+    <step order="9">Update TASK-INDEX.md: task 046 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">DispatchResult.cs</tool>
+    <tool name="Edit">Apply additive record changes + tests</tool>
+    <tool name="Grep">Search for existing DispatchResult constructions to validate binary compat</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatchResult.cs — extended</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Models/Ai/DispatchResultTests.cs</output>
+    <output type="docs">notes/handoffs/046-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`DispatchResult` has `NodeDestination` + `WidgetType` properties.</criterion>
+    <criterion testable="true">`dotnet build` of `Sprk.Bff.Api` passes WITHOUT modifying any caller.</criterion>
+    <criterion testable="true">Existing unit tests pass UNCHANGED.</criterion>
+    <criterion testable="true">New tests cover default construction + explicit values.</criterion>
+    <criterion testable="true">BFF publish delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol.</protocol>
+  </execution>
+</task>

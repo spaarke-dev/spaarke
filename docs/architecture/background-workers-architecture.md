@@ -28,6 +28,16 @@ These workers consume Azure Service Bus queues and process messages continuously
 | ProfileSummaryWorker | `src/server/api/Sprk.Bff.Api/Workers/Office/ProfileSummaryWorker.cs` | `office-profile` | Continuous; 5 concurrent calls |
 | IndexingWorkerHostedService | `src/server/api/Sprk.Bff.Api/Workers/Office/IndexingWorkerHostedService.cs` | `office-indexing` | Continuous; 5 concurrent calls |
 
+### Service Bus Topic Subscriptions (R3 Phase 2)
+
+Topic-based pub/sub is used for fan-out events (multiple consumers on the same source event). Topic + subscription provisioned via Bicep (`infrastructure/bicep/modules/membership-topic.bicep`); BFF App Service Managed Identity granted Sender on the topic + Receiver on each subscription per ADR-028.
+
+| Topic | Subscription | Consumer Handler | Purpose |
+|-------|--------------|-------------------|---------|
+| `sprk-membership-changes` | `recon-junction-updater` | `MembershipJunctionUpdater` (task 084 — `src/server/api/Sprk.Bff.Api/Services/Membership/MembershipJunctionUpdater.cs`) | Upserts/deletes `sprk_userentityassociation` rows on `MembershipChangedEvent` receipt; idempotent on `{personId, entityRecordId, sourceField}` per FR-2P2.4 |
+
+Topic policies: 1 GB max, 14-day default TTL, non-partitioned, batched ops, no duplicate detection (idempotency at consumer side). Subscription policies: 10 max delivery, 5-min lock duration, dead-letter on expiration. Per FR-2P2.3 (D3 decision 2026-06-20): topic transport with subscription-per-consumer — explicitly NOT reusing the `sdap-jobs` queue — so future consumers (cache warmers, downstream indexers, Teams notify, VIP cache invalidator) can subscribe without infra migration.
+
 ### Periodic Timer Services (7)
 
 These workers execute on a recurring schedule using `PeriodicTimer` or delay-until-time patterns.

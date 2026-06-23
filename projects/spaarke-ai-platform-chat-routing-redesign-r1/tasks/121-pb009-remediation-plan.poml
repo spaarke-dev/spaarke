@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="121" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>PB-009 review + remediation plan (per Q17 — do NOT delete; rewrite)</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>120</dependencies>
+    <blocks>122,130</blocks>
+    <tags>dataverse, documentation</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation task; produces a remediation plan consumed by tasks 122 (Path 3 engine extension) and 130 (PB-009 rewrite); no code modification</rigor-reason>
+    <parallel-group>6-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential — task 130 (PB-009 rewrite) consumes this plan; cannot author rewrite without plan</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Convert the PB-009 section of the task-120 audit document into a concrete remediation plan. Per Q17 owner directive: PB-009 is the canonical specialized NDA playbook after WP6 enrichment — do NOT delete. Plan must specify: (1) the rewritten description text (embedding-friendly), (2) the JPS `$ref` composition (Skills + Knowledge), (3) the `sprk_jpsmatchingmetadata` JSON payload, (4) the target `sprk_playbookcode` value (`summarize-nda`), (5) any node-graph adjustments needed for Path 3 compatibility. Output: `notes/handoffs/121-pb009-remediation-plan.md`. This plan is the input for task 130.
+  </prompt>
+
+  <role>SPAARKE platform developer + AI playbook author. Translates audit findings into actionable remediation specs.</role>
+
+  <goal>
+    A concrete, executable remediation plan for PB-009 captured at `notes/handoffs/121-pb009-remediation-plan.md`. Plan specifies EVERY field change task 130 will apply, the JPS `$ref` composition text, the `sprk_jpsmatchingmetadata` JSON, and the embedding-friendly description rewrite. The plan is reviewed by the owner before task 130 commits.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-43 + design §WP6 Reconciliation §3 (Recommendation: keep PB-009, review, update to current standard). Q17 owner directive forbids deletion. PB-009 becomes the canonical specialized NDA playbook after WP6 — it's the cleanest path because it already exists in Dataverse as a system playbook. Task 130 applies the plan; this task authors it.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/120-pb-audit.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>scripts/seed-data/skills.json</file>
+      <file>scripts/seed-data/knowledge.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner-clarification">Q17 — do NOT delete; rewrite + repurpose as canonical Summarize-NDA.</constraint>
+    <constraint source="spec">FR-43 acceptance — PB-009 inspection report + post-rewrite vector match for "summarize this NDA" returns PB-009 as top-1.</constraint>
+    <constraint source="spec">Use existing SKL-003 (NDA Review) + KNW-006 (NDA Standards) + KNW-005 (Defined Terms) — these are real seeded primitives; do not invent new ones for PB-009.</constraint>
+    <constraint source="project">`sprk_playbookcode` MUST be `summarize-nda` (kebab-case, no `@v1` suffix per §1.7 naming).</constraint>
+    <constraint source="project">Output schema must align with design §WP6 7-section NDA pattern (parties + direction, definition, exclusions, term + survival, permittedUse, remedies, redFlags).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/120-pb-audit.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the PB-009 section of `notes/handoffs/120-pb-audit.md` end-to-end. Note the current description, configJson, node graph, and any Power Automate consumers.</step>
+    <step order="2">Draft the embedding-friendly description per FR-43: one sentence purpose + trigger words + output format + document type hints + NO project-task refs. Aim for 1-2 sentences, 200-400 chars.</step>
+    <step order="3">Draft the JPS `$ref` composition referencing `skill:NDA Review` (SKL-003) + `knowledge:NDA Standards` (KNW-006) + `knowledge:Defined Terms` (KNW-005). Use the JPS-v1 schema shown in design.md §WP6 sketch.</step>
+    <step order="4">Draft the `sprk_jpsmatchingmetadata` JSON: `documentTypes` (e.g., `["nda", "non-disclosure-agreement", "confidentiality-agreement"]`), `intents` (e.g., `["summarize"]`), `triggerPhrases` (e.g., `["summarize this NDA", "review NDA", "NDA summary"]`).</step>
+    <step order="5">Identify the target `sprk_playbookcode` (`summarize-nda`) and confirm uniqueness against the audit's other-playbook codes.</step>
+    <step order="6">Specify node-graph adjustments needed for Path 3 (single-node, action with embedded JPS `$ref` in systemPrompt; configJson destination=workspace + widgetType=structured-output-stream).</step>
+    <step order="7">Write the plan at `notes/handoffs/121-pb009-remediation-plan.md` with sections: (1) Description Rewrite, (2) JPS $ref Composition, (3) sprk_jpsmatchingmetadata Payload, (4) sprk_playbookcode Target, (5) Node-Graph Adjustments, (6) Task 130 Application Checklist.</step>
+    <step order="8">Update TASK-INDEX.md: task 121 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">120-pb-audit.md, design.md, skills.json, knowledge.json</tool>
+    <tool name="Write">notes/handoffs/121-pb009-remediation-plan.md</tool>
+    <tool name="Edit">TASK-INDEX.md status flip</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/121-pb009-remediation-plan.md — concrete remediation plan</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Remediation plan exists at the specified path with all 6 sections populated.</criterion>
+    <criterion testable="true">Description rewrite is embedding-friendly (1-2 sentences, includes trigger words + document type hints).</criterion>
+    <criterion testable="true">JPS `$ref` composition references only existing seeded primitives (SKL-003, KNW-006, KNW-005).</criterion>
+    <criterion testable="true">sprk_jpsmatchingmetadata JSON includes documentTypes + intents + triggerPhrases arrays.</criterion>
+    <criterion testable="true">Target sprk_playbookcode = "summarize-nda" (kebab-case, no @v1).</criterion>
+    <criterion testable="true">Plan is concrete enough that task 130 can execute it without re-deciding architectural choices.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    PB-009 is sacred — do not delete. Be precise; task 130 is the executor of this plan.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

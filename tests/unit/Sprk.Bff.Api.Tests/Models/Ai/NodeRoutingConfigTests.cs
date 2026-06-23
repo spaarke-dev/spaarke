@@ -356,4 +356,127 @@ public class NodeRoutingConfigTests
         parsed.WidgetType.Should().Be(original.WidgetType);
         parsed.Validate().IsValid.Should().BeTrue();
     }
+
+    // -------------------------------------------------------------------------
+    // FR-14a — chat-routing-redesign-r1 / WP3: NodeDestination.Both
+    // -------------------------------------------------------------------------
+    //
+    // The "both" destination is an additive enum value introduced by task 045 to
+    // support playbooks whose output is routed to BOTH the chat surface AND a
+    // workspace widget. These tests pin:
+    //
+    //   1. Round-trip of NodeDestination.Both via the wire value "both";
+    //   2. Regression — the four pre-existing destinations (chat, workspace,
+    //      form-prefill, side-effect) still round-trip unchanged (FR-14a binding:
+    //      existing values bit-for-bit unchanged);
+    //   3. FR-14f — Parse(null) defaults Destination to Chat (regression);
+    //   4. Unknown-value fallback behavior is preserved (Parse swallows the
+    //      JsonException and defaults to Chat — pin current behavior, do not
+    //      change it).
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Roundtrip_Both_Preserves_EnumValue()
+    {
+        // Arrange — Both destination with a widgetType (the workspace half of "both"
+        // still benefits from a widgetType for the workspace render; Validate semantics
+        // for Both are out-of-scope for this task and tested elsewhere if relevant).
+        var original = new NodeRoutingConfig
+        {
+            Destination = NodeDestination.Both,
+            WidgetType = "Summary"
+        };
+
+        // Act — serialize to JSON then parse back through the same code path used by
+        // sprk_configjson consumers (NodeRoutingConfig.Parse).
+        var json = JsonSerializer.Serialize(original);
+        var parsed = NodeRoutingConfig.Parse(json);
+
+        // Assert — wire value is lowercase "both" (matches the existing kebab-case
+        // single-word convention: chat, workspace) and the enum value round-trips.
+        json.Should().Contain("\"destination\":\"both\"",
+            "FR-14a / WP3 wire format: NodeDestination.Both serializes to lowercase 'both'");
+        parsed.Destination.Should().Be(NodeDestination.Both);
+        parsed.WidgetType.Should().Be("Summary");
+    }
+
+    [Theory]
+    [InlineData(NodeDestination.Chat, "chat")]
+    [InlineData(NodeDestination.Workspace, "workspace")]
+    [InlineData(NodeDestination.FormPrefill, "form-prefill")]
+    [InlineData(NodeDestination.SideEffect, "side-effect")]
+    public void Roundtrip_Chat_Workspace_FormPrefill_SideEffect_Preserve(
+        NodeDestination destination,
+        string expectedWireValue)
+    {
+        // Arrange — FR-14a regression coverage: the four pre-existing destinations
+        // MUST remain bit-for-bit unchanged after the additive Both insertion.
+        // Workspace requires widgetType to satisfy Validate (orthogonal to this test).
+        var widget = destination == NodeDestination.Workspace ? "Summary" : null;
+        var original = new NodeRoutingConfig
+        {
+            Destination = destination,
+            WidgetType = widget
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(original);
+        var parsed = NodeRoutingConfig.Parse(json);
+
+        // Assert — wire value matches the pre-R1 kebab-case mapping verbatim;
+        // round-trip preserves the enum value.
+        json.Should().Contain($"\"destination\":\"{expectedWireValue}\"",
+            $"FR-14a regression: pre-existing destination '{expectedWireValue}' wire value " +
+            "MUST remain bit-for-bit unchanged");
+        parsed.Destination.Should().Be(destination);
+        parsed.WidgetType.Should().Be(widget);
+    }
+
+    [Fact]
+    public void Parse_Null_Returns_Chat_Default()
+    {
+        // Arrange + Act — FR-14f: Parse(null) MUST return a config with Destination = Chat.
+        // This is a stricter spec-named restatement of the existing
+        // Parse_WithNullJson_ReturnsDefaultRoutingConfig test, retained because FR-14f
+        // names this contract explicitly and downstream regression tooling greps for the
+        // FR-14f test name.
+        var config = NodeRoutingConfig.Parse(null);
+
+        // Assert
+        config.Should().NotBeNull();
+        config.Destination.Should().Be(NodeDestination.Chat,
+            "FR-14f: NodeRoutingConfig.Parse(null) MUST return { Destination = Chat }");
+    }
+
+    [Fact]
+    public void Roundtrip_UnknownValue_FallsBackGracefully()
+    {
+        // Arrange — an unknown destination value (typo / future value the BFF does not
+        // recognize). Pin the CURRENT behavior:
+        //   - The bespoke NodeDestinationJsonConverter throws JsonException on unknown
+        //     values (surfaces the problem to callers that use direct
+        //     JsonSerializer.Deserialize).
+        //   - NodeRoutingConfig.Parse() swallows the JsonException and degrades to the
+        //     default (Destination = Chat), matching DeliverOutputNodeExecutor's
+        //     ParseConfigOrDefault swallow-and-default pattern.
+        //
+        // Per task 045 spec: "preserve whatever the current behavior is — write test to
+        // lock it in, don't change it". This test pins BOTH halves so any future change
+        // (e.g. silently mapping unknown to Chat in the converter) trips a regression.
+        var configJson = """{ "destination": "telegram" }""";
+
+        // Act + Assert (converter half) — direct deserialize throws.
+        var directAct = () => JsonSerializer.Deserialize<NodeRoutingConfig>(configJson);
+        directAct.Should().Throw<JsonException>()
+            .WithMessage("*Unknown NodeDestination value*",
+                "current behavior: NodeDestinationJsonConverter throws JsonException for " +
+                "unknown wire values — pinned by FR-14a regression coverage");
+
+        // Act + Assert (Parse half) — swallow-and-default to Chat.
+        var parsed = NodeRoutingConfig.Parse(configJson);
+        parsed.Destination.Should().Be(NodeDestination.Chat,
+            "current behavior: NodeRoutingConfig.Parse() swallows JsonException from " +
+            "unknown destination wire values and degrades to Chat (FR-14f default) — " +
+            "matches DeliverOutputNodeExecutor.ParseConfigOrDefault pattern");
+    }
 }

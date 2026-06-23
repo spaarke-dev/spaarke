@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using HandlebarsDotNet;
@@ -48,6 +49,81 @@ public sealed class TemplateEngine : ITemplateEngine
             var value = arguments.Length > 0 ? arguments[0] : null;
             return value?.ToString() ?? string.Empty;
         });
+
+        // Register `default` helper: {{default X 'Y'}} returns X if non-empty, else 'Y'.
+        // Replaces broken `{{X ?? 'Y'}}` usage in playbook configs (FR-3H1.1, R3 task 001).
+        // Handlebars.NET passes `UndefinedBindingResult` for unresolved variables (NOT null),
+        // whose .ToString() returns the binding name — so we must treat it as "empty".
+        _handlebars.RegisterHelper("default", (writer, ctx, args) =>
+            writer.WriteSafeString(
+                args.Length > 1 && IsNonEmptyValue(args[0])
+                    ? args[0]!.ToString()
+                    : args.ElementAtOrDefault(1)?.ToString() ?? ""));
+
+        // Register `joinIds` helper: {{joinIds arr}} → comma-separated string suitable for
+        // FetchXML `operator='in' value='...'` clauses. Used by playbooks consuming
+        // LookupUserMembership node output (FR-1B.2 + FR-3H1.2, R3 task 002).
+        // Behavior:
+        //   - IEnumerable (List<string>, List<Guid>, arrays, JsonElement-derived List<object>) → "a,b,c"
+        //   - Null / UndefinedBindingResult (unresolved binding) / non-enumerable scalar → ""
+        //   - Empty enumerable → ""
+        //   - Null elements within enumerable → empty token (preserves position, harmless for FetchXML IN)
+        _handlebars.RegisterHelper("joinIds", (writer, ctx, args) =>
+            writer.WriteSafeString(JoinIds(args.Length > 0 ? args[0] : null)));
+    }
+
+    /// <summary>
+    /// Converts an enumerable value into a comma-separated string suitable for FetchXML
+    /// `operator='in'` clauses. Returns empty string for null, unresolved bindings, or
+    /// non-enumerable scalars (defensive — same graceful-degradation contract as the
+    /// `default` helper). Strings are treated as scalars (not as enumerable of char).
+    /// </summary>
+    private static string JoinIds(object? value)
+    {
+        if (value is null || value is UndefinedBindingResult)
+        {
+            return string.Empty;
+        }
+
+        // Treat string as a scalar, not as IEnumerable<char>
+        if (value is string)
+        {
+            return string.Empty;
+        }
+
+        if (value is IEnumerable enumerable)
+        {
+            var parts = new List<string>();
+            foreach (var item in enumerable)
+            {
+                parts.Add(item?.ToString() ?? string.Empty);
+            }
+
+            return string.Join(",", parts);
+        }
+
+        // Non-enumerable scalar (number, bool, object) — caller likely passed wrong shape.
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Returns true if the value is a non-null, non-empty, resolved binding.
+    /// Handlebars.NET represents unresolved bindings as <see cref="UndefinedBindingResult"/>;
+    /// these must be treated as empty for the `default` helper to fall back to 'Y'.
+    /// </summary>
+    private static bool IsNonEmptyValue(object? value)
+    {
+        if (value is null)
+        {
+            return false;
+        }
+
+        if (value is UndefinedBindingResult)
+        {
+            return false;
+        }
+
+        return !string.IsNullOrEmpty(value.ToString());
     }
 
     /// <inheritdoc />

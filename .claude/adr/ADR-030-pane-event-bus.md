@@ -1,20 +1,21 @@
 # ADR-030: PaneEventBus — Typed Multi-Subscriber Cross-Pane Communication (Concise)
 
-> **Status**: Accepted
+> **Status**: Accepted (v2 — amendment 2026-06-21 adds `memory` channel)
 > **Domain**: Client-side cross-pane communication (SpaarkeAi three-pane shell + future N-pane shells)
-> **Last Updated**: 2026-05-26
+> **Last Updated**: 2026-06-21
 > **Originating project**: `spaarke-ai-platform-unification-r4` (task A-2a) — codifies R2-shipped, R3-extended pattern (no behavior change)
+> **Amendment (2026-06-21)**: `spaarke-ai-platform-chat-routing-redesign-r1` adds `memory` channel as the 5th member to support the 6-tier memory subsystem (matter-memory promotion approval, future memory-domain events). Closed-union size revised from 4 → 5. Amendment record at the bottom of this document.
 > **Renumbering note**: Drafted as ADR-025 in R4 plan; renumbered to ADR-030 on 2026-05-26 (ADR-025 in use by `ADR-025-icon-library-and-deployment.md`).
 
 ---
 
 ## Decision
 
-The **PaneEventBus** is the single authorized cross-pane communication primitive for the SpaarkeAi shell. Four typed channels (`workspace`, `context`, `conversation`, `safety`) carry discriminated-union event payloads. Multi-subscriber delivery via Set-based registry; no DOM dependency; React-integrated via one provider (`<PaneEventBusProvider>`) + two hooks (`usePaneEvent`, `useDispatchPaneEvent`).
+The **PaneEventBus** is the single authorized cross-pane communication primitive for the SpaarkeAi shell. Five typed channels (`workspace`, `context`, `conversation`, `safety`, `memory`) carry discriminated-union event payloads. Multi-subscriber delivery via Set-based registry; no DOM dependency; React-integrated via one provider (`<PaneEventBusProvider>`) + two hooks (`usePaneEvent`, `useDispatchPaneEvent`).
 
 **Invariants** (the bus has these properties and they MUST be preserved by any future implementation):
 
-- Channels are a **closed union of exactly four members** — adding a fifth requires a successor ADR
+- Channels are a **closed union of exactly five members** — adding a sixth requires a successor ADR
 - Event payloads are **typed via `PaneChannelEventMap`** — `dispatch('workspace', { safety_annotation })` is a compile error
 - Multi-subscriber, insertion-order, **synchronous** delivery — no last-write-wins; subscribing the same handler twice is a no-op (Set dedup)
 - Dispatch iterates a **snapshot** so handlers may unsubscribe during dispatch without mutating the set mid-iteration
@@ -23,7 +24,7 @@ The **PaneEventBus** is the single authorized cross-pane communication primitive
 
 ---
 
-## Channels (closed union — exactly four)
+## Channels (closed union — exactly five)
 
 | Channel | Purpose | Source-file event interface |
 |---|---|---|
@@ -31,6 +32,7 @@ The **PaneEventBus** is the single authorized cross-pane communication primitive
 | `context` | Document/data context updates, citation highlights, extraction stage advance | `ContextPaneEvent` |
 | `conversation` | User input signals, playbook selection, refinement requests | `ConversationPaneEvent` |
 | `safety` | Groundedness annotations, capability availability changes | `SafetyPaneEvent` |
+| `memory` | **(added 2026-06-21)** Memory-domain signals — matter-memory promotion approval requests, fact-promotion completion, pin lifecycle. Targeted by ContextPane approval UI subscribers and memory-aware widgets. | `MemoryPaneEvent` |
 
 ## Event-type discriminants (per channel — additive only)
 
@@ -38,8 +40,22 @@ The **PaneEventBus** is the single authorized cross-pane communication primitive
 - **`context`**: `context_update`, `context_highlight`, `stage_change`
 - **`conversation`**: `suggestion`, `playbook_change`, `playbook-selected`, `refine_request`, `first_message`
 - **`safety`**: `safety_annotation`, `capability_change`
+- **`memory` (added 2026-06-21)**: `promotion_pending`, `promotion_resolved`, `fact_promoted`, `pin_added`, `pin_removed`
 
 New event types are added by extending the channel's `type` union and adding optional payload fields. Existing subscribers MUST continue to compile and run.
+
+### `memory` channel payload reference (initial)
+
+```typescript
+type MemoryPaneEvent =
+  | { type: 'promotion_pending';   promotionId: string; factSummary: string; matterId: string; sessionId: string }
+  | { type: 'promotion_resolved';  promotionId: string; decision: 'approved' | 'rejected'; factId?: string }
+  | { type: 'fact_promoted';       factId: string; matterId: string; source: string }
+  | { type: 'pin_added';           pinId: string; pinType: 'user-preference' | 'system-rule' | 'matter-fact' }
+  | { type: 'pin_removed';         pinId: string };
+```
+
+Payloads carry deterministic IDs + summaries only (per ADR-015 tier-1 safety) — NEVER raw fact text, user message content, or recall results. `factSummary` is the first 80 chars of the candidate fact for UI display purposes only.
 
 ---
 
@@ -48,7 +64,7 @@ New event types are added by extending the channel's `type` union and adding opt
 ### ✅ MUST
 
 - **MUST** keep all event payloads **typed** via the `PaneChannelEventMap` interface — no `any` payloads, ever
-- **MUST** use `PaneChannel = 'workspace' | 'context' | 'conversation' | 'safety'` as a closed union — no fifth channel without a successor ADR
+- **MUST** use `PaneChannel = 'workspace' | 'context' | 'conversation' | 'safety' | 'memory'` as a closed union — no sixth channel without a successor ADR (5th `memory` added by v2 amendment 2026-06-21)
 - **MUST** dispatch via `useDispatchPaneEvent()` from React; never instantiate `new PaneEventBus()` in widget code, never reach into context directly
 - **MUST** subscribe via `usePaneEvent(channel, handler)` from React; never `useContext(PaneEventBusContext)` directly
 - **MUST** have subscribers handle the event `type` values they care about and **ignore others** — discriminated-union narrowing per subscriber
@@ -59,7 +75,7 @@ New event types are added by extending the channel's `type` union and adding opt
 ### ❌ MUST NOT
 
 - **MUST NOT** use `any` in event payloads (use `unknown` if the field is genuinely polymorphic, with subscriber-side narrowing)
-- **MUST NOT** add a fifth channel without a successor ADR amending this one
+- **MUST NOT** add a sixth channel without a successor ADR amending this one (5th `memory` added by v2 amendment 2026-06-21)
 - **MUST NOT** instantiate `new PaneEventBus()` in component code (the provider owns the lifecycle)
 - **MUST NOT** export `usePaneEventBus()` from the package barrel — it is encapsulation by design
 - **MUST NOT** redefine an existing event-type discriminant's payload shape in a breaking way — payload changes are additive optional fields only
@@ -107,3 +123,36 @@ New event types are added by extending the channel's `type` union and adding opt
 ---
 
 **Lines**: ~120
+
+---
+
+## Amendment Record
+
+### v2 (2026-06-21) — `memory` channel addition
+
+**Context.** The `spaarke-ai-platform-chat-routing-redesign-r1` project introduces a 6-tier memory subsystem (Working / Session / Matter / User-Org / Retrieval / Audit per `projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md` §3). Memory-domain UI signals — most prominently the matter-memory promotion approval workflow (architecture §6.4) — do not fit semantically into any of the original four channels. The reconciliation review (spec.md FR-32 / project clarification 2026-06-21) initially namespaced these as `workspace.promotion_pending` inside the `workspace` channel, which forced workspace-channel subscribers to ignore non-workspace events. Audit (this ADR amendment) elevates the memory event taxonomy to a dedicated channel.
+
+**Change.**
+- Channel union expanded from 4 → 5: add `memory`.
+- New event interface `MemoryPaneEvent` introduced (initial 5 discriminants: `promotion_pending`, `promotion_resolved`, `fact_promoted`, `pin_added`, `pin_removed`).
+- `PaneChannel` closed-union now `'workspace' | 'context' | 'conversation' | 'safety' | 'memory'`. Adding a sixth still requires a successor ADR.
+
+**Constraints preserved.**
+- All original invariants (typed payloads, multi-subscriber sync delivery, snapshot iteration, single-provider lifetime, hidden context reader) continue to hold for the `memory` channel.
+- ADR-015 tier-1 safety binding extends to `memory` payloads: deterministic IDs + summaries only; NEVER raw fact text, user message content, or recall results. `factSummary` is the 80-char preview for UI display.
+- Memory payloads MUST be tenant-scoped via context (sessions / matters carry tenantId implicitly through subscriber context, NOT in payload).
+
+**Required implementation updates** (out of this ADR's scope — owned by project tasks):
+1. `src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts` — add `MemoryPaneEvent` interface + extend `PaneChannel` union + extend `PaneChannelEventMap`.
+2. `src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts` — verify channel-string switches accept `memory` (Set-keyed registry is channel-string-agnostic; no code change expected).
+3. ContextPane approval UI subscriber wires `usePaneEvent('memory', handleMemoryEvent)`.
+4. `MatterMemoryPromotionService` dispatch site uses the new channel via `useDispatchPaneEvent()` boundary.
+
+**Out of scope for v2 amendment**: removing R6-style namespaced `workspace.promotion_pending` legacy references in code (if any exist) — done as part of FR-32 task.
+
+**Reviewer**: Project owner (2026-06-21).
+
+**Future additive event types** (per channel) on `memory` MAY include (NOT binding here — additive freedom granted by §"Event-type discriminants" rule):
+- `recall_completed` — if tools want to signal completion to UI for citation highlighting
+- `session_memory_written` — if Tier-2 writes need UI awareness
+- `preference_changed` — if T4 user preferences gain mutability inside chat scope (not currently in scope per FR-04 + architecture §3.2 rule 3)

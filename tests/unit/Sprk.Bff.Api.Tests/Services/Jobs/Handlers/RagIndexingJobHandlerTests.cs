@@ -580,4 +580,143 @@ public class RagIndexingJobHandlerTests
     }
 
     #endregion
+
+    #region Search-Index Lifecycle Dual-Write (R3 FR-3H3.2 / AC-H3.2 — task 062)
+
+    /// <summary>
+    /// R3 FR-3H3.2 / AC-H3.2: when indexing completes successfully, the handler MUST
+    /// dual-write — set the new <c>SearchIndexCompletedOn</c> lifecycle marker AND keep
+    /// the legacy <c>SearchIndexed</c>=true + <c>SearchIndexedOn</c> for the duration of
+    /// R3 + one sprint per spec assumption line 366.
+    ///
+    /// The dual-write lives at three writer call-sites; this test covers the background
+    /// (Service Bus) path. The other two (RagEndpoints.IndexFile, RagEndpoints.SendToIndex)
+    /// are covered by the model-contract tests in
+    /// <c>DataverseEntitySchemaTests.BuildEntity_OnCompletion_DualWritesNewAndLegacyFields</c>.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_SuccessfulIndexing_DualWritesNewAndLegacySearchIndexFields()
+    {
+        // Arrange
+        var job = CreateJobContract();
+        SetupSuccessfulIdempotencyFlow();
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 5, duration: TimeSpan.FromSeconds(1)));
+
+        UpdateDocumentRequest? capturedUpdate = null;
+        _dataverseServiceMock
+            .Setup(x => x.UpdateDocumentAsync(
+                It.IsAny<string>(),
+                It.IsAny<UpdateDocumentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, UpdateDocumentRequest, CancellationToken>((_, req, _) => capturedUpdate = req)
+            .Returns(Task.CompletedTask);
+
+        var before = DateTime.UtcNow;
+
+        // Act
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        var after = DateTime.UtcNow;
+
+        // Assert
+        result.Status.Should().Be(JobStatus.Completed);
+
+        capturedUpdate.Should().NotBeNull(
+            "the handler MUST call IDocumentDataverseService.UpdateDocumentAsync after successful indexing");
+
+        // New canonical lifecycle marker (R3+)
+        capturedUpdate!.SearchIndexCompletedOn.Should().NotBeNull(
+            "AC-H3.2: completed doc has sprk_searchindexcompletedon set");
+        capturedUpdate.SearchIndexCompletedOn!.Value.Should().BeOnOrAfter(before).And.BeOnOrBefore(after,
+            "SearchIndexCompletedOn should be stamped at UtcNow during the handler execution window");
+
+        // Legacy dual-write (preserved during R3 transition per spec line 366)
+        capturedUpdate.SearchIndexed.Should().BeTrue(
+            "AC-H3.2: completed doc still has sprk_searchindexed=true (dual-write transition)");
+        capturedUpdate.SearchIndexedOn.Should().Be(capturedUpdate.SearchIndexCompletedOn,
+            "legacy SearchIndexedOn MUST mirror the new SearchIndexCompletedOn during dual-write");
+
+        // Index routing (unchanged behaviour)
+        capturedUpdate.SearchIndexName.Should().Be("spaarke-knowledge-index-v2",
+            "SearchIndexName is the index routing field — unchanged by the lifecycle migration");
+
+        // Queuedon MUST NOT be set on completion — that was stamped at enqueue time
+        capturedUpdate.SearchIndexQueuedOn.Should().BeNull(
+            "completion writer does not re-stamp queuedon — that was set at the enqueue site");
+    }
+
+    /// <summary>
+    /// R3 FR-3H3.2 failure semantics: when indexing fails (transient or permanent), the
+    /// handler MUST NOT write the completion fields — the document remains in its previous
+    /// state (either queued or untouched), and the next retry attempt has a fresh chance
+    /// to complete. This preserves the contract that <c>SearchIndexCompletedOn</c> is
+    /// stamped only on confirmed success, fixing the long-standing pitfall.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_IndexingFailure_DoesNotWriteCompletionFields()
+    {
+        // Arrange — failure path
+        var job = CreateJobContract();
+        SetupSuccessfulIdempotencyFlow();
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Failed("Transient downstream error"));
+
+        // Act
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — failure outcome, no completion writes
+        result.Status.Should().NotBe(JobStatus.Completed,
+            "transient failure should result in JobStatus.Failed (retryable) — not Completed");
+
+        _dataverseServiceMock.Verify(
+            x => x.UpdateDocumentAsync(
+                It.IsAny<string>(),
+                It.IsAny<UpdateDocumentRequest>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never,
+            "on indexing failure the handler MUST NOT stamp SearchIndexCompletedOn — that would lie about completion");
+    }
+
+    /// <summary>
+    /// R3 FR-3H3.2: when the Dataverse update itself throws (e.g., entity locked,
+    /// transient network blip), the handler MUST swallow the exception and still report
+    /// the job as successful — indexing did succeed, the Dataverse tracking-field update
+    /// is non-critical. Mirrors the existing try/catch around the legacy SearchIndexed=true
+    /// write; the new dual-write must preserve this resilience guarantee.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_DataverseUpdateFails_StillReportsSuccessfulOutcome()
+    {
+        // Arrange
+        var job = CreateJobContract();
+        SetupSuccessfulIdempotencyFlow();
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 5, duration: TimeSpan.FromSeconds(1)));
+
+        _dataverseServiceMock
+            .Setup(x => x.UpdateDocumentAsync(
+                It.IsAny<string>(),
+                It.IsAny<UpdateDocumentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse entity locked"));
+
+        // Act
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — indexing succeeded; Dataverse update failure is non-fatal
+        result.Status.Should().Be(JobStatus.Completed,
+            "Dataverse tracking write is non-critical — indexing succeeded so the job outcome is Completed");
+    }
+
+    #endregion
 }

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="086" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>WriteSessionMemoryHandler (T2) — write session-scoped fact</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>091</blocks>
+    <tags>bff-api, services, handlers, tool-handler, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; creates new `.cs` handler file; new tool surface; ADR-013/ADR-015/ADR-033 binding</rigor-reason>
+    <parallel-group>4-G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `WriteSessionMemoryHandler` (NEW) at `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/WriteSessionMemoryHandler.cs` implementing the T2 `write_session_memory({fact, source, confidence, category?})` tool per architecture §8.1. Writes a structured fact to the current session's T2 memory (NOT T3 — promotion is explicit via task 088). Returns `{ factId }`. The fact lives only in the active session (24h Redis hot / 90d Cosmos warm per §3.1). Implements FR-30 (write_session_memory row of the 8-tool surface).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat tool-handler authoring + session persistence.</role>
+
+  <goal>
+    `WriteSessionMemoryHandler` lives at `Services/Ai/Handlers/WriteSessionMemoryHandler.cs` implementing `IToolHandler`. Persists session-scoped fact via `ISessionPersistenceService` (extends `ChatSession` with a `SessionFacts[]` collection following the §11.2 `SaveTabsAsync` pattern, or uses an existing session-fact accessor). `category` enum constrained to: `decision | preference | open-question | assumption`. `confidence` validated 0.0–1.0. Returns single `ToolResult` with generated `factId`. Unit tests cover happy path, invalid confidence, invalid category, ADR-015 telemetry safety (fact text NEVER logged).
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §3.1 (T2 lifecycle), §3.2 (cross-tier separation — no auto-promotion to T3), §8.1 schema. T2 writes are ephemeral to the session — promotion to T3 (matter memory) is mediated by `promote_to_matter_memory` (task 088) with explicit user approval per §6.4. This handler does NOT touch T3.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint.</constraint>
+    <constraint source="ADR-010">Auto-discovered; no manual DI here.</constraint>
+    <constraint source="ADR-013">Reads/writes T2 session storage directly (BFF-internal).</constraint>
+    <constraint source="ADR-015">Telemetry payload: handlerName + sessionId + factId (generated GUID, deterministic) + category + confidence + durationMs ONLY. NEVER fact text or source text.</constraint>
+    <constraint source="ADR-029">≤+0.1 MB publish-size delta.</constraint>
+    <constraint source="ADR-033">SINGLE `ToolResult` return.</constraint>
+    <constraint source="architecture">§3.2 rule 2 — T2 → T3 promotion is EXPLICIT via `promote_to_matter_memory`. This handler MUST NOT write to T3 storage (`MatterMemoryService.AppendFactAsync` is OUT of scope here).</constraint>
+    <constraint source="architecture">§8.1 — return shape is `{ factId }`; parameter schema matches `{ fact, source, confidence, category? }`.</constraint>
+    <constraint source="project">Validate `fact ≤500 chars`; `confidence ∈ [0.0, 1.0]`; `category ∈ enum`. Return structured validation-failure payload (not exception) when violated.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §3.1, §3.2, §8.1 (write_session_memory schema).</step>
+    <step order="2">Read `ManagePinnedContextHandler.cs` for handler exemplar; read `SessionPersistenceService.cs` to identify the right session-write extension point.</step>
+    <step order="3">Author `Services/Ai/Handlers/WriteSessionMemoryHandler.cs` implementing `IToolHandler`. Parameters per §8.1.</step>
+    <step order="4">Implement `ExecuteAsync`: validate fact length + confidence range + category enum; generate `factId` (GUID); persist to T2 (extend `ChatSession.SessionFacts[]` collection or use `ISessionPersistenceService.AppendSessionFactAsync` — extend the persistence service if needed); return `{ factId }`.</step>
+    <step order="5">CRITICAL: do NOT call `MatterMemoryService.AppendFactAsync` — T2 → T3 is explicit user-mediated promotion only.</step>
+    <step order="6">Add Dataverse seed-row JSON at `infra/dataverse/sprk_analysistool-write-session-memory-row.json`.</step>
+    <step order="7">Author unit tests: happy path returns factId; invalid confidence returns validation failure; invalid category returns validation failure; ADR-015 — captured log events contain no fact text.</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="9">Measure BFF publish-size delta; write `notes/handoffs/086-bff-publish-delta.md`.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5).</step>
+    <step order="11">Update TASK-INDEX.md: 086 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">SessionPersistenceService, ChatSession, exemplar handler</tool>
+    <tool name="Write">Handler + tests + seed-row JSON</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/WriteSessionMemoryHandler.cs</output>
+    <output type="code">infra/dataverse/sprk_analysistool-write-session-memory-row.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/WriteSessionMemoryHandlerTests.cs</output>
+    <output type="docs">notes/handoffs/086-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler exists at the specified path and implements `IToolHandler`.</criterion>
+    <criterion testable="true">Single `ToolResult` return.</criterion>
+    <criterion testable="true">`grep "MatterMemoryService" src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/WriteSessionMemoryHandler.cs` returns ZERO matches (architecture §3.2 enforcement).</criterion>
+    <criterion testable="true">Validation failures return structured payload (no exception).</criterion>
+    <criterion testable="true">Telemetry payload omits fact + source text — verified by log-capture assertion.</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Strict tier separation enforced: T2 only. Any cross-tier write goes through task 088 (PromoteToMatterMemoryHandler). If `ChatSession.SessionFacts[]` does not yet exist, follow the same `SaveTabsAsync` extension pattern used by task 051 / task 071 (extend the record + persistence write method); do not over-engineer.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

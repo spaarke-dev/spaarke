@@ -1,0 +1,104 @@
+<task id="004" project="pcf-orphan-cleanup-r1">
+  <metadata>
+    <title>Shared lib @types/react peerDep declaration (PR-D1)</title>
+    <phase>P4</phase>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <dependencies>003</dependencies>
+    <blocks>005</blocks>
+    <tags>react-types, shared-lib, ui-components, bucket-d, fluent-v9</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Changes the published peerDep contract of @spaarke/ui-components — affects every consumer (11 PCFs + 4 code-pages + 22 Vite solutions). FULL rigor per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>(sequential)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on Task 003 completion + 7-day soak — cleanup must be stable before changing the type-system contract.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+  </metadata>
+
+  <prompt>
+    Move `@types/react` + `@types/react-dom` from `devDependencies` to `peerDependencies` in [`src/client/shared/Spaarke.UI.Components/package.json`](../../../src/client/shared/Spaarke.UI.Components/package.json) with a multi-major range (`>=16.14 || >=17 || >=18 || >=19`). Follow [procedure §4.3 PR-D1](../../ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md#43-pr-d1--shared-lib-peerdep-fix).
+
+    **Mandatory pre-merge audit** — grep shared lib source for React 18+ runtime APIs that would silently break React-16 PCF consumers. Per NFR-05.
+
+    Hits → for each, decide:
+    - Replace with React-16-compatible equivalent (e.g., `useId` → manual id generator with `useRef`; `useSyncExternalStore` → manual `useEffect` + `useState`)
+    - OR feature-gate behind a runtime check (acceptable for opt-in surfaces consumed only by React 18+ Code Pages)
+    - OR document the surface as React-18-only and add an export-time guard preventing React-16 consumers (PCFs) from importing it
+
+    Build matrix verification: shared lib + each of 11 PCFs + 3 spot-checked Code Pages must build cleanly.
+  </prompt>
+
+  <role>Shared-lib maintainer changing the type-system peerDep contract with rigorous pre-merge audit.</role>
+
+  <goal>
+    One merged PR that:
+    - Adds `@types/react` + `@types/react-dom` to `peerDependencies` with `>=16.14 || >=17 || >=18 || >=19` range
+    - Keeps them in `devDependencies` for the lib's own self-build
+    - Lands with documented evidence that the shared lib uses zero React 18+ runtime APIs (or any that exist have been addressed)
+    - Build matrix passes: 11 PCFs + 3 spot-checked Code Pages
+  </goal>
+
+  <inputs>
+    <file purpose="procedure-section">projects/ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md</file>
+    <file purpose="spec">projects/pcf-orphan-cleanup-r1/spec.md</file>
+    <file purpose="design">projects/pcf-orphan-cleanup-r1/design.md</file>
+    <file purpose="claude-md">projects/pcf-orphan-cleanup-r1/CLAUDE.md</file>
+    <file purpose="target">src/client/shared/Spaarke.UI.Components/package.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-04">Multi-major @types/react peerDep declaration</constraint>
+    <constraint source="NFR-05">Pre-merge audit of shared lib for React 18+ runtime APIs is MANDATORY</constraint>
+    <constraint source="ADR-022">React 16 APIs only (shared lib must be safe to consume from React-16 PCFs)</constraint>
+    <constraint source="ADR-012">Shared component library (context-agnostic — multi-major peerDep is consistent)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/pcf-orphan-cleanup-r1/notes/research-findings-2026-06-22.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Edit [`src/client/shared/Spaarke.UI.Components/package.json`](../../../src/client/shared/Spaarke.UI.Components/package.json): add to `peerDependencies` block: `"@types/react": ">=16.14 || >=17 || >=18 || >=19"`, `"@types/react-dom": ">=16.14 || >=17 || >=18 || >=19"`. Keep existing devDeps unchanged.</step>
+    <step order="2">Run the pre-merge React-18-API audit per procedure §4.3 verify block: `Select-String -Path "src\client\shared\Spaarke.UI.Components\src\**\*.ts","src\client\shared\Spaarke.UI.Components\src\**\*.tsx" -Pattern "\b(useId|useTransition|useDeferredValue|useSyncExternalStore|useInsertionEffect|createRoot|hydrateRoot|startTransition)\b"`</step>
+    <step order="3">For each hit (if any): document in `notes/shared-lib-react18-audit.md` with file, line, decision (replace / feature-gate / export-guard). Apply the fix.</step>
+    <step order="4">Build shared lib: `pushd src\client\shared\Spaarke.UI.Components; npm run build; popd` — must succeed.</step>
+    <step order="5">Build all 11 PCFs: `pushd src\client\pcf; npm run build; popd` — must succeed for all.</step>
+    <step order="6">Build 3 spot-checked Code Pages (SmartTodo, SpaarkeAi, LegalWorkspace): each `npm run build` must succeed.</step>
+    <step order="7">Verify no new TS errors: `npm run build` output for each must show zero TS2322 / TS2305 / TS2307 errors that weren't present pre-PR.</step>
+    <step order="8">Commit per procedure §4.3 commit block.</step>
+    <step order="9">Push branch + open PR. Title: `fix(ui-components): declare @types/react as peerDep (multi-major)`. Include audit findings in PR description.</step>
+    <step order="10">Quality gates per CLAUDE.md §8 FULL rigor: invoke `code-review` skill + `adr-check` skill.</step>
+    <step order="11">Update [`current-task.md`](../current-task.md) + [`tasks/TASK-INDEX.md`](TASK-INDEX.md) (Task 004 → ✅ on merge).</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">src/client/shared/Spaarke.UI.Components/package.json</tool>
+    <tool name="Grep">React-18-API audit across shared lib source</tool>
+    <tool name="Bash">npm builds across shared lib + 11 PCFs + 3 code-pages; `gh pr create`</tool>
+    <tool name="Write">notes/shared-lib-react18-audit.md (if hits found)</tool>
+    <tool name="Skill">code-review + adr-check (Step 10 quality gates)</tool>
+  </tools>
+
+  <outputs>
+    <output type="pr">One merged PR adding multi-major @types/react peerDep to shared lib</output>
+    <output type="docs">notes/shared-lib-react18-audit.md (only if hits found in Step 2)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/client/shared/Spaarke.UI.Components/package.json` peerDependencies block contains `@types/react` and `@types/react-dom` with `>=16.14 || >=17 || >=18 || >=19` range</criterion>
+    <criterion testable="true">Pre-merge audit grep returned zero hits OR all hits documented + addressed in `notes/shared-lib-react18-audit.md`</criterion>
+    <criterion testable="true">Shared lib builds: `pushd src\client\shared\Spaarke.UI.Components; npm run build` succeeds</criterion>
+    <criterion testable="true">All 11 PCFs build successfully with the new peerDep</criterion>
+    <criterion testable="true">3 spot-checked Code Pages (SmartTodo, SpaarkeAi, LegalWorkspace) build successfully</criterion>
+    <criterion testable="true">No new TS2322 / TS2305 / TS2307 errors in any build target</criterion>
+    <criterion testable="true">code-review + adr-check skills invoked and pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. FULL rigor (cross-cutting type-system contract change).
+  </execution>
+</task>

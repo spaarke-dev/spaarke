@@ -1,0 +1,39 @@
+<task id="R3-024" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Migrate `sprk_analysisplaybook.sprk_configjson` schedule fields to new framework</title>
+    <status>completed</status>
+    <phase>P3</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>bff-api,dataverse,migration,playbook</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs</file>
+      <file>scripts/Migrate-PlaybookScheduleConfig.ps1 (new)</file>
+    </relevant-files>
+    <dependencies>023</dependencies>
+  </metadata>
+  <prompt>Existing schedule data lives in sprk_analysisplaybook.sprk_configjson. Decide: (a) leave there + PlaybookSchedulerJob reads both sources, OR (b) one-time migrate to sprk_backgroundjob.sprk_configjson. Per spec.md FR-2.8, treat scheduler as a thin adapter — leave configjson in playbook entity, scheduler job reads it.</prompt>
+  <goal>PlaybookSchedulerJob reads schedule cadence from sprk_analysisplaybook.sprk_configjson (existing source of truth). sprk_backgroundjob row for the scheduler has its own cron (e.g. */15 * * * *) for the parent fire interval.</goal>
+  <constraints>
+    <constraint source="spec">PlaybookSchedulerService becomes a thin adapter; preserves existing config layout</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-config-schedule-migration</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check</step>
+    <step order="1">Verify PlaybookSchedulerJob reads sprk_analysisplaybook.sprk_configjson correctly</step>
+    <step order="2">Seed sprk_backgroundjob row for scheduler with parent cron</step>
+    <step order="3">Smoke test: all 7 playbooks discovered on dev tenant; cadence preserved</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">7 active playbooks discovered + scheduled correctly</criterion>
+    <criterion testable="true">Existing sprk_configjson layout preserved (no data migration needed)</criterion>
+  </acceptance-criteria>
+</task>

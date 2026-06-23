@@ -490,7 +490,9 @@ public static class ChatEndpoints
                 cancellationToken: cancellationToken,
                 // R6 Pillar 8 / task 082 / FR-50: forward the soft-slash hint to the
                 // CapabilityRouter Layer 0.5 pre-pass. Null in the common path.
-                commandIntent: request.CommandIntent);
+                // Wire-format field renamed `commandIntent` → `intentHint` per
+                // chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
+                intentHint: request.IntentHint);
 
             // Convert session history to AI framework messages for context
             var history = BuildAiHistory(session.Messages);
@@ -569,7 +571,21 @@ public static class ChatEndpoints
             var dispatcher = await agentFactory.CreatePlaybookDispatcherAsync(tenantId, cancellationToken);
             var dispatchResult = await dispatcher.DispatchAsync(request.Message, session.HostContext, cancellationToken);
 
-            if (dispatchResult is { Matched: true, OutputType: not OutputType.Text })
+            // Task 048 (FR-14d) — the gate now also fires for non-Chat NodeDestination
+            // values (Workspace / Both / FormPrefill / SideEffect). The destination is
+            // populated by PlaybookDispatcher (task 047) from the matched playbook's
+            // DeliverOutput node's sprk_configjson; Workspace-bound playbooks like
+            // summarize-document-for-workspace have OutputType.Text (their content is
+            // text — only the destination surface differs), so routing solely on
+            // OutputType would never hand the dispatch to the handler. The Chat default
+            // path remains: when NodeDestination == Chat AND OutputType == Text, the
+            // handler is bypassed and standard streaming below runs unchanged.
+            var routesViaHandler =
+                dispatchResult is { Matched: true } &&
+                (dispatchResult.OutputType != OutputType.Text ||
+                 dispatchResult.NodeDestination != NodeDestination.Chat);
+
+            if (routesViaHandler)
             {
                 var outputHandler = agentFactory.CreatePlaybookOutputHandler();
                 var handled = await outputHandler.HandleOutputAsync(
@@ -2625,20 +2641,26 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// in-memory only). Default null preserves backwards compatibility for clients that omit
 /// the field. See <see cref="ValidateAttachments"/> for validation rules (NFR-04).
 /// </param>
-/// <param name="CommandIntent">
-/// R6 Pillar 8 / task 082 / FR-50: Optional closed-vocabulary soft-slash hint emitted by
-/// the frontend `SoftSlashRouter.decorateBody()`. When non-null and recognised (one of:
+/// <param name="IntentHint">
+/// Optional closed-vocabulary soft-slash hint emitted by the frontend
+/// `SoftSlashRouter.decorateBody()`. When non-null and recognised (one of:
 /// "summarize", "draft", "extract-entities", "analyze"), the BFF `CapabilityRouter`
 /// Layer 0.5 pre-pass short-circuits to a Confident result selecting the synthetic
 /// capability for that intent. Default null preserves backwards compatibility — clients
 /// that omit the field route via the existing Layer 1 keyword path (NFR-11).
 /// ADR-015 audit: this is a closed-vocabulary identifier, NEVER raw user message text.
+///
+/// Wire-format field: <c>intentHint</c> (renamed from <c>commandIntent</c> per
+/// chat-routing-redesign-r1 FR-07 / task 022). Phase 5 task 115 will additionally
+/// wire this field as a vector-query bias parameter to Phase B classification; this
+/// task only renames the field — semantics remain pass-through to `CapabilityRouter`
+/// Layer 0.5.
 /// </param>
 public record ChatSendMessageRequest(
     string Message,
     string? DocumentId = null,
     IReadOnlyList<ChatMessageAttachment>? Attachments = null,
-    string? CommandIntent = null);
+    string? IntentHint = null);
 
 /// <summary>
 /// In-memory chat-message attachment with client-extracted text content (FR-07).

@@ -27,6 +27,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     private readonly ISpeFileOperations _speFileOperations;
     private readonly ITextExtractor _textExtractor;
     private readonly IPlaybookService _playbookService;
+    private readonly IPlaybookLookupService _playbookLookup;
     private readonly IScopeResolverService _scopeResolver;
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
     private readonly INodeService _nodeService;
@@ -43,7 +44,39 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// Default playbook name for Document Profile analysis.
     /// This playbook is loaded by name rather than hardcoded ID for flexibility.
     /// </summary>
+    /// <remarks>
+    /// Retained as the public name-based contract for backward compatibility with callers
+    /// (<c>ProfileSummaryWorker</c>, <c>ProfileSummaryJobHandler</c>, <c>AppOnlyDocumentAnalysisJobHandler</c>)
+    /// during the FR-03 deprecation window. Internal playbook resolution uses
+    /// <see cref="DocumentProfilePlaybookId"/> via <see cref="IPlaybookLookupService.GetByIdAsync"/>
+    /// (chat-routing-redesign-r1 task 020, Pattern B).
+    /// </remarks>
     public const string DefaultPlaybookName = "Document Profile";
+
+    /// <summary>
+    /// Stable ID alternate-key value for the "Document Profile" playbook
+    /// (<c>sprk_playbookid</c> column on <c>sprk_analysisplaybook</c>).
+    /// </summary>
+    /// <remarks>
+    /// Per Q&amp;A 2026-06-22 Q1, stable-ID lookups query the <c>sprk_playbookid</c>
+    /// column whose value mirrors the row's <c>sprk_analysisplaybookid</c> PK at seed time.
+    /// The same GUID is valid across DEV/QA/PROD (admin re-seeds the column on solution import).
+    /// Pattern B per chat-routing-redesign-r1 task 020 — execution-path const, not config.
+    /// Source: task 014 backfill evidence; sprk_name = "Document Profile".
+    /// </remarks>
+    private const string DocumentProfilePlaybookId = "18cf3cc8-02ec-f011-8406-7c1e520aa4df";
+
+    /// <summary>
+    /// Stable ID alternate-key value for the "Email Analysis" playbook
+    /// (<c>sprk_playbookid</c> column on <c>sprk_analysisplaybook</c>).
+    /// </summary>
+    /// <remarks>
+    /// Per Q&amp;A 2026-06-22 Q1, stable-ID lookups query the <c>sprk_playbookid</c>
+    /// column whose value mirrors the row's <c>sprk_analysisplaybookid</c> PK at seed time.
+    /// Pattern B per chat-routing-redesign-r1 task 020 — execution-path const, not config.
+    /// Source: DEV Dataverse query 2026-06-22; sprk_name = "Email Analysis".
+    /// </remarks>
+    private const string EmailAnalysisPlaybookId = "bc71facf-6af1-f011-8406-7ced8d1dc988";
 
     public AppOnlyAnalysisService(
         IDocumentDataverseService documentService,
@@ -51,6 +84,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         ISpeFileOperations speFileOperations,
         ITextExtractor textExtractor,
         IPlaybookService playbookService,
+        IPlaybookLookupService playbookLookup,
         IScopeResolverService scopeResolver,
         IToolHandlerRegistry toolHandlerRegistry,
         INodeService nodeService,
@@ -62,11 +96,59 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         _speFileOperations = speFileOperations;
         _textExtractor = textExtractor;
         _playbookService = playbookService;
+        _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _scopeResolver = scopeResolver;
         _toolHandlerRegistry = toolHandlerRegistry;
         _nodeService = nodeService;
         _playbookOrchestrator = playbookOrchestrator;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Resolves a playbook by name using the stable-ID lookup path (FR-03 Pattern B,
+    /// chat-routing-redesign-r1 task 020) when the requested name matches a well-known
+    /// playbook (<see cref="DefaultPlaybookName"/> or <see cref="EmailAnalysisPlaybookName"/>),
+    /// otherwise falls back to the legacy <see cref="IPlaybookService.GetByNameAsync"/>
+    /// path during the FR-03 deprecation window. Task 024 owns deprecation telemetry on
+    /// the legacy <c>/by-name/</c> endpoint.
+    /// </summary>
+    /// <remarks>
+    /// This is the single resolution point in this service — both
+    /// <see cref="AnalyzeDocumentAsync"/> and <see cref="ExecutePlaybookAnalysisAsync"/>
+    /// delegate here so the FR-03 migration takes effect in one place.
+    /// </remarks>
+    private async Task<Models.Ai.PlaybookResponse> ResolvePlaybookAsync(
+        string playbookName,
+        CancellationToken cancellationToken)
+    {
+        // Pattern B: resolve well-known playbook names via stable-ID lookup
+        // (sprk_playbookid alternate key) per chat-routing-redesign-r1 task 020 / FR-03.
+        if (string.Equals(playbookName, DefaultPlaybookName, StringComparison.Ordinal))
+        {
+            return await _playbookLookup
+                .GetByIdAsync(DocumentProfilePlaybookId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (string.Equals(playbookName, EmailAnalysisPlaybookName, StringComparison.Ordinal))
+        {
+            return await _playbookLookup
+                .GetByIdAsync(EmailAnalysisPlaybookId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        // Legacy by-name path retained for the FR-03 deprecation window. Custom playbook
+        // overrides (test fixtures, future custom playbooks) still resolve here. Task 024
+        // adds deprecation telemetry; this site does NOT call the deprecated endpoint
+        // directly — it goes through IPlaybookService.GetByNameAsync which task 024 owns.
+        _logger.LogInformation(
+            "AppOnlyAnalysisService: resolving custom playbook '{PlaybookName}' via legacy " +
+            "by-name path (not a well-known stable-ID-mapped playbook).",
+            playbookName);
+
+        return await _playbookService
+            .GetByNameAsync(playbookName, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -159,11 +241,13 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 "Extracted {CharCount} characters from document {DocumentId}",
                 extractionResult.Text.Length, documentId);
 
-            // 5a. Load playbook by name to get its ID for the Analysis record
+            // 5a. Load playbook to get its ID for the Analysis record (FR-03 Pattern B:
+            // well-known names resolve via stable-ID lookup; custom names fall back to
+            // legacy by-name during the deprecation window).
             Guid? playbookId = null;
             try
             {
-                var playbook = await _playbookService.GetByNameAsync(effectivePlaybookName, cancellationToken);
+                var playbook = await ResolvePlaybookAsync(effectivePlaybookName, cancellationToken);
                 playbookId = playbook.Id;
                 _logger.LogInformation(
                     "Loaded playbook '{PlaybookName}' with ID {PlaybookId}",
@@ -357,11 +441,12 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         string? graphDriveId = null,
         string? graphItemId = null)
     {
-        // 1. Load playbook by name
+        // 1. Load playbook — FR-03 Pattern B: well-known names resolve via stable-ID
+        //    lookup (sprk_playbookid alt-key); custom names fall back to legacy by-name.
         Models.Ai.PlaybookResponse playbook;
         try
         {
-            playbook = await _playbookService.GetByNameAsync(playbookName, cancellationToken);
+            playbook = await ResolvePlaybookAsync(playbookName, cancellationToken);
             _logger.LogDebug(
                 "Loaded playbook '{PlaybookName}' (Id={PlaybookId}) with {ToolCount} tools",
                 playbook.Name, playbook.Id, playbook.ToolIds?.Length ?? 0);

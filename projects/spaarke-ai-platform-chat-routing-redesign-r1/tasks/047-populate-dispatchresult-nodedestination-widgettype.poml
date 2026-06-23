@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Populate DispatchResult.NodeDestination + WidgetType in PlaybookDispatcher</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>027</dependencies>
+    <blocks>048,049,054</blocks>
+    <tags>bff-api, services, ADR-013, ADR-029</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies hot-path dispatcher service `.cs` file — FULL per Step 0.5</rigor-reason>
+    <parallel-group>3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    In `PlaybookDispatcher` (the chat-routing service that returns `DispatchResult`), after a playbook matches, load its primary AI/DeliverOutput node and call `NodeRoutingConfig.Parse(node.ConfigJson)`. Populate `DispatchResult.NodeDestination` and `DispatchResult.WidgetType` from the parsed config. Backward compat: null/empty `sprk_configjson` falls back to `Destination = Chat`, `WidgetType = null` (per FR-14f). Implements spec FR-14c.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `PlaybookDispatcher` + `NodeRoutingConfig.Parse` + Dataverse playbook node loading.</role>
+
+  <goal>
+    `PlaybookDispatcher.DispatchAsync` returns `DispatchResult` with populated `NodeDestination` + `WidgetType` reflecting the matched playbook's primary node's `sprk_configjson`. Integration test dispatching `summarize-document-for-workspace` returns `{ NodeDestination: Workspace, WidgetType: "structured-output-stream" }`. Integration test dispatching a playbook with null `sprk_configjson` returns `{ NodeDestination: Chat }`.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14c + design §1.3 (WP3 step 3). The dispatcher already returns `DispatchResult`; tasks 045 (Both enum) and 046 (record extension) made this possible. Now we wire it. The "primary AI/DeliverOutput node" is the node that triggers `PlaybookOutputHandler` — typically the last node in the playbook graph.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/NodeRoutingConfig.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatchResult.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Chat/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Service lives in `Services/Ai/Chat/`; AI-internal.</constraint>
+    <constraint source="ADR-014">Cached playbook lookup respected — do not re-fetch on warm cache hits.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-14c acceptance: dispatching `summarize-document-for-workspace` returns Workspace + structured-output-stream.</constraint>
+    <constraint source="spec">FR-14f acceptance: null `sprk_configjson` returns Chat default.</constraint>
+    <constraint source="project">Preserve R6 FR-26 convergence invariant (chat-summarize playbook dispatch unchanged in behavior).</constraint>
+    <constraint source="project">CLAUDE.md §10 test obligation — add integration tests for populated dispatch.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookDispatcher.cs` — locate the point where `DispatchResult` is constructed.</step>
+    <step order="2">Identify how the matched playbook's nodes are loaded today; if not loaded, add a load via existing playbook-node repository.</step>
+    <step order="3">Identify the "primary AI/DeliverOutput node" — typically the playbook's terminal/output node. Document the selection heuristic in code comment.</step>
+    <step order="4">Call `NodeRoutingConfig.Parse(node.ConfigJson)` (Parse handles null gracefully per FR-14f).</step>
+    <step order="5">Populate `DispatchResult { ..., NodeDestination = parsed.Destination, WidgetType = parsed.WidgetType }`.</step>
+    <step order="6">Add integration test: dispatch `summarize-document-for-workspace` → assert `NodeDestination = Workspace, WidgetType = "structured-output-stream"`.</step>
+    <step order="7">Add integration test: dispatch a playbook with null `sprk_configjson` → assert `NodeDestination = Chat`.</step>
+    <step order="8">Add unit test for the primary-node selection heuristic.</step>
+    <step order="9">Run `dotnet build` + tests; measure publish-size delta.</step>
+    <step order="10">Quality gates per task-execute Step 9.5 (FULL rigor).</step>
+    <step order="11">Update TASK-INDEX.md: task 047 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookDispatcher.cs + related repos</tool>
+    <tool name="Edit">Apply changes + tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs — extended</output>
+    <output type="test">tests/integration/.../PlaybookDispatcherDestinationTests.cs</output>
+    <output type="docs">notes/handoffs/047-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dispatching `summarize-document-for-workspace` returns `NodeDestination = Workspace, WidgetType = "structured-output-stream"`.</criterion>
+    <criterion testable="true">Dispatching a playbook with null `sprk_configjson` returns `NodeDestination = Chat`.</criterion>
+    <criterion testable="true">R6 FR-26 convergence invariant test passes (chat-summarize playbook unchanged).</criterion>
+    <criterion testable="true">`dotnet build` + `dotnet test` exit 0.</criterion>
+    <criterion testable="true">BFF publish delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 3-A parallel safe because the 3 tasks touch 3 different files (NodeRoutingConfig.cs / DispatchResult.cs / PlaybookDispatcher.cs). Each task verifies its own build + tests; main session re-verifies the unified build before wave 3-B.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -27,10 +27,24 @@ namespace Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 /// </remarks>
 public sealed class PlaybookIndexingService
 {
+    // sprk_indexstatus option codes (chat-routing-redesign-r1 FR-13, task 030).
+    // Mirrored from PlaybookService / PlaybookIndexDriftDetectionJob to keep this
+    // pipeline self-contained for indexing-state transitions.
+    private const int IndexStatusIndexed = 100_000_002;
+    private const int IndexStatusFailed = 100_000_004;
+
+    /// <summary>
+    /// Maximum length of the lastError string written to Dataverse <c>sprk_lastindexerror</c>.
+    /// Caps the column to a sensible diagnostic preview; ADR-015 still applies (the value
+    /// MUST NOT be logged).
+    /// </summary>
+    private const int MaxLastErrorLength = 500;
+
     private readonly Channel<string> _indexingChannel;
     private readonly IPlaybookService _playbookService;
     private readonly SearchIndexClient _searchIndexClient;
     private readonly IOpenAiClient _openAiClient;
+    private readonly IPlaybookEmbeddingHashCalculator _hashCalculator;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<PlaybookIndexingService> _logger;
 
@@ -50,16 +64,21 @@ public sealed class PlaybookIndexingService
     /// <param name="playbookService">Service to fetch playbook data from Dataverse.</param>
     /// <param name="searchIndexClient">Azure AI Search index client.</param>
     /// <param name="openAiClient">OpenAI client for embedding generation.</param>
+    /// <param name="hashCalculator">Canonical embed-input hash calculator (chat-routing-redesign-r1
+    /// FR-13 — task 034 Gap 5 closure). Used to compute <c>sprk_indexhash</c> at successful
+    /// index completion so the nightly drift job can compare against the same value.</param>
     /// <param name="loggerFactory">Logger factory for creating typed loggers.</param>
     public PlaybookIndexingService(
         IPlaybookService playbookService,
         SearchIndexClient searchIndexClient,
         IOpenAiClient openAiClient,
+        IPlaybookEmbeddingHashCalculator hashCalculator,
         ILoggerFactory loggerFactory)
     {
         _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
         _openAiClient = openAiClient ?? throw new ArgumentNullException(nameof(openAiClient));
+        _hashCalculator = hashCalculator ?? throw new ArgumentNullException(nameof(hashCalculator));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
         _logger = loggerFactory.CreateLogger<PlaybookIndexingService>();
 
@@ -164,7 +183,8 @@ public sealed class PlaybookIndexingService
                 TriggerPhrases = playbook.TriggerPhrases?.ToList() ?? [],
                 RecordType = playbook.RecordType ?? string.Empty,
                 EntityType = playbook.EntityType ?? string.Empty,
-                Tags = ParseTags(playbook)
+                Tags = ParseTags(playbook),
+                JpsMatchingMetadata = playbook.JpsMatchingMetadata,
             };
 
             // Step 3: Use PlaybookEmbeddingService to generate embedding and upsert
@@ -180,13 +200,65 @@ public sealed class PlaybookIndexingService
             _logger.LogInformation(
                 "Background indexing of playbook {PlaybookId} completed in {ElapsedMs}ms",
                 playbookId, stopwatch.ElapsedMilliseconds);
+
+            // Step 4 (chat-routing-redesign-r1 FR-13, task 034 Gap 5 closure): write the
+            // canonical embed-input hash + Indexed status so the nightly drift-detection
+            // job has a fingerprint to compare against. Failure to persist the tracking
+            // fields MUST NOT fail the indexing operation — the embedding was created
+            // successfully even if the bookkeeping update failed.
+            try
+            {
+                var hash = _hashCalculator.ComputeHash(document);
+                await _playbookService.UpdateIndexStatusAsync(
+                    playbookGuid,
+                    statusCode: IndexStatusIndexed,
+                    indexHash: hash,
+                    lastError: null,
+                    cancellationToken: cancellationToken);
+            }
+            catch (Exception bookkeepingEx) when (bookkeepingEx is not OperationCanceledException)
+            {
+                // ADR-015 safe: only playbook ID + exception type name. The embedding
+                // succeeded; drift detection will skip this row until the next index
+                // attempt populates the hash. Per pattern: LogWarning, not LogError.
+                _logger.LogWarning(
+                    "Failed to persist tracking fields after successful indexing of playbook {PlaybookId} ({ExceptionType}); embedding is live but drift detection will skip this row",
+                    playbookId, bookkeepingEx.GetType().Name);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // ADR-015: Log only playbookId, no content. Leave stale entry in place.
-            _logger.LogWarning(ex,
-                "Failed to index playbook {PlaybookId} — stale entry retained in index",
-                playbookId);
+            // ADR-015: Log only playbookId + exception type. Leave stale entry in place.
+            _logger.LogWarning(
+                "Failed to index playbook {PlaybookId} ({ExceptionType}) — stale entry retained in index",
+                playbookId, ex.GetType().Name);
+
+            // chat-routing-redesign-r1 FR-13 (task 034 Gap 5 closure — failure path):
+            // record Failed status so admins can see the row needs attention. The error
+            // message goes to the Dataverse column (admin-visible) but per ADR-015 MUST
+            // NOT be logged here — note we deliberately log only the exception TYPE above,
+            // not the message body.
+            if (Guid.TryParse(playbookId, out var failGuid))
+            {
+                try
+                {
+                    var truncated = ex.Message.Length > MaxLastErrorLength
+                        ? ex.Message[..MaxLastErrorLength]
+                        : ex.Message;
+                    await _playbookService.UpdateIndexStatusAsync(
+                        failGuid,
+                        statusCode: IndexStatusFailed,
+                        indexHash: null,
+                        lastError: truncated,
+                        cancellationToken: cancellationToken);
+                }
+                catch (Exception bookkeepingEx) when (bookkeepingEx is not OperationCanceledException)
+                {
+                    _logger.LogWarning(
+                        "Failed to persist Failed status for playbook {PlaybookId} after index failure ({ExceptionType}); row will appear as previous status",
+                        playbookId, bookkeepingEx.GetType().Name);
+                }
+            }
         }
     }
 

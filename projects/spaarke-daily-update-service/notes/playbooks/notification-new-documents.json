@@ -44,7 +44,24 @@
       "dependsOn": [],
       "configJson": {
         "scope": "user-matters",
-        "description": "Scoped to the current user's matters (matters where user is a team member)"
+        "description": "Scoped to the current user's matters (resolved via LookupUserMembership node)"
+      }
+    },
+    {
+      "name": "Lookup My Matters",
+      "nodeType": "Workflow",
+      "actionType": 52,
+      "canvasType": "lookupUserMembership",
+      "outputVariable": "myMatters",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 52,
+        "entityType": "sprk_matter",
+        "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+        "includeRelated": false,
+        "description": "Resolve the executing user's matter memberships (owner + assigned attorney + assigned paralegal). Replaces the broken non-existent team-member junction FetchXML join (R3 FR-1C.1 / A1 defect). Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
       }
     },
     {
@@ -53,18 +70,18 @@
       "actionType": 22,
       "canvasType": "updateRecord",
       "outputVariable": "newDocsQuery",
-      "positionX": 350,
+      "positionX": 450,
       "positionY": 200,
-      "dependsOn": ["Start"],
+      "dependsOn": ["Lookup My Matters"],
       "configJson": {
         "__actionType": 22,
         "queryMode": true,
         "entityLogicalName": "sprk_document",
-        "fetchXml": "<fetch top='50'><entity name='sprk_document'><attribute name='sprk_name'/><attribute name='sprk_filename'/><attribute name='createdon'/><attribute name='sprk_documentid'/><attribute name='sprk_matter'/><link-entity name='sprk_matter' from='sprk_matterid' to='sprk_matter' link-type='inner'><link-entity name='sprk_matterteammember' from='sprk_matter' to='sprk_matterid' link-type='inner'><filter type='and'><condition attribute='sprk_user' operator='eq-userid'/></filter></link-entity></link-entity><filter type='and'><condition attribute='createdon' operator='last-x-hours' value='{{timeWindowHours}}'/><condition attribute='createdby' operator='ne-userid'/></filter><order attribute='createdon' descending='true'/></entity></fetch>",
+        "fetchXml": "<fetch top='50'><entity name='sprk_document'><attribute name='sprk_name'/><attribute name='sprk_filename'/><attribute name='createdon'/><attribute name='sprk_documentid'/><attribute name='sprk_matter'/><filter type='and'><condition attribute='sprk_matter' operator='in' value='{{joinIds myMatters.ids}}'/><condition attribute='createdon' operator='last-x-hours' value='{{timeWindowHours}}'/><condition attribute='createdby' operator='ne-userid'/></filter><order attribute='createdon' descending='true'/></entity></fetch>",
         "templateParameters": {
-          "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
+          "timeWindow": "{{default userPreferences.timeWindow '24h'}}"
         },
-        "description": "Query documents created on user's matters within the configured time window, excluding documents created by the user themselves"
+        "description": "Query documents created on user's matters (resolved via myMatters.ids) within the configured time window, excluding documents created by the user themselves."
       }
     },
     {
@@ -73,7 +90,7 @@
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasNewDocs",
-      "positionX": 600,
+      "positionX": 700,
       "positionY": 200,
       "dependsOn": ["Query New Documents"],
       "configJson": {
@@ -88,7 +105,7 @@
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "notification",
-      "positionX": 900,
+      "positionX": 1000,
       "positionY": 150,
       "dependsOn": ["Check Results"],
       "configJson": {
@@ -114,7 +131,8 @@
     }
   ],
   "edges": [
-    { "source": "Start", "target": "Query New Documents" },
+    { "source": "Start", "target": "Lookup My Matters" },
+    { "source": "Lookup My Matters", "target": "Query New Documents" },
     { "source": "Query New Documents", "target": "Check Results" },
     { "source": "Check Results", "target": "Create Notification", "condition": "true" }
   ]

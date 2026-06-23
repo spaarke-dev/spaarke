@@ -54,6 +54,9 @@ param serviceBusSku string = 'Standard'
 @description('Service Bus queue names to create')
 param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing', 'sdap-communication']
 
+@description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
+param bffPrincipalId string = ''
+
 // --- Redis options ---
 
 @description('Redis Cache SKU')
@@ -155,6 +158,23 @@ module serviceBus 'modules/service-bus.bicep' = {
 }
 
 // ============================================================================
+// MEMBERSHIP TOPIC (R3 Phase 2 — D3 / FR-2P2.3)
+// Topic + subscription for membership-change events, with BFF MI Sender+Receiver RBAC.
+// ============================================================================
+
+module membershipTopic 'modules/membership-topic.bicep' = {
+  scope: rg
+  name: 'membershipTopic-${baseName}'
+  params: {
+    serviceBusNamespaceName: serviceBusName
+    bffPrincipalId: bffPrincipalId
+  }
+  dependsOn: [
+    serviceBus
+  ]
+}
+
+// ============================================================================
 // REDIS CACHE (Token caching, session state per ADR-009)
 // ============================================================================
 
@@ -195,6 +215,10 @@ output serviceBusName string = serviceBus.outputs.serviceBusName
 output serviceBusEndpoint string = serviceBus.outputs.serviceBusEndpoint
 #disable-next-line outputs-should-not-contain-secrets
 output serviceBusConnectionString string = serviceBus.outputs.serviceBusConnectionString
+
+// --- Membership topic (R3 Phase 2) ---
+output membershipTopicName string = membershipTopic.outputs.topicName
+output membershipReconSubscriptionName string = membershipTopic.outputs.subscriptionName
 
 // --- Redis Cache ---
 output redisHostName string = redis.outputs.redisHostName

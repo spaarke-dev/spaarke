@@ -1,0 +1,71 @@
+<task id="R4-117" project="smart-todo-r4">
+  <metadata>
+    <title>R4-098 — Project wrap-up: lessons-learned + README + repo-cleanup</title>
+    <phase>Closeout (UAT round 14 — final task)</phase>
+    <workstream>project-tracking</workstream>
+    <status>not-started</status>
+    <estimated-effort>2-3 hrs</estimated-effort>
+    <tags>wrap-up, lessons-learned, docs, repo-cleanup</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>R4-110, R4-111, R4-112, R4-113, R4-114, R4-115, R4-116 (all closeout tasks done)</dependencies>
+    <relevant-files>
+      <file>projects/smart-todo-r4/README.md</file>
+      <file>projects/smart-todo-r4/tasks/TASK-INDEX.md (flip all closeout tasks to ✅)</file>
+      <file>projects/smart-todo-r4/notes/lessons-learned.md (NEW — to be written)</file>
+      <file>projects/smart-todo-r5/design.md (R5 backlog already captured)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Final closeout for R4. Per project pattern: lessons-learned + README update + repo-cleanup + PR close.
+
+Lessons-learned must capture the UAT rounds 4-13 + closeout findings — this is the gold:
+- The 5-round entity-name bug (sprk_contact vs contact) caused by prototype mocks hiding production reality → PROC-1 in R5
+- The 7-round widget height-chain debug arc → BUILD-A-NEW-WORKSPACE-WIDGET.md §7.2 + embedded-widget-sizing.md pattern doc (already updated)
+- The form-script registration miss (sprk_todo_dirty_check.js never bound) → no-shims principle reinforcement
+- The bind-key PascalCase issue (sprk_assignedto vs sprk_AssignedTo @odata.bind) → 1-round fix once diagnosed
+- The "Open Code Page as modal" simplification removal → UX clarity
+
+README must reflect:
+- Final project state (all tasks ✅)
+- Link to PR #406 squash commit 80f70a1d4
+- Pointer to R5 design.md for follow-up work
+
+Repo-cleanup: run /repo-cleanup skill OR manually remove ephemeral files (handoffs/, debug/, drafts/) per project pattern.
+  </prompt>
+
+  <role>Project closer / documentation.</role>
+
+  <goal>
+1. Write `projects/smart-todo-r4/notes/lessons-learned.md` covering UAT rounds 4-13 + closeout.
+2. Update `projects/smart-todo-r4/README.md` with final state + PR link + R5 pointer.
+3. Run `/repo-cleanup` skill on `projects/smart-todo-r4/`.
+4. Flip TASK-INDEX status: all closeout tasks (110-117) to ✅.
+5. Update TASK-INDEX header: 38 complete, 0 not-started, 0 in-progress.
+6. Final commit + PR (closeout PR, separate from PR #406).
+7. Verify no leftover open items (cross-ref against R5 design.md — anything not deferred must be ✅).
+  </goal>
+
+  <constraints>
+    <constraint source="user durable instruction">Do not close PR until UAT signed off — by this point, all UAT rounds are done.</constraint>
+    <constraint source="lessons-learned format">Mirror prior projects (e.g., smart-todo-decoupling-r3 if present). Brief, actionable, with date stamps.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check.</step>
+    <step order="1">Read recent project lessons-learned (e.g., from smart-todo-decoupling-r3 or another R-cycle) for format reference.</step>
+    <step order="2">Write `projects/smart-todo-r4/notes/lessons-learned.md` covering the topics above.</step>
+    <step order="3">Update `projects/smart-todo-r4/README.md` final state section.</step>
+    <step order="4">Run `/repo-cleanup` skill targeted at `projects/smart-todo-r4/`.</step>
+    <step order="5">Flip all closeout-task statuses in TASK-INDEX.md.</step>
+    <step order="6">Commit + PR.</step>
+    <step order="7">Final verification — query TASK-INDEX: 0 🔲, 0 🔄, all ✅.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">lessons-learned.md exists and covers UAT rounds 4-13 + closeout.</criterion>
+    <criterion testable="true">README.md final state section updated with PR link + R5 pointer.</criterion>
+    <criterion testable="true">All R4 tasks (including closeout 110-117) marked ✅ in TASK-INDEX.</criterion>
+    <criterion testable="true">No ephemeral files left in projects/smart-todo-r4/ (handoffs/, debug/, drafts/ cleared).</criterion>
+  </acceptance-criteria>
+</task>

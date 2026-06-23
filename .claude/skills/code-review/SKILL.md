@@ -656,6 +656,77 @@ FLAG SEVERITIES:
 
 See: [`.claude/constraints/bff-extensions.md`](../../constraints/bff-extensions.md) for full rules; [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) for the evidence base.
 
+### Step 6.6: Component Justification Check (Universal — CLAUDE.md §11)
+
+**This step extends Step 6.5 (BFF Hygiene) to ANY new component, not just BFF.** It enforces root CLAUDE.md §11 "Component Justification — Default to Reuse" at code-review time.
+
+**Fires for ANY of**:
+- New `.cs` / `.ts` / `.tsx` / `.ps1` file added under `src/`
+- New endpoint route or handler
+- New DI registration (`services.Add*`)
+- New package reference (`<PackageReference>` or `dependencies` entry)
+- New Dataverse column / entity / alternate key added by the change
+
+**Does NOT fire for**: pure modifications to existing files (edit, refactor, fix bug, add tests for existing surface, rename, format).
+
+**Workflow**:
+
+```
+1. LOCATE the task POML that authorized the change:
+   - Look up by branch name pattern or by PR description reference to TASK-INDEX
+   - If multiple tasks contributed, check each task's POML in turn
+
+2. READ the <justification> element from the task POML:
+   IF <justification> missing AND new-component scope present:
+     → flag as code-review WARNING (severity proportional to surface):
+       - New file in shared lib OR new endpoint → HIGH
+       - New DI registration OR new package → HIGH
+       - New internal helper / private class → LOW
+     → cite root CLAUDE.md §11 + task-create Step 3.5.6 as the rule source
+     → recommend: add <justification> retroactively before merge
+
+3. VERIFY the three answers are concrete:
+
+   a. <existing>: must cite a file:line found via Grep, OR show the grep command + "no matches" output.
+      - "None" with no grep evidence → WARNING (lazy answer)
+      - "Similar to FooService but different in X" without file:line → SUGGESTION (sharpen)
+
+   b. <extension>: must be a yes/no with reason. Acceptable reasons include:
+      - "Existing X uses lookup-by-name; this needs lookup-by-id; signatures incompatible"
+      - "Existing X is in CRUD namespace; new component must live in AI facade per ADR-013"
+      - "Existing X is sync; this requires async stream signature"
+      NOT acceptable: "cleaner separation", "for testability", "to avoid coupling"
+      → if extension reason is hollow → WARNING
+
+   c. <cost-of-doing-nothing>: must name a concrete behavior, contract, or failure mode:
+      - "Without this, callers cannot resolve playbooks by stable ID; name-resolution breaks on rename"
+      - "Without this, the new endpoint returns 200 with raw exception text instead of RFC 7807 ProblemDetails"
+      NOT acceptable: "scalability", "abstraction layer", "future flexibility", "best practice"
+      → if cost-of-doing-nothing is abstract → WARNING
+
+4. IF any of (a), (b), (c) is hollow / boilerplate / abstract:
+   → flag as code-review SUGGESTION to revisit scope before merge
+   → if all three are hollow → escalate to WARNING
+
+5. PASS through to Step 7 (technology-specific checks) once justification quality verified.
+```
+
+**Anti-patterns to flag**:
+
+| Pattern | Severity |
+|---|---|
+| New file with no task POML reference findable | WARNING |
+| Justification missing entirely | WARNING |
+| `<existing>` says "none" without grep evidence | WARNING |
+| `<extension>` reason is "cleaner separation" or similar abstract framing | WARNING |
+| `<cost-of-doing-nothing>` is "scalability" / "future flexibility" / "abstraction layer" | WARNING |
+| `<cost-of-doing-nothing>` doesn't name a concrete behavior or contract | WARNING |
+| 8+ new components in one PR with collective justification (instead of per-component) | WARNING |
+
+**Why this gate matters**: BFF Hygiene §10 catches scope creep into the BFF specifically. §11 catches it everywhere — shared libs, PCFs, code pages, plugins, Dataverse columns. The chat-routing-redesign-r1 project produced three real-world failures of this gate (LegalWorkspace dead-code misreading, sprk_playbookcode field choice, 8-tool surface) — all caught only after they shipped. This step catches them at PR review.
+
+See: root [`CLAUDE.md` §11](../../../CLAUDE.md) for the principle; [`.claude/skills/task-create/SKILL.md` Step 3.5.6](../task-create/SKILL.md) for the authoring-time gate.
+
 ### Step 7: Technology-Specific Checks
 
 #### For .NET Code (.cs)

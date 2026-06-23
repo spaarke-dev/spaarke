@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Rename commandIntent wire-format per Q5 (coordinated FE+BE)</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020,021</dependencies>
+    <blocks>023,024</blocks>
+    <tags>bff-api, frontend, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Coordinated FE+BE wire-format rename; tags span both layers; cross-cutting refactor needs FULL rigor + quality gates</rigor-reason>
+    <parallel-group>1-G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>FE and BE must change in lockstep; if one ships before the other, requests on the wire break. Single agent owns the atomic FE+BE rename commit.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Rename the `commandIntent` field on the chat request wire-format to match its purpose per spec §Unresolved-Questions Q5 (suggested names: `intentHint`, `dispatchBias`, `routingHint`). Per FR-07 there is NO backward-compat — both frontend (SoftSlashRouter + chat request body) AND backend (request DTO + handler) flip in one atomic commit. Per FR-20 the renamed field semantically becomes a vector-query bias parameter to Phase B in Phase 5 — this task ONLY renames; Phase 5 wires the bias logic.
+  </prompt>
+
+  <role>SPAARKE platform full-stack developer. Expert in coordinated wire-format changes spanning React (SoftSlashRouter) + ASP.NET Core (chat request DTO).</role>
+
+  <goal>
+    The chat request wire-format field formerly named `commandIntent` is renamed to the owner-confirmed new name. Frontend (`SoftSlashRouter.ts` + chat request builders) emits the new name; backend chat endpoint DTO + handler reads the new name. Old name removed everywhere (no back-compat alias). Owner-decision recorded in handoff note. Integration test asserts wire round-trip.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-07 + Owner Clarification Q5 ("no back-compat needed") + Unresolved Question on target name. The original `commandIntent` is a slash-command bias signal sent from frontend to backend; the new name should reflect "intent hint" / "dispatch bias" semantics. Phase 5 (task 115) will WIRE the renamed field as a vector-query bias to Phase B classification; this task ONLY renames the field — no behavior change yet.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/SoftSlashRouter.ts</file>
+      <file>src/solutions/SpaarkeAi/src/ (chat request builders)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/Chat/ (chat endpoint + DTO)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (handler consuming the DTO field)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ (regression tests)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Backend endpoint DTO uses minimal-API `[FromBody]` binding; rename property + matching JSON attribute.</constraint>
+    <constraint source="ADR-010">No new DI changes.</constraint>
+    <constraint source="ADR-015">Renamed field is a routing-bias hint, not user content; tier-1 safe for telemetry.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-07 acceptance: field name reflects "intent hint" semantics; backend treats as vector-query bias parameter to Phase B (Phase 5 wires the behavior — this task only renames).</constraint>
+    <constraint source="spec">No backward-compatibility alias allowed (Q5: "no back-compat needed"). FE + BE flip atomically in one commit.</constraint>
+    <constraint source="project">Confirm the renamed field name with owner BEFORE editing — Unresolved-Question item from spec. Document the chosen name in `notes/handoffs/022-commandintent-rename-decision.md`.</constraint>
+    <constraint source="project">DO NOT add Phase B vector-query bias behavior — that is Phase 5 task 115. This task only renames the field; the field is forwarded through the existing pipeline unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm the renamed field name with owner (escalate per CLAUDE.md §6 Human Escalation if not yet resolved). Suggested: `intentHint`. Document decision in `notes/handoffs/022-commandintent-rename-decision.md`.</step>
+    <step order="2">Grep for ALL occurrences of `commandIntent` across `src/` (FE + BE). Build a complete inventory.</step>
+    <step order="3">Backend: rename DTO property + `[JsonPropertyName]` attribute + handler consumer + any logging tag. Update `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` fixtures.</step>
+    <step order="4">Frontend: rename `SoftSlashRouter.ts` field emission + any chat request builders consuming it.</step>
+    <step order="5">Update `tests/vitest/.../SoftSlashRouter.test.ts` (if exists) — assert new field name on serialized request body.</step>
+    <step order="6">Add integration test asserting frontend → backend wire round-trip uses the new name; old name produces 400 (or is silently ignored — confirm with owner).</step>
+    <step order="7">Build BFF + affected frontend solutions. All pass.</step>
+    <step order="8">Run `dotnet test` + Vitest. Pass.</step>
+    <step order="9">Measure BFF publish size; report delta.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 022 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Inventory all `commandIntent` references across src/</tool>
+    <tool name="Read">Backend DTO + frontend SoftSlashRouter</tool>
+    <tool name="Edit">Rename across all sites</tool>
+    <tool name="Bash">dotnet build / test / publish + npm install + npm run build / test</tool>
+    <tool name="Write">Decision handoff note</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/Chat/ — DTO + handler renamed</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/SoftSlashRouter.ts — field renamed</output>
+    <output type="code">src/solutions/SpaarkeAi/src/ — chat request builders renamed (all sites)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ — DTO fixtures updated</output>
+    <output type="test">tests/integration/.../ChatRequestWireFormatTests.cs — round-trip test asserting new field name</output>
+    <output type="docs">notes/handoffs/022-commandintent-rename-decision.md — owner-confirmed new name</output>
+    <output type="docs">notes/handoffs/022-bff-publish-delta.md</output>
+  </outputs>
+
+  <ui-tests>
+    <test type="console-error">SpaarkeAi chat surface must render with zero console errors after rename — confirms request body wire-format change didn't break serialization.</test>
+    <test type="dark-mode">Per ADR-021, verify dark-mode unchanged.</test>
+    <test type="interaction-smoke">Issue a slash command (e.g., `/summarize`) in chat; verify the network request body carries the new field name and a chat response is received (rename is wire-only; no behavior change).</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "commandIntent" src/` returns zero matches across FE + BE.</criterion>
+    <criterion testable="true">New field name appears in DTO + handler + frontend emitter.</criterion>
+    <criterion testable="true">Integration test confirms FE → BE round-trip uses new name.</criterion>
+    <criterion testable="true">No behavior change — slash command flow produces same response as pre-rename.</criterion>
+    <criterion testable="true">`dotnet build` + frontend builds exit 0.</criterion>
+    <criterion testable="true">Tests exit 0.</criterion>
+    <criterion testable="true">Decision handoff note documents the chosen name + rationale.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe FALSE because FE and BE must flip in one atomic commit — no back-compat alias allowed per FR-07. A single agent owns the cross-stack rename. If the chosen name is not yet owner-confirmed at task start, ESCALATE per CLAUDE.md §6 with the three suggested options.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

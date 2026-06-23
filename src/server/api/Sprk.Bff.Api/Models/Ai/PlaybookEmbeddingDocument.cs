@@ -80,8 +80,32 @@ public class PlaybookEmbeddingDocument
     public IList<string> Tags { get; set; } = [];
 
     /// <summary>
+    /// Raw JSON content from the Dataverse <c>sprk_jps_matching_metadata</c> Memo column
+    /// (added by chat-routing-redesign-r1 task 031). Optional; null/empty means the
+    /// playbook has not been backfilled with JPS matching metadata yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This field is NOT persisted in the AI Search index — it is a transient input to
+    /// <see cref="PlaybookEmbedding.PlaybookEmbeddingService.ComposeContentText"/>, which
+    /// tolerantly parses it to append <c>documentTypes</c>, <c>intents</c>, and
+    /// <c>triggerPhrases</c> arrays to the embed-input string per spec FR-10.
+    /// </para>
+    /// <para>
+    /// Marked <see cref="JsonIgnoreAttribute"/> so it never round-trips through Azure AI
+    /// Search serialization. Tolerant parse semantics: null / missing / malformed JSON
+    /// falls back to baseline composition (no exception bubble; warning logged once with
+    /// playbook ID per ADR-015 — never the JSON content itself).
+    /// </para>
+    /// </remarks>
+    [JsonIgnore]
+    public string? JpsMatchingMetadata { get; set; }
+
+    /// <summary>
     /// Vector embedding of the playbook content (3072 dimensions, text-embedding-3-large).
-    /// Generated from: playbookName + description + triggerPhrases + tags.
+    /// Generated from: playbookName + description + triggerPhrases + tags
+    /// + (when present) documentTypes + intents + jpsTriggerPhrases parsed from
+    /// <see cref="JpsMatchingMetadata"/>.
     /// </summary>
     [VectorSearchField(VectorSearchDimensions = 3072, VectorSearchProfileName = "playbook-vector-profile")]
     [JsonPropertyName("contentVector3072")]

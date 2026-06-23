@@ -1,7 +1,9 @@
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Models;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
@@ -13,21 +15,46 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// platform (via the <see cref="IWorkspacePrefillAi"/> public facade) for analysis.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Follows refined ADR-013 (2026-05-20, task 046): AI playbook execution flows through
 /// the <see cref="IWorkspacePrefillAi"/> public facade — no direct injection of
 /// AI-internal orchestration or completion-client types into CRUD code.
 /// Follows ADR-010: Concrete registration, no unnecessary interface seam.
-///
+/// </para>
+/// <para>
 /// The service maps an entity type and entity ID to an <see cref="AiSummaryResponse"/>
 /// containing analysis text, suggested actions, and confidence score.
-///
+/// </para>
+/// <para>
 /// Supported entity types:
 /// - <c>sprk_event</c>  — Updates Feed items and To-Do items
 /// - <c>sprk_matter</c> — Matter-level context
 /// - <c>sprk_project</c> — Project-level context
 /// - <c>sprk_document</c> — Document analysis
-///
+/// </para>
+/// <para>
+/// <b>FR-02 stable-ID resolution</b> (chat-routing-redesign-r1 task 018, Wave 1-E
+/// Pattern A migration): the prior hardcoded
+/// <c>18cf3cc8-02ec-f011-8406-7c1e520aa4df</c> GUID constant (DEV "Document Profile"
+/// playbook, <c>sprk_playbookcode=PB-002</c>) and the raw
+/// <c>IConfiguration["Workspace:AiSummaryPlaybookId"]</c> indexer read have both been
+/// removed. The playbook is now resolved at runtime by looking up
+/// <see cref="WorkspaceOptions.AiSummaryPlaybookId"/> (typed-options per ADR-018)
+/// through <see cref="IPlaybookLookupService.GetByIdAsync"/>, which queries the
+/// <c>sprk_playbookid</c> alternate key on <c>sprk_analysisplaybook</c>
+/// (Q&amp;A 2026-06-22 Q1) with 1-hour caching (ADR-014).
+/// </para>
+/// <para>
+/// Empty / missing config is tolerated here (unlike the chat /summarize convergence
+/// point in <c>SessionSummarizeOrchestrator</c>): if the lookup fails for any reason
+/// the existing fallback-response path is taken so the workspace summary tile still
+/// renders a placeholder rather than 500-ing. Per-environment configuration values
+/// for <c>Workspace:AiSummaryPlaybookId</c> are populated at deploy time
+/// (DEV: <c>18cf3cc8-02ec-f011-8406-7c1e520aa4df</c>).
+/// </para>
+/// <para>
 /// TODO (future tasks): Replace mock Dataverse fetch with real IDataverseService queries.
+/// </para>
 /// </remarks>
 public sealed class WorkspaceAiService
 {
@@ -35,13 +62,8 @@ public sealed class WorkspaceAiService
     private readonly IGenericEntityService _genericEntityService;
     private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<WorkspaceAiService> _logger;
-    private readonly IConfiguration _configuration;
-
-    /// <summary>
-    /// Default playbook ID for workspace AI summaries. Override via Workspace:AiSummaryPlaybookId.
-    /// </summary>
-    private static readonly Guid DefaultAiSummaryPlaybookId =
-        Guid.Parse("18cf3cc8-02ec-f011-8406-7c1e520aa4df");
+    private readonly IPlaybookLookupService _playbookLookup;
+    private readonly IOptions<WorkspaceOptions> _workspaceOptions;
 
     private static readonly HashSet<string> SupportedEntityTypes =
         new(StringComparer.OrdinalIgnoreCase)
@@ -59,13 +81,15 @@ public sealed class WorkspaceAiService
         IGenericEntityService genericEntityService,
         IDocumentDataverseService documentService,
         ILogger<WorkspaceAiService> logger,
-        IConfiguration configuration,
+        IPlaybookLookupService playbookLookup,
+        IOptions<WorkspaceOptions> workspaceOptions,
         IWorkspacePrefillAi? prefillAi = null)
     {
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
+        _workspaceOptions = workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions));
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
 
@@ -312,10 +336,42 @@ public sealed class WorkspaceAiService
         HttpContext httpContext,
         CancellationToken ct)
     {
-        var playbookIdStr = _configuration["Workspace:AiSummaryPlaybookId"];
-        var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
-            ? parsed
-            : DefaultAiSummaryPlaybookId;
+        // FR-02 stable-ID resolution (chat-routing-redesign-r1 task 018, Wave 1-E
+        // Pattern A): resolve the AI summary playbook GUID at runtime via the
+        // stable-ID alternate key (sprk_playbookid) per Q&A 2026-06-22 Q1,
+        // replacing the prior hardcoded 18cf3cc8-02ec-f011-8406-7c1e520aa4df
+        // DEV "Document Profile" GUID. The lookup service caches results for
+        // 1 hour (ADR-014); per-environment values come from WorkspaceOptions.
+        // Unlike the chat /summarize convergence point in SessionSummarizeOrchestrator
+        // (FR-26), workspace AI summaries gracefully degrade to a template response
+        // when config is missing or lookup fails — the tile must still render
+        // rather than 500 (BuildFallbackResponse contract preserved).
+        var configuredPlaybookId = _workspaceOptions.Value.AiSummaryPlaybookId;
+        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        {
+            _logger.LogWarning(
+                "Workspace:AiSummaryPlaybookId is not configured. Falling back to template " +
+                "response. EntityType={EntityType}, EntityId={EntityId}",
+                request.EntityType, request.EntityId);
+            return BuildFallbackResponse(request);
+        }
+
+        Guid playbookId;
+        try
+        {
+            var playbook = await _playbookLookup
+                .GetByIdAsync(configuredPlaybookId, ct)
+                .ConfigureAwait(false);
+            playbookId = playbook.Id;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Failed to resolve AI summary playbook via stable ID '{ConfiguredPlaybookId}'. " +
+                "Falling back to template response. EntityType={EntityType}, EntityId={EntityId}",
+                configuredPlaybookId, request.EntityType, request.EntityId);
+            return BuildFallbackResponse(request);
+        }
 
         var playbookRequest = new PlaybookRunRequest
         {

@@ -142,21 +142,27 @@ const SEARCH_DEBOUNCE_MS = 150;
 /**
  * Build the active-todo $select+$filter query targeting `sprk_todo`.
  *
- * Per R4 spec FR-02 + UAT 2026-06-19 assigned-to migration:
+ * Per R4 spec FR-02 + UAT 2026-06-20 assigned-to migration:
  *   - statecode eq 0
  *   - statuscode in (Open, In Progress)
  *   - regarding context filter (when supplied)
  *   - assignee filter (when supplied and no regarding context) —
- *     `_sprk_assignedto_value` is now a CONTACT lookup (was systemuser).
- *     Callers must resolve their systemuser → sprk_contact via
- *     useCurrentContactId hook and pass `contactId` here. Passing a raw
- *     systemuser GUID will produce zero matches.
+ *     `_sprk_assignedto_value` is now an OOB **contact** lookup (was systemuser).
+ *     Callers must resolve their systemuser → contact via useCurrentContactId
+ *     hook and pass `contactId` here. Passing a raw systemuser GUID will
+ *     produce zero matches.
+ *
+ * SECURITY (UAT 2026-06-20): when there is NO regarding context AND NO
+ * contactId (e.g., user has no contact link), returns a query that yields
+ * **zero rows** — NOT a fallback to all active sprk_todos system-wide.
+ * Showing other people's todos to an unauthenticated/unresolved user is a
+ * data-isolation breach. The caller surfaces "no records" instead.
  *
  * Zero `sprk_event` references. Zero `sprk_todoflag` references.
  */
 export function buildSmartTodoQuery(opts: {
   regardingContext?: IRegardingContext | null;
-  /** sprk_contact GUID — the current user's contact, NOT systemuser GUID. */
+  /** Contact GUID — the current user's contact (OOB), NOT systemuser GUID. */
   contactId?: string;
   businessUnitId?: string;
   scope?: 'my' | 'all';
@@ -198,7 +204,12 @@ export function buildSmartTodoQuery(opts: {
     contextClause = `_sprk_assignedto_value eq ${opts.contactId}`;
   }
 
-  const filter = contextClause ? `${contextClause} and ${activeClause}` : activeClause;
+  // SECURITY: if no context clause was built (no regarding AND no contactId),
+  // force a zero-row filter rather than returning all active todos. See the
+  // SECURITY note in buildSmartTodoQuery's docblock.
+  const filter = contextClause
+    ? `${contextClause} and ${activeClause}`
+    : `sprk_todoid eq 00000000-0000-0000-0000-000000000000`;
   const orderby = 'sprk_priorityscore desc,sprk_duedate asc';
 
   return `?$select=${select}&$filter=${encodeURIComponent(filter)}&$orderby=${encodeURIComponent(orderby)}&$top=${top}`;
@@ -359,9 +370,13 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // multiple workspace contexts and forcing per-context Dataverse round-trips
   // would inflate cold-start time. The Code Page (which is the user's "Smart
   // To Do home") persists orientation via `useUserPreferences` (R4-071) —
-  // that's the canonical persistence point. Default 'horizontal' matches the
-  // Code Page default + the original app behaviour.
-  const [orientation, setOrientation] = React.useState<Orientation>('horizontal');
+  // that's the canonical persistence point.
+  //
+  // UAT 2026-06-20: WIDGET default is 'vertical' (Today on top, Tomorrow in
+  // middle, Future on bottom — stacked rows). This matches the widget's
+  // typical narrow workspace pane. The Code Page default remains
+  // 'horizontal' (columns side-by-side) because it gets full viewport width.
+  const [orientation, setOrientation] = React.useState<Orientation>('vertical');
 
   // SearchBox — local controlled value debounced into `appliedQuery` which
   // drives the in-memory filter.
@@ -420,9 +435,18 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   const { contactId, contactName, isLoading: isContactLoading } = useCurrentContactId({ webApi, userId });
 
   // Track the resolved contact GUID separately from the user-visible name.
-  // Display = name; internal payload = GUID. User can clear the field to
-  // unassign, or in a future iteration we can wire a real lookup picker.
+  // Display = name; internal payload = GUID. Selection comes from the
+  // typeahead dropdown below (UAT 2026-06-20 round 4 — replaced the plain
+  // Input with a search-as-you-type contact picker).
   const [quickAddAssignedToContactId, setQuickAddAssignedToContactId] = React.useState<string>('');
+
+  // UAT 2026-06-20 round 4 — typeahead state for the Assigned To picker.
+  // Search the OOB `contact` entity by fullname; user picks from a small
+  // floating result list. Selection sets BOTH the display name AND the
+  // internal contactId used for the @odata.bind on quick-add submit.
+  const [assignedToResults, setAssignedToResults] = React.useState<Array<{ id: string; name: string }>>([]);
+  const [isSearchingContacts, setIsSearchingContacts] = React.useState<boolean>(false);
+  const [showAssignedToResults, setShowAssignedToResults] = React.useState<boolean>(false);
 
   React.useEffect(() => {
     // Track the contactId internally for the bind, but DON'T pre-fill the
@@ -627,9 +651,82 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   const handleQuickAddAssignedToChange = React.useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
       setQuickAddAssignedTo(data.value);
+      // Typing changes the display string; previous selection's contactId
+      // is no longer valid unless the user picks again or the text exactly
+      // re-matches. Clear it to avoid silently binding the wrong contact.
+      if (data.value.trim() === '') {
+        setQuickAddAssignedToContactId(contactId ?? '');
+      } else {
+        setQuickAddAssignedToContactId('');
+      }
     },
-    []
+    [contactId]
   );
+
+  // UAT 2026-06-20 round 4 — debounced typeahead search of the OOB `contact`
+  // entity. Fires when the user types 2+ chars, queries `contains(fullname,
+  // '<q>')`, and surfaces up to 8 matches in a dropdown. On selection, sets
+  // both the visible name AND the internal contactId.
+  React.useEffect(() => {
+    const q = quickAddAssignedTo.trim();
+    if (q.length < 2 || !webApi.retrieveMultipleRecords) {
+      setAssignedToResults([]);
+      setShowAssignedToResults(false);
+      setIsSearchingContacts(false);
+      return;
+    }
+    // If the current text exactly matches the previously selected name, no
+    // need to re-query (avoids the user's selection getting wiped on focus).
+    if (contactName && q === contactName.trim()) {
+      setShowAssignedToResults(false);
+      return;
+    }
+    let cancelled = false;
+    setIsSearchingContacts(true);
+    const handle = window.setTimeout(() => {
+      // OData single-quote escape (' → '') is required to keep the filter
+      // valid when a user types a name with an apostrophe.
+      const escaped = q.replace(/'/g, "''");
+      const url = `?$select=contactid,fullname&$filter=statecode eq 0 and contains(fullname,'${encodeURIComponent(escaped)}')&$top=8&$orderby=fullname asc`;
+      webApi.retrieveMultipleRecords!('contact', url)
+        .then(result => {
+          if (cancelled) return;
+          const entities = (result.entities ?? []) as Array<{ contactid?: string; fullname?: string }>;
+          const mapped = entities
+            .filter(e => !!e.contactid && !!e.fullname)
+            .map(e => ({ id: e.contactid as string, name: e.fullname as string }));
+          setAssignedToResults(mapped);
+          setShowAssignedToResults(true);
+          setIsSearchingContacts(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setAssignedToResults([]);
+          setShowAssignedToResults(false);
+          setIsSearchingContacts(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [quickAddAssignedTo, webApi, contactName]);
+
+  const handleSelectAssignedTo = React.useCallback((id: string, name: string) => {
+    setQuickAddAssignedTo(name);
+    setQuickAddAssignedToContactId(id);
+    setShowAssignedToResults(false);
+  }, []);
+
+  const handleAssignedToBlur = React.useCallback(() => {
+    // Hide on blur, but defer so a click on a result still registers (click
+    // fires after blur in some browsers).
+    window.setTimeout(() => setShowAssignedToResults(false), 150);
+  }, []);
+
+  const handleAssignedToFocus = React.useCallback(() => {
+    if (assignedToResults.length > 0) setShowAssignedToResults(true);
+  }, [assignedToResults.length]);
 
   const submitQuickAdd = React.useCallback(async () => {
     const title = quickAddTitle.trim();
@@ -642,20 +739,24 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     setIsQuickAdding(true);
     setQuickAddError(null);
 
-    // Build payload from the three-field quick-add. Per UAT 2026-06-19
-    // assigned-to migration, `sprk_assignedto` now targets sprk_contact
-    // (NOT systemuser). Bind format must use `/sprk_contacts(GUID)` and
-    // the GUID must be a sprk_contact ID — for "assigned to me" we use the
-    // resolved contactId from useCurrentContactId. The quickAddAssignedTo
-    // text field can override (when user types a different contact GUID).
+    // Build payload from the three-field quick-add. Per UAT 2026-06-20
+    // assigned-to migration, `sprk_assignedto` targets the OOB `contact`
+    // entity (NOT systemuser, NOT a custom sprk_contact). Bind set name is
+    // `contacts`. For "assigned to me" we use the resolved contactId from
+    // useCurrentContactId. The quickAddAssignedTo picker overrides when the
+    // user selects a different contact.
     const payload: Record<string, unknown> = { sprk_name: title };
-    // Use the internal contactId (not the display name) for the bind. If the
-    // user has cleared the Assigned To name field, fall back to contactId
-    // (still assigns to current user); if they cleared both, leave unassigned.
     const assignedToContactId =
       quickAddAssignedTo.trim() && quickAddAssignedToContactId ? quickAddAssignedToContactId : contactId || '';
     if (assignedToContactId) {
-      payload['sprk_assignedto@odata.bind'] = `/sprk_contacts(${assignedToContactId})`;
+      // UAT 2026-06-22 round 13: bind key MUST be the navigation property
+      // name (PascalCase `sprk_AssignedTo`), not the lookup column logical
+      // name (lowercase `sprk_assignedto`). Dataverse rejects the lowercase
+      // form with: "An undeclared property 'sprk_assignedto' which only has
+      // property annotations in the payload but no property value was
+      // found in the payload." Verified via EntityDefinitions metadata:
+      // ReferencingEntityNavigationPropertyName = "sprk_AssignedTo".
+      payload['sprk_AssignedTo@odata.bind'] = `/contacts(${assignedToContactId})`;
     }
     if (quickAddDueDate) {
       // Date input gives YYYY-MM-DD; treat as end-of-day local.
@@ -841,15 +942,48 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
                 aria-label="Due date"
                 className={styles.quickAddDateInput}
               />
-              <Input
-                size="small"
-                value={quickAddAssignedTo}
-                onChange={handleQuickAddAssignedToChange}
-                placeholder="Assigned to"
-                disabled={isQuickAdding}
-                aria-label="Assigned to"
-                className={styles.quickAddAssignedInput}
-              />
+              <div className={styles.assignedToWrap}>
+                <Input
+                  size="small"
+                  value={quickAddAssignedTo}
+                  onChange={handleQuickAddAssignedToChange}
+                  onFocus={handleAssignedToFocus}
+                  onBlur={handleAssignedToBlur}
+                  placeholder="Assigned to"
+                  disabled={isQuickAdding}
+                  aria-label="Assigned to"
+                  aria-autocomplete="list"
+                  aria-expanded={showAssignedToResults}
+                  aria-controls="smart-todo-widget-assignedto-results"
+                  role="combobox"
+                />
+                {showAssignedToResults && (
+                  <div id="smart-todo-widget-assignedto-results" role="listbox" className={styles.assignedToResults}>
+                    {isSearchingContacts && <div className={styles.assignedToResultsHint}>Searching…</div>}
+                    {!isSearchingContacts && assignedToResults.length === 0 && (
+                      <div className={styles.assignedToResultsHint}>No contacts found</div>
+                    )}
+                    {!isSearchingContacts &&
+                      assignedToResults.map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          role="option"
+                          aria-selected={c.id === quickAddAssignedToContactId}
+                          className={styles.assignedToResultItem}
+                          // onMouseDown beats onBlur so the click registers
+                          // before the dropdown closes.
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            handleSelectAssignedTo(c.id, c.name);
+                          }}
+                        >
+                          {c.name}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
               <Tooltip content="Add to-do (Enter)" relationship="label">
                 <Button
                   appearance="primary"

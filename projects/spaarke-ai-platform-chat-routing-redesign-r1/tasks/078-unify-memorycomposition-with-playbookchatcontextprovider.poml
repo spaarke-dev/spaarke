@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Unify MemoryCompositionService with PlaybookChatContextProvider (no parallel pipelines per FR-27)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4c)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>074</dependencies>
+    <blocks>080</blocks>
+    <tags>bff-api, services, refactoring, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Refactors per-turn assembly hot path; tags include `bff-api`, `refactoring`; FR-27 + FR-45 invariants depend on this; coordinator role for wave 4-E</rigor-reason>
+    <parallel-group>4-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `MemoryCompositionService.cs` + `PlaybookChatContextProvider.cs` — peer 4-E tasks 076, 077, 079 author NEW separate files; no direct file overlap. ⚠️ This task is the integration coordinator for wave 4-E.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Unify `MemoryCompositionService` with `PlaybookChatContextProvider` per FR-27 (no parallel pipelines). Currently per architecture §4.3 + §11.2 there are two composition seams: (1) `MemoryCompositionService.ComposeAsync` (R6 4-layer composer) and (2) `PlaybookChatContextProvider.ProvideAsync` (which already calls `MatterMemoryService.ToSystemPromptFragmentAsync` at line 627 — FR-45 VERIFIED). This task makes the per-turn composer the single integrated seam consuming `LayeredContextCardBuilder` (076) + `TrustFrameInstructionInjector` (077) + `MemoryCompositionService.ComposeAsync` (existing R6) and preserves the FR-45 wiring at line 627.
+
+    **Binding invariant**: `PlaybookChatContextProvider.cs:627` MatterMemoryService invocation continues to fire. Task 080 enforces this via regression test.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in per-turn composition architecture + FR-45 invariant preservation + wave-coordinator role for integration changes.</role>
+
+  <goal>
+    Single composition flow:
+    `PlaybookChatContextProvider.ProvideAsync` orchestrates the static prefix (persona + matter memory @ line 627 + trust frame from 077 + layered cards from 076) + dynamic suffix (MemoryCompositionService.ComposeAsync — existing R6 4-layer with FR-42 pinned-never-drops). FR-45 wiring at line 627 preserved. Build + tests pass. Coordinator role: integrate the 3 peer-wave services' outputs (076, 077, 079) coherently.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-27: "no parallel pipelines." The R6 work shipped `MemoryCompositionService` (4-layer composer); the existing `PlaybookChatContextProvider` already calls `MatterMemoryService.ToSystemPromptFragmentAsync` at line 627 (architecture §11.1 — VERIFIED). Without unification, two parallel composition paths emerge. This task makes the context provider the single integration seam, calling `MemoryCompositionService` for dynamic suffix and embedding the new builders (076, 077) in the static prefix. Per CLAUDE.md "do not regress" — task 080 enforces FR-45 invariant.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryCompositionService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/LayeredContextCardBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/TrustFrameInstructionInjector.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SprkChatAgentFactory.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-27">No parallel pipelines — single composition flow.</constraint>
+    <constraint source="FR-45 (VERIFIED)">`PlaybookChatContextProvider.cs:627` MatterMemoryService invocation MUST continue to fire. Task 080 enforces.</constraint>
+    <constraint source="FR-42">Pinned-never-drops invariant — preserved through `MemoryCompositionService`'s existing logic.</constraint>
+    <constraint source="ADR-013">Service composition within `Services/Ai/`.</constraint>
+    <constraint source="ADR-014">Static prefix portion must be byte-stable across turns within a session (cache-hit support).</constraint>
+    <constraint source="ADR-015">Tier-1 logging only.</constraint>
+    <constraint source="ADR-029">Publish-size measurement.</constraint>
+    <constraint source="architecture §6.2">Static prefix (~6K tokens) cacheable; dynamic suffix (~5K) per-turn.</constraint>
+    <constraint source="project">Coordinator role — main session validates wave 4-E peers (076, 077, 079) complete before this task's integration step.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookChatContextProvider.cs` end-to-end. Confirm line 627 MatterMemoryService wiring; note exact call signature.</step>
+    <step order="2">Read `MemoryCompositionService.cs` to understand its current composition flow.</step>
+    <step order="3">Read peer wave 4-E outputs: `LayeredContextCardBuilder` (076) + `TrustFrameInstructionInjector` (077) + composition target (079).</step>
+    <step order="4">Inject `ILayeredContextCardBuilder` + `ITrustFrameInstructionInjector` into `PlaybookChatContextProvider` constructor (concrete-class binding per ADR-010).</step>
+    <step order="5">Refactor `ProvideAsync`:
+      - Preserve persona resolution + line 627 MatterMemoryService.ToSystemPromptFragmentAsync invocation (FR-45 invariant)
+      - Add trust-frame injection (077)
+      - Add layered context cards (076)
+      - Delegate dynamic suffix composition to `MemoryCompositionService.ComposeAsync`</step>
+    <step order="6">Remove any duplicate composition path that bypasses `MemoryCompositionService` (FR-27 single-pipeline).</step>
+    <step order="7">Verify line 627 still fires via re-read + grep: `grep -n "MatterMemoryService" src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs` returns the invocation at line ~627 (line may shift slightly).</step>
+    <step order="8">Run `dotnet build` + existing `PlaybookChatContextProviderTests` — all existing tests must pass.</step>
+    <step order="9">Measure BFF publish size.</step>
+    <step order="10">code-review + adr-check (Step 9.5).</step>
+    <step order="11">Update TASK-INDEX.md: 078 → ✅; wave 4-E coordinator complete.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookChatContextProvider + MemoryCompositionService + peer wave 4-E services</tool>
+    <tool name="Edit">Refactor ProvideAsync</tool>
+    <tool name="Grep">FR-45 invariant verification at line 627</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs (refactored to single pipeline)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryCompositionService.cs (touch only if needed to preserve FR-42 + remove duplicate path)</output>
+    <output type="docs">notes/handoffs/078-fr-45-line-verified.md — line number of MatterMemoryService invocation post-refactor</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`PlaybookChatContextProvider.ProvideAsync` invokes: persona + MatterMemoryService.ToSystemPromptFragmentAsync (FR-45) + TrustFrameInstructionInjector + LayeredContextCardBuilder + MemoryCompositionService.ComposeAsync — in that order.</criterion>
+    <criterion testable="true">FR-45 invariant: `grep "MatterMemoryService.ToSystemPromptFragmentAsync\|MatterMemoryService.ToSystemPrompt" src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs` returns 1+ hits.</criterion>
+    <criterion testable="true">No duplicate composition pipeline (FR-27).</criterion>
+    <criterion testable="true">FR-42 pinned-never-drops preserved through MemoryCompositionService.</criterion>
+    <criterion testable="true">`dotnet build` + existing PlaybookChatContextProviderTests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.2 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+    <criterion testable="true">FR-45 regression test (task 080) ready to consume.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Coordinator role for wave 4-E. Task 080 enforces the FR-45 invariant via a separate regression test (binding-invariant). If line 627 shifts during refactor, update notes/handoffs/078-fr-45-line-verified.md with new line number so task 080 can update its assertion.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -46,7 +46,12 @@ $Targets = @(
     @{ PlaybookName = 'Tasks Due Soon'; NodeName = 'Create Notification' }
 )
 
-$DueDateTemplate = '{{item.scheduledend}}'  # rendered by CreateNotificationNodeExecutor per R2.2
+# CORRECTED 2026-06-22: was '{{item.scheduledend}}' (OOB task field).
+# The DEPLOYED playbooks query `sprk_event`, which uses `sprk_duedate` for the
+# due date. The earlier patch was based on stale repo JSON that referenced the
+# OOB task entity. Using sprk_duedate makes the template render the actual
+# due-date value into customData.dueDate on each created appnotification.
+$DueDateTemplate = '{{item.sprk_duedate}}'
 
 $ApiBase = "$DataverseUrl/api/data/v9.2"
 

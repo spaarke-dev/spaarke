@@ -1,0 +1,108 @@
+<task id="005" project="pcf-orphan-cleanup-r1">
+  <metadata>
+    <title>VisualHost re-pin to React 16 (PR-D2) — deploy + smoke</title>
+    <phase>P5</phase>
+    <status>not-started</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <dependencies>004</dependencies>
+    <blocks>006</blocks>
+    <tags>pcf, react-types, visualhost, bucket-d, deploy, adr-022</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production PCF re-pin + redeploy. ADR-022 binding. Recent enhancements at risk if React 18 APIs were missed. FULL rigor per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>(sequential)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on Task 004 (PR-D1's peerDep range must be merged for PR-D2's type matrix to resolve cleanly).</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+  </metadata>
+
+  <prompt>
+    Re-pin VisualHost from React 18 type pins to React 16 type pins to match its platform-library runtime (per ADR-022). Follow [procedure §4.4 PR-D2](../../ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md#44-pr-d2--re-pin-visualhost-to-react-16) verbatim.
+
+    Two-file edit:
+    - [`src/client/pcf/VisualHost/package.json`](../../../src/client/pcf/VisualHost/package.json): `react ^18.2.0` → `^16.14.0`; `@types/react ^18.2.0` → `^16.14.60`
+    - [`src/client/pcf/VisualHost/control/ControlManifest.Input.xml`](../../../src/client/pcf/VisualHost/control/ControlManifest.Input.xml): bump version `1.4.16` → `1.4.17`
+
+    Then: clean install, build:prod, deploy to spaarkedev1, smoke-test ALL VisualHost features.
+
+    **Mandatory defensive re-verification**: re-run the React-18-API grep on VisualHost source BEFORE merging. 2026-06-22 audit returned zero hits; this gate catches any post-audit code change. Per NFR-05.
+  </prompt>
+
+  <role>PCF engineer performing a type-system re-pin on a deployed PCF with rigorous smoke-test of the full feature surface (including recent enhancements).</role>
+
+  <goal>
+    One merged PR + one successful deploy that:
+    - VisualHost `package.json` pins React 16 (matching platform-library runtime)
+    - Manifest version bumped to 1.4.17
+    - Deployed to spaarkedev1 with smoke-test pass covering: chart rendering, drill-through, MetricCard matrix layout, recent enhancements per commit b5b3118b1
+    - Closes bucket D from the chat-routing-redesign-r1 audit
+  </goal>
+
+  <inputs>
+    <file purpose="procedure-section">projects/ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md</file>
+    <file purpose="spec">projects/pcf-orphan-cleanup-r1/spec.md</file>
+    <file purpose="design">projects/pcf-orphan-cleanup-r1/design.md</file>
+    <file purpose="target-package">src/client/pcf/VisualHost/package.json</file>
+    <file purpose="target-manifest">src/client/pcf/VisualHost/control/ControlManifest.Input.xml</file>
+    <file purpose="deploy-guide">docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-05">VisualHost re-pin to React 16 type pins</constraint>
+    <constraint source="NFR-05">React-18-API grep re-verification pre-merge is MANDATORY</constraint>
+    <constraint source="ADR-022">PCF runtime is React 16.14.0 (platform-library); type pin must match</constraint>
+    <constraint source="D-04">Re-pin DOWN to React 16 (not UP to React 19) — matches runtime, preserves features</constraint>
+    <constraint source="FAILURE-MODES.md#AP-1">Use `npm run build:prod`, NOT `npm run build`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/pcf-orphan-cleanup-r1/notes/research-findings-2026-06-22.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">**Defensive re-verification** per NFR-05: `Select-String -Path "src\client\pcf\VisualHost\control\**\*.ts","src\client\pcf\VisualHost\control\**\*.tsx" -Pattern "\b(useId|useTransition|useDeferredValue|useSyncExternalStore|useInsertionEffect|createRoot|hydrateRoot|startTransition)\b"`. Expected: zero hits (confirmed 2026-06-22). ANY hit → STOP and reconcile.</step>
+    <step order="2">Edit `src/client/pcf/VisualHost/package.json`: change `"react": "^18.2.0"` → `"^16.14.0"`; change `"@types/react": "^18.2.0"` → `"^16.14.60"`.</step>
+    <step order="3">Edit `src/client/pcf/VisualHost/control/ControlManifest.Input.xml`: bump `version="1.4.16"` → `version="1.4.17"`.</step>
+    <step order="4">Clean install: `pushd src\client\pcf\VisualHost; Remove-Item -Recurse -Force node_modules; Remove-Item -Force package-lock.json; npm install --legacy-peer-deps --no-audit --no-fund; popd`.</step>
+    <step order="5">Production build: `pushd src\client\pcf\VisualHost; npm run build:prod; popd` (build:prod NOT build per FAILURE-MODES.md#AP-1).</step>
+    <step order="6">Bundle-size sanity: record `Solution\Controls\sprk_Spaarke.Visuals.VisualHost\bundle.js` file size before vs after. Must NOT grow >20% (would indicate React 16 isn't being externalized via platform-library).</step>
+    <step order="7">Deploy to spaarkedev1 per [PCF deployment guide](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md): pack solution, import via PAC CLI, publish all customizations.</step>
+    <step order="8">Smoke-test full VisualHost feature surface in spaarkedev1: (a) chart definitions render correctly on test pages, (b) drill-through opens the drill workspace, (c) MetricCard matrix layout displays per `chartDefinition.matrix` config, (d) recent enhancements per b5b3118b1 (whatever feature surface that commit added) work as designed. Document each smoke-test outcome in `notes/visualhost-smoke-test.md`.</step>
+    <step order="9">If smoke tests pass: commit per procedure §4.4 commit block; push branch; open PR with title `fix(pcf): re-pin VisualHost to React 16 type pins (match platform-library runtime, ADR-022)`.</step>
+    <step order="10">Quality gates per CLAUDE.md §8 FULL rigor: invoke `code-review` skill + `adr-check` skill (ADR-022 is the load-bearing ADR for this PR).</step>
+    <step order="11">Update [`current-task.md`](../current-task.md) + [`tasks/TASK-INDEX.md`](TASK-INDEX.md) (Task 005 → ✅ on merge + deploy).</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">React-18-API defensive re-verification</tool>
+    <tool name="Edit">VisualHost package.json + ControlManifest.Input.xml</tool>
+    <tool name="Bash">npm clean install + build:prod; PAC CLI deploy commands; `gh pr create`</tool>
+    <tool name="Write">notes/visualhost-smoke-test.md</tool>
+    <tool name="Skill">pcf-deploy (Step 7 deployment); code-review + adr-check (Step 10 quality gates)</tool>
+  </tools>
+
+  <outputs>
+    <output type="pr">One merged PR re-pinning VisualHost to React 16 type pins</output>
+    <output type="state-change">spaarkedev1 VisualHost: v1.4.16 → v1.4.17 deployed</output>
+    <output type="docs">notes/visualhost-smoke-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Defensive React-18-API grep on VisualHost source returns zero hits</criterion>
+    <criterion testable="true">`src/client/pcf/VisualHost/package.json` has `"react": "^16.14.0"` and `"@types/react": "^16.14.60"`</criterion>
+    <criterion testable="true">VisualHost manifest version = `1.4.17`</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds; bundle.js size growth < 20%</criterion>
+    <criterion testable="true">VisualHost v1.4.17 deployed to spaarkedev1 (Dataverse MCP query confirms)</criterion>
+    <criterion testable="true">Smoke tests pass for: charts, drill-through, MetricCard, recent enhancements per b5b3118b1</criterion>
+    <criterion testable="true">code-review + adr-check skills invoked and pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. FULL rigor (PCF re-pin + redeploy; Step 9.5 quality gates required; ADR-022 is binding).
+  </execution>
+</task>

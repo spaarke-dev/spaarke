@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="091" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>DI registration for 8 new tool handlers + supporting services in AiModule.cs (CRIT-4 fix)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>083,084,085,086,087,088,089,090</dependencies>
+    <blocks>092</blocks>
+    <tags>bff-api, di, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modifies `.cs` (AiModule.cs) but is small additive DI work; STANDARD per task-execute Step 0.5; ADR-010 + ADR-032 are the binding ADRs verified at code-review stage</rigor-reason>
+    <parallel-group>4-I</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single sequential task — modifies shared `Infrastructure/DI/AiModule.cs` and is the prerequisite for 092 (Seed-TypedHandlers update). Resolves CRIT-4 file overlap among the 8 handler tasks.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Register all supporting services consumed by the 8 new tool handlers (tasks 083–090) in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs`. The handlers themselves are AUTO-DISCOVERED via `AddToolHandlersFromAssembly` (no manual DI line per ADR-010), but the supporting services they depend on (`IMatterMemoryPromotionService` for task 088, `IUserPreferencesService` for task 089, `IOrgTemplatesService` for task 090, `IRecentlyDiscussedTracker` for task 085, plus any session-fact accessor extensions from task 086) require explicit registration. Verify via grep that every new dependency has a DI binding. Resolves CRIT-4 (file overlap risk: the 8 parallel handler tasks would each touch AiModule.cs if registrations were inlined).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in ADR-010 DI minimalism + ADR-032 Null-Object kill-switch pattern for feature-gated services.</role>
+
+  <goal>
+    `Infrastructure/DI/AiModule.cs` extended with concrete registrations for the supporting services introduced by tasks 083–090. Each new `AddSingleton`/`AddScoped` call documented in the module XML comment count (per ADR-010 ≤15 unconditional ceiling — track the new count + flag any conditional registrations). `dotnet build` passes. Build verification: integration smoke test starts the BFF host and resolves each of the 8 handler classes via DI without exception (asserts auto-discovery + supporting-service registration both work).
+  </goal>
+
+  <context>
+    <background>
+      Per TASK-INDEX CRIT-4: the 8 handler tasks (083–090) run in parallel and EACH would otherwise need to touch `AiModule.cs` to register their supporting service — file overlap. CRIT-4 inserts THIS task as the single sequential consolidator. Per architecture §4.4 NEW components list: `IMatterMemoryPromotionService`, `IRecentlyDiscussedTracker`, possibly `IUserPreferencesService`, possibly `IOrgTemplatesService` are NEW services that need DI binding. Per ADR-010 we use concrete-class registrations; per ADR-032 if any service is feature-gated, use Null-Object pattern (P1/P2/P3) — but the memory-subsystem services here are unconditional (memory is always on).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/PinnedContextRepository.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — register concrete classes; prefer `AddSingleton` for stateless services, `AddScoped` for tenant-scoped. Update the AiModule XML comment registration count + DI-budget tracking after additions.</constraint>
+    <constraint source="ADR-010">No `IServiceProvider.GetService&lt;T&gt;()` resolution in endpoint or handler signatures.</constraint>
+    <constraint source="ADR-013">Memory services live under `Services/Ai/Memory/`; injected directly into handlers (BFF-internal, not PublicContracts).</constraint>
+    <constraint source="ADR-029">≤+0.0 MB delta expected (DI wiring only).</constraint>
+    <constraint source="ADR-032">If any registration is feature-gated, use Null-Object Kill-Switch pattern per ADR-032 §F.1; do NOT introduce asymmetric registration anti-pattern. Memory-subsystem services here are UNCONDITIONAL — no feature flag — so ADR-032 P1 not triggered.</constraint>
+    <constraint source="project">bff-extensions.md placement justification: services live in `Services/Ai/Memory/` (already there for `MatterMemoryService` etc.); DI lives in the AiModule. Document this in PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `AiModule.cs` to understand the current registration list + XML-comment budget tracking; identify the right `AddXxx` insertion point.</step>
+    <step order="2">Enumerate new dependencies introduced by tasks 083–090:
+      - `IRecentlyDiscussedTracker` + impl (Redis-backed; consumed by 085)
+      - `IMatterMemoryPromotionService` + impl (consumed by 088; concrete from task 093)
+      - `IUserPreferencesService` + impl (if newly created in 089; consumed by 089)
+      - `IOrgTemplatesService` + impl (if newly created in 090; consumed by 090)
+      - Any session-fact accessor extension from 086.
+    </step>
+    <step order="3">For each new service, add the appropriate `AddSingleton` or `AddScoped` registration in `AiModule.cs` (after the existing memory-services block).</step>
+    <step order="4">Update the AiModule XML-comment "UNCONDITIONAL ... — N total" count to reflect the new registrations; document each new line per ADR-010 tracking convention.</step>
+    <step order="5">Author an integration smoke test at `tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Handlers/EightHandlersResolvableTests.cs` that builds a host scope and resolves each of the 8 new handler classes (083–090) — asserts both auto-discovery + supporting-service DI work end-to-end.</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/`. Must pass.</step>
+    <step order="7">Run grep across new handlers: `grep "IServiceProvider.GetService" src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/*Handler.cs` must return ZERO matches (ADR-010 enforcement).</step>
+    <step order="8">Measure BFF publish-size delta; write `notes/handoffs/091-bff-publish-delta.md` — expect ≤+0.0 MB (wiring only).</step>
+    <step order="9">Run code-review + adr-check.</step>
+    <step order="10">Update TASK-INDEX.md: 091 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">AiModule.cs + each new handler/service</tool>
+    <tool name="Edit">Add `AddSingleton`/`AddScoped` lines + update XML comment count</tool>
+    <tool name="Write">Integration smoke test</tool>
+    <tool name="Grep">Verify no `IServiceProvider.GetService` violations</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs (extended)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Handlers/EightHandlersResolvableTests.cs</output>
+    <output type="docs">notes/handoffs/091-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 8 handler classes resolvable via `serviceProvider.GetRequiredService&lt;HandlerType&gt;()` in the smoke test — no `InvalidOperationException`.</criterion>
+    <criterion testable="true">All new supporting services (`IRecentlyDiscussedTracker`, `IMatterMemoryPromotionService`, optionally `IUserPreferencesService`/`IOrgTemplatesService`) registered in AiModule.</criterion>
+    <criterion testable="true">AiModule XML-comment registration count updated to reflect new totals.</criterion>
+    <criterion testable="true">`grep "IServiceProvider.GetService" src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/*Handler.cs` returns ZERO matches.</criterion>
+    <criterion testable="true">No asymmetric-registration anti-pattern introduced (ADR-032 §F.1) — confirm via constraints/bff-extensions.md inspection.</criterion>
+    <criterion testable="true">`dotnet build` exits 0.</criterion>
+    <criterion testable="true">BFF publish delta reported (expected ≤+0.0 MB).</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    THIS IS A CONSOLIDATOR TASK per CRIT-4. Without this task, the 8 parallel handler tasks would each need to touch AiModule.cs and would conflict. Sequence: parallel handlers (083–090) author the dependent types in their own files; THIS task wires DI in one sequential commit. If a handler task introduced a feature-gated service (none expected here), apply ADR-032 P1/P2/P3 Null-Object pattern.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol; code-review + adr-check are not mandatory for STANDARD per task-execute Step 9.5 — but they ARE recommended given this touches AiModule.cs (which is hot-path DI). Run them anyway.</protocol>
+  </execution>
+</task>

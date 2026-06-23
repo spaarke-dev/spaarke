@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="098" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>ContextPane subscriber + Accept/Reject approval UI (consumes memory channel)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4e)</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>060,096</dependencies>
+    <blocks>099</blocks>
+    <tags>frontend, react, fluent-ui, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'frontend'+'react'+'fluent-ui'+'e2e-test'; new UI component subscribing to a new PaneEventBus channel; ADR-021 dark mode + ADR-030 v2 binding</rigor-reason>
+    <parallel-group>4-M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the ContextPane subscriber + Accept/Reject approval UI for the matter-memory promotion workflow per architecture §6.4 + spec FR-32. Subscribes via `usePaneEvent('memory', handler)` (the new `memory` channel added by task 060). On `promotion_pending` event, renders an inline notification (Fluent UI v9) with the `factSummary` (80-char preview) + matter context + Accept/Reject buttons. Accept → `POST /api/memory/promotions/{id}/approve` (task 094); Reject → `POST /api/memory/promotions/{id}/reject` (task 095). On `promotion_resolved` event, removes the corresponding notification. CROSS-WAVE dependency on task 060 (frontend `MemoryPaneEvent` type) AND task 096 (server-side dispatch site).
+  </prompt>
+
+  <role>SPAARKE platform frontend developer. Expert in React 18 + Fluent UI v9 + PaneEventBus subscriber pattern + ADR-021 dark mode.</role>
+
+  <goal>
+    A new component (e.g., `MemoryPromotionApprovalCard.tsx`) renders inline in the ContextPane when a `memory.promotion_pending` event arrives. Card displays `factSummary` + matter context label + Accept (primary) / Reject (secondary) Fluent UI v9 Buttons. Click handlers POST to the corresponding endpoint with `authenticatedFetch` per ADR-028 client contract. On `memory.promotion_resolved`, the card is removed. Supports ADR-021 dark mode (no theme regression). Component is wired into the existing ContextPaneController subscriber + render tree. End-to-end test (jest + RTL or equivalent harness) covers: pending event renders card; Accept click POSTs + removes card on resolved; Reject click POSTs + removes card on resolved; console-error-free dark-mode toggle.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.4 (frontend: ContextPaneController subscribes via `usePaneEvent('memory', handler)`; renders approval notification on `promotion_pending`), spec FR-32. ADR-030 v2 added the `memory` channel (task 060 added the `MemoryPaneEvent` discriminated union type). The component lives in the SpaarkeAi Code Page surface (canonical embedding host per `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT`).
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/ContextPane/ (existing controller + cards)</file>
+      <file>src/client/shared/@spaarke/events-components/src/PaneEventBus.ts (if shared)</file>
+      <file>src/client/shared/@spaarke/events-components/src/PaneEventTypes.ts (extended by task 060)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Dark mode supported — use Fluent UI v9 theme tokens, no hardcoded colors. No theme regression vs current ContextPane.</constraint>
+    <constraint source="ADR-028">Use `useAuth()` + `authenticatedFetch` from `@spaarke/auth` for the POST calls. Do NOT add manual `Authorization` headers; do NOT pass `accessToken` props.</constraint>
+    <constraint source="ADR-030">v2 — subscribe via `usePaneEvent('memory', handler)`; do NOT route memory events through `workspace.*`. Type-safe via the `MemoryPaneEvent` union (task 060).</constraint>
+    <constraint source="ADR-015">Component renders ONLY `factSummary` (already 80-char preview per ADR-015 server side); do NOT log full payload to console; do NOT persist event payload to sessionStorage.</constraint>
+    <constraint source="CLAUDE.md">Use `npm install --legacy-peer-deps --no-audit --no-fund` not `npm ci` for Vite-based SpaarkeAi build.</constraint>
+    <constraint source="architecture">§6.4 — UX shape: notification with Accept (primary) / Reject (secondary) buttons; on resolved event, card removed; on error, structured error displayed (do not silently swallow).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-021-dark-mode.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §6.4 (frontend section) + ADR-030 v2 (memory channel + type) + ADR-021 dark mode.</step>
+    <step order="2">Read existing ContextPane subscriber/controller files to identify the right insertion point + the canonical card component pattern in SpaarkeAi.</step>
+    <step order="3">Confirm task 060 has shipped `MemoryPaneEvent` discriminated union in `PaneEventTypes.ts` with at least `promotion_pending` + `promotion_resolved` variants.</step>
+    <step order="4">Author `MemoryPromotionApprovalCard.tsx` component:
+      - Props: `event: MemoryPaneEvent &amp; { type: 'promotion_pending' }`, `onAccept(): Promise&lt;void&gt;`, `onReject(): Promise&lt;void&gt;`.
+      - Renders `factSummary` (80-char) + matter context label + Accept/Reject Fluent UI v9 `&lt;Button&gt;`s.
+      - Pending state during POST (disable buttons + spinner).
+      - Error state on POST failure (toast + retry).
+    </step>
+    <step order="5">Update `ContextPaneController.tsx` (or equivalent) to subscribe to `usePaneEvent('memory', handler)`:
+      - On `promotion_pending` → add card to local state.
+      - On `promotion_resolved` → remove matching card by `promotionId`.
+      - Wire Accept/Reject button handlers to POST endpoints (`authenticatedFetch`).
+    </step>
+    <step order="6">Run `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build` in `src/solutions/SpaarkeAi/`. Must pass.</step>
+    <step order="7">Author UI tests (per `&lt;ui-tests&gt;` block below) using the harness used by other SpaarkeAi component tests.</step>
+    <step order="8">Run code-review + adr-check (Step 9.5 FULL).</step>
+    <step order="9">Update TASK-INDEX.md: 098 → ✅.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="renders-on-promotion-pending">
+      Dispatch a synthetic `memory.promotion_pending` event with payload `{ type: 'promotion_pending', promotionId: 'p1', factSummary: 'Counsel agreed to extend the contract deadline by 14 days', matterId: 'm1', sessionId: 's1' }`; assert `MemoryPromotionApprovalCard` is rendered with the factSummary text visible and BOTH `Accept` + `Reject` buttons present.
+    </test>
+    <test name="accept-click-posts-and-removes">
+      Mock `authenticatedFetch`; click Accept; assert POST to `/api/memory/promotions/p1/approve`; dispatch synthetic `memory.promotion_resolved { promotionId: 'p1', decision: 'approved' }`; assert card removed from DOM.
+    </test>
+    <test name="reject-click-posts-and-removes">
+      Mock `authenticatedFetch`; click Reject; assert POST to `/api/memory/promotions/p1/reject`; dispatch synthetic `memory.promotion_resolved { promotionId: 'p1', decision: 'rejected' }`; assert card removed from DOM.
+    </test>
+    <test name="payload-assertion">
+      Assert the consumed event payload shape matches `MemoryPaneEvent` discriminated union from task 060 (`type`, `promotionId`, `factSummary`, `matterId`, `sessionId`). TypeScript narrowing must compile without `as any` casts.
+    </test>
+    <test name="console-error-check">
+      Render component + dispatch the synthetic event; assert `console.error` is not called in any test path (clean rendering).
+    </test>
+    <test name="adr-021-dark-mode">
+      Render component in both light + dark Fluent themes via `FluentProvider`; assert visual snapshot diffs limited to expected theme-token swaps; no hardcoded color regressions.
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="Read">Existing ContextPane components + PaneEventTypes.ts</tool>
+    <tool name="Write">New card component + extended controller subscriber + tests</tool>
+    <tool name="Bash">npm install (legacy-peer-deps) + npm run build + npm test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ContextPane/MemoryPromotionApprovalCard.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ContextPane/ContextPaneController.tsx (extended subscriber + render)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/ContextPane/__tests__/MemoryPromotionApprovalCard.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Component renders on `memory.promotion_pending` event with factSummary + Accept/Reject buttons.</criterion>
+    <criterion testable="true">Accept click POSTs to approve endpoint via `authenticatedFetch`.</criterion>
+    <criterion testable="true">Reject click POSTs to reject endpoint via `authenticatedFetch`.</criterion>
+    <criterion testable="true">`memory.promotion_resolved` event removes the matching card.</criterion>
+    <criterion testable="true">No `console.error` during test paths.</criterion>
+    <criterion testable="true">Dark mode renders cleanly (ADR-021).</criterion>
+    <criterion testable="true">TypeScript build passes — `MemoryPaneEvent` narrowing without `as any`.</criterion>
+    <criterion testable="true">`grep "Authorization" src/solutions/SpaarkeAi/src/components/ContextPane/MemoryPromotionApprovalCard.tsx` returns ZERO matches (ADR-028 — no manual auth header).</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    CROSS-WAVE dependency: task 060 (frontend `MemoryPaneEvent` type) AND task 096 (server-side event source) must both be ✅ before dispatch. Main session validates before launching this task. The component lives in SpaarkeAi (the canonical embedding host) — if a more generic `@spaarke/events-components` location is appropriate, follow the dual-use pattern from SPAARKEAI-COMPONENT-MODEL.md. For this task scope, SpaarkeAi-local is sufficient.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5. ADR-021 + ADR-028 + ADR-030 v2 are binding.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase 3 exit gate — verify FR-14a through FR-14f satisfied</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>054</dependencies>
+    <blocks>060</blocks>
+    <tags>verification, gate</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Verification only; no source modification; MINIMAL per Step 0.5</rigor-reason>
+    <parallel-group>3-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify Phase 3 exit criteria: all WP3 destination-metadata FRs (FR-14a through FR-14f) satisfied per spec.md acceptance text. Capture summary in `notes/handoffs/055-phase-3-exit.md`. On any failure, do NOT advance to Phase 4 — file a remediation task.
+  </prompt>
+
+  <role>SPAARKE QA / project gatekeeper.</role>
+
+  <goal>
+    Documented confirmation that Phase 3 is complete: `NodeDestination.Both` enum value live; `DispatchResult` carries NodeDestination + WidgetType; `PlaybookDispatcher` populates both; 4 new `PlaybookOutputHandler` cases work end-to-end; validation gate operational; backward compat preserved.
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md Phase 3 acceptance + design §1.3. Exit-gate verification is a brief checklist run. Phase 4 (WP5 6-Tier Memory Subsystem) is the largest phase and depends on Phase 3 closure.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Every FR-14a through FR-14f acceptance criterion must be visibly satisfied.</constraint>
+    <constraint source="project">Phase 4 blocked by Phase 3 closure (4-A1 → 060 depends on 055 ✅).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">FR-14a: confirm `NodeDestination.Both` exists + JSON converter roundtrips "both" (task 045 acceptance).</step>
+    <step order="2">FR-14b: confirm `DispatchResult` carries NodeDestination + WidgetType with defaults; `dotnet build` passes without modifying callers (task 046 acceptance).</step>
+    <step order="3">FR-14c: re-run integration test from task 047 — dispatch `summarize-document-for-workspace` returns Workspace + structured-output-stream.</step>
+    <step order="4">FR-14d: confirm 4 new switch cases land in `PlaybookOutputHandler` (tasks 048-051); smoke each in dev environment.</step>
+    <step order="5">FR-14e: confirm Deploy-Playbook.ps1 validation gate aborts on malformed configJson (task 052 fixture dry-run).</step>
+    <step order="6">FR-14f: re-run regression test from task 053 — `Parse(null)` returns Chat default.</step>
+    <step order="7">Confirm BFF publish-size cumulative within NFR-01 thresholds.</step>
+    <step order="8">Summarize results in `notes/handoffs/055-phase-3-exit.md`. Mark each FR pass/fail.</step>
+    <step order="9">If all pass: update TASK-INDEX.md task 055 → ✅; Phase 3 complete; Phase 4 unblocked. If any fail: file remediation task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">spec.md acceptance criteria</tool>
+    <tool name="Bash">curl / PowerShell for endpoint smokes</tool>
+    <tool name="Write">exit-gate summary</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/055-phase-3-exit.md — FR-14a through FR-14f pass/fail summary</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 FRs (FR-14a through FR-14f) marked PASS in summary doc.</criterion>
+    <criterion testable="true">Any FAIL has corresponding remediation task filed.</criterion>
+    <criterion testable="true">BFF publish-size cumulative within NFR-01 thresholds.</criterion>
+    <criterion testable="true">TASK-INDEX.md reflects Phase 3 ✅ when all pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol.</protocol>
+  </execution>
+</task>
