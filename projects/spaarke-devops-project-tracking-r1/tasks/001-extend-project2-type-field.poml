@@ -1,9 +1,11 @@
 <task id="DEVOPS-001" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Extend GitHub Project #2 Type field with Project option</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>1</phase>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~15 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>github-project, schema, foundation, gh-cli</tags>
     <dependencies>none</dependencies>
     <parallel-group>P1-schema</parallel-group>

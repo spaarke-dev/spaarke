@@ -1,0 +1,53 @@
+name: Idea
+description: Capture a raw idea before it becomes a real project. No worktree or folder is created.
+title: "[Idea]: "
+labels: [backlog]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to capture an idea early. Ideas live in the backlog until promoted via `/devops-idea-promote` (Path A → 1 project, or Path B → packaged with other Ideas into 1 project).
+        Submitting this template does NOT create a local folder or worktree — that happens later via `/devops-project-start --from-issue #N` after promotion.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences describing the idea.
+      placeholder: "Add a shared progress dashboard so non-implementers can see what's running…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: why-it-matters
+    attributes:
+      label: Why It Matters
+      description: What problem does this idea solve? Who is affected?
+    validations:
+      required: false
+
+  - type: input
+    id: tentative-epic
+    attributes:
+      label: Tentative Epic
+      description: Issue # of the Epic this idea would likely roll up to (best guess; can change on promotion).
+      placeholder: e.g. "#42"
+    validations:
+      required: false
+
+  - type: input
+    id: originating-source
+    attributes:
+      label: Originating Source
+      description: Where did this idea come from? Conversation, ticket, retro, observation…
+      placeholder: e.g. "Stakeholder feedback on portfolio visibility"
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything else.
+    validations:
+      required: false

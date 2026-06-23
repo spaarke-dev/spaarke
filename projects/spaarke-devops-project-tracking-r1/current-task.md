@@ -1,32 +1,41 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-23 16:18
+> **Last Updated**: 2026-06-23
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
 
-<!-- This section is for FAST context restoration after compaction -->
-
 | Field | Value |
 |-------|-------|
-| **Task** | none — project scaffolded but tasks not yet generated |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Run `/project-pipeline` Step 3 to generate task POMLs via `task-create`, then start with `001` |
+| **Task** | Phase 1 complete (tasks 001–005, 008 ✅). Next: 010 (`/devops-portfolio-setup` skill) |
+| **Step** | — (between phases) |
+| **Status** | Phase boundary — awaiting user direction on Phase 2 |
+| **Next Action** | If user says "continue" → invoke task-execute on `tasks/010-create-devops-portfolio-setup.poml` |
 
 ### Files Modified This Session
-- `projects/spaarke-devops-project-tracking-r1/README.md` — Created — project overview + graduation criteria
-- `projects/spaarke-devops-project-tracking-r1/plan.md` — Created — WBS, phases, discovered resources, acceptance criteria
-- `projects/spaarke-devops-project-tracking-r1/CLAUDE.md` — Created — AI context, MUST rules, exemplar skill references
-- `projects/spaarke-devops-project-tracking-r1/current-task.md` — Created — this file
-- `projects/spaarke-devops-project-tracking-r1/tasks/.gitkeep` — Created — empty tasks folder placeholder
-- `projects/spaarke-devops-project-tracking-r1/notes/{debug,drafts,handoffs,spikes}/.gitkeep` — Created — notes subfolder placeholders
+- `.github/ISSUE_TEMPLATE/{epic,project,idea}.yml` — Created — Phase 1 task 004
+- `projects/spaarke-devops-project-tracking-r1/tasks/{001-005, 008}.poml` — Updated — completed metadata
+- `projects/spaarke-devops-project-tracking-r1/tasks/TASK-INDEX.md` — Updated — Phase 1 rows ✅
+- `projects/spaarke-devops-project-tracking-r1/notes/phase1-field-ids.md` — Created — Phase 2 needs these IDs
+- `projects/spaarke-devops-project-tracking-r1/notes/phase1-epic-issue-numbers.md` — Created — Phase 3 needs these
+- `projects/spaarke-devops-project-tracking-r1/notes/phase1-verify-report.md` — Created — GO recommendation
+- `projects/spaarke-devops-project-tracking-r1/notes/drafts/epic-descriptions.md` — Created — source for Epic bodies
+- `projects/spaarke-devops-project-tracking-r1/notes/spikes/phase1-task001-execution-log-2026-06-23.md` — Created — CRITICAL lesson
+- `projects/spaarke-devops-project-tracking-r1/notes/spikes/phase1-after-fr01-2026-06-23.json` — Created — snapshot
+- `projects/spaarke-devops-project-tracking-r1/notes/spikes/phase1-fields-after-fr02-2026-06-23.json` — Created — snapshot
+- `projects/spaarke-devops-project-tracking-r1/notes/spikes/create-epics.py` — Created — Issue creator helper
+- `projects/spaarke-devops-project-tracking-r1/notes/spikes/create-epics-output-2026-06-23.log` — Created — run log
 
 ### Critical Context
-Project artifacts scaffolded by `/project-pipeline` Steps 0–2 from a 31-FR / 10-NFR spec. Step 3 (task POML generation, ~42 tasks across 6 phases) is the next pipeline step. No mandatory ADRs; sub-agent write boundary applies to most Phase 2 + Phase 4 tasks (`.claude/skills/` paths). All 9 new skills must be idempotent (NFR-04) and follow Spaarke skill convention (NFR-07).
+
+**Phase 1 complete** (all 6 tasks) — Project #2 has the `Project` Type option, 6 new custom fields, 7 labels, 3 issue templates, and 12 Epic Issues (#421–#432) all with `Type=Epic`. **Phase 1 verify gate PASS** — see `notes/phase1-verify-report.md`.
+
+**CRITICAL FOR PHASE 2 task 010**: `updateProjectV2Field` mutation REPLACES option IDs (verified empirically in task 001). Future skill must implement snapshot → mutate → reconcile pattern. See `notes/spikes/phase1-task001-execution-log-2026-06-23.md` § "Required changes to task 010".
+
+**GitHub Project #2 IDs cached in `notes/phase1-field-ids.md`** — task 010 + every future `/devops-*` skill consumes these.
 
 ---
 
@@ -34,79 +43,73 @@ Project artifacts scaffolded by `/project-pipeline` Steps 0–2 from a 31-FR / 1
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
+| **Task ID** | none (between phases) |
 | **Task File** | — |
 | **Title** | — |
-| **Phase** | — |
-| **Status** | none |
+| **Phase** | Phase 2 ready to begin |
+| **Status** | not-started |
 | **Started** | — |
 
 ---
 
 ## Progress
 
-### Completed Steps
+### Completed Steps (Phase 1 summary)
 
-*No steps completed yet*
-
-### Current Step
-
-*No active step — project artifacts scaffolded; awaiting Pipeline Step 3 (task generation)*
-
-### Files Modified (All Task)
-
-*No task-scoped files modified yet*
+- [x] Task 001: Extend Project #2 Type field with `Project` option (2026-06-23)
+- [x] Task 002: Add 6 custom fields to Project #2 (2026-06-23)
+- [x] Task 003: Create 7 repository labels (2026-06-23)
+- [x] Task 004: Land 3 issue templates (2026-06-23)
+- [x] Task 005: Create 12 initial Epic Issues #421–#432 (2026-06-23)
+- [x] Task 008: Phase 1 verify gate — PASS (2026-06-23)
 
 ### Decisions Made
 
-*No task-scoped decisions recorded yet — see [`CLAUDE.md`](CLAUDE.md) "Decisions Made" section for project-level decisions inherited from spec.*
+- 2026-06-23 (task 001): User authorized live mutation against shared Project #2 — proceeded with `updateProjectV2Field` despite option-ID-reassignment risk; risk did not materialize (0 items had Type values to lose).
+- 2026-06-23 (task 004): UI smoke test deferred — issue templates only appear in GitHub "New Issue" picker on default branch; will verify on merge.
+- 2026-06-23 (task 005): Epic descriptions authored programmatically via `notes/spikes/create-epics.py`; user-refinable later.
 
 ---
 
 ## Next Action
 
-**Next Step**: Pipeline Step 3 — generate ~42 task POML files
+**Next Step**: Begin Phase 2 task 010 (`/devops-portfolio-setup` skill creation).
 
 **Pre-conditions**:
-- README.md, plan.md, CLAUDE.md, current-task.md exist ✅
-- tasks/ folder exists with .gitkeep ✅
-- notes/ subfolders exist ✅
-- spec.md committed ✅
-- design.md committed ✅
+- Phase 1 verify ✅
+- `notes/phase1-field-ids.md` available (field IDs for skill consumption)
+- `notes/spikes/phase1-task001-execution-log-2026-06-23.md` available (critical lesson on snapshot-mutate-reconcile pattern)
 
 **Key Context**:
-- `plan.md` Phase Breakdown is the input to `task-create`
-- ~42 tasks expected: Phase 1 (~6–8) + Phase 2 (9) + Phase 3 (~3–5) + Phase 4 (9) + Phase 5 (~5–7) + Phase 6 (~3–5) + deploy/verify gates + 090-wrap-up
-- Most Phase 2 + Phase 4 tasks must have `parallel-safe: false` (Sub-Agent Write Boundary)
-- Phase 6 doc tasks (modifying `docs/`) CAN be parallel-safe
+- Task 010 is **load-bearing** — codifies Phase 1 into an idempotent skill; all other `/devops-*` skills assume the schema this skill enforces
+- Per CLAUDE.md §3 (Sub-Agent Write Boundary), task 010 must run in main session (modifies `.claude/skills/devops-portfolio-setup/SKILL.md`)
+- Reference exemplar: `.claude/skills/worktree-setup/SKILL.md` (skill structure pattern)
 
 **Expected Output**:
-- `projects/spaarke-devops-project-tracking-r1/tasks/001-*.poml` through `090-project-wrap-up.poml`
-- `projects/spaarke-devops-project-tracking-r1/tasks/TASK-INDEX.md` — phases, parallel groups, dependencies
+- `.claude/skills/devops-portfolio-setup/SKILL.md` (new)
+- `.claude/skills/INDEX.md` (one new row)
+- Snapshot → mutate → reconcile pattern documented in skill Steps section
+- Idempotency smoke-test artifact in `notes/spikes/`
 
 ---
 
 ## Blockers
 
-**Status**: None
+**Status**: None (awaiting user "continue" or pause for direction)
 
 ---
 
 ## Session Notes
 
 ### Current Session
-- Started: 2026-06-23 16:00
-- Focus: `/project-pipeline` execution against scaffold-ready project
+- Started: 2026-06-23 (project-pipeline followed by task-execute)
+- Focus: Phase 1 implementation + verification
 
 ### Key Learnings
 
-- The `Sub-Agent Write Boundary` is the defining structural constraint of this project. Phase 2 (creating 9 new SKILL.md files) and Phase 4 (modifying 9 existing SKILL.md files) cannot be parallelized via sub-agents — main session sequential only. Phase 6 docs CAN be parallel.
-- ADR surface is genuinely sparse here. The pipeline's adr-aware enrichment found nothing mandatory; `adr-check` at Step 9.5 will be informational only for most tasks.
-- Phase 1 is hand-driven; Phase 2 task 010 (`/devops-portfolio-setup`) codifies and idempotently replays Phase 1.
-
-### Handoff Notes
-
-*No handoff notes — fresh session*
+- **API behavior**: `updateProjectV2Field` reassigns single-select option IDs on every mutation. The Spaarke `/devops-*` skill family must capture item-level snapshots before any Type/Status field mutation to enable reconciliation.
+- **Encoding**: Python scripts on Windows default to CP1252 — emojis/unicode crash stdout. Use plain ASCII for all `/devops-*` skill verification output.
+- **Deferred UI smoke**: Issue template picker only reads from default branch. Adapt skill smoke-test contracts accordingly.
 
 ---
 
@@ -114,40 +117,29 @@ Project artifacts scaffolded by `/project-pipeline` Steps 0–2 from a 31-FR / 1
 
 ### Project Context
 - **Project**: spaarke-devops-project-tracking-r1
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) (pending creation by `task-create`)
+- **CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
+- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) — 6/38 complete
+- **Phase 1 verify**: [`notes/phase1-verify-report.md`](./notes/phase1-verify-report.md)
 
 ### Applicable ADRs
+None mandatory (DevOps tooling + skill authoring + docs domain).
 
-**None mandatory.** Informational only:
-- ADR-010: DI Minimalism — would apply if any skill introduces .NET service code (not anticipated)
-
-### Knowledge Files Loaded
-
-*Will be populated when first task starts.* Reference list (from CLAUDE.md):
-- `.claude/skills/task-execute/SKILL.md` — hook-injection exemplar
-- `.claude/skills/worktree-setup/SKILL.md` — skill structure exemplar
-- `.claude/skills/design-to-spec/SKILL.md` — long-form skill exemplar
-- `.claude/skills/INDEX.md` — convention / frontmatter (NFR-07 binding)
+### Knowledge Files for Task 010
+- `.claude/skills/worktree-setup/SKILL.md` — skill exemplar
+- `.claude/skills/INDEX.md` — convention reference (NFR-07 binding)
+- `notes/phase1-field-ids.md` — field IDs the skill must hardcode/lookup
+- `notes/spikes/phase1-task001-execution-log-2026-06-23.md` — CRITICAL snapshot-mutate-reconcile design input
 
 ---
 
 ## Recovery Instructions
 
-**To recover context after compaction or new session:**
-
-1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
-2. **If more context needed**: Read Active Task and Progress sections
-3. **Load task file**: `tasks/{task-id}-*.poml`
-4. **Load knowledge files**: From task's `<knowledge>` section
-5. **Resume**: From the "Next Action" section
-
-**Commands**:
-- `/project-continue` — Full project context reload + master sync
-- `/context-handoff` — Save current state before compaction
-- "where was I?" — Quick context recovery
-
-**For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
+If resuming after compaction:
+1. Read Quick Recovery (above) — < 30 seconds
+2. Read `notes/phase1-verify-report.md` for Phase 1 summary
+3. Open `tasks/010-create-devops-portfolio-setup.poml` for next task
+4. Apply Critical Context lesson from above (snapshot-mutate-reconcile pattern)
+5. Resume with task-execute skill
 
 ---
 

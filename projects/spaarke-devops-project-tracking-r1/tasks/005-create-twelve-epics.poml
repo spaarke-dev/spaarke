@@ -1,9 +1,12 @@
 <task id="DEVOPS-005" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Create 12 initial Epic Issues per §4.6 taxonomy</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>1</phase>
     <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~20 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <notes>12 Epics created (#421-#432) via notes/spikes/create-epics.py. All have Type=Epic + label epic + populated bodies.</notes>
     <tags>github-issues, foundation, epics, taxonomy</tags>
     <dependencies>003, 004</dependencies>
     <parallel-group>none</parallel-group>

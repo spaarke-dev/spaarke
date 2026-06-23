@@ -1,9 +1,11 @@
 <task id="DEVOPS-003" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Create 7 repository labels for portfolio classification</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>1</phase>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>github-labels, foundation, gh-cli</tags>
     <dependencies>none</dependencies>
     <parallel-group>P1-schema</parallel-group>

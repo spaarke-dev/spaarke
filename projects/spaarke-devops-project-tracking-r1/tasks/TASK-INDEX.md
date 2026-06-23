@@ -1,8 +1,8 @@
 # Task Index — Spaarke DevOps Project Tracking (r1)
 
 > **Last Updated**: 2026-06-23
-> **Total Tasks**: 38
-> **Status**: 🔲 Not started (Phase 1 ready to begin)
+> **Total Tasks**: 38 (6 complete · 32 pending)
+> **Status**: 🔄 Phase 1 ✅ (foundation schema + 12 Epics landed) · Phase 2 next (skill authoring)
 
 ## Status Legend
 
@@ -32,12 +32,12 @@
 
 | # | Task | Effort | Dependencies | Parallel | Status |
 |---|------|--------|--------------|----------|--------|
-| 001 | Extend Project #2 Type field with `Project` option | 1h | none | P1-schema | 🔲 |
-| 002 | Add 6 new custom fields to Project #2 | 2h | 001 | P1-schema | 🔲 |
-| 003 | Create 7 repository labels | 1h | none | P1-schema | 🔲 |
-| 004 | Land 3 issue templates (epic.yml, project.yml, idea.yml) | 2h | none | P1-schema | 🔲 |
-| 005 | Create 12 initial Epic Issues per §4.6 taxonomy | 2h | 003, 004 | none | 🔲 |
-| 008 | **Phase 1 verify gate** — Foundation schema complete | 1h | 001, 002, 003, 004, 005 | none | 🔲 |
+| 001 | Extend Project #2 Type field with `Project` option | 1h | none | P1-schema | ✅ |
+| 002 | Add 6 new custom fields to Project #2 | 2h | 001 | P1-schema | ✅ |
+| 003 | Create 7 repository labels | 1h | none | P1-schema | ✅ |
+| 004 | Land 3 issue templates (epic.yml, project.yml, idea.yml) | 2h | none | P1-schema | ✅ |
+| 005 | Create 12 initial Epic Issues per §4.6 taxonomy | 2h | 003, 004 | none | ✅ |
+| 008 | **Phase 1 verify gate** — Foundation schema complete | 1h | 001, 002, 003, 004, 005 | none | ✅ |
 
 **Phase 1 Total**: ~9 hours · **Parallel opportunity**: tasks 001-004 in P1-schema can run in parallel (but they're all main-session-only `gh` invocations; user runs sequentially)
 
