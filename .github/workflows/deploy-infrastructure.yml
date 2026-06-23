@@ -62,13 +62,20 @@ jobs:
     name: Validate Bicep
     runs-on: ubuntu-latest
 
+    # Job-level env so AZURE_CONFIG_DIR propagates to every step (was previously
+    # scoped only to the "Setup Azure CLI config" step, causing az bicep lint to
+    # fall back to ~/.azure/azureProfile.json which doesn't exist on the runner —
+    # PermissionError / FileNotFoundError. Fixed 2026-06-23 in R3 PR #415; the
+    # bug was pre-existing on master but only triggered by PRs touching
+    # infrastructure/bicep/.
+    env:
+      AZURE_CONFIG_DIR: ${{ runner.temp }}/.azure
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Setup Azure CLI config
-        env:
-          AZURE_CONFIG_DIR: ${{ runner.temp }}/.azure
         run: |
           mkdir -p $AZURE_CONFIG_DIR
           echo '{}' > $AZURE_CONFIG_DIR/azureProfile.json
