@@ -1,0 +1,57 @@
+<task id="DEVOPS-039" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Phase 4 verify gate — 9 hooks active + no regressions</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>verify, phase-gate, hook-audit, regression-test</tags>
+    <dependencies>030, 031, 032, 033, 034, 035, 036, 037, 038</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Verify Phase 4 end-to-end per spec Success Criteria 6 + 12: all 9 hooked skills reference `/devops-project-sync` or `/devops-project-register` in their Steps section; no hooked skill has lost its existing contract behavior (regression test).
+  </prompt>
+
+  <role>QA engineer with regression-test mindset. The risk in Phase 4 is breaking existing skill contracts; this gate catches that.</role>
+
+  <goal>
+9 hooks verified active + 9 hooked skills pass their pre-hook acceptance behavior (no regression).
+  </goal>
+
+  <constraints>
+    <constraint source="spec Success Criterion 6">`grep -l "devops-project-sync\|devops-project-register" .claude/skills/{design-to-spec,project-pipeline,task-create,task-execute,context-handoff,worktree-setup,worktree-sync,repo-cleanup,merge-to-master}/SKILL.md` returns 9 lines</constraint>
+    <constraint source="spec Success Criterion 12">No regression in any hooked skill</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 030-038 all ✅.</step>
+    <step order="1" name="Reference audit">Run the spec Success Criterion 6 grep command. Expect 9 lines.</step>
+    <step order="2" name="Per-skill regression smoke">For each hooked skill, run a known-good invocation on a throwaway project. Compare to baseline (captured before hooks landed in Phase 4 start). Confirm: identical non-portfolio output; hook adds a single ✅ line.</step>
+    <step order="3" name="Failure-degrade verification">For each hook, simulate a failure (kill API access mid-call); confirm host skill still completes with ⚠️ warn (no block).</step>
+    <step order="4" name="Report">Write `notes/phase4-verify-report.md`. Per-hook pass/fail + regression result. Recommend GO/NO-GO for Phase 5.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Reference audit</tool>
+    <tool name="Skill">Regression smokes</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-devops-project-tracking-r1/notes/phase4-verify-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spec SC#6 grep returns exactly 9 lines</criterion>
+    <criterion testable="true">9/9 hooked skills pass regression smoke test</criterion>
+    <criterion testable="true">9/9 hooks fail gracefully (degrade-to-warn)</criterion>
+    <criterion testable="true">Phase 4 verify report written with GO recommendation</criterion>
+  </acceptance-criteria>
+</task>

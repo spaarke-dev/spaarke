@@ -1,0 +1,73 @@
+<task id="DEVOPS-090" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Project wrap-up — graduation criteria audit + lessons-learned + archive</title>
+    <status>not-started</status>
+    <phase>wrap-up</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>wrap-up, graduation, lessons-learned, archive</tags>
+    <dependencies>053</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Final wrap-up task. Run the graduation-criteria audit from README.md (all 12 criteria). Write `notes/lessons-learned.md` documenting what worked, what was harder than expected, patterns to reuse. Update README status to Complete. Prepare for merge to master.
+  </prompt>
+
+  <role>Project closer. You finish well — audit + document + update + prepare for handoff.</role>
+
+  <goal>
+README status = Complete. All 12 graduation criteria checked. lessons-learned.md written. Ready for `/merge-to-master`.
+  </goal>
+
+  <constraints>
+    <constraint source="README graduation criteria">All 12 must pass before marking Complete</constraint>
+    <constraint source="convention">lessons-learned.md is mandatory; must cover: what worked, what surprised us, patterns to reuse, anti-patterns to avoid</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/README.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/plan.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase1-verify-report.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase2-verify-report.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase3-verify-report.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase4-verify-report.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase5-verify-report.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase6-verify-report.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm all phase verify tasks ✅.</step>
+    <step order="1" name="Graduation criteria audit">Run each of 12 README graduation-criteria checks (commands in spec §Success Criteria). For each: pass/fail with evidence.</step>
+    <step order="2" name="Lessons learned">Write `notes/lessons-learned.md` covering: (a) What worked: Phase 1 hand-driven + Phase 2 codified flow; idempotency-by-construction; (b) What surprised us: any Phase 4 hook injection complications; rate-limit incidents; sub-agent write boundary impacts; (c) Patterns to reuse: skill-creation cadence, smoke-test loop; (d) Anti-patterns to avoid.</step>
+    <step order="3" name="Update README status">Set README status to ✅ Complete. Add completion date. Check graduation criteria boxes.</step>
+    <step order="4" name="Final sync">Invoke `/devops-project-sync` to set `Project Status = Completed candidate`. (Actual archive happens later via `/devops-project-archive`, but mark the candidate state now.)</step>
+    <step order="5" name="Pre-merge state">Confirm: no uncommitted changes; current task = none; TASK-INDEX.md all rows ✅.</step>
+    <step order="6" name="Handoff to merge">Print: "Project complete. Ready for `/merge-to-master`. After merge, run `/devops-project-archive --status Completed` to remove the worktree and write `.archived` marker."</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">All phase reports</tool>
+    <tool name="Edit">README.md status update</tool>
+    <tool name="Write">notes/lessons-learned.md</tool>
+    <tool name="Skill">/devops-project-sync</tool>
+    <tool name="Bash">Run graduation-criteria audit commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-devops-project-tracking-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-devops-project-tracking-r1/README.md (status updated to Complete)</output>
+    <output type="config">Project #2 Issue: Project Status = Completed candidate</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 12 graduation criteria pass with evidence</criterion>
+    <criterion testable="true">lessons-learned.md written with all 4 sections</criterion>
+    <criterion testable="true">README.md status = ✅ Complete</criterion>
+    <criterion testable="true">Project #2 Issue: Project Status reflects Completed candidate</criterion>
+    <criterion testable="true">Project ready for /merge-to-master</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,79 @@
+<task id="DEVOPS-002" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Add 6 new custom fields to GitHub Project #2</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>github-project, schema, foundation, gh-cli</tags>
+    <dependencies>001</dependencies>
+    <parallel-group>P1-schema</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Add 6 new custom fields to GitHub Project #2 per FR-02 exact schemas. The fields are: `Project Type` (single-select with 8 options), `Worktree Path` (text), `Project Folder` (text), `Task Count` (number), `Tasks Completed` (number), `Project Status` (single-select with 5 options). All 20 existing fields MUST be preserved unchanged.
+  </prompt>
+
+  <role>
+DevOps engineer fluent with `createProjectV2Field` GraphQL mutation. You understand single-select vs text vs number field encoding in the GitHub Projects v2 API.
+  </role>
+
+  <goal>
+`gh project field-list 2 --owner spaarke-dev --format json | jq '.fields | length'` returns 26+ (20 existing + 6 new). Each new field has the exact name + type + (where applicable) option list specified in FR-02.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">FR-02 exact schemas: Project Type options = `Module, UI, Infrastructure, Cleanup, Data, Process, AI, Mixed`; Project Status options = `Planned, In Progress, On Hold, Completed, Cancelled`</constraint>
+    <constraint source="spec">MUST preserve all 20 existing fields — additive only</constraint>
+    <constraint source="NFR-04">Idempotency target — re-running on a project that already has these 6 fields MUST be a no-op</constraint>
+    <constraint source="D-15">Project Type 8-option set is final</constraint>
+    <constraint source="D-16">Project Status set folds `Abandoned` into `Cancelled` (do not add Abandoned)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="createProjectV2Field" location="GitHub GraphQL API docs">
+        Single-select fields require `dataType: SINGLE_SELECT` and `singleSelectOptions: [{name, color, description}]`. Text fields use `dataType: TEXT`. Number fields use `dataType: NUMBER`. Colors are GitHub semantic palette names (e.g., `GRAY`, `BLUE`, `GREEN`, `YELLOW`, `ORANGE`, `RED`, `PURPLE`, `PINK`).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Read CLAUDE.md MUST rules. Confirm task 001 is ✅. Capture current field count.</step>
+    <step order="1" name="Baseline">Run `gh project field-list 2 --owner spaarke-dev --format json`. Save to `notes/spikes/phase1-fields-pre-fr02-{date}.json`. Note exact count and names.</step>
+    <step order="2" name="Idempotency pre-check">Inspect baseline. For each of 6 target fields, check if it already exists. Skip fields already present (report each skipped field).</step>
+    <step order="3" name="Create Project Type field">Mutation: `createProjectV2Field` with `dataType: SINGLE_SELECT` and 8 options per FR-02. Capture field ID.</step>
+    <step order="4" name="Create Worktree Path field">Mutation: TEXT field. Capture field ID.</step>
+    <step order="5" name="Create Project Folder field">Mutation: TEXT field. Capture field ID.</step>
+    <step order="6" name="Create Task Count field">Mutation: NUMBER field. Capture field ID.</step>
+    <step order="7" name="Create Tasks Completed field">Mutation: NUMBER field. Capture field ID.</step>
+    <step order="8" name="Create Project Status field">Mutation: SINGLE_SELECT with 5 options per FR-02. Capture field ID.</step>
+    <step order="9" name="Verify schema">Re-run field-list. Confirm 6 new field names + types + (single-select) options match FR-02 exactly. Save snapshot to `notes/spikes/phase1-fields-after-fr02-{date}.json`.</step>
+    <step order="10" name="Verify existing untouched">Diff baseline vs after JSON — 20 existing field names + types + options unchanged.</step>
+    <step order="11" name="Document">Append all 6 new field IDs to `notes/phase1-field-ids.md` (these are needed by the `/devops-portfolio-setup` skill at task 010).</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI</tool>
+    <tool name="jq">JSON parsing</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">6 new Project #2 fields with exact FR-02 schemas</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase1-fields-*-{date}.json</output>
+    <output type="notes">projects/spaarke-devops-project-tracking-r1/notes/phase1-field-ids.md (referenced by task 010)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 new field names exist on Project #2</criterion>
+    <criterion testable="true">Project Type options = exact 8 per FR-02 (no extras, no missing)</criterion>
+    <criterion testable="true">Project Status options = exact 5 per FR-02 (no Abandoned per D-16)</criterion>
+    <criterion testable="true">Task Count + Tasks Completed are NUMBER type; Worktree Path + Project Folder are TEXT type</criterion>
+    <criterion testable="true">All 20 existing fields untouched (diff verification)</criterion>
+    <criterion testable="true">Field IDs captured in `notes/phase1-field-ids.md` for downstream skill consumption</criterion>
+  </acceptance-criteria>
+</task>

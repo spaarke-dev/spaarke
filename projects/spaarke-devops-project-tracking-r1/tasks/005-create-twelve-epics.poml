@@ -1,0 +1,68 @@
+<task id="DEVOPS-005" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Create 12 initial Epic Issues per §4.6 taxonomy</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>github-issues, foundation, epics, taxonomy</tags>
+    <dependencies>003, 004</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Create the 12 initial Epic Issues per FR-05 + design.md §4.6 Epic taxonomy strawman: AI Platform &amp; Chat, Insights Engine, Smart Todo, Document Intelligence, BFF &amp; Test Hygiene, Auth &amp; SSO, Code Quality, Procedures &amp; Knowledge, CI/CD &amp; Tooling, Insights/Widgets/Search, Communications, Multi-tenant. Each Epic uses the `epic.yml` template (task 004), gets `Type=Epic` + label `epic`, and lands on Project #2. Sub-issues panel is ready to receive Project sub-issues in Phase 2 onwards.
+  </prompt>
+
+  <role>
+Project owner who knows Spaarke's portfolio. You author Epic descriptions concisely — what the Epic is about, what success looks like, what timeframe is rough.
+  </role>
+
+  <goal>
+12 Epic Issues exist on Project #2 with `Type=Epic`, label `epic`, populated description/objectives field, and each visible in the Epics-overview portfolio view (which lands in Phase 5).
+  </goal>
+
+  <constraints>
+    <constraint source="spec FR-05">12 specific Epic titles per §4.6 — match exactly (typos drift the taxonomy)</constraint>
+    <constraint source="spec D-12">Every Project must have an Epic parent; this task seeds the taxonomy so Phase 3 backfill can attach Projects</constraint>
+    <constraint source="NFR-04">Idempotency target — re-running this task on a Project #2 that already has the 12 Epics MUST be a no-op (per-Epic existence check)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="gh issue create + add to project" location="gh CLI">
+        `gh issue create --title "..." --body-file ... --label epic` creates Issue. Then `gh project item-add 2 --owner spaarke-dev --url &lt;issue-url&gt;` adds to Project. Then set `Type=Epic` via `updateProjectV2ItemFieldValue` GraphQL mutation.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 001 (Type=Project option) and 003 (labels) and 004 (issue template) are ✅.</step>
+    <step order="1" name="Baseline">Run `gh issue list --label epic --state open --json number,title` and save. Determine which (if any) of the 12 Epics already exist by title.</step>
+    <step order="2" name="Author Epic descriptions">Draft a concise 4-6 line description for each of the 12 Epics (in `notes/drafts/epic-descriptions.md`). Cover: what the Epic encompasses, success outlook, rough timeframe (free-text — Roadmap view does the date math later).</step>
+    <step order="3" name="Create Epics one-by-one">For each of 12 Epics (skipping any already present): `gh issue create` using the epic template fields; add to Project #2; set `Type=Epic` field value. Capture Issue URL + number.</step>
+    <step order="4" name="Spot-check">Open Project #2 in browser. Filter by `Type=Epic`. Confirm 12 (or 12 + pre-existing if some were already there) Epic Issues visible.</step>
+    <step order="5" name="Document">Save the 12 Epic Issue #s + titles to `notes/phase1-epic-issue-numbers.md` — Phase 3 backfill needs these as Parent Issue targets.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">12 Epic Issues on Project #2</output>
+    <output type="notes">projects/spaarke-devops-project-tracking-r1/notes/phase1-epic-issue-numbers.md</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/drafts/epic-descriptions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">12 Epic Issues exist with the 12 exact titles from FR-05</criterion>
+    <criterion testable="true">Each Epic has `Type=Epic` field set on Project #2 + label `epic`</criterion>
+    <criterion testable="true">Each Epic description is populated (not empty/template placeholder)</criterion>
+    <criterion testable="true">All 12 Epic Issue numbers captured for Phase 3 use</criterion>
+  </acceptance-criteria>
+</task>

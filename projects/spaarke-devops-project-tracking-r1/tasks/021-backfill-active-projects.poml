@@ -1,0 +1,65 @@
+<task id="DEVOPS-021" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Backfill active projects via /devops-project-register</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>backfill, devops-project-register, rate-limit</tags>
+    <dependencies>020</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Run `/devops-project-register --from-folder` for each ACTIVE project from the enumeration list (task 020). Per NFR-05, batch operations: groups of 20 with exponential backoff on 429. After this task: every active worktree has a matching Project Issue with all 6 new fields populated.
+  </prompt>
+
+  <role>Operations engineer comfortable with rate-limit hygiene. You batch + back off; you do not hammer the API.</role>
+
+  <goal>
+Every project on the task 020 ACTIVE list has a Project Issue on Project #2 with Parent Epic correct + all 6 new fields populated. Active projects view item count matches enumeration count.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-05">≤5000/hr REST, ≤5000 points/hr GraphQL; batch in groups of 20 with exponential backoff on 429</constraint>
+    <constraint source="spec FR-15">Per F4: ordering by Epic then most-recent commit activity</constraint>
+    <constraint source="NFR-04">Idempotent — re-running on already-registered project is no-op</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/backfill-enumeration-{date}.md</file>
+      <file>.claude/skills/devops-project-register/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm task 020 enumeration list is reviewed + Epic mappings confirmed (no remaining `[REVIEW]` markers).</step>
+    <step order="1" name="Batch in groups of 20">Process projects in chunks of 20. Between chunks, sleep 5 seconds.</step>
+    <step order="2" name="Per-project register">For each project: invoke `/devops-project-register --from-folder projects/{name} --epic #E`. Capture exit status + Issue URL. On 429, exponentially back off (initial 30s, double on repeat).</step>
+    <step order="3" name="Failure tracking">Collect per-project failures into `notes/backfill-failures-{date}.md`. Continue with remaining projects.</step>
+    <step order="4" name="Verify">After all batches: query `gh project item-list 2 --owner spaarke-dev` for `Type=Project` count. Compare against task 020 enumeration count.</step>
+    <step order="5" name="Spot-check">Open Project #2 in browser; filter to Active projects view; spot-check 5 random Issues — Parent Epic + all 6 fields populated.</step>
+    <step order="6" name="Failure remediation">For each failure: attempt individual re-run (skills are idempotent). Document any persistent failures.</step>
+    <step order="7" name="README pointer block backfill">Verify each registered project has the `> **Portfolio**:` pointer block in its `README.md`. `/devops-project-register` should write this; spot-check 5 projects.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">/devops-project-register</tool>
+    <tool name="gh">Verification queries</tool>
+    <tool name="sleep">Backoff</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-devops-project-tracking-r1/notes/backfill-results-{date}.md</output>
+    <output type="config">~20-30 new Project Issues on Project #2</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Project Issue created for every ACTIVE project from task 020 enumeration</criterion>
+    <criterion testable="true">Each Issue has Parent Epic + all 6 fields populated</criterion>
+    <criterion testable="true">Spot-check of 5 random projects: README pointer block present</criterion>
+    <criterion testable="true">No rate-limit failures unrecoverable (final state matches enumeration)</criterion>
+  </acceptance-criteria>
+</task>

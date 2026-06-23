@@ -1,0 +1,57 @@
+<task id="DEVOPS-035" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Inject link-or-prompt hook into /worktree-setup</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>0.5 hour</estimated-effort>
+    <tags>hook-injection, worktree-setup, additive-only</tags>
+    <dependencies>019, 015</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Inject hook into `.claude/skills/worktree-setup/SKILL.md` per FR-21. After worktree scaffolded, if matching Issue exists, link it via `/devops-project-register`; else prompt "Register project on portfolio now?".
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill modifier. Additive-only edit at end of worktree-setup.</role>
+
+  <goal>
+worktree-setup for a project with a pre-existing Issue produces correct Worktree Path linkage; for new projects, the register prompt fires once.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-03">Additive only; degrade-to-warn on failure</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/worktree-setup/SKILL.md</file>
+      <file>.claude/skills/devops-project-register/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 015, 019 ✅.</step>
+    <step order="1" name="Add hook Step">After worktree scaffolded: if matching Project Issue exists (search by branch name), call `/devops-project-register` to link. Else prompt for registration.</step>
+    <step order="2" name="Smoke test">Both happy paths: linked + prompted.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/worktree-setup/SKILL.md</tool>
+    <tool name="Skill">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.claude/skills/worktree-setup/SKILL.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">worktree-setup SKILL.md references `/devops-project-register` in Steps</criterion>
+    <criterion testable="true">Pre-existing-Issue smoke test: Worktree Path field populated</criterion>
+    <criterion testable="true">No-Issue smoke test: register prompt fires</criterion>
+  </acceptance-criteria>
+</task>

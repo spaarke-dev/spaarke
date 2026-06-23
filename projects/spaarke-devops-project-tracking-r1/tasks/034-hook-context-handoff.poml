@@ -1,0 +1,59 @@
+<task id="DEVOPS-034" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Inject portfolio-sync hook into /context-handoff (HIGHEST VALUE)</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>hook-injection, context-handoff, highest-value, additive-only</tags>
+    <dependencies>019, 016</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Inject hook into `.claude/skills/context-handoff/SKILL.md` per FR-20. Always call `/devops-project-sync` at end of handoff. **Per spec §6.2 this is the highest-value hook** — compaction checkpoints (every 3 steps, >60% context, 5+ files modified) coincide with portfolio checkpoints so the board is never >3 task steps stale.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill modifier. This hook is the most-frequently-fired of all 9; lean on idempotency and silence.</role>
+
+  <goal>
+Any `/context-handoff` invocation in a project with an Issue produces a successful `/devops-project-sync` call visible in handoff output. The board is never more than 3 task steps stale.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-03">Additive only; silent on success; degrade-to-warn on failure</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+    <constraint source="spec §6.2">Highest-value hook — frequency is ~10x other hooks</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/context-handoff/SKILL.md</file>
+      <file>.claude/skills/devops-project-sync/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 016, 019 ✅. Read context-handoff/SKILL.md.</step>
+    <step order="1" name="Identify injection point">Final step of context-handoff (after writing handoff doc).</step>
+    <step order="2" name="Add hook Step">Final step: "Invoke `/devops-project-sync` (silent on success). This keeps the portfolio board in sync with checkpoint cadence."</step>
+    <step order="3" name="Smoke test">Run `/context-handoff` on a project with an Issue. Verify single ✅ sync line in handoff output + Issue field values current.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/context-handoff/SKILL.md</tool>
+    <tool name="Skill">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.claude/skills/context-handoff/SKILL.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">context-handoff SKILL.md references `/devops-project-sync` in final Step</criterion>
+    <criterion testable="true">Smoke test: handoff output includes successful sync line</criterion>
+    <criterion testable="true">`grep "devops-project-sync" .claude/skills/context-handoff/SKILL.md` returns ≥1 match</criterion>
+  </acceptance-criteria>
+</task>

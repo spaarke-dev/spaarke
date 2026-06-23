@@ -1,0 +1,63 @@
+<task id="DEVOPS-020" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Enumerate active/in-flight projects for backfill</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <tags>backfill, enumeration, audit</tags>
+    <dependencies>019</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Per F6 resolution, enumerate all projects that meet "active/in-flight" criteria for Phase 3 backfill: a project's worktree exists at `c:/code_files/spaarke-wt-*` AND (the local `current-task.md` indicates an active task OR an open PR references the branch OR commits exist on the branch in the last 30 days).
+
+Save the enumeration list to `notes/backfill-enumeration-{date}.md` ordered per F4: by Epic (mapped per `notes/phase1-epic-issue-numbers.md`), then by most-recent commit activity within Epic.
+  </prompt>
+
+  <role>Repo auditor with shell-script comfort. You iterate over `git worktree list`, cross-reference against `gh pr list`, parse local files cleanly.</role>
+
+  <goal>
+A complete enumeration list of active projects with proposed Parent Epic for each, ordered by Epic then activity. List is ready to feed `/devops-project-register` invocations in task 021.
+  </goal>
+
+  <constraints>
+    <constraint source="spec F6">Triple criterion: worktree AND (active task OR open PR OR commits in 30d)</constraint>
+    <constraint source="spec F4">Order: by Epic, then by most-recent commit activity within Epic</constraint>
+    <constraint source="spec FR-15">~20-30 projects expected based on current observable state</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase1-epic-issue-numbers.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm Phase 2 verify ✅ + Phase 1 Epic numbers captured.</step>
+    <step order="1" name="Enumerate worktrees">`git worktree list` — list all worktrees under `c:/code_files/`. Filter for paths matching `c:/code_files/spaarke-wt-*`.</step>
+    <step order="2" name="Per-worktree triple-criterion">For each worktree: (a) check `projects/{name}/current-task.md` for active task (status not "none"); (b) check `gh pr list --head &lt;branch&gt;` for open PR; (c) check `git log --since='30 days ago' &lt;branch&gt;` for non-zero commits. If ANY of the three is true → mark as ACTIVE.</step>
+    <step order="3" name="Map to Epic">For each ACTIVE project, propose Parent Epic from `notes/phase1-epic-issue-numbers.md` based on project name/scope. Flag unmappable projects for manual review.</step>
+    <step order="4" name="Order">Group by Epic; within Epic, sort by last commit date desc.</step>
+    <step order="5" name="Write report">`notes/backfill-enumeration-{date}.md` with table: Project Name | Worktree Path | Last Commit | Active Task? | Open PR? | Proposed Epic | Notes.</step>
+    <step order="6" name="Manual review markers">For unmappable projects (no obvious Epic), suggest one and mark `[REVIEW]`. User must confirm before task 021 runs.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Worktree list + log queries</tool>
+    <tool name="gh">PR list queries</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-devops-project-tracking-r1/notes/backfill-enumeration-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Enumeration list contains all worktrees meeting F6 criteria</criterion>
+    <criterion testable="true">Each ACTIVE project has proposed Parent Epic from Phase 1 list (or `[REVIEW]` marker)</criterion>
+    <criterion testable="true">Order: by Epic, then by last-commit-date desc within Epic</criterion>
+    <criterion testable="true">Count is in 20-30 range per spec expectation (deviation acceptable; documented)</criterion>
+  </acceptance-criteria>
+</task>

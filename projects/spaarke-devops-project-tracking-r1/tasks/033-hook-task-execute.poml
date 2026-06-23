@@ -1,0 +1,60 @@
+<task id="DEVOPS-033" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Inject Tasks Completed increment hook into /task-execute</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>hook-injection, task-execute, additive-only</tags>
+    <dependencies>019, 016</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Inject hook into `.claude/skills/task-execute/SKILL.md` per FR-19. At Step 9 (task completion), increment the `Tasks Completed` field on the Project Issue. If `Tasks Completed == Task Count`, prompt "Promote Project Status to Completed candidate?". Additive only.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill modifier. Two-line addition to task-execute Step 9 + conditional prompt logic.</role>
+
+  <goal>
+Each task completion via task-execute increments `Tasks Completed` by exactly 1. Last task completion shows the promotion prompt.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-03">Additive only; silent on success; degrade-to-warn on failure</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+    <constraint source="UX">Promotion prompt fires only when Tasks Completed == Task Count (final task)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/task-execute/SKILL.md</file>
+      <file>.claude/skills/devops-project-sync/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 016, 019 ✅. Read task-execute SKILL.md to locate Step 9.</step>
+    <step order="1" name="Identify injection point">After Step 9.5 (quality gates). The new Step 9.6 is "Portfolio increment".</step>
+    <step order="2" name="Add hook Step">Step 9.6: "Invoke `/devops-project-sync` to increment `Tasks Completed`. After sync, if `Tasks Completed == Task Count`, prompt 'All tasks complete. Promote Project Status to Completed candidate? [Y/n]' → on Y, set `Project Status = Completed` (still requires explicit `/devops-project-archive` per F3 to actually close)."</step>
+    <step order="3" name="Smoke test">Mark a task complete via task-execute; verify Tasks Completed increment. Mark final task; verify prompt fires.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/task-execute/SKILL.md</tool>
+    <tool name="Skill">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.claude/skills/task-execute/SKILL.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">task-execute SKILL.md references `/devops-project-sync` in Step 9.x</criterion>
+    <criterion testable="true">Smoke test: per-completion Tasks Completed increment by 1</criterion>
+    <criterion testable="true">Smoke test: final completion fires promotion prompt</criterion>
+    <criterion testable="true">Promotion does NOT auto-archive (still gated by /devops-project-archive per F3)</criterion>
+  </acceptance-criteria>
+</task>

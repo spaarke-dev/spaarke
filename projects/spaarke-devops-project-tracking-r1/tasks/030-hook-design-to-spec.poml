@@ -1,0 +1,71 @@
+<task id="DEVOPS-030" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Inject portfolio-sync hook into /design-to-spec</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>hook-injection, design-to-spec, additive-only</tags>
+    <dependencies>019, 016</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Inject portfolio-update hook into `.claude/skills/design-to-spec/SKILL.md` per FR-16. At the end of the skill (after `spec.md` is written), if a Project Issue exists for the folder, call `/devops-project-sync` and ensure `Project Status=In Progress`. Hook is additive only — does NOT change existing contract.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill modifier. You make minimal, additive edits — touch only the `Steps` section to add the hook reference.</role>
+
+  <goal>
+After modification: `design-to-spec` still passes its existing success criteria. New hook fires at end-of-skill, silent on success, degrades-to-warn on failure (NFR-03).
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-03">Additive only — existing contract unchanged; hook silent on success; degrade-to-warn on failure</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+    <constraint source="spec FR-16">Hook fires AFTER spec.md is written; sets Project Status=In Progress if not already</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>.claude/skills/design-to-spec/SKILL.md</file>
+      <file>.claude/skills/devops-project-sync/SKILL.md</file>
+      <file>.claude/skills/task-execute/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="hook-injection pattern" location=".claude/skills/task-execute/SKILL.md Step 9.5">
+        The calling skill mentions the hooked skill explicitly in its `Steps` section (e.g., "Step N: Call `code-review` skill via Skill tool"). Replicate this style.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 016, 019 ✅. Read current `design-to-spec/SKILL.md` to find the end-of-skill Steps section.</step>
+    <step order="1" name="Identify injection point">Locate the final step of `design-to-spec` Steps section. The hook step lands AFTER spec.md write.</step>
+    <step order="2" name="Edit Steps section">Add new final step: "Step N+1: Portfolio sync (if applicable). If `projects/{name}/README.md` has a portfolio pointer block, invoke `/devops-project-sync` skill via Skill tool. If `Project Status != In Progress`, also set `Project Status=In Progress` via `/devops-project-sync`. Hook is silent on success (single ✅ line) and degrades to ⚠️ warn on failure (does NOT block skill completion)."</step>
+    <step order="3" name="Update INDEX.md if needed">No change unless adding hook documentation.</step>
+    <step order="4" name="Verify existing contract">Re-read modified design-to-spec SKILL.md. Confirm no existing step removed; ordering preserved; no behavior change to spec.md generation.</step>
+    <step order="5" name="Smoke test">Invoke `/design-to-spec` on a throwaway project that has a Project Issue; confirm spec.md generated as before + hook fires + `Project Status=In Progress` set.</step>
+    <step order="6" name="Failure-degrade smoke">Force the hook to fail (e.g., bad Issue ID). Confirm `design-to-spec` still completes successfully with a ⚠️ warn line.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/design-to-spec/SKILL.md</tool>
+    <tool name="Skill">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.claude/skills/design-to-spec/SKILL.md (modified - hook added)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase4-hook-design-to-spec-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">design-to-spec SKILL.md contains explicit reference to `/devops-project-sync` in its Steps section</criterion>
+    <criterion testable="true">Smoke test happy path: spec.md generated + Status=In Progress set on Issue</criterion>
+    <criterion testable="true">Smoke test failure path: hook failure does NOT block design-to-spec completion</criterion>
+    <criterion testable="true">`grep "devops-project-sync\|devops-project-register" .claude/skills/design-to-spec/SKILL.md` returns ≥1 match</criterion>
+  </acceptance-criteria>
+</task>

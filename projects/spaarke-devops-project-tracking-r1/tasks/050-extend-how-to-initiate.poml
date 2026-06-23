@@ -1,0 +1,65 @@
+<task id="DEVOPS-050" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Extend HOW-TO-INITIATE-NEW-PROJECT.md with Portfolio Integration</title>
+    <status>not-started</status>
+    <phase>6</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>documentation, how-to-initiate, additive-only</tags>
+    <dependencies>019, 042</dependencies>
+    <parallel-group>P6-docs</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Extend `docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md` per FR-29. Add:
+- **Step 0** for idea capture (`/devops-idea-create` or manual GitHub Issue)
+- **Portfolio Integration section** covering: Epic↔Project mechanics with screenshots of `Parent issue` + `Sub-issues` UI; Idea → Project promotion (Path A 1→1 + Path B N→1); `/devops-project-start --from-issue` handoff walkthrough; auto-hook behaviors per FR-16..FR-24
+- The 9 `/devops-*` skills to the command reference
+- Portfolio-specific troubleshooting (missing Type=Project, orphan worktree, drift)
+
+NFR-08: PRESERVE existing structure. No section renumbering, no breaking changes.
+  </prompt>
+
+  <role>Technical writer with respect for existing docs. You extend additively; you do not refactor.</role>
+
+  <goal>
+The doc covers the full lifecycle from idea to archive without requiring the reader to open `design.md` of this project. Existing structure preserved.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-08">PRESERVE existing structure — no renumbering, no rearrangement</constraint>
+    <constraint source="spec FR-29">Specific content additions per task prompt</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Read current 423-line doc. Identify existing structure + insertion points.</step>
+    <step order="1" name="Add Step 0">"Step 0: Capture the idea" section before existing Step 1. Covers `/devops-idea-create` and manual Issue path.</step>
+    <step order="2" name="Add Portfolio Integration section">New top-level section covering 4 subsections per FR-29. Include screenshots references (placeholder paths if not generated yet) or text descriptions of UI flows.</step>
+    <step order="3" name="Add 9 skills to command reference">In existing command-reference section, add 9 rows for `/devops-*` skills with one-line purpose each.</step>
+    <step order="4" name="Add troubleshooting subsection">"Portfolio troubleshooting" with 3+ scenarios per FR-29.</step>
+    <step order="5" name="Verify NFR-08">Re-read entire doc. Confirm no existing section renumbered/rearranged.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Step 0: Capture the idea" section exists before Step 1</criterion>
+    <criterion testable="true">"Portfolio Integration" section exists with 4 subsections</criterion>
+    <criterion testable="true">9 `/devops-*` skills listed in command reference</criterion>
+    <criterion testable="true">Portfolio troubleshooting section with ≥3 scenarios</criterion>
+    <criterion testable="true">Existing 423-line structure preserved (no section renumbered)</criterion>
+  </acceptance-criteria>
+</task>

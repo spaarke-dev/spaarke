@@ -1,0 +1,83 @@
+<task id="DEVOPS-013" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Create /devops-idea-promote skill (Path A + Path B)</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>skill-creation, devops, idea, promote, gh-cli</tags>
+    <dependencies>010, 012</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Author `/devops-idea-promote` skill per FR-09 + D-12. Two paths:
+
+**Path A** (`--to-project --epic #E`): Flip an Idea Issue's `Type` from `Idea` to `Project`, set `Parent issue` to Epic #E, populate `Project Type` from prompt, swap label `backlog` → `project`. Issue number preserved.
+
+**Path B** (`--package #X #Y #Z --epic #E`): Create a NEW Project Issue with `Type=Project`, set `Parent issue` to Epic #E, attach Idea Issues #X #Y #Z as **sub-issues of the new Project Issue (kept open per D-20)**. Original Ideas keep their numbers/labels/Type; only their `Parent issue` is set to the new Project.
+
+**Neither path creates a local worktree** — that's `/devops-project-start`'s job (task 014).
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill author who can model two-path logic cleanly. You document each path's mutations explicitly and provide test commands for both.</role>
+
+  <goal>
+Path A: Original Idea Issue #N now has `Type=Project`, parent Epic set, label swapped. Path B: New Project Issue exists with 3 Idea sub-issues showing in `Sub-issues progress`; Ideas remain open with original Type=Idea.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-07">Spaarke skill convention</constraint>
+    <constraint source="spec FR-09 + D-12">Two distinct paths; mutually exclusive flags; both require `--epic`</constraint>
+    <constraint source="spec D-20">Path B keeps Ideas OPEN as sub-issues (do NOT close them)</constraint>
+    <constraint source="spec D-12">Every Project must have an Epic parent — `--epic` is REQUIRED on both paths</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>.claude/skills/INDEX.md</file>
+      <file>.claude/skills/devops-idea-create/SKILL.md</file>
+      <file>.claude/skills/devops-epic-create/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="GitHub sub-issue API" location="GitHub Issues API">
+        Sub-issues are linked via `Parent issue` field. Use `gh api repos/{owner}/{repo}/issues/{number}/sub_issues` for sub-issue add/list. Sub-issue progress = closed_subs / total_subs.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 010, 011, 012 ✅.</step>
+    <step order="1" name="Author SKILL.md frontmatter + Prerequisites + Purpose">Per NFR-07.</step>
+    <step order="2" name="Author Steps — Path A">Flag detection → validate Issue #N exists with Type=Idea → flip Type=Project mutation → set Parent issue Epic #E → swap label `backlog` → `project` → prompt for `Project Type` → set field value → emit confirmation.</step>
+    <step order="3" name="Author Steps — Path B">Flag detection → validate Idea Issues all exist → prompt for new Project title (or derive from primary Idea) → `gh issue create` with project template → add to Project #2 → set Type=Project + Parent issue Epic #E + Project Type → for each Idea: set its Parent issue to the new Project Issue → emit confirmation with sub-issue count.</step>
+    <step order="4" name="Author Failure Modes">Missing `--epic`, both paths flagged (mutex), Idea already Project (Path A no-op possible), Idea closed when Path B attempted.</step>
+    <step order="5" name="Update INDEX.md">Add row.</step>
+    <step order="6" name="Smoke test — Path A">Create throwaway Idea via task 012; promote with `--to-project --epic #E`; verify; clean up.</step>
+    <step order="7" name="Smoke test — Path B">Create 3 throwaway Ideas; package with `--package` flags; verify Project Issue + 3 sub-issues, Ideas still open; clean up.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/* files</tool>
+    <tool name="Write">New SKILL.md</tool>
+    <tool name="gh">Smoke tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="skill">.claude/skills/devops-idea-promote/SKILL.md</output>
+    <output type="config">.claude/skills/INDEX.md (one new row)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase2-idea-promote-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SKILL.md exists; both paths documented with example invocations</criterion>
+    <criterion testable="true">Path A smoke test: Idea #N now has Type=Project + Parent issue Epic #E + label `project`</criterion>
+    <criterion testable="true">Path B smoke test: new Project Issue with 3 sub-issues; original Ideas remain open with Type=Idea</criterion>
+    <criterion testable="true">Missing `--epic` flag fails with clear error message</criterion>
+    <criterion testable="true">INDEX.md updated</criterion>
+  </acceptance-criteria>
+</task>

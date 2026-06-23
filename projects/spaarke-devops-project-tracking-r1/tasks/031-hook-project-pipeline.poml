@@ -1,0 +1,63 @@
+<task id="DEVOPS-031" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Inject portfolio-register-or-sync hook into /project-pipeline</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>hook-injection, project-pipeline, additive-only</tags>
+    <dependencies>019, 015, 016</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Inject hook into `.claude/skills/project-pipeline/SKILL.md` per FR-17. At skill start, if no Project Issue exists for the folder, prompt "register on portfolio?" → calls `/devops-project-register`; otherwise call `/devops-project-sync`. Additive only.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill modifier. Additive-only edit at the start of project-pipeline's Steps section.</role>
+
+  <goal>
+First `/project-pipeline` run on a non-registered project produces a Project Issue (after user confirms); subsequent runs sync silently.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-03">Additive only; hook silent on success; degrade-to-warn on failure</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+    <constraint source="UX">Prompt for register only fires ONCE per project; subsequent runs sync silently</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/project-pipeline/SKILL.md</file>
+      <file>.claude/skills/devops-project-register/SKILL.md</file>
+      <file>.claude/skills/devops-project-sync/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 015, 016, 019 ✅. Read project-pipeline/SKILL.md to locate Step 0 area.</step>
+    <step order="1" name="Identify injection point">Before Step 0.3 (pre-flight) or after Step 1 (spec validation) — choose the one that makes the prompt least intrusive. Recommend: after Step 1 (spec already validated, project is known-good before portfolio interaction).</step>
+    <step order="2" name="Edit Steps section">Add new step: "Step 1.7: Portfolio register-or-sync. Check `projects/{name}/README.md` for portfolio pointer block. IF absent: prompt 'Register this project on the portfolio? [Y/n]' → on Y, invoke `/devops-project-register`. IF present: invoke `/devops-project-sync` silently. Failure degrades to ⚠️ warn (does NOT block pipeline)."</step>
+    <step order="3" name="Verify existing contract">No removed steps; ordering preserved; behavior on non-portfolio projects unchanged.</step>
+    <step order="4" name="Smoke test">Run pipeline on a fresh project (no Issue yet); accept register prompt; verify Issue created. Re-run pipeline; verify silent sync.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/project-pipeline/SKILL.md</tool>
+    <tool name="Skill">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.claude/skills/project-pipeline/SKILL.md (modified - hook added)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase4-hook-project-pipeline-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">project-pipeline SKILL.md references both `/devops-project-register` and `/devops-project-sync`</criterion>
+    <criterion testable="true">Smoke test: fresh project triggers register prompt + creates Issue on Y</criterion>
+    <criterion testable="true">Smoke test: registered project syncs silently on re-run</criterion>
+    <criterion testable="true">Existing pipeline contract unchanged</criterion>
+  </acceptance-criteria>
+</task>

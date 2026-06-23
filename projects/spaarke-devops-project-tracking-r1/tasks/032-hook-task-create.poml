@@ -1,0 +1,57 @@
+<task id="DEVOPS-032" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Inject Task Count hook into /task-create</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>0.5 hour</estimated-effort>
+    <tags>hook-injection, task-create, additive-only</tags>
+    <dependencies>019, 016</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Inject hook into `.claude/skills/task-create/SKILL.md` per FR-18. After tasks are scaffolded, set the `Task Count` field on the Project Issue from POML file count. Additive only.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill modifier. Single-step additive edit at end of task-create.</role>
+
+  <goal>
+After `/task-create`, the Issue's `Task Count` equals `ls projects/{name}/tasks/*.poml | wc -l`.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-03">Additive only; silent on success; degrade-to-warn on failure</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/task-create/SKILL.md</file>
+      <file>.claude/skills/devops-project-sync/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 016, 019 ✅.</step>
+    <step order="1" name="Add final Step">After all tasks scaffolded, invoke `/devops-project-sync` which will compute + set Task Count. Document hook with one-liner referencing FR-18.</step>
+    <step order="2" name="Smoke test">Run `/task-create` on a throwaway project; verify Issue's Task Count = POML file count.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/task-create/SKILL.md</tool>
+    <tool name="Skill">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.claude/skills/task-create/SKILL.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">task-create SKILL.md references `/devops-project-sync` in Steps</criterion>
+    <criterion testable="true">Smoke test: Task Count on Issue = POML file count</criterion>
+    <criterion testable="true">`grep "devops-project-sync" .claude/skills/task-create/SKILL.md` returns ≥1 match</criterion>
+  </acceptance-criteria>
+</task>

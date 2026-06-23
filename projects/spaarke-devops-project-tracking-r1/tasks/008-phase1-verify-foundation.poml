@@ -1,0 +1,68 @@
+<task id="DEVOPS-008" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Phase 1 verify gate — Foundation schema complete</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>verify, phase-gate, github-project</tags>
+    <dependencies>001, 002, 003, 004, 005</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Verify Phase 1 foundation work end-to-end: Project #2 has new Type=Project option (FR-01); 6 new custom fields with exact FR-02 schemas (FR-02); 7 labels (FR-03); 3 issue templates land (FR-04); 12 Epics exist (FR-05). Run the spec acceptance checks for FR-01..FR-05 + Success Criterion 1+2. This is the gate before Phase 2 skill authoring begins.
+  </prompt>
+
+  <role>
+QA engineer with paranoia about schema drift. You run the spec acceptance commands verbatim and don't accept "close enough."
+  </role>
+
+  <goal>
+A go/no-go report against spec FR-01..FR-05 acceptance criteria + spec §Success Criteria #1 and #2. If any check fails, Phase 2 is blocked.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Each acceptance check runs the exact command in the spec — no paraphrasing</constraint>
+    <constraint source="quality-gate">A single failed check blocks Phase 2 entirely</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/plan.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase1-field-ids.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase1-epic-issue-numbers.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Load spec.md §Success Criteria. Load all task artifacts from `notes/`.</step>
+    <step order="1" name="Verify FR-01">Run `gh project field-list 2 --owner spaarke-dev --format json | jq '.fields[] | select(.name=="Type") | .options[].name'`. Confirm `Project` present + all 6 existing options present.</step>
+    <step order="2" name="Verify FR-02">Run field-list again. Confirm 6 new field names. For each single-select field, list options and compare exactly against spec.</step>
+    <step order="3" name="Verify FR-03">Run `gh label list | grep -E "^(epic|project|backlog|worktree:active|worktree:archived|on-hold|cancelled)\s"`. Expect 7 lines.</step>
+    <step order="4" name="Verify FR-04">Open https://github.com/spaarke-dev/spaarke/issues/new/choose in browser. Confirm 3 new templates visible. Verify YAML files exist + lint clean.</step>
+    <step order="5" name="Verify FR-05">Run `gh issue list --label epic --state open --json number,title`. Confirm 12 (+ any pre-existing) Epic Issues with exact titles from FR-05.</step>
+    <step order="6" name="Verify Success Criterion 1">Run `gh project field-list 2 --owner spaarke-dev --format json | grep -c "Project Type"`. Expect 1.</step>
+    <step order="7" name="Verify Success Criterion 2">Confirm all 12 Epic Issues visible in Project #2 (open in browser).</step>
+    <step order="8" name="Report">Write Phase 1 verify report to `notes/phase1-verify-report.md`. Section per FR with pass/fail + evidence. Recommend GO or NO-GO for Phase 2.</step>
+    <step order="9" name="If NO-GO">Document the specific failures + remediation needed. Phase 2 does not start.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI</tool>
+    <tool name="jq">JSON parsing</tool>
+    <tool name="browser">Visual verification of GitHub UI</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-devops-project-tracking-r1/notes/phase1-verify-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 FR acceptance checks (FR-01..FR-05) pass</criterion>
+    <criterion testable="true">Spec Success Criteria #1 and #2 pass</criterion>
+    <criterion testable="true">Phase 1 verify report written with GO recommendation</criterion>
+    <criterion testable="true">If NO-GO: failures documented + remediation tasks identified before Phase 2 starts</criterion>
+  </acceptance-criteria>
+</task>

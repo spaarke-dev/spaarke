@@ -1,0 +1,58 @@
+<task id="DEVOPS-037" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Inject archive-candidate-prompt hook into /repo-cleanup</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>hook-injection, repo-cleanup, additive-only</tags>
+    <dependencies>019, 018</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Inject hook into `.claude/skills/repo-cleanup/SKILL.md` per FR-23. For projects identified as archive candidates (e.g., merged + no recent activity), call `/devops-project-archive` after explicit user confirmation.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill modifier. Additive edit with explicit confirmation gate for destructive call.</role>
+
+  <goal>
+When `/repo-cleanup` detects archive candidates, it prompts; on confirmation, the archive skill runs and produces FR-14 acceptance state.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-03">Additive only; explicit confirmation required for destructive call</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+    <constraint source="safety">/devops-project-archive removes worktree; MUST require user confirm per candidate</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 018, 019 ✅.</step>
+    <step order="1" name="Add hook Step">After cleanup detects archive candidates: enumerate candidates → for each, prompt "Archive {project}? [y/N]" → on Y, invoke `/devops-project-archive --status Completed`.</step>
+    <step order="2" name="Smoke test">Simulate archive candidate; confirm prompt fires; on Y, archive runs.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/repo-cleanup/SKILL.md</tool>
+    <tool name="Skill">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.claude/skills/repo-cleanup/SKILL.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">repo-cleanup SKILL.md references `/devops-project-archive` in Steps</criterion>
+    <criterion testable="true">Prompt requires explicit Y (not just enter)</criterion>
+    <criterion testable="true">Smoke test: archive triggered only on Y confirmation</criterion>
+  </acceptance-criteria>
+</task>

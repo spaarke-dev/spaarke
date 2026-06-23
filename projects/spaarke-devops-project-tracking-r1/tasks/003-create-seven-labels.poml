@@ -1,0 +1,65 @@
+<task id="DEVOPS-003" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Create 7 repository labels for portfolio classification</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>github-labels, foundation, gh-cli</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>P1-schema</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Create 7 repository-level labels per FR-03: `epic`, `project`, `backlog`, `worktree:active`, `worktree:archived`, `on-hold`, `cancelled`. All lowercase, hyphen-separated. Each label should have a brief description and a color from the Spaarke palette convention (if one exists) or sensible defaults.
+  </prompt>
+
+  <role>
+DevOps engineer comfortable with `gh label create`. You think about label naming hygiene and color semantics (e.g., `cancelled` → red, `on-hold` → yellow, `backlog` → gray).
+  </role>
+
+  <goal>
+`gh label list` shows all 7 new labels. Each is documented with a description.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">FR-03 exact label names — do not abbreviate or pluralize</constraint>
+    <constraint source="NFR-04">Idempotency target — re-running on a repo with existing labels MUST be a no-op (per-label)</constraint>
+    <constraint source="convention">Lowercase, hyphen-separated; colon-separated for namespace (e.g., `worktree:active`)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="gh label create" location="gh CLI">
+        `gh label create &lt;name&gt; --description "&lt;desc&gt;" --color &lt;hex-without-hash&gt;`. Re-running on existing label returns error code; capture and continue.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Verify `gh auth status`. Confirm operating on the correct repo (`spaarke-dev/spaarke`).</step>
+    <step order="1" name="Baseline">Run `gh label list --json name,color,description` and save to `notes/spikes/phase1-labels-pre-{date}.json`.</step>
+    <step order="2" name="Idempotency pre-check">For each of 7 target labels, check existence in baseline. Skip existing labels (report which).</step>
+    <step order="3" name="Create labels">Create the 7 labels with colors: `epic` (purple `8e44ad`), `project` (blue `3498db`), `backlog` (gray `95a5a6`), `worktree:active` (green `27ae60`), `worktree:archived` (gray `7f8c8d`), `on-hold` (yellow `f1c40f`), `cancelled` (red `e74c3c`). Use descriptive descriptions explaining each label's portfolio role.</step>
+    <step order="4" name="Verify">Re-run `gh label list` and confirm 7 new labels present with expected names, colors, descriptions.</step>
+    <step order="5" name="Document">Save final label list to `notes/spikes/phase1-labels-after-{date}.json`.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">7 new repository labels with descriptions + colors</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase1-labels-*-{date}.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`gh label list | grep -E "^(epic|project|backlog|worktree:active|worktree:archived|on-hold|cancelled)\s"` returns 7 lines</criterion>
+    <criterion testable="true">Each label has a non-empty description</criterion>
+    <criterion testable="true">Re-running task is a no-op per label (each label create returns "exists" without error blocking)</criterion>
+  </acceptance-criteria>
+</task>
