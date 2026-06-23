@@ -141,6 +141,15 @@ export interface ISmartTodoKanbanProps<T extends IKanbanCardTodo = IKanbanCardTo
   onToggleCollapse?: (columnId: string) => void;
   /** ARIA label for the Kanban region. Defaults to "Smart To Do Kanban board". */
   ariaLabel?: string;
+  /**
+   * UAT 2026-06-19 — initial per-column manual order from user prefs.
+   * Forwarded to useKanbanColumns. Cross-device persisted via sprk_userpreference.
+   */
+  initialColumnOrders?: Record<string, string[]>;
+  /**
+   * UAT 2026-06-19 — called on each reorder so caller can persist to prefs.
+   */
+  onColumnOrdersChange?: (next: Record<string, string[]>) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,12 +176,16 @@ export function SmartTodoKanban<T extends IKanbanCardTodo>({
   collapsedColumns,
   onToggleCollapse,
   ariaLabel = 'Smart To Do Kanban board',
+  initialColumnOrders,
+  onColumnOrdersChange,
 }: ISmartTodoKanbanProps<T>): React.ReactElement {
   const { columns, moveItem, reorderInColumn, togglePin } = useKanbanColumns<T>({
     items,
     todayThreshold,
     tomorrowThreshold,
     dataverseService,
+    initialColumnOrders,
+    onColumnOrdersChange,
   });
 
   // -------------------------------------------------------------------------

@@ -49,7 +49,17 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     lineHeight: tokens.lineHeightBase400,
     display: 'block',
-    marginBottom: tokens.spacingVerticalS,
+    marginBottom: tokens.spacingVerticalM,
+  },
+  takeawaysList: {
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase300,
+    marginTop: '0',
+    marginBottom: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+  },
+  takeawayItem: {
+    marginBottom: tokens.spacingVerticalXS,
   },
   topAction: {
     display: 'block',
@@ -89,8 +99,14 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export interface TldrSectionProps {
+  /**
+   * Structured TL;DR — R2.2 replaced the prior single `briefing` blob with a
+   * 2-3 sentence summary + 3-5 key-takeaway bullets + a top-action sentence so
+   * the user can scan the briefing at a glance instead of reading a paragraph.
+   */
   tldr: {
-    briefing: string;
+    summary: string;
+    keyTakeaways: string[];
     topAction: string;
     categoryCount: number;
     priorityItemCount: number;
@@ -203,9 +219,20 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
       <Badge className={styles.aiBadge} appearance="tint" color="brand" size="small">
         AI Insight
       </Badge>
-      <Text size={300} className={styles.briefingText}>
-        {tldr.briefing}
-      </Text>
+      {tldr.summary && (
+        <Text size={300} className={styles.briefingText}>
+          {tldr.summary}
+        </Text>
+      )}
+      {Array.isArray(tldr.keyTakeaways) && tldr.keyTakeaways.length > 0 && (
+        <ul className={styles.takeawaysList} aria-label="Key takeaways">
+          {tldr.keyTakeaways.map((takeaway, idx) => (
+            <li key={idx} className={styles.takeawayItem}>
+              <Text size={300}>{takeaway}</Text>
+            </li>
+          ))}
+        </ul>
+      )}
       {tldr.topAction && (
         <Text size={300} weight="semibold" className={styles.topAction}>
           {tldr.topAction}

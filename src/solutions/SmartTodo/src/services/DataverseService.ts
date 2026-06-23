@@ -426,8 +426,9 @@ export class DataverseService {
    *
    * @param userId - The GUID of the current user
    */
-  async getActiveTodos(userId: string): Promise<IResult<ITodo[]>> {
-    const query = buildTodoItemsQuery(userId);
+  /** UAT 2026-06-19: param renamed userId → contactId (assigned-to migrated to Contact lookup). */
+  async getActiveTodos(contactId: string): Promise<IResult<ITodo[]>> {
+    const query = buildTodoItemsQuery(contactId);
     return tryCatch(async () => {
       const result = await this._webApi.retrieveMultipleRecords('sprk_todo', query);
       return toTypedArray<ITodo>(mapTodoFormattedValues(result.entities));

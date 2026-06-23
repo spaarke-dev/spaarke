@@ -89,6 +89,13 @@ const useStyles = makeStyles({
   root: {
     flex: 1,
     minHeight: 0,
+    // UAT 2026-06-22 round 11: ADDED `height: 100%`. Console diagnostics
+    // confirmed this element's parent (a workspace tab content wrapper) is
+    // `display: block`, so the `flex: 1` here is ignored. Without
+    // `height: 100%` the widget root shrinks to content height (~600px)
+    // even when the parent has 900+ available pixels — capping the entire
+    // SectionPanel chain below.
+    height: '100%',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',

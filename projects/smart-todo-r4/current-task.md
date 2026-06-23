@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-18 (Wave D ✅ deployed; Wave E queued — 3 new widget/app parity tasks 102/103/104 per UAT round 2)
+> **Last Updated**: 2026-06-20 22:30Z (PR #403 merged to master — UAT iteration complete + Contact lookup migration code on master)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,16 +9,182 @@
 
 | Field | Value |
 |-------|-------|
-| **Project** | smart-todo-r4 — 7 workstreams (A-G), 34 tasks total (31 baseline + 3 Wave D widget-parity adds) |
-| **Status** | **31 of 34 tasks ✅** (91% by count; all implementation waves + widget parity complete) |
-| **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
-| **PR #384** | ✅ MERGED to master 2026-06-11 (Waves A + B + C; 14 tasks) |
-| **Wave D** | ✅ COMPLETE on branch (NOT yet on master): 099 widget chrome + Pattern D, 101 useKanbanColumns hoist, 100 openTodo launch + BroadcastChannel refetch. 4 commits on branch (`c50690be8` planning + `6074d42b9` 099 + `afb6ac6cc` 101 + `f593292c2` 100). Closes UAT issues 1-6 from 2026-06-18 screenshot. |
-| **Worktree branch** | `work/smart-todo-r4-wave2` — synced to master + Wave E queued (POMLs filed, awaiting agent dispatch) |
-| **Active task** | **Wave E queued** (R4-102 + R4-103 + R4-104 per 2026-06-18 UAT round 2; widget/app full parity). R4-092 deploy stays IN-PROGRESS until UAT sign-off (Wave E will require re-deploy after merge). |
-| **Working tree** | Wave E planning artifacts staged (audit note + 3 POMLs + TASK-INDEX updates); awaiting commit + agent dispatch |
-| **Next Action** | **Dispatch Wave E-1**: R4-102 (Kanban hoist) + R4-104 (app chrome) in parallel via Agent tool. After R4-102 lands, dispatch R4-103 serially. Then open PR, master-deploy, hold for UAT round 3. |
-| **PR strategy** | Wave D shipped via PR #391 (`e4e91a3ec`); CI hardening shipped via PR #392 (`a93fbebf6`) + PR #393 (eslint root-cause; auto-merge enabled, awaiting CI green). Wave E ships as one follow-up PR after 3 tasks complete + redeploy. R4-098 wrap-up + project-close still HELD until final UAT acceptance per durable user instruction. |
+| **Project** | smart-todo-r4 — 7 workstreams; PR-merge phase post-UAT iteration |
+| **Status** | All implementation + 2 days of UAT iteration ✅ **MERGED TO MASTER** (commit `845521aaf` via PR #403 squash, 2026-06-20T22:22:27Z) |
+| **PR #403** | ✅ MERGED 2026-06-20 — 19 commits squash-merged covering: contact-lookup migration, chrome uniformity (title row above toolbar, 3-field quick-add, Filter slide), color-coded count pills, collapsible columns (both orientations), columnOrders cross-device persistence, modal-launch harness wiring, prototype-framework skills, Header.tsx production regression fix |
+| **Worktree branch** | `work/smart-todo-r4-wave2` was DELETED after merge. Worktree is now on `master` @ `845521aaf` |
+| **Active task** | **R4-092 deploy** still in-progress — code is on master but NOT YET DEPLOYED to spaarkedev1 |
+| **Working tree** | 2 unrelated researcher subagent memory files modified (`.claude/agent-memory/researcher/*`) — non-source, safe to ignore |
+| **Next Action** | **Master-deploy to spaarkedev1**: `/master-deploy` (or invoke `master-deploy` skill). PREREQ to verify before deploy: (1) `sprk_todo.sprk_assignedto` is migrated to sprk_contact Contact lookup on spaarkedev1 (user confirmed migration done); (2) at least one `sprk_contact` record exists with `sprk_systemuser` populated for test users (otherwise useCurrentContactId returns null → empty kanban). After deploy: UAT round 4 on deployed bits; flip R4-092 + R4-093 to ✅; proceed to R4-098 project wrap-up. |
+| **Critical schema dependency** | New code REQUIRES `sprk_todo.sprk_assignedto` = lookup to `sprk_contact` (NOT systemuser). Filter resolves current user → sprk_contact via `useCurrentContactId` hook. Without the schema migration + at least one sprk_contact row per user, the widget + Code Page will show empty for that user. |
+
+### What landed in PR #403 (highlights)
+
+| Area | Change |
+|---|---|
+| **Schema migration** | `sprk_todo.sprk_assignedto` migrated systemuser → sprk_contact; `useCurrentContactId` hook in `@spaarke/smart-todo-components`; widget + Code Page + queryHelpers + DataverseService all rewired; bind format `/sprk_contacts(...)` |
+| **Chrome uniformity** | Title row above toolbar (both surfaces); 3-field quick-add (name + due + assigned + Add icon); Filter slide UX (replaces search-as-icon expand row); list view removed from Code Page |
+| **Kanban improvements** | Tomorrow → yellow accent + dark text on pill (WCAG); color-coded count pills (red/yellow/green); KanbanBoard width:100% + alignSelf:stretch; widget kanbanContainer flex 1 1 0 + flexible min-height `max(400px, 60vh)`; collapsible columns in BOTH orientations (single-container pattern + `alignSelf:flex-start` for horizontal-collapsed); orientation toggle single-source-of-truth (was stuck on Code Page); widget defaults to horizontal |
+| **Persistence** | `columnOrders` field on `ITodoKanbanPreferences` (cross-device JSON pref); `useKanbanColumns` `initialColumnOrders` + `onColumnOrdersChange`; SmartToDo wired to persist via `updatePreferences` |
+| **Production regression fix** | `SmartTodoApp/components/Header/Header.tsx` import (`../../icons/MicrosoftToDoIcon` → `@spaarke/ui-components`) — slipped past master-deploy webpack resolution, caught by harness |
+| **Tooling** | 3 new skills: `prototype-harness-setup`, `prototype-harness-extend`, `prototype-experiment-init` |
+| **Architecture note** | `projects/smart-todo-r4/notes/ownership-filter-alignment-2026-06-19.md` |
+| **Prototype harness companion commits** | spaarke-prototype repo: `_infra/seed/factories/sprk_contact.ts` + sprk_todo seed updated to use contact GUID + localStorage persistence simulator + widget→modal harness wiring + worked-example guide + Mode 1/2 pcfContext mock + Code Page mount alias |
+
+### Files Modified Since 2026-06-18 Restart (this session work)
+
+**Production (now on master):**
+- `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx` + `.styles.ts` — three-field quick-add, Filter slide, title row, collapse wiring, contact-id integration, Add icon
+- `src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts` — columnOrders plumbing, Tomorrow yellow accent + dark countTextColor
+- `src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useCurrentContactId.ts` (NEW) — systemuser → sprk_contact resolver
+- `src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartTodoKanban/SmartTodoKanban.tsx` — collapse + columnOrders forwarding
+- `src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx` + `types.ts` — width:100% + alignSelf:stretch, count pill, single-container collapsed
+- `src/solutions/SmartTodo/src/SmartTodoApp.tsx` — orientation prop down, contact resolution, list view + ViewToggle removed
+- `src/solutions/SmartTodo/src/components/SmartToDo.tsx` — orientation override prop, columnOrders wiring, three-field event payload
+- `src/solutions/SmartTodo/src/components/Header/Header.tsx` + `.styles.ts` — title row, three-field quick-add, Filter slide, contact defaults
+- `src/solutions/SmartTodo/src/services/queryHelpers.ts` + `DataverseService.ts` + `hooks/useTodoItems.ts` — contactId param rename
+- `src/solutions/SmartTodo/src/hooks/useUserPreferences.ts` — columnOrders field
+- `.claude/skills/prototype-harness-setup/SKILL.md` (NEW)
+- `.claude/skills/prototype-harness-extend/SKILL.md` (NEW)
+- `.claude/skills/prototype-experiment-init/SKILL.md` (NEW)
+- `.claude/skills/INDEX.md` — added new skills
+- `projects/smart-todo-r4/notes/ownership-filter-alignment-2026-06-19.md` (NEW)
+
+**Harness (spaarke-prototype repo, `feature/uat-harness-framework` branch):**
+- `_infra/mocks/xrm.ts` — OData lookup normalization, @odata.bind handling, localStorage persistence, server-side defaults on create
+- `_infra/mocks/pcfContext.ts` (NEW) — PCF ComponentFramework.Context mock
+- `_infra/mocks/auth.ts` — auth mocks
+- `_infra/mocks/index.ts` — InstallMocks aggregate + persistKey + PCF exports
+- `_infra/seed/factories/sprk_todo.ts` — sprk_assignedto now contact GUID, more fields
+- `_infra/seed/factories/sprk_contact.ts` (NEW) — Person table seed for contact resolution
+- `_infra/seed/presets/smart-todo-default.ts` — seeds both entities
+- `_infra/vite.shared-libs.ts` — @spaarke/smart-todo-app alias for Code Page mount
+- `projects/smart-todo-r4-uat/src/App.tsx` — tab switcher (Widget + Code Page), CreateTodoWizard mount, widget→modal launch wiring
+- `projects/smart-todo-r4-uat/src/main.tsx` — persistKey enabled
+- `docs/PROTOTYPE-UI-SYSTEM-GUIDE.md` — Mode 1/2 + worked example + interactive UI + seed data + PCF + Coverage&limits sections
+- `docs/SKILLS-TO-BUILD.md` — design doc for the 3 prototype skills (now built)
+
+### Decisions Made This Session
+
+| Decision | Why |
+|---|---|
+| **Squash merge** for PR #403 | User's choice — single commit on master vs preserving 19 individual commits |
+| **`useCurrentContactId` hook** (new shared peer) over inline resolution in each surface | Single source-of-truth for systemuser → sprk_contact mapping; both widget + Code Page consume the same hook |
+| **Dual-field display vs polymorphic vs name+systemuser** for Assigned To | User chose to migrate `sprk_assignedto` straight to sprk_contact lookup (removed old, created new); polymorphic was rejected (FetchXML can't filter); name-only rejected (loses lookup semantics) |
+| **In-memory contactId state + visible name display** for quick-add | UI shows resolved contact NAME (not raw GUID); bind payload uses GUID; user can leave Assigned To empty (placeholder shows) → bind defaults to current user's contact |
+| **Default contactId placeholder over auto-fill** | UAT feedback: field hint should show "Assigned to" — pre-filling with contact name hides the placeholder. Internal contactId tracking still defaults assignment to current user when field is empty. |
+| **`flex: 1 1 0` + `max(400px, 60vh)` min-height** on widget kanbanContainer | UAT discovery: nested Griffel `min-height: 0` collapsed the kanban to invisible; flexible floor prevents collapse while still growing in larger hosts. User noted "this needs to be flexible." |
+| **`alignSelf: flex-start` for horizontal-collapsed columns** | Lets collapsed columns shrink to header-height while sibling expanded columns still stretch to board height. Replaces prior 40px vertical-rl rail (which user found visually disjoint). |
+| **Single-container collapsed pattern** (no separate `<div>` for collapsed) | Same element renders in both states; only the Droppable card-list area is conditional. Solves the "vertical-mode collapsed hides header + takes giant height" bug. |
+| **Orientation passed as prop SmartTodoApp → SmartToDo** (not via internal hook instance) | Two `useUserPreferences` instances had independent state — toggle persisted but didn't reach SmartToDo's KanbanBoard. Prop down = single source of truth. |
+| **localStorage persistence in harness mock** | Production has Dataverse persistence; harness re-seeded on every refresh, making pin moves appear lost. localStorage simulates production behavior. |
+| **Modal-launch via URL params + key remount in harness** | Mirrors production's `useLaunchContext` flow exactly. SmartTodoApp's useLaunchContext re-reads URL on mount; key bump forces remount. |
+
+### 🆕 UAT-iteration harness (R4-105)
+
+Built this session to address the ~30-min-per-Ctrl-F5 cost that drove Wave D + Wave E rework. Live now in `c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat/`:
+
+```bash
+cd c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat
+npm run dev   # localhost:5173 with widget + 15 seeded todos + HMR on widget source
+```
+
+Framework (reusable for any future project): `c:/code_files/spaarke-prototype/_infra/` + `projects/_templates/prod-component-harness/`. See `projects/_framework-setup-2026-06/README.md` in the prototype repo for the design. AI convention: `claude.md` updated with "Production Component Harnesses" section.
+
+---
+
+## 🚨 RESTART POINT — read this first after compaction
+
+> **Saved**: 2026-06-18 (session approaching context limit)
+> **Status**: 35/38 tasks ✅; Wave E deployed; UAT-harness framework shipped to prototype repo
+> **What's HELD**: R4-098 wrap-up + R4-093 UI tests + R4-092 closeout — ALL gated on user UAT acceptance per durable instruction
+
+### Where every piece lives
+
+| Artifact | Repo | Path | Branch |
+|---|---|---|---|
+| smart-todo-r4 production code | `c:/code_files/spaarke-wt-smart-todo-r4` | `src/` | `work/smart-todo-r4-wave2` (this worktree; HEAD = c1b02c961) |
+| smart-todo-r4 production code (also on master) | `c:/code_files/spaarke` (main repo) | `src/` | `master` (HEAD = 3d02a3d38, PR #394 merged) |
+| Deployed to spaarkedev1 | Dataverse | sprk_smarttodo + sprk_spaarkeai + sprk_createtodowizard web resources | Wave D + Wave E both live (timestamps 9:25-9:27 PM 2026-06-18) |
+| UAT-harness framework | `c:/code_files/spaarke-prototype` | `_infra/` + `projects/_templates/prod-component-harness/` + `projects/smart-todo-r4-uat/` | `feature/uat-harness-framework` (HEAD = 73a9ddc; pushed to origin; PR NOT yet opened to main) |
+| Framework docs | `c:/code_files/spaarke-prototype` | `docs/PROTOTYPE-UI-SYSTEM-GUIDE.md` + `docs/SKILLS-TO-BUILD.md` + `projects/_framework-setup-2026-06/README.md` + `claude.md` | Same `feature/uat-harness-framework` branch |
+| R4-105 POML | `c:/code_files/spaarke-wt-smart-todo-r4` | `projects/smart-todo-r4/tasks/105-UAT-harness-consumer.poml` | This worktree, committed |
+
+### PRs landed this session
+
+| PR | Merged | Scope |
+|---|---|---|
+| #391 | 2026-06-18T16:03:49Z | Wave D widget parity (R4-099/100/101) |
+| #392 | 2026-06-18T16:31:07Z | CI hardening: lockfile + `npm install` pattern |
+| #393 | 2026-06-18T~17:00Z | CI hardening: explicit eslint dep in PCF package.json (root-cause fix) |
+| #394 | 2026-06-18T21:03:49Z | Wave E widget/app parity (R4-102/103/104) — merge commit 3d02a3d38 |
+
+### Outstanding work
+
+| Task | State | Blocked on |
+|---|---|---|
+| **User UAT round 3** | Pending — user testing on live spaarkedev1 OR via new prototype harness | User availability |
+| R4-092 deploy session POML closeout | 🔄 in-progress | UAT round 3 sign-off |
+| R4-093 UI test suite | 🔲 not-started (superseded by iterative UAT) | UAT round 3 sign-off — likely auto-✅ when user signs off |
+| R4-098 project wrap-up | 🔲 not-started — lessons-learned + README → Complete + final PR-close | UAT round 3 sign-off |
+| Prototype harness framework PR → main | NOT yet opened; branch `feature/uat-harness-framework` pushed at commit 73a9ddc | User decision (merge now / wait for team review) |
+| Skill build: `prototype-harness-setup` (HIGH priority per `docs/SKILLS-TO-BUILD.md`) | Not started | User decision (build it now? defer?) |
+
+### Resume commands
+
+```bash
+# 1. Verify state
+cd c:/code_files/spaarke-wt-smart-todo-r4
+git status                                    # should be clean
+git log -1 --oneline                          # should be c1b02c961
+git fetch origin --prune
+git rev-list --count HEAD..origin/master     # expect 0 (Wave E + R4-105 closeout both on master? no — closeout still local)
+
+# Check prototype repo
+cd c:/code_files/spaarke-prototype
+git status
+git branch --show-current                    # should be feature/uat-harness-framework
+git log -1 --oneline                          # should be 73a9ddc
+
+# To launch the harness for testing
+cd c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat
+npm run dev                                   # localhost:5173
+
+# To verify deployed bits on spaarkedev1
+# Browser: open spaarkedev1 SpaarkeAi workspace; Ctrl+F5 first
+# Or query Dataverse:
+pwsh -NoProfile -File /c/tmp/verify-deploy.ps1
+```
+
+### Decision points awaiting user
+
+1. **UAT round 3 verdict**: sign-off, partial sign-off (with new bugs filed), or new Wave F?
+2. **Prototype harness PR to main**: merge `feature/uat-harness-framework` → main now, or wait?
+3. **Build `prototype-harness-setup` skill**: build now (~4 hr investment, would benefit all future projects) or defer?
+
+### Recovery instructions (for next session)
+
+1. Read this Quick Recovery + RESTART POINT sections (above)
+2. Read `c:/code_files/spaarke-prototype/docs/PROTOTYPE-UI-SYSTEM-GUIDE.md` for full framework context (700+ lines covering both modes)
+3. Read `c:/code_files/spaarke-prototype/docs/SKILLS-TO-BUILD.md` for the skill decision context
+4. Read this session's last commit messages: `git log --oneline -10` in BOTH repos
+5. Re-confirm with user which decision point they want to address first
+
+### Last commits this session (both repos)
+
+```
+spaarke-wt-smart-todo-r4 (work/smart-todo-r4-wave2):
+  c1b02c961 feat(smart-todo-r4): R4-105 UAT-harness framework (cross-repo; sub-second iteration enabler)
+  1e8872871 chore(smart-todo-r4): R4-092 Wave E deploy session 2026-06-18
+  10e5b8a01 Merge remote-tracking branch 'origin/master' into work/smart-todo-r4-wave2
+  87b3d3a85 chore(smart-todo-r4): prettier --write on 8 Wave E peer-package files
+  1a906db84 feat(smart-todo-r4): R4-103 (E-2) — widget toolbar polish
+  0a1443fbe feat(smart-todo-r4): R4-104 (E-3) — app chrome consolidation
+  882c1836a feat(smart-todo-r4): R4-102 (E-1) — widget Kanban hoist
+
+spaarke-prototype (feature/uat-harness-framework):
+  73a9ddc feat(prototype): UAT harness framework + smart-todo-r4-uat first consumer
+```
 
 ### Critical context for resume
 

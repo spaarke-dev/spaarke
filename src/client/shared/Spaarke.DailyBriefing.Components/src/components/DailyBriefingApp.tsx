@@ -35,6 +35,7 @@ import {
   useId,
   Toast,
   ToastTitle,
+  ToastBody,
 } from '@fluentui/react-components';
 import { DigestHeader } from './DigestHeader';
 import { EmptyState } from './EmptyState';
@@ -228,28 +229,61 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // Handlers
   // ---------------------------------------------------------------------------
 
-  /** Add a notification item to To Do and show a toast. */
+  /**
+   * Add a notification item to To Do and show a confirmation toast.
+   * R2.2 Item 3: shows the To Do title in the toast and surfaces a failure
+   * toast when createTodo throws (existing tooltip-only error path was too
+   * easy to miss).
+   */
   const handleAddToTodo = React.useCallback(
     async (itemIds: string[]) => {
       for (const ch of channels) {
         if (ch.status !== 'success') continue;
         for (const item of ch.group.items) {
           if (itemIds.includes(item.id)) {
-            await createTodo(item);
-            dispatchToast(
-              <Toast>
-                <ToastTitle>Added to To Do</ToastTitle>
-              </Toast>,
-              { intent: 'success', timeout: 3000 }
-            );
-            // Also mark notification as read
-            markAsRead?.(item.id);
+            try {
+              await createTodo(item);
+              // useInlineTodoCreate swallows exceptions and surfaces them via
+              // its getError() — check that path too so the user sees a toast
+              // even when the underlying createRecord call failed.
+              const err = getTodoError(item.id);
+              if (err) {
+                dispatchToast(
+                  <Toast>
+                    <ToastTitle>Could not add to To Do</ToastTitle>
+                    <ToastBody>{err}</ToastBody>
+                  </Toast>,
+                  { intent: 'error', timeout: 5000 }
+                );
+              } else {
+                dispatchToast(
+                  <Toast>
+                    <ToastTitle>Added to To Do</ToastTitle>
+                    <ToastBody>{item.title}</ToastBody>
+                  </Toast>,
+                  { intent: 'success', timeout: 3000 }
+                );
+                // Mark notification as read only on success
+                markAsRead?.(item.id);
+              }
+            } catch (e) {
+              // Defensive: createTodo isn't supposed to throw (it catches
+              // internally), but if a future change re-throws we still want
+              // the user to see a toast.
+              dispatchToast(
+                <Toast>
+                  <ToastTitle>Could not add to To Do</ToastTitle>
+                  <ToastBody>{e instanceof Error ? e.message : String(e)}</ToastBody>
+                </Toast>,
+                { intent: 'error', timeout: 5000 }
+              );
+            }
             return;
           }
         }
       }
     },
-    [channels, createTodo, dispatchToast, markAsRead]
+    [channels, createTodo, getTodoError, dispatchToast, markAsRead]
   );
 
   /** Dismiss notification items by marking them as read. */

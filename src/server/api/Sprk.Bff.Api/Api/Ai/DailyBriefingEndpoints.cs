@@ -220,7 +220,8 @@ public static class DailyBriefingEndpoints
             {
                 Tldr = new TldrResult
                 {
-                    Briefing = string.Empty,
+                    Summary = string.Empty,
+                    KeyTakeaways = [],
                     TopAction = string.Empty,
                     CategoryCount = 0,
                     PriorityItemCount = 0
@@ -300,7 +301,11 @@ public static class DailyBriefingEndpoints
     }
 
     /// <summary>
-    /// Generate the TL;DR briefing (5-7 sentences) with top action identification.
+    /// Generate the TL;DR briefing as a structured response (2-3 sentence summary,
+    /// 3-5 key-takeaway bullets, top action). R2.2: switched from free-form prose
+    /// to a JSON-structured response so the client renders a scannable shape.
+    /// Falls back to populating just <see cref="TldrResult.Summary"/> if JSON parsing
+    /// fails (graceful degradation — user sees a paragraph, not an error).
     /// </summary>
     private static async Task<TldrResult> GetTldrAsync(
         DailyBriefingNarrateRequest request,
@@ -310,33 +315,80 @@ public static class DailyBriefingEndpoints
     {
         var prompt = BuildNarrateTldrPrompt(request);
 
-        var briefingText = await briefingAi.GenerateNarrativeAsync(
+        var responseText = await briefingAi.GenerateNarrativeAsync(
             prompt,
             maxOutputTokens: 500,
             cancellationToken: cancellationToken);
 
-        // Extract top action from the briefing text (last sentence starting with "Your most important action today is...")
-        var trimmed = briefingText.Trim();
-        var topAction = "";
-        var sentences = trimmed.Split(new[] { ". " }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (var sentence in sentences)
-        {
-            if (sentence.TrimStart().StartsWith("Your most important action today is", StringComparison.OrdinalIgnoreCase))
-            {
-                topAction = sentence.TrimStart();
-                if (!topAction.EndsWith('.'))
-                    topAction += ".";
-                break;
-            }
-        }
+        var parsed = ParseTldrResponse(responseText, logger);
 
-        return new TldrResult
+        return parsed with
         {
-            Briefing = trimmed,
-            TopAction = topAction,
             CategoryCount = request.Categories.Length,
             PriorityItemCount = request.PriorityItems.Length
         };
+    }
+
+    /// <summary>
+    /// Parse the AI TL;DR response (expected JSON: { summary, keyTakeaways[], topAction }).
+    /// Strips markdown code fences. Falls back to using the raw text as Summary with empty
+    /// KeyTakeaways and TopAction if parsing fails — graceful degradation per R2.2.
+    /// Internal for unit-test access (mirrors BuildChannelNarrationPrompt convention).
+    /// </summary>
+    internal static TldrResult ParseTldrResponse(string responseText, ILogger logger)
+    {
+        var json = responseText.Trim();
+
+        // Strip markdown code fences if present (mirrors ParseChannelBullets convention)
+        if (json.StartsWith("```"))
+        {
+            var firstNewline = json.IndexOf('\n');
+            if (firstNewline > 0)
+                json = json[(firstNewline + 1)..];
+            if (json.EndsWith("```"))
+                json = json[..^3];
+            json = json.Trim();
+        }
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<TldrJsonPayload>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (parsed is null)
+            {
+                logger.LogWarning("TL;DR JSON parse returned null. Falling back to raw text as Summary.");
+                return new TldrResult { Summary = responseText.Trim() };
+            }
+
+            return new TldrResult
+            {
+                Summary = parsed.Summary ?? "",
+                KeyTakeaways = parsed.KeyTakeaways ?? [],
+                TopAction = parsed.TopAction ?? ""
+            };
+        }
+        catch (JsonException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to parse TL;DR JSON. Falling back to raw text as Summary. Response={Response}",
+                json);
+            return new TldrResult { Summary = responseText.Trim() };
+        }
+    }
+
+    /// <summary>
+    /// Internal DTO matching the JSON shape requested in <see cref="BuildNarrateTldrPrompt"/>.
+    /// Kept private to the endpoint — public callers receive <see cref="TldrResult"/>.
+    /// </summary>
+    private sealed class TldrJsonPayload
+    {
+        public string? Summary { get; set; }
+        public string[]? KeyTakeaways { get; set; }
+        public string? TopAction { get; set; }
     }
 
     /// <summary>
@@ -393,17 +445,23 @@ public static class DailyBriefingEndpoints
 
     /// <summary>
     /// Build the TL;DR prompt for narrate endpoint.
-    /// Instructs the model to produce a 5-7 sentence briefing ending with the most important action.
+    /// R2.2: requests a JSON response shape — `summary` (2-3 sentences), `keyTakeaways`
+    /// (3-5 short bullets), and `topAction` (one action sentence) — so the client can
+    /// render an at-a-glance scannable summary instead of a paragraph block.
     /// </summary>
     internal static string BuildNarrateTldrPrompt(DailyBriefingNarrateRequest request)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You are a concise executive assistant writing a daily briefing for a legal professional.");
-        sb.AppendLine("Summarize the user's daily notifications into a prioritized briefing of 5-7 sentences.");
+        sb.AppendLine("Summarize the user's daily notifications into a structured briefing with THREE parts:");
+        sb.AppendLine("  1. summary: 2-3 sentence executive summary focused on what requires immediate attention");
+        sb.AppendLine("  2. keyTakeaways: 3-5 short bullet strings (each <120 chars, no leading '-' or '*')");
+        sb.AppendLine("  3. topAction: ONE sentence naming the single most important action for today (begin with the action verb, e.g. 'Review the Acme Corp engagement letter (2 days overdue)')");
+        sb.AppendLine();
         sb.AppendLine("IMPORTANT: Reference specific names, titles, matters, and entities from the data below. Do NOT write vague summaries like 'you have one overdue task'. Instead write 'The Acme Corp engagement letter review is 2 days overdue'.");
-        sb.AppendLine("Focus on what requires immediate attention first, then provide context on volume and trends.");
-        sb.AppendLine("Do NOT use bullet points. Write in natural prose.");
-        sb.AppendLine("End with a sentence identifying the single most important action for today, starting with 'Your most important action today is...'");
+        sb.AppendLine();
+        sb.AppendLine("Return ONLY a JSON object (no markdown, no code fences) with this exact shape:");
+        sb.AppendLine("  { \"summary\": \"...\", \"keyTakeaways\": [\"...\", \"...\"], \"topAction\": \"...\" }");
         sb.AppendLine();
         sb.AppendLine("=== Notification Data ===");
 
@@ -455,7 +513,7 @@ public static class DailyBriefingEndpoints
         }
 
         sb.AppendLine();
-        sb.AppendLine("Write a 5-7 sentence briefing referencing specific names and entities:");
+        sb.AppendLine("Return the JSON object now (no markdown, no code fences, no surrounding text):");
 
         return sb.ToString();
     }
@@ -800,7 +858,7 @@ public record ChannelItemDto
 /// </summary>
 public record DailyBriefingNarrateResponse
 {
-    /// <summary>TL;DR executive summary (5-7 sentences).</summary>
+    /// <summary>TL;DR executive summary (2-3 sentences + 3-5 key-takeaway bullets + top action).</summary>
     [JsonPropertyName("tldr")]
     public TldrResult Tldr { get; init; } = new();
 
@@ -814,15 +872,22 @@ public record DailyBriefingNarrateResponse
 }
 
 /// <summary>
-/// TL;DR executive summary with top action identification.
+/// TL;DR executive summary with key takeaways and top action identification.
+/// R2.2: switched from a single 5-7 sentence narrative to a structured shape —
+/// a 2-3 sentence executive summary + 3-5 key-takeaway bullets — so the client
+/// can render an at-a-glance scannable summary instead of a paragraph block.
 /// </summary>
 public record TldrResult
 {
-    /// <summary>AI-generated 5-7 sentence prioritized briefing narrative.</summary>
-    [JsonPropertyName("briefing")]
-    public string Briefing { get; init; } = "";
+    /// <summary>AI-generated 2-3 sentence executive summary.</summary>
+    [JsonPropertyName("summary")]
+    public string Summary { get; init; } = "";
 
-    /// <summary>The single most important action for today, extracted from the briefing.</summary>
+    /// <summary>AI-generated 3-5 short key-takeaway bullet strings (no leading "- ").</summary>
+    [JsonPropertyName("keyTakeaways")]
+    public string[] KeyTakeaways { get; init; } = [];
+
+    /// <summary>The single most important action for today.</summary>
     [JsonPropertyName("topAction")]
     public string TopAction { get; init; } = "";
 

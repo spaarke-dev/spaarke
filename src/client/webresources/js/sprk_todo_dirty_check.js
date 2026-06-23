@@ -88,7 +88,7 @@ Spaarke.SmartTodo.DirtyCheck = Spaarke.SmartTodo.DirtyCheck || {};
     // -----------------------------------------------------------------------
 
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.0.0";
+    ns.VERSION = "1.1.0";
 
     /**
      * Message-type discriminators. MUST stay in lockstep with
@@ -97,6 +97,18 @@ Spaarke.SmartTodo.DirtyCheck = Spaarke.SmartTodo.DirtyCheck || {};
      */
     var REQUEST_TYPE = "request-dirty-check";
     var RESULT_TYPE = "dirty-check-result";
+
+    /**
+     * v1.1.0 — outbound message type the iframe posts to the parent when
+     * the OOB form's "Save & Close" (or any Xrm.Page.ui.close call) fires.
+     * Parent dismisses the SmartTodoModal and the iframe is unmounted
+     * BEFORE MDA's default close-and-navigate-parent behaviour runs, so
+     * the parent page (Code Page modal / embedded Code Page / SpaarkeAi)
+     * never gets navigated away.
+     *
+     * MUST stay in lockstep with the consumer in SmartTodoModal.tsx.
+     */
+    var CLOSE_INTENT_TYPE = "sprk_todo_form_close_intent";
 
     /**
      * Inbound-origin allow-list (Spaarke domains only). Patterns:
@@ -124,6 +136,9 @@ Spaarke.SmartTodo.DirtyCheck = Spaarke.SmartTodo.DirtyCheck || {};
      */
     var FORM_CONTEXT_HOLDER = "__sprk_todo_dirty_check_formctx__";
 
+    /** v1.1.0 — sentinel to install the ui.close monkey-patch exactly once. */
+    var CLOSE_PATCH_INSTALLED = "__sprk_todo_close_patch_installed__";
+
     // -----------------------------------------------------------------------
     // OnLoad — register message listener + cache formContext
     // -----------------------------------------------------------------------
@@ -148,6 +163,13 @@ Spaarke.SmartTodo.DirtyCheck = Spaarke.SmartTodo.DirtyCheck || {};
             // Refresh the cached formContext (per-load — new record may differ).
             window[FORM_CONTEXT_HOLDER] = formContext;
 
+            // v1.1.0 — reset the close-post dedup so each record's first
+            // Save & Close posts exactly once (without this the second
+            // record's Save & Close would silently no-op).
+            if (typeof ns._resetClosePost === "function") {
+                ns._resetClosePost();
+            }
+
             // Install the message listener exactly once per iframe lifetime.
             if (!window[LISTENER_INSTALLED]) {
                 window.addEventListener("message", ns._handleMessage, false);
@@ -156,10 +178,91 @@ Spaarke.SmartTodo.DirtyCheck = Spaarke.SmartTodo.DirtyCheck || {};
             } else {
                 console.log("[SmartTodo.DirtyCheck v" + ns.VERSION + "] formContext refreshed for new record");
             }
+
+            // v1.1.0 — install the ui.close monkey-patch exactly once. The
+            // OOB Save & Close ribbon command, and any custom call to
+            // Xrm.Page.ui.close() or formContext.ui.close(), would normally
+            // navigate the iframe's PARENT WINDOW (an MDA behaviour that
+            // assumes the form is the top-level page). Inside our hybrid
+            // modal that parent is the SmartTodo Code Page (or SpaarkeAi
+            // hosting it) and we don't want it navigated.
+            //
+            // Strategy: replace `ui.close` on both `formContext.ui` and the
+            // legacy `Xrm.Page.ui` with a function that posts a close-intent
+            // message to the parent and does nothing else. The parent
+            // listens, dismisses the SmartTodoModal, and the iframe is
+            // unmounted before any further nav could fire.
+            if (!window[CLOSE_PATCH_INSTALLED]) {
+                installCloseInterceptor(formContext);
+                window[CLOSE_PATCH_INSTALLED] = true;
+            }
         } catch (err) {
             console.error("[SmartTodo.DirtyCheck v" + ns.VERSION + "] onLoad error:", err);
         }
     };
+
+    // -----------------------------------------------------------------------
+    // v1.1.0 — Save & Close interceptor
+    // -----------------------------------------------------------------------
+
+    /**
+     * Replaces `formContext.ui.close` AND the legacy `Xrm.Page.ui.close`
+     * with a function that posts a close-intent message to the iframe's
+     * parent window. Both references must be patched because:
+     *   - Custom command-bar commands sometimes use the deprecated
+     *     `Xrm.Page.ui.close()` directly (legacy code paths)
+     *   - Newer command formulas use `formContext.ui.close(executionContext)`
+     *
+     * Defensive: if either reference path is missing (older / sandboxed
+     * MDA), the corresponding patch is silently skipped. The other patch
+     * still applies. If both are missing the user falls back to the
+     * pre-v1.1.0 behaviour (parent navigation) — no worse than before.
+     *
+     * @param {object} formContext - The current form's execution context
+     */
+    function installCloseInterceptor(formContext) {
+        var posted = false;
+        var postCloseIntent = function () {
+            if (posted) return; // dedup — Save & Close fires both paths sometimes
+            posted = true;
+            try {
+                if (window.parent && typeof window.parent.postMessage === "function") {
+                    // Use "*" target origin here because the parent is
+                    // same-origin in production but iframe-loaded forms can
+                    // execute in cross-origin contexts during diagnostics.
+                    // The message body is a fixed sentinel — no user data
+                    // leaks via origin wildcards.
+                    window.parent.postMessage({ type: CLOSE_INTENT_TYPE }, "*");
+                    console.log("[SmartTodo.DirtyCheck v" + ns.VERSION + "] posted " + CLOSE_INTENT_TYPE);
+                }
+            } catch (err) {
+                console.warn("[SmartTodo.DirtyCheck v" + ns.VERSION + "] postCloseIntent failed:", err);
+            }
+        };
+
+        // Reset the dedup flag whenever this form re-loads (new record).
+        ns._resetClosePost = function () { posted = false; };
+
+        // Patch 1: formContext.ui.close
+        try {
+            if (formContext && formContext.ui && typeof formContext.ui.close === "function") {
+                formContext.ui.close = postCloseIntent;
+                console.log("[SmartTodo.DirtyCheck v" + ns.VERSION + "] patched formContext.ui.close");
+            }
+        } catch (err) {
+            console.warn("[SmartTodo.DirtyCheck v" + ns.VERSION + "] formContext.ui.close patch failed:", err);
+        }
+
+        // Patch 2: legacy Xrm.Page.ui.close
+        try {
+            if (typeof Xrm !== "undefined" && Xrm.Page && Xrm.Page.ui && typeof Xrm.Page.ui.close === "function") {
+                Xrm.Page.ui.close = postCloseIntent;
+                console.log("[SmartTodo.DirtyCheck v" + ns.VERSION + "] patched Xrm.Page.ui.close");
+            }
+        } catch (err) {
+            console.warn("[SmartTodo.DirtyCheck v" + ns.VERSION + "] Xrm.Page.ui.close patch failed:", err);
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Message handler — validate, compute dirty, respond

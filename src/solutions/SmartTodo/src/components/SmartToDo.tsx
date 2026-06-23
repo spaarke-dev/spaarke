@@ -46,6 +46,7 @@ import {
   MessageBarBody,
 } from "@fluentui/react-components";
 import { KanbanBoard, OrientationToggle, type Orientation } from "@spaarke/ui-components";
+import { useCurrentContactId } from "@spaarke/smart-todo-components";
 // R4 task 102 (E-1, 2026-06-18) — `KanbanCard` hoisted from this folder into
 // the `@spaarke/smart-todo-components` peer package so the workspace widget
 // can render the IDENTICAL card surface. The Code Page swap is an
@@ -310,6 +311,18 @@ export interface ISmartToDoProps {
    * SmartToDo. Implemented as a callback ref bound on mount.
    */
   onSettingsOpenerReady?: (open: () => void) => void;
+  /**
+   * UAT 2026-06-19 — Optional orientation override.
+   * When provided, this prop wins over SmartToDo's internal
+   * `useUserPreferences().orientation`. This is the cross-instance fix:
+   * if the parent (SmartTodoApp) also calls useUserPreferences, both
+   * instances would hold independent local state and the user's Header
+   * toggle wouldn't reach SmartToDo's KanbanBoard. With this prop, the
+   * parent is the single source of truth.
+   *
+   * Back-compat: when omitted, SmartToDo uses its own preference instance.
+   */
+  orientation?: Orientation;
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +342,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onOpenTodo,
   hideHeader = false,
   onSettingsOpenerReady,
+  orientation: orientationProp,
 }) => {
   const styles = useStyles();
 
@@ -362,9 +376,15 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   const { preferences, updatePreferences, isLoading: prefsLoading } =
     useUserPreferences({ webApi, userId });
 
+  // UAT 2026-06-19 — resolve current systemuser → sprk_contact for the
+  // migrated sprk_assignedto Contact lookup. useTodoItems gets the
+  // contactId (passed via the legacy-named `userId` arg per the boundary
+  // comment on useTodoItems options).
+  const { contactId } = useCurrentContactId({ webApi, userId });
+
   const { items, isLoading, error, refetch } = useTodoItems({
     webApi,
-    userId,
+    userId: contactId ?? '00000000-0000-0000-0000-000000000000',
     mockItems,
   });
 
@@ -423,9 +443,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onSettingsOpenerReady]);
 
-  /** Collapsed Kanban columns — Future is collapsed by default */
+  /**
+   * Collapsed Kanban columns — UAT 2026-06-19: ALL columns expanded by default
+   * per user feedback (previously Future was collapsed). User explicitly
+   * collapses via column-header click.
+   */
   const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(
-    new Set(["Future"])
+    new Set()
   );
 
   /**
@@ -445,7 +469,14 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
    * the hook — `updatePreferences` already does an optimistic local
    * update, so a single call drives both state + persistence.
    */
-  const orientation = preferences.orientation;
+  // UAT 2026-06-19 — if parent passes orientation prop, that wins over
+  // SmartToDo's internal preference state. Otherwise fall back to the
+  // hook's value. Fixes the cross-instance state-sync bug: when both
+  // SmartTodoApp and SmartToDo call useUserPreferences independently,
+  // toggling in the Header updates the app's instance only — SmartToDo's
+  // KanbanBoard stays stuck on the original orientation without this
+  // prop override.
+  const orientation = orientationProp ?? preferences.orientation;
   const setOrientation = React.useCallback(
     (next: Orientation) => {
       void updatePreferences({ orientation: next });
@@ -501,6 +532,16 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Kanban columns hook
   // -------------------------------------------------------------------------
 
+  // UAT 2026-06-19 — persist manual intra-column order to user prefs
+  // (cross-device via sprk_userpreference). Reads `columnOrders` from prefs
+  // on mount; writes back on each reorder.
+  const handleColumnOrdersChange = React.useCallback(
+    (next: Record<string, string[]>) => {
+      void updatePreferences({ columnOrders: next });
+    },
+    [updatePreferences],
+  );
+
   const {
     columns,
     moveItem,
@@ -517,6 +558,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     // structurally compatible because its 3 Kanban methods return
     // `IResult<...>` which carries `success: boolean`.
     dataverseService: serviceRef.current,
+    initialColumnOrders: preferences.columnOrders,
+    onColumnOrdersChange: handleColumnOrdersChange,
   });
 
   // -------------------------------------------------------------------------
@@ -587,15 +630,52 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   React.useEffect(() => {
     const listener = (ev: Event): void => {
       const detail = (ev as CustomEvent<QuickAddTodoEventDetail>).detail;
-      if (detail?.title) {
+      if (!detail?.title) return;
+      // UAT 2026-06-19 — three-field payload. When dueDate / assignedToId are
+      // present, bypass the basic handleAdd and call webApi.createRecord
+      // directly so the additional fields (`sprk_duedate`,
+      // `sprk_assignedto@odata.bind`) land on the create. Falls back to the
+      // simple title-only path when extra fields aren't provided (back-compat
+      // for old launchers).
+      const hasExtras = !!detail.dueDate || !!detail.assignedToId;
+      if (!hasExtras) {
         void handleAddRef.current(detail.title);
+        return;
       }
+      const payload: Record<string, unknown> = { sprk_name: detail.title };
+      // UAT 2026-06-20 — sprk_assignedto binds to the OOB `contact` entity.
+      // detail.assignedToId is a contact GUID (the Header's quick-add
+      // Assigned To field). When unset, fall back to current user's contactId.
+      // Bind set name is `contacts` (plural of the OOB contact table).
+      const assignedToContactId = detail.assignedToId || contactId || '';
+      if (assignedToContactId) {
+        // UAT 2026-06-22 round 13: bind key MUST be PascalCase nav-prop
+        // name `sprk_AssignedTo` (verified via EntityDefinitions metadata),
+        // not the lookup column logical name `sprk_assignedto`. The
+        // lowercase form fails with "An undeclared property
+        // 'sprk_assignedto' which only has property annotations..."
+        payload['sprk_AssignedTo@odata.bind'] = `/contacts(${assignedToContactId})`;
+      }
+      if (detail.dueDate) {
+        const [y, m, d] = detail.dueDate.split('-').map(Number);
+        const dt = new Date(y, m - 1, d, 23, 59, 0);
+        payload['sprk_duedate'] = dt.toISOString();
+      }
+      void (async () => {
+        try {
+          await webApi.createRecord('sprk_todo', payload);
+          refetch();
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[SmartToDo] three-field quickAdd create failed:', err);
+        }
+      })();
     };
     window.addEventListener(QUICK_ADD_TODO_EVENT, listener);
     return () => {
       window.removeEventListener(QUICK_ADD_TODO_EVENT, listener);
     };
-  }, []);
+  }, [webApi, contactId, refetch]);
 
   // -------------------------------------------------------------------------
   // Dismiss handler

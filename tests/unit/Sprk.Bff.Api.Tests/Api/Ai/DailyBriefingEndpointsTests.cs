@@ -88,11 +88,13 @@ public sealed class DailyBriefingEndpointsTests
         var result = await InvokeHandleNarrateAsync(request, briefingAi.Object, context);
 
         // Assert — 200 with empty narrative response
+        // R2.2: TldrResult shape changed — Briefing replaced by Summary + KeyTakeaways[].
         result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>();
         var ok = (Ok<DailyBriefingNarrateResponse>)result;
         ok.Value.Should().NotBeNull();
         ok.Value!.Tldr.Should().NotBeNull();
-        ok.Value.Tldr.Briefing.Should().BeEmpty();
+        ok.Value.Tldr.Summary.Should().BeEmpty();
+        ok.Value.Tldr.KeyTakeaways.Should().BeEmpty();
         ok.Value.Tldr.TopAction.Should().BeEmpty();
         ok.Value.Tldr.CategoryCount.Should().Be(0);
         ok.Value.Tldr.PriorityItemCount.Should().Be(0);
@@ -327,6 +329,100 @@ public sealed class DailyBriefingEndpointsTests
         validated[0].PrimaryEntityId.Should().Be(suppliedId);
         validated[0].PrimaryEntityName.Should().Be("Acme Corp");
         logger.WarningCount.Should().Be(0);
+    }
+
+    // ── Tests: R2.2 — structured TL;DR prompt + ParseTldrResponse ─────────────────
+    //
+    // R2.2 hotfix switched TL;DR from a single 5-7 sentence narrative to a
+    // structured response (summary + keyTakeaways[] + topAction) so the client
+    // can render a scannable shape. These tests cover the new prompt + parser.
+
+    [Fact]
+    public void BuildNarrateTldrPrompt_Requests_Json_Structured_Response()
+    {
+        // Arrange — minimal request (prompt content is invariant to data shape)
+        var request = new DailyBriefingNarrateRequest
+        {
+            Categories = [],
+            PriorityItems = [],
+            TotalNotificationCount = 0,
+            Channels = []
+        };
+
+        // Act
+        var prompt = DailyBriefingEndpoints.BuildNarrateTldrPrompt(request);
+
+        // Assert — prompt must request the JSON shape, NOT a 5-7 sentence narrative.
+        prompt.Should().Contain("summary");
+        prompt.Should().Contain("keyTakeaways");
+        prompt.Should().Contain("topAction");
+        prompt.Should().Contain("JSON");
+        prompt.Should().NotContain("5-7 sentence", because: "R2.2 replaced free-form narrative with structured JSON");
+        prompt.Should().NotContain("Do NOT use bullet points", because: "bullets are now requested");
+    }
+
+    [Fact]
+    public void ParseTldrResponse_Parses_Valid_Json_Successfully()
+    {
+        // Arrange — well-formed JSON matching the prompt contract
+        var json = """
+            {
+              "summary": "Three urgent matters need attention today.",
+              "keyTakeaways": ["Acme contract overdue", "Bravo brief due tomorrow", "Charlie meeting at 3pm"],
+              "topAction": "Review the Acme engagement letter (2 days overdue)."
+            }
+            """;
+        var logger = NullLogger.Instance;
+
+        // Act
+        var result = DailyBriefingEndpoints.ParseTldrResponse(json, logger);
+
+        // Assert
+        result.Summary.Should().Be("Three urgent matters need attention today.");
+        result.KeyTakeaways.Should().HaveCount(3);
+        result.KeyTakeaways[0].Should().Be("Acme contract overdue");
+        result.TopAction.Should().Be("Review the Acme engagement letter (2 days overdue).");
+    }
+
+    [Fact]
+    public void ParseTldrResponse_Strips_Markdown_Code_Fences()
+    {
+        // Arrange — LLM sometimes wraps JSON in ```json fences despite "no markdown" instruction
+        var fencedJson = """
+            ```json
+            {
+              "summary": "Test summary.",
+              "keyTakeaways": ["one"],
+              "topAction": "Do the thing."
+            }
+            ```
+            """;
+        var logger = NullLogger.Instance;
+
+        // Act
+        var result = DailyBriefingEndpoints.ParseTldrResponse(fencedJson, logger);
+
+        // Assert — fences stripped, JSON parsed (mirrors ParseChannelBullets convention).
+        result.Summary.Should().Be("Test summary.");
+        result.KeyTakeaways.Should().ContainSingle().Which.Should().Be("one");
+        result.TopAction.Should().Be("Do the thing.");
+    }
+
+    [Fact]
+    public void ParseTldrResponse_Falls_Back_To_Raw_Summary_On_Invalid_Json()
+    {
+        // Arrange — LLM returns a paragraph instead of JSON (failure mode)
+        var nonJsonResponse = "Three urgent matters need attention today. Review the Acme letter first.";
+        var logger = new CapturingTestLogger();
+
+        // Act
+        var result = DailyBriefingEndpoints.ParseTldrResponse(nonJsonResponse, logger);
+
+        // Assert — graceful degradation: raw text becomes Summary, bullets + topAction empty.
+        result.Summary.Should().Be(nonJsonResponse);
+        result.KeyTakeaways.Should().BeEmpty();
+        result.TopAction.Should().BeEmpty();
+        logger.WarningCount.Should().Be(1, because: "fallback path logs a structured warning");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

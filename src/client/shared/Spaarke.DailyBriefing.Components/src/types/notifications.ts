@@ -216,6 +216,14 @@ export interface NotificationItem {
   aiConfidence?: number;
   /** ISO timestamp when the notification was created */
   createdOn: string;
+  /**
+   * Optional ISO-8601 due date from notification customData.dueDate (R2.2).
+   * Set by task playbooks (notification-tasks-overdue, notification-tasks-due-soon)
+   * via the BFF CreateNotificationNodeExecutor's DueDate field. Null when the
+   * source channel has no due-date concept (documents, emails, work-assignments,
+   * matter-activity, events).
+   */
+  dueDate: string | null;
 }
 
 // ---------------------------------------------------------------------------

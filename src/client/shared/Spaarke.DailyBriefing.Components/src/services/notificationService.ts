@@ -69,6 +69,8 @@ function parseNotificationData(raw: unknown): {
   regardingId: string;
   isAiGenerated: boolean;
   aiConfidence?: number;
+  /** R2.2: ISO-8601 due date from customData.dueDate (set by task playbooks). */
+  dueDate: string | null;
 } | null {
   if (!raw || typeof raw !== 'string') return null;
 
@@ -89,6 +91,7 @@ function parseNotificationData(raw: unknown): {
       regardingId: (customData['regardingId'] as string) ?? (parsed['regardingId'] as string) ?? '',
       isAiGenerated: (customData['isAiGenerated'] as boolean) ?? false,
       aiConfidence: typeof customData['aiConfidence'] === 'number' ? (customData['aiConfidence'] as number) : undefined,
+      dueDate: (customData['dueDate'] as string) ?? null,
     };
   } catch {
     console.warn('[DailyBriefing] Failed to parse notification data JSON');
@@ -121,6 +124,7 @@ function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
     isAiGenerated: customData?.isAiGenerated ?? false,
     aiConfidence: customData?.aiConfidence,
     createdOn: (entity['createdon'] as string) ?? new Date().toISOString(),
+    dueDate: customData?.dueDate ?? null,
   };
 }
 
@@ -290,9 +294,13 @@ export async function markAllNotificationsRead(
     let succeeded = 0;
     let failed = 0;
 
-    // Use Promise.allSettled for parallel mark-read operations
+    // Use Promise.allSettled for parallel mark-read operations.
+    // Write toasttype=200000000 to match the single-record markNotificationRead path
+    // and the read/filter paths above (line 123, 156). The previous {isread:true} was
+    // either a no-op (isread not on appnotification schema) or wrote to a different
+    // field than the read path checks — bulk dismiss was therefore silently broken.
     const results = await Promise.allSettled(
-      unread.data.map(item => webApi.updateRecord('appnotification', item.id, { isread: true }))
+      unread.data.map(item => webApi.updateRecord('appnotification', item.id, { toasttype: 200000000 }))
     );
 
     for (const r of results) {

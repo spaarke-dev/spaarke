@@ -650,6 +650,184 @@ The output tells you:
 
 ---
 
+## 7.2 Sizing & layout — the HEIGHT chain (NEW 2026-06-22, smart-todo-r4 round 12)
+
+If your widget's body should grow to fill the SectionPanel area (kanban,
+list, grid, anything that benefits from vertical space) — and you see it
+capping at content height even though the surrounding section has more
+room — the height chain has a break somewhere between the workspace tab
+content and your widget's innermost flex child.
+
+This was the root cause of a 7-round debug cycle on the SmartTodo widget
+(smart-todo-r4 UAT 4 → 12, June 2026). The widget kept rendering at
+~600px (or its minHeight floor) even when the section panel was 900+ px
+tall. Working widgets in the same pane (Daily Briefing, Calendar) fill
+correctly because they follow the contract below.
+
+### 7.2.1 The three-rule contract
+
+The full height chain is:
+
+```
+viewport
+  → SpaarkeAi 3-pane shell                  (✓ established, don't touch)
+  → WorkspacePane / tab content              (✓ established, don't touch)
+  → WorkspaceLayoutWidget.root               ★ Rule 1
+  → LegalWorkspaceApp root                   (✓ already height:100%)
+  → WorkspaceShell.shell                     (✓ flex 1 1 auto)
+  → WorkspaceShell.row                       ★ Rule 2
+  → SectionPanel.card                        (height supplied via `style: { height: ... }`)
+  → SectionPanel.content                     (✓ flex 1 1 auto)
+  → YOUR WIDGET ROOT                         ★ Rule 3 (your responsibility)
+  → ...inner widget wrappers...              ★ Rule 3 (your responsibility)
+  → your scrollable body / kanban / list
+```
+
+**Rule 1 — Block-parent crossing**: `WorkspaceLayoutWidget.root` is mounted
+inside a `display: block` tab-content wrapper. A block parent **ignores
+flex** on children. Without explicit `height: 100%`, the widget root
+shrinks to content height (~600px) regardless of how tall the parent is.
+
+This is already fixed in `WorkspaceLayoutWidget.tsx` styles (`height:
+'100%'` + `flex: 1`). Don't remove it.
+
+**Rule 2 — Grid row must claim shell height**: `WorkspaceShell.row`
+(`display: grid`) needs `flex: 1 1 0, minHeight: 0, alignItems: stretch`
+to claim its flex shell parent's vertical space AND stretch SectionPanel
+cards to fill the row.
+
+This is already fixed in `WorkspaceShell.styles.ts`. Don't remove it.
+
+**Rule 3 — YOUR widget's internal wrappers must all be `display: flex`** (or
+`grid`), not the div default of `block`. Every level between your widget
+root and your scrollable body must propagate height via flex.
+
+```typescript
+// ✅ CORRECT — every wrapper in the chain is flex
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',          // anchor to parent's supplied height
+    overflow: 'hidden',
+  },
+  body: {
+    display: 'flex',         // ← CRITICAL: without this, child flex props don't work
+    flexDirection: 'column',
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflowY: 'auto',
+  },
+  kanbanContainer: {
+    flex: '1 1 auto',        // claims body's height
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+});
+
+// ❌ THE TRAP — the body div is implicitly display:block, so the kanbanContainer
+// child's `flex: 1 1 auto` is IGNORED. Kanban falls back to content height.
+const broken = makeStyles({
+  body: {
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflowY: 'auto',
+    // MISSING: display: 'flex'  ← caused the smart-todo-r4 round 4-12 cycle
+  },
+});
+```
+
+### 7.2.2 Working reference widgets (clone this layout)
+
+If in doubt, copy the proven pattern from these widgets — they fill
+correctly with NO height-cap workarounds:
+
+- **`DailyBriefingApp`** — `src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx` —
+  `container: { display: flex, flexDirection: column, height: '100%' }` +
+  `scrollContent: { flex: 1 }`. Note `height: 100%` instead of `flex: 1` on
+  the root anchors against the block-parent-crossing problem.
+- **`CalendarWorkspaceWidget`** — `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx` —
+  `root: { display: flex, flexDirection: column, height: '100%' }` +
+  `gridContainer: { flex: '1 1 auto', minHeight: 0 }`. Canonical Pattern D
+  reference.
+
+### 7.2.3 Per-section height supply (workspaceConfig)
+
+`SectionPanel.card` does NOT have `height: 100%` by default (a structural
+fix attempt in round 7 collapsed the workspace because the chain above
+the shell wasn't yet repaired). Each section must supply its own height
+via inline style:
+
+```typescript
+// In src/solutions/LegalWorkspace/src/workspaceConfig.tsx
+{
+  id: "your-widget",
+  type: "content",
+  title: "Your Widget",
+  style: { height: "calc(100vh - 200px)", minHeight: "560px" },  // ← required
+  renderContent: () => <YourWidget />,
+}
+```
+
+The `calc(100vh - 200px)` accounts for the SpaarkeAi shell chrome
+(headers + tab strip ≈ 200px). Adjust if your shell is taller. The
+`minHeight: 560px` is a defensive floor for very short viewports.
+
+### 7.2.4 Diagnostic script when something looks wrong
+
+Open DevTools console on the SpaarkeAi page with your widget visible
+and paste:
+
+```javascript
+(function dumpHeightChain() {
+  var start = document.querySelector('[role="region"][aria-label*="your-widget-name"]') ||
+              document.querySelector('main');
+  var el = start, depth = 0;
+  while (el && depth < 25) {
+    var cs = getComputedStyle(el);
+    var rect = el.getBoundingClientRect();
+    var cls = (typeof el.className === 'string'
+      ? '.' + el.className.split(/\s+/)[0] : '');
+    console.log('  '.repeat(depth) + el.tagName.toLowerCase() + cls +
+      ' | h=' + Math.round(rect.height) + 'px' +
+      ' | display=' + cs.display +
+      ' | flex=' + cs.flex);
+    el = el.parentElement; depth++;
+  }
+})();
+```
+
+The output walks UP from your widget to viewport. Look for:
+- The first `display: block` parent that has more height than its child
+  → that's where flex children are being ignored.
+- Any `flex: 1 1 0` or `flex: 1 1 auto` element NOT growing to fill its
+  parent → that level needs `height: 100%` instead, OR its parent isn't
+  a flex container.
+
+For a worked-through example see `projects/smart-todo-r4/notes/` — the
+UAT rounds 4-12 debugging artifacts (kept as a reference for the height
+chain investigation methodology).
+
+### 7.2.5 Anti-patterns specific to height sizing
+
+- ❌ **Using `flex: 1 1 0` on a child of `display: block`.** Flex
+  properties only work in flex parents. `display: block` ignores them
+  and child sizes to content. Either make the parent `display: flex` or
+  use `height: 100%` on the child.
+- ❌ **Forgetting `display: flex` on intermediate wrappers.** A div with
+  `flex: 1 1 auto, overflowY: auto` looks like a flex item but its
+  CHILDREN can't use flex (because the div itself is block). Add
+  `display: flex, flexDirection: column` to make it a flex container.
+- ❌ **Setting `minHeight: 400px` (or any pixel floor) on the scrollable
+  body to "guarantee" it renders.** That's masking a broken chain. Fix
+  the chain; use `minHeight: 0` so the chain can supply natural height.
+- ❌ **Inventing a per-widget height fallback like `height: 'calc(100vh
+  - 200px)'`** ON the widget itself rather than on the section config.
+  Sections own height; widgets fill what they're given.
+
+---
+
 ## 8. Anti-patterns
 
 - **❌ Do not invent a third wrapper.** The two wrappers (Dashboard + Direct) are intentionally retained per OC-R4-06 (model doc §2.3). If you find yourself wanting a third — "but my widget is sort-of-composable" or "but my widget needs Dataverse persistence too" — re-read the model doc. Dual-use (§4 here) is almost always the right answer.

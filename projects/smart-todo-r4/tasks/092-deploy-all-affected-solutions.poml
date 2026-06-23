@@ -136,5 +136,162 @@ All 3 deploy scripts reported `Publishing customizations... Published`. No error
 ### Status
 
 `in-progress` until user UAT sign-off confirms golden-path. Per user instruction "do not close the PR or project until testing and acceptance are signed off on" — R4-092 stays open; R4-098 wrap-up is held; PR-close is held.
+
+---
+
+## Deploy session 2026-06-18 (Wave E) — second deploy of the day
+
+Post-PR #394 (Wave E widget/app parity) merged to master at `3d02a3d38` (2026-06-18T21:03:49Z). This deploy supersedes the Wave D deploy from earlier today (16:25-16:30 UTC) for SmartTodo + SpaarkeAi surfaces. The Wave D deploy of those 2 surfaces did NOT include Wave E (drag-drop, multi-select, column tints, search-as-icon, always-on Open, inline quick-add, app's single-toolbar chrome).
+
+### Surfaces deployed (2)
+
+| Surface | Web Resource | Bundle | Carries (Wave E delta) |
+|---|---|---|---|
+| SmartTodo Code Page | `sprk_smarttodo` | 1709 KB (was 1706 KB pre-Wave-E) | R4-104 app chrome consolidation (single Toolbar, compact QuickAdd, 3-col first-load); R4-102 app-side Kanban consumer import swap |
+| SpaarkeAi (embeds LW shell with widget) | `sprk_spaarkeai` | 3766 KB (was 3752 KB pre-Wave-E) | R4-102 full widget Kanban (drag/drop/multi-select/orientation/pin); R4-103 widget toolbar polish (search-icon, always-on Open, column tints, Capital Case, inline quick-add) |
+
+### Surfaces NOT redeployed (intentional)
+
+- **CreateTodoWizard** (`sprk_createtodowizard`) — Wave E did NOT modify it. R4-100's BroadcastChannel producer is already live from the Wave D deploy (modifiedon 6/18/2026 4:30:41 PM). No-op skip.
+- **RegardingResolver PCF v1.1.0**, **`sprk_todo_dirty_check.js`**, **BFF API**, **Matter insight web resources** — all untouched in Wave E (same as Wave D).
+
+### Pre-deploy verification
+
+- Main repo at `c:/code_files/spaarke` synced to master tip `3d02a3d38` (PR #394 merge commit)
+- npm install with `--legacy-peer-deps --no-audit --no-fund` per CI hardening convention (PR #392 + PR #393)
+- Both Vite builds green: SmartTodo 1.74 MB / 476 KB gzip in 13.18s; SpaarkeAi 3.85 MB / 1.05 MB gzip in 12.11s
+- DATAVERSE_URL = https://spaarkedev1.crm.dynamics.com; az auth valid
+
+### Deploy results — both ✅
+
+- SmartTodo: "Publishing customizations... Published"; modifiedon = 6/18/2026 9:25:43 PM
+- SpaarkeAi: "Publishing customizations... Published"; modifiedon = 6/18/2026 9:27:21 PM
+
+Dataverse server timestamps confirm both writes landed within the past 5 minutes of this commit.
+
+### Acceptance criteria status (cumulative across Wave D + Wave E deploys)
+
+- [x] All affected solutions deployed to spaarkedev1 (Wave D 3 surfaces + Wave E 2 surfaces = 4 unique surfaces; CreateTodoWizard shared between both)
+- [x] sprk_todoflag: 0 functional hits in source (R4-094 grep gate 2026-06-12)
+- [ ] Golden-path smoke test — STILL DELEGATED to user UAT (round 3 now, post-Wave-E)
+- [ ] PR description — Wave E landed via PR #394; this notes block records it
+
+### Status (unchanged)
+
+`in-progress` until user UAT round 3 confirms widget/app parity per the 11 UAT items in `notes/e-widget-app-parity-audit-2026-06-18.md`. R4-098 wrap-up + final PR-close stay HELD.
+
+---
+
+## Deploy session 2026-06-20 (Wave 2 UAT post-merge)
+
+Post-PR #403 (`feat(smart-todo-r4): UAT 2026-06-19/20 — Contact lookup migration + chrome uniformity + persistence + skills`) squash-merged to master at `845521aaf` (2026-06-20T22:22:27Z). This deploy supersedes the Wave E deploy (2026-06-18) for the same 2 surfaces — they now carry the Wave 2 UAT delta (contact-lookup ownership migration, Code Page chrome uniformity, cross-device columnOrders persistence, collapsible columns in both orientations, color-coded count pills, Filter slide UX, three-field quick-add, widget→modal launch).
+
+### Surfaces deployed (2)
+
+| Surface | Web Resource | Bundle | Carries (Wave 2 UAT delta) |
+|---|---|---|---|
+| SmartTodo Code Page | `sprk_smarttodo` | 1714 KB (was 1709 KB pre-Wave-2-UAT) | Header three-field quick-add, Filter slide, title row, useCurrentContactId resolution, useUserPreferences.columnOrders, orientation prop down-flow, queryHelpers contact-filter, services/DataverseService contactId param |
+| SpaarkeAi (embeds LW shell with widget) | `sprk_spaarkeai` | 3848 KB (was 3766 KB pre-Wave-2-UAT) | Spaarke.SmartTodo.Components widget (Filter slide, 3-field quick-add, useCurrentContactId, persistence, MicrosoftToDoIcon, Add20Regular); Spaarke.UI.Components Kanban (collapse in both orientations, countTextColor, board flex stretch, conditional Droppable) |
+
+### Surfaces NOT redeployed (intentional)
+
+- **CreateTodoWizard** (`sprk_createtodowizard`) — PR #403 did NOT modify it. No-op skip.
+- **RegardingResolver PCF v1.1.0**, **`sprk_todo_dirty_check.js`**, **BFF API**, **Matter VisualHost web resources** — all untouched in PR #403 (same as prior waves).
+
+### Pre-deploy verification
+
+- This worktree (`c:/code_files/spaarke-wt-smart-todo-r4`) on master tip `845521aaf` (PR #403 squash-merge SHA)
+- SpaarkeAi: required `npm install --legacy-peer-deps --no-audit --no-fund` to pull a new transitive `@spaarke/daily-briefing-components` peer dep that landed via master between Wave E and now
+- Vite cache cleared before SpaarkeAi build (per code-page-deploy skill mandate); SmartTodo built via existing `Deploy-SmartTodo.ps1` (build embedded in script)
+- Build outputs verified to contain PR #403 strings (columnOrders, countTextColor) post-minification
+- Both Vite builds green: SmartTodo 1.71 MB / 475 KB gzip in 12.48s; SpaarkeAi 3.85 MB / 1.07 MB gzip in 13.21s
+- DATAVERSE_URL = https://spaarkedev1.crm.dynamics.com; az auth valid (ralph.schroeder@spaarke.com)
+
+### Deploy results — both ✅
+
+- SmartTodo: "Publishing customizations... Published"; deploy via `Deploy-SmartTodo.ps1` (combined build + deploy)
+- SpaarkeAi: "Publishing customizations... Published"; deploy via `Deploy-SpaarkeAi.ps1` (manual build first; script verifies + uploads)
+
+### Schema dependency (pre-UAT verification on spaarkedev1)
+
+Per `useCurrentContactId` introduction in PR #403, the following MUST be true on spaarkedev1 before UAT round 4 can pass golden-path tests:
+
+1. `sprk_todo.sprk_assignedto` is a Contact lookup (not systemuser) — user confirmed migration done
+2. At least one `sprk_contact` record exists with `sprk_systemuser` populated for the test user (`ralph.schroeder@spaarke.com`) — otherwise the widget's empty-state shows and no kanban renders
+
+### Acceptance criteria status (cumulative)
+
+- [x] All affected solutions deployed to spaarkedev1 (3 unique surfaces across Wave D + E + 2-UAT; SmartTodo + SpaarkeAi redeployed this session)
+- [x] sprk_todoflag: 0 functional hits in source (R4-094 grep gate 2026-06-12, unchanged)
+- [ ] Golden-path smoke test — DELEGATED to user UAT round 4 (Wave 2 UAT)
+- [ ] PR description — Wave 2 UAT landed via PR #403; this notes block records the deploy
+
+### Status (unchanged)
+
+`in-progress` until user UAT round 4 confirms the 11 Wave 2 UAT items. R4-098 wrap-up + final PR-close stay HELD.
+
+---
+
+## Deploy session 2026-06-21 (UAT round 4 hotfix)
+
+User UAT round 4 surfaced 6 issues against the 2026-06-20 deploy. Root causes identified live (no separate audit task — this notes block records both diagnosis + fix):
+
+### Bugs found in UAT round 4
+
+| # | Symptom | Root cause |
+|---|---|---|
+| 1 | Widget orientation default wrong | Both surfaces defaulted to `'horizontal'`. User intent: WIDGET default = vertical (stacked rows), Code Page default = horizontal (columns). |
+| 2 | Widget collapse doesn't shrink column width | `KanbanBoard` only set `alignSelf: flex-start` for collapsed horizontal — cross-axis only. Base `column` flex `1 1 0` still claimed equal width. |
+| 3 | Clicking Open in widget opened BOTH Code Page modal AND record modal (stack) | LW shim's `handleOpenTodo` always navigated to `sprk_smarttodo` Code Page with `?action=openTodo&todoId=<guid>`. The Code Page then auto-mounted the record modal — net result two stacked dialogs. |
+| 4 | Future column hidden at narrow widget width | `KanbanBoard.board` style had `overflow: hidden`. When 3 columns + gap exceeded available width (even with `flex 1 1 0 / minWidth 0`), rightmost column got clipped invisibly. |
+| 5 | Code Page kanban showed "All caught up" — 0 records | `useCurrentContactId` queried `sprk_contact` entity with `sprk_contactid` / `sprk_name` fields. **None of those exist**. The actual schema uses the OOB `contact` entity (extended with custom `sprk_systemuser` lookup) — fields are `contactid` / `fullname`. Hook returned null → `useTodoItems` filtered by null contactId → 0 records. |
+| 5a (security regression) | Widget showed all 14 active sprk_todos system-wide | `buildSmartTodoQuery` fell back to `activeClause` only when contactId was null. This was a data-isolation breach: anyone whose contact didn't resolve saw everyone's todos. |
+| 6 | Assigned To field was a plain Input, not connected to a lookup | Designed as a plain Input pending real picker. Same fix scope as #5. |
+
+### Honest process gap
+
+The UAT mock-data harness (spaarke-prototype) seeded a `sprk_contact` row with `sprk_contactid` / `sprk_name` fields, masking the entity-name bug entirely. Prototype tests against mocks should NOT be considered UAT for query-shape correctness — only a real-Dataverse smoke test catches entity-existence and field-name errors. **Future R-cycles MUST add a "real Dataverse smoke" deploy step before merge** (filing as `[[r4-process-gap-2026-06-21]]` candidate in lessons-learned).
+
+### Files changed in fix wave
+
+| File | Change |
+|---|---|
+| `src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useCurrentContactId.ts` | Entity `sprk_contact` → `contact`; fields `sprk_contactid` → `contactid`, `sprk_name` → `fullname`; docblock rewritten |
+| `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx` | (1) `@odata.bind` set `sprk_contacts` → `contacts`; (2) `buildSmartTodoQuery` now returns zero-row filter (not activeClause-only) when contextClause empty — security fix #5a; (3) orientation default `'horizontal'` → `'vertical'`; (4) added typeahead state + debounced contact search effect + select handler; (5) replaced plain Input with typeahead wrapper + Listbox dropdown |
+| `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts` | Added `assignedToWrap` / `assignedToResults` / `assignedToResultItem` / `assignedToResultsHint` styles for typeahead dropdown |
+| `src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx` | (1) `board.overflow` `hidden` → `overflowX: auto, overflowY: hidden` — fix #4; (2) collapsed-horizontal inline style now adds `flex: '0 0 auto'` alongside `alignSelf: 'flex-start'` so column shrinks both axes — fix #2 |
+| `src/solutions/SmartTodo/src/components/SmartToDo.tsx` | `@odata.bind` set `sprk_contacts` → `contacts` in three-field quick-add handler |
+| `src/solutions/SmartTodo/src/components/Header/Header.tsx` | (1) `handleQuickAddAssignedToChange` clears contactId on edit; (2) added typeahead state + debounced contact search effect + select handler; (3) replaced plain Input with typeahead wrapper + Listbox dropdown |
+| `src/solutions/SmartTodo/src/components/Header/Header.styles.ts` | Added typeahead styles mirroring widget |
+| `src/solutions/LegalWorkspace/src/sections/todo.registration.ts` | `handleOpenTodo` rewritten: with `todoId` → `Xrm.Navigation.openForm({entityName:'sprk_todo', entityId})` directly (no Code Page hop); without `todoId` → keep Code Page nav for "open the full app" — fix #3 |
+
+### Bugs NOT fixed (out of UAT scope, tracked for next cycle)
+
+_(none remaining — see CreateTodoWizard sub-deploy below)_
+
+### Surfaces deployed (3)
+
+| Surface | Web Resource | Bundle | Carries |
+|---|---|---|---|
+| SmartTodo Code Page | `sprk_smarttodo` | 1719 KB (was 1714 KB pre-fix) | All Code Page-side fixes for #1/#5/#6 |
+| SpaarkeAi (embeds LW shell with widget) | `sprk_spaarkeai` | 3851 KB (was 3848 KB pre-fix) | All widget-side fixes for #1/#2/#3/#4/#5/#5a/#6 |
+| CreateTodoWizard Code Page | `sprk_createtodowizard` | 1617 KB | Wizard `@odata.bind` switched from `/systemusers(...)` to `/contacts(...)`; Assignee LookupField now searches OOB `contact` entity via `searchContactsAsLookup`; placeholder updated to "Search contacts..."; nav-prop discovery now matches `ReferencedEntity === 'contact'`. Without this redeploy, ANY new To Do created via the `+` wizard would FAIL with a Dataverse type-mismatch error. |
+
+### Pre-deploy verification
+
+- This worktree (`c:/code_files/spaarke-wt-smart-todo-r4`) on master tip `845521aaf` + uncommitted UAT-round-4 fixes
+- Vite cache cleared before SpaarkeAi build
+- Both Vite builds green: SmartTodo 1.76 MB / 476 KB gzip in 14.07s; SpaarkeAi 3.94 MB / 1.08 MB gzip in 14.86s
+- Schema verified via MCP `describe('tables/sprk_todo')`: `sprk_assignedto LOOKUP (GUID) ( Related table : contact)` ✓
+- User contact verified via MCP: `contactid=2e419a4f-010d-f111-8342-7ced8d1dc988, fullname="Ralph Schroeder", sprk_systemuser=1d02f31c-1872-f011-b4cb-7c1e52671ad0` ✓
+
+### Deploy results — both ✅
+
+- SmartTodo: "Publishing customizations... Published"
+- SpaarkeAi: "Publishing customizations... Published"
+
+### Status
+
+`in-progress` — fixes deployed but NOT user-verified. User to retest the 6 UAT items against new bundles. R4-098 wrap-up + final PR-close stay HELD until UAT signoff.
   </notes>
 </task>

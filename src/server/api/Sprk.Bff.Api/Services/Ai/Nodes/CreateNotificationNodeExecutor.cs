@@ -157,6 +157,9 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             var actionUrl = config.ActionUrl is not null
                 ? _templateEngine.Render(config.ActionUrl, templateContext)
                 : null;
+            var dueDate = config.DueDate is not null
+                ? _templateEngine.Render(config.DueDate, templateContext)
+                : null;
 
             // Resolve recipient
             var recipientId = ResolveRecipientId(config, templateContext);
@@ -229,6 +232,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 title, body, category, config.Priority ?? DefaultPriority,
                 config.ToastType ?? DefaultToastType,
                 actionUrl, recipientId.Value, regardingId, regardingType,
+                dueDate,
                 context);
 
             // Create the notification via Dataverse Web API
@@ -334,6 +338,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             var body = _templateEngine.Render(itemConfig.Body!, itemContext);
             var category = itemConfig.Category is not null ? _templateEngine.Render(itemConfig.Category, itemContext) : null;
             var actionUrl = itemConfig.ActionUrl is not null ? _templateEngine.Render(itemConfig.ActionUrl, itemContext) : null;
+            var dueDate = itemConfig.DueDate is not null ? _templateEngine.Render(itemConfig.DueDate, itemContext) : null;
 
             var recipientId = ResolveRecipientId(itemConfig, itemContext);
             if (recipientId is null)
@@ -364,7 +369,8 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             var payload = BuildNotificationPayload(
                 title, body, category, itemConfig.Priority ?? DefaultPriority,
                 itemConfig.ToastType ?? DefaultToastType,
-                actionUrl, recipientId.Value, regardingId, regardingType, context);
+                actionUrl, recipientId.Value, regardingId, regardingType,
+                dueDate, context);
             await CreateAppNotificationAsync(payload, cancellationToken);
             created++;
         }
@@ -477,6 +483,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         Guid recipientId,
         Guid? regardingId,
         string? regardingType,
+        string? dueDate,
         NodeExecutionContext context)
     {
         var payload = new Dictionary<string, object?>
@@ -486,7 +493,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             ["priority"] = priority,
             ["toasttype"] = toastType,
             ["ownerid@odata.bind"] = $"/systemusers({recipientId})",
-            ["ttlinseconds"] = 259200  // 3 days default TTL
+            ["ttlinseconds"] = 604800  // 7 days default TTL (increased from 3d on 2026-06-22 after UAT showed 36 notifications TTL-purged before user could review them)
         };
 
         // Add category (custom field for idempotency grouping)
@@ -497,11 +504,20 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
 
         // FR-18 (P3): build appnotification.data payload.
         // - customData.actionUrl is populated regardless of toasttype (Daily Briefing UI consumer).
+        // - customData.dueDate is populated when provided (R2.2 — Daily Briefing per-item due-date UX).
         // - data.actions[] is populated ONLY when actionUrl is present AND toasttype != Hidden
         //   (so MDA native bell icon shows a clickable "Open" button).
-        if (!string.IsNullOrWhiteSpace(actionUrl))
+        // R2.2: data is built whenever actionUrl OR dueDate is present (was: only actionUrl).
+        var hasActionUrl = !string.IsNullOrWhiteSpace(actionUrl);
+        var hasDueDate = !string.IsNullOrWhiteSpace(dueDate);
+        if (hasActionUrl || hasDueDate)
         {
-            var isVisibleToast = toastType != ToastTypeHidden;
+            // Build customData as a dictionary so we conditionally include only the populated fields.
+            var customData = new Dictionary<string, object?>();
+            if (hasActionUrl) customData["actionUrl"] = actionUrl;
+            if (hasDueDate) customData["dueDate"] = dueDate;
+
+            var isVisibleToast = hasActionUrl && toastType != ToastTypeHidden;
             object dataObject = isVisibleToast
                 ? new
                 {
@@ -513,12 +529,9 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                             data = new { url = actionUrl }
                         }
                     },
-                    customData = new { actionUrl }
+                    customData
                 }
-                : new
-                {
-                    customData = new { actionUrl }
-                };
+                : (object)new { customData };
 
             payload["data"] = JsonSerializer.Serialize(dataObject);
         }
@@ -676,4 +689,12 @@ internal sealed record NotificationNodeConfig
 
     /// <summary>Notification template for each item when IterateItems is true. Supports {{item.fieldName}} variables.</summary>
     public NotificationNodeConfig? ItemNotification { get; init; }
+
+    /// <summary>
+    /// Optional ISO-8601 due-date string written into <c>appnotification.data.customData.dueDate</c>
+    /// when present. Used by Daily Briefing consumers to render per-item due dates (R2.2).
+    /// Supports template variables (e.g. <c>"{{item.scheduledend}}"</c>). Playbooks that don't
+    /// emit a due date can omit this field — consumers render no due-date row when missing.
+    /// </summary>
+    public string? DueDate { get; init; }
 }

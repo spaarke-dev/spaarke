@@ -182,7 +182,9 @@ export const SmartTodoModal: React.FC<SmartTodoModalProps> = ({
   //    listener; for task 040 we plumb the window reference so the shell
   //    is ready to use it the moment 041 lands).
   const [iframeWindow, setIframeWindow] = React.useState<Window | null>(null);
+  const iframeNodeRef = React.useRef<HTMLIFrameElement | null>(null);
   const iframeRef = React.useCallback((node: HTMLIFrameElement | null) => {
+    iframeNodeRef.current = node;
     setIframeWindow(node?.contentWindow ?? null);
   }, []);
 
@@ -193,6 +195,149 @@ export const SmartTodoModal: React.FC<SmartTodoModalProps> = ({
   React.useEffect(() => {
     setIframeLoading(true);
   }, [iframeSrc]);
+
+  // ── UAT 2026-06-21 round 6 — close-on-iframe-navigation guard.
+  //
+  // The OOB MDA form's "Save & Close" button calls `Xrm.Page.ui.close()`
+  // which, when the form is loaded inside an iframe, navigates the IFRAME
+  // away from the form URL (typically to a "back" URL — which in some
+  // environments resolves to the user's home workspace, e.g. SpaarkeAi).
+  // Without intercepting this we get: dialog stays open showing the wrong
+  // page underneath, OR (worse) the parent window navigates and the user
+  // is whisked off the Code Page entirely.
+  //
+  // Mitigation: each iframe `load` event after the FIRST one, compare the
+  // iframe's current URL against the intended form URL. If they no longer
+  // match, the form has closed itself — call onClose to dismiss the modal
+  // before any further parent navigation can cascade.
+  //
+  // Same-origin guard: we read `contentWindow.location.href` only when
+  // same-origin (else the access throws). Cross-origin reads return null
+  // and we treat that as "navigated away" too (defensive).
+  const initialLoadRef = React.useRef<boolean>(true);
+  React.useEffect(() => {
+    // Reset the first-load gate whenever the intended src changes (next
+    // record navigated via prev/next chrome).
+    initialLoadRef.current = true;
+  }, [iframeSrc]);
+
+  const handleIframeLoad = React.useCallback(() => {
+    setIframeLoading(false);
+
+    // UAT 2026-06-22 round 9 — PARENT-SIDE Save&Close interceptor.
+    //
+    // Originally we shipped a form-script (sprk_todo_dirty_check.js v1.1.0)
+    // that monkey-patched `Xrm.Page.ui.close` from inside the iframe via the
+    // form's OnLoad handler. Console verification confirmed the script was
+    // NEVER REGISTERED on the form designer's OnLoad event — so the patch
+    // never applied and Save & Close still cascade-navigated the parent.
+    //
+    // This block does the same monkey-patch but from the PARENT side. The
+    // iframe loads same-origin Dataverse content (both URLs are
+    // *.dynamics.com / same host), so we can reach into
+    // `iframeNode.contentWindow.Xrm` directly. The patch:
+    //   - Replaces `formContext.ui.close` and `Xrm.Page.ui.close` with a
+    //     function that calls `onClose()` (which dismisses our modal)
+    //     instead of MDA's default close-and-navigate-parent behaviour.
+    //   - This way the parent page (Code Page modal / embedded Code Page /
+    //     SpaarkeAi) stays intact when the user clicks Save & Close.
+    //
+    // Defensive: same-origin access can throw in sandbox / cross-origin
+    // edge cases; failures are caught and logged but never block render.
+    // We re-apply on EVERY load so the prev/next chrome's iframe re-loads
+    // also get patched.
+    const node = iframeNodeRef.current;
+    if (node?.contentWindow) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const iframeWin = node.contentWindow as any;
+        // Xrm may take a moment to initialize inside the iframe — retry
+        // briefly. MDA typically has Xrm ready by the time `load` fires
+        // but defensive against slow loads.
+        const tryPatch = (attempt: number): void => {
+          const xrm = iframeWin.Xrm;
+          if (!xrm?.Page?.ui) {
+            if (attempt < 20) {
+              window.setTimeout(() => tryPatch(attempt + 1), 100);
+            }
+            return;
+          }
+          const closeHandler = (): void => {
+            // eslint-disable-next-line no-console
+            console.log('[SmartTodoModal] intercepted Xrm.Page.ui.close → dismissing modal');
+            onClose();
+          };
+          // Patch the legacy Xrm.Page.ui.close (used by the OOB Save & Close
+          // ribbon command in classic-MDA contexts).
+          try {
+            if (typeof xrm.Page.ui.close === 'function') {
+              xrm.Page.ui.close = closeHandler;
+            }
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn('[SmartTodoModal] Xrm.Page.ui.close patch failed', err);
+          }
+          // Patch formContext.ui.close (used by modern command formulas).
+          try {
+            const fc = xrm.Page; // Xrm.Page IS the formContext in classic MDA
+            if (fc?.ui && typeof fc.ui.close === 'function') {
+              fc.ui.close = closeHandler;
+            }
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn('[SmartTodoModal] formContext.ui.close patch failed', err);
+          }
+        };
+        tryPatch(0);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[SmartTodoModal] iframe-side patch failed (cross-origin?)', err);
+      }
+    }
+
+    if (initialLoadRef.current) {
+      // First load — this IS the form rendering. Don't close.
+      initialLoadRef.current = false;
+      return;
+    }
+    // Subsequent load — the iframe navigated. Compare URL against the
+    // intended form URL; if different (or unreadable), treat as close.
+    if (!node) {
+      onClose();
+      return;
+    }
+    let currentHref: string | null = null;
+    try {
+      currentHref = node.contentWindow?.location?.href ?? null;
+    } catch {
+      // Cross-origin access throws — treat as navigated away.
+      currentHref = null;
+    }
+    if (!currentHref || (iframeSrc && !currentHref.startsWith(iframeSrc.split('?')[0]))) {
+      onClose();
+    }
+  }, [iframeSrc, onClose]);
+
+  // ── UAT 2026-06-21 round 8 — Save & Close interceptor protocol.
+  //
+  // The iframe-side form script `sprk_todo_dirty_check.js` (v1.1.0)
+  // monkey-patches `formContext.ui.close` and `Xrm.Page.ui.close` so the
+  // OOB "Save & Close" button posts a `sprk_todo_form_close_intent`
+  // message to us instead of navigating the iframe's parent. We dismiss
+  // the modal on receipt. This preserves the OOB command bar UX (user
+  // still clicks the same Save & Close button) while keeping the parent
+  // page (Code Page modal / embedded Code Page / SpaarkeAi) intact —
+  // closing only the SmartTodoModal layer.
+  React.useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const data = event?.data;
+      if (data && typeof data === 'object' && (data as { type?: unknown }).type === 'sprk_todo_form_close_intent') {
+        onClose();
+      }
+    };
+    window.addEventListener('message', handler, false);
+    return () => window.removeEventListener('message', handler, false);
+  }, [onClose]);
 
   // ── Navigation handler ──────────────────────────────────────────────────
   // Shell guarantees `direction` is 'prev' | 'next' and is only invoked when
@@ -245,7 +390,7 @@ export const SmartTodoModal: React.FC<SmartTodoModalProps> = ({
                   ? `${styles.iframe} ${styles.iframeLoading}`
                   : styles.iframe
               }
-              onLoad={() => setIframeLoading(false)}
+              onLoad={handleIframeLoad}
               title={`To Do ${safeIndex + 1} of ${navTotal}`}
               // Allow the iframe to navigate same-origin Dataverse links
               // without being blocked. The OOB form needs `allow-scripts`

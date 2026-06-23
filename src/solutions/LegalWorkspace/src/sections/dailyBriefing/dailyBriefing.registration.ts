@@ -33,10 +33,20 @@
 import {
   createDailyBriefingRegistration,
   TELEMETRY_EVENT_DAILY_BRIEFING_429,
-} from "@spaarke/ui-components";
-import type { SectionRegistration, NarrateRequest } from "@spaarke/ui-components";
+} from "@spaarke/daily-briefing-components/widgets";
+import type { NarrateRequest } from "@spaarke/daily-briefing-components/widgets";
+import type { SectionRegistration } from "@spaarke/ui-components";
 import { authenticatedFetch, getTenantId } from "../../services/authInit";
 import { trackEvent } from "../../services/telemetry";
+
+// R2.1 hotfix (2026-06-19): factory moved from @spaarke/ui-components into
+// @spaarke/daily-briefing-components/widgets so it mounts the full DailyBriefingApp
+// (TL;DR + Activity Notes + per-item actions) instead of the old
+// narrative-only DailyBriefingSection. The options surface is preserved
+// verbatim for backward compat with this shim and the Option D registry
+// chain; they are no-ops in the new factory because DailyBriefingApp
+// self-resolves Xrm + webApi and fetches via useBriefingNotifications.
+// SectionRegistration type itself still comes from @spaarke/ui-components.
 
 /**
  * Options for `createLegalWorkspaceDailyBriefingRegistration`.
