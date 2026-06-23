@@ -314,14 +314,14 @@ public record PlaybookStreamEvent
         Guid nodeId,
         string nodeName,
         string sample) => new()
-    {
-        Type = PlaybookEventType.UnrenderedTemplateDetected,
-        RunId = runId,
-        PlaybookId = playbookId,
-        NodeId = nodeId,
-        NodeName = nodeName,
-        Content = sample
-    };
+        {
+            Type = PlaybookEventType.UnrenderedTemplateDetected,
+            RunId = runId,
+            PlaybookId = playbookId,
+            NodeId = nodeId,
+            NodeName = nodeName,
+            Content = sample
+        };
 }
 
 /// <summary>

@@ -175,11 +175,11 @@ public class MembershipFieldDiscoveryServiceTests
     // ────────────────────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("sprk_assignedattorney1",  "assignedattorney")]
-    [InlineData("sprk_assignedattorney2",  "assignedattorney")]
+    [InlineData("sprk_assignedattorney1", "assignedattorney")]
+    [InlineData("sprk_assignedattorney2", "assignedattorney")]
     [InlineData("sprk_assignedparalegal1", "assignedparalegal")]
-    [InlineData("ownerid",                 "ownerid")] // no sprk_ prefix, no trailing digits
-    [InlineData("owningteam",              "owningteam")]
+    [InlineData("ownerid", "ownerid")] // no sprk_ prefix, no trailing digits
+    [InlineData("owningteam", "owningteam")]
     public async Task DiscoverAsync_RoleNameStrategy_StripsSprkPrefixAndTrailingDigits(
         string fieldLogicalName,
         string expectedRole)

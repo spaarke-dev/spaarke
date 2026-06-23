@@ -316,9 +316,9 @@ public sealed class MigratedPlaybookFixture
             NodeOutput output = (node.actionType, isQueryMode) switch
             {
                 (ActionType.LookupUserMembership, _) => await lookupExecutor.ExecuteAsync(ctx, cancellationToken),
-                (ActionType.QueryDataverse, _)       => await queryExecutor.ExecuteAsync(ctx, cancellationToken),
-                (ActionType.UpdateRecord, true)      => await queryExecutor.ExecuteAsync(ctx, cancellationToken),
-                (ActionType.CreateNotification, _)   => await notifyExecutor.ExecuteAsync(ctx, cancellationToken),
+                (ActionType.QueryDataverse, _) => await queryExecutor.ExecuteAsync(ctx, cancellationToken),
+                (ActionType.UpdateRecord, true) => await queryExecutor.ExecuteAsync(ctx, cancellationToken),
+                (ActionType.CreateNotification, _) => await notifyExecutor.ExecuteAsync(ctx, cancellationToken),
                 _ => NodeOutput.Ok(node.dto.Id, node.dto.OutputVariable, null, $"skipped action {node.actionType}"),
             };
 
