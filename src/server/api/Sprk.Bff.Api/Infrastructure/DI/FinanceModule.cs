@@ -106,11 +106,12 @@ public static class FinanceModule
         // ============================================================================
         // Playbook Lookup Service (cached alternate key lookups for SaaS portability)
         // ============================================================================
-        // Scoped: retrieves playbooks by portable code (e.g., "PB-013") instead of environment-specific GUIDs
-        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded GUIDs or config changes
+        // Scoped: retrieves playbooks by the stable-ID alt-key sprk_playbookid per Q&A 2026-06-22 Q1.
+        // Stable-ID alt-key value mirrors the row's sprk_analysisplaybookid PK and is immutable across
+        // environments — enables multi-environment deployments (DEV/QA/PROD) without env-specific config.
         // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries (critical for high-volume scenarios)
-        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_playbookcode alternate key
-        // Example: GetByCodeAsync("PB-013") returns same playbook across all environments (different GUIDs)
+        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_playbookid alternate key.
+        // Example: GetByIdAsync("<row's sprk_analysisplaybookid PK GUID>") returns the same playbook across environments.
         services.AddScoped<IPlaybookLookupService, PlaybookLookupService>();
 
         // ============================================================================

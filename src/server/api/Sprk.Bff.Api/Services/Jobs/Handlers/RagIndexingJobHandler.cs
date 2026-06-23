@@ -201,23 +201,31 @@ public class RagIndexingJobHandler : IJobHandler
                     ct);
 
                 // Update Dataverse tracking fields when DocumentId is provided
-                // Same pattern as RagEndpoints.cs manual indexing
+                // Same pattern as RagEndpoints.cs manual indexing.
+                // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
+                // sprk_searchindexed=true + sprk_searchindexedon for the transition window
+                // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
                 if (!string.IsNullOrEmpty(payload.DocumentId))
                 {
                     try
                     {
+                        var completedAt = DateTime.UtcNow;
                         var updateRequest = new UpdateDocumentRequest
                         {
+                            // New canonical lifecycle marker (R3+)
+                            SearchIndexCompletedOn = completedAt,
+                            // Legacy dual-write (preserved during transition)
                             SearchIndexed = true,
-                            SearchIndexName = _analysisOptions.SharedIndexName,
-                            SearchIndexedOn = DateTime.UtcNow
+                            SearchIndexedOn = completedAt,
+                            // Index routing (unchanged)
+                            SearchIndexName = _analysisOptions.SharedIndexName
                         };
 
                         await _documentService.UpdateDocumentAsync(payload.DocumentId, updateRequest, ct);
 
                         _logger.LogInformation(
-                            "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexed=true, IndexName={IndexName}",
-                            payload.DocumentId, _analysisOptions.SharedIndexName);
+                            "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexCompletedOn={CompletedAt}, SearchIndexed=true (dual-write), IndexName={IndexName}",
+                            payload.DocumentId, completedAt, _analysisOptions.SharedIndexName);
                     }
                     catch (Exception ex)
                     {

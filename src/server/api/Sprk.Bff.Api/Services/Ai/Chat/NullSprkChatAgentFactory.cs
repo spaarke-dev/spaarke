@@ -54,7 +54,7 @@ public sealed class NullSprkChatAgentFactory : SprkChatAgentFactory
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         CancellationToken cancellationToken = default,
-        string? commandIntent = null)
+        string? intentHint = null)
     {
         LogDisabled(nameof(CreateAgentAsync));
         throw new FeatureDisabledException(ErrorCode, DetailMessage);

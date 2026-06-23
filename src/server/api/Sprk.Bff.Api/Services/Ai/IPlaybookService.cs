@@ -150,4 +150,68 @@ public interface IPlaybookService
         Guid userId,
         string? newName = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Enumerate ALL active (<c>statecode == 0</c>) playbooks across the tenant for
+    /// chat-routing-redesign-r1 FR-13 drift detection. Pages through Dataverse 100 rows
+    /// at a time and yields each <see cref="PlaybookResponse"/> as it is materialized.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per-tenant scoping flows via <c>JobContract.SubjectId</c> upstream — this
+    /// method intentionally returns all Active rows visible to the BFF's Dataverse
+    /// application user.
+    /// </para>
+    /// <para>
+    /// N:N relationship collections (<c>ActionIds</c>, <c>SkillIds</c>, etc.) are NOT
+    /// populated because drift detection only requires the embed-input fields plus the
+    /// tracking fields (<c>sprk_indexstatus</c>, <c>sprk_indexhash</c>, <c>sprk_lastindexedat</c>).
+    /// Callers requiring relationships should call <see cref="GetPlaybookAsync"/> by ID
+    /// once a row of interest is found.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token. Honored between pages and
+    /// between yielded rows.</param>
+    /// <returns>Async enumerable of active playbooks.</returns>
+    IAsyncEnumerable<PlaybookResponse> ListAllActivePlaybooksAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes <c>sprk_indexstatus</c> (and optionally <c>sprk_indexhash</c>,
+    /// <c>sprk_lastindexedat</c>, <c>sprk_lastindexerror</c>) on the playbook row for
+    /// chat-routing-redesign-r1 FR-13 indexing-state tracking.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Behavior matrix:
+    /// <list type="bullet">
+    ///   <item><description><c>sprk_indexstatus</c> is always set to <paramref name="statusCode"/>.</description></item>
+    ///   <item><description><c>sprk_indexhash</c> is set to <paramref name="indexHash"/> (null clears the field).</description></item>
+    ///   <item><description><c>sprk_lastindexedat</c> is stamped to <see cref="DateTime.UtcNow"/>
+    ///   ONLY when <paramref name="statusCode"/> indicates successful indexing (100000002 = Indexed).
+    ///   On Stale / Failed transitions the previous timestamp is intentionally preserved.</description></item>
+    ///   <item><description><c>sprk_lastindexerror</c> is set to <paramref name="lastError"/>
+    ///   (null clears to empty string).</description></item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// ADR-015: this method MUST NOT log <paramref name="lastError"/> content or
+    /// <paramref name="indexHash"/> content. Only playbook ID and status code may
+    /// be surfaced in BFF logs. Error content flows to the Dataverse column for
+    /// admin visibility but never to logs.
+    /// </para>
+    /// </remarks>
+    /// <param name="playbookId">Playbook ID to update.</param>
+    /// <param name="statusCode">New <c>sprk_indexstatus</c> numeric option-set code.
+    /// Allowed: 100000000 (NotIndexed), 100000001 (Pending), 100000002 (Indexed),
+    /// 100000003 (Stale), 100000004 (Failed).</param>
+    /// <param name="indexHash">SHA-256 hex digest to store, or null to clear.</param>
+    /// <param name="lastError">Error message to store, or null to clear.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task UpdateIndexStatusAsync(
+        Guid playbookId,
+        int statusCode,
+        string? indexHash,
+        string? lastError,
+        CancellationToken cancellationToken = default);
 }

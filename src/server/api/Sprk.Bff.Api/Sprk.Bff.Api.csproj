@@ -126,6 +126,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\shared\Spaarke.Core\Spaarke.Core.csproj" />
     <ProjectReference Include="..\..\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
+    <!-- R3 task 010 (FR-2.1): Spaarke.Scheduling in-process job host (~50KB Cronos). -->
+    <ProjectReference Include="..\..\shared\Spaarke.Scheduling\Spaarke.Scheduling.csproj" />
   </ItemGroup>
 
   <!-- Builder scope JSON files for AI Playbook Builder (Phase 4 Dataverse import) -->

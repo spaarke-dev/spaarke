@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Action code reform: drop @v1 from new actions; backward-compat for existing sprk_actioncode values</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>025,026</blocks>
+    <tags>dataverse, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Cross-cutting action-code convention change; touches Dataverse + service layer but additive (backward-compat); STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>1-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Establish the convention that new `sprk_actioncode` values are kebab-case WITHOUT `@v1` suffix (per FR-06). Implement a backward-compat layer that recognizes existing `@v1`-suffixed action codes as valid (no rename of existing data; same column reused). Add a deprecation comment + telemetry tag so the stabilization-window end can be measured.
+  </prompt>
+
+  <role>SPAARKE platform BFF + Dataverse developer. Expert in stable-code conventions + backward-compat shimming.</role>
+
+  <goal>
+    Action-code reform documented as a project standard (`docs/standards/` reference or inline in `sprk_action` resolver helper). Backward-compat layer in the action-resolution path strips `@v1` suffix for matching purposes (so a new caller passing `kebab-name` and an old caller passing `kebab-name@v1` both resolve to the same action). Test asserts both forms resolve identically. No existing action-code values rewritten in Dataverse.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-06 + Owner Clarification on action-code reform + Open Questions on field shape. The decision: REUSE existing `sprk_actioncode` field (per Dataverse describe `NVARCHAR(64)`); new actions use kebab-case without `@v1`; old `@v1`-suffixed values remain valid in the same column until the stabilization window closes. CLAUDE.md MUSTs forbid `sprk_actioncode_clean` as a new column.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ (action-code resolver path)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (potential helper location)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+      <file>docs/standards/ (potential convention doc — existing only; do NOT create new doc per CLAUDE.md)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Dataverse data not modified for existing action codes; reuse `sprk_actioncode` column.</constraint>
+    <constraint source="ADR-010">If a helper is introduced, register via concrete-class DI (or extension method); no `IServiceProvider.GetService&lt;T&gt;()`.</constraint>
+    <constraint source="ADR-013">Reform logic stays inside `Services/Ai/`; CRUD callers use stable code without `@v1` going forward.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-06: new actions kebab-case without `@v1`; existing `@v1`-suffixed values remain valid in same column.</constraint>
+    <constraint source="spec">CLAUDE.md MUSTs: REUSE existing `sprk_actioncode` field; do NOT create `sprk_actioncode_clean`.</constraint>
+    <constraint source="project">DO NOT rewrite any existing Dataverse `sprk_actioncode` value in this task (data migration NOT in scope here; later stabilization window cutover handles it).</constraint>
+    <constraint source="project">DO NOT create a new doc file unless explicitly requested per CLAUDE.md anti-pattern; if a convention doc is needed, EXTEND an existing `docs/standards/*.md` instead.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-002-dataverse-data-access.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/data-model/sprk_action.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate the action-resolution path in `Services/Ai/`. Identify the lookup that takes a string action code and resolves it to an `sprk_action` row.</step>
+    <step order="2">Add a normalization helper: `string NormalizeActionCode(string raw) =&gt; raw.EndsWith("@v1") ? raw[..^3] : raw;`. Apply at lookup boundary so callers passing either form resolve identically.</step>
+    <step order="3">Add telemetry tag `actionCodeFormat: "v1Suffix" | "clean"` to the action-resolution log line so deprecation rate is measurable.</step>
+    <step order="4">Add unit tests asserting: (a) `"foo-bar"` resolves the same as `"foo-bar@v1"`; (b) telemetry tag set correctly per input form.</step>
+    <step order="5">If a standards doc on action-code naming exists, extend it with the convention; if not, add an XML doc comment on the helper.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`. Pass.</step>
+    <step order="7">Measure publish size; report delta.</step>
+    <step order="8">Update TASK-INDEX.md: task 023 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Action-resolution path code</tool>
+    <tool name="Edit">Add normalization helper + telemetry tag + tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+    <tool name="Grep">Locate action-code lookup call sites</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/.../ActionCodeResolver.cs (or similar) — normalization helper added</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ActionCodeResolverTests.cs — backward-compat test</output>
+    <output type="docs">notes/handoffs/023-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Action-code lookup accepts BOTH `"foo-bar"` and `"foo-bar@v1"` and resolves to the same row.</criterion>
+    <criterion testable="true">Telemetry tag `actionCodeFormat` emitted on each lookup, value `"clean"` or `"v1Suffix"`.</criterion>
+    <criterion testable="true">No new Dataverse column added; no data rewrites.</criterion>
+    <criterion testable="true">Unit test exits 0.</criterion>
+    <criterion testable="true">`dotnet build` exits 0.</criterion>
+    <criterion testable="true">Publish-size delta within NFR-01 thresholds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 024 (different files — 024 owns `/by-name/` endpoint telemetry; this task owns action-code resolver). The telemetry tag is the deprecation-window measurement: when call rate of `"v1Suffix"` drops to ~0, the stabilization window can close. Window length is owner-decided per Open Question "Action-code stabilization window length".
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — code-review + adr-check skipped at Step 9.5; build + test verification required.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>SessionPersistenceService.UpdateUploadedFilesAsync (NEW method)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4b)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>071</dependencies>
+    <blocks>073,074</blocks>
+    <tags>bff-api, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies hot-path persistence service; tags include `bff-api`; consumes 071 model extension</rigor-reason>
+    <parallel-group>4-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential: consumes 071's `ChatSessionFile` extended shape; both touch the persistence layer</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add `UpdateUploadedFilesAsync(string sessionId, IReadOnlyList&lt;ChatSessionFile&gt; enrichedFiles, CancellationToken ct)` method to `SessionPersistenceService`. Per architecture §6.1 + §7.1: writes enriched `ChatSessionFile` records to Redis hot-tier + Cosmos warm-tier with the same write-through pattern as existing `SaveSessionAsync` / `SaveTabsAsync`. Uses ETag for optimistic concurrency.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `SessionPersistenceService` patterns + Redis/Cosmos write-through.</role>
+
+  <goal>
+    `SessionPersistenceService` has new public method `UpdateUploadedFilesAsync` that:
+    - Reads current `ChatSession` from Redis (fallback Cosmos cold)
+    - Replaces `UploadedFiles` collection with new enriched list (or merges by `FileId` if upserting individual files — choose per existing service's write-pattern conventions)
+    - Writes back to Redis (24h sliding TTL) + Cosmos (90d TTL) with ETag
+    - Logs sessionId, file count, durationMs only (tier-1 safe)
+    - Throws / surfaces conflict on ETag mismatch
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.1 (Upload pipeline) — the orchestrator (066) invokes this method after parallel enrichment completes. Per architecture §11.2 — same write-through pattern as `SaveTabsAsync` (R6 task 051 precedent). The method is the final step of the upload pipeline; task 074 instruments its telemetry.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Chat/ChatSession.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Chat/ChatSessionFile.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">SessionPersistenceService is in `Services/Ai/Sessions/` — within AI module.</constraint>
+    <constraint source="ADR-015">Tier-1 logging only: sessionId, fileCount, durationMs. NEVER log per-file summary text, content, classification text.</constraint>
+    <constraint source="architecture §6.1">Write-through pattern: Redis hot + Cosmos warm. Use existing ETag pattern from peer methods.</constraint>
+    <constraint source="architecture §11.2">Follow R6 task 051 `SaveTabsAsync` write-through precedent — do NOT introduce new container or new doc-type.</constraint>
+    <constraint source="ADR-029">Per-task publish-size measurement.</constraint>
+    <constraint source="project">Test update obligation — extend `SessionPersistenceServiceTests.cs` to cover the new method's roundtrip + ETag conflict path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `SessionPersistenceService.cs` end-to-end. Identify the write-through pattern, ETag handling, peer methods (`SaveSessionAsync`, `SaveTabsAsync` precedent).</step>
+    <step order="2">Add `UpdateUploadedFilesAsync` to the interface (`ISessionPersistenceService`) + implement.</step>
+    <step order="3">Implementation:
+      - Read session from Redis; fallback Cosmos
+      - Merge / replace `UploadedFiles` collection per service's convention
+      - Write back Redis (24h sliding) + Cosmos (90d, ETag check)
+      - Log tier-1 fields only
+      - Surface ETag conflict (per existing pattern — likely throws `CosmosException` or returns a Result type)</step>
+    <step order="4">Add interface method (if interface exists).</step>
+    <step order="5">Extend unit tests: roundtrip, ETag conflict, tier-1 log assertion (verify NO summary text in log output via test capture).</step>
+    <step order="6">Run `dotnet build` + `dotnet test`.</step>
+    <step order="7">Measure BFF publish size.</step>
+    <step order="8">code-review + adr-check.</step>
+    <step order="9">Update TASK-INDEX.md: 072 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">SessionPersistenceService + interface + tests</tool>
+    <tool name="Edit">Add method + extend interface + extend tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs (method added)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/ISessionPersistenceService.cs (interface method added, if applicable)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionPersistenceServiceTests.cs (extended)</output>
+    <output type="docs">notes/handoffs/072-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`UpdateUploadedFilesAsync` exists and is public.</criterion>
+    <criterion testable="true">Redis + Cosmos write-through occurs.</criterion>
+    <criterion testable="true">ETag concurrency check present.</criterion>
+    <criterion testable="true">Log capture test confirms no summary text / textContent in logs.</criterion>
+    <criterion testable="true">Roundtrip + ETag conflict tests exit 0.</criterion>
+    <criterion testable="true">`dotnet build` exits 0.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.2 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The merge-vs-replace strategy depends on how the service handles file lifecycle (e.g., are files individually deleted? appended only?). Choose the strategy that aligns with peer methods.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

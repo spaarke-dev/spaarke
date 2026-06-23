@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Admin Power Apps view "Playbook Index Drift" (filtered status IN stale/failed/not-indexed)</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>032,033</dependencies>
+    <blocks>039</blocks>
+    <tags>dataverse, power-apps, views, admin-ux</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Single filtered view (FetchXml); no code; no quality-gate requirement; MINIMAL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>2-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a Power Apps view named "Playbook Index Drift" on the `sprk_analysisplaybook` entity that filters `sprk_indexstatus IN ('stale', 'failed', 'not-indexed')`. Columns: name, `sprk_playbookcode`, `sprk_indexstatus`, `sprk_lastindexedat`, `sprk_lastindexerror`. Ribbon includes "Send to Index" (from task 033). Implements spec FR-14.
+  </prompt>
+
+  <role>SPAARKE Power Apps engineer. Expert in saved-query authoring + FetchXml + model-driven app view configuration.</role>
+
+  <goal>
+    "Playbook Index Drift" view appears under `sprk_analysisplaybook` in the admin model-driven app. Filter matches the 3 status values. Ribbon includes the "Send to Index" button per task 033. Visible to admin role only.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14 + design §1.4. Single Dataverse `savedquery` row authored via Web API or solution editor. Admins use this view to find playbooks needing reindex; ribbon enables bulk "Send to Index" trigger.
+    </background>
+    <relevant-files>
+      <file>src/dataverse/solutions/</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-14: view name exactly "Playbook Index Drift"; filter is `sprk_indexstatus IN ('stale', 'failed', 'not-indexed')`.</constraint>
+    <constraint source="project">View must be solution-aware (added to the unmanaged solution so it deploys with task 039).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author the saved query (FetchXml) — `<filter><condition attribute='sprk_indexstatus' operator='in'>...</condition></filter>`.</step>
+    <step order="2">Add the view to the unmanaged solution containing `sprk_analysisplaybook`.</step>
+    <step order="3">Verify view appears in the admin model-driven app; check ribbon for "Send to Index" inheriting from task 033.</step>
+    <step order="4">Update TASK-INDEX.md: task 035 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">dataverse-create-schema</tool>
+    <tool name="Skill">dataverse-deploy</tool>
+    <tool name="Bash">PAC CLI / Web API for saved-query create</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_analysisplaybook savedquery "Playbook Index Drift" (filtered)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">View named "Playbook Index Drift" exists in `savedquery` for `sprk_analysisplaybook`.</criterion>
+    <criterion testable="true">FetchXml filter: `sprk_indexstatus IN ('stale', 'failed', 'not-indexed')`.</criterion>
+    <criterion testable="true">Ribbon shows "Send to Index" command on this view.</criterion>
+    <criterion testable="true">View included in solution ZIP export.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol per Step 0.5.</protocol>
+  </execution>
+</task>

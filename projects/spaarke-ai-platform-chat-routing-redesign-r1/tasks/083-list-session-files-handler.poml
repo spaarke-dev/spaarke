@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>ListSessionFilesHandler (T2) — list session-scoped uploaded files</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>091</blocks>
+    <tags>bff-api, services, handlers, tool-handler, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; creates new `.cs` handler file; new tool surface; ADR-013/ADR-015/ADR-033 binding</rigor-reason>
+    <parallel-group>4-G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `ListSessionFilesHandler` (NEW) at `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ListSessionFilesHandler.cs` implementing the T2 `list_session_files` tool per architecture §8.1. The handler reads `ChatSession.UploadedFiles` (extended in task 071) and returns the enriched per-file array (fileId, fileName, contentType, sizeBytes, pageCount?, uploadedAt, uploadedBy, classifiedDocType, classifiedConfidence, precomputedSummary marked NOT authoritative in description, sections, recentlyDiscussed, citationsReferenced). Implements FR-30 (list_session_files row of the 8-tool surface).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat tool-handler authoring + auto-discovered `sprk_analysistool` registration.</role>
+
+  <goal>
+    `ListSessionFilesHandler` lives at `Services/Ai/Handlers/ListSessionFilesHandler.cs` implementing `IToolHandler`. Returns single `ToolResult` (no streaming, per ADR-033). Auto-discovered via `AddToolHandlersFromAssembly`. The handler reads through `IChatSessionManager` (or equivalent persistence accessor) to fetch the current session's `UploadedFiles`. Tool description embeds the architecture §2 P3 trust framing — the `precomputedSummary` field is marked "NOT authoritative; call `recall_session_file(requireCitations:true)` for legally-precise answers". Unit tests cover: zero files, multiple files, recentlyDiscussed flag flips, citationsReferenced shape. Telemetry emits handler name + sessionId + file count + duration ONLY (ADR-015 tier-1 safe).
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §3.1 (Tier 2 Session memory) + §4.2 dependency graph + §8.1 Tool Surface + §8.2 (Tool routing — list_session_files reads T2, no writes, always-on when session has files). The handler wraps existing `ChatSession.UploadedFiles[]` access. Architecture §4.4 catalogs this as one of the 8 NEW tool handlers. FR-30 in spec.md lists it as part of the tool surface expansion.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/UpdateWorkspaceTabHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+      <file>infra/dataverse/sprk_analysistool-update-workspace-tab-row.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Handler exposed via existing Minimal API tool-dispatch surface; no new endpoint added by this task.</constraint>
+    <constraint source="ADR-010">Auto-discovered via `AddToolHandlersFromAssembly`; ZERO new manual DI line in this task. Task 091 handles any companion service registrations.</constraint>
+    <constraint source="ADR-013">Handler lives under `Services/Ai/Handlers/`; injects existing T2 persistence accessors directly (BFF-internal). NO direct injection of `IOpenAiClient`/`IPlaybookService`.</constraint>
+    <constraint source="ADR-015">Telemetry/log payloads carry: handlerName, sessionId, fileCount, durationMs ONLY. NEVER file content, summary text, classifiedDocType per-file (aggregate counts only).</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect ≤+0.1 MB.</constraint>
+    <constraint source="ADR-033">Returns a SINGLE `ToolResult`; does NOT stream. Memory tools are non-streaming per ADR-033 amendment.</constraint>
+    <constraint source="architecture">§3.2 — reads T2 only; no writes. Always-on per §8.2 when session has files.</constraint>
+    <constraint source="architecture">§8.1 — return shape matches schema verbatim (including recentlyDiscussed + citationsReferenced fields).</constraint>
+    <constraint source="architecture">§2 P3 — trust framing applies to the `precomputedSummary` field description.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — add tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §3.1 (T2 contract), §4.2 (dependency graph), §8.1 (list_session_files schema), §8.2 (routing rules).</step>
+    <step order="2">Read `ManagePinnedContextHandler.cs` + `UpdateWorkspaceTabHandler.cs` as exemplars for the `IToolHandler` contract + telemetry/audit emission patterns.</step>
+    <step order="3">Read `ChatSession.cs` to confirm the `UploadedFiles` shape extended by task 071 (PrecomputedSummary, ClassifiedDocType, etc.).</step>
+    <step order="4">Author `Services/Ai/Handlers/ListSessionFilesHandler.cs`: implement `IToolHandler` with `ToolHandlerMetadata` describing the per-file return shape; embed architecture §2 P3 trust framing inside the `precomputedSummary` parameter description.</step>
+    <step order="5">Inject the existing T2 accessor (likely `IChatSessionManager` or `ISessionPersistenceService`) per `ManagePinnedContextHandler.cs` pattern; do NOT introduce new dependencies.</step>
+    <step order="6">Implement `ExecuteAsync` (or per-handler contract) to read `ChatSession.UploadedFiles` and map to the §8.1 return shape; mark `recentlyDiscussed` via `IRecentlyDiscussedTracker` if available, else false.</step>
+    <step order="7">Add the Dataverse seed row JSON at `infra/dataverse/sprk_analysistool-list-session-files-row.json` mirroring the `manage-pinned-context-row` pattern; `sprk_handlerclass = "ListSessionFilesHandler"`; `sprk_requiredcapability = null` (always-on per architecture §8.2). Note: task 092 wires this into `Seed-TypedHandlers.ps1`.</step>
+    <step order="8">Author unit tests at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/ListSessionFilesHandlerTests.cs` covering: empty session, multi-file response, recentlyDiscussed flag, citationsReferenced shape, ADR-015 telemetry safety (no file content in log payloads).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Must pass.</step>
+    <step order="10">Measure BFF publish size: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report delta vs Phase 4f baseline at `notes/handoffs/083-bff-publish-delta.md`.</step>
+    <step order="11">Run code-review + adr-check (Step 9.5 FULL rigor quality gates).</step>
+    <step order="12">Update TASK-INDEX.md: 083 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">ManagePinnedContextHandler.cs, ChatSession.cs, architecture doc</tool>
+    <tool name="Write">ListSessionFilesHandler.cs + tests + seed-row JSON</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ListSessionFilesHandler.cs</output>
+    <output type="code">infra/dataverse/sprk_analysistool-list-session-files-row.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/ListSessionFilesHandlerTests.cs</output>
+    <output type="docs">notes/handoffs/083-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ListSessionFilesHandler` exists at the specified path and implements `IToolHandler`.</criterion>
+    <criterion testable="true">Handler returns a SINGLE `ToolResult` (no streaming) — assert via unit test.</criterion>
+    <criterion testable="true">Tool metadata description includes architecture §2 P3 "NOT authoritative" framing on the `precomputedSummary` field.</criterion>
+    <criterion testable="true">Unit tests cover empty + multi-file + recentlyDiscussed cases; all pass.</criterion>
+    <criterion testable="true">Telemetry payload carries only handlerName + sessionId + fileCount + durationMs — verified by assertion against captured log events.</criterion>
+    <criterion testable="true">BFF publish delta reported; ≤+0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Auto-discovered handler — no manual DI required by this task. The companion T2 accessor (already registered by `AnalysisServicesModule` per AiModule.cs) is reused. Task 091 covers any cross-handler shared dependency wiring. Task 092 seeds the Dataverse `sprk_analysistool` row authoritatively.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

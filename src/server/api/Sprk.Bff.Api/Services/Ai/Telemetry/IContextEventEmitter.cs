@@ -107,4 +107,102 @@ public interface IContextEventEmitter
     /// <param name="sessionId">Chat session GUID (may be null).</param>
     /// <param name="tenantId">Opaque tenant identifier.</param>
     void DecisionMade(string layer, string decision, string? capabilityName, Guid? sessionId, string? tenantId);
+
+    // =========================================================================
+    // chat-routing-redesign-r1 task 074 — Upload-pipeline `context.upload_*` events
+    // =========================================================================
+    //
+    // ADR-015 BINDING (Tier 1 SAFE only): every method below carries deterministic IDs +
+    // lengths + counts + durationMs ONLY. NEVER textContent, summaryText, classification
+    // label text body (the short enum label like "NDA" / "Contract" is allowed; freeform
+    // classifier text is NOT), recall results, file content, or user message content. The
+    // method signatures are structurally constrained — no <c>object</c>, <c>JsonElement</c>,
+    // or free-form <c>string content</c> parameters.
+    //
+    // Architecture §4.1 T6 + §7.1 audit container + P7 binding principle on telemetry safety.
+
+    /// <summary>
+    /// Emits <c>context.upload_started</c>. Called by
+    /// <see cref="Api.Ai.ChatDocumentEndpoints.UploadDocumentAsync"/> after validation passes
+    /// and BEFORE text extraction begins.
+    /// </summary>
+    /// <param name="sessionId">Chat session GUID (may be null when emitter is invoked outside chat).</param>
+    /// <param name="fileId">Deterministic file identifier (GUID/N).</param>
+    /// <param name="contentType">MIME content-type enum-like short string ("application/pdf", "text/plain", etc.).</param>
+    /// <param name="fileSizeBytes">Binary file size in bytes (numeric metric only).</param>
+    /// <param name="tenantId">Opaque tenant identifier (ADR-014 cache-key partition).</param>
+    void UploadStarted(Guid? sessionId, string fileId, string contentType, long fileSizeBytes, string? tenantId);
+
+    /// <summary>
+    /// Emits <c>context.upload_classified</c>. Called by the classification service AFTER
+    /// classification completes (NOT yet wired — service does not exist in code as of task 074).
+    /// </summary>
+    /// <param name="sessionId">Chat session GUID.</param>
+    /// <param name="fileId">Deterministic file identifier.</param>
+    /// <param name="documentType">Enum-like classification label ("NDA", "Contract", "Memo", etc.). MUST be a short enum string — NOT a freeform classifier text body (ADR-015 binding).</param>
+    /// <param name="confidence">Numeric confidence score (0.0..1.0).</param>
+    /// <param name="durationMs">Wall-clock duration in milliseconds.</param>
+    /// <param name="tenantId">Opaque tenant identifier.</param>
+    void UploadClassified(Guid? sessionId, string fileId, string documentType, double confidence, long durationMs, string? tenantId);
+
+    /// <summary>
+    /// Emits <c>context.upload_summarized</c>. Called by the summarization service AFTER
+    /// summarization completes (NOT yet wired — service does not exist in code as of task 074).
+    ///
+    /// <para>ADR-015 BINDING: <paramref name="summaryCharCount"/> is the LENGTH ONLY — NEVER
+    /// the summary text body. Implementations MUST NOT log or tag the summary text.</para>
+    /// </summary>
+    /// <param name="sessionId">Chat session GUID.</param>
+    /// <param name="fileId">Deterministic file identifier.</param>
+    /// <param name="summaryCharCount">Character count of the summary (numeric metric only — NEVER the summary text).</param>
+    /// <param name="durationMs">Wall-clock duration in milliseconds.</param>
+    /// <param name="tenantId">Opaque tenant identifier.</param>
+    void UploadSummarized(Guid? sessionId, string fileId, int summaryCharCount, long durationMs, string? tenantId);
+
+    /// <summary>
+    /// Emits <c>context.upload_manifest_extracted</c>. Called by the manifest-extractor service
+    /// AFTER extraction completes (NOT yet wired — service does not exist in code as of task 074).
+    /// </summary>
+    /// <param name="sessionId">Chat session GUID.</param>
+    /// <param name="fileId">Deterministic file identifier.</param>
+    /// <param name="sectionCount">Number of sections extracted (numeric metric only).</param>
+    /// <param name="tableCount">Number of tables extracted (numeric metric only).</param>
+    /// <param name="pageCount">Number of pages in the document (numeric metric only).</param>
+    /// <param name="durationMs">Wall-clock duration in milliseconds.</param>
+    /// <param name="tenantId">Opaque tenant identifier.</param>
+    void UploadManifestExtracted(Guid? sessionId, string fileId, int sectionCount, int tableCount, int pageCount, long durationMs, string? tenantId);
+
+    /// <summary>
+    /// Emits <c>context.upload_indexed</c>. Called by
+    /// <see cref="Api.Ai.ChatDocumentEndpoints.UploadDocumentAsync"/> AFTER
+    /// <c>RagIndexingPipeline.IndexSessionFileAsync</c> returns.
+    /// </summary>
+    /// <param name="sessionId">Chat session GUID.</param>
+    /// <param name="fileId">Deterministic file identifier.</param>
+    /// <param name="chunkCount">Number of knowledge chunks indexed (numeric metric only).</param>
+    /// <param name="durationMs">Wall-clock duration in milliseconds.</param>
+    /// <param name="tenantId">Opaque tenant identifier.</param>
+    void UploadIndexed(Guid? sessionId, string fileId, int chunkCount, long durationMs, string? tenantId);
+
+    /// <summary>
+    /// Emits <c>context.upload_persisted</c>. Called by
+    /// <see cref="Sessions.SessionPersistenceService.UpdateUploadedFilesAsync"/> AFTER the
+    /// uploaded-files manifest write-through (Redis hot + Cosmos warm) completes.
+    /// </summary>
+    /// <param name="sessionId">Chat session GUID.</param>
+    /// <param name="fileId">Deterministic file identifier (per-manifest entry; pass the most-recent enriched file's id, or empty string when bulk).</param>
+    /// <param name="durationMs">Wall-clock duration in milliseconds.</param>
+    /// <param name="tenantId">Opaque tenant identifier.</param>
+    void UploadPersisted(Guid? sessionId, string fileId, long durationMs, string? tenantId);
+
+    /// <summary>
+    /// Emits <c>context.upload_completed</c>. Called by
+    /// <see cref="Api.Ai.ChatDocumentEndpoints.UploadDocumentAsync"/> immediately before
+    /// returning the 202 Accepted response (end-of-pipeline marker).
+    /// </summary>
+    /// <param name="sessionId">Chat session GUID.</param>
+    /// <param name="fileId">Deterministic file identifier.</param>
+    /// <param name="totalDurationMs">Total wall-clock duration of the upload pipeline (start → completed) in milliseconds.</param>
+    /// <param name="tenantId">Opaque tenant identifier.</param>
+    void UploadCompleted(Guid? sessionId, string fileId, long totalDurationMs, string? tenantId);
 }

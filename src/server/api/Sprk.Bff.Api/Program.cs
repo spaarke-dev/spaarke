@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Membership;                 // R3 task 035 — AddMembershipApi() pairing
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
 using Sprk.Bff.Api.Infrastructure.DI;
@@ -66,6 +67,18 @@ builder.Services.AddFinanceModule(builder.Configuration);
 
 // Communication module (email sending via Graph API)
 builder.Services.AddCommunicationModule(builder.Configuration);
+
+// Membership module (R3 Part 1, task 012) — binds MembershipOptions from the
+// "Membership" appsettings section. Service registrations (discovery + resolver
+// + endpoints) arrive in later P4 tasks. ADR-010 + bff-extensions.md §A.
+builder.Services.AddMembership(builder.Configuration);
+
+// R3 task 035 — user-facing membership endpoint surface (FR-1A.9). Currently a
+// no-op pairing for the canonical Add+Map convention; reserved for future
+// endpoint-specific service registrations (e.g., a CurrentUserResolver extracted
+// from MembershipEndpoints.cs when a second consumer surfaces). Endpoint mapping
+// itself happens in EndpointMappingExtensions.MapDomainEndpoints via MapMembershipApi().
+builder.Services.AddMembershipApi();
 
 // Todo Graph sync scaffolding (smart-todo-decoupling-r3 Phase 6, task 018) — registers
 // ITodoGraphSyncHandler / ISpaarkeListProvisioner / ITodoSubscriptionManager / ITodoSyncBackfiller
@@ -142,6 +155,11 @@ builder.Services.AddEmailServicesModule(builder.Configuration);
 
 // Job processing (handlers, Service Bus, background services, AI platform options)
 builder.Services.AddJobProcessingModule(builder.Configuration, builder.Logging);
+
+// R3 task 020 (FR-2.6) — in-process Spaarke.Scheduling registry + run-history store
+// for the /api/admin/jobs/* admin surface. Unconditional per bff-extensions.md §F.1
+// (the endpoints map unconditionally; their dependencies must too).
+builder.Services.AddSchedulingModule();
 
 // M365 Copilot Agent module (gateway, auth, cards, conversation, playbook invocation, telemetry)
 builder.Services.AddAgentModule(builder.Configuration);

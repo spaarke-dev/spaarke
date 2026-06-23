@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Finance;
@@ -32,6 +34,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
     private readonly FinancialCalculationToolHandler _financialCalculationTool;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly FinanceTelemetry _telemetry;
+    private readonly IOptions<FinanceOptions> _financeOptions;
     private readonly ILogger<InvoiceExtractionJobHandler> _logger;
 
     // Extraction status choice values
@@ -53,6 +56,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
         FinancialCalculationToolHandler financialCalculationTool,
         JobSubmissionService jobSubmissionService,
         FinanceTelemetry telemetry,
+        IOptions<FinanceOptions> financeOptions,
         ILogger<InvoiceExtractionJobHandler> logger)
     {
         _invoiceAnalysisService = invoiceAnalysisService ?? throw new ArgumentNullException(nameof(invoiceAnalysisService));
@@ -64,6 +68,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
         _financialCalculationTool = financialCalculationTool ?? throw new ArgumentNullException(nameof(financialCalculationTool));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
+        _financeOptions = financeOptions ?? throw new ArgumentNullException(nameof(financeOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -304,10 +309,19 @@ public class InvoiceExtractionJobHandler : IJobHandler
                 context.Variables.Count, invoiceId);
 
             // Apply outputMapping via OutputOrchestrator
-            // Look up playbook by portable code (works in all environments - DEV/QA/PROD)
-            // Uses alternate key "sprk_playbookcode" = "PB-013" instead of environment-specific GUID
-            // Result is cached for 1 hour to minimize Dataverse queries
-            var playbook = await _playbookLookup.GetByCodeAsync("PB-013", ct);
+            // Look up Finance Invoice Processing playbook by stable opaque ID (sprk_playbookid)
+            // per Q&A 2026-06-22 Q1. Configured via FinanceOptions.InvoiceExtractionPlaybookId.
+            var playbookId = _financeOptions.Value.InvoiceExtractionPlaybookId;
+            if (string.IsNullOrWhiteSpace(playbookId))
+            {
+                _logger.LogError(
+                    "Finance:InvoiceExtractionPlaybookId is not configured. Cannot resolve invoice extraction playbook. Aborting invoice {InvoiceId}.",
+                    invoiceId);
+                await UpdateInvoiceExtractionStatusAsync(invoiceId, ExtractionStatusFailed, ct);
+                return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+            }
+
+            var playbook = await _playbookLookup.GetByIdAsync(playbookId, ct);
             var outputResult = await _outputOrchestrator.ApplyOutputMappingAsync(playbook.Id, context, ct);
 
             if (!outputResult.Success)

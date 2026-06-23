@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="127" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Author Patent Review skill (SKL-NEW) + Patent Standards knowledge (KNW-NEW) — Dataverse seed entries</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>125</dependencies>
+    <blocks>126,128,129,130</blocks>
+    <tags>dataverse, seed-data</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Seed-data authoring + Dataverse upsert; no .cs/.ts changes; STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential — task 128 (summarize-patent playbook) depends on these primitives being present in seed catalogs + deployed</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-40: author a NEW Patent Review skill (SKL-NEW) + Patent Standards knowledge source (KNW-NEW) as Dataverse seed entries. Add to `scripts/seed-data/skills.json` and `scripts/seed-data/knowledge.json`. Deploy via existing seed deploy script. These primitives are referenced by JPS `$ref` in task 128's `summarize-patent` playbook.
+  </prompt>
+
+  <role>SPAARKE AI playbook author + legal-domain content drafter. Familiar with skills.json / knowledge.json seed catalog shape.</role>
+
+  <goal>
+    `scripts/seed-data/skills.json` has a new "Patent Review" entry (SKL-NEW code; PromptFragment authored for patent summarization — claims, prior art, jurisdiction, term, inventors, assignees). `scripts/seed-data/knowledge.json` has a new "Patent Standards" entry (KNW-NEW code; Content authored covering USPTO standard sections, claim taxonomy, term computation). Deploy script seeds both into Dataverse (`sprk_analysisskill` + `sprk_analysisknowledge`). Verified via Dataverse query.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-40 + design §WP6 specialized playbook table. SKL-003 (NDA Review) + KNW-006 (NDA Standards) already exist for `summarize-nda`. Patent Review and Patent Standards do NOT exist — must be authored. This task ships ONLY the primitives; task 128 ships the playbook that references them via `$ref`.
+    </background>
+    <relevant-files>
+      <file>scripts/seed-data/skills.json</file>
+      <file>scripts/seed-data/knowledge.json</file>
+      <file>scripts/Deploy-SeedData.ps1</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-40 acceptance — skill + knowledge appear in `scripts/seed-data/skills.json` + `knowledge.json`; deploy script seeds them; playbook (task 128) indexed.</constraint>
+    <constraint source="project">Naming per §1.7: kebab-case codes; no `@v1` suffix on new skills/knowledge.</constraint>
+    <constraint source="project">PromptFragment text should be 200-500 chars covering patent-specific extraction guidance.</constraint>
+    <constraint source="project">Knowledge Content can be 500-2000 chars — patent claim taxonomy, USPTO section markers, term computation rules.</constraint>
+    <constraint source="owner-assumption">Patent Skill + Patent Standards Knowledge authoring scope assumed in-project per spec Assumptions; 1-2 days authoring effort.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `scripts/seed-data/skills.json` and confirm shape for SKL-003 (NDA Review) as a template.</step>
+    <step order="2">Read `scripts/seed-data/knowledge.json` and confirm shape for KNW-006 (NDA Standards) as a template.</step>
+    <step order="3">Draft Patent Review skill entry: `{ code: "patent-review", name: "Patent Review", promptFragment: "..." }`. PromptFragment covers: identify claims (independent + dependent), summarize abstract, extract inventors + assignees, identify jurisdiction + filing date + term, flag prior-art mentions, flag novelty/non-obviousness arguments.</step>
+    <step order="4">Draft Patent Standards knowledge entry: `{ code: "patent-standards", name: "Patent Standards", content: "..." }`. Content covers: USPTO standard sections (Field, Background, Summary, Drawings, Detailed Description, Claims, Abstract), claim taxonomy (apparatus, method, composition), 20-year term computation from earliest effective filing date, key Title 35 USC references.</step>
+    <step order="5">Append both entries to the respective JSON files. Validate JSON syntax.</step>
+    <step order="6">Run the existing seed deploy script (`scripts/Deploy-SeedData.ps1` or equivalent) to upsert into Dataverse.</step>
+    <step order="7">Verify via Dataverse query: `sprk_analysisskill` row with name "Patent Review" exists; `sprk_analysisknowledge` row with name "Patent Standards" exists.</step>
+    <step order="8">Document the new codes (`patent-review`, `patent-standards`) in `notes/handoffs/127-patent-primitives.md` for task 128 to consume.</step>
+    <step order="9">Update TASK-INDEX.md: task 127 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">skills.json, knowledge.json, Deploy-SeedData.ps1</tool>
+    <tool name="Edit">Append new entries to both JSON files</tool>
+    <tool name="Bash">Run deploy script + Dataverse query verification</tool>
+    <tool name="Write">notes/handoffs/127-patent-primitives.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">scripts/seed-data/skills.json — Patent Review entry appended</output>
+    <output type="data">scripts/seed-data/knowledge.json — Patent Standards entry appended</output>
+    <output type="dataverse">sprk_analysisskill row "Patent Review" seeded</output>
+    <output type="dataverse">sprk_analysisknowledge row "Patent Standards" seeded</output>
+    <output type="docs">notes/handoffs/127-patent-primitives.md — codes documented</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "Patent Review" scripts/seed-data/skills.json` returns at least one match.</criterion>
+    <criterion testable="true">`grep "Patent Standards" scripts/seed-data/knowledge.json` returns at least one match.</criterion>
+    <criterion testable="true">JSON files parse without error.</criterion>
+    <criterion testable="true">Dataverse query confirms both rows seeded.</criterion>
+    <criterion testable="true">Handoff document records the new codes for task 128.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Content quality matters — these PromptFragment + Content blobs feed into LLM prompts for every Patent summarization. Spend time getting the patent-domain language right (claim taxonomy is non-trivial). If subject-matter expertise is required, flag for owner review before deploying to production.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

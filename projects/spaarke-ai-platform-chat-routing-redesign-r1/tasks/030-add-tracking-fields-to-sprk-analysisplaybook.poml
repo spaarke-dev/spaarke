@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Add 4 tracking fields to sprk_analysisplaybook (lastindexedat, indexstatus, lastindexerror, indexhash)</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>027</dependencies>
+    <blocks>031,034,035,036,037,039</blocks>
+    <tags>dataverse, solution, fields, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema additions to production-bound entity; new files (publisher prefix) — STANDARD per task-execute Step 0.5 (no .cs/.tsx modification)</rigor-reason>
+    <parallel-group>2-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same entity (`sprk_analysisplaybook`) as task 031; Dataverse PUBLISH ALL is global; serialize 030 → 031</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add 4 additive tracking fields to the `sprk_analysisplaybook` Dataverse entity per spec FR-08: `sprk_lastindexedat` (DateTime, nullable), `sprk_indexstatus` (OptionSet/Choice with values 'not-indexed' / 'pending' / 'indexed' / 'stale' / 'failed'), `sprk_lastindexerror` (Memo / Multiline Text up to 500 chars), `sprk_indexhash` (Text, 64 chars — sha256 hex). Use the `dataverse-create-schema` skill which covers what PAC CLI doesn't. Publish all customizations after addition.
+  </prompt>
+
+  <role>SPAARKE Dataverse schema engineer. Expert in `EntityDefinitions` Web API + the `dataverse-create-schema` skill pattern + Choice option-set lifecycle.</role>
+
+  <goal>
+    Four new fields live on `sprk_analysisplaybook`: `sprk_lastindexedat` (DateTime), `sprk_indexstatus` (Choice with 5 documented option values), `sprk_lastindexerror` (Memo, max 500 chars), `sprk_indexhash` (Text, max length 64). All four appear in Power Apps form designer. Solution export (CDS-Solution unmanaged zip) contains all four fields. No schema migration of existing rows required — fields are nullable / default to 'not-indexed'.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-08 + design §1.4 (WP1.5) + design.md "Tracking fields on `sprk_analysisplaybook` Dataverse row" section. These fields enable Send-to-Index UX (task 033), drift-detection job (task 034), admin view (task 035), and the validation gate (task 036). Adding 4 of the 5 planned fields here; `sprk_jpsmatchingmetadata` is split out to task 031 because its JSON-schema documentation is a separate concern. Sequential within wave 2-A to avoid PUBLISH ALL race.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>docs/data-model/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-08 binding: 5 additive fields total on `sprk_analysisplaybook`; this task adds 4 (the 5th, `sprk_jpsmatchingmetadata`, is task 031).</constraint>
+    <constraint source="spec">All fields additive — no breaking change; no migration of existing 6 production-bound playbooks required.</constraint>
+    <constraint source="project">Reuse existing `sprk_playbookcode` (NVARCHAR(10)) — do NOT create new column; per CLAUDE.md Project-Specific MUSTs.</constraint>
+    <constraint source="project">Do NOT modify the 6 production-bound playbooks' output schemas / names / GUIDs (per spec §1.5).</constraint>
+    <constraint source="ADR-002">Schema additions go through solution; export resulting `sprk_AnalysisPlatform` solution unmanaged zip for downstream deploy task 039.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-002-no-heavy-plugins.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke `dataverse-create-schema` skill — review the Web API + PowerShell pattern for adding fields not coverable by PAC CLI.</step>
+    <step order="2">Confirm current state of `sprk_analysisplaybook` via Dataverse describe — verify the 4 target fields do NOT exist (avoid duplicate-create error).</step>
+    <step order="3">Create `sprk_lastindexedat` as DateTimeAttributeMetadata (DateAndTime format, UserLocal behavior, nullable).</step>
+    <step order="4">Create global option-set `sprk_indexstatus` (or local picklist) with 5 values: 'not-indexed' (default), 'pending', 'indexed', 'stale', 'failed'. Document each option's label + value.</step>
+    <step order="5">Create `sprk_indexstatus` (PicklistAttributeMetadata or ChoiceAttribute) wired to the option-set; default = 'not-indexed'.</step>
+    <step order="6">Create `sprk_lastindexerror` as MemoAttributeMetadata (max length 500, format Text).</step>
+    <step order="7">Create `sprk_indexhash` as StringAttributeMetadata (max length 64, format Text — sha256 hex string).</step>
+    <step order="8">Publish all customizations (`PublishAllXml` Web API request).</step>
+    <step order="9">Verify all 4 fields appear in Power Apps form designer for `sprk_analysisplaybook`.</step>
+    <step order="10">Add all 4 fields to the unmanaged solution that contains `sprk_analysisplaybook` (or confirm they're already in the publisher's solution per ALM convention).</step>
+    <step order="11">Update TASK-INDEX.md: task 030 → ✅; current-task.md → task 031 ready.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">PowerShell + Web API requests via `dataverse-create-schema` skill</tool>
+    <tool name="Skill">dataverse-create-schema</tool>
+    <tool name="Skill">dataverse-deploy (for solution export)</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_analysisplaybook.sprk_lastindexedat (DateTime)</output>
+    <output type="schema">sprk_analysisplaybook.sprk_indexstatus (Choice; 5 values)</output>
+    <output type="schema">sprk_analysisplaybook.sprk_lastindexerror (Memo, max 500)</output>
+    <output type="schema">sprk_analysisplaybook.sprk_indexhash (Text, max 64)</output>
+    <output type="docs">notes/handoffs/030-schema-additions.md — field definitions + option-set values</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dataverse describe of `sprk_analysisplaybook` shows all 4 new fields.</criterion>
+    <criterion testable="true">`sprk_indexstatus` Choice has exactly 5 values matching spec.</criterion>
+    <criterion testable="true">Power Apps form designer can place all 4 fields on `sprk_analysisplaybook` main form.</criterion>
+    <criterion testable="true">Solution export ZIP contains all 4 field definitions.</criterion>
+    <criterion testable="true">Existing 6 production-bound playbooks remain functional (default `sprk_indexstatus = 'not-indexed'`).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 2-A is sequential due to shared entity + Dataverse PUBLISH ALL behavior. After 030 publishes, task 031 adds the 5th field. Do not run 030 + 031 in parallel.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol per task-execute Step 0.5 (schema changes, not code).</protocol>
+  </execution>
+</task>

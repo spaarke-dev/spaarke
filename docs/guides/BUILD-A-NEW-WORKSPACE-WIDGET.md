@@ -650,7 +650,7 @@ The output tells you:
 
 ---
 
-## 7.2 Sizing & layout — the HEIGHT chain (NEW 2026-06-22, smart-todo-r4 round 12)
+## 7.2 Sizing & layout — the HEIGHT chain (updated 2026-06-23, smart-todo-r4 R4-110 chain audit)
 
 If your widget's body should grow to fill the SectionPanel area (kanban,
 list, grid, anything that benefits from vertical space) — and you see it
@@ -664,43 +664,42 @@ This was the root cause of a 7-round debug cycle on the SmartTodo widget
 tall. Working widgets in the same pane (Daily Briefing, Calendar) fill
 correctly because they follow the contract below.
 
-### 7.2.1 The three-rule contract
+### 7.2.1 The chain contract (post R4-110, 2026-06-23)
 
 The full height chain is:
 
 ```
 viewport
   → SpaarkeAi 3-pane shell                  (✓ established, don't touch)
-  → WorkspacePane / tab content              (✓ established, don't touch)
-  → WorkspaceLayoutWidget.root               ★ Rule 1
+  → WorkspacePane.root                       (✓ display:flex; height:100%)
+  → WorkspaceTabManagerComponent.root        (✓ display:flex; height:100%)
+  → WorkspaceTabManagerComponent.content     (✓ display:flex + flex:1, R4-110)
+  → widgetWrapper                            (✓ height:100%)
+  → WorkspaceLayoutWidget.root               (✓ flex:1 + height:100%, round 11)
   → LegalWorkspaceApp root                   (✓ already height:100%)
-  → WorkspaceShell.shell                     (✓ flex 1 1 auto)
-  → WorkspaceShell.row                       ★ Rule 2
-  → SectionPanel.card                        (height supplied via `style: { height: ... }`)
-  → SectionPanel.content                     (✓ flex 1 1 auto)
-  → YOUR WIDGET ROOT                         ★ Rule 3 (your responsibility)
-  → ...inner widget wrappers...              ★ Rule 3 (your responsibility)
+  → WorkspaceShell.shell                     (✓ flex:1 1 auto)
+  → WorkspaceShell.row                       (✓ flex:1 1 0 + alignItems:stretch, round 12)
+  → SectionPanel.card                        (✓ stretches via grid alignItems:stretch)
+  → SectionPanel.content                     (✓ flex:1 1 auto)
+  → YOUR WIDGET ROOT                         ★ Your responsibility — Rule 1
+  → ...inner widget wrappers...              ★ Your responsibility — Rule 2
   → your scrollable body / kanban / list
 ```
 
-**Rule 1 — Block-parent crossing**: `WorkspaceLayoutWidget.root` is mounted
-inside a `display: block` tab-content wrapper. A block parent **ignores
-flex** on children. Without explicit `height: 100%`, the widget root
-shrinks to content height (~600px) regardless of how tall the parent is.
+**The shell-side chain is now FORGIVING** (post-R4-110). Every layer above
+your widget supplies determinate height. You do NOT need per-section
+`style: { height: "calc(100vh - X)" }` workarounds — the SectionPanel
+stretches to fill the grid row, and the grid row claims the shell's
+available height.
 
-This is already fixed in `WorkspaceLayoutWidget.tsx` styles (`height:
-'100%'` + `flex: 1`). Don't remove it.
+**Rule 1 — Widget root anchors to parent height.** Use EITHER `height:
+100%` OR `flex: 1` (R4-110 made both work — pre-R4-110 only `height:
+100%` did, because `WorkspaceTabManagerComponent.content` was block).
 
-**Rule 2 — Grid row must claim shell height**: `WorkspaceShell.row`
-(`display: grid`) needs `flex: 1 1 0, minHeight: 0, alignItems: stretch`
-to claim its flex shell parent's vertical space AND stretch SectionPanel
-cards to fill the row.
-
-This is already fixed in `WorkspaceShell.styles.ts`. Don't remove it.
-
-**Rule 3 — YOUR widget's internal wrappers must all be `display: flex`** (or
-`grid`), not the div default of `block`. Every level between your widget
-root and your scrollable body must propagate height via flex.
+**Rule 2 — Every intermediate wrapper inside the widget must be a flex
+container** (`display: flex` or `display: grid`). A `div` defaults to
+`block`, and a block parent IGNORES child flex props. This is the most
+common widget-author trap.
 
 ```typescript
 // ✅ CORRECT — every wrapper in the chain is flex
@@ -752,27 +751,46 @@ correctly with NO height-cap workarounds:
   `gridContainer: { flex: '1 1 auto', minHeight: 0 }`. Canonical Pattern D
   reference.
 
-### 7.2.3 Per-section height supply (workspaceConfig)
+### 7.2.3 Per-section sizing (post R4-110 — no calc() needed)
 
-`SectionPanel.card` does NOT have `height: 100%` by default (a structural
-fix attempt in round 7 collapsed the workspace because the chain above
-the shell wasn't yet repaired). Each section must supply its own height
-via inline style:
+`SectionPanel.card` does NOT have `height: 100%` and does NOT need it.
+It is a direct grid item of `WorkspaceShell.row` which has
+`alignItems: stretch` (the CSS grid default for the cross axis), so the
+card automatically stretches to fill the row's track height. The row in
+turn shares the shell's vertical space equally with sibling rows
+(`flex: 1 1 0`).
+
+**Recommended pattern for new sections** — supply a `minHeight` floor
+only (as a safety net for tiny viewports / broken host layouts) and let
+the chain supply real height:
 
 ```typescript
-// In src/solutions/LegalWorkspace/src/workspaceConfig.tsx
+// For Path A (LegalWorkspace static workspaceConfig.tsx default dashboard)
 {
   id: "your-widget",
   type: "content",
   title: "Your Widget",
-  style: { height: "calc(100vh - 200px)", minHeight: "560px" },  // ← required
+  style: { minHeight: "560px" },        // floor only — chain supplies real height
   renderContent: () => <YourWidget />,
 }
+
+// For Path B (SpaarkeAi dynamic workspace layouts via buildDynamicWorkspaceConfig)
+// Set defaultHeight in the SectionRegistration; buildDynamicWorkspaceConfig
+// promotes it to minHeight automatically:
+export const yourRegistration: SectionRegistration = {
+  id: "your-widget",
+  defaultHeight: "560px",               // → becomes style.minHeight on the SectionPanel
+  factory(ctx) {
+    return { id: "your-widget", type: "content", title: "Your Widget", ... };
+  },
+};
 ```
 
-The `calc(100vh - 200px)` accounts for the SpaarkeAi shell chrome
-(headers + tab strip ≈ 200px). Adjust if your shell is taller. The
-`minHeight: 560px` is a defensive floor for very short viewports.
+**To make a widget DOMINATE its tab visually**, do NOT override `style.height`
+on the section. Instead, create a single-section workspace layout via the
+WorkspaceLayoutWizard (one row, one section). With only one row,
+`flex: 1 1 0` distribution gives that row 100% of the shell height, and
+the SectionPanel + widget fill the full Workspace tab area.
 
 ### 7.2.4 Diagnostic script when something looks wrong
 
@@ -825,6 +843,12 @@ chain investigation methodology).
 - ❌ **Inventing a per-widget height fallback like `height: 'calc(100vh
   - 200px)'`** ON the widget itself rather than on the section config.
   Sections own height; widgets fill what they're given.
+- ❌ **Adding `style: { height: "calc(100vh - X)" }` to a section
+  config** to force a widget to dominate. Post-R4-110 the chain
+  delivers determinate height to every section; calc overrides force the
+  shell to overflow (master-scroll), which is rarely the intended UX.
+  If you want a widget to dominate, give it its own single-section
+  workspace layout via the WorkspaceLayoutWizard instead.
 
 ---
 

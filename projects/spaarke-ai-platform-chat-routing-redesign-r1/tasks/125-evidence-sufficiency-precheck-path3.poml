@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="125" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Add evidence-sufficiency precheck in Path 3 (PATTERN ONLY — do NOT reuse Insights EvidenceSufficiencyNode per architecture §5.2.4)</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>123</dependencies>
+    <blocks>132</blocks>
+    <tags>bff-api, services, architecture-binding</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies Path 3 engine (.cs); architecture §5.2.4 binding-NEGATIVE rule applies (MUST NOT reuse Insights EvidenceSufficiencyNode); FULL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-45: add an evidence-sufficiency precheck in Path 3 (`ExecuteChatSummarizeAsync`) that returns a structured Decline shape when RAG retrieval yields 0 chunks for the requested files — avoiding garbage-summary on empty input. Per architecture §5.2.4 (binding-NEGATIVE): this is PATTERN-LEVEL inspiration only. DO NOT reuse Insights `EvidenceSufficiencyNode` — that is a playbook-execution decision gate for Insights synthesis, different domain. Build a clean, tool-level error return in the engine.
+  </prompt>
+
+  <role>SPAARKE BFF AI engineer. Knows the Insights/Chat architecture boundary (architecture §5).</role>
+
+  <goal>
+    `ExecuteChatSummarizeAsync` invokes a lightweight evidence-sufficiency check BEFORE the LLM call: if RAG retrieval for the requested `fileIds` returns 0 chunks, the engine emits a structured Decline (`{ status: "declined", reason: "no_evidence", message: "No content was found in the referenced files for this query.", fileIds: [...] }`) and short-circuits — no LLM call, no streaming. Unit test for empty-corpus case asserts Decline shape. Architecture §5.2.4 boundary respected (no Insights reuse).
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-45 + architecture §5.2.4 binding-NEGATIVE rule. Insights Engine has an `EvidenceSufficiencyNode` (action type 100) — a playbook decision gate that aborts Insights synthesis when KPI assessments fall below threshold. That's the WRONG abstraction for chat-Summarize: chat needs a TOOL-LEVEL error return, not a playbook gate. Architecture §5.2.4 forbids reuse. Build the chat-specific precheck in the engine.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="architecture-§5.2.4">DO NOT reuse Insights `EvidenceSufficiencyNode` for memory recall or chat-Summarize evidence checks. Build clean recall-tool error returns instead.</constraint>
+    <constraint source="ADR-033">Decline returned via the streaming side-channel mechanism if applicable; otherwise as a non-streaming structured response. Do NOT mid-stream abort.</constraint>
+    <constraint source="ADR-013">Stay within `Services/Ai/` boundary.</constraint>
+    <constraint source="ADR-015">Decline payload tier-1 safe — deterministic IDs only, no user content; `reason` field is enum-like, not free-text user content.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-45 acceptance — empty-corpus test returns Decline shape with reason.</constraint>
+    <constraint source="project">NFR-06 — Insights Engine non-interference; this precheck is pattern-inspired from §5.2.4 but the implementation is chat-domain-specific.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read architecture/stateful-chat-architecture.md §5.2.4 end-to-end. Internalize the binding-NEGATIVE rule.</step>
+    <step order="2">Inspect existing RAG retrieval pattern in `PlaybookExecutionEngine` and `RagService` — how `fileIds` map to AI Search query and chunk count.</step>
+    <step order="3">Decide the precheck location: BEFORE the LLM call, AFTER RAG retrieval has populated the per-file context. If retrieval is currently inline with prompt assembly, refactor so chunk count is observable separately.</step>
+    <step order="4">Author the Decline shape: `{ status: "declined", reason: "no_evidence", message: string, fileIds: string[] }`. Keep message templated (no user content interpolation).</step>
+    <step order="5">Add the precheck: `if (totalChunks == 0) return Decline(...)`. Verify it returns ABOVE the streaming initiation point so we don't emit a half-formed SSE stream.</step>
+    <step order="6">Add structured-log "precheck.declined" at info level with `reason` + count + fileIds (tier-1 safe).</step>
+    <step order="7">Write unit test: arrange a mock RAG service that returns empty chunks; act on `ExecuteChatSummarizeAsync`; assert Decline shape returned (status, reason, fileIds).</step>
+    <step order="8">Write unit test for positive case: chunks present → no Decline; LLM call proceeds (mock the LLM).</step>
+    <step order="9">Code-grep verification: confirm zero references to `EvidenceSufficiencyNode` or `IEvidenceSufficiencyNode` introduced in this commit. (NFR-06 compliance.)</step>
+    <step order="10">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="11">Measure BFF publish size; report delta.</step>
+    <step order="12">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="13">Update TASK-INDEX.md: task 125 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookExecutionEngine.cs, RagService.cs, architecture §5.2.4</tool>
+    <tool name="Edit">Apply precheck + unit tests</tool>
+    <tool name="Grep">Verify zero EvidenceSufficiencyNode references introduced</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs — evidence-sufficiency precheck added</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookExecutionEnginePrecheckTests.cs — new tests</output>
+    <output type="docs">notes/handoffs/125-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Empty-corpus unit test returns Decline with `reason: "no_evidence"`.</criterion>
+    <criterion testable="true">Positive case unit test proceeds to LLM call.</criterion>
+    <criterion testable="true">`grep "EvidenceSufficiencyNode" src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs` returns ZERO hits (architecture §5.2.4 boundary respected).</criterion>
+    <criterion testable="true">Trace log emits "precheck.declined" tier-1 safe.</criterion>
+    <criterion testable="true">Decline returned BEFORE any SSE stream initiation (no half-stream).</criterion>
+    <criterion testable="true">BFF publish delta reported.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Architecture §5.2.4 is BINDING. The pattern is inspired by Insights but the IMPLEMENTATION must be chat-domain-specific — different timing (pre-LLM, not post-synthesis), different consumer (engine short-circuit, not playbook abort), different return shape (Decline vs Insights AbortPlaybook). If a reviewer asks "why not reuse EvidenceSufficiencyNode?" the answer is architecture §5.2.4.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

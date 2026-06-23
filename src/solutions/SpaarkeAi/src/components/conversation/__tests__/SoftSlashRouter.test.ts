@@ -3,7 +3,7 @@
  *
  * Table-driven coverage of the 4-soft-slash decorate contract:
  *   - mapping table is correct (1:1 with CommandRouter Q6 vocabulary)
- *   - decorateBody adds `commandIntent` ONLY when intent.isSoftSlash === true
+ *   - decorateBody adds `intentHint` ONLY when intent.isSoftSlash === true
  *   - hard slashes, no-slash, unrecognized slash → body UNCHANGED (NFR-11)
  *   - composition with references: payload carries BOTH soft-slash intent
  *     AND reference metadata (FR-52)
@@ -48,7 +48,7 @@ describe('toCommandIntent — closed vocabulary mapping (FR-50)', () => {
   ];
 
   test.each(cases)(
-    '"$input" → commandIntent="$expected"',
+    '"$input" → intentHint="$expected"',
     ({ input, expected }) => {
       const intent = parse(input);
       expect(intent.isSoftSlash).toBe(true);
@@ -82,10 +82,10 @@ describe('toCommandIntent — non-soft-slash inputs return null (NFR-11)', () =>
 });
 
 // ---------------------------------------------------------------------------
-// decorateBody — adds commandIntent on soft slash
+// decorateBody — adds intentHint on soft slash
 // ---------------------------------------------------------------------------
 
-describe('decorateBody — soft slash adds commandIntent', () => {
+describe('decorateBody — soft slash adds intentHint', () => {
   const cases: Array<{
     input: string;
     expectedIntent: CommandIntent;
@@ -97,13 +97,13 @@ describe('decorateBody — soft slash adds commandIntent', () => {
   ];
 
   test.each(cases)(
-    '"$input" → body.commandIntent = "$expectedIntent"',
+    '"$input" → body.intentHint = "$expectedIntent"',
     ({ input, expectedIntent }) => {
       const intent = parse(input);
       const body: DecoratedChatBody = { message: input, documentId: 'doc-123' };
       const decorated = decorateBody(intent, body);
 
-      expect(decorated.commandIntent).toBe(expectedIntent);
+      expect(decorated.intentHint).toBe(expectedIntent);
       // Other fields preserved verbatim
       expect(decorated.message).toBe(input);
       expect(decorated.documentId).toBe('doc-123');
@@ -124,13 +124,13 @@ describe('decorateBody — non-soft-slash returns body UNCHANGED (NFR-11)', () =
     ['hello there', 'natural language'],
     ['Please summarize this document', 'natural language equivalent of /summarize'],
     ['/foobar arg', 'unrecognized slash'],
-  ])('"%s" (%s) leaves commandIntent unset', (input) => {
+  ])('"%s" (%s) leaves intentHint unset', (input) => {
     const intent = parse(input);
     const body: DecoratedChatBody = { message: input, documentId: 'doc-123' };
     const decorated = decorateBody(intent, body);
 
-    expect(decorated.commandIntent).toBeUndefined();
-    expect('commandIntent' in decorated).toBe(false);
+    expect(decorated.intentHint).toBeUndefined();
+    expect('intentHint' in decorated).toBe(false);
     expect(decorated.message).toBe(input);
     expect(decorated.documentId).toBe('doc-123');
   });
@@ -139,7 +139,7 @@ describe('decorateBody — non-soft-slash returns body UNCHANGED (NFR-11)', () =
     const intent = parse('');
     const body: DecoratedChatBody = { message: '' };
     const decorated = decorateBody(intent, body);
-    expect(decorated.commandIntent).toBeUndefined();
+    expect(decorated.intentHint).toBeUndefined();
   });
 });
 
@@ -148,7 +148,7 @@ describe('decorateBody — non-soft-slash returns body UNCHANGED (NFR-11)', () =
 // ---------------------------------------------------------------------------
 
 describe('decorateBody — composition with references (FR-52)', () => {
-  test('"/summarize #engagement-letter.docx" — commandIntent + references both present in intent', () => {
+  test('"/summarize #engagement-letter.docx" — intentHint + references both present in intent', () => {
     const input = '/summarize #engagement-letter.docx';
     const intent = parse(input);
 
@@ -162,13 +162,13 @@ describe('decorateBody — composition with references (FR-52)', () => {
       raw: '#engagement-letter.docx',
     });
 
-    // SoftSlashRouter decorates ONLY the commandIntent field. References are
+    // SoftSlashRouter decorates ONLY the intentHint field. References are
     // resolved separately by task 083 (ReferenceResolver); both decorations
     // compose on the same body without conflict because they target distinct
     // fields.
     const body: DecoratedChatBody = { message: input };
     const decorated = decorateBody(intent, body);
-    expect(decorated.commandIntent).toBe('summarize');
+    expect(decorated.intentHint).toBe('summarize');
     expect(decorated.message).toBe(input);
   });
 
@@ -183,7 +183,7 @@ describe('decorateBody — composition with references (FR-52)', () => {
 
     const body: DecoratedChatBody = { message: input };
     const decorated = decorateBody(intent, body);
-    expect(decorated.commandIntent).toBe('draft');
+    expect(decorated.intentHint).toBe('draft');
   });
 
   test('decorated body preserves caller-supplied attachments array', () => {
@@ -193,7 +193,7 @@ describe('decorateBody — composition with references (FR-52)', () => {
     const body: DecoratedChatBody = { message: input, attachments };
     const decorated = decorateBody(intent, body);
 
-    expect(decorated.commandIntent).toBe('extract-entities');
+    expect(decorated.intentHint).toBe('extract-entities');
     expect(decorated.attachments).toBe(attachments); // reference preserved
   });
 });
@@ -211,9 +211,9 @@ describe('decorateBody — purity (immutability of input)', () => {
     const decorated = decorateBody(intent, body);
 
     expect(body).toEqual(snapshot);
-    expect('commandIntent' in body).toBe(false);
+    expect('intentHint' in body).toBe(false);
     expect(decorated).not.toBe(body); // different object reference
-    expect(decorated.commandIntent).toBe('summarize');
+    expect(decorated.intentHint).toBe('summarize');
   });
 
   test('passthrough path also returns a new object (consistent identity contract)', () => {
@@ -245,7 +245,7 @@ describe('decorateBody — purity (immutability of input)', () => {
 // ---------------------------------------------------------------------------
 
 describe('SoftSlashRouter — defensive invariants', () => {
-  test('Intent { command: null } → null commandIntent (NFR-11)', () => {
+  test('Intent { command: null } → null intentHint (NFR-11)', () => {
     const intent: Intent = {
       command: null,
       references: [],

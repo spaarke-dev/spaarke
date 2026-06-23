@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="079" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Static prefix ~6K cacheable composition</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4c)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>074</dependencies>
+    <blocks>080</blocks>
+    <tags>bff-api, services, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies per-turn hot-path composition; tags include `bff-api`, `ai`; ADR-014 cache-hit dependency + architecture §10.2 cost-model binding</rigor-reason>
+    <parallel-group>4-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches static-prefix assembly seam; peer 4-E tasks 076, 077, 078 author/modify different files — no direct overlap.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the static-prefix composition (~6K tokens, byte-stable for prompt-cache hit) per architecture §6.2 + §10.2. Compose in stable order: persona → trust-frame injection (077) → tool definitions → workspace digest → layered context cards (076) → user preferences snapshot → glossary. Output must be BYTE-STABLE across turns within a session unless one of the underlying block contents changes. Cache-hit produces 50% discount + 80% faster TTFT per architecture §10.2.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in prompt-cache cost optimization + byte-stable composition + ADR-014 caching invariants.</role>
+
+  <goal>
+    Static-prefix composition method (likely in `SprkChatAgentFactory` or `PlaybookChatContextProvider`) produces ~6K tokens deterministically. Composition order is stable. Block-level recomposition only when a block's contents change. Token budget enforcement via `PromptBudgetTracker`. Open Question §12.1.1 documented (recently-discussed flag flip handling) — initial implementation places recently-discussed in dynamic suffix to maximize cache hit rate; flag in code comment + notes/handoffs/.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer.</role>
+
+  <goal>
+    Static prefix ≤6K tokens byte-stable; LayeredContextCardBuilder cards positioned in prefix; recently-discussed flag deferred to dynamic suffix per open-question resolution. Build + existing tests pass.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.2 (per-turn prompt assembly) + §10.2 (cost model with cache) + §10.3 (cache hit rate). The static prefix is the cacheable portion; the dynamic suffix is per-turn. Open Question §12.1.1: "does per-turn recently-discussed flag flip defeat caching?" Resolution: place recently-discussed in dynamic suffix (downgrades to non-cached part); maximizes static-prefix cache hit. This is documented in code + notes/handoffs/ for future benchmark validation.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/PromptBudgetTracker.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/LayeredContextCardBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/TrustFrameInstructionInjector.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="architecture §6.2">Composition order: persona → trust-frame → tool defs → workspace digest → layered cards → user prefs → glossary. Stable.</constraint>
+    <constraint source="architecture §10.2">Static prefix ≤6K tokens; cost target ~$0.0075/turn with cache hit.</constraint>
+    <constraint source="ADR-014">Byte-stability enables prompt-cache hit; any block content change must be intentional (e.g., new file upload triggers card recompute).</constraint>
+    <constraint source="ADR-013">Composition lives in `Services/Ai/`.</constraint>
+    <constraint source="ADR-015">Tier-1 logging — sessionId, totalPrefixTokens. NEVER prefix body.</constraint>
+    <constraint source="ADR-029">Per-task publish-size measurement.</constraint>
+    <constraint source="open-question §12.1.1">Place recently-discussed in DYNAMIC suffix initially; document for later benchmark.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `SprkChatAgentFactory.cs` + `PlaybookChatContextProvider.cs` to locate current per-turn assembly seam.</step>
+    <step order="2">Read `PromptBudgetTracker.cs` for budget-enforcement API.</step>
+    <step order="3">Implement (or refactor existing) static-prefix composition:
+      - Compose blocks in the architecture-specified order
+      - Use `LayeredContextCardBuilder` for the file-cards block (assert recently-discussed flag stripped — placed in dynamic suffix)
+      - Use `TrustFrameInstructionInjector` for the trust-frame block
+      - Validate total ≤6K tokens via `PromptBudgetTracker`
+      - Log sessionId + totalPrefixTokens (tier-1 safe)</step>
+    <step order="4">Implement byte-stability test: same session context (no file changes) → same prefix output byte-for-byte across N invocations.</step>
+    <step order="5">Document open-question §12.1.1 resolution in code comment + notes/handoffs/079-recently-discussed-placement.md.</step>
+    <step order="6">Run `dotnet build` + existing tests.</step>
+    <step order="7">Measure BFF publish size.</step>
+    <step order="8">code-review + adr-check.</step>
+    <step order="9">Update TASK-INDEX.md: 079 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">SprkChatAgentFactory + PlaybookChatContextProvider + PromptBudgetTracker</tool>
+    <tool name="Edit">Refactor static-prefix composition</tool>
+    <tool name="Write">Byte-stability test + notes</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SprkChatAgentFactory.cs (or peer composition seam) — static prefix composed deterministically</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/StaticPrefixCompositionTests.cs (NEW) — byte-stability assertion</output>
+    <output type="docs">notes/handoffs/079-recently-discussed-placement.md — open-question §12.1.1 resolution</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Static-prefix composition method follows architecture §6.2 block order.</criterion>
+    <criterion testable="true">Total prefix ≤6K tokens (PromptBudgetTracker assertion).</criterion>
+    <criterion testable="true">Byte-stability test: two calls with same session context return identical prefix.</criterion>
+    <criterion testable="true">Recently-discussed flag NOT in static prefix (deferred to dynamic suffix).</criterion>
+    <criterion testable="true">No log statement carries prefix body.</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.2 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The recently-discussed-flag placement (dynamic vs static) is a TENTATIVE choice per open-question §12.1.1. A future benchmark may motivate moving it back to static if cache hit rate is acceptable with per-turn-flipping. Document in code comment.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

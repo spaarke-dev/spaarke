@@ -1,0 +1,97 @@
+<task id="R3-020" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`GET /api/admin/jobs` + `GET /api/admin/jobs/{jobId}/status`</title>
+    <status>completed</status>
+    <phase>P3</phase>
+    <parallel-group>F (with 021, 022)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>bff-api,admin-endpoints,scheduling</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Admin/JobsEndpointsTests.cs</file>
+    </relevant-files>
+    <dependencies>013, 014, 015, 016</dependencies>
+  </metadata>
+  <prompt>Implement GET endpoints for listing jobs + per-job status. Use SystemAdmin policy. Queries sprk_backgroundjob + sprk_backgroundjobrun. Per spec.md FR-2.6.</prompt>
+  <goal>GET /api/admin/jobs returns all registered jobs + status. GET /api/admin/jobs/{jobId}/status returns detailed status + last 10 runs. Both behind SystemAdmin policy.</goal>
+  <constraints>
+    <constraint source="ADR-008">Endpoint filter for auth — NOT global middleware</constraint>
+    <constraint source="spec">Use existing SystemAdmin policy at AuthorizationModule.cs:241</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>admin-endpoint-pattern</topic>
+    <files>
+      <file>docs/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2.6 + Q6 owner clarification (SystemAdmin policy)</step>
+    <step order="1">Create JobsEndpoints.cs static class with MapAdminJobsEndpoints extension</step>
+    <step order="2">Implement GET / endpoint: list ScheduledJobRegistry + map to status DTO</step>
+    <step order="3">Implement GET /{jobId}/status endpoint with last 10 runs</step>
+    <step order="4">Register in Program.cs with .RequireAuthorization("SystemAdmin")</step>
+    <step order="5">Unit tests: list returns expected, status returns 404 for unknown jobId, 403 for non-admin</step>
+    <step order="6">Build + tests + publish-size</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/admin/jobs returns list of registered jobs with status</criterion>
+    <criterion testable="true">GET /api/admin/jobs/{jobId}/status returns detailed status + last 10 runs</criterion>
+    <criterion testable="true">Non-admin token gets 403</criterion>
+    <criterion testable="true">Unknown jobId returns 404</criterion>
+  </acceptance-criteria>
+  <notes>
+    <completion-date>2026-06-21</completion-date>
+    <build>BFF + Spaarke.Scheduling + Spaarke.Scheduling.Tests + Sprk.Bff.Api.Tests all build clean (0 errors, 0 new warnings).</build>
+    <tests>11/11 new JobsEndpointsTests pass (133ms). 42/42 Spaarke.Scheduling regression tests still pass.</tests>
+    <publish-size>46.18 MB compressed (delta +0.02 MB vs 46.16 baseline; no NuGet adds — reuses Cronos from task 010).</publish-size>
+    <cve>No new HIGH-severity CVEs; only pre-existing Kiota Abstractions 1.21.2 HIGH (tracked at project level).</cve>
+    <files-created>
+      Api/Admin/JobsEndpoints.cs
+      Api/Admin/Models/JobStatusSummary.cs
+      Api/Admin/Models/JobStatusDetail.cs
+      Api/Admin/Models/JobRunDetail.cs
+      Infrastructure/DI/SchedulingModule.cs
+      tests/.../Api/Admin/JobsEndpointsTests.cs
+      tests/.../Api/Admin/AdminJobsTestFixture.cs
+      notes/bff-publish-size-task020.md
+    </files-created>
+    <files-modified>
+      src/server/shared/Spaarke.Scheduling/IBackgroundJobStore.cs (+GetRecentRunsAsync + BackgroundJobRunRecord public record)
+      src/server/shared/Spaarke.Scheduling/InMemoryBackgroundJobStore.cs (+GetRecentRunsAsync impl + status canonicalization helper)
+      src/server/api/Sprk.Bff.Api/Program.cs (+AddSchedulingModule call)
+      src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (+MapAdminJobsEndpoints call at end of MapDomainEndpoints)
+    </files-modified>
+    <design-decisions>
+      <decision>IBackgroundJobStore extended with GetRecentRunsAsync(jobId, limit, ct) returning a NEW public record BackgroundJobRunRecord. Public projection of internal InMemoryBackgroundJobStore.RunRecord; surfaces canonical Status string (Succeeded/Failed/InProgress) so the Dataverse-backed store in task 023+ doesn't need to re-canonicalize from sprk_backgroundjobrun option-set values.</decision>
+      <decision>SchedulingModule.cs registers ScheduledJobRegistry + InMemoryBackgroundJobStore (as IBackgroundJobStore + concrete) UNCONDITIONALLY per bff-extensions.md §F.1 — endpoints map unconditionally so dependencies must too. ADR-032 N/A (real services, not kill-switches). When task 023+ swaps in the Dataverse-backed store, the registration site is this single module.</decision>
+      <decision>JobsEndpoints.cs uses Cronos directly for NextScheduledOn via a local ParseCron helper that mirrors ScheduledJobHost.ParseCron (5-field minute-precision OR 6-field seconds). Cron-format failures log Warning + omit NextScheduledOn rather than 500 the whole admin list.</decision>
+      <decision>Orphan-handler tolerance: jobs registered with ScheduledJobRegistry but missing a definition in IBackgroundJobStore surface with Enabled=false + empty cron + NextScheduledOn=null. Mirrors ScheduledJobHost's same tolerance and lets operators spot "handler registered but no definition" misconfigs via the admin UI.</decision>
+      <decision>Authorization model: existing SystemAdmin policy at AuthorizationModule.cs:241 per Q6 owner clarification — NOT a new PlatformAdmin policy. Precedent: RagEndpoints admin group uses the same policy.</decision>
+      <decision>Test fixture (AdminJobsTestFixture) separate from CustomWebAppFactory/WorkspaceTestFixture: needs per-test admin/non-admin/none auth selection via X-Test-Role header (X-Test-Role:admin → roles=SystemAdmin claim; user → roles=User; missing → 401). The custom FakeAuthHandler that hardcodes SystemAdmin roles wouldn't work because we explicitly need a 403 path.</decision>
+      <decision>Reserved comment blocks in JobsEndpoints.cs explicitly delimit task-021 and task-022 sections to minimize merge conflict surface — those tasks append handlers without touching task-020 code.</decision>
+      <decision>Test reset between tests via reflection on InMemoryBackgroundJobStore._runs/_jobs + ScheduledJobRegistry._jobs ConcurrentDictionaries. Production code intentionally has no Clear() (single-host invariant); tests need symmetric teardown to avoid inter-test pollution given the shared fixture.</decision>
+    </design-decisions>
+    <coordination-with-021-022>
+      Tasks 021 + 022 will ALSO touch JobsEndpoints.cs. To minimize merge friction:
+      - This task owns the GET /api/admin/jobs handler + the GET /{jobId}/status handler + shared helpers (BuildSummaryFromRuns, ToJobRunDetail, ParseCron).
+      - The MapGroup + reserved // ===== Task 021 / Task 022 ===== // comment blocks are at clearly-delimited lines in MapAdminJobsEndpoints — those tasks append after the GET /{jobId}/status block.
+      - All three tasks share the helper methods; tasks 021/022 should NOT modify them without coordinating back to this PR.
+    </coordination-with-021-022>
+    <verification>
+      adr-check (self): PASS — ADR-001 (in-process), ADR-008 (RequireAuthorization at MapGroup level, no global middleware), ADR-010 (concretes + interface justified ≥2 impls), ADR-029 (publish-size measured +0.02 MB), ADR-032 N/A. TreatWarningsAsErrors honored on Spaarke.Scheduling; BFF has 0 new warnings from task code.
+      bff-extensions §A/§F: PASS — Placement Justification ✅, ADRs cited ✅, publish-size ✅, no new CRUD→AI dep ✅, feature-module DI ✅. §F.1 asymmetric-registration PASS — endpoints map unconditionally + services register unconditionally.
+      AC verification: AC-2.5 ✅ (403 non-admin test passes), GET /api/admin/jobs returns list ✅, GET /{jobId}/status returns detail with 10 runs ✅, 404 unknown ✅, AC-2.7 failed-run ErrorMessage surfaces ✅.
+    </verification>
+    <not-committed>Per task brief — do not commit.</not-committed>
+  </notes>
+</task>

@@ -449,6 +449,19 @@ export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): s
       if (data.waitDurationHours != null) config.duration = { hours: data.waitDurationHours };
       if (data.waitUntilDateTime) config.untilDateTime = data.waitUntilDateTime;
       break;
+
+    case 'lookupUserMembership':
+      // Lookup User Membership (R3 P5 / task 042): entityType (required),
+      // roles (optional), includeRelated (optional 1-hop max — owner Q3).
+      // outputVariable is on the node itself (not in config); the server
+      // executor (LookupUserMembershipNodeExecutor, task 041) reads it from
+      // PlaybookNodeDto.OutputVariable. Canvas fields use the `membership`
+      // prefix to avoid collisions; remap to server-expected keys
+      // (entityType, roles, includeRelated) here.
+      if (data.membershipEntityType) config.entityType = data.membershipEntityType;
+      if (data.membershipRoles && data.membershipRoles.length > 0) config.roles = data.membershipRoles;
+      if (data.membershipIncludeRelated != null) config.includeRelated = data.membershipIncludeRelated;
+      break;
   }
 
   return JSON.stringify(config);

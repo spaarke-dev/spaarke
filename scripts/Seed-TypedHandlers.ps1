@@ -187,6 +187,21 @@ $RowFiles = @{
     # affordance available in every chat session). sprk_availableincontexts = Chat (100000001).
     # ADR-015 BINDING: handler logs title length + content presence only — never the bodies.
     "MANAGE-PINNED-CONTEXT"            = "$RepoRoot/infra/dataverse/sprk_analysistool-manage-pinned-context-row.json"
+    # chat-routing-redesign-r1 / Phase 4 WP5 / task 085 — RecallSessionFileHandler: single row
+    # exposing the recall_session_file(fileId, purpose, query, scope, maxTokens?, requireCitations?)
+    # chat tool. Load-bearing T2+T5 retrieval tool for the legal-domain trust framing — the
+    # requireCitations: true default + the persona instruction injected by TrustFrameInstructionInjector
+    # (task 077) ensure the agent uses citation-bearing recall rather than quoting the precomputed
+    # (NOT authoritative) summary. Reads ONLY from the spaarke-session-files Azure AI Search index
+    # (architecture §5.2.1 BINDING) — session-scoped RagService route, with tenantId + sessionId
+    # AND-clause enforcement (ADR-014). sprk_requiredcapability = null (intentional — always-on
+    # when the session has uploaded files per architecture §8.2). sprk_availableincontexts =
+    # Chat (100000001) — playbook nodes do not read from ChatSession.UploadedFiles.
+    # MVP-cut scope (chat-routing-redesign-r1 Q5b): this is the ONE retrieval handler shipping in
+    # MVP; tasks 083/084/086/087/088/089/090 (list_session_files / get_file_manifest /
+    # write_session_memory / retrieve_matter_memory / promote_to_matter_memory /
+    # get_user_preferences / get_org_templates) are DEFERRED.
+    "RECALL-SESSION-FILE"              = "$RepoRoot/infra/dataverse/sprk_analysistool-recall-session-file-row.json"
 }
 
 # -----------------------------------------------------------------------------

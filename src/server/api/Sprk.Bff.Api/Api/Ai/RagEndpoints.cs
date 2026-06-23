@@ -549,15 +549,23 @@ public static class RagEndpoints
                     statusCode: 500);
             }
 
-            // Update Dataverse tracking fields when DocumentId is provided
+            // Update Dataverse tracking fields when DocumentId is provided.
+            // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
+            // sprk_searchindexed=true + sprk_searchindexedon for the transition window
+            // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
             if (!string.IsNullOrEmpty(request.DocumentId))
             {
                 var indexName = analysisOptions.Value.SharedIndexName;
+                var completedAt = DateTime.UtcNow;
                 var updateRequest = new UpdateDocumentRequest
                 {
+                    // New canonical lifecycle marker (R3+)
+                    SearchIndexCompletedOn = completedAt,
+                    // Legacy dual-write (preserved during transition)
                     SearchIndexed = true,
-                    SearchIndexName = indexName,
-                    SearchIndexedOn = DateTime.UtcNow
+                    SearchIndexedOn = completedAt,
+                    // Index routing (unchanged)
+                    SearchIndexName = indexName
                 };
 
                 await dataverseService.UpdateDocumentAsync(request.DocumentId, updateRequest, cancellationToken);
@@ -696,12 +704,20 @@ public static class RagEndpoints
 
                 if (indexResult.Success)
                 {
-                    // Step 6: Update Dataverse with search index fields
+                    // Step 6: Update Dataverse with search index fields.
+                    // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
+                    // sprk_searchindexed=true + sprk_searchindexedon for the transition window
+                    // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
+                    var completedAt = DateTime.UtcNow;
                     var updateRequest = new UpdateDocumentRequest
                     {
+                        // New canonical lifecycle marker (R3+)
+                        SearchIndexCompletedOn = completedAt,
+                        // Legacy dual-write (preserved during transition)
                         SearchIndexed = true,
-                        SearchIndexName = indexName,
-                        SearchIndexedOn = DateTime.UtcNow
+                        SearchIndexedOn = completedAt,
+                        // Index routing (unchanged)
+                        SearchIndexName = indexName
                     };
 
                     await dataverseService.UpdateDocumentAsync(documentId, updateRequest, cancellationToken);

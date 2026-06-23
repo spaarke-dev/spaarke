@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Models.Ai.Chat;
+
 namespace Sprk.Bff.Api.Services.Ai.Sessions;
 
 /// <summary>
@@ -97,5 +99,36 @@ public interface ISessionPersistenceService
         string tenantId,
         IReadOnlyList<StoredWorkspaceTab> tabs,
         string? activeTabId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists the session's uploaded-file manifest (with enrichment fields) to both
+    /// Redis (hot) and Cosmos DB (warm). Called by the upload-pipeline orchestrator after
+    /// parallel enrichment (classify + summarize + manifest-extraction) completes for a file
+    /// (chat-routing-redesign-r1 architecture §6.1 / §7.1, task 072).
+    ///
+    /// <para>Strategy: REPLACE — the orchestrator supplies the complete enriched snapshot.
+    /// The existing <see cref="StoredSession.UploadedFiles"/> collection is replaced wholesale,
+    /// avoiding per-FileId merge complexity and stale-data risk.</para>
+    ///
+    /// <para>Concurrency: matches the <see cref="SaveTabsAsync"/> precedent — fire-and-forget
+    /// Cosmos upsert, last-writer-wins. No ETag conflict surfaced to the caller.</para>
+    ///
+    /// <para>Logging: ADR-015 Tier-1 safe — emits <c>sessionId</c>, <c>tenantId</c>,
+    /// <c>fileCount</c>, <c>durationMs</c> only. NEVER logs per-file summary text,
+    /// classification text, section names, or file names.</para>
+    /// </summary>
+    /// <param name="sessionId">Session identifier.</param>
+    /// <param name="tenantId">Tenant identifier (Cosmos partition key /tenantId per ADR-015).</param>
+    /// <param name="enrichedFiles">
+    /// Complete enriched-state snapshot of all uploaded files for the session.
+    /// Caller is responsible for the 20-file cap (mirrors <c>ChatSession.MaxUploadedFiles</c>).
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> if the session was found and updated; <c>false</c> if the session does not exist.</returns>
+    Task<bool> UpdateUploadedFilesAsync(
+        string sessionId,
+        string tenantId,
+        IReadOnlyList<ChatSessionFile> enrichedFiles,
         CancellationToken cancellationToken = default);
 }

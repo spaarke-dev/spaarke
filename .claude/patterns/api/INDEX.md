@@ -12,7 +12,9 @@
 | [endpoint-definition.md](endpoint-definition.md) | Creating/modifying API endpoints | 2026-04-05 | Verified |
 | [endpoint-filters.md](endpoint-filters.md) | Adding resource-level authorization | 2026-04-05 | Verified |
 | [error-handling.md](error-handling.md) | Returning errors, exception handling | 2026-04-05 | Verified |
-| [background-workers.md](background-workers.md) | Adding async job processing | 2026-04-05 | Verified |
+| [background-workers.md](background-workers.md) | Adding async job processing — **queue-driven** (Service Bus message → handler) | 2026-06-22 | Verified |
+| [scheduled-jobs.md](scheduled-jobs.md) | Adding **schedule-driven** background work — IScheduledJob + Spaarke.Scheduling framework (R3) | 2026-06-22 | Verified |
+| [membership-consumer.md](membership-consumer.md) | Consuming IMembershipResolverService — answer "which records is this user a member of" (R3) | 2026-06-22 | Verified |
 | [resilience.md](resilience.md) | Adding HTTP retry/circuit-breaker/timeout | 2026-04-05 | Verified |
 | [service-registration.md](service-registration.md) | Registering services in DI | 2026-04-05 | Verified |
 | [send-email-integration.md](send-email-integration.md) | Adding email sending to any module | 2026-04-05 | Verified |

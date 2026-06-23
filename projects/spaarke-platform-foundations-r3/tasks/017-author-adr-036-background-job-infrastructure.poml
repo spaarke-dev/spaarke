@@ -1,0 +1,56 @@
+<task id="R3-017" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Author ADR-036 — Background-job infrastructure (Spaarke.Scheduling)</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Authored both versions:
+      - `.claude/adr/ADR-036-background-job-infrastructure.md` (concise — MUST/MUST NOT + key types + admin endpoints + alternatives + integration with other ADRs)
+      - `docs/adr/ADR-036-background-job-infrastructure.md` (full — Context + Decision (6 sections: lib + host + entities + endpoints + reference consumers + NOT in R3) + Consequences + AC + open questions resolved D1/D2/D4/Q1/Q6)
+      Both INDEX files updated (.claude/adr/INDEX.md + docs/adr/INDEX.md) with cross-references. Owner clarifications baked in: D2 (single-row fan-out for PlaybookScheduler), Q1 (fresh per-child correlationId in ResultJson), Q6 (existing SystemAdmin policy NOT new PlatformAdmin). Two reference consumers documented: MembershipReconciliationJob (Phase 2, task 085) + PlaybookSchedulerJob (task 023 migration, single sprk_backgroundjob row "notification-playbook-scheduler"). Main-session execution per .claude/ write boundary (CLAUDE.md §3). Not committed per project convention — main session batches commits.
+    </completion-notes>
+    <phase>P2</phase>
+    <parallel-group>none (main-session-only — .claude/ write boundary)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>adr,docs,architecture,background-jobs</tags>
+    <relevant-files>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/INDEX.md</file>
+    </relevant-files>
+    <dependencies>013, 014, 015, 016</dependencies>
+  </metadata>
+  <prompt>Author ADR-036 documenting the Spaarke.Scheduling framework: contract (IScheduledJob, JobRunContext, JobRunResult), Dataverse entities (sprk_backgroundjob, sprk_backgroundjobrun), admin endpoints, scope boundary (NOT extending sprk_processingjob), opportunistic migration strategy.</prompt>
+  <goal>ADR-036 merged into both `.claude/adr/` (concise) and `docs/adr/` (full). INDEX files updated. Cross-references to ADR-001 (in-process), ADR-010 (DI minimalism), ADR-012 (shared lib).</goal>
+  <constraints>
+    <constraint source="CLAUDE.md §3">.claude/ writes are main-session-only (sub-agent boundary)</constraint>
+    <constraint source="spec">ADR number reserved as 036; 035 reserved for R4 rollout-mode</constraint>
+  </constraints>
+  <knowledge>
+    <topic>adr-authoring</topic>
+    <files>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-001-minimal-api.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + spec.md "ADR-036" reference</step>
+    <step order="1">Read existing ADR-013 as nearest-style precedent</step>
+    <step order="2">Author full ADR in `docs/adr/ADR-036-*.md` with Context/Decision/Consequences sections</step>
+    <step order="3">Author concise version in `.claude/adr/ADR-036-*.md` (MUST/MUST NOT rules)</step>
+    <step order="4">Update both INDEX.md files</step>
+    <step order="5">Add cross-refs (ADR-001, ADR-010, ADR-012) and Alternatives Considered (Hangfire/Quartz rejected per spec)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Both ADR-036 files exist + cross-referenced from INDEX</criterion>
+    <criterion testable="true">MUST/MUST NOT rules in concise version</criterion>
+    <criterion testable="true">Alternatives (Hangfire, Quartz) documented as rejected</criterion>
+  </acceptance-criteria>
+</task>

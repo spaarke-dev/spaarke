@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Capabilities;
 /// <summary>
 /// Unit tests for the R6 Pillar 8 / task 082 / FR-50 Layer 0.5 soft-slash pre-pass on
 /// <see cref="CapabilityRouter"/>. The pre-pass recognises the four closed-vocabulary
-/// soft-slash <c>commandIntent</c> hints emitted by the frontend
+/// soft-slash <c>intentHint</c> hints emitted by the frontend
 /// <c>SoftSlashRouter.decorateBody()</c> and short-circuits routing to the synthetic
 /// capability for that intent, biasing the LLM toward the matching playbook / handler
 /// on FIRST try (spec FR-50 + Phase D exit criterion 3).
@@ -100,22 +100,22 @@ public sealed class CapabilityRouterSoftSlashTests
     [InlineData("extract-entities", CapabilityRouter.SoftSlashExtractEntitiesCapabilityName)]
     [InlineData("analyze", CapabilityRouter.SoftSlashAnalyzeCapabilityName)]
     public void RouteSync_SoftSlashIntent_ShortCircuitsToSyntheticCapability(
-        string commandIntent, string expectedCapabilityName)
+        string intentHint, string expectedCapabilityName)
     {
         var router = BuildRouter();
 
         // User message body is arbitrary (the soft-slash literal would appear in
-        // production, but the pre-pass uses commandIntent NOT message text).
+        // production, but the pre-pass uses intentHint NOT message text).
         var result = router.RouteSync(
             userMessage: "anything the user typed here",
             activePlaybookName: null,
-            commandIntent: commandIntent);
+            intentHint: intentHint);
 
         result.IsConfident.Should().BeTrue(
-            because: "Layer 0.5 pre-pass produces a Confident result on recognised commandIntent");
+            because: "Layer 0.5 pre-pass produces a Confident result on recognised intentHint");
         result.SelectedCapabilities.Should().ContainSingle()
             .Which.Should().Be(expectedCapabilityName,
-                because: "the closed vocabulary maps {0} → {1}", commandIntent, expectedCapabilityName);
+                because: "the closed vocabulary maps {0} → {1}", intentHint, expectedCapabilityName);
         result.Confidence.Should().Be(1.0,
             because: "deterministic vocabulary match — no ambiguity");
         result.Layer.Should().Be(1,
@@ -123,14 +123,14 @@ public sealed class CapabilityRouterSoftSlashTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
-    // NFR-11 — null/empty commandIntent falls through to Layer 1 keyword scoring
+    // NFR-11 — null/empty intentHint falls through to Layer 1 keyword scoring
     // ═════════════════════════════════════════════════════════════════════════════
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void RouteSync_NullOrWhitespaceCommandIntent_FallsThroughToLayer1(string? commandIntent)
+    public void RouteSync_NullOrWhitespaceIntentHint_FallsThroughToLayer1(string? intentHint)
     {
         var router = BuildRouter();
 
@@ -138,15 +138,15 @@ public sealed class CapabilityRouterSoftSlashTests
         var result = router.RouteSync(
             userMessage: "hello there",
             activePlaybookName: null,
-            commandIntent: commandIntent);
+            intentHint: intentHint);
 
         result.IsConfident.Should().BeFalse(
-            because: "without a commandIntent OR keyword match, Layer 1 returns Uncertain");
+            because: "without a intentHint OR keyword match, Layer 1 returns Uncertain");
         result.SelectedCapabilities.Should().BeEmpty();
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
-    // Unrecognised commandIntent — falls through to Layer 1 (defensive)
+    // Unrecognised intentHint — falls through to Layer 1 (defensive)
     // ═════════════════════════════════════════════════════════════════════════════
 
     [Theory]
@@ -154,17 +154,17 @@ public sealed class CapabilityRouterSoftSlashTests
     [InlineData("Summarize")]    // wrong case — vocabulary is ordinal lowercase
     [InlineData("translate")]    // not in Q6 closed vocabulary
     [InlineData("clear")]        // hard-slash semantic, not a soft slash
-    public void RouteSync_UnrecognisedCommandIntent_FallsThroughToLayer1(string commandIntent)
+    public void RouteSync_UnrecognisedIntentHint_FallsThroughToLayer1(string intentHint)
     {
         var router = BuildRouter();
 
         var result = router.RouteSync(
             userMessage: "hello there",
             activePlaybookName: null,
-            commandIntent: commandIntent);
+            intentHint: intentHint);
 
         result.IsConfident.Should().BeFalse(
-            because: "unrecognised commandIntent falls through to Layer 1 keyword scoring (NFR-11 defensive)");
+            because: "unrecognised intentHint falls through to Layer 1 keyword scoring (NFR-11 defensive)");
         result.SelectedCapabilities.Should().BeEmpty();
     }
 
@@ -177,13 +177,13 @@ public sealed class CapabilityRouterSoftSlashTests
     {
         var router = BuildRouter();
 
-        // Message matches voice-memory regex ("remember X") AND commandIntent is set.
+        // Message matches voice-memory regex ("remember X") AND intentHint is set.
         // The Layer 0 voice-memory pre-pass runs FIRST and short-circuits to
         // manage_pinned_context; Layer 0.5 soft-slash never runs.
         var result = router.RouteSync(
             userMessage: "remember to summarize concisely",
             activePlaybookName: null,
-            commandIntent: "summarize");
+            intentHint: "summarize");
 
         result.IsConfident.Should().BeTrue();
         result.SelectedCapabilities.Should().ContainSingle()
@@ -194,7 +194,7 @@ public sealed class CapabilityRouterSoftSlashTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
-    // Backward compat — explicit 2-arg call still works (default commandIntent = null)
+    // Backward compat — explicit 2-arg call still works (default intentHint = null)
     // ═════════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -203,12 +203,12 @@ public sealed class CapabilityRouterSoftSlashTests
         var router = BuildRouter();
 
         // Pre-R6 callers (tests + legacy paths) using the 2-arg overload should compile
-        // and behave EXACTLY as before — Layer 0.5 is skipped when commandIntent is null
+        // and behave EXACTLY as before — Layer 0.5 is skipped when intentHint is null
         // (default).
         var result = router.RouteSync("hello there", activePlaybookName: null);
 
         result.IsConfident.Should().BeFalse(
-            because: "no commandIntent, no keyword match → Layer 1 Uncertain");
+            because: "no intentHint, no keyword match → Layer 1 Uncertain");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
@@ -221,7 +221,7 @@ public sealed class CapabilityRouterSoftSlashTests
     [InlineData("extract-entities", CapabilityRouter.SoftSlashExtractEntitiesCapabilityName)]
     [InlineData("analyze", CapabilityRouter.SoftSlashAnalyzeCapabilityName)]
     public async Task RouteAsync_SoftSlashIntent_SkipsLayer2AndLayer3(
-        string commandIntent, string expectedCapabilityName)
+        string intentHint, string expectedCapabilityName)
     {
         var router = BuildRouter();
 
@@ -231,7 +231,7 @@ public sealed class CapabilityRouterSoftSlashTests
             userMessage: "anything",
             activePlaybookName: null,
             ct: default,
-            commandIntent: commandIntent);
+            intentHint: intentHint);
 
         result.IsConfident.Should().BeTrue();
         result.SelectedCapabilities.Should().ContainSingle()

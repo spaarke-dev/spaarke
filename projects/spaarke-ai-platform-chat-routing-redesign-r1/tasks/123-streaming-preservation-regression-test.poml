@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="123" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Streaming preservation regression test — FieldDelta SSE events per top-level field unchanged (ADR-033 binding invariant)</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>122</dependencies>
+    <blocks>124,125</blocks>
+    <tags>testing, regression, streaming, binding-invariant, ADR-033</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Asserts a binding architectural invariant per ADR-033; protects the chat-summarize streaming UX from regressions introduced by task 122 engine extension; FULL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after task 122 — verifies 122 did not regress streaming behavior; same engine file area</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author a streaming-preservation regression test asserting the ADR-033 binding invariant: after task 122's `JpsRefResolver` extension to Path 3, `ExecuteChatSummarizeAsync` still emits `FieldDelta` SSE events per top-level output schema field. The test exercises a `$ref`-bearing playbook end-to-end and inspects the SSE stream. This is a "do not regress" invariant test — it gates all downstream Phase 6 work that touches the engine.
+  </prompt>
+
+  <role>SPAARKE BFF integration test engineer. Expert in SSE streaming + Structured Outputs verification.</role>
+
+  <goal>
+    A regression integration test exists in `tests/integration/Sprk.Bff.Api.IntegrationTests/` (or unit-level if SSE can be exercised at unit grain) asserting that `ExecuteChatSummarizeAsync` with a `$ref`-bearing playbook emits at least one `FieldDelta` SSE event per top-level field of the action's outputSchema, in arrival order, with payload shape unchanged. Test fails if Path 3 regresses to non-streaming or omits per-field deltas.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-38 acceptance second clause + ADR-033 binding. Task 122 modified Path 3's prompt assembly to call `JpsRefResolver` before the LLM call. The ADR-033 invariant — streaming UX preserved per top-level field via `IncrementalJsonParser` + `FieldDelta` SSE events — MUST continue to hold. Without this regression test, future engine modifications could silently regress streaming and only surface as UAT bugs.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Streaming/IncrementalJsonParser.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Streaming/StreamStructuredCompletionAsync.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">Streaming chat tool side-channel preservation — `FieldDelta` SSE events per top-level field MUST emit unchanged; this test asserts the invariant.</constraint>
+    <constraint source="spec">FR-38 acceptance — streaming integration test continues to emit `FieldDelta` per top-level field.</constraint>
+    <constraint source="ADR-015">Test fixtures MUST NOT log real user content; use synthetic test docs.</constraint>
+    <constraint source="project">Test is binding-invariant grade — should fail loudly on regression; mark with [Trait("Category", "BindingInvariant")] or equivalent.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect existing streaming tests in `tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/` to identify the prior pattern for asserting `FieldDelta` SSE events.</step>
+    <step order="2">Construct a synthetic test playbook fixture with a `$ref`-bearing systemPrompt and a 3-field outputSchema (e.g., `{tldr, summary, keywords}`).</step>
+    <step order="3">Wire the test to call `ExecuteChatSummarizeAsync` (or the higher-level chat endpoint that invokes it) with the synthetic playbook + mock RAG retrieval that returns 1-2 chunks.</step>
+    <step order="4">Capture the SSE stream emitted; parse `FieldDelta` events; assert: (a) at least one event per top-level field, (b) field arrival order matches the outputSchema property order or is at minimum deterministic, (c) payload shape unchanged from R6 baseline (no new required fields).</step>
+    <step order="5">Add a negative control: with a no-`$ref` legacy playbook, the same SSE shape is emitted (confirms task 122 did not break the legacy path).</step>
+    <step order="6">Mark the test with a binding-invariant trait so future contributors see it as a "do not weaken" test.</step>
+    <step order="7">Run `dotnet test`. Must pass. Verify the test FAILS if streaming is artificially disabled (sanity-test the gate).</step>
+    <step order="8">Measure BFF publish size; report delta (tests don't affect runtime publish; should be ~0).</step>
+    <step order="9">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="10">Update TASK-INDEX.md: task 123 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing streaming test patterns</tool>
+    <tool name="Write">New regression test file</tool>
+    <tool name="Bash">dotnet test, dotnet publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/PathThreeStreamingPreservationTests.cs (or equivalent path) — binding-invariant regression test</output>
+    <output type="docs">notes/handoffs/123-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test file exists and is discovered by `dotnet test`.</criterion>
+    <criterion testable="true">Test asserts at least one `FieldDelta` SSE event per top-level outputSchema field.</criterion>
+    <criterion testable="true">Test passes when run against current Path 3 implementation (with task 122 changes).</criterion>
+    <criterion testable="true">Negative-control sub-test for no-`$ref` legacy path passes.</criterion>
+    <criterion testable="true">Test is marked with a binding-invariant trait/category.</criterion>
+    <criterion testable="true">Sanity-check: artificially disabling streaming causes test to FAIL (verifies the gate has teeth).</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This test is load-bearing for any future engine modification touching Path 3. Make it readable and well-commented — future contributors must understand WHY this invariant matters (chat-summarize UX is core).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

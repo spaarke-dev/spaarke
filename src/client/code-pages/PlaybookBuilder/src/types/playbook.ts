@@ -25,6 +25,11 @@ export enum PlaybookNodeType {
   SendEmail = 'sendEmail',
   CreateNotification = 'createNotification',
   Wait = 'wait',
+  // R3 P5 (task 042): Resolves the calling user's record memberships for a
+  // given entity type via IMembershipResolverService (FR-1B.1). Pairs with
+  // server-side ActionType.LookupUserMembership = 52 and the
+  // LookupUserMembershipNodeExecutor (task 041).
+  LookupUserMembership = 'lookupUserMembership',
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +89,9 @@ export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = 
   [PlaybookNodeType.SendEmail]: DataverseNodeType.Workflow,
   [PlaybookNodeType.CreateNotification]: DataverseNodeType.Workflow,
   [PlaybookNodeType.Wait]: DataverseNodeType.Control,
+  // LookupUserMembership is a data-ops Workflow node — invokes the membership
+  // resolver service in-process and binds the resolved IDs to OutputVariable.
+  [PlaybookNodeType.LookupUserMembership]: DataverseNodeType.Workflow,
 };
 
 // ---------------------------------------------------------------------------
@@ -113,6 +121,10 @@ export enum ActionType {
   DeliverOutput = 40,
   DeliverToIndex = 41,
   CreateNotification = 50,
+  // R3 P5 (task 042): mirrors server INodeExecutor.cs ActionType.LookupUserMembership.
+  // Slot 52 sits alongside QueryDataverse (51, server-only, not yet exposed in the
+  // canvas) in the Dataverse-data-ops group.
+  LookupUserMembership = 52,
 }
 
 /**
@@ -130,6 +142,7 @@ export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
   [PlaybookNodeType.SendEmail]: ActionType.SendEmail,
   [PlaybookNodeType.CreateNotification]: ActionType.CreateNotification,
   [PlaybookNodeType.Wait]: ActionType.Wait,
+  [PlaybookNodeType.LookupUserMembership]: ActionType.LookupUserMembership,
 };
 
 // ---------------------------------------------------------------------------
@@ -240,6 +253,15 @@ export interface PlaybookNodeData {
   waitDurationHours?: number;
   waitUntilDateTime?: string;
 
+  // Lookup User Membership config (R3 P5 / task 042) — read by buildConfigJson()
+  // and the LookupUserMembershipForm (task 043). Field names use `membership`
+  // prefix on the canvas to avoid colliding with other ActionType fields; they
+  // are remapped to the server-expected keys (entityType, roles, includeRelated)
+  // when serialized into sprk_configjson.
+  membershipEntityType?: string;
+  membershipRoles?: string[];
+  membershipIncludeRelated?: boolean;
+
   // Extensibility: allow additional properties for React Flow compatibility
   [key: string]: unknown;
 }
@@ -318,6 +340,13 @@ export const NODE_TYPE_INFO: NodeTypeInfo[] = [
     label: 'Create Notification',
     description: 'Create an in-app notification for a user',
     icon: 'Alert',
+    category: 'action',
+  },
+  {
+    type: PlaybookNodeType.LookupUserMembership,
+    label: 'Lookup User Membership',
+    description: 'Resolve the caller’s record memberships for an entity type',
+    icon: 'PeopleTeam',
     category: 'action',
   },
   {

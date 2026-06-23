@@ -390,9 +390,21 @@ public sealed class PlaybookDispatcher
         Dictionary<string, string> extractedParameters,
         CancellationToken cancellationToken)
     {
-        // Attempt to read output node metadata from cache or Dataverse
-        var (outputType, requiresConfirmation, targetPage) = await GetOutputNodeMetadataAsync(
-            candidate.PlaybookId, cancellationToken);
+        // Attempt to read output node metadata from cache or Dataverse.
+        // Returns the primary DeliverOutput node's OutputType / RequiresConfirmation / TargetPage
+        // (existing R2 surface) plus the new R6 per-playbook routing info
+        // (NodeDestination + WidgetType) parsed from that same node's sprk_configjson.
+        //
+        // Spec FR-14c: matched playbook returns DispatchResult populated with NodeDestination
+        // + WidgetType reflecting the matched playbook's primary DeliverOutput node's routing.
+        //
+        // R6 FR-26 convergence invariant: the chat-summarize playbook
+        // (sprk_playbookid = 44285d15-...) has no `destination` property in its node's
+        // sprk_configjson, so NodeRoutingConfig.Parse(null|empty|missing) returns
+        // `{ Destination = Chat, WidgetType = null }` — preserving pre-R6 behavior without
+        // any playbook-specific branching here. The default is the mechanism.
+        var (outputType, requiresConfirmation, targetPage, nodeDestination, widgetType) =
+            await GetOutputNodeMetadataAsync(candidate.PlaybookId, cancellationToken);
 
         return new DispatchResult(
             Matched: true,
@@ -402,14 +414,39 @@ public sealed class PlaybookDispatcher
             OutputType: outputType,
             RequiresConfirmation: requiresConfirmation,
             ExtractedParameters: extractedParameters,
-            TargetPage: targetPage);
+            TargetPage: targetPage,
+            NodeDestination: nodeDestination,
+            WidgetType: widgetType);
     }
 
     /// <summary>
-    /// Retrieves OutputType, RequiresConfirmation, and TargetPage from the playbook's
-    /// DeliverOutput node. Cached per playbook (ADR-014: version-keyed, tenant-scoped).
+    /// Retrieves OutputType, RequiresConfirmation, TargetPage, NodeDestination, and WidgetType
+    /// from the playbook's DeliverOutput node. Cached per playbook (ADR-014: version-keyed,
+    /// tenant-scoped).
     /// </summary>
-    private async Task<(OutputType outputType, bool requiresConfirmation, string? targetPage)>
+    /// <remarks>
+    /// <para>
+    /// <b>Primary-node selection heuristic</b> (spec FR-14c, task 047):
+    /// The "primary AI/DeliverOutput node" is identified as the FIRST node in the playbook
+    /// whose <see cref="PlaybookNodeDto.NodeType"/> equals <see cref="NodeType.Output"/>.
+    /// <see cref="INodeService.GetNodesAsync"/> returns nodes ordered by
+    /// <c>sprk_executionorder</c>, so this picks the terminal DeliverOutput node — the one
+    /// that drives <c>PlaybookOutputHandler</c> rendering. This is the same heuristic the
+    /// pre-R6 OutputType lookup used; we reuse it here to extract the routing config from
+    /// the same node, avoiding a separate Dataverse round-trip and respecting ADR-014 by
+    /// piggy-backing on the existing per-playbook cache.
+    /// </para>
+    /// <para>
+    /// <b>R6 routing fields</b>: <see cref="PlaybookNodeDto.ConfigJson"/>
+    /// (<c>sprk_playbooknode.sprk_configjson</c>) is parsed by
+    /// <see cref="NodeRoutingConfig.Parse"/> which is null/empty/malformed-safe and
+    /// returns <c>{ Destination = Chat, WidgetType = null }</c> by default — preserving
+    /// pre-R6 behavior and the R6 FR-26 chat-summarize convergence invariant without any
+    /// per-playbook branching.
+    /// </para>
+    /// </remarks>
+    private async Task<(OutputType outputType, bool requiresConfirmation, string? targetPage,
+        NodeDestination nodeDestination, string? widgetType)>
         GetOutputNodeMetadataAsync(string playbookId, CancellationToken cancellationToken)
     {
         // ADR-014: Cache key scoped by tenant and playbook
@@ -427,7 +464,8 @@ public sealed class PlaybookDispatcher
                     _logger.LogDebug(
                         "PlaybookDispatcher: output node metadata cache hit for playbook {PlaybookId}",
                         playbookId);
-                    return (cachedMeta.OutputType, cachedMeta.RequiresConfirmation, cachedMeta.TargetPage);
+                    return (cachedMeta.OutputType, cachedMeta.RequiresConfirmation,
+                        cachedMeta.TargetPage, cachedMeta.NodeDestination, cachedMeta.WidgetType);
                 }
             }
 
@@ -435,15 +473,21 @@ public sealed class PlaybookDispatcher
             if (!Guid.TryParse(playbookId, out var playbookGuid))
             {
                 _logger.LogWarning("PlaybookDispatcher: invalid playbook ID format: {PlaybookId}", playbookId);
-                return (OutputType.Text, false, null);
+                return (OutputType.Text, false, null, NodeDestination.Chat, null);
             }
 
             var nodes = await _nodeService.GetNodesAsync(playbookGuid, cancellationToken);
+
+            // Primary-node selection: first Output-type node by execution order
+            // (INodeService.GetNodesAsync returns nodes ordered by sprk_executionorder).
+            // This is the terminal DeliverOutput node that drives PlaybookOutputHandler.
             var outputNode = Array.Find(nodes, n => n.NodeType == NodeType.Output);
 
             OutputType outputType;
             bool requiresConfirmation;
             string? targetPage;
+            NodeDestination nodeDestination;
+            string? widgetType;
 
             if (outputNode is not null)
             {
@@ -452,45 +496,72 @@ public sealed class PlaybookDispatcher
                 requiresConfirmation = outputNode.RequiresConfirmation
                     ?? (outputType is OutputType.Dialog or OutputType.Navigation);
                 targetPage = outputNode.TargetPage;
+
+                // R6 FR-14c / FR-27 routing: parse the node's sprk_configjson for
+                // per-playbook routing destination + widget type. Parse() handles
+                // null/empty/malformed gracefully (FR-14f): defaults to
+                // { Destination = Chat, WidgetType = null }. This default IS the
+                // chat-summarize convergence invariant (R6 FR-26) — no special case
+                // needed.
+                var routing = NodeRoutingConfig.Parse(outputNode.ConfigJson);
+                nodeDestination = routing.Destination;
+                widgetType = routing.WidgetType;
             }
             else
             {
-                // No output node found — default to text with no confirmation
+                // No output node found — default to text with no confirmation,
+                // and chat destination (pre-R6 backward compatibility)
                 _logger.LogDebug(
                     "PlaybookDispatcher: no DeliverOutput node found for playbook {PlaybookId}, defaulting to text",
                     playbookId);
                 outputType = OutputType.Text;
                 requiresConfirmation = false;
                 targetPage = null;
+                nodeDestination = NodeDestination.Chat;
+                widgetType = null;
             }
 
             // Cache the result (ADR-014)
-            var metadata = new OutputNodeMetadata(outputType, requiresConfirmation, targetPage);
+            var metadata = new OutputNodeMetadata(
+                outputType, requiresConfirmation, targetPage, nodeDestination, widgetType);
             await _cache.SetStringAsync(
                 cacheKey,
                 JsonSerializer.Serialize(metadata),
                 new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheTtl },
                 cancellationToken);
 
-            return (outputType, requiresConfirmation, targetPage);
+            return (outputType, requiresConfirmation, targetPage, nodeDestination, widgetType);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
                 "PlaybookDispatcher: failed to load output node metadata for playbook {PlaybookId}; " +
-                "defaulting to text output",
+                "defaulting to text output + chat destination",
                 playbookId);
-            return (OutputType.Text, false, null);
+            return (OutputType.Text, false, null, NodeDestination.Chat, null);
         }
     }
 
     /// <summary>
     /// Cached output node metadata record.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Cache compatibility (R6 FR-14c — task 047)</b>: the addition of
+    /// <see cref="NodeDestination"/> and <see cref="WidgetType"/> changes the JSON shape.
+    /// Older cache entries (pre-R6, without the new properties) deserialize with the C#
+    /// init-default values — <c>NodeDestination.Chat</c> + <c>null</c> WidgetType — which
+    /// is the backward-compatible behavior. No cache flush is required for the rolling
+    /// deploy. Cache TTL is 5 minutes (see <see cref="CacheTtl"/>), so any stale shape
+    /// would naturally roll over within minutes.
+    /// </para>
+    /// </remarks>
     private sealed record OutputNodeMetadata(
         OutputType OutputType,
         bool RequiresConfirmation,
-        string? TargetPage);
+        string? TargetPage,
+        NodeDestination NodeDestination = NodeDestination.Chat,
+        string? WidgetType = null);
 
     #endregion
 

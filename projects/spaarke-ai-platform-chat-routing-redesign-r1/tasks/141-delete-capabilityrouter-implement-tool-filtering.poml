@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="141" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Delete CapabilityRouter + 10 supporting files + implement per-playbook tool filtering replacement (FR-23) — single agent, atomic commit</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <dependencies>140</dependencies>
+    <blocks>142,143,144,145,146,147,148,150</blocks>
+    <tags>bff-api, refactoring, legacy-removal</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Massive code deletion + replacement implementation (FR-23 tool filtering); ADR-013 + ADR-029 + ADR-032 all binding; FULL per task-execute Step 0.5; resolves CRIT-6 (single-agent atomic commit)</rigor-reason>
+    <parallel-group>7-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single-agent atomic commit per CRIT-6 — multi-file coordinated deletion + replacement implementation must be one unit to avoid partial states</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-22 + FR-23: in a single atomic commit, (1) delete `CapabilityRouter` + all 10 supporting files from `src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/` (full file list below), (2) implement the FR-23 per-playbook tool filtering replacement (matched playbook scopes + always-on conversational tools), (3) remove all CapabilityRouter DI registrations + endpoint wiring, (4) update tests that asserted CapabilityRouter behavior. This is the WP4 single-phase cutover per Q8 owner directive — no parallel-run, no phased rollout.
+  </prompt>
+
+  <role>SPAARKE BFF AI engineer + refactoring specialist. Knows the CapabilityRouter architecture inside-out.</role>
+
+  <goal>
+    `grep "CapabilityRouter" src/` returns ZERO hits in production code (test fixtures only, where applicable). FR-23 replacement implemented: matched playbook tools = playbook's Action + Tool scopes; always-on tools = `recall_session_file`, `get_workspace_tab_state`, `document_search`, `update_workspace_tab` (when tab is agent-editable). CI green. BFF publish size reduced from baseline (expected NET REDUCTION per ADR-029). All affected tests updated.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-22, FR-23, FR-24 + design §WP4 + Q8 single-phase-cutover directive. The 10 CapabilityRouter-supporting files inventoried in design §WP4 + verified via the file system glob: CapabilityClassificationPromptBuilder.cs, CapabilityManifest.cs, CapabilityManifestEntry.cs, CapabilityManifestInitializer.cs, CapabilityRouter.cs, CapabilityRouterOptions.cs, CapabilityRoutingResult.cs, CapabilityValidationContext.cs, CapabilityValidator.cs, DataverseCapabilityManifestLoader.cs, ICapabilityManifest.cs, ICapabilityManifestLoader.cs, ICapabilityRouter.cs, ICapabilityValidator.cs, IManifestRefreshTrigger.cs, ManifestRefreshOptions.cs, ManifestRefreshService.cs. (17 files in `Services/Ai/Capabilities/` — the "10 supporting" was a design-doc approximation; delete the full directory.)
+
+      Replacement implementation: when a chat turn matches a playbook via `PlaybookDispatcher`, the tool set exposed to the LLM = playbook's declared Action scope + Tool scope. When no match (conversational turn), expose the always-on set: `recall_session_file`, `get_workspace_tab_state`, `document_search`, `update_workspace_tab` (conditional on any tab being agent-editable per Q8 conflict check).
+
+      FR-24 binding: R6 FR-30 CapabilityRouter dedup semantics MUST be preserved through the new dispatcher path. Task 143 is the regression test asserting this; task 141 must structure the new tool filtering such that dedup invariant remains structurally enforceable.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouterOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityClassificationPromptBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityManifest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityManifestEntry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityManifestInitializer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRoutingResult.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityValidationContext.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityValidator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/DataverseCapabilityManifestLoader.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/ICapabilityManifest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/ICapabilityManifestLoader.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/ICapabilityRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/ICapabilityValidator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/IManifestRefreshTrigger.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/ManifestRefreshOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/ManifestRefreshService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Modules/AiModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-22 acceptance — single deletion commit; CI green; `grep CapabilityRouter src/` returns zero hits.</constraint>
+    <constraint source="spec">FR-23 acceptance — tool list assembly unit tests pass with new logic; LLM receives correct tool subset per playbook.</constraint>
+    <constraint source="spec">FR-24 — R6 FR-30 dedup semantics preserved through new dispatcher path; task 143 verifies.</constraint>
+    <constraint source="ADR-013">No `IOpenAiClient` / `IPlaybookService` direct injection into CRUD code; tool filtering stays inside `Services/Ai/`.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect NET REDUCTION from this deletion (binding per WP4 hypothesis).</constraint>
+    <constraint source="ADR-032">If any conditional/feature-gated registration arises from this refactor, use Null-Object Kill-Switch (symmetric); avoid asymmetric registration anti-pattern.</constraint>
+    <constraint source="CLAUDE.md §10">Test update obligation — all `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/` tests deleted or repurposed; new tool-filtering tests added.</constraint>
+    <constraint source="project">Single atomic commit per CRIT-6 fix. Do NOT split deletion + replacement into separate commits.</constraint>
+    <constraint source="owner-clarification">Q8 — single-phase cutover; no backward compat needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Take a Phase 6 final BFF publish-size measurement as the pre-deletion baseline: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Record at `notes/handoffs/141-pre-deletion-publish.md`.</step>
+    <step order="2">Inventory call sites: `grep -rn "CapabilityRouter\|ICapabilityRouter\|ICapabilityValidator\|ICapabilityManifest\|ManifestRefresh\|DataverseCapability" src/` and `tests/`. Catalog every file referencing any deleted type.</step>
+    <step order="3">For each call site, decide: (a) call site removed entirely (most common — the caller was Layer 0.5 routing), (b) call site rewired to `PlaybookDispatcher` + new tool-filtering logic. Document the decision per call site in working notes.</step>
+    <step order="4">Implement FR-23 replacement logic in `SprkChatAgentFactory` (or appropriate prompt-assembly site): when a turn maps to a playbook via `PlaybookDispatcher`, derive the tool list from the playbook's Action + Tool scopes. When no playbook match (conversational), use the always-on set: `recall_session_file`, `get_workspace_tab_state`, `document_search`, `update_workspace_tab` (conditional on any tab being agent-editable).</step>
+    <step order="5">Wire FR-24: ensure the new tool filtering preserves dedup semantics (one user intent → one playbook → one destination → no duplicate tool exposure). The dedup test in task 143 will verify this.</step>
+    <step order="6">Remove ALL DI registrations for `ICapabilityRouter`, `ICapabilityValidator`, `ICapabilityManifest`, `ICapabilityManifestLoader`, `IManifestRefreshTrigger`, `ManifestRefreshService` from `AiModule.cs` (or wherever registered).</step>
+    <step order="7">Delete the 17 files under `src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/` (per Glob inventory). Verify `Services/Ai/Capabilities/` directory empty (or removed).</step>
+    <step order="8">Delete or migrate tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/`. Replace with new tool-filtering unit tests asserting FR-23 behavior.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed without warnings about missing types.</step>
+    <step order="10">Run `dotnet test` — full suite must pass. Failures here likely indicate missed call sites; iterate steps 2-4 as needed.</step>
+    <step order="11">Measure post-deletion BFF publish size: `dotnet publish -c Release ...`. Compute delta vs step 1 baseline. EXPECT NET REDUCTION (binding per FR-22 hypothesis); report at `notes/handoffs/141-post-deletion-publish.md`.</step>
+    <step order="12">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="13">Single atomic commit — ALL deletions + replacement code + test updates in ONE commit with clear message referencing FR-22 + FR-23.</step>
+    <step order="14">Update TASK-INDEX.md: task 141 → ✅. Pre/post publish-size handoffs link from the index entry.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Inventory CapabilityRouter call sites across src/ + tests/</tool>
+    <tool name="Read">All 17 Capabilities/*.cs files + their consumers</tool>
+    <tool name="Edit">Apply replacement logic in SprkChatAgentFactory + remove DI registrations</tool>
+    <tool name="Bash">Delete files; dotnet build/test/publish</tool>
+    <tool name="Write">Pre/post publish-size handoffs</tool>
+  </tools>
+
+  <outputs>
+    <output type="deletion">17 files under src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (or equivalent) — FR-23 tool filtering implemented</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Modules/AiModule.cs — Capabilities DI registrations removed</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ — Capabilities tests removed; new tool-filtering tests added</output>
+    <output type="docs">notes/handoffs/141-pre-deletion-publish.md + 141-post-deletion-publish.md — NET REDUCTION report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "CapabilityRouter" src/server/` returns 0 hits.</criterion>
+    <criterion testable="true">`grep "ICapabilityRouter\|ICapabilityValidator\|ICapabilityManifest" src/server/` returns 0 hits.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+    <criterion testable="true">`dotnet test` full suite passes.</criterion>
+    <criterion testable="true">FR-23 tool list unit tests pass (matched-playbook subset + always-on conversational set).</criterion>
+    <criterion testable="true">BFF publish-size NET REDUCTION vs pre-deletion baseline.</criterion>
+    <criterion testable="true">Single atomic commit (verify via `git log -1 --stat`).</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the project's most aggressive deletion. Hold the line on the single atomic commit per CRIT-6 — splitting into "delete first, replace second" leaves master in a broken state mid-PR. Pre-flight the call-site inventory thoroughly; missed consumers cause hard-to-diagnose runtime failures.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

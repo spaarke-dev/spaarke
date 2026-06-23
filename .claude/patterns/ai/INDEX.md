@@ -19,6 +19,7 @@ Load these patterns when implementing AI analysis features, document extraction,
 | [indexing-pipeline.md](indexing-pipeline.md) | RAG indexing contract: documentId, parentEntity, GUID case, observability | 2026-05-22 | Verified |
 | [public-contracts-facade.md](public-contracts-facade.md) | Spaarke Public-Contracts Facade DI Fascia — facade + Null peer pattern for AI features | 2026-06-05 | Verified |
 | [endpoint-di-symmetry.md](endpoint-di-symmetry.md) | Endpoint↔DI Registration Conditionality Symmetry Rule — banned anti-pattern + runtime detection | 2026-06-05 | Verified |
+| [node-executor-authoring.md](node-executor-authoring.md) | Adding a new playbook node executor — Singleton+Scoped DI pattern, canvas↔server symmetry checklist | 2026-06-21 | Verified |
 
 ## Canonical Source Files
 `src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs` · `Services/Ai/AnalysisOrchestrationService.cs` · `Services/Ai/AnalysisContextBuilder.cs` · `Services/Ai/OpenAiClient.cs` · `Services/Ai/TextExtractorService.cs` · `Services/Ai/ScopeResolverService.cs` · `Services/Ai/ITextExtractor.cs` · `Configuration/DocumentIntelligenceOptions.cs`

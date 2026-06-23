@@ -194,7 +194,43 @@ This is **not advisory**. It is a binding workflow rule for every BFF-touching t
 
 ---
 
-## 11. Build Commands
+## 11. Component Justification — Default to Reuse (BINDING)
+
+**Principle**: Every new component must justify its existence. Prefer extending an existing service over introducing a new one. Prefer one component that works exceptionally well over five that partially overlap.
+
+Applies at EVERY scope boundary: spec authoring, plan WBS, task creation, code review. §10 BFF Hygiene is the BFF-specific instance; this is the universal rule.
+
+### The three-question template
+
+For every NEW service / abstraction / interface / endpoint / DI registration / package / Dataverse column / file surface, answer one sentence each:
+
+1. **Existing** — What does this overlap with? (Verify by `Grep` / `Glob` before claiming "none".)
+2. **Extension** — Can I extend the existing instead? (If yes → extend. If no → say why in ≤2 sentences.)
+3. **Cost-of-doing-nothing** — Name a concrete behavior or contract that fails without this. (NOT "scalability" / "abstraction layer" / "future flexibility.")
+
+A justification that cannot articulate concrete failure modes for question 3 = scope creep. Demote the task to "extend existing X" or drop it.
+
+### Enforcement points
+
+| Stage | Mechanism |
+|---|---|
+| Spec authoring | `project-pipeline` validates spec scope against existing components during Step 2 resource discovery |
+| Plan WBS | `task-create` Step 3.5.6 requires `<justification>` element in each new-component POML |
+| Code review | `code-review` Step 6.6 verifies justification is concrete + cites grep evidence |
+
+### Anti-patterns this catches (real examples from chat-routing-redesign-r1)
+
+- ❌ "Delete LegalWorkspace `CreateRecordStep.tsx` as dead code per OC-R4-05" — retirement doc actually preserves it as library; cost-of-doing-nothing was assumed wrongly
+- ❌ "Add new `sprk_playbookcode` lookup keys" — `sprk_playbookid` already exists as the immutable opaque ID; existing-question unanswered
+- ❌ "Build 8 retrieval tool handlers" — 7 of 8 fail extension test for the MVP use case; one excellent handler beats five that partially overlap
+
+Tasks that ONLY modify existing files (edit, refactor, fix bug, add tests for existing surface) do NOT require justification — the rule applies to NEW surface, not modification.
+
+Cost-of-rule: one paragraph per new component. Cost-of-rule-absence: shipped scope creep.
+
+---
+
+## 12. Build Commands
 
 | Action | Command |
 |---|---|
@@ -211,7 +247,7 @@ Many `src/solutions/*` Vite projects have stale `package-lock.json` files; `npm 
 
 ---
 
-## 12. System Entry Points (where to start reading)
+## 13. System Entry Points (where to start reading)
 
 | Subsystem | Start here | Shows |
 |---|---|---|
@@ -224,7 +260,7 @@ Many `src/solutions/*` Vite projects have stale `package-lock.json` files; `npm 
 | Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` | OBO + app-only Graph auth |
 | Background Jobs | `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` | Service Bus job processing |
 
-## 13. Context Layer Hierarchy
+## 14. Context Layer Hierarchy
 
 | Layer | Contains | When to load |
 |---|---|---|
@@ -242,7 +278,7 @@ Many `src/solutions/*` Vite projects have stale `package-lock.json` files; `npm 
 
 ---
 
-## 14. Knowledge Repository for Rapidly-Evolving Topics
+## 15. Knowledge Repository for Rapidly-Evolving Topics
 
 Claude's training data has a knowledge cutoff. For rapidly-evolving Microsoft/AI platform topics where Claude's context may be stale (Azure AI Foundry, Power Platform updates, Dataverse MCP, Office Add-ins SDK, SharePoint Embedded), use the **`researcher` subagent**:
 
@@ -255,13 +291,13 @@ Claude's training data has a knowledge cutoff. For rapidly-evolving Microsoft/AI
 
 ---
 
-## 15. Hooks — Current Guidance
+## 16. Hooks — Current Guidance
 
 Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Quality enforcement runs via (1) skill-level checks (`task-execute`, `adr-check`, `code-review`), (2) CI/CD (`.github/workflows/sdap-ci.yml`), and (3) the `doc-drift-audit` skill at project transitions. Reconsider hooks only for narrow, high-frequency automations that run in <5s with zero false positives.
 
 ---
 
-## 16. Pointers — Where to find everything
+## 17. Pointers — Where to find everything
 
 | Topic | Pointer |
 |---|---|
@@ -304,6 +340,6 @@ Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Qual
 
 ---
 
-## 17. Footer
+## 18. Footer
 
 **Maintained by** the project owner. To extend this file: follow the rules in `.claude/skills/ai-procedure-maintenance/SKILL.md`. When in doubt about whether content belongs here vs in `docs/`: if it's a binding rule the agent must apply every turn → here; if it's reference/tutorial → `docs/`. Every PR touching this file MUST add an entry to [`.claude/CHANGELOG.md`](.claude/CHANGELOG.md).

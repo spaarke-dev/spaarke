@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -36,8 +37,12 @@ public static class PlaybookEmbeddingEndpoints
             .WithDescription(
                 "Enqueues a playbook for embedding generation and AI Search index upsert. " +
                 "Returns 202 Accepted immediately — indexing runs asynchronously in the background. " +
+                "Returns 400 ProblemDetails with `missingFields` extension when the playbook is missing " +
+                "FR-12 required fields (description / documentTypes / destinationHint). " +
                 "Called by Dataverse plugin on playbook create/update.")
             .Produces(202)
+            .ProducesProblem(400)
+            .ProducesProblem(404)
             .ProducesProblem(429)
             .ProducesProblem(503);
 
@@ -45,17 +50,62 @@ public static class PlaybookEmbeddingEndpoints
     }
 
     /// <summary>
-    /// Enqueues a playbook for embedding indexing and returns 202 Accepted immediately.
+    /// Loads the playbook, validates FR-12 required fields, and enqueues for embedding
+    /// indexing. Returns 202 Accepted on success; 400 with <c>missingFields</c> extension
+    /// when validation fails; 404 when playbook does not exist; 503 when the indexing
+    /// background service is not available.
     /// </summary>
     /// <param name="playbookId">Playbook GUID to index.</param>
+    /// <param name="playbookService">Dataverse playbook fetch service (injected).</param>
+    /// <param name="validator">FR-12 validation gate (injected).</param>
     /// <param name="loggerFactory">Logger factory for structured logging.</param>
-    /// <returns>202 Accepted if enqueued; 503 if background service not available.</returns>
-    private static IResult IndexPlaybook(
+    /// <param name="cancellationToken">Request cancellation token.</param>
+    /// <returns>
+    /// 202 Accepted if enqueued; 400 if validation failed; 404 if playbook not found;
+    /// 503 if background service not available.
+    /// </returns>
+    private static async Task<IResult> IndexPlaybook(
         Guid playbookId,
-        ILoggerFactory loggerFactory)
+        IPlaybookService playbookService,
+        PlaybookIndexInputValidator validator,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
     {
         var logger = loggerFactory.CreateLogger("PlaybookEmbeddingEndpoints");
 
+        // Step 1: Load the playbook from Dataverse to validate required fields (FR-12).
+        var playbook = await playbookService.GetPlaybookAsync(playbookId, cancellationToken);
+        if (playbook is null)
+        {
+            logger.LogWarning(
+                "Playbook {PlaybookId} not found in Dataverse — cannot index",
+                playbookId);
+            return Results.Problem(
+                statusCode: 404,
+                title: "Playbook not found",
+                detail: $"No playbook exists with id {playbookId}.");
+        }
+
+        // Step 2: FR-12 validation gate — reject if required fields are missing.
+        var missingFields = validator.Validate(playbook);
+        if (missingFields.Count > 0)
+        {
+            // ADR-015: log only the field names + playbook ID; never log JPS JSON content.
+            logger.LogWarning(
+                "Playbook {PlaybookId} failed FR-12 validation — missing fields: {MissingFields}",
+                playbookId, string.Join(",", missingFields));
+
+            return Results.Problem(
+                statusCode: 400,
+                title: "Playbook validation failed",
+                detail: "Playbook is missing one or more required fields for indexing per FR-12",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["missingFields"] = missingFields
+                });
+        }
+
+        // Step 3: Enqueue for background indexing.
         var indexingService = PlaybookIndexingBackgroundService.Instance;
         if (indexingService is null)
         {

@@ -86,11 +86,18 @@ const useStyles = makeStyles({
     // win. Same fix pattern as in DataGrid root/innerCard/gridScroll +
     // DataverseEntityViewWidget root — this completes the chain.
     minWidth: 0,
-    // NOTE: a UAT round 7 attempt to add `height: 100%` here (paired with
-    // WorkspaceShell.row { flex: 1 1 0 }) collapsed the SpaarkeAi embedded
-    // workspace to 40px because the height couldn't resolve up the chain.
-    // Reverted; per-section `style: { height: ... }` remains the supply
-    // mechanism until a deeper layout audit identifies the true break.
+    // R4-110 height-chain audit (2026-06-23): the card does NOT need
+    // `height: 100%` because it is a direct grid item of `WorkspaceShell.row`
+    // which has `alignItems: stretch` (the CSS grid default). The row's
+    // stretch alignment sizes the card to the full row track height.
+    //
+    // The UAT round 7 collapse (workspace shrank to 40px) was caused by
+    // the chain BREAKING ABOVE this point — `WorkspaceLayoutWidget.root`
+    // had `flex: 1` but its parent was `display: block` (flex ignored),
+    // so the row had no determinate height to share. Rounds 11/12 fixed
+    // that at the source. R4-110 added chain robustness at
+    // `WorkspaceTabManagerComponent.content` so future widget roots can
+    // use either `flex: 1` or `height: 100%` and the chain still works.
   },
   titleBar: {
     display: 'flex',

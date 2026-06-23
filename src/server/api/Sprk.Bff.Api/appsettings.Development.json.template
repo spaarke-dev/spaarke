@@ -1,0 +1,50 @@
+{
+  "_comment": "Development-only overrides. Copy to appsettings.Development.json (gitignored) for local use; CI/CD does not consume this template. R3 task 012 (2026-06-21) adds the 'Membership' section per design.md Part 1 § Configuration shape. R3 task 081 (2026-06-22) adds the 'Membership:EventPublisher' subsection (FR-2P2.6 + Q2 fire-and-forget publisher); Enabled=false until operator deploys Service Bus topic per task 071 runbook. R3 task 084 (2026-06-22) adds the 'Membership:JunctionUpdater' subsection (FR-2P2.4 subscription consumer); Enabled=false until same operator-deploy gate completes.",
+
+  "Membership": {
+    "IncludedIdentityTables": [
+      { "Table": "systemuser",         "IdentityType": "SystemUser" },
+      { "Table": "contact",            "IdentityType": "Contact" },
+      { "Table": "team",               "IdentityType": "Team" },
+      { "Table": "businessunit",       "IdentityType": "BusinessUnit" },
+      { "Table": "account",            "IdentityType": "Account" },
+      { "Table": "sprk_organization",  "IdentityType": "Organization" }
+    ],
+    "GlobalFieldExclusions": [
+      "createdby",
+      "modifiedby",
+      "createdonbehalfby",
+      "modifiedonbehalfby"
+    ],
+    "RoleNameStrategy": "CamelCase",
+    "MetadataCacheTtlMinutes": 60,
+    "EntityOverrides": {
+      "sprk_matter": {
+        "ExcludedFields": [],
+        "IncludedFields": [],
+        "FieldRoleOverrides": {
+          "sprk_assignedlawfirm1": "assignedLawFirm",
+          "sprk_assignedlawfirm2": "assignedLawFirm"
+        }
+      }
+    },
+    "EventPublisher": {
+      "_comment": "Task 081 (R3 Part 1 Phase 2 — FR-2P2.6 + Q2 fire-and-forget). Enabled=false (default) registers NullMembershipEventPublisher (ADR-032 P2 Quiet no-op) — no Azure Service Bus dependency. Flip Enabled=true ONLY AFTER task 071 deploys the topic 'sprk-membership-changes' in Azure (see notes/operator-followup-task071.md). TopicName defaults to 'sprk-membership-changes' per spec D3.",
+      "Enabled": false,
+      "TopicName": "sprk-membership-changes"
+    },
+    "JunctionUpdater": {
+      "_comment": "Task 084 (R3 Part 1 Phase 2 — FR-2P2.4 subscription consumer). Enabled=false (default) registers NullMembershipJunctionUpdaterHost (ADR-032 hosted-service Null peer) — no Service Bus subscription is created, no Azure dependency. Flip Enabled=true AND populate ServiceBusNamespace ONLY AFTER task 071 deploys the topic + subscription in Azure (see notes/operator-followup-task071.md). TopicName + SubscriptionName default to the names baked into task 071's Bicep module.",
+      "Enabled": false,
+      "TopicName": "sprk-membership-changes",
+      "SubscriptionName": "recon-junction-updater",
+      "ServiceBusNamespace": "",
+      "MaxConcurrentCalls": 5
+    },
+    "CacheInvalidator": {
+      "_comment": "Task 086 (R3 Part 1 Phase 2 — FR-2P2.8 + AC-1P2.7 Redis pub/sub cache invalidation). Enabled=false (default) registers NullMembershipCacheInvalidator (ADR-032 P2 Quiet no-op) — no Redis subscription is opened. Flip Enabled=true ONLY when Redis:Enabled=true AND IConnectionMultiplexer is registered (the DI module also gates on resolvability). When enabled, MembershipJunctionUpdater (task 084) + MembershipReconciliationJob (task 085, via shared handler) publish to the channel after every junction-row write, and MembershipCacheInvalidationSubscriber on every BFF instance evicts matching MembershipResolverService cache entries. The 5-min cache TTL is the correctness backstop.",
+      "Enabled": false,
+      "Channel": "membership-cache-invalidate"
+    }
+  }
+}

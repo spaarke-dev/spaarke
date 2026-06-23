@@ -9,9 +9,18 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 
 /// <summary>
 /// Routes a matched <see cref="DispatchResult"/> to the appropriate output action based on
-/// the five typed output types defined in the JPS DeliverOutput node.
+/// the five typed output types defined in the JPS DeliverOutput node — and, as of
+/// chat-routing-redesign-r1 task 048 (FR-14d), also based on
+/// <see cref="DispatchResult.NodeDestination"/> which is checked UPFRONT before the
+/// <see cref="OutputType"/> switch (Workspace / Both / FormPrefill / SideEffect short-circuit
+/// the OutputType arms).
 ///
 /// <list type="bullet">
+///   <item><b>workspace</b> (NodeDestination) — Emits a <c>workspace.tab_open</c> SSE event
+///     with <c>{ tabId, widgetType }</c> and short-circuits chat-token emission. The
+///     <see cref="Services.Ai.PlaybookExecutionEngine"/> streams <c>FieldDelta</c> events
+///     via the existing <c>/summarize</c> SSE endpoint path — this handler does NOT proxy
+///     that stream (ADR-033 streaming chat-tool side-channel preservation pattern).</item>
 ///   <item><b>text</b> — Streams the AI response normally through the standard chat flow.
 ///     Delegates to <see cref="CompoundIntentDetector"/> for plan preview gate when the
 ///     response is a multi-step plan.</item>
@@ -35,6 +44,13 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <b>ADR-013</b>: <see cref="ChatHostContext"/> flows through for entity-scoped operations.
 ///
 /// <b>ADR-014</b>: Pre-populated field values are ephemeral and NOT cached.
+///
+/// <b>ADR-033</b>: For the Workspace destination, the structural <c>workspace.tab_open</c>
+/// SSE event is emitted from this handler; the per-field token streaming continues to flow
+/// via the <see cref="Services.Ai.PlaybookExecutionEngine"/> streaming surface (existing
+/// <c>FieldDelta</c> path) — the handler does NOT introduce a new IPlaybookExecutionEngine
+/// dependency to proxy/transform streaming. This minimises the change scope per the
+/// "ADRs Are Defaults — Challenge When Warranted" operating principle.
 /// </summary>
 public sealed class PlaybookOutputHandler
 {
@@ -65,8 +81,18 @@ public sealed class PlaybookOutputHandler
     }
 
     /// <summary>
-    /// Routes the dispatch result to the appropriate output handler based on
-    /// <see cref="DispatchResult.OutputType"/>.
+    /// Routes the dispatch result to the appropriate output handler.
+    ///
+    /// <para>
+    /// <b>Routing surface — task 048 (FR-14d) update</b>: dispatch routing is two-level.
+    /// <see cref="DispatchResult.NodeDestination"/> is consulted FIRST — when it is anything
+    /// other than <see cref="NodeDestination.Chat"/>, the dispatch short-circuits the
+    /// <see cref="OutputType"/> arms (Workspace / Both / FormPrefill / SideEffect have their
+    /// own dedicated handlers). When destination is <see cref="NodeDestination.Chat"/> (the
+    /// default — backward-compatible for all pre-R6 call sites), the existing
+    /// <see cref="OutputType"/> switch is consulted (Text / Dialog / Navigation / Download /
+    /// Insert).
+    /// </para>
     ///
     /// For HITL outputs (<see cref="DispatchResult.RequiresConfirmation"/> = true), the handler
     /// emits an SSE event (dialog_open, navigate) for the frontend to present to the user.
@@ -82,8 +108,8 @@ public sealed class PlaybookOutputHandler
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// True if the output was fully handled (caller should emit <c>done</c> and return).
-    /// False if the output type is <c>text</c> and the caller should proceed with normal
-    /// streaming (the handler did not intercept).
+    /// False if the output type is <c>text</c> (default chat destination) and the caller
+    /// should proceed with normal streaming (the handler did not intercept).
     /// </returns>
     public async Task<bool> HandleOutputAsync(
         DispatchResult dispatch,
@@ -101,9 +127,54 @@ public sealed class PlaybookOutputHandler
         }
 
         _logger.LogInformation(
-            "PlaybookOutputHandler: routing output — playbookId={PlaybookId}, outputType={OutputType}, " +
-            "requiresConfirmation={RequiresConfirmation}, targetPage={TargetPage}",
-            dispatch.PlaybookId, dispatch.OutputType, dispatch.RequiresConfirmation, dispatch.TargetPage);
+            "PlaybookOutputHandler: routing output — playbookId={PlaybookId}, destination={NodeDestination}, " +
+            "outputType={OutputType}, widgetType={WidgetType}, requiresConfirmation={RequiresConfirmation}, " +
+            "targetPage={TargetPage}",
+            dispatch.PlaybookId, dispatch.NodeDestination, dispatch.OutputType, dispatch.WidgetType,
+            dispatch.RequiresConfirmation, dispatch.TargetPage);
+
+        // -------------------------------------------------------------------------
+        // Task 048 (FR-14d) Workspace branch: route on NodeDestination FIRST.
+        // -------------------------------------------------------------------------
+        // The NodeDestination check sits ABOVE the OutputType switch because the
+        // workspace-bound `summarize-document-for-workspace` playbook has OutputType.Text
+        // (its content is text — only the destination surface differs). Routing solely
+        // on OutputType would never reach the Workspace branch.
+        //
+        // Backward-compat: NodeDestination defaults to Chat (DispatchResult constructor
+        // default; PlaybookDispatcher.Parse default; FR-14b/FR-27 binding). All pre-R6
+        // call sites hit the OutputType switch below unchanged.
+        //
+        // Sibling tasks 049/050/051 add Both / FormPrefill / SideEffect arms here.
+        switch (dispatch.NodeDestination)
+        {
+            case NodeDestination.Workspace:
+                return await HandleWorkspaceOutputAsync(dispatch, emitSseEvent, cancellationToken);
+
+            case NodeDestination.Both:
+                return await HandleBothOutputAsync(dispatch, emitSseEvent, cancellationToken);
+
+            case NodeDestination.FormPrefill:
+                // FormPrefill: intentional no-op per spec FR-14d. Pre-fill flow
+                // (MatterPreFillService / ProjectPreFillService) is the consumer; NFR-07
+                // forbids modifying that flow from this handler. The arm exists for switch
+                // completeness so the dispatch is explicitly acknowledged (returns true)
+                // rather than falling through to the OutputType arms.
+                return HandleFormPrefillOutput(dispatch);
+
+            case NodeDestination.SideEffect:
+                // SideEffect: tier-1-safe telemetry only per spec FR-14d + ADR-015. No SSE
+                // event, no chat token, no user-visible content. Records a structured log
+                // event so ops can observe side-effect dispatch volume without surfacing
+                // anything to the user. ADR-015: only deterministic IDs / names — never
+                // userMessage / fileContent / userPrompt / JSON payloads / file paths.
+                return HandleSideEffectOutput(dispatch);
+
+            case NodeDestination.Chat:
+            default:
+                // Fall through to the OutputType switch below (existing pre-R6 behavior).
+                break;
+        }
 
         return dispatch.OutputType switch
         {
@@ -466,6 +537,283 @@ public sealed class PlaybookOutputHandler
         _logger.LogInformation(
             "PlaybookOutputHandler: insert complete — {TokenCount} tokens emitted, playbook={PlaybookId}",
             chunks.Length, dispatch.PlaybookId);
+
+        return true;
+    }
+
+    #endregion
+
+    #region Workspace Output (Task 048 / FR-14d)
+
+    /// <summary>
+    /// Handles <see cref="NodeDestination.Workspace"/> — emits a <c>workspace.tab_open</c>
+    /// SSE event with <c>{ tabId, widgetType }</c> and short-circuits chat-token emission.
+    ///
+    /// <para>
+    /// <b>Spec FR-14d acceptance</b>: Workspace destination dispatch emits
+    /// <c>workspace.tab_open</c> SSE from the handler; <see cref="Services.Ai.PlaybookExecutionEngine"/>
+    /// streaming is preserved via the existing <c>FieldDelta</c> path on the
+    /// <c>/api/ai/chat/sessions/{id}/summarize</c> endpoint (NOT proxied through this handler);
+    /// chat sidebar stays empty (no chat tokens for Workspace destination).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>ADR-033 streaming side-channel discipline</b>: this handler emits the STRUCTURAL
+    /// <c>workspace.tab_open</c> event and returns true. It does NOT proxy / transform /
+    /// inject IPlaybookExecutionEngine to re-stream the per-field deltas — the engine's
+    /// existing <c>ExecuteChatSummarizeAsync</c> SSE stream (consumed by the
+    /// <c>sseToPaneEventBridge</c> on the frontend) is the streaming surface for the
+    /// Workspace tab's content. The handler's contribution is the <c>tab_open</c> structural
+    /// event that tells the frontend to mount the widget BEFORE the deltas begin to arrive.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Note for sibling task 049 (NodeDestination.Both)</b>: when destination is Both,
+    /// the handler will (a) call <see cref="EmitWorkspaceTabOpenAndStreamAsync"/> below to
+    /// reuse the workspace-tab-open emission, then (b) emit a chat ack token. The helper
+    /// is extracted as a <c>private</c> method on this class for that reason.
+    /// </para>
+    /// </summary>
+    /// <param name="dispatch">Matched dispatch result with <see cref="NodeDestination.Workspace"/>.</param>
+    /// <param name="emitSseEvent">SSE writer delegate.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Always true (handled — caller should emit <c>done</c> and return).</returns>
+    private async Task<bool> HandleWorkspaceOutputAsync(
+        DispatchResult dispatch,
+        Func<ChatSseEvent, CancellationToken, Task> emitSseEvent,
+        CancellationToken cancellationToken)
+    {
+        await EmitWorkspaceTabOpenAndStreamAsync(dispatch, emitSseEvent, cancellationToken);
+
+        _logger.LogInformation(
+            "PlaybookOutputHandler: workspace destination handled — tab_open emitted, " +
+            "chat-token emission suppressed, playbook={PlaybookId}, widgetType={WidgetType}",
+            dispatch.PlaybookId, dispatch.WidgetType);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Handles <see cref="NodeDestination.Both"/> — emits a <c>workspace.tab_open</c> SSE event
+    /// (same as the Workspace branch) AND a templated chat ack token so the chat sidebar
+    /// shows a brief confirmation that a Workspace result was produced.
+    ///
+    /// <para>
+    /// <b>Spec FR-14d Both acceptance</b>: Both-destination dispatch emits BOTH
+    /// <c>workspace.tab_open</c> SSE AND a chat ack token
+    /// (<c>"I've added a {playbookName} result to the Workspace."</c>). Streaming preserved
+    /// (the per-field <c>FieldDelta</c> stream continues to flow via the existing
+    /// <see cref="Services.Ai.PlaybookExecutionEngine"/> SSE path — this handler does NOT
+    /// proxy/transform that stream, mirroring the Workspace branch ADR-033 discipline).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Sequence</b> (per task 049 POML step 3 — tab_open → typing_start → ack token →
+    /// typing_end → streaming proceeds): the structural <c>workspace.tab_open</c> is emitted
+    /// FIRST so the frontend can mount the widget BEFORE the chat ack appears, then the chat
+    /// ack is emitted via the existing <see cref="EmitTextResponseAsync"/> helper which wraps
+    /// the token in <c>typing_start</c>/<c>typing_end</c> markers (matching the chat surface's
+    /// existing convention). Per-field streaming is the engine's responsibility and flows
+    /// independently on the <c>/api/ai/chat/sessions/{id}/summarize</c> endpoint after this
+    /// handler returns.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Ack template (hardcoded English per design.md §1.3)</b>:
+    /// <c>"I've added a {playbookName} result to the Workspace."</c> where
+    /// <c>{playbookName}</c> is <see cref="DispatchResult.PlaybookName"/> or the literal
+    /// fallback word <c>"playbook"</c> when null/whitespace. Per-playbook customization is
+    /// deferred until proven necessary (design.md WP3).
+    /// </para>
+    /// </summary>
+    /// <param name="dispatch">Matched dispatch result with <see cref="NodeDestination.Both"/>.</param>
+    /// <param name="emitSseEvent">SSE writer delegate.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Always true (handled — caller should emit <c>done</c> and return).</returns>
+    private async Task<bool> HandleBothOutputAsync(
+        DispatchResult dispatch,
+        Func<ChatSseEvent, CancellationToken, Task> emitSseEvent,
+        CancellationToken cancellationToken)
+    {
+        // (1) Structural workspace.tab_open SSE event — DRY reuse of the Workspace branch
+        // helper extracted by task 048 for exactly this purpose.
+        await EmitWorkspaceTabOpenAndStreamAsync(dispatch, emitSseEvent, cancellationToken);
+
+        // (2) Templated chat ack — defensive null fallback to the literal word "playbook"
+        // (design.md: hardcoded English; defer per-playbook customization until proven
+        // necessary). The fallback word "playbook" is what the user sees if the dispatch
+        // somehow lacks PlaybookName — never "null" / "" / "undefined".
+        var playbookName = string.IsNullOrWhiteSpace(dispatch.PlaybookName)
+            ? "playbook"
+            : dispatch.PlaybookName;
+
+        var ackMessage = $"I've added a {playbookName} result to the Workspace.";
+
+        // EmitTextResponseAsync emits typing_start → token → typing_end (matches the chat
+        // surface's existing convention used by Dialog/Navigation/Download/Insert ack flows).
+        await EmitTextResponseAsync(emitSseEvent, ackMessage, cancellationToken);
+
+        _logger.LogInformation(
+            "PlaybookOutputHandler: both destination handled — tab_open emitted + chat ack " +
+            "emitted, playbook={PlaybookId}, playbookName={PlaybookName}, widgetType={WidgetType}",
+            dispatch.PlaybookId, playbookName, dispatch.WidgetType);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Emits the <c>workspace.tab_open</c> SSE event carrying <c>{ tabId, widgetType }</c>.
+    /// Extracted as a private helper so sibling task 049 (Both destination) can reuse the
+    /// same emission alongside its chat-ack path (the DRY opportunity called out in
+    /// project task 049 POML <c>notes</c>).
+    ///
+    /// <para>
+    /// <b>tabId derivation</b>: a fresh GUID (N-format) per emission. The frontend uses this
+    /// to correlate subsequent <c>field_delta</c> / <c>streaming_complete</c> events. When
+    /// the dispatch carries an explicit <c>workspaceTabId</c> extracted parameter (from the
+    /// playbook's <c>parameterSchema.workspaceTabId</c> — see
+    /// <c>summarize-document-for-workspace.playbook.json</c>), that value is preferred so
+    /// the frontend can update an existing tab; otherwise a new GUID is allocated.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>widgetType fallback</b>: when <see cref="DispatchResult.WidgetType"/> is null (an
+    /// edge case where a Workspace-destination playbook author forgot to set
+    /// <c>widgetType</c> in the node config — caught by
+    /// <see cref="NodeRoutingConfig.Validate"/> at config-author time but defended here),
+    /// fall back to the canonical streaming widget key
+    /// <c>"structured-output-stream"</c> (matches
+    /// <c>STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE</c> in
+    /// <c>register-structured-output-stream-widget.ts</c>).
+    /// </para>
+    /// </summary>
+    private static async Task EmitWorkspaceTabOpenAndStreamAsync(
+        DispatchResult dispatch,
+        Func<ChatSseEvent, CancellationToken, Task> emitSseEvent,
+        CancellationToken cancellationToken)
+    {
+        var tabId = dispatch.ExtractedParameters.TryGetValue("workspaceTabId", out var existingTabId)
+            && !string.IsNullOrWhiteSpace(existingTabId)
+                ? existingTabId
+                : Guid.NewGuid().ToString("N");
+
+        // Fall back to the canonical streaming widget key when the node config omitted
+        // widgetType. NodeRoutingConfig.Validate catches this at author time; the runtime
+        // fallback keeps the surface non-fatal.
+        string widgetType = string.IsNullOrWhiteSpace(dispatch.WidgetType)
+            ? "structured-output-stream"
+            : dispatch.WidgetType!;
+
+        var data = new WorkspaceTabOpenSseData(
+            TabId: tabId,
+            WidgetType: widgetType,
+            PlaybookId: dispatch.PlaybookId);
+
+        await emitSseEvent(
+            new ChatSseEvent("workspace.tab_open", null, data),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Payload for the <c>workspace.tab_open</c> SSE event emitted on Workspace destination
+    /// dispatches (FR-14d). Carries the tab identifier the frontend uses to mount the widget
+    /// and correlate subsequent <c>field_delta</c> events from the per-field streaming
+    /// (<see cref="Services.Ai.PlaybookExecutionEngine.ExecuteChatSummarizeAsync"/> →
+    /// <c>sseToPaneEventBridge</c>).
+    /// </summary>
+    /// <param name="TabId">Workspace tab identifier; new GUID or reuse of the dispatch's <c>workspaceTabId</c> extracted parameter.</param>
+    /// <param name="WidgetType">Widget registry key (kebab-case wire format) the frontend resolves at render time.</param>
+    /// <param name="PlaybookId">Matched playbook ID (for frontend correlation + telemetry).</param>
+    internal sealed record WorkspaceTabOpenSseData(
+        string TabId,
+        string WidgetType,
+        string? PlaybookId);
+
+    #endregion
+
+    #region FormPrefill Output (Task 050 / FR-14d)
+
+    /// <summary>
+    /// Handles <see cref="NodeDestination.FormPrefill"/> — intentional no-op preserve.
+    ///
+    /// <para>
+    /// <b>Spec FR-14d FormPrefill acceptance</b>: the pre-fill flow
+    /// (<c>MatterPreFillService</c> / <c>ProjectPreFillService</c> / <c>useAiPrefill</c>)
+    /// is the consumer that produces form-prefill output via its own pipeline. NFR-07
+    /// forbids modifying that flow from this handler. This arm exists for switch
+    /// completeness — without it the dispatch would fall through to the OutputType arms
+    /// (incorrect) or hit the default (silent no-op without an audit trail).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Contract</b>: emits NO SSE event, NO chat token, NO user-visible content.
+    /// Returns true so the caller emits <c>done</c> and stops (matching the Workspace /
+    /// Both arms' "handled" contract). A debug log records the dispatch for ops
+    /// observability without surfacing anything to the user.
+    /// </para>
+    /// </summary>
+    /// <param name="dispatch">Matched dispatch result with <see cref="NodeDestination.FormPrefill"/>.</param>
+    /// <returns>Always true (handled — caller should emit <c>done</c> and return).</returns>
+    private bool HandleFormPrefillOutput(DispatchResult dispatch)
+    {
+        _logger.LogDebug(
+            "PlaybookOutputHandler: form-prefill destination — no-op preserve per NFR-07 + FR-14d; " +
+            "pre-fill flow (MatterPreFillService / ProjectPreFillService) is consumer. " +
+            "playbookId={PlaybookId}, playbookName={PlaybookName}",
+            dispatch.PlaybookId, dispatch.PlaybookName);
+
+        return true;
+    }
+
+    #endregion
+
+    #region SideEffect Output (Task 051 / FR-14d)
+
+    /// <summary>
+    /// Handles <see cref="NodeDestination.SideEffect"/> — tier-1-safe telemetry only.
+    ///
+    /// <para>
+    /// <b>Spec FR-14d SideEffect acceptance</b>: side-effect destinations are for playbooks
+    /// that do background work (logging, telemetry, batch processing, Dataverse mutation,
+    /// notification dispatch) without user-visible output. The telemetry record makes these
+    /// dispatches observable for ops without surfacing them to the chat or workspace surface.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>ADR-015 binding (tier-1 governance)</b>: the structured log event carries ONLY
+    /// deterministic IDs + names — <c>playbookId</c>, <c>playbookName</c>, <c>widgetType</c>.
+    /// It MUST NOT carry <c>userMessage</c>, <c>fileContent</c>, <c>userPrompt</c>, recall
+    /// results, memory facts, JSON payloads, file paths, or any other tier-2+ content.
+    /// (<c>tenantId</c> / <c>durationMs</c> would be desirable but neither is in scope at
+    /// this handler — <see cref="DispatchResult"/> does not carry tenant identity and there
+    /// is no stopwatch on the SideEffect path. Both are intentionally omitted rather than
+    /// synthesized.)
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Telemetry mechanism</b>: emitted via <see cref="ILogger"/> with structured
+    /// properties — the established telemetry path for this handler (see the
+    /// <c>"PlaybookOutputHandler: ..."</c> log lines on Dialog / Navigation / Download /
+    /// Insert / Workspace / Both branches). Event name: <c>"playbook.side_effect_dispatched"</c>
+    /// per task 051 POML acceptance criteria.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Contract</b>: emits NO SSE event, NO chat token. Returns true so the caller emits
+    /// <c>done</c> and stops (matching the Workspace / Both / FormPrefill arms' "handled"
+    /// contract).
+    /// </para>
+    /// </summary>
+    /// <param name="dispatch">Matched dispatch result with <see cref="NodeDestination.SideEffect"/>.</param>
+    /// <returns>Always true (handled — caller should emit <c>done</c> and return).</returns>
+    private bool HandleSideEffectOutput(DispatchResult dispatch)
+    {
+        // ADR-015 tier-1 safe: ONLY deterministic IDs + names. Do NOT add userMessage /
+        // fileContent / userPrompt / recall results / JSON payloads / file paths here.
+        _logger.LogInformation(
+            "playbook.side_effect_dispatched — playbookId={PlaybookId}, " +
+            "playbookName={PlaybookName}, widgetType={WidgetType}",
+            dispatch.PlaybookId, dispatch.PlaybookName, dispatch.WidgetType);
 
         return true;
     }

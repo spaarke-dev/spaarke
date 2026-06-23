@@ -1,0 +1,43 @@
+<task id="R3-012" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`MembershipOptions` placeholder + appsettings binding skeleton</title>
+    <status>completed</status>
+    <phase>P2</phase>
+    <parallel-group>C (with 011)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1h</estimated-effort>
+    <tags>bff-api,configuration,options-pattern</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+    </relevant-files>
+    <dependencies>010</dependencies>
+  </metadata>
+  <prompt>Create `MembershipOptions` class with appsettings binding for `Membership` section (per spec.md design snippet: IncludedIdentityTables, GlobalFieldExclusions, RoleNameStrategy, MetadataCacheTtlMinutes, EntityOverrides). Skeleton only — full discovery logic in task 030.</prompt>
+  <goal>Options class binds cleanly from `appsettings.json`. Sample `Membership` config block added to dev appsettings (excluded from prod). DI registration via `services.Configure<MembershipOptions>(...)`.</goal>
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — Options pattern is the canonical config-binding mechanism</constraint>
+    <constraint source="bff-extensions.md §A">BFF-touching task pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>options-pattern-binding</topic>
+    <files>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + spec Membership config shape</step>
+    <step order="1">Author `MembershipOptions.cs` with all 5 properties + nested types (IdentityTableConfig, EntityOverride)</step>
+    <step order="2">Add `Membership` section to `appsettings.Development.json` per spec design example</step>
+    <step order="3">Register via `services.Configure<MembershipOptions>(config.GetSection("Membership"))` in MembershipModule.cs (new) or existing AI module</step>
+    <step order="4">Build + verify options resolve at runtime via integration smoke test</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">`IOptions<MembershipOptions>` resolvable in DI</criterion>
+    <criterion testable="true">Binding from appsettings populates EntityOverrides[\"sprk_matter\"].FieldRoleOverrides correctly</criterion>
+  </acceptance-criteria>
+</task>

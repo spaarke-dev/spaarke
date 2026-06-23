@@ -1,0 +1,64 @@
+<task id="R4-110" project="smart-todo-r4">
+  <metadata>
+    <title>NEW-2 — Structural Workspace height-chain audit + fix (foundational)</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>cross-cutting layout</workstream>
+    <status>not-started</status>
+    <estimated-effort>1-2 days</estimated-effort>
+    <tags>layout, workspace, height-chain, structural, cross-widget</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>(none — but informs all other R4-closeout tasks since they may depend on the chain working)</dependencies>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/SectionPanel.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/WorkspaceShell.styles.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx (consumer of per-section height workaround)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+The current per-section `style: { height: "calc(100vh - 200px)", minHeight: "560px" }` in `workspaceConfig.tsx` is a workaround. The real problem is that the height chain ABOVE `WorkspaceShell.shell` doesn't reliably propagate determinate height down. Round 7 attempted the structural fix (SectionPanel.card height:100% + WorkspaceShell.row flex:1 1 0 + alignItems:stretch) and the entire workspace collapsed to 40px. Round 11/12 fixed it tactically by adding `height: 100%` to `WorkspaceLayoutWidget.root` (which crosses a block parent) + the row flex change.
+
+This task: do a careful audit of the full chain from `SpaarkeAi App appRoot` → `ThreePaneShell` → `WorkspacePane` → `WorkspaceTabManager.content` → `WorkspaceLayoutWidget.root` → `LegalWorkspaceApp.content` → `WorkspaceShell.shell` → `WorkspaceShell.row` → `SectionPanel.card` → `SectionPanel.content` → widget root. Find any layer that drops height (display:block where it should be flex; missing `height: 100%` where parent is block; missing `flex: 1 1 0 + minHeight: 0` where parent is flex column).
+
+Goal: a single canonical pattern so widgets mount with `height: 100%` on root and DON'T need per-section `calc(100vh - X)` heights in workspaceConfig.
+  </prompt>
+
+  <role>Frontend layout engineer.</role>
+
+  <goal>
+1. Document the full chain with display + flex + height properties for each layer (one paragraph per layer).
+2. Identify each break point (where chain stops propagating).
+3. Apply structural fix(es) so per-section `style: { height: ... }` in workspaceConfig.tsx is no longer needed.
+4. Remove the SmartTodo `style: { height: "calc(100vh - 200px)", minHeight: "560px" }` workaround and verify widget still fills correctly.
+5. Test in ALL workspaces (LegalWorkspace embedded in SpaarkeAi, standalone LegalWorkspace if still mounted, any other consumers).
+6. Update documentation: `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` §7.2 + `.claude/patterns/ui/embedded-widget-sizing.md` (HEIGHT chain section) to reflect the structural fix as the canonical pattern.
+  </goal>
+
+  <constraints>
+    <constraint source="R4 UAT round 7 (DON'T REPEAT)">Round 7 collapsed workspace to 40px. Test in-page via console diagnostic AFTER each structural change BEFORE deploying. User has confirmed working console scripts in `notes/` — use those.</constraint>
+    <constraint source="cross-widget impact">SectionPanel + WorkspaceShell.row changes affect every widget in every workspace. Visual regression-test Daily Briefing, Calendar, Matters, any other section in the same pane after each change.</constraint>
+    <constraint source="documentation">Pattern file MUST be updated. Future widget authors land on the pattern file via `.claude/patterns/ui/INDEX.md` — getting this right is the whole point.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check: confirm R4 PR #406 merged (80f70a1d4 on master).</step>
+    <step order="1">Pull the full DOM chain from a current SpaarkeAi page via DevTools console; document each layer's actual styles.</step>
+    <step order="2">Identify the topmost element that breaks the chain (block-parent or non-flex wrapper that drops height).</step>
+    <step order="3">Propose minimal structural fix (smallest set of style changes). Validate in-page via console FIRST.</step>
+    <step order="4">Apply to source; rebuild; deploy to spaarkedev1; re-run console diagnostic to confirm chain holds.</step>
+    <step order="5">Visual regression check: Daily Briefing, Calendar, Matters widgets in same pane.</step>
+    <step order="6">Remove per-section `style: { height: ... }` from SmartTodo in workspaceConfig.tsx; verify widget still fills.</step>
+    <step order="7">Update BUILD-A-NEW-WORKSPACE-WIDGET.md §7.2 + embedded-widget-sizing.md pattern.</step>
+    <step order="8">Commit + PR.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">SmartTodo widget fills SectionPanel without any per-section inline height.</criterion>
+    <criterion testable="true">No regression in Daily Briefing / Calendar / Matters widget rendering.</criterion>
+    <criterion testable="true">Pattern documentation reflects the structural fix as the canonical pattern (not the per-section workaround).</criterion>
+    <criterion testable="true">Console diagnostic shows height propagating all the way to the kanban container without any 400px floor masking the break.</criterion>
+  </acceptance-criteria>
+</task>
