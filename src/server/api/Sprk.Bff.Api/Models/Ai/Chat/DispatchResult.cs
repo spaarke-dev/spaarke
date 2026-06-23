@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Models.Ai;
+
 namespace Sprk.Bff.Api.Models.Ai.Chat;
 
 /// <summary>
@@ -34,6 +36,19 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// Code Page web resource name for dialog/navigation outputs (e.g., "sprk_emailcomposer").
 /// Null for text/download/insert outputs. Sourced from JPS DeliverOutput node.
 /// </param>
+/// <param name="NodeDestination">
+/// Per-playbook routing destination for the matched DeliverOutput node (spec FR-14b / FR-27).
+/// Defaults to <see cref="NodeDestination.Chat"/> — the implicit pre-R6 behavior where
+/// matched playbooks emit content into the chat conversation surface. Task 047 populates
+/// this from <see cref="NodeRoutingConfig"/> parsed off <c>sprk_playbooknode.sprk_configjson</c>;
+/// the default preserves backward compatibility for all 20+ existing call sites.
+/// </param>
+/// <param name="WidgetType">
+/// Workspace widget type — set only when <see cref="NodeDestination"/> = <see cref="NodeDestination.Workspace"/>
+/// (or <see cref="NodeDestination.Both"/>). Null otherwise. Sourced from
+/// <see cref="NodeRoutingConfig.WidgetType"/>. The string is matched against
+/// <c>WorkspaceWidgetRegistry</c> at render time (e.g. "structured-output-stream", "Summary").
+/// </param>
 public sealed record DispatchResult(
     bool Matched,
     string? PlaybookId,
@@ -42,7 +57,9 @@ public sealed record DispatchResult(
     OutputType OutputType,
     bool RequiresConfirmation,
     Dictionary<string, string> ExtractedParameters,
-    string? TargetPage)
+    string? TargetPage,
+    Sprk.Bff.Api.Models.Ai.NodeDestination NodeDestination = Sprk.Bff.Api.Models.Ai.NodeDestination.Chat,
+    string? WidgetType = null)
 {
     /// <summary>
     /// Returns a result indicating no playbook was matched.

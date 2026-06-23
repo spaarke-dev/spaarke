@@ -12,10 +12,10 @@
 | **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
 | **Origin status** | Rebased onto `origin/master` + force-pushed clean. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
-| **Last commit (pushed)** | (pending — about to commit task 036 + 032 loader-fix bundle) |
-| **Phase status** | Phase 0 ✅ · Phase 1 ✅ · Wave 2-A ✅ · Wave 2-B ✅ (032 ✅; loader-gap closed via 036 bundle; 033 🟡 partial-blocked Power Apps) · **Wave 2-C in progress** (036 ✅; 034 next; 035 🟡 partial-blocked Power Apps) |
+| **Last commit (pushed)** | (pending — about to commit Wave 3-A + 034) |
+| **Phase status** | Phase 0 ✅ · Phase 1 ✅ · Phase 2 mostly closed (Waves 2-A ✅, 2-B ✅, 2-C: 034 scaffold ✅ + 036 ✅; 033/035 🟡 Power Apps; 037-040 still pending) · **Wave 3-A: 045 ✅ + 046 ✅; 047 next** |
 | **Execution mode** | Autonomous wave-by-wave; **STOPPED at Wave 2-C** pending owner direction on the cascading send-to-index endpoint blocker |
-| **Next Action** | Wave 2-C task 034 (drift detection background job — FULL rigor; ~4h scope; ADR-004 Service Bus pattern). Or pivot to Phase 3 Wave 3-A (045/046/047 — 3 parallel-safe BFF model tasks). Both unblocked. |
+| **Next Action** | Dispatch Wave 3-A task 047 (PlaybookDispatcher populate `NodeDestination` + `WidgetType` per FR-14c; depends on 045+046 which are in code). Sub-agent pattern. After 047 lands, evaluate Wave 3-B (tasks 048-051 output handler cases). |
 
 ### Critical context (3-sentence version)
 

@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 using Sprk.Bff.Api.Services.Ai.Sessions;
+using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -257,6 +258,25 @@ public static class AiModule
         // beyond constructor instantiation in unit tests).
         services.AddSingleton<PlaybookIndexInputValidator>();
 
+        // IPlaybookEmbeddingHashCalculator — FR-13 single source of truth for the canonical
+        // embed-input hash (chat-routing-redesign-r1 task 034). Stateless, pure function;
+        // Singleton. Consumed by both the indexer (future: stored on sprk_indexhash) and the
+        // nightly PlaybookIndexDriftDetectionJob — centralizing the composition is the
+        // correctness invariant that prevents false-positive drift flags.
+        // Interface kept (not concrete-only) because the calculator is a logical seam — the
+        // drift-detection job and indexer consume different implementations only if a future
+        // composition revision (FR-10 v2) needs to coexist with the legacy hash for migration.
+        services.AddSingleton<IPlaybookEmbeddingHashCalculator, PlaybookEmbeddingHashCalculator>();
+
+        // PlaybookIndexDriftDetectionJob — IJobHandler for the nightly drift-detection
+        // Service Bus job (FR-13). Scoped to match other IJobHandler registrations and to
+        // resolve scoped IPlaybookService cleanly. Registered UNCONDITIONALLY: per
+        // CLAUDE.md §10 F.1, ServiceBusJobProcessor enumerates IJobHandler unconditionally
+        // and a feature-gated registration would create the asymmetric-registration anti-
+        // pattern (ADR-032). If a kill-switch is later required, apply Null-Object per
+        // ADR-032 P1/P2/P3 rather than wrapping this line in a feature flag.
+        services.AddScoped<IJobHandler, PlaybookIndexDriftDetectionJob>();
+
         // PlaybookIndexingBackgroundService — hosted service (ADR-001 mandate, no Azure Functions).
         // Processes playbook embedding indexing requests from a bounded Channel<string>.
         // Factory-instantiates PlaybookIndexingService internally (ADR-010: no new DI registration
@@ -275,10 +295,11 @@ public static class AiModule
 
 // =============================================================================
 // DI REGISTRATION COUNT AUDIT — AiModule.cs (AIPU-075, 2026-05-16;
-//                                            updated task 011 Phase 1b Tier 1, 2026-06-01)
+//                                            updated task 011 Phase 1b Tier 1, 2026-06-01;
+//                                            updated chat-routing-redesign-r1 task 034, 2026-06-22)
 // ADR-010 Limit: 15 non-framework registrations per module
 // =============================================================================
-// UNCONDITIONAL REGISTRATIONS — 12 / 15 (5 promoted out — see Promoted block below)
+// UNCONDITIONAL REGISTRATIONS — 14 / 15 (5 promoted out — see Promoted block below)
 // -----------------------------------------------------------------------------
 //  1. AddKeyedSingleton<IChatClient>("raw")                — raw OpenAI client (task 071)
 //  2. AddChatClient<IChatClient>                           — OpenAI pipeline client (AIPL-050)
@@ -292,6 +313,8 @@ public static class AiModule
 // 10. AddScoped<ChatContextMappingService>                 — context mapping (AIPL-053)
 // 11. AddScoped<PendingPlanManager>                        — pending plan Redis storage (task 071)
 // 12. AddSingleton<PlaybookIndexInputValidator>            — FR-12 validation gate (chat-routing-redesign-r1 task 036)
+// 13. AddSingleton<IPlaybookEmbeddingHashCalculator, ...>  — FR-13 canonical hash calculator (chat-routing-redesign-r1 task 034)
+// 14. AddScoped<IJobHandler, PlaybookIndexDriftDetectionJob> — FR-13 nightly drift-detection job (chat-routing-redesign-r1 task 034)
 // -----------------------------------------------------------------------------
 // PROMOTED TO UNCONDITIONAL (in AnalysisServicesModule.AddUnconditionalChatAndNotificationServices)
 //   — D-09 §2 B4/B5/L5, task 011 Phase 1b Tier 1, 2026-06-01
