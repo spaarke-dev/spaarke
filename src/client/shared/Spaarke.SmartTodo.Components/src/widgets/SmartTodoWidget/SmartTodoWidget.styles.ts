@@ -319,6 +319,15 @@ export const useSmartTodoWidgetStyles = makeStyles({
 
   /** Scrollable body — owns internal scroll for the cards list. */
   body: {
+    // UAT 2026-06-22 round 11: ADDED `display: flex, flexDirection: column`.
+    // Without these, this div is `display: block` (the div default), and its
+    // child (the kanbanContainer with `flex: 1 1 auto`) cannot use flex to
+    // claim height — falling back to content height = the kanban's 400px
+    // min-height floor. Console diagnostics confirmed this is the ONE break
+    // in the height chain that was capping the widget at ~400px even when
+    // the SectionPanel had 900+ available pixels.
+    display: 'flex',
+    flexDirection: 'column',
     flex: '1 1 auto',
     minHeight: 0,
     overflowY: 'auto',
