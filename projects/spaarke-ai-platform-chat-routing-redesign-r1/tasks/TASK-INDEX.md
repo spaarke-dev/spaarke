@@ -335,7 +335,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 |---|---|---|---|---|---|---|---|
 | 076 | `LayeredContextCardBuilder` (NEW) — structured per-file card ~150–250 tok per architecture §4.4 | 🔲📝 | FULL | true | 4-E | 074 | `bff-api`, `services`, `ai` |
 | 077 | `TrustFrameInstructionInjector` (NEW) — canonical persona text per architecture §8.3 | 🔲📝 | FULL | true | 4-E | 074 | `bff-api`, `services`, `ai` |
-| 078 | Unify `MemoryCompositionService` with `PlaybookChatContextProvider` (no parallel pipelines per FR-27) | 🔲📝 | FULL | true | 4-E | 074 | `bff-api`, `services`, `refactoring` |
+| 078 | Unify `MemoryCompositionService` with `PlaybookChatContextProvider` (no parallel pipelines per FR-27) | ✅ | FULL | true | 4-E | 074 | `bff-api`, `services`, `refactoring` — MVP Scope A (per Q5b cut: peers 076/077/079 deferred). **Honest finding**: FR-27 single-pipeline state exists by *absence of integration* — `MemoryCompositionService.ComposeAsync` has 0 production callers (only 26 test callers); DI-wired but never invoked. FR-45 invocation at `PlaybookChatContextProvider.cs:679` (shifted +52 from architecture §11.1's line 627 by XML-doc addition). Added 2 source-text regression tests + future plug-in point comments for 076/077/079. Evidence: `notes/handoffs/078-fr-45-line-verified.md` |
 | 079 | Static prefix ~6K cacheable composition | 🔲📝 | FULL | true | 4-E | 074 | `bff-api`, `services`, `ai` |
 | 080 | FR-45 regression test asserting `PlaybookChatContextProvider.cs:627` invocation continues to fire | 🔲📝 | STANDARD | false | 4-F | 076,077,078,079 | `testing`, `regression`, `binding-invariant` |
 
