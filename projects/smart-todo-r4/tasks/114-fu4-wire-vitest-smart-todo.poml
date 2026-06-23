@@ -1,0 +1,60 @@
+<task id="R4-114" project="smart-todo-r4">
+  <metadata>
+    <title>FU-4 — Wire vitest for SmartTodo Code Page (no test shims)</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>test infrastructure</workstream>
+    <status>not-started</status>
+    <estimated-effort>2-3 hrs</estimated-effort>
+    <tags>testing, vitest, infra, no-shims</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>(none)</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/package.json (currently no test script)</file>
+      <file>src/solutions/SmartTodo/src/hooks/__tests__/useLaunchContext.test.ts (22 specs)</file>
+      <file>src/solutions/SmartTodo/src/services/__tests__/ (other spec shims)</file>
+      <file>src/solutions/CreateTodoWizard/package.json (reference — already wired with vitest)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+The SmartTodo Code Page has 22 test files written as "executable spec shims" — they LOOK like tests but don't actually run because vitest/jest isn't wired in `src/solutions/SmartTodo/package.json`. Per the no-shims principle: clean up.
+
+Two options:
+- (a) Wire vitest so the specs ARE real tests. Preferred — the specs exist as documented expectations and were written carefully.
+- (b) Delete the dead test files. Simpler, but loses documented behavior.
+
+This task = (a): wire vitest, fix any specs that don't pass (they likely DO pass, since they were written contemporaneously with the implementation), make `npm test` actually do something meaningful in `src/solutions/SmartTodo/`.
+
+Reference: `src/solutions/CreateTodoWizard/package.json` already has vitest wired — copy the pattern.
+  </prompt>
+
+  <role>Frontend test infrastructure.</role>
+
+  <goal>
+1. Add vitest dependency + test script to `src/solutions/SmartTodo/package.json`.
+2. Add `vitest.config.ts` (copy CreateTodoWizard's pattern).
+3. Run `npm test` and fix any failing specs.
+4. Wire to CI if not already covered by SDAP CI's general npm test sweep.
+5. Document in `projects/smart-todo-r4/notes/lessons-learned.md` (R4-098) — "no shims = test runners must be wired before specs are written".
+  </goal>
+
+  <constraints>
+    <constraint source="user feedback feedback_no-shims-clean-up-dead-code">No shims — wire the runner OR delete the specs. The current state (specs exist, runner doesn't) is the worst of both worlds.</constraint>
+    <constraint source="CreateTodoWizard pattern">Copy CreateTodoWizard's vitest config — same package.json structure, same testing primitives. Don't invent new patterns.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check.</step>
+    <step order="1">Compare `src/solutions/SmartTodo/package.json` vs `src/solutions/CreateTodoWizard/package.json` (which has vitest wired). List the deltas.</step>
+    <step order="2">Add vitest dependency + script. Copy/adapt `vitest.config.ts`.</step>
+    <step order="3">Run `npm test` and triage failures (likely 0 failures or trivial fixes since specs were written contemporaneously).</step>
+    <step order="4">Verify CI picks up the new test runs.</step>
+    <step order="5">Commit + PR.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`cd src/solutions/SmartTodo && npm test` runs vitest and produces pass/fail output.</criterion>
+    <criterion testable="true">All previously-shim tests now actually execute (pass OR fail visibly, no silent skips).</criterion>
+    <criterion testable="true">CI runs the new tests (or a follow-up task is filed to wire CI if separate).</criterion>
+  </acceptance-criteria>
+</task>
