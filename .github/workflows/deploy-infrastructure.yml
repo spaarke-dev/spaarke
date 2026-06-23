@@ -62,20 +62,13 @@ jobs:
     name: Validate Bicep
     runs-on: ubuntu-latest
 
-    # Job-level env so AZURE_CONFIG_DIR propagates to every step (was previously
-    # scoped only to the "Setup Azure CLI config" step, causing az bicep lint to
-    # fall back to ~/.azure/azureProfile.json which doesn't exist on the runner —
-    # PermissionError / FileNotFoundError. Fixed 2026-06-23 in R3 PR #415; the
-    # bug was pre-existing on master but only triggered by PRs touching
-    # infrastructure/bicep/.
-    env:
-      AZURE_CONFIG_DIR: ${{ runner.temp }}/.azure
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Setup Azure CLI config
+        env:
+          AZURE_CONFIG_DIR: ${{ runner.temp }}/.azure
         run: |
           mkdir -p $AZURE_CONFIG_DIR
           echo '{}' > $AZURE_CONFIG_DIR/azureProfile.json
@@ -87,7 +80,16 @@ jobs:
           azcliversion: latest
           inlineScript: echo "Azure CLI ready"
 
+      # AZURE_CONFIG_DIR must be set per-step (runner context not available
+      # at job-level per GitHub Actions context rules — actionlint enforces).
+      # Without this, az bicep lint falls back to ~/.azure/azureProfile.json
+      # which doesn't exist + isn't writable on the runner, causing
+      # PermissionError / FileNotFoundError on ALL Bicep files.
+      # Fixed 2026-06-23 in R3 PR #415; pre-existing bug on master triggered
+      # only by PRs touching infrastructure/bicep/ post-runner-image-change.
       - name: Lint Bicep templates
+        env:
+          AZURE_CONFIG_DIR: ${{ runner.temp }}/.azure
         run: |
           echo "## Bicep Lint Results" >> $GITHUB_STEP_SUMMARY
           LINT_ERRORS=0
