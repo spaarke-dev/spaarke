@@ -345,7 +345,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 |---|---|---|---|---|---|---|---|
 | 083 | `ListSessionFilesHandler` (T2) | 🔲📝 | FULL | true | 4-G | 080 | `bff-api`, `services`, `handlers`, `tool-handler` |
 | 084 | `GetFileManifestHandler` (T2) | 🔲📝 | FULL | true | 4-G | 080 | `bff-api`, `services`, `handlers` |
-| 085 | `RecallSessionFileHandler` (T2 + T5) — 6 purpose × 5 scope × requireCitations default true | 🔲📝 | FULL | true | 4-G | 080 | `bff-api`, `services`, `handlers`, `ai`, `azure-search` |
+| 085 | `RecallSessionFileHandler` (T2 + T5) — 6 purpose × 5 scope × requireCitations default true | ✅ | FULL | true | 4-G | 080 | `bff-api`, `services`, `handlers`, `ai`, `azure-search` — sealed class `IToolHandler` impl; ~720 lines + 40 test cases (Theory 6×5 matrix + 9 Facts); requireCitations DEFAULT true; routes via `IRagService.SearchAsync` with `RagSearchOptions.SessionId` (uses `spaarke-session-files` SearchClient — **zero `spaarke-insights-index` refs verified**); `IRecentlyDiscussedTrackerLike` deferred-defensive (task 091 will replace); 39/39 tests pass 33 ms; load-bearing for legal-domain trust framing (arch §2 P3); ADR-013/015/033 clean |
 | 086 | `WriteSessionMemoryHandler` (T2) | 🔲📝 | FULL | true | 4-G | 080 | `bff-api`, `services`, `handlers` |
 | 087 | `RetrieveMatterMemoryHandler` (T3) | 🔲📝 | FULL | true | 4-G | 080 | `bff-api`, `services`, `handlers` |
 | 088 | `PromoteToMatterMemoryHandler` (T2 → T3 pending-approval queue) | 🔲📝 | FULL | true | 4-H | 080 | `bff-api`, `services`, `handlers` |
