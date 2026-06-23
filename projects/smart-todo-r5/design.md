@@ -97,6 +97,40 @@ The current per-section `style: { height: "calc(100vh - 200px)", minHeight: "560
 
 **Scope if R4 defers this**: the audit + cleanup, including removing all per-section `calc(...)` workarounds across LegalWorkspace `workspaceConfig.tsx` once the structural fix lands.
 
+**Status 2026-06-23**: ✅ Closed in R4-110 (commit `40ff12224` on `work/smart-todo-r4-closeout` + a follow-up commit removing `minHeight:0` from `WorkspaceShell.row`). Delete this entry once R4 PR merges.
+
+### F-6 — SmartTodo widget toolbar: 'Search' label should be 'Filter' (and broken)
+
+**Surface**: standalone SmartTodo Code Page modal (`sprk_smarttodo`), top toolbar.
+
+**Behavior**: the toolbar currently shows a 'Search' affordance (icon + label) but its actual function is filter (it's the inline filter SearchBox in `SmartTodoWidget.styles.ts:inlineFilterBox`). Beyond the label being wrong, the affordance doesn't actually filter the kanban when typed into.
+
+**Why R5**: pre-existing bug; cosmetic + functional. Not deploy-blocking. Pairs naturally with F-3 (filter pane redesign).
+
+**Scope**: rename label + wire the input to actually drive the kanban's filter predicate. Likely a 1-2 hour fix once F-3 lands (or could be done independently first).
+
+### F-7 — Open-To-Do inner-modal sizing (Smart To Do code page modal-in-modal)
+
+**Surface**: standalone SmartTodo Code Page modal (`sprk_smarttodo`) → click Open on a card → inner record-form dialog launched via `Xrm.Navigation.navigateTo({pageType:'entityrecord', ...}, {target:2, width:80%, height:80%})` in `todo.registration.ts:handleOpenTodo`.
+
+**Behavior**: the inner record dialog renders at 80%×80% of viewport, which is smaller than the outer SmartTodo Code Page modal (85%×85%). Visually, the inner dialog appears inset from the outer modal frame rather than fully covering it. User expectation: inner dialog should cover the outer modal (look like it replaces, not nests).
+
+**Why R5**: nested-modal UX coordination is not trivial — relates to FU-2 (RecordNavigationModalShell chromeMode). Bundle with the broader modal-shell redesign.
+
+**Scope**: either bump inner dialog to 85%×85% (parity), or 100%×100% (fully covers), or coordinate with FU-2 to introduce a chrome-suppression contract so nested modals can render full-frame. Decide UX first.
+
+### F-8 — Open-To-Do inner-modal Save&Close behavior
+
+**Surface**: same as F-7 — inner record dialog opened from SmartTodo Code Page modal.
+
+**Behavior**: on Save & Close of the inner record dialog, the dialog frame stays open but its iframe content navigates back to the launch URL (= the SpaarkeAi Code Page). The user expects the inner dialog to close AND the outer SmartTodo Code Page modal to refresh its kanban with the saved changes.
+
+**Root cause**: the round-9 parent-side `Xrm.Page.ui.close` interceptor in `SmartTodoModal.tsx` is wired for the outer Code Page modal, NOT for the inner record dialog. The inner dialog's Save & Close action triggers MDA's default navigation behavior (back to launch URL) instead of dismissing the dialog.
+
+**Why R5**: this is a coordination problem between the SmartTodoModal interceptor and the inner `Xrm.Navigation.navigateTo` dialog. Solving it requires either (a) extending the parent-side interceptor to also catch inner-dialog close events, or (b) using a different navigation API for the inner record open (e.g., `openForm` with a custom close handler). Both have trade-offs. Investigate during the F-7 redesign — they likely share the same fix.
+
+**Workaround in R4**: don't open records from inside the SmartTodo Code Page modal — open them from the widget directly (which dismisses the widget's modal cleanly via the existing interceptor).
+
 ---
 
 ## R5 Scope — Test Infrastructure (was R4-093 + FU-4 deferred)

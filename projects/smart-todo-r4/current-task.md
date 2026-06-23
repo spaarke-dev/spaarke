@@ -12,8 +12,8 @@
 | **Project** | smart-todo-r4 — closeout wave (rounds 110-117) post UAT rounds 4-13 |
 | **Phase** | **Closeout Wave 14** — 8 tasks tasked + ready to execute. R4 main scope ALREADY MERGED (PR #406 squash commit `80f70a1d4` on master, 2026-06-23T13:21:19Z). |
 | **Worktree branch** | `work/smart-todo-r4-closeout` (NEW — created from master after PR #406 merge). Pushed to origin. |
-| **Active task** | **R4-110 — Structural Workspace height-chain audit + fix (FOUNDATIONAL)**. In progress via task-execute (FULL rigor). Static chain audit complete; user approved 4-step plan. |
-| **Next Action** | Apply 3 source edits + update pattern docs + rebuild + deploy + run console diagnostic. See "R4-110 audit findings + 4-step plan" below. |
+| **Active task** | **R4-110 — Structural Workspace height-chain audit + fix** — ✅ **COMPLETE**. UAT-validated (8-section checklist + multi-widget overlap re-test). Ready for PR + merge to master. |
+| **Next Action** | Commit follow-up → /push-to-github → /merge-to-master. After merge, redeploy from master per "spaarkedev1 deploys are master-only" durable rule. Next closeout task: R4-111 (remove widget Expand-to-Code-Page modal). |
 | **Pre-execution context** | The per-section `style: { height: 'calc(100vh - 200px)', minHeight: '560px' }` in `LegalWorkspace/workspaceConfig.tsx` is a workaround for an unresolved structural break in the workspace height chain above `WorkspaceShell.shell`. Round 7 of UAT attempted the fix and collapsed the workspace to 40px — that attempt and the working tactical-fix (round 11/12) are documented in `notes/handoffs/` and the git log on the merged work/smart-todo-r4-uat4-fixes branch (now deleted locally but findable via `git log master`). |
 
 ### What just shipped (PR #406 on master)
