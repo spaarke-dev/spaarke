@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-23 14:15Z (by context-handoff, post PR #406 merge + closeout planning)
+> **Last Updated**: 2026-06-23 (R4-110 in progress — 4-step chain audit fix applied to source + docs; build/deploy next)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -12,8 +12,8 @@
 | **Project** | smart-todo-r4 — closeout wave (rounds 110-117) post UAT rounds 4-13 |
 | **Phase** | **Closeout Wave 14** — 8 tasks tasked + ready to execute. R4 main scope ALREADY MERGED (PR #406 squash commit `80f70a1d4` on master, 2026-06-23T13:21:19Z). |
 | **Worktree branch** | `work/smart-todo-r4-closeout` (NEW — created from master after PR #406 merge). Pushed to origin. |
-| **Active task** | **R4-110 — Structural Workspace height-chain audit + fix (FOUNDATIONAL)**. Not started yet — task POML exists at `tasks/110-new2-structural-workspace-layout-audit.poml`. Next step: invoke `task-execute` skill with this task. |
-| **Next Action** | Say "work on task 110" or "continue" — Claude should invoke `task-execute` with `projects/smart-todo-r4/tasks/110-new2-structural-workspace-layout-audit.poml`. **DO NOT read POML directly + implement manually** — the task-execute skill is mandatory per root CLAUDE.md §4. |
+| **Active task** | **R4-110 — Structural Workspace height-chain audit + fix (FOUNDATIONAL)**. In progress via task-execute (FULL rigor). Static chain audit complete; user approved 4-step plan. |
+| **Next Action** | Apply 3 source edits + update pattern docs + rebuild + deploy + run console diagnostic. See "R4-110 audit findings + 4-step plan" below. |
 | **Pre-execution context** | The per-section `style: { height: 'calc(100vh - 200px)', minHeight: '560px' }` in `LegalWorkspace/workspaceConfig.tsx` is a workaround for an unresolved structural break in the workspace height chain above `WorkspaceShell.shell`. Round 7 of UAT attempted the fix and collapsed the workspace to 40px — that attempt and the working tactical-fix (round 11/12) are documented in `notes/handoffs/` and the git log on the merged work/smart-todo-r4-uat4-fixes branch (now deleted locally but findable via `git log master`). |
 
 ### What just shipped (PR #406 on master)
@@ -39,6 +39,26 @@
 6. **R4-115** — SpeDocumentViewer stale bundle cleanup (FU-6, 1-2 hrs). Legacy `sprk_todoflag` write path may still be in deployed bundle.
 7. **R4-116** — R4-092 final deploy notes + flip to ✅ (30 min, serial after 110-115).
 8. **R4-117** — R4-098 wrap-up + lessons-learned + repo-cleanup (2-3 hrs, serial after 116).
+
+### R4-110 audit findings + 4-step plan (executing now)
+
+**Static chain audit finding**: Post UAT rounds 11/12, the height chain from `App.appRoot` (`100vh` anchor) down through every layer to `SectionPanel.card` (grid-stretched via row `alignItems: stretch`) is structurally intact. The per-section `calc(100vh - 200px)` workaround on SmartTodo was not the root issue — it was forcing dominance over peers in the legacy LegalWorkspace 5-section dashboard. **One latent fragility remained**: `WorkspaceTabManagerComponent.content` was `display:block` with `flex:1`, which silently ignores child flex — meaning future widget authors who use `flex:1` instead of `height:100%` on their root would trip the same trap as smart-todo-r4 rounds 4-10.
+
+**4-step plan (user approved)**:
+1. ✅ `WorkspaceTabManagerComponent.content` — add `display:flex; flexDirection:column; minHeight:0` (chain robustness — future widgets can now use either `flex:1` or `height:100%`)
+2. ✅ `workspaceConfig.tsx` (LegalWorkspace default dashboard, Path B) — remove `style: { height: "calc(100vh - 200px)", minHeight: "560px" }`; keep `style: { minHeight: "560px" }` floor parity with todoRegistration.defaultHeight (Path A)
+3. ✅ `SmartTodoWidget.styles.ts` kanbanContainer — remove vestigial `minHeight: 400px` pixel floor (chain now delivers determinate height)
+4. ✅ Pattern docs (`BUILD-A-NEW-WORKSPACE-WIDGET.md §7.2` + `embedded-widget-sizing.md` HEIGHT contract + `SectionPanel.tsx` card comment) — updated to reflect post-R4-110 forgiving chain
+
+**Files modified (this task)**:
+- `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManagerComponent.tsx`
+- `src/solutions/LegalWorkspace/src/workspaceConfig.tsx`
+- `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts`
+- `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/SectionPanel.tsx` (comment refresh only)
+- `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` (§7.2 chain map + §7.2.3 + §7.2.5 anti-patterns)
+- `.claude/patterns/ui/embedded-widget-sizing.md` (HEIGHT contract + failure modes table)
+
+**Next**: build affected packages → deploy `sprk_spaarkeai` + `sprk_smarttodo` → user runs console diagnostic to verify chain holds.
 
 ### Files Modified This Session (closeout planning)
 
