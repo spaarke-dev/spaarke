@@ -1,0 +1,108 @@
+<task id="007" project="pcf-orphan-cleanup-r1">
+  <metadata>
+    <title>Cleanup-log finalize + inventory refresh</title>
+    <phase>P7</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>006</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, inventory, audit-trail, project-closeout</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation finalization only. No code, no Dataverse mutations. STANDARD rigor per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>(sequential)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task — depends on Task 006 completion to capture cross-environment state in the log.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+  </metadata>
+
+  <prompt>
+    Final project closeout. Three documentation deliverables:
+
+    1. **Finalize `notes/dataverse-cleanup-log.md`** — add a summary section at top covering: total controls deleted (across both envs), spot-test outcomes, any deviations encountered + how resolved, links to backup ZIPs used.
+
+    2. **Refresh [`pcf-deployment-inventory-2026-06-22.md`](../../ai-procedure-quality-r1/notes/inventory/pcf-deployment-inventory-2026-06-22.md)** — add a "## Cleanup complete — YYYY-MM-DD" footnote section that:
+       - Lists which controls were retired (mirrors FR-02 + FR-03 results)
+       - Updates §2's source-tree-PCF count (14 → 11)
+       - Updates §3's deployed-but-no-source count (10 → 0 — they're all gone)
+       - Notes VisualHost v1.4.16 → v1.4.17 with React 16 type pin alignment
+       - Marks PlaybookBuilderHost as remaining open item
+
+    3. **Refresh [`pcf-bundle-sizes.md`](../../ai-procedure-quality-r1/notes/inventory/pcf-bundle-sizes.md)** — remove the UQC, DTW, SDV entries from the baseline table; add a "Refreshed 2026-MM-DD" note. Bundle-size validator (`scripts/quality/Check-BundleSizeDrift.ps1`) should still pass against the trimmed baseline.
+
+    Verify all 12 success criteria from [`spec.md §3`](../spec.md#3-success-criteria) one by one — check the box if verified, document the verification method.
+  </prompt>
+
+  <role>Project closeout — documentation finalizer ensuring the audit trail is complete and the inventory artifacts reflect post-cleanup reality.</role>
+
+  <goal>
+    Three updated docs:
+    - `notes/dataverse-cleanup-log.md` — with summary section
+    - `../ai-procedure-quality-r1/notes/inventory/pcf-deployment-inventory-2026-06-22.md` — with "Cleanup complete" footnote
+    - `../ai-procedure-quality-r1/notes/inventory/pcf-bundle-sizes.md` — with UQC/DTW/SDV removed from baseline
+
+    Plus: all 12 SCs in spec.md §3 verified + checked off.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/pcf-orphan-cleanup-r1/spec.md</file>
+    <file purpose="design">projects/pcf-orphan-cleanup-r1/design.md</file>
+    <file purpose="claude-md">projects/pcf-orphan-cleanup-r1/CLAUDE.md</file>
+    <file purpose="log-source">projects/pcf-orphan-cleanup-r1/notes/dataverse-cleanup-log.md</file>
+    <file purpose="inventory-target">projects/ai-procedure-quality-r1/notes/inventory/pcf-deployment-inventory-2026-06-22.md</file>
+    <file purpose="bundle-target">projects/ai-procedure-quality-r1/notes/inventory/pcf-bundle-sizes.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-07">Cleanup-log per-control entries (covered in Tasks 003/006); finalize summary section here</constraint>
+    <constraint source="FR-08">Inventory + bundle-size refresh with completion footnotes</constraint>
+    <constraint source="SC-01..SC-12">All 12 success criteria must be verified before project marked complete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/pcf-orphan-cleanup-r1/spec.md</file>
+      <file>projects/pcf-orphan-cleanup-r1/notes/dataverse-cleanup-log.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read [`notes/dataverse-cleanup-log.md`](../notes/dataverse-cleanup-log.md) — review for completeness (one entry per control per environment).</step>
+    <step order="2">Append summary section to top of `dataverse-cleanup-log.md`: total counts (controls + canvas apps), environments touched, spot-test outcomes, any deviations encountered.</step>
+    <step order="3">Edit [`pcf-deployment-inventory-2026-06-22.md`](../../ai-procedure-quality-r1/notes/inventory/pcf-deployment-inventory-2026-06-22.md): add "## Cleanup complete — YYYY-MM-DD" footnote section per task description bullet 2.</step>
+    <step order="4">Edit [`pcf-bundle-sizes.md`](../../ai-procedure-quality-r1/notes/inventory/pcf-bundle-sizes.md): remove UQC, DTW, SDV from the "Committed Bundles" + "PCF Folders WITHOUT a Committed Bundle" tables. Add `Refreshed: YYYY-MM-DD` line under the baseline-date header.</step>
+    <step order="5">If `scripts/quality/Check-BundleSizeDrift.ps1` exists and references `pcf-bundle-baseline.json`: refresh that JSON to match the trimmed `pcf-bundle-sizes.md` table.</step>
+    <step order="6">Verify all 12 SCs in spec.md §3 — for each: confirm it's met, document the verification method, check the box. If any SC is NOT met, file in `notes/closeout-gaps.md`.</step>
+    <step order="7">Update [`current-task.md`](../current-task.md): Active Task = "None — project complete"; Next Action = "Project closeout review with owner."</step>
+    <step order="8">Update [`tasks/TASK-INDEX.md`](TASK-INDEX.md): Task 007 → ✅; all 7 tasks ✅.</step>
+    <step order="9">Update [`README.md`](../README.md) status line: "Phase 0 — Project Setup" → "COMPLETE — YYYY-MM-DD".</step>
+    <step order="10">Commit the doc updates with message: `docs(pcf-orphan-cleanup): finalize cleanup log + refresh inventory + close project`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">existing log + inventory docs</tool>
+    <tool name="Edit">dataverse-cleanup-log.md, pcf-deployment-inventory-2026-06-22.md, pcf-bundle-sizes.md, current-task.md, TASK-INDEX.md, README.md</tool>
+    <tool name="Bash">`git commit` for doc updates</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">finalized notes/dataverse-cleanup-log.md (with summary)</output>
+    <output type="docs">refreshed pcf-deployment-inventory-2026-06-22.md (with cleanup-complete footnote)</output>
+    <output type="docs">refreshed pcf-bundle-sizes.md (UQC/DTW/SDV removed)</output>
+    <output type="docs">notes/closeout-gaps.md (only if SCs not met)</output>
+    <output type="state-change">Project marked complete</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dataverse-cleanup-log.md has summary section + per-control entries for both environments</criterion>
+    <criterion testable="true">pcf-deployment-inventory-2026-06-22.md has "Cleanup complete" footnote section</criterion>
+    <criterion testable="true">pcf-bundle-sizes.md no longer lists UQC, DTW, SDV in any table</criterion>
+    <criterion testable="true">If pcf-bundle-baseline.json exists: refreshed to match trimmed pcf-bundle-sizes.md</criterion>
+    <criterion testable="true">All 12 SCs in spec.md §3 verified + boxes checked</criterion>
+    <criterion testable="true">README.md status reflects project completion</criterion>
+    <criterion testable="true">TASK-INDEX.md shows 7/7 tasks ✅</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (documentation only).
+  </execution>
+</task>
