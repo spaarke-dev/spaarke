@@ -151,7 +151,10 @@ public sealed class PlaybookOutputHandler
             case NodeDestination.Workspace:
                 return await HandleWorkspaceOutputAsync(dispatch, emitSseEvent, cancellationToken);
 
-            // Both / FormPrefill / SideEffect arms added by tasks 049 / 050 / 051.
+            case NodeDestination.Both:
+                return await HandleBothOutputAsync(dispatch, emitSseEvent, cancellationToken);
+
+            // FormPrefill / SideEffect arms added by tasks 050 / 051.
             case NodeDestination.Chat:
             default:
                 // Fall through to the OutputType switch below (existing pre-R6 behavior).
@@ -571,6 +574,74 @@ public sealed class PlaybookOutputHandler
             "PlaybookOutputHandler: workspace destination handled — tab_open emitted, " +
             "chat-token emission suppressed, playbook={PlaybookId}, widgetType={WidgetType}",
             dispatch.PlaybookId, dispatch.WidgetType);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Handles <see cref="NodeDestination.Both"/> — emits a <c>workspace.tab_open</c> SSE event
+    /// (same as the Workspace branch) AND a templated chat ack token so the chat sidebar
+    /// shows a brief confirmation that a Workspace result was produced.
+    ///
+    /// <para>
+    /// <b>Spec FR-14d Both acceptance</b>: Both-destination dispatch emits BOTH
+    /// <c>workspace.tab_open</c> SSE AND a chat ack token
+    /// (<c>"I've added a {playbookName} result to the Workspace."</c>). Streaming preserved
+    /// (the per-field <c>FieldDelta</c> stream continues to flow via the existing
+    /// <see cref="Services.Ai.PlaybookExecutionEngine"/> SSE path — this handler does NOT
+    /// proxy/transform that stream, mirroring the Workspace branch ADR-033 discipline).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Sequence</b> (per task 049 POML step 3 — tab_open → typing_start → ack token →
+    /// typing_end → streaming proceeds): the structural <c>workspace.tab_open</c> is emitted
+    /// FIRST so the frontend can mount the widget BEFORE the chat ack appears, then the chat
+    /// ack is emitted via the existing <see cref="EmitTextResponseAsync"/> helper which wraps
+    /// the token in <c>typing_start</c>/<c>typing_end</c> markers (matching the chat surface's
+    /// existing convention). Per-field streaming is the engine's responsibility and flows
+    /// independently on the <c>/api/ai/chat/sessions/{id}/summarize</c> endpoint after this
+    /// handler returns.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Ack template (hardcoded English per design.md §1.3)</b>:
+    /// <c>"I've added a {playbookName} result to the Workspace."</c> where
+    /// <c>{playbookName}</c> is <see cref="DispatchResult.PlaybookName"/> or the literal
+    /// fallback word <c>"playbook"</c> when null/whitespace. Per-playbook customization is
+    /// deferred until proven necessary (design.md WP3).
+    /// </para>
+    /// </summary>
+    /// <param name="dispatch">Matched dispatch result with <see cref="NodeDestination.Both"/>.</param>
+    /// <param name="emitSseEvent">SSE writer delegate.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Always true (handled — caller should emit <c>done</c> and return).</returns>
+    private async Task<bool> HandleBothOutputAsync(
+        DispatchResult dispatch,
+        Func<ChatSseEvent, CancellationToken, Task> emitSseEvent,
+        CancellationToken cancellationToken)
+    {
+        // (1) Structural workspace.tab_open SSE event — DRY reuse of the Workspace branch
+        // helper extracted by task 048 for exactly this purpose.
+        await EmitWorkspaceTabOpenAndStreamAsync(dispatch, emitSseEvent, cancellationToken);
+
+        // (2) Templated chat ack — defensive null fallback to the literal word "playbook"
+        // (design.md: hardcoded English; defer per-playbook customization until proven
+        // necessary). The fallback word "playbook" is what the user sees if the dispatch
+        // somehow lacks PlaybookName — never "null" / "" / "undefined".
+        var playbookName = string.IsNullOrWhiteSpace(dispatch.PlaybookName)
+            ? "playbook"
+            : dispatch.PlaybookName;
+
+        var ackMessage = $"I've added a {playbookName} result to the Workspace.";
+
+        // EmitTextResponseAsync emits typing_start → token → typing_end (matches the chat
+        // surface's existing convention used by Dialog/Navigation/Download/Insert ack flows).
+        await EmitTextResponseAsync(emitSseEvent, ackMessage, cancellationToken);
+
+        _logger.LogInformation(
+            "PlaybookOutputHandler: both destination handled — tab_open emitted + chat ack " +
+            "emitted, playbook={PlaybookId}, playbookName={PlaybookName}, widgetType={WidgetType}",
+            dispatch.PlaybookId, playbookName, dispatch.WidgetType);
 
         return true;
     }
