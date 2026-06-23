@@ -13,9 +13,9 @@
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
 | **Origin status** | Rebased onto `origin/master` + force-pushed clean. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
 | **Last commit (pushed)** | (pending — about to commit Wave 3-A + 034) |
-| **Phase status** | Phase 0 ✅ · Phase 1 ✅ · Phase 2 mostly closed (Waves 2-A ✅, 2-B ✅, 2-C: 034 scaffold ✅ + 036 ✅; 033/035 🟡 Power Apps; 037-040 still pending) · **Wave 3-A ✅ COMPLETE (045 + 046 + 047)** · Wave 3-B next (048-051 output handler cases) |
+| **Phase status** | Phase 0 ✅ · Phase 1 ✅ · Phase 2 mostly closed (Waves 2-A ✅, 2-B ✅, 2-C: 034 + 034b FUNCTIONAL ✅ + 036 ✅; 033/035 🟡 Power Apps; 037-040 still pending) · **Wave 3-A ✅ + Wave 3-B ✅ COMPLETE (048+049+050+051)** · Wave 3-C next (052-055 deployment + exit gate) |
 | **Execution mode** | Autonomous wave-by-wave; **STOPPED at Wave 2-C** pending owner direction on the cascading send-to-index endpoint blocker |
-| **Next Action** | Wave 3-B (tasks 048-051): output handler cases for the 4 destinations (Workspace + Both + FormPrefill + SideEffect). All FULL rigor; **parallel-safe: false** (CRIT-8 — same `PlaybookOutputHandler.cs` file). Plan: sequential dispatch 048 → 049 → 050 → 051 with main session verify between each. |
+| **Next Action** | Wave 3-C (tasks 052-055): Deploy-Playbook.ps1 JSON-schema validation gate + backward-compat verify + Phase 3 deploy + exit gate. Tasks 052-053 are STANDARD parallel-safe (different files); 054 is a deployment task; 055 is the verification exit gate. |
 
 ### Critical context (3-sentence version)
 

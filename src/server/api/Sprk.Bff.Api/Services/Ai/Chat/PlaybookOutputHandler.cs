@@ -154,7 +154,22 @@ public sealed class PlaybookOutputHandler
             case NodeDestination.Both:
                 return await HandleBothOutputAsync(dispatch, emitSseEvent, cancellationToken);
 
-            // FormPrefill / SideEffect arms added by tasks 050 / 051.
+            case NodeDestination.FormPrefill:
+                // FormPrefill: intentional no-op per spec FR-14d. Pre-fill flow
+                // (MatterPreFillService / ProjectPreFillService) is the consumer; NFR-07
+                // forbids modifying that flow from this handler. The arm exists for switch
+                // completeness so the dispatch is explicitly acknowledged (returns true)
+                // rather than falling through to the OutputType arms.
+                return HandleFormPrefillOutput(dispatch);
+
+            case NodeDestination.SideEffect:
+                // SideEffect: tier-1-safe telemetry only per spec FR-14d + ADR-015. No SSE
+                // event, no chat token, no user-visible content. Records a structured log
+                // event so ops can observe side-effect dispatch volume without surfacing
+                // anything to the user. ADR-015: only deterministic IDs / names — never
+                // userMessage / fileContent / userPrompt / JSON payloads / file paths.
+                return HandleSideEffectOutput(dispatch);
+
             case NodeDestination.Chat:
             default:
                 // Fall through to the OutputType switch below (existing pre-R6 behavior).
@@ -713,6 +728,95 @@ public sealed class PlaybookOutputHandler
         string TabId,
         string WidgetType,
         string? PlaybookId);
+
+    #endregion
+
+    #region FormPrefill Output (Task 050 / FR-14d)
+
+    /// <summary>
+    /// Handles <see cref="NodeDestination.FormPrefill"/> — intentional no-op preserve.
+    ///
+    /// <para>
+    /// <b>Spec FR-14d FormPrefill acceptance</b>: the pre-fill flow
+    /// (<c>MatterPreFillService</c> / <c>ProjectPreFillService</c> / <c>useAiPrefill</c>)
+    /// is the consumer that produces form-prefill output via its own pipeline. NFR-07
+    /// forbids modifying that flow from this handler. This arm exists for switch
+    /// completeness — without it the dispatch would fall through to the OutputType arms
+    /// (incorrect) or hit the default (silent no-op without an audit trail).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Contract</b>: emits NO SSE event, NO chat token, NO user-visible content.
+    /// Returns true so the caller emits <c>done</c> and stops (matching the Workspace /
+    /// Both arms' "handled" contract). A debug log records the dispatch for ops
+    /// observability without surfacing anything to the user.
+    /// </para>
+    /// </summary>
+    /// <param name="dispatch">Matched dispatch result with <see cref="NodeDestination.FormPrefill"/>.</param>
+    /// <returns>Always true (handled — caller should emit <c>done</c> and return).</returns>
+    private bool HandleFormPrefillOutput(DispatchResult dispatch)
+    {
+        _logger.LogDebug(
+            "PlaybookOutputHandler: form-prefill destination — no-op preserve per NFR-07 + FR-14d; " +
+            "pre-fill flow (MatterPreFillService / ProjectPreFillService) is consumer. " +
+            "playbookId={PlaybookId}, playbookName={PlaybookName}",
+            dispatch.PlaybookId, dispatch.PlaybookName);
+
+        return true;
+    }
+
+    #endregion
+
+    #region SideEffect Output (Task 051 / FR-14d)
+
+    /// <summary>
+    /// Handles <see cref="NodeDestination.SideEffect"/> — tier-1-safe telemetry only.
+    ///
+    /// <para>
+    /// <b>Spec FR-14d SideEffect acceptance</b>: side-effect destinations are for playbooks
+    /// that do background work (logging, telemetry, batch processing, Dataverse mutation,
+    /// notification dispatch) without user-visible output. The telemetry record makes these
+    /// dispatches observable for ops without surfacing them to the chat or workspace surface.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>ADR-015 binding (tier-1 governance)</b>: the structured log event carries ONLY
+    /// deterministic IDs + names — <c>playbookId</c>, <c>playbookName</c>, <c>widgetType</c>.
+    /// It MUST NOT carry <c>userMessage</c>, <c>fileContent</c>, <c>userPrompt</c>, recall
+    /// results, memory facts, JSON payloads, file paths, or any other tier-2+ content.
+    /// (<c>tenantId</c> / <c>durationMs</c> would be desirable but neither is in scope at
+    /// this handler — <see cref="DispatchResult"/> does not carry tenant identity and there
+    /// is no stopwatch on the SideEffect path. Both are intentionally omitted rather than
+    /// synthesized.)
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Telemetry mechanism</b>: emitted via <see cref="ILogger"/> with structured
+    /// properties — the established telemetry path for this handler (see the
+    /// <c>"PlaybookOutputHandler: ..."</c> log lines on Dialog / Navigation / Download /
+    /// Insert / Workspace / Both branches). Event name: <c>"playbook.side_effect_dispatched"</c>
+    /// per task 051 POML acceptance criteria.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Contract</b>: emits NO SSE event, NO chat token. Returns true so the caller emits
+    /// <c>done</c> and stops (matching the Workspace / Both / FormPrefill arms' "handled"
+    /// contract).
+    /// </para>
+    /// </summary>
+    /// <param name="dispatch">Matched dispatch result with <see cref="NodeDestination.SideEffect"/>.</param>
+    /// <returns>Always true (handled — caller should emit <c>done</c> and return).</returns>
+    private bool HandleSideEffectOutput(DispatchResult dispatch)
+    {
+        // ADR-015 tier-1 safe: ONLY deterministic IDs + names. Do NOT add userMessage /
+        // fileContent / userPrompt / recall results / JSON payloads / file paths here.
+        _logger.LogInformation(
+            "playbook.side_effect_dispatched — playbookId={PlaybookId}, " +
+            "playbookName={PlaybookName}, widgetType={WidgetType}",
+            dispatch.PlaybookId, dispatch.PlaybookName, dispatch.WidgetType);
+
+        return true;
+    }
 
     #endregion
 
