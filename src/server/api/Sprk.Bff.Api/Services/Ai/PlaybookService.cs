@@ -173,7 +173,8 @@ public class PlaybookService : IPlaybookService
 
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
         // NOTE: sprk_istemplate removed until Dataverse schema is updated
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
+        // NOTE: sprk_jps_matching_metadata added by chat-routing-redesign-r1 task 031/036 — required by FR-10/FR-12
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_jps_matching_metadata,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
         var url = $"{EntitySetName}({playbookId})?$select={select}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -197,6 +198,7 @@ public class PlaybookService : IPlaybookService
             Id = entity.Id,
             Name = entity.Name ?? string.Empty,
             Description = entity.Description,
+            JpsMatchingMetadata = entity.JpsMatchingMetadata,
             OutputTypeId = entity.OutputTypeId,
             IsPublic = entity.IsPublic ?? false,
             IsTemplate = entity.IsTemplate ?? false,
@@ -363,7 +365,8 @@ public class PlaybookService : IPlaybookService
         // Query by name - exact match, case-insensitive per Dataverse default
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
         // NOTE: sprk_istemplate removed until Dataverse schema is updated (causes 400 if column doesn't exist)
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
+        // NOTE: sprk_jps_matching_metadata added by chat-routing-redesign-r1 task 031/036 — required by FR-10/FR-12
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_jps_matching_metadata,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
         var filter = $"sprk_name eq '{EscapeODataString(name)}'";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
 
@@ -420,6 +423,7 @@ public class PlaybookService : IPlaybookService
             Id = entity.Id,
             Name = entity.Name ?? string.Empty,
             Description = entity.Description,
+            JpsMatchingMetadata = entity.JpsMatchingMetadata,
             OutputTypeId = entity.OutputTypeId,
             IsPublic = entity.IsPublic ?? false,
             IsTemplate = entity.IsTemplate ?? false,
@@ -989,6 +993,14 @@ public class PlaybookService : IPlaybookService
 
         [JsonPropertyName("sprk_description")]
         public string? Description { get; set; }
+
+        /// <summary>
+        /// Raw JSON content from the Dataverse <c>sprk_jps_matching_metadata</c> Memo column
+        /// (chat-routing-redesign-r1 task 031). Consumed by the embedding composer (FR-10) and
+        /// the indexing validation gate (FR-12).
+        /// </summary>
+        [JsonPropertyName("sprk_jps_matching_metadata")]
+        public string? JpsMatchingMetadata { get; set; }
 
         [JsonPropertyName("sprk_ispublic")]
         public bool? IsPublic { get; set; }

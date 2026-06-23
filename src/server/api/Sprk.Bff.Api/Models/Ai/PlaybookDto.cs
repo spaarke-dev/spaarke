@@ -99,6 +99,15 @@ public record PlaybookResponse
     public string? Description { get; init; }
 
     /// <summary>
+    /// Raw JSON content from the Dataverse <c>sprk_jps_matching_metadata</c> Memo column
+    /// (added by chat-routing-redesign-r1 task 031). Null when the playbook has not been
+    /// backfilled with JPS matching metadata. Consumed by
+    /// <c>PlaybookEmbeddingService.ComposeContentText</c> (FR-10) and the validation gate
+    /// (FR-12).
+    /// </summary>
+    public string? JpsMatchingMetadata { get; init; }
+
+    /// <summary>
     /// Output type ID.
     /// </summary>
     public Guid? OutputTypeId { get; init; }

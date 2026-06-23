@@ -250,6 +250,13 @@ public static class AiModule
         // ADR-010: Concrete type, no interface (single implementation).
         services.AddScoped<PendingPlanManager>();
 
+        // PlaybookIndexInputValidator — FR-12 validation gate for the playbook embedding
+        // trigger endpoint (chat-routing-redesign-r1 task 036). Stateless; registered
+        // unconditionally because the trigger endpoint is mapped unconditionally.
+        // ADR-010: concrete class, no interface (single implementation, no test seam needed
+        // beyond constructor instantiation in unit tests).
+        services.AddSingleton<PlaybookIndexInputValidator>();
+
         // PlaybookIndexingBackgroundService — hosted service (ADR-001 mandate, no Azure Functions).
         // Processes playbook embedding indexing requests from a bounded Channel<string>.
         // Factory-instantiates PlaybookIndexingService internally (ADR-010: no new DI registration
@@ -271,7 +278,7 @@ public static class AiModule
 //                                            updated task 011 Phase 1b Tier 1, 2026-06-01)
 // ADR-010 Limit: 15 non-framework registrations per module
 // =============================================================================
-// UNCONDITIONAL REGISTRATIONS — 11 / 15 (5 promoted out — see Promoted block below)
+// UNCONDITIONAL REGISTRATIONS — 12 / 15 (5 promoted out — see Promoted block below)
 // -----------------------------------------------------------------------------
 //  1. AddKeyedSingleton<IChatClient>("raw")                — raw OpenAI client (task 071)
 //  2. AddChatClient<IChatClient>                           — OpenAI pipeline client (AIPL-050)
@@ -284,6 +291,7 @@ public static class AiModule
 //  9. AddScoped<IChatContextProvider, PlaybookChatContextProvider> — playbook context (AIPL-051)
 // 10. AddScoped<ChatContextMappingService>                 — context mapping (AIPL-053)
 // 11. AddScoped<PendingPlanManager>                        — pending plan Redis storage (task 071)
+// 12. AddSingleton<PlaybookIndexInputValidator>            — FR-12 validation gate (chat-routing-redesign-r1 task 036)
 // -----------------------------------------------------------------------------
 // PROMOTED TO UNCONDITIONAL (in AnalysisServicesModule.AddUnconditionalChatAndNotificationServices)
 //   — D-09 §2 B4/B5/L5, task 011 Phase 1b Tier 1, 2026-06-01

@@ -164,7 +164,8 @@ public sealed class PlaybookIndexingService
                 TriggerPhrases = playbook.TriggerPhrases?.ToList() ?? [],
                 RecordType = playbook.RecordType ?? string.Empty,
                 EntityType = playbook.EntityType ?? string.Empty,
-                Tags = ParseTags(playbook)
+                Tags = ParseTags(playbook),
+                JpsMatchingMetadata = playbook.JpsMatchingMetadata,
             };
 
             // Step 3: Use PlaybookEmbeddingService to generate embedding and upsert

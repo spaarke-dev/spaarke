@@ -12,10 +12,10 @@
 | **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
 | **Origin status** | Rebased onto `origin/master` + force-pushed clean. Draft PR open: https://github.com/spaarke-dev/spaarke/pull/409 |
-| **Last commit (pushed)** | `1347b8c92` — task 032 PlaybookEmbeddingService extension (FR-10) |
-| **Phase status** | Phase 0 ✅ · Phase 1 ✅ · Wave 2-A ✅ · Wave 2-B partial (032 ✅; 033 🚫) · **Wave 2-C SCOPE-BLOCKED** (034 doable; 035 partial-blocked; 036 BLOCKED) |
+| **Last commit (pushed)** | (pending — about to commit task 036 + 032 loader-fix bundle) |
+| **Phase status** | Phase 0 ✅ · Phase 1 ✅ · Wave 2-A ✅ · Wave 2-B ✅ (032 ✅; loader-gap closed via 036 bundle; 033 🟡 partial-blocked Power Apps) · **Wave 2-C in progress** (036 ✅; 034 next; 035 🟡 partial-blocked Power Apps) |
 | **Execution mode** | Autonomous wave-by-wave; **STOPPED at Wave 2-C** pending owner direction on the cascading send-to-index endpoint blocker |
-| **Next Action** | **OWNER DECISION (refined 2026-06-22)** — original endpoint-block was wrong (endpoint exists at `POST /api/ai/playbooks/{id}/index`); separately, task 032 has a loader gap (extension dormant in production). See `notes/handoffs/032-loader-gap-and-036-bundling.md` for E1/E2/E3 options. Recommended **E2**: dispatch tight-scope sub-agent for the 6-change bundle (3-5h work; covers FR-10 production wiring + FR-12 validation gate); main session does build/test/publish/commit. Phase 3 Wave 3-A (045/046/047) is unaffected — pivotable at any time. |
+| **Next Action** | Wave 2-C task 034 (drift detection background job — FULL rigor; ~4h scope; ADR-004 Service Bus pattern). Or pivot to Phase 3 Wave 3-A (045/046/047 — 3 parallel-safe BFF model tasks). Both unblocked. |
 
 ### Critical context (3-sentence version)
 
