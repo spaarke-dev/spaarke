@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Sessions;
 
@@ -42,18 +43,21 @@ public class SessionPersistenceService : ISessionPersistenceService
     private readonly CosmosClient _cosmosClient;
     private readonly string _databaseName;
     private readonly ILogger<SessionPersistenceService> _logger;
+    private readonly IContextEventEmitter _contextEventEmitter;
 
     public SessionPersistenceService(
         IDistributedCache cache,
         CosmosClient cosmosClient,
         IConfiguration configuration,
-        ILogger<SessionPersistenceService> logger)
+        ILogger<SessionPersistenceService> logger,
+        IContextEventEmitter contextEventEmitter)
     {
         _cache = cache;
         _cosmosClient = cosmosClient;
         _databaseName = configuration["CosmosPersistence:DatabaseName"]
             ?? throw new InvalidOperationException("CosmosPersistence:DatabaseName is not configured.");
         _logger = logger;
+        _contextEventEmitter = contextEventEmitter ?? throw new ArgumentNullException(nameof(contextEventEmitter));
     }
 
     // =========================================================================
@@ -317,6 +321,20 @@ public class SessionPersistenceService : ISessionPersistenceService
         _logger.LogInformation(
             "SessionPersistenceService.UpdateUploadedFilesAsync: persisted manifest for session {SessionId} (tenant={TenantId}, fileCount={FileCount}, durationMs={DurationMs})",
             sessionId, tenantId, enrichedFiles.Count, stopwatch.ElapsedMilliseconds);
+
+        // chat-routing-redesign-r1 task 074 — emit context.upload_persisted (manifest write-through done).
+        // ADR-015 Tier 1 SAFE: durationMs + IDs only. The fileId field is the MOST RECENT enriched
+        // file (or empty if the manifest is empty — should not happen in practice but defensive).
+        // The per-file emission contract is "one event per pipeline" — bulk persists carry the last
+        // file as the representative anchor. Future per-file granular events can be added by
+        // emitting inside the orchestrator's per-file enrichment loop.
+        var sessionGuid = Guid.TryParse(sessionId, out var parsedSessionGuid) ? parsedSessionGuid : (Guid?)null;
+        var representativeFileId = enrichedFiles.Count > 0 ? enrichedFiles[enrichedFiles.Count - 1].FileId : string.Empty;
+        _contextEventEmitter.UploadPersisted(
+            sessionId: sessionGuid,
+            fileId: representativeFileId,
+            durationMs: stopwatch.ElapsedMilliseconds,
+            tenantId: tenantId);
 
         return true;
     }

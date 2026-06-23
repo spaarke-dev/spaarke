@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Sessions;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Sessions;
@@ -45,6 +46,7 @@ public class SessionPersistenceServiceUploadedFilesTests
     private readonly Mock<CosmosClient> _cosmosClientMock;
     private readonly Mock<Container> _containerMock;
     private readonly Mock<ILogger<SessionPersistenceService>> _loggerMock;
+    private readonly Mock<IContextEventEmitter> _contextEventEmitterMock;
     private readonly IConfiguration _configuration;
     private readonly SessionPersistenceService _sut;
 
@@ -54,6 +56,10 @@ public class SessionPersistenceServiceUploadedFilesTests
         _cosmosClientMock = new Mock<CosmosClient>();
         _containerMock = new Mock<Container>();
         _loggerMock = new Mock<ILogger<SessionPersistenceService>>();
+        // chat-routing-redesign-r1 task 074 — IContextEventEmitter is now a required ctor dep
+        // for context.upload_persisted emission. Provide a Loose mock here; the dedicated
+        // emission tests live in UploadPipelineTelemetryTests.cs.
+        _contextEventEmitterMock = new Mock<IContextEventEmitter>();
 
         _configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -71,7 +77,8 @@ public class SessionPersistenceServiceUploadedFilesTests
             _cacheMock.Object,
             _cosmosClientMock.Object,
             _configuration,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            _contextEventEmitterMock.Object);
     }
 
     // =========================================================================
