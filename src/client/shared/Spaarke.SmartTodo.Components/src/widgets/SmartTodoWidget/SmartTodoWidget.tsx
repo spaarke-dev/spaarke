@@ -749,7 +749,14 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     const assignedToContactId =
       quickAddAssignedTo.trim() && quickAddAssignedToContactId ? quickAddAssignedToContactId : contactId || '';
     if (assignedToContactId) {
-      payload['sprk_assignedto@odata.bind'] = `/contacts(${assignedToContactId})`;
+      // UAT 2026-06-22 round 13: bind key MUST be the navigation property
+      // name (PascalCase `sprk_AssignedTo`), not the lookup column logical
+      // name (lowercase `sprk_assignedto`). Dataverse rejects the lowercase
+      // form with: "An undeclared property 'sprk_assignedto' which only has
+      // property annotations in the payload but no property value was
+      // found in the payload." Verified via EntityDefinitions metadata:
+      // ReferencingEntityNavigationPropertyName = "sprk_AssignedTo".
+      payload['sprk_AssignedTo@odata.bind'] = `/contacts(${assignedToContactId})`;
     }
     if (quickAddDueDate) {
       // Date input gives YYYY-MM-DD; treat as end-of-day local.

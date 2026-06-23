@@ -649,7 +649,12 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       // Bind set name is `contacts` (plural of the OOB contact table).
       const assignedToContactId = detail.assignedToId || contactId || '';
       if (assignedToContactId) {
-        payload['sprk_assignedto@odata.bind'] = `/contacts(${assignedToContactId})`;
+        // UAT 2026-06-22 round 13: bind key MUST be PascalCase nav-prop
+        // name `sprk_AssignedTo` (verified via EntityDefinitions metadata),
+        // not the lookup column logical name `sprk_assignedto`. The
+        // lowercase form fails with "An undeclared property
+        // 'sprk_assignedto' which only has property annotations..."
+        payload['sprk_AssignedTo@odata.bind'] = `/contacts(${assignedToContactId})`;
       }
       if (detail.dueDate) {
         const [y, m, d] = detail.dueDate.split('-').map(Number);
