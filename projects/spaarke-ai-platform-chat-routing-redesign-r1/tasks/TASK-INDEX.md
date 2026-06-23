@@ -370,7 +370,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|
-| 100 | Tier 5 wrapper handlers over `spaarke-session-files` + `spaarke-files-index` + `spaarke-rag-references` ONLY | 🔲📝 | FULL | true | 4-O | 099 | `bff-api`, `services`, `azure-search`, `architecture-binding` |
+| 100 | Tier 5 wrapper handlers over `spaarke-session-files` + `spaarke-files-index` + `spaarke-rag-references` ONLY | ✅ | FULL | true | 4-O | 099 | `bff-api`, `services`, `azure-search`, `architecture-binding` — MVP-cut scope (matter + knowledge handlers deferred per Q5b): inline binding-NEGATIVE guard `EnsureNotInsightsIndex` at session-routing branch in `RagService.cs` (operator-settable `AiSearchOptions.SessionFilesIndexName` is the misconfig risk; runtime guard fires `InvalidOperationException` with §5.2.1/FR-36/allowed-indexes message); 4 unit tests (guard fires, case-insensitive, happy path, scope-of-guard); `IRagService.SearchAsync` XML doc declares §5.2.1 contract; grep verified: `spaarke-insights-index` ZERO hits in `Services/Ai/Memory/` + ZERO in `Services/Ai/Handlers/Recall*`; 5 hits in RagService.cs are exclusively the NEGATIVE guard reference |
 | 101 | `ChatDataverseRepository` → `IChatAuditRepository` rename + retire placeholder methods (FR-25) | 🔲📝 | FULL | true | 4-P | 100 | `bff-api`, `services`, `refactoring` |
 | 102 | Verify `sprk_aichatmessage` is write-only via grep | 🔲📝 | STANDARD | true | 4-Q | 101 | `verification`, `dataverse` |
 | 103 | Phase 4 integration test suite (T-002 + T-004 + T-005 + T-009) — **cross-wave dep on 064** (frontend build) | 🔲📝 | STANDARD | true | 4-R | 064,102 | `testing`, `integration-test` |
