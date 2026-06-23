@@ -8,7 +8,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { ExtractedEntities } from './useAiSummary';
+import type { ExtractedEntities } from '@spaarke/ui-components/src/hooks';
 
 /**
  * Record type options for filtering

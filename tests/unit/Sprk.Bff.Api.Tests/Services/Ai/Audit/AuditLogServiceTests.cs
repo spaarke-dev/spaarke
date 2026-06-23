@@ -345,7 +345,7 @@ public class AuditLogServiceTests
         containerMock
             .Setup(c => c.CreateItemAsync(
                 It.IsAny<AuditEntry>(),
-                It.IsAny<PartitionKey>(),
+                It.IsAny<PartitionKey?>(),
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<AuditEntry, PartitionKey?, ItemRequestOptions, CancellationToken>(

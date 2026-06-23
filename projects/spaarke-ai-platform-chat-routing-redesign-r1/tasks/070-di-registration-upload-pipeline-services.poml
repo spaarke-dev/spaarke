@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>DI registration for 4 upload pipeline services in AiModule.cs</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4b)</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>066,067,068,069</dependencies>
+    <blocks>071,072,073,074</blocks>
+    <tags>bff-api, di, config, ADR-010</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Single-file DI registration; tags include `bff-api`; CRIT-3 fix per TASK-INDEX audit history</rigor-reason>
+    <parallel-group>4-B'</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>CRIT-3 fix — single sequential edit to `AiModule.cs` resolves the race condition where 066/067/068/069 would otherwise touch the same DI registration file in parallel</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Register the 4 upload-pipeline services authored in wave 4-B as `Scoped` DI services in `AiModule.cs` (or whichever module is the canonical AI-service registration site — find via grep). Resolves CRIT-3 race condition (per TASK-INDEX audit history). Adhere to ADR-010 (concrete-class binding; no `IServiceProvider.GetService&lt;T&gt;()`). Asymmetric-registration anti-pattern check: these services are NOT feature-gated; ALL 4 register unconditionally.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in DI module registration + ADR-010 + ADR-032 kill-switch patterns.</role>
+
+  <goal>
+    `AiModule.cs` (or canonical AI DI site) has 4 new `services.AddScoped&lt;IInterface, Impl&gt;()` lines for: `ISessionFileEnrichmentService → SessionFileEnrichmentService`, `IFileClassificationService → FileClassificationService`, `IFileSummarizationService → FileSummarizationService`, `IFileManifestExtractor → FileManifestExtractor`. Build passes. WebApplicationFactory-based integration test confirms all 4 resolve.
+  </goal>
+
+  <context>
+    <background>
+      Per TASK-INDEX audit history, original waves had 4 parallel agents (066-069) each touching `AiModule.cs` for their own DI registration — guaranteed race condition. CRIT-3 fix split DI into this single sequential task. Per CLAUDE.md §10 bullet 6 + ADR-032 anti-pattern: services that map unconditionally must have unconditional service registration; these 4 services are upload-pipeline-core and ALL endpoints that accept uploads must have all 4 available, so unconditional registration is correct.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Modules/AiModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionFileEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/FileClassificationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/FileSummarizationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/FileManifestExtractor.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Concrete-class injection — register `services.AddScoped&lt;IInterface, ConcreteImpl&gt;()`. Do NOT register only the concrete or only the interface.</constraint>
+    <constraint source="ADR-032">Asymmetric-registration anti-pattern check: ALL 4 services register unconditionally (no feature flag guard).</constraint>
+    <constraint source="ADR-029">Publish-size measurement after wiring; report delta vs Phase 4b start.</constraint>
+    <constraint source="project">CRIT-3 fix — this task is the sole DI edit for wave 4-B. 066/067/068/069 MUST NOT have touched `AiModule.cs`.</constraint>
+    <constraint source="bff-extensions.md F.1">Static-scan recipe: if any of these services are later feature-gated, apply ADR-032 P1/P2/P3 (Null-Object). For v1 unconditional registration, no Null-Object needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep for `AiModule.cs` or peer module registration site to confirm canonical location.</step>
+    <step order="2">Read `AiModule.cs`. Identify the section where session-services / chat-services are registered.</step>
+    <step order="3">Verify 066-069 did NOT touch `AiModule.cs` (grep recent commits or read file mtime).</step>
+    <step order="4">Add 4 `services.AddScoped&lt;IXxx, Xxx&gt;()` lines in the appropriate section. Co-locate with peer session services for clarity.</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/`.</step>
+    <step order="6">Author / extend WebApplicationFactory integration test asserting all 4 interfaces resolve from DI scope. Place in `tests/integration/Sprk.Bff.Api.IntegrationTests/Di/UploadPipelineDiTests.cs` (or peer location).</step>
+    <step order="7">Run `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/Di/`.</step>
+    <step order="8">Measure BFF publish size; report cumulative delta for waves 4-B + 4-B' to notes/handoffs/070-bff-publish-delta.md.</step>
+    <step order="9">code-review + adr-check.</step>
+    <step order="10">Update TASK-INDEX.md: 070 → ✅; wave 4-B' complete → 4-C may proceed.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Locate AiModule.cs + verify 066-069 didn't touch it</tool>
+    <tool name="Read">AiModule.cs</tool>
+    <tool name="Edit">Add 4 AddScoped lines</tool>
+    <tool name="Write">DI integration test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Modules/AiModule.cs — 4 AddScoped lines added</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Di/UploadPipelineDiTests.cs (NEW or extended)</output>
+    <output type="docs">notes/handoffs/070-bff-publish-delta.md — cumulative wave 4-B+4-B' delta</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "AddScoped.*SessionFileEnrichmentService" src/server/api/Sprk.Bff.Api/Modules/` returns 1 hit.</criterion>
+    <criterion testable="true">Same for the other 3 services.</criterion>
+    <criterion testable="true">No service registered conditionally inside `if (flag) {...}` block.</criterion>
+    <criterion testable="true">`dotnet build` exits 0.</criterion>
+    <criterion testable="true">DI integration test exits 0; all 4 interfaces resolve.</criterion>
+    <criterion testable="true">Cumulative BFF publish delta reported; ≤60 MB ceiling.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    CRIT-3 fix per TASK-INDEX audit history. The asymmetric-registration anti-pattern (CLAUDE.md §10 F.1) is satisfied: ALL endpoints that handle uploads will use ALL 4 services, so all 4 register unconditionally.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

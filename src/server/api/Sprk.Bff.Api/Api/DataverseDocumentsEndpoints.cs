@@ -6,6 +6,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Api;
@@ -23,13 +24,21 @@ public static class DataverseDocumentsEndpoints
             .RequireRateLimiting("dataverse-query");
 
         // POST /api/v1/documents - Create new document
+        // R3 task 082 (2026-06-22): Publishes MembershipChangedEvent for implicit
+        // ownerid Lookup per event-source-inventory.md §3B + spec FR-2P2.6.
+        // Fire-and-forget per Q2: publisher never throws; mutation succeeds even
+        // if publish fails (nightly recon task 085 is the backstop).
         documentsGroup.MapPost("/", async (
             [FromBody] CreateDocumentRequest request,
             IDocumentDataverseService dataverseService,
+            IMembershipEventPublisher membershipEventPublisher,
             ILogger<Program> logger,
-            HttpContext context) =>
+            HttpContext context,
+            CancellationToken ct) =>
         {
             var traceId = context.TraceIdentifier;
+            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? context.User.FindFirstValue("oid");
 
             try
             {
@@ -41,6 +50,32 @@ public static class DataverseDocumentsEndpoints
                 var createdDocument = await dataverseService.GetDocumentAsync(documentId);
 
                 logger.LogInformation("Document created successfully with ID: {DocumentId}", documentId);
+
+                // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
+                // Per event-source-inventory §3B, document Create has only the
+                // implicit ownerid Lookup (defaulted by Dataverse to the OBO
+                // caller). Publish Added event so the junction-updater (task 084)
+                // + nightly recon (task 085) observe the new association.
+                // When MembershipEventPublisherOptions.Enabled=false (default),
+                // the NullMembershipEventPublisher peer logs + returns (ADR-032 P2).
+                if (Guid.TryParse(documentId, out var documentGuid)
+                    && Guid.TryParse(userId, out var callerOid))
+                {
+                    var membershipEvent = new MembershipChangedEvent
+                    {
+                        PersonId = callerOid,
+                        PersonIdType = PersonIdentityType.User,
+                        EntityLogicalName = "sprk_document",
+                        EntityRecordId = documentGuid,
+                        SourceField = "ownerid",
+                        Role = "owner",
+                        MutationType = MembershipMutationType.Added,
+                        CorrelationId = traceId,
+                        OccurredOnUtc = DateTime.UtcNow,
+                    };
+
+                    _ = membershipEventPublisher.PublishAsync(membershipEvent, ct);
+                }
 
                 return TypedResults.Created($"/api/v1/documents/{documentId}", new
                 {
@@ -227,6 +262,22 @@ public static class DataverseDocumentsEndpoints
                 await dataverseService.DeleteDocumentAsync(id);
 
                 logger.LogInformation("Document deleted successfully: {DocumentId}", id);
+
+                // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
+                // Per event-source-inventory §3B, document Delete should publish
+                // Removed events for every Lookup populated on the deleted row.
+                // BUT: DocumentEntity does NOT expose ownerid/systemuserid (the
+                // only identity Lookup on sprk_document per inventory) — adding
+                // that field requires expanding IDocumentDataverseService, which
+                // is out of scope for this task. Per Q2 fire-and-forget + recon
+                // backstop (FR-2P2.7 task 085), the nightly reconciliation job
+                // scans for orphaned junction rows (rows whose source entity no
+                // longer exists) and removes them. This is the load-bearing path
+                // per inventory §6.1 + the design contract for Delete cleanup.
+                // The 24h max-staleness window applies (recon cadence).
+                logger.LogDebug(
+                    "Document {DocumentId} deleted — junction row cleanup deferred to nightly recon (FR-2P2.7).",
+                    id);
 
                 return TypedResults.NoContent();
             }

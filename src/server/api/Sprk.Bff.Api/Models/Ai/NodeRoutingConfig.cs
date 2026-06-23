@@ -60,7 +60,19 @@ public enum NodeDestination
     /// rendering. Used for playbooks whose primary product is a Dataverse mutation or
     /// system action rather than a conversational reply.
     /// </summary>
-    SideEffect
+    SideEffect,
+
+    /// <summary>
+    /// Dual destination — output is routed BOTH to the chat conversation surface AND to
+    /// a workspace tab via <c>StructuredOutputStreamWidget</c>. Requires
+    /// <see cref="NodeRoutingConfig.WidgetType"/> to be set when routing the workspace
+    /// half. Added in chat-routing-redesign-r1 (FR-14a / WP3) to support playbooks whose
+    /// output must appear in both surfaces (e.g. an answer rendered inline in chat while
+    /// a structured artifact is also streamed into a workspace widget). Inserted at the
+    /// end of the enum list to preserve the numeric ordinals of the four pre-existing
+    /// values bit-for-bit (FR-14a).
+    /// </summary>
+    Both
 }
 
 /// <summary>
@@ -253,9 +265,10 @@ public sealed class NodeDestinationJsonConverter : JsonConverter<NodeDestination
             "workspace" => NodeDestination.Workspace,
             "form-prefill" => NodeDestination.FormPrefill,
             "side-effect" => NodeDestination.SideEffect,
+            "both" => NodeDestination.Both,
             _ => throw new JsonException(
                 $"Unknown NodeDestination value: '{value}'. Expected one of: " +
-                "chat, workspace, form-prefill, side-effect.")
+                "chat, workspace, form-prefill, side-effect, both.")
         };
     }
 
@@ -267,6 +280,7 @@ public sealed class NodeDestinationJsonConverter : JsonConverter<NodeDestination
             NodeDestination.Workspace => "workspace",
             NodeDestination.FormPrefill => "form-prefill",
             NodeDestination.SideEffect => "side-effect",
+            NodeDestination.Both => "both",
             _ => throw new JsonException($"Unknown NodeDestination enum value: {value}")
         };
         writer.WriteStringValue(wire);

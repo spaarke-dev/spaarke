@@ -678,7 +678,7 @@ export interface ISprkChatProps {
    * The host receives the base outbound body (`{ message, documentId, attachments? }`)
    * and MAY return:
    *   - the body unchanged (no decoration);
-   *   - a NEW body with additional fields (e.g. `commandIntent`, `resolvedReferences`);
+   *   - a NEW body with additional fields (e.g. `intentHint`, `resolvedReferences`);
    *   - `null` to CANCEL the BFF send (hard-slash commands like `/clear`, `/help`,
    *     `/export` are dispatched client-side and produce no LLM round-trip).
    *

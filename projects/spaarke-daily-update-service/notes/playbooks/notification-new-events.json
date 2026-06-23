@@ -3,7 +3,7 @@
   "playbook": {
     "id": "NP-005",
     "name": "New Events on Matters/Projects",
-    "description": "Notifies users when new calendar events (appointments, meetings) have been created or updated on their assigned matters or projects since the last check. Queries appointment activity records linked to matters and projects where the user is a team member, filtered by the configurable timeWindow parameter.",
+    "description": "Notifies users when new calendar events (appointments, meetings) have been created or updated on their assigned matters or projects since the last check. Queries appointment activity records linked to matters where the user is a team member (owner, assigned attorney, assigned paralegal), filtered by the configurable timeWindow parameter.",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,
@@ -49,23 +49,40 @@
       }
     },
     {
+      "name": "Lookup My Matters",
+      "nodeType": "Workflow",
+      "actionType": 52,
+      "canvasType": "lookupUserMembership",
+      "outputVariable": "myMatters",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 52,
+        "entityType": "sprk_matter",
+        "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+        "includeRelated": false,
+        "description": "Resolve the executing user's matter memberships (owner + assigned attorney + assigned paralegal). Mirrors the canonical pattern established by notification-new-documents.json (R3 FR-1C.1 / A1 defect). Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
+      }
+    },
+    {
       "name": "Query New Events",
       "nodeType": "Workflow",
       "actionType": 22,
       "canvasType": "updateRecord",
       "outputVariable": "newEvents",
-      "positionX": 350,
+      "positionX": 450,
       "positionY": 200,
-      "dependsOn": ["Start"],
+      "dependsOn": ["Lookup My Matters"],
       "configJson": {
         "__actionType": 22,
         "queryMode": true,
         "entityLogicalName": "appointment",
-        "fetchXml": "<fetch top='50'><entity name='appointment'><attribute name='subject'/><attribute name='scheduledstart'/><attribute name='scheduledend'/><attribute name='location'/><attribute name='createdon'/><attribute name='modifiedon'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><filter type='or'><condition attribute='createdon' operator='ge' value='{{sinceTimestamp}}'/><condition attribute='modifiedon' operator='ge' value='{{sinceTimestamp}}'/></filter></filter><order attribute='scheduledstart' descending='false'/></entity></fetch>",
+        "fetchXml": "<fetch top='50'><entity name='appointment'><attribute name='subject'/><attribute name='scheduledstart'/><attribute name='scheduledend'/><attribute name='location'/><attribute name='createdon'/><attribute name='modifiedon'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><condition attribute='regardingobjectid' operator='in' value='{{joinIds myMatters.ids}}'/><filter type='or'><condition attribute='createdon' operator='ge' value='{{sinceTimestamp}}'/><condition attribute='modifiedon' operator='ge' value='{{sinceTimestamp}}'/></filter></filter><order attribute='scheduledstart' descending='false'/></entity></fetch>",
         "parameters": {
           "sinceTimestamp": "{{timeWindow}}"
         },
-        "description": "Retrieve appointments linked to user's matters or projects that were created or modified within the configured time window"
+        "description": "Retrieve appointments whose regardingobjectid is in the user's matter membership set (resolved via myMatters.ids) and that were created or modified within the configured time window."
       }
     },
     {
@@ -74,7 +91,7 @@
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasNewEvents",
-      "positionX": 600,
+      "positionX": 700,
       "positionY": 200,
       "dependsOn": ["Query New Events"],
       "configJson": {
@@ -89,7 +106,7 @@
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "notification",
-      "positionX": 900,
+      "positionX": 1000,
       "positionY": 150,
       "dependsOn": ["Has New Events?"],
       "configJson": {
@@ -120,7 +137,8 @@
     }
   ],
   "edges": [
-    { "source": "Start", "target": "Query New Events" },
+    { "source": "Start", "target": "Lookup My Matters" },
+    { "source": "Lookup My Matters", "target": "Query New Events" },
     { "source": "Query New Events", "target": "Has New Events?" },
     { "source": "Has New Events?", "target": "Create Notification", "condition": "true" }
   ]

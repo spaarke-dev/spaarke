@@ -22,10 +22,33 @@ public interface IRagService
     /// <summary>
     /// Search for relevant knowledge documents using hybrid search.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>chat-routing-redesign-r1 task 100 — Architecture §5.2.1 binding-NEGATIVE
+    /// (spec FR-36)</strong>: when this method is called with
+    /// <see cref="RagSearchOptions.SessionId"/> set (chat-memory T2/T5 retrieval), the
+    /// implementation routes the underlying SearchClient to the chat-domain session-files
+    /// index (<see cref="Sprk.Bff.Api.Configuration.AiSearchOptions.SessionFilesIndexName"/>,
+    /// default <c>spaarke-session-files</c>). The session-scoped chat-memory retrieval path
+    /// MUST NOT target <c>spaarke-insights-index</c> — that index is owned by the Insights
+    /// subsystem and using it from chat-memory paths is a categorical-mismatch design
+    /// violation. The session-scoped routing branch enforces this as a fail-fast guard
+    /// (<see cref="InvalidOperationException"/>); operators MUST configure
+    /// <c>SessionFilesIndexName</c> to one of: <c>spaarke-session-files</c>,
+    /// <c>spaarke-files-index</c>, or <c>spaarke-rag-references</c>.
+    /// </para>
+    /// </remarks>
     /// <param name="query">The search query text.</param>
     /// <param name="options">Search options including tenant, filters, and limits.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Ranked search results with relevance scores.</returns>
+    /// <exception cref="System.InvalidOperationException">
+    /// Thrown (chat-routing-redesign-r1 task 100) when <see cref="RagSearchOptions.SessionId"/>
+    /// is set AND
+    /// <see cref="Sprk.Bff.Api.Configuration.AiSearchOptions.SessionFilesIndexName"/> is
+    /// configured to <c>spaarke-insights-index</c> — defense against operator
+    /// misconfiguration per architecture §5.2.1.
+    /// </exception>
     Task<RagSearchResponse> SearchAsync(
         string query,
         RagSearchOptions options,

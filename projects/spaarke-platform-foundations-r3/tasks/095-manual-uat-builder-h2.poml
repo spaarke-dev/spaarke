@@ -1,0 +1,39 @@
+<task id="R3-095" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Manual UAT walkthrough — H2 builder scenarios in spaarkedev1</title>
+    <status>not-started</status>
+    <phase>P9</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>uat,manual-test,playbook-builder,h2</tags>
+    <relevant-files>
+      <file>projects/spaarke-platform-foundations-r3/notes/h2-uat-results.md (new)</file>
+    </relevant-files>
+    <dependencies>091, 092, 093, 094</dependencies>
+  </metadata>
+  <prompt>Deploy PlaybookBuilder code page to spaarkedev1 via code-page-deploy skill. Manual walkthrough: rename scenario (verify auto-rename works); branch scenario (verify wiring prompt); perf-hint scenario (verify advisory visible).</prompt>
+  <goal>All three H2 scenarios verified end-to-end in real environment. Screenshots captured.</goal>
+  <constraints>
+    <constraint source="spec">UAT prerequisite for AC-H2.1, H2.2, H2.3 sign-off</constraint>
+  </constraints>
+  <knowledge>
+    <topic>manual-uat-playbook-builder</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check</step>
+    <step order="1">Deploy PlaybookBuilder code page via /code-page-deploy</step>
+    <step order="2">Execute 3 scenarios manually; capture screenshots</step>
+    <step order="3">Document outcomes in notes/h2-uat-results.md</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">All 3 scenarios pass manual UAT</criterion>
+    <criterion testable="true">Outcomes documented</criterion>
+  </acceptance-criteria>
+</task>

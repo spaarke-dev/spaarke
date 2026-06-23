@@ -58,6 +58,15 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
     public const string PlaybookNodeCompletedCounter = "context.playbook_node_completed";
     public const string DecisionMadeCounter = "context.decision_made";
 
+    // chat-routing-redesign-r1 task 074 — Upload-pipeline counter names (canonical).
+    public const string UploadStartedCounter = "context.upload_started";
+    public const string UploadClassifiedCounter = "context.upload_classified";
+    public const string UploadSummarizedCounter = "context.upload_summarized";
+    public const string UploadManifestExtractedCounter = "context.upload_manifest_extracted";
+    public const string UploadIndexedCounter = "context.upload_indexed";
+    public const string UploadPersistedCounter = "context.upload_persisted";
+    public const string UploadCompletedCounter = "context.upload_completed";
+
     private readonly Meter _meter;
     private readonly Counter<long> _toolCallStarted;
     private readonly Counter<long> _toolCallCompleted;
@@ -65,6 +74,16 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
     private readonly Counter<long> _playbookNodeExecuting;
     private readonly Counter<long> _playbookNodeCompleted;
     private readonly Counter<long> _decisionMade;
+
+    // chat-routing-redesign-r1 task 074 — Upload-pipeline counters.
+    private readonly Counter<long> _uploadStarted;
+    private readonly Counter<long> _uploadClassified;
+    private readonly Counter<long> _uploadSummarized;
+    private readonly Counter<long> _uploadManifestExtracted;
+    private readonly Counter<long> _uploadIndexed;
+    private readonly Counter<long> _uploadPersisted;
+    private readonly Counter<long> _uploadCompleted;
+
     private readonly ILogger<ContextEventEmitter> _logger;
 
     public ContextEventEmitter(ILogger<ContextEventEmitter> logger)
@@ -84,6 +103,22 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
             description: "context.playbook_node_completed — playbook node finished (wrapper-level; NFR-08 binding).");
         _decisionMade = _meter.CreateCounter<long>(DecisionMadeCounter, unit: "{event}",
             description: "context.decision_made — capability router enumerated decision (deterministic identifiers only).");
+
+        // chat-routing-redesign-r1 task 074 — Upload-pipeline counters (ADR-015 Tier 1 SAFE).
+        _uploadStarted = _meter.CreateCounter<long>(UploadStartedCounter, unit: "{event}",
+            description: "context.upload_started — upload pipeline started (sessionId + fileId + contentType + fileSizeBytes).");
+        _uploadClassified = _meter.CreateCounter<long>(UploadClassifiedCounter, unit: "{event}",
+            description: "context.upload_classified — classification step completed (enum label + confidence + durationMs).");
+        _uploadSummarized = _meter.CreateCounter<long>(UploadSummarizedCounter, unit: "{event}",
+            description: "context.upload_summarized — summarization step completed (summaryCharCount LENGTH ONLY + durationMs).");
+        _uploadManifestExtracted = _meter.CreateCounter<long>(UploadManifestExtractedCounter, unit: "{event}",
+            description: "context.upload_manifest_extracted — manifest extraction completed (sectionCount + tableCount + pageCount + durationMs).");
+        _uploadIndexed = _meter.CreateCounter<long>(UploadIndexedCounter, unit: "{event}",
+            description: "context.upload_indexed — RAG indexing completed (chunkCount + durationMs).");
+        _uploadPersisted = _meter.CreateCounter<long>(UploadPersistedCounter, unit: "{event}",
+            description: "context.upload_persisted — uploaded-files manifest write-through completed (durationMs).");
+        _uploadCompleted = _meter.CreateCounter<long>(UploadCompletedCounter, unit: "{event}",
+            description: "context.upload_completed — upload pipeline end-of-pipeline marker (totalDurationMs).");
     }
 
     /// <inheritdoc />
@@ -195,6 +230,133 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
         _logger.LogInformation(
             "[ADR-015][context.decision_made] layer={Layer} decision={Decision} capabilityName={CapabilityName} sessionId={SessionId} tenantId={TenantId} timestamp={Timestamp:o}",
             layer, decision, capabilityName, sessionId?.ToString("N"), tenantId, DateTimeOffset.UtcNow);
+    }
+
+    // =========================================================================
+    // chat-routing-redesign-r1 task 074 — Upload-pipeline emissions (ADR-015 Tier 1 SAFE).
+    // =========================================================================
+
+    /// <inheritdoc />
+    public void UploadStarted(Guid? sessionId, string fileId, string contentType, long fileSizeBytes, string? tenantId)
+    {
+        // ADR-015: deterministic IDs + enum-like contentType + numeric fileSizeBytes only.
+        var tags = new TagList
+        {
+            { "sessionId", sessionId?.ToString("N") ?? string.Empty },
+            { "fileId", fileId ?? string.Empty },
+            { "contentType", contentType ?? string.Empty },
+            { "tenantId", tenantId ?? string.Empty },
+        };
+        _uploadStarted.Add(1, tags);
+
+        _logger.LogInformation(
+            "[ADR-015][context.upload_started] sessionId={SessionId} fileId={FileId} contentType={ContentType} fileSizeBytes={FileSizeBytes} tenantId={TenantId} timestamp={Timestamp:o}",
+            sessionId?.ToString("N"), fileId, contentType, fileSizeBytes, tenantId, DateTimeOffset.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public void UploadClassified(Guid? sessionId, string fileId, string documentType, double confidence, long durationMs, string? tenantId)
+    {
+        // ADR-015: deterministic IDs + enum-like documentType label + numeric metrics only.
+        // documentType MUST be a short enum string ("NDA", "Contract", "Memo"); freeform
+        // classifier text is forbidden per interface contract.
+        var tags = new TagList
+        {
+            { "sessionId", sessionId?.ToString("N") ?? string.Empty },
+            { "fileId", fileId ?? string.Empty },
+            { "documentType", documentType ?? string.Empty },
+            { "tenantId", tenantId ?? string.Empty },
+        };
+        _uploadClassified.Add(1, tags);
+
+        _logger.LogInformation(
+            "[ADR-015][context.upload_classified] sessionId={SessionId} fileId={FileId} documentType={DocumentType} confidence={Confidence:F4} durationMs={DurationMs} tenantId={TenantId} timestamp={Timestamp:o}",
+            sessionId?.ToString("N"), fileId, documentType, confidence, durationMs, tenantId, DateTimeOffset.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public void UploadSummarized(Guid? sessionId, string fileId, int summaryCharCount, long durationMs, string? tenantId)
+    {
+        // ADR-015 CRITICAL: summaryCharCount is the LENGTH ONLY — NEVER the summary text.
+        var tags = new TagList
+        {
+            { "sessionId", sessionId?.ToString("N") ?? string.Empty },
+            { "fileId", fileId ?? string.Empty },
+            { "tenantId", tenantId ?? string.Empty },
+        };
+        _uploadSummarized.Add(1, tags);
+
+        _logger.LogInformation(
+            "[ADR-015][context.upload_summarized] sessionId={SessionId} fileId={FileId} summaryCharCount={SummaryCharCount} durationMs={DurationMs} tenantId={TenantId} timestamp={Timestamp:o}",
+            sessionId?.ToString("N"), fileId, summaryCharCount, durationMs, tenantId, DateTimeOffset.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public void UploadManifestExtracted(Guid? sessionId, string fileId, int sectionCount, int tableCount, int pageCount, long durationMs, string? tenantId)
+    {
+        // ADR-015: deterministic IDs + numeric counts only — never section names / table content / page text.
+        var tags = new TagList
+        {
+            { "sessionId", sessionId?.ToString("N") ?? string.Empty },
+            { "fileId", fileId ?? string.Empty },
+            { "tenantId", tenantId ?? string.Empty },
+        };
+        _uploadManifestExtracted.Add(1, tags);
+
+        _logger.LogInformation(
+            "[ADR-015][context.upload_manifest_extracted] sessionId={SessionId} fileId={FileId} sectionCount={SectionCount} tableCount={TableCount} pageCount={PageCount} durationMs={DurationMs} tenantId={TenantId} timestamp={Timestamp:o}",
+            sessionId?.ToString("N"), fileId, sectionCount, tableCount, pageCount, durationMs, tenantId, DateTimeOffset.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public void UploadIndexed(Guid? sessionId, string fileId, int chunkCount, long durationMs, string? tenantId)
+    {
+        // ADR-015: deterministic IDs + numeric chunkCount + durationMs only — never chunk text.
+        var tags = new TagList
+        {
+            { "sessionId", sessionId?.ToString("N") ?? string.Empty },
+            { "fileId", fileId ?? string.Empty },
+            { "tenantId", tenantId ?? string.Empty },
+        };
+        _uploadIndexed.Add(1, tags);
+
+        _logger.LogInformation(
+            "[ADR-015][context.upload_indexed] sessionId={SessionId} fileId={FileId} chunkCount={ChunkCount} durationMs={DurationMs} tenantId={TenantId} timestamp={Timestamp:o}",
+            sessionId?.ToString("N"), fileId, chunkCount, durationMs, tenantId, DateTimeOffset.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public void UploadPersisted(Guid? sessionId, string fileId, long durationMs, string? tenantId)
+    {
+        // ADR-015: deterministic IDs + numeric duration only.
+        var tags = new TagList
+        {
+            { "sessionId", sessionId?.ToString("N") ?? string.Empty },
+            { "fileId", fileId ?? string.Empty },
+            { "tenantId", tenantId ?? string.Empty },
+        };
+        _uploadPersisted.Add(1, tags);
+
+        _logger.LogInformation(
+            "[ADR-015][context.upload_persisted] sessionId={SessionId} fileId={FileId} durationMs={DurationMs} tenantId={TenantId} timestamp={Timestamp:o}",
+            sessionId?.ToString("N"), fileId, durationMs, tenantId, DateTimeOffset.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public void UploadCompleted(Guid? sessionId, string fileId, long totalDurationMs, string? tenantId)
+    {
+        // ADR-015: deterministic IDs + numeric total duration only.
+        var tags = new TagList
+        {
+            { "sessionId", sessionId?.ToString("N") ?? string.Empty },
+            { "fileId", fileId ?? string.Empty },
+            { "tenantId", tenantId ?? string.Empty },
+        };
+        _uploadCompleted.Add(1, tags);
+
+        _logger.LogInformation(
+            "[ADR-015][context.upload_completed] sessionId={SessionId} fileId={FileId} totalDurationMs={TotalDurationMs} tenantId={TenantId} timestamp={Timestamp:o}",
+            sessionId?.ToString("N"), fileId, totalDurationMs, tenantId, DateTimeOffset.UtcNow);
     }
 
     public void Dispose()

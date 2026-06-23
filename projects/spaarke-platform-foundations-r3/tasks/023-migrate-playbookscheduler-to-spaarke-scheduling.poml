@@ -1,0 +1,53 @@
+<task id="R3-023" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Migrate `PlaybookSchedulerService` to `Spaarke.Scheduling` (single-row fan-out)</title>
+    <status>completed</status>
+    <phase>P3</phase>
+    <parallel-group>none (post-F)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>4-6h</estimated-effort>
+    <tags>bff-api,scheduling,refactor,playbook</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs (new)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookSchedulerServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>013, 020, 021</dependencies>
+  </metadata>
+  <prompt>Refactor PlaybookSchedulerService into an IScheduledJob impl (`notification-playbook-scheduler`) that fans out across the 7 active playbooks. Per D2: single sprk_backgroundjob row; preserves current 1:1 behavior. Per Q1: fresh correlationId per child playbook. Per spec FR-2.8.</prompt>
+  <goal>PlaybookSchedulerService removed (or thinned to host-only); new PlaybookSchedulerJob registered as IScheduledJob. All 7 playbooks still fire on schedule. Per-playbook correlationIds recorded in parent run's sprk_resultjson.</goal>
+  <constraints>
+    <constraint source="spec">Single sprk_backgroundjob row 'notification-playbook-scheduler' (D2)</constraint>
+    <constraint source="spec Q1">Fresh correlationId per child playbook; parent records children in sprk_resultjson</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+    <constraint source="NFR-04">Preserve existing scheduled cadence — no operator-visible regression</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-scheduler-migration</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerService.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2.8 + Q1 + D2</step>
+    <step order="1">Read existing PlaybookSchedulerService to understand current cadence + playbook discovery</step>
+    <step order="2">Author PlaybookSchedulerJob : IScheduledJob with same playbook-discovery logic</step>
+    <step order="3">Fan-out logic: for each active playbook, generate fresh correlationId + dispatch playbook execution</step>
+    <step order="4">Record children correlationIds in parent JobRunResult.ResultJson</step>
+    <step order="5">Seed sprk_backgroundjob row for `notification-playbook-scheduler` with matching cron</step>
+    <step order="6">Remove old PlaybookSchedulerService BackgroundService registration</step>
+    <step order="7">Migration test: existing notification cadence preserved (compare pre/post run timestamps)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">PlaybookSchedulerJob registered as IScheduledJob</criterion>
+    <criterion testable="true">Visible in GET /api/admin/jobs as 'notification-playbook-scheduler'</criterion>
+    <criterion testable="true">All 7 active playbooks fire on existing cadence</criterion>
+    <criterion testable="true">Each child playbook has its own correlationId</criterion>
+    <criterion testable="true">Parent run's sprk_resultjson records children correlationIds</criterion>
+    <criterion testable="true">Old PlaybookSchedulerService BackgroundService removed</criterion>
+  </acceptance-criteria>
+</task>

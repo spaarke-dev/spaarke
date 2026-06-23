@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Extend WorkspaceOptions.cs with 4 typed code options (CRIT-1 fix)</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010,011,012</dependencies>
+    <blocks>014,015,016,017,018,019</blocks>
+    <tags>bff-api, config, ADR-018, architecture-binding</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Single sequential task that pre-seats typed options so wave 1-E parallel consumers don't collide on WorkspaceOptions.cs; CRIT-1 race-condition fix; tags include 'bff-api'; FULL per Step 0.5</rigor-reason>
+    <parallel-group>1-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>CRIT-1 fix: tasks 016, 017, 018, 019 would all edit WorkspaceOptions.cs in wave 1-E if extensions weren't pre-added; this single-agent task adds all 4 in one commit so wave 1-E is truly parallel-safe.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `WorkspaceOptions.cs` with 4 typed string options: `ChatSummarizePlaybookCode`, `MatterPreFillPlaybookCode`, `ProjectPreFillPlaybookCode`, and `AiSummaryPlaybookCode`. Bind each from `Workspace:&lt;Name&gt;` config section. Update `appsettings.Development.json` with the expected stable-code values. This task does NOT migrate any consumer — it ONLY pre-seats the typed options so wave 1-E (tasks 016–019) can complete in parallel without colliding on `WorkspaceOptions.cs`.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in IOptions binding + minimal-API DI. Coordinator role — enables downstream parallel migrations.</role>
+
+  <goal>
+    `WorkspaceOptions.cs` carries 4 new string properties (in addition to `SummarizePlaybookCode` from task 012). Each binds from the matching config section. Unit test asserts all 4 properties bind correctly. `appsettings.Development.json` has matching keys with expected stable-code values per spec §1.7.3 codes table.
+  </goal>
+
+  <context>
+    <background>
+      Per TASK-INDEX audit history CRIT-1: wave 1-E originally had 4 tasks (016, 017, 018, 019) all editing `WorkspaceOptions.cs` in parallel, creating a file-overlap race condition. The fix is to pre-add all 4 typed options in a single sequential task BEFORE wave 1-E. After this task, wave 1-E tasks only consume their respective typed option — they don't modify `WorkspaceOptions.cs`. Spec §1.7.3 codes table defines the four stable codes: `summarize-document-chat`, `create-matter-prefill`, `create-project-prefill`, and the `AiSummaryPlaybookCode` for `WorkspaceAiService`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs</file>
+      <file>config/appsettings.Development.json</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Options/WorkspaceOptionsTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-018">Typed options REQUIRED; properties have explicit defaults.</constraint>
+    <constraint source="ADR-010">DI minimalism — no service registration changes; options bind via existing `services.Configure&lt;WorkspaceOptions&gt;()` from task 012.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect ≤0.05 MB delta.</constraint>
+    <constraint source="spec">§1.7.3 codes table — exact codes: `summarize-document-chat`, `create-matter-prefill`, `create-project-prefill`. `AiSummaryPlaybookCode` value to be confirmed during task 018 (deferred decision; default to existing playbook name).</constraint>
+    <constraint source="project">DO NOT modify any consumer in this task. Wave 1-E owns the consumer migrations.</constraint>
+    <constraint source="project">Atomic commit — all 4 properties added in one PR/commit to satisfy CRIT-1 ordering invariant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `Sprk.Bff.Api/Options/WorkspaceOptions.cs` — confirm task 012 added `SummarizePlaybookCode` correctly.</step>
+    <step order="2">Add property: `public string ChatSummarizePlaybookCode { get; set; } = "summarize-document-chat";` with XML doc referencing FR-05.</step>
+    <step order="3">Add property: `public string MatterPreFillPlaybookCode { get; set; } = "create-matter-prefill";` with XML doc referencing FR-02 + NFR-07.</step>
+    <step order="4">Add property: `public string ProjectPreFillPlaybookCode { get; set; } = "create-project-prefill";` with XML doc referencing FR-02 + NFR-07.</step>
+    <step order="5">Add property: `public string AiSummaryPlaybookCode { get; set; } = string.Empty;` with XML doc noting "value confirmed in task 018 — populated then" + reference to FR-02.</step>
+    <step order="6">Update `appsettings.Development.json` `Workspace` section: add 4 matching keys with the expected values. Leave `AiSummaryPlaybookCode` empty pending task 018.</step>
+    <step order="7">Extend `tests/unit/Sprk.Bff.Api.Tests/Options/WorkspaceOptionsTests.cs` (or create) asserting all 4 properties bind from config. Verify defaults applied when config key missing.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Pass.</step>
+    <step order="9">Measure publish size; report delta.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 013 → ✅. current-task.md → ready for wave 1-C (task 014).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">WorkspaceOptions.cs + appsettings.Development.json</tool>
+    <tool name="Edit">Add 4 properties + 4 config keys + test cases</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs — 4 new typed code properties</output>
+    <output type="config">config/appsettings.Development.json — 4 new config keys under Workspace section</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Options/WorkspaceOptionsTests.cs — binding tests for all 4</output>
+    <output type="docs">notes/handoffs/013-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 new string properties exist on `WorkspaceOptions`.</criterion>
+    <criterion testable="true">Each property has a default value matching spec §1.7.3 (or empty string for `AiSummaryPlaybookCode`).</criterion>
+    <criterion testable="true">`appsettings.Development.json` has all 4 matching config keys under `Workspace`.</criterion>
+    <criterion testable="true">Unit tests verify binding for each property.</criterion>
+    <criterion testable="true">`dotnet build` exits 0; tests exit 0.</criterion>
+    <criterion testable="true">Publish-size delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+    <criterion testable="true">NO consumer file modified (verified via `git diff` scope).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is a CRIT-1 race-condition fix. Sequential (parallel-safe=false) is intentional and binding. Keep the diff narrow: ONLY `WorkspaceOptions.cs`, `appsettings.Development.json`, and `WorkspaceOptionsTests.cs`. Any other file touched is a scope violation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

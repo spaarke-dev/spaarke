@@ -11,7 +11,7 @@
  *
  * Plus NFR-11 binding regression: natural-language equivalent
  *   "summarize the engagement letter"
- * must STILL produce a passthrough body (commandIntent absent, no resolved
+ * must STILL produce a passthrough body (intentHint absent, no resolved
  * references) so the existing CapabilityRouter / SprkChat natural-language
  * path continues to work UNCHANGED.
  *
@@ -21,10 +21,10 @@
  *     → ReferenceResolver.resolveAll(intent.references, ctx) with stubbed
  *       adapters (no network, no React, no SprkChat)
  *     → SoftSlashRouter.decorateBody(intent, body)
- *     → final composed BFF body { message, commandIntent?, resolvedReferences? }
+ *     → final composed BFF body { message, intentHint?, resolvedReferences? }
  *
  * Composition contract verified here:
- *   - decorateBody adds `commandIntent` ONLY for soft slashes
+ *   - decorateBody adds `intentHint` ONLY for soft slashes
  *   - resolveAll adds `resolvedReferences[]` independently — the two
  *     decorations target distinct fields and compose without conflict
  *   - interleaved natural-language text between references is preserved
@@ -118,7 +118,7 @@ function buildResolverContext(
 /**
  * Compose the final BFF body the way ConversationPane would after running
  * the full chain. This mirrors the composition contract documented in the
- * file header: `commandIntent` from SoftSlashRouter + `resolvedReferences`
+ * file header: `intentHint` from SoftSlashRouter + `resolvedReferences`
  * appended independently.
  *
  * Returns the body PLUS the resolver output for assertion convenience.
@@ -140,7 +140,7 @@ async function runComposition(
   // 3) Build the base body that SprkChat would emit
   const base: DecoratedChatBody = { message: userText };
 
-  // 4) Decorate via SoftSlashRouter (adds commandIntent IFF soft slash)
+  // 4) Decorate via SoftSlashRouter (adds intentHint IFF soft slash)
   const decorated = decorateBody(intent, base);
 
   // 5) Compose the resolved-references field if any references are present.
@@ -205,12 +205,12 @@ describe('Pillar 8 composition integration (FR-52)', () => {
       });
     });
 
-    it('decorates the outbound body with commandIntent + resolvedReferences', async () => {
+    it('decorates the outbound body with intentHint + resolvedReferences', async () => {
       const ctx = buildResolverContext([ENGAGEMENT_LETTER_FILE]);
       const { body } = await runComposition(INPUT, ctx);
 
       // SoftSlashRouter contribution
-      expect(body.commandIntent).toBe('summarize');
+      expect(body.intentHint).toBe('summarize');
       // ReferenceResolver contribution
       expect(body.resolvedReferences).toHaveLength(1);
       expect(body.resolvedReferences?.[0].resolved).toBe(true);
@@ -227,10 +227,10 @@ describe('Pillar 8 composition integration (FR-52)', () => {
 
       // The composed payload carries BOTH the command intent AND the
       // resolved entities the agent needs. The BFF deserializes both and
-      // routes via Layer 0.5 (commandIntent) + agent prompt (resolved refs).
+      // routes via Layer 0.5 (intentHint) + agent prompt (resolved refs).
       expect(body).toMatchObject({
         message: INPUT,
-        commandIntent: 'summarize',
+        intentHint: 'summarize',
         resolvedReferences: [
           {
             type: 'file',
@@ -245,12 +245,12 @@ describe('Pillar 8 composition integration (FR-52)', () => {
 
     it('gracefully degrades when the file adapter cannot resolve', async () => {
       // NFR-01 binding: unresolved references DO NOT block the conversation.
-      // The body still carries commandIntent + an unresolved-flag entry the
+      // The body still carries intentHint + an unresolved-flag entry the
       // agent prompt can surface for clarification.
       const ctx = buildResolverContext([]); // empty file index
       const { body } = await runComposition(INPUT, ctx);
 
-      expect(body.commandIntent).toBe('summarize');
+      expect(body.intentHint).toBe('summarize');
       expect(body.resolvedReferences).toHaveLength(1);
       expect(body.resolvedReferences?.[0].resolved).toBe(false);
       expect(body.resolvedReferences?.[0].canonicalId).toBeNull();
@@ -335,7 +335,7 @@ describe('Pillar 8 composition integration (FR-52)', () => {
       const ctx = buildResolverContext([MOTION_FILE]);
       const { body } = await runComposition(INPUT, ctx);
 
-      expect(body.commandIntent).toBe('draft');
+      expect(body.intentHint).toBe('draft');
       expect(body.resolvedReferences).toHaveLength(2);
 
       // Both references survive the chain — one resolved, one degraded.
@@ -379,9 +379,9 @@ describe('Pillar 8 composition integration (FR-52)', () => {
         ctx,
       );
 
-      // No commandIntent decoration — BFF falls through to existing Layer 1
+      // No intentHint decoration — BFF falls through to existing Layer 1
       // keyword path UNCHANGED per NFR-11.
-      expect('commandIntent' in body).toBe(false);
+      expect('intentHint' in body).toBe(false);
 
       // No references → no resolvedReferences field at all (composition
       // helper omits the field when the resolver returns an empty array).
@@ -395,7 +395,7 @@ describe('Pillar 8 composition integration (FR-52)', () => {
     it('"draft response to opposing counsel about the motion" → no decoration', async () => {
       // Same intent as Scenario 2, expressed in natural language without
       // sigils. NFR-11 binding: this must continue to work via the existing
-      // CapabilityRouter natural-language path — no commandIntent, no
+      // CapabilityRouter natural-language path — no intentHint, no
       // resolved references, message passes through verbatim.
       const text = 'draft response to opposing counsel about the motion';
       const ctx = buildResolverContext([MOTION_FILE]);
@@ -407,7 +407,7 @@ describe('Pillar 8 composition integration (FR-52)', () => {
       expect(intent.command).toBeNull();
       expect(intent.isSoftSlash).toBe(false);
       expect(intent.references).toEqual([]);
-      expect('commandIntent' in body).toBe(false);
+      expect('intentHint' in body).toBe(false);
       expect('resolvedReferences' in body).toBe(false);
       expect(resolvedReferences).toEqual([]);
       expect(body.message).toBe(text);

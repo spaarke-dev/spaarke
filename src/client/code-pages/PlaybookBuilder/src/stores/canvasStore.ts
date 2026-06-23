@@ -34,6 +34,13 @@ const generateNodeId = (): string => `node_${Date.now()}_${Math.random().toStrin
 /** Snapshot of N:N scopes at load time, keyed by canvas node ID. */
 type InitialScopeMap = Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>;
 
+/**
+ * Branch choice for a Condition→downstream edge. 'both' creates TWO edges
+ * (one trueBranch + one falseBranch) — we never invent a third edge type.
+ * See R3-092 (FR-3H2.2) and notes/playbookbuilder-pattern-research.md §6.
+ */
+export type BranchChoice = 'true' | 'false' | 'both';
+
 interface CanvasState {
   // State
   nodes: PlaybookNode[];
@@ -43,6 +50,12 @@ interface CanvasState {
   lastSavedJson: string | null;
   /** N:N scopes as they were when the canvas loaded — used to detect external changes on save */
   initialNodeScopes: InitialScopeMap;
+  /**
+   * Pending Condition→downstream connection awaiting author branch choice.
+   * Populated by onConnect when source is a condition node and sourceHandle
+   * is unset. Consumed by BranchPickerDialog (R3-092 / FR-3H2.2 / AC-H2.2).
+   */
+  pendingBranchConnection: Connection | null;
 
   // Node actions
   setNodes: (nodes: PlaybookNode[]) => void;
@@ -50,12 +63,27 @@ interface CanvasState {
   addNode: (node: PlaybookNode) => void;
   updateNodeData: (nodeId: string, data: Partial<PlaybookNodeData>) => void;
   removeNode: (nodeId: string) => void;
+  /**
+   * R3 P9 H2 (task 091): Auto-rename all `{{oldName.output.*}}` template
+   * references across the canvas. Mutates every node whose serialized config
+   * (configJson.fieldMappings[].value, configJson.fields, configJson template
+   * fields, node.data.template / emailBody / emailSubject / conditionJson)
+   * contains the pattern. Returns the number of nodes mutated.
+   *
+   * Invoked by the rename-guard dialog when the user picks "Auto-rename
+   * references". No-ops when oldName / newName are empty or identical.
+   */
+  renameOutputVariableReferences: (oldName: string, newName: string) => number;
 
   // Edge actions
   setEdges: (edges: PlaybookEdge[]) => void;
   onEdgesChange: (changes: EdgeChange<PlaybookEdge>[]) => void;
   onConnect: (connection: Connection) => void;
   removeEdge: (edgeId: string) => void;
+  /** Resolve a pending Condition→downstream branch picker dialog (R3-092). */
+  confirmBranchSelection: (choice: BranchChoice) => void;
+  /** Cancel the pending branch picker dialog without creating an edge (R3-092). */
+  cancelBranchSelection: () => void;
 
   // Selection
   selectNode: (nodeId: string | null) => void;
@@ -89,6 +117,7 @@ const initialState = {
   isDirty: false,
   lastSavedJson: null as string | null,
   initialNodeScopes: new Map() as InitialScopeMap,
+  pendingBranchConnection: null as Connection | null,
 };
 
 // ---------------------------------------------------------------------------
@@ -134,6 +163,122 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       isDirty: true,
     })),
 
+  /**
+   * R3 P9 H2 (task 091): Walk every node and rewrite
+   * `{{<oldName>.output.<field>}}` → `{{<newName>.output.<field>}}` across all
+   * fields the rename-guard scanner inspects:
+   *   - node.data.template, emailBody, emailSubject, conditionJson
+   *   - configJson.fieldMappings[].value
+   *   - configJson.fields (legacy dict)
+   *   - configJson.{template, body, subject, description}
+   *
+   * Returns the count of nodes mutated. No-ops when oldName / newName are
+   * empty or identical (returns 0).
+   */
+  renameOutputVariableReferences: (oldName, newName) => {
+    const trimmedOld = oldName.trim();
+    const trimmedNew = newName.trim();
+    if (trimmedOld === '' || trimmedNew === '' || trimmedOld === trimmedNew) return 0;
+
+    // Pattern: {{oldName.output.<field>}} — escape oldName for regex safety.
+    const escapedOld = trimmedOld.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const refPattern = new RegExp(`\\{\\{${escapedOld}\\.output\\.(\\w+)\\}\\}`, 'g');
+    const replacement = `{{${trimmedNew}.output.$1}}`;
+
+    const rewriteString = (value: unknown): { changed: boolean; result: unknown } => {
+      if (typeof value !== 'string' || value.length === 0) return { changed: false, result: value };
+      refPattern.lastIndex = 0;
+      if (!refPattern.test(value)) return { changed: false, result: value };
+      refPattern.lastIndex = 0;
+      return { changed: true, result: value.replace(refPattern, replacement) };
+    };
+
+    let mutatedCount = 0;
+
+    set(state => ({
+      nodes: state.nodes.map(node => {
+        let nodeChanged = false;
+        const nextData: Record<string, unknown> = { ...node.data };
+
+        // Direct string fields on node.data
+        for (const key of ['template', 'emailBody', 'emailSubject', 'conditionJson']) {
+          const { changed, result } = rewriteString(nextData[key]);
+          if (changed) {
+            nextData[key] = result;
+            nodeChanged = true;
+          }
+        }
+
+        // configJson: parse → rewrite known string fields → re-serialize
+        const configJsonStr = nextData.configJson;
+        if (typeof configJsonStr === 'string' && configJsonStr.length > 0) {
+          try {
+            const parsed = JSON.parse(configJsonStr) as Record<string, unknown>;
+            let configChanged = false;
+
+            // fieldMappings[].value
+            if (Array.isArray(parsed.fieldMappings)) {
+              const updated = parsed.fieldMappings.map(entry => {
+                if (!entry || typeof entry !== 'object') return entry;
+                const e = entry as Record<string, unknown>;
+                const r = rewriteString(e.value);
+                if (r.changed) {
+                  configChanged = true;
+                  return { ...e, value: r.result };
+                }
+                return entry;
+              });
+              if (configChanged) parsed.fieldMappings = updated;
+            }
+
+            // legacy fields dict
+            if (parsed.fields && typeof parsed.fields === 'object' && !Array.isArray(parsed.fields)) {
+              const fields = parsed.fields as Record<string, unknown>;
+              const nextFields: Record<string, unknown> = { ...fields };
+              let fieldsChanged = false;
+              for (const [k, v] of Object.entries(fields)) {
+                const r = rewriteString(v);
+                if (r.changed) {
+                  nextFields[k] = r.result;
+                  fieldsChanged = true;
+                }
+              }
+              if (fieldsChanged) {
+                parsed.fields = nextFields;
+                configChanged = true;
+              }
+            }
+
+            // Top-level template fields
+            for (const key of ['template', 'body', 'subject', 'description']) {
+              const r = rewriteString(parsed[key]);
+              if (r.changed) {
+                parsed[key] = r.result;
+                configChanged = true;
+              }
+            }
+
+            if (configChanged) {
+              nextData.configJson = JSON.stringify(parsed);
+              nodeChanged = true;
+            }
+          } catch {
+            // Malformed configJson — leave untouched (matches scanner's graceful handling).
+          }
+        }
+
+        if (nodeChanged) {
+          mutatedCount++;
+          return { ...node, data: nextData as PlaybookNodeData };
+        }
+        return node;
+      }),
+      isDirty: state.nodes.length > 0 ? true : state.isDirty,
+    }));
+
+    return mutatedCount;
+  },
+
   // -----------------------------------------------------------------------
   // Edge actions
   // -----------------------------------------------------------------------
@@ -155,7 +300,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       // Check if source is a condition node
       const sourceNode = state.nodes.find(n => n.id === connection.source);
-      if (sourceNode?.data.type === 'condition' && connection.sourceHandle) {
+      if (sourceNode?.data.type === 'condition') {
+        // R3-092 (FR-3H2.2 / AC-H2.2): Condition→downstream connections
+        // MUST specify a branch. If sourceHandle is already set (drag from
+        // 'true'/'false' handle), honor it. Otherwise, defer the edge and
+        // prompt the author via BranchPickerDialog.
         if (connection.sourceHandle === 'true') {
           edgeType = 'trueBranch';
           animated = false;
@@ -164,6 +313,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           edgeType = 'falseBranch';
           animated = false;
           edgeData = { branch: 'false' as const };
+        } else {
+          // Defer edge creation; surface the picker dialog.
+          return { pendingBranchConnection: connection };
         }
       }
 
@@ -186,6 +338,56 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       edges: state.edges.filter(edge => edge.id !== edgeId),
       isDirty: true,
     })),
+
+  // -----------------------------------------------------------------------
+  // Branch picker (R3-092 / FR-3H2.2 / AC-H2.2)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Confirm the author's branch choice for a pending Condition→downstream
+   * connection. `'both'` creates TWO edges (one trueBranch + one falseBranch)
+   * — we never invent a third 'bothBranch' edge type (research §7 anti-pattern).
+   */
+  confirmBranchSelection: choice =>
+    set(state => {
+      const pending = state.pendingBranchConnection;
+      if (!pending) return {};
+
+      let nextEdges = state.edges;
+      if (choice === 'true' || choice === 'both') {
+        nextEdges = addEdge(
+          {
+            ...pending,
+            sourceHandle: 'true',
+            type: 'trueBranch',
+            animated: false,
+            data: { branch: 'true' as const },
+          },
+          nextEdges
+        );
+      }
+      if (choice === 'false' || choice === 'both') {
+        nextEdges = addEdge(
+          {
+            ...pending,
+            sourceHandle: 'false',
+            type: 'falseBranch',
+            animated: false,
+            data: { branch: 'false' as const },
+          },
+          nextEdges
+        );
+      }
+
+      return {
+        edges: nextEdges,
+        pendingBranchConnection: null,
+        isDirty: true,
+      };
+    }),
+
+  /** Cancel the pending branch picker — discard the connection. */
+  cancelBranchSelection: () => set({ pendingBranchConnection: null }),
 
   // -----------------------------------------------------------------------
   // Selection

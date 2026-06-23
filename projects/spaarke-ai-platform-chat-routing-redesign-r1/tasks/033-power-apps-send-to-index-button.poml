@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Power Apps "Send to Index" button on sprk_analysisplaybook form</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>034,035,036,039</blocks>
+    <tags>dataverse, power-apps, forms, ribbon</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Power Apps form + ribbon customization; no .cs/.tsx modification; STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>2-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a "Send to Index" ribbon button to the `sprk_analysisplaybook` model-driven form. The button calls BFF endpoint `POST /api/ai/playbooks/{id}/send-to-index` (existing or to-stand-up — confirm during step 1). On click: set `sprk_indexstatus = 'pending'` → invoke endpoint → on success update `sprk_lastindexedat`, `sprk_indexhash`, `sprk_indexstatus = 'indexed'`; on failure update `sprk_lastindexerror`, `sprk_indexstatus = 'failed'`. Implements spec FR-11.
+  </prompt>
+
+  <role>SPAARKE Power Apps engineer. Expert in model-driven app ribbon customization + JavaScript web resources + Dataverse Web API.</role>
+
+  <goal>
+    "Send to Index" button visible in the form ribbon for `sprk_analysisplaybook` records (admin / playbook-author roles). Button is disabled if user lacks admin role. Click triggers the BFF endpoint and shows status flip to 'pending' immediately, then 'indexed' or 'failed' within 60s per FR-11. Errors surface in `sprk_lastindexerror`.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-11 + design §1.4 (WP1.5 "Send-to-index process"). This is the admin-facing UX for index governance — pairs with task 034 (drift job) and task 035 (admin view) to make playbook indexing observable and operable from Power Apps. Implementation pattern: JavaScript web resource + ribbon customization via `RibbonDiff` XML (or modern command bar action).
+    </background>
+    <relevant-files>
+      <file>src/dataverse/web-resources/</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>docs/guides/POWER-APPS-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-11: button visible only to admin role; status flips to 'indexed' within 60s on success.</constraint>
+    <constraint source="spec">FR-12 (separate task 036): validation gate runs server-side; client must surface 400-with-`MissingFields` response shape.</constraint>
+    <constraint source="project">Endpoint URL: `POST /api/ai/playbooks/{id}/send-to-index` — verify in step 1; stand up if missing (small scope; defer to a follow-up if endpoint absence exceeds estimated-hours budget).</constraint>
+    <constraint source="project">Use BFF base URL from organization environment variable (per Spaarke Power Apps convention).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>docs/guides/POWER-APPS-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect existing endpoint surface — does `POST /api/ai/playbooks/{id}/send-to-index` exist? If yes, document URL + auth shape. If no, document the gap (separate task may be needed).</step>
+    <step order="2">Author the JavaScript web resource that: reads the playbook record ID, sets `sprk_indexstatus = 'pending'` via Web API, calls the BFF endpoint, handles success/failure, updates the row accordingly.</step>
+    <step order="3">Author the ribbon definition: add command + button to the `sprk_analysisplaybook` form ribbon. Display rule: visible when user has admin role (configurable via security-role lookup or environment variable).</step>
+    <step order="4">Test the button manually in the dev environment on a sample playbook (non-production playbook).</step>
+    <step order="5">Verify status transitions: pending → indexed (success path) and pending → failed with `sprk_lastindexerror` populated (failure path).</step>
+    <step order="6">Add the web resource + ribbon to the unmanaged solution.</step>
+    <step order="7">Update TASK-INDEX.md: task 033 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">JavaScript web resource + ribbon XML</tool>
+    <tool name="Skill">dataverse-deploy</tool>
+    <tool name="Bash">PAC CLI for solution operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/dataverse/web-resources/sprk_analysisplaybook_sendToIndex.js</output>
+    <output type="schema">sprk_analysisplaybook form ribbon — "Send to Index" command/button</output>
+    <output type="docs">notes/handoffs/033-send-to-index-ux.md — URL + auth + display-rule notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Send to Index" button visible to admin user on `sprk_analysisplaybook` form.</criterion>
+    <criterion testable="true">Button click sets `sprk_indexstatus = 'pending'` immediately.</criterion>
+    <criterion testable="true">On endpoint success, `sprk_lastindexedat`, `sprk_indexhash`, `sprk_indexstatus = 'indexed'` updated within 60s.</criterion>
+    <criterion testable="true">On endpoint 400 (validation error per FR-12), `sprk_lastindexerror` captures missing-fields message + `sprk_indexstatus = 'failed'`.</criterion>
+    <criterion testable="true">Web resource + ribbon present in solution ZIP export.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If endpoint absent in step 1, escalate to user — adding a new BFF endpoint expands this task's scope (bff-extensions.md placement decision required).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

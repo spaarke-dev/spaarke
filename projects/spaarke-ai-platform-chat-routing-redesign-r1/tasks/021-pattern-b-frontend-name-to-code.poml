@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Migrate frontend Pattern B name-resolve consumers to stable ID (useAiSummary.ts + DocumentEmailWizard.tsx)</title>
+    <phase>1: §1.7 Stable IDs Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016,017,018,019</dependencies>
+    <blocks>022</blocks>
+    <tags>frontend, react, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'frontend' + 'react'; modifies hot user-facing path; needs UI tests per task-create Step 3.65; FULL per Step 0.5</rigor-reason>
+    <parallel-group>1-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Migrate frontend Pattern B name-resolve consumers from literal-name fetches to stable-ID fetches. Affected sites: `useAiSummary.ts:285` (code-pages hook calling `/by-name/`) + `DocumentEmailWizard.tsx:628` (SpaarkeAi solution wizard step). Each call site changes from `/api/ai/playbooks/by-name/{name}` to `/api/ai/playbooks/by-id/{id}`. Per FR-03 acceptance, post-migration the by-name endpoint sees zero calls from production code.
+
+    **Refresh (Q&A 2026-06-22 Q1)**: Stable lookups go through `sprk_playbookid` (immutable opaque ID, GUID-format). The endpoint route is `/api/ai/playbooks/by-id/{id}` (NOT `/by-id/{id}`). See spec.md § Canonical Field Naming for the corrected role table.
+  </prompt>
+
+  <role>SPAARKE platform frontend developer. Expert in React 18 hooks + SpaarkeAi solution + PCF/code-page Spaarke Auth patterns.</role>
+
+  <goal>
+    `useAiSummary.ts:285` and `DocumentEmailWizard.tsx:628` call `/api/ai/playbooks/by-id/{id}` with the appropriate stable code. Literal playbook-name strings are removed from the call sites (kebab-case codes inlined or hoisted to a shared constant module). Vitest unit tests + a UI smoke test confirm the summary/wizard flow still works end-to-end.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-03 + §1.7 Pattern B (frontend variant). `useAiSummary.ts:285` is the React hook used by code-pages for AI summary; `DocumentEmailWizard.tsx:628` is the workspace wizard's playbook-trigger step. Both currently hit `/by-name/`. After migration, they hit `/by-code/`. The codes table from spec §1.7.3 supplies the target codes.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useAiSummary.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/ (potential shared client for AI lookups)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">Frontend handles 404 ProblemDetails shape from `/by-code/` (per task 011); display user-friendly error when code missing.</constraint>
+    <constraint source="ADR-015">Frontend logging — no message content / file content / memory facts in client telemetry.</constraint>
+    <constraint source="ADR-021">Dark-mode compatibility preserved for any UI changes (none expected, but verify).</constraint>
+    <constraint source="spec">FR-03 acceptance: zero `/by-name/` calls from these two files post-migration.</constraint>
+    <constraint source="spec">NFR-07 not directly applicable (these are not pre-fill flows); preserve existing UX behavior (loading states, error handling).</constraint>
+    <constraint source="project">DO NOT modify backend `/by-name/` endpoint (task 024 owns deprecation telemetry).</constraint>
+    <constraint source="project">Use `npm install --legacy-peer-deps --no-audit --no-fund` for any solution rebuilds (NOT `npm ci`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-dark-mode.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `useAiSummary.ts:285` — record the literal playbook name string + URL pattern.</step>
+    <step order="2">Read `DocumentEmailWizard.tsx:628` — same.</step>
+    <step order="3">Map each literal name → stable code via spec §1.7.3 codes table.</step>
+    <step order="4">Refactor `useAiSummary.ts:285`: change fetch URL from `/api/ai/playbooks/by-name/{name}` to `/api/ai/playbooks/by-id/{id}`; replace literal name with code constant.</step>
+    <step order="5">Refactor `DocumentEmailWizard.tsx:628`: same pattern.</step>
+    <step order="6">Add error-handling for ProblemDetails 404 shape (from task 011): show user-friendly "Playbook unavailable" message instead of raw error.</step>
+    <step order="7">Update Vitest unit tests for both files — mock fetch returns `/by-code/` response; assert URL pattern.</step>
+    <step order="8">Build each affected solution: `cd src/client/code-pages/AnalysisWorkspace && npm install --legacy-peer-deps --no-audit --no-fund && npm run build` ; similarly for SpaarkeAi.</step>
+    <step order="9">Run UI smoke test per `<ui-tests>` section: console-error free, dark-mode toggle works, click-summary triggers correct `/by-code/` URL (verify via network tab observation in test).</step>
+    <step order="10">Measure publish artifacts — code-page bundle size and SpaarkeAi bundle size; report deltas (NFR-01 is BFF-only but bundle hygiene matters).</step>
+    <step order="11">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="12">Update TASK-INDEX.md: task 021 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">useAiSummary.ts + DocumentEmailWizard.tsx</tool>
+    <tool name="Edit">Apply Pattern B frontend migration + update tests</tool>
+    <tool name="Bash">npm install + npm run build + npm run test</tool>
+    <tool name="Grep">Verify zero `/by-name/` calls remain in target files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/hooks/useAiSummary.ts — `/by-code/` calls</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx — `/by-code/` calls</output>
+    <output type="test">tests/vitest/.../useAiSummary.test.ts — mock fetch asserts `/by-code/` URL</output>
+    <output type="test">tests/vitest/.../DocumentEmailWizard.test.tsx — mock fetch asserts `/by-code/` URL</output>
+    <output type="docs">notes/handoffs/021-frontend-bundle-deltas.md — bundle size deltas + UI smoke test evidence</output>
+  </outputs>
+
+  <ui-tests>
+    <test type="console-error">UI surfaces (AnalysisWorkspace code-page + SpaarkeAi DocumentEmailWizard) must render with zero console errors after migration.</test>
+    <test type="dark-mode">Per ADR-021, verify dark-mode toggle still works on both affected surfaces — no regressions in theming or token usage.</test>
+    <test type="interaction-smoke">Manually trigger the summary flow (or simulate via Playwright) and verify the network request URL is `/api/ai/playbooks/by-id/{id}` and the response is consumed without error.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "by-name" src/client/code-pages/AnalysisWorkspace/src/hooks/useAiSummary.ts` returns zero matches.</criterion>
+    <criterion testable="true">`grep "by-name" src/solutions/SpaarkeAi/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx` returns zero matches.</criterion>
+    <criterion testable="true">Both files call `/api/ai/playbooks/by-id/{id}` with a stable code from spec §1.7.3.</criterion>
+    <criterion testable="true">404 ProblemDetails response produces a user-friendly error message (not raw `Error.message`).</criterion>
+    <criterion testable="true">`npm run build` exits 0 for both solutions.</criterion>
+    <criterion testable="true">Vitest tests exit 0.</criterion>
+    <criterion testable="true">UI smoke test confirms zero console errors + dark-mode works.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 020 (backend) — touches frontend only. Two source files in different solutions don't share state. Confirm `appsettings.Development.json` (or frontend config) doesn't carry a literal name string — if it does, lift to a `playbookCodes.ts` shared module. Use `npm install --legacy-peer-deps --no-audit --no-fund` per CLAUDE.md §11.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

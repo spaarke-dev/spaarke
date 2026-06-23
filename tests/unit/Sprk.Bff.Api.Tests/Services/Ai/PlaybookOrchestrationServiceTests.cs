@@ -1291,6 +1291,219 @@ public class PlaybookOrchestrationServiceTests
 
     #endregion
 
+    #region Unrendered Template Detection (R3 FR-3H1.4 / AC-H1.2)
+
+    /// <summary>
+    /// R3 FR-3H1.4 / AC-H1.2 — when a node's NodeOutput.TextContent contains literal
+    /// "{{" (an unrendered Handlebars template), the orchestrator MUST emit a
+    /// PlaybookStreamEvent of type UnrenderedTemplateDetected AND log a structured
+    /// warning. Output still flows downstream (non-fatal degradation).
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_NodeOutputContainsUnrenderedTemplate_EmitsWarningStreamEvent()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+        var node = CreateNode("Notify", actionId);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([node]);
+        _scopeResolverMock
+            .Setup(x => x.ResolveNodeScopesAsync(node.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+        _scopeResolverMock
+            .Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+
+        // Output deliberately includes literal "{{x.output}}" (template that was
+        // never substituted) — simulates the FR-3H1.4 leak scenario.
+        var leakedOutput = NodeOutput.Ok(
+            node.Id,
+            node.OutputVariable,
+            data: null,
+            textContent: "Hello, your task '{{x.output}}' is overdue.");
+
+        var mockExecutor = new Mock<INodeExecutor>();
+        mockExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>()))
+            .Returns(NodeValidationResult.Success());
+        mockExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(leakedOutput);
+
+        _executorRegistryMock
+            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Returns(mockExecutor.Object);
+
+        // Act
+        var events = new List<PlaybookStreamEvent>();
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        // Assert — stream event
+        var unrenderedEvents = events.Where(e => e.Type == PlaybookEventType.UnrenderedTemplateDetected).ToList();
+        unrenderedEvents.Should().HaveCount(1, "exactly one warning event per node with leaked templates");
+        unrenderedEvents[0].NodeId.Should().Be(node.Id);
+        unrenderedEvents[0].NodeName.Should().Be("Notify");
+        unrenderedEvents[0].PlaybookId.Should().Be(playbookId);
+        unrenderedEvents[0].Content.Should().Contain("{{x.output}}", "sample text MUST carry the leaked template token");
+        unrenderedEvents[0].RunId.Should().NotBe(Guid.Empty, "RunId doubles as correlationId per NFR-08");
+
+        // Assert — output STILL flows downstream (non-fatal)
+        events.Should().Contain(e => e.Type == PlaybookEventType.NodeCompleted);
+        events.Should().Contain(e => e.Type == PlaybookEventType.RunCompleted);
+        events.Last().Done.Should().BeTrue();
+
+        // Assert — structured warning logged with NodeId + RunId + sample
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, t) =>
+                    o.ToString()!.Contains("Unrendered template detected") &&
+                    o.ToString()!.Contains("Notify")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+    }
+
+    /// <summary>
+    /// R3 FR-3H1.4 / AC-H1.2 — clean NodeOutput (no literal "{{") must NOT trigger
+    /// a false-positive UnrenderedTemplateDetected event or warning log.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_NodeOutputClean_NoUnrenderedTemplateEventEmitted()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+        var node = CreateNode("Notify", actionId);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([node]);
+        _scopeResolverMock
+            .Setup(x => x.ResolveNodeScopesAsync(node.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+        _scopeResolverMock
+            .Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+
+        // Realistic substituted output — single curly braces (JSON), no doubles.
+        var cleanOutput = NodeOutput.Ok(
+            node.Id,
+            node.OutputVariable,
+            data: new { ok = true, id = 42 },
+            textContent: "Hello, your task 'Review Contract' is overdue.");
+
+        var mockExecutor = new Mock<INodeExecutor>();
+        mockExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>()))
+            .Returns(NodeValidationResult.Success());
+        mockExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cleanOutput);
+
+        _executorRegistryMock
+            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Returns(mockExecutor.Object);
+
+        // Act
+        var events = new List<PlaybookStreamEvent>();
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        // Assert — NO false-positive warning event
+        events.Should().NotContain(e => e.Type == PlaybookEventType.UnrenderedTemplateDetected,
+            "clean output MUST NOT trigger a false-positive warning");
+
+        // And NO warning log carrying the FR-3H1.4 phrase
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, t) => o.ToString()!.Contains("Unrendered template detected")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// R3 FR-3H1.4 / AC-H1.2 — when multiple string fields of NodeOutput contain
+    /// "{{" (TextContent + Warnings + StructuredData), the orchestrator emits a
+    /// SINGLE warning event per node (one warning per node — design decision noted
+    /// in task notes), with the warning log listing all offending field names.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_NodeOutputMultipleFieldsUnrendered_EmitsSingleWarningWithAllFields()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+        var node = CreateNode("MultiLeak", actionId);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([node]);
+        _scopeResolverMock
+            .Setup(x => x.ResolveNodeScopesAsync(node.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+        _scopeResolverMock
+            .Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+
+        // Leak in TextContent + Warnings + StructuredData simultaneously.
+        var leakedOutput = NodeOutput.Ok(
+            node.Id,
+            node.OutputVariable,
+            data: new { recipient = "{{user.email}}" },  // StructuredData leak
+            textContent: "Hello {{user.name}}",            // TextContent leak
+            warnings: new[] { "Could not resolve {{x.fallback}}" }); // Warnings leak
+
+        var mockExecutor = new Mock<INodeExecutor>();
+        mockExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>()))
+            .Returns(NodeValidationResult.Success());
+        mockExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(leakedOutput);
+
+        _executorRegistryMock
+            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Returns(mockExecutor.Object);
+
+        // Act
+        var events = new List<PlaybookStreamEvent>();
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        // Assert — exactly ONE warning event despite 3 distinct leaks
+        var unrenderedEvents = events.Where(e => e.Type == PlaybookEventType.UnrenderedTemplateDetected).ToList();
+        unrenderedEvents.Should().HaveCount(1, "design decision: single event per node, not per leaked field");
+        unrenderedEvents[0].NodeId.Should().Be(node.Id);
+        unrenderedEvents[0].NodeName.Should().Be("MultiLeak");
+
+        // Assert — warning log lists ALL offending field names so operators can locate every leak
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, t) =>
+                    o.ToString()!.Contains("TextContent") &&
+                    o.ToString()!.Contains("Warnings[0]") &&
+                    o.ToString()!.Contains("StructuredData")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private void SetupLegacyOrchestrator(IEnumerable<string> chunks)

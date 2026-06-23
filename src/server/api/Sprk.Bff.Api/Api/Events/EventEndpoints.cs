@@ -1,6 +1,8 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events.Dtos;
+using Sprk.Bff.Api.Services.Ai.Membership.Events;
 // Type aliases to resolve ambiguity between API DTOs and Dataverse models
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
 using ApiRegardingRecordType = Sprk.Bff.Api.Api.Events.Dtos.RegardingRecordType;
@@ -327,6 +329,8 @@ public static class EventEndpoints
     private static async Task<IResult> CreateEventAsync(
         [FromBody] ApiCreateEventRequest request,
         IEventDataverseService dataverseService,
+        IMembershipEventPublisher membershipEventPublisher,
+        HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -383,6 +387,35 @@ public static class EventEndpoints
             logger.LogInformation(
                 "Event created successfully. EventId={EventId}, Subject={Subject}",
                 eventId, request.Subject);
+
+            // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
+            // Per event-source-inventory §3C, event Create has only the implicit
+            // ownerid Lookup (defaulted by Dataverse to the OBO caller).
+            // Publish Added event so the junction-updater (task 084) + nightly
+            // recon (task 085) observe the new association. When
+            // MembershipEventPublisherOptions.Enabled=false (default), the
+            // NullMembershipEventPublisher peer logs + returns (ADR-032 P2).
+            // Publisher contract guarantees no exceptions propagate here.
+            var traceId = httpContext.TraceIdentifier;
+            var oid = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? httpContext.User.FindFirstValue("oid");
+            if (Guid.TryParse(oid, out var callerOid))
+            {
+                var membershipEvent = new MembershipChangedEvent
+                {
+                    PersonId = callerOid,
+                    PersonIdType = PersonIdentityType.User,
+                    EntityLogicalName = "sprk_event",
+                    EntityRecordId = eventId,
+                    SourceField = "ownerid",
+                    Role = "owner",
+                    MutationType = MembershipMutationType.Added,
+                    CorrelationId = traceId,
+                    OccurredOnUtc = DateTime.UtcNow,
+                };
+
+                _ = membershipEventPublisher.PublishAsync(membershipEvent, ct);
+            }
 
             return TypedResults.Created($"/api/v1/events/{eventId}", response);
         }

@@ -30,7 +30,11 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_actiontype,sprk_temperature&$expand=sprk_ActionTypeId($select=sprk_name,sprk_executoractiontype)";
+        // Bug fix 2026-06-23: removed sprk_actiontype from $select — that field does not exist on
+        // sprk_analysisaction (the comment below documents the Q1 2026-06-02 empirical confirmation
+        // but the SELECT clause was never updated). Including it causes ALL GetActionAsync calls to
+        // return 400 Bad Request, silently breaking every node that depends on Action lookup.
+        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature&$expand=sprk_ActionTypeId($select=sprk_name,sprk_executoractiontype)";
         var response = await Http.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)

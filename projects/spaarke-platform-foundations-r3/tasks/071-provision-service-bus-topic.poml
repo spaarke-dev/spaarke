@@ -1,0 +1,68 @@
+<task id="R3-071" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Provision Service Bus topic `sprk-membership-changes` + subscription `recon-junction-updater` (Bicep)</title>
+    <status>completed</status>
+    <completion-date>2026-06-23</completion-date>
+    <completion-notes>
+      DEPLOYED to dev 2026-06-23 after owner approval of Option A (upgrade spaarke-servicebus-dev Basic→Standard).
+      Prerequisite: Basic-tier namespace doesn't support topics. Cross-project analysis showed
+      R3 + ai-spaarke-insights-engine-r1 + future cross-cutting events all need topic support;
+      one Standard namespace is cleaner than alternatives. Owner authorized 2026-06-23.
+
+      Upgrade succeeded in-place (Basic → Standard); all 7 existing queues preserved + active
+      sdap-jobs traffic continued without disruption.
+
+      Topic deploy succeeded:
+      - Topic sprk-membership-changes (1024 MB, P14D TTL, batched, non-partitioned, Active)
+      - Subscription recon-junction-updater (10 max delivery, PT5M lock, DLQ-on-expiry, Active)
+      - RBAC: BFF MI 9fd47efb-7962-492b-ac44-e5ccd0268ebb granted
+        Azure Service Bus Data Sender on topic + Data Receiver on subscription
+
+      Original artifacts (preserved):
+      - infrastructure/bicep/modules/membership-topic.bicep (NEW module; deployed)
+      - infrastructure/bicep/customer.bicep (modified — bffPrincipalId param + module wiring)
+      - infrastructure/bicep/stacks/model2-full.bicep (modified — module + outputs)
+      - docs/architecture/background-workers-architecture.md (Phase 2 topic section)
+      - projects/spaarke-platform-foundations-r3/notes/operator-followup-task071.md (now reflects as-deployed state)
+
+      AC-1P2.2 graduation gate satisfied. Next: task 073 (smoke test) ready to run.
+    </completion-notes>
+    <phase>P7.5</phase>
+    <parallel-group>P (with 070)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>infrastructure,bicep,service-bus,phase2</tags>
+    <relevant-files>
+      <file>infra/bicep/service-bus.bicep (modify or add)</file>
+      <file>infra/bicep/membership-topic.bicep (new)</file>
+    </relevant-files>
+    <dependencies>010</dependencies>
+  </metadata>
+  <prompt>Add Service Bus topic `sprk-membership-changes` + subscription `recon-junction-updater` to Bicep (D3 resolved 2026-06-20 — topic NOT queue, NOT reuse existing). Deploy to dev/test/prod via existing pipeline.</prompt>
+  <goal>Topic + subscription provisioned in all environments. Connection string + managed-identity access configured for BFF.</goal>
+  <constraints>
+    <constraint source="spec D3">Topic with subscription-per-consumer; do NOT reuse existing ServiceBusJobProcessor queue</constraint>
+    <constraint source="ADR-028">Managed identity for outbound Service Bus auth</constraint>
+  </constraints>
+  <knowledge>
+    <topic>azure-service-bus-topic-bicep</topic>
+    <files>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + D3</step>
+    <step order="1">Survey existing infra/bicep/ for Service Bus namespace location</step>
+    <step order="2">Add topic resource + subscription resource</step>
+    <step order="3">Grant BFF managed identity Sender + Receiver roles on topic/subscription</step>
+    <step order="4">Bicep what-if + deploy to dev</step>
+    <step order="5">Verify in Azure portal + smoke send/receive</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-1P2.2 — Topic + subscription exist in dev (and pipeline ready for higher envs)</criterion>
+    <criterion testable="true">BFF MI has Sender + Receiver roles</criterion>
+  </acceptance-criteria>
+</task>

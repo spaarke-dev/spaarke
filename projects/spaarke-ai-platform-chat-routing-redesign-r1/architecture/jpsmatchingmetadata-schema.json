@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/jpsmatchingmetadata.v1.json",
+  "title": "JPS Matching Metadata",
+  "description": "Structured metadata used at routing time (and embedding-input time) to improve playbook selection precision. Stored as JSON content in the Dataverse column `sprk_analysisplaybook.sprk_jps_matching_metadata` (MULTILINE TEXT). All properties are optional — additive philosophy.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "documentTypes": {
+      "description": "Document type tags the playbook applies to. Used by WP1.5 embedding-input extension (task 032) and WP2 file-aware routing pre-filter.",
+      "type": "array",
+      "items": { "type": "string" },
+      "examples": [["NDA", "Contract", "MSA"]]
+    },
+    "intents": {
+      "description": "User intent labels the playbook serves. Embedding-input feature; not currently used as hard filter.",
+      "type": "array",
+      "items": { "type": "string" },
+      "examples": [["summarize", "review", "extract-terms"]]
+    },
+    "triggerPhrases": {
+      "description": "Free-text phrases that strongly suggest this playbook. Boosts embedding similarity; not a hard route.",
+      "type": "array",
+      "items": { "type": "string" },
+      "examples": [["summarize this NDA", "review confidentiality terms"]]
+    },
+    "preferredOver": {
+      "description": "List of playbook codes (PB-NNN) this playbook should be preferred over when both match. Tie-breaker for routing.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^PB-[0-9]{3}$"
+      },
+      "examples": [["PB-002", "PB-015"]]
+    },
+    "outputDestination": {
+      "description": "Where the playbook's output is delivered. Must align with NodeDestination values; 'both' is the post-FR-14a addition.",
+      "type": "string",
+      "enum": ["chat", "workspace", "both", "form-prefill", "side-effect"]
+    },
+    "scopeHints": {
+      "description": "Tags hinting at the desired knowledge / retrieval scope (e.g. matter type, jurisdiction). Consumed by WP2 retrieval composer.",
+      "type": "array",
+      "items": { "type": "string" },
+      "examples": [["jurisdiction:US-NY", "matter:M&A"]]
+    },
+    "exclusionHints": {
+      "description": "Tags that — when present in the request context — should DEMOTE or EXCLUDE this playbook. Negative-signal complement to scopeHints.",
+      "type": "array",
+      "items": { "type": "string" },
+      "examples": [["matter:Litigation"]]
+    }
+  },
+  "examples": [
+    {
+      "documentTypes": ["NDA"],
+      "intents": ["summarize", "review"],
+      "triggerPhrases": ["summarize this NDA", "review confidentiality terms"],
+      "preferredOver": [],
+      "outputDestination": "chat",
+      "scopeHints": ["jurisdiction:US-NY"],
+      "exclusionHints": []
+    }
+  ]
+}
