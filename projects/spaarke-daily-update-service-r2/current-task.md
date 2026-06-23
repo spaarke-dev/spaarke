@@ -1,8 +1,8 @@
-# Current Task State
+# Current Task State - Spaarke Daily Update Service R2
 
-> **Last Updated**: 2026-06-22 (Phase A Channels 1–5 patched LIVE; Ch.6 + Ch.7 deferred; moving to Phase B)
+> **Last Updated**: 2026-06-23 18:30 UTC (by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
-> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Branch**: `master` (⚠ uncommitted BFF changes present — see "Files Modified" + "Critical Context")
 
 ---
 
@@ -10,107 +10,130 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | R2.2 SHIPPED + DEPLOYED. Producer-fix Phase A: Channels 1–5 fetchXml patches LIVE on spaarkedev1. Channels 6+7 deferred (design captured for Ch.7). Moving to Phase B (isread/toasttype + TTL). |
-| **Step** | Phase A complete; Phase B not yet started |
-| **Status** | Phase A done; ready for commit + Phase B kickoff |
-| **Next Action** | (1) Commit new Patch-PlaybookQueryFetchXml.ps1 script + Ch.7 design notes + this checkpoint. (2) Admin-merge PR #413 (known StorageRetryPolicyTests flake). (3) Design Phase B fix for isread/toasttype mismatch + TTL increase. |
-| **Branch** | `work/spaarke-daily-update-service-r2.2-patch-fix` (head: `1282c1335`, +1 uncommitted: new patch script + Ch.7 notes + this update) |
-| **Open PRs** | **PR #413**: scripts/Patch-NotificationPlaybookDueDate.ps1 field-name fix — awaiting admin-merge (Release CI flake on StorageRetryPolicyTests) |
+| **Task** | Daily Briefing producer pipeline — 6 bugs diagnosed in series; correct architectural fix identified (refactor to `Spaarke.Dataverse.IGenericEntityService`); audit complete; about to start refactor |
+| **Step** | After audit, before refactor. User asked for /compact at this boundary. |
+| **Status** | blocked-on-compact-then-refactor |
+| **Next Action** | After /compact: refactor 3 broken node executors (`QueryDataverseNodeExecutor`, `CreateNotificationNodeExecutor`, `CreateTaskNodeExecutor`) to inject `Spaarke.Dataverse.IGenericEntityService` instead of the orphan-named `IHttpClientFactory.CreateClient("DataverseApi")`. Then build + zipdeploy + force-tick + verify appnotifications appear for Ralph. Per user principle: "correct, not fastest" — also flag/refactor the 4 OTHER services with same antipattern (EmailTemplateService, BulkRagIndexingJobHandler, SessionRestoreService, EmailAssociationService) as follow-up. |
+| **BFF runtime state** | Diag-instrumented build deployed (hash matches), with `AnalysisActionService.cs:33` SELECT fix included. App Insights captures `[DBG-DAILY]` markers. App-only path enters `ExecuteNodeAsync` then fails on HttpClient missing BaseAddress. |
+| **Dataverse state** | All Phase A fetchXml patches still live (Ch.1–5). All R2.2 BFF + code-page changes still live. Plus today's wiring patches (see "Live Dataverse mutations" below). |
 
-### Files Modified This Session (after context-handoff resume)
+### Files Modified This Session (UNCOMMITTED ⚠)
 
-- `scripts/Patch-PlaybookQueryFetchXml.ps1` (NEW) — reusable producer-fix script: patches sprk_configjson.fetchXml + description + optional entityLogicalName + optional ClearParameters. Used to apply Ch.1–5 patches.
-- `projects/spaarke-daily-update-service-r2/notes/channel-7-work-assignments-design.md` (NEW) — captured design for deferred Channel 7 (sprk_workassignment + Option C + createdon OR sprk_responseduedate semantics)
-- `projects/spaarke-daily-update-service-r2/current-task.md` (THIS FILE) — Phase A wrap-up + Phase B kickoff
+- `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs` — **Real fix.** Removed `sprk_actiontype` from the `$select` clause (line 33). That field doesn't exist on the `sprk_analysisaction` entity (a 2026-06-02 comment in the same file documented the empirical confirmation but the SELECT was never updated). Including it caused ALL `GetActionAsync` calls to return HTTP 400 → broke Insights AND Daily Briefing AND any future ActionId-based dispatch.
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs` — **Diagnostic instrumentation.** Added 6 `[DBG-DAILY]` `LogWarning` markers at: AppOnlyInternal entry/post-GetNodesAsync/post-ExecuteNodeBasedModeAsync, NodeBased entry/post-graph-build/post-batches/per-batch, ExecuteNodeAsync entry/executor-lookup/calling-executor/executor-returned. Decision pending: leave as `LogInformation` (permanent observability) or revert.
 
-### Live Dataverse mutations (after resume) — all on spaarkedev1
+### Live Dataverse mutations this session (all on spaarkedev1)
 
-| Node | Channel | What changed |
-|---|---|---|
-| `1cbd78b2-5f2d-…` Query Overdue Tasks | 1 | fetchXml: sprk_todoflag→sprk_eventtype_ref=Task + statuscode=Open + (sprk_duedate OR sprk_finalduedate < today); sort: finalduedate then duedate |
-| `79f77aa5-5f2d-…` Query Tasks Due Soon | 2 | fetchXml: same shape as Ch.1 but BETWEEN today AND {{dueSoonWindowUtc}} (default 7d) |
-| `2b50e587-5f2d-…` Query New Documents | 3 | fetchXml: removed sprk_matterteammember; replaced with outer join on sprk_matter + OR (m.ownerid=me, doc.ownerid=me) |
-| `2d2fdd9e-5f2d-…` Query New Events | 4 | fetchXml: appointment→sprk_event with type IN {Action,Deadline,Meeting,Milestone,Reminder} + sprk_RegardingMatter outer join + Option C OR; entityLogicalName: appointment→sprk_event; cleared stale parameters |
-| `d9468c8e-5f2d-…` Query New Emails | 5 | fetchXml: email→sprk_communication with type=Email (100000000) + sprk_RegardingMatter outer join + Option C OR; entityLogicalName: email→sprk_communication; cleared stale parameters |
+**10 sprk_playbooknode records PATCHed**:
+- `sprk_isactive = true` on all 20 nodes across 5 in-scope playbooks (Ch.1–5). Previously all 20 were `false` — `ExecutionGraph.IsActive` filter dropped them → `totalNodes=0` → no work.
+- `__actionType: 33` added to configjson of 5 Start nodes — triggers `isStartNode` passthrough in orchestrator line 1023.
+- `_sprk_actionid_value` (FK) set on 5 Query nodes → SYS-QUERY-DV Action.
+- `_sprk_actionid_value` (FK) set on 5 Notify nodes → SYS-CREATE-NOTIF Action.
 
-### Critical Context (must read before continuing)
+**2 sprk_analysisaction rows CREATED**:
+- `ef7747ca-2b6f-f111-ab0e-7ced8ddc4cc6` SYS-QUERY-DV (executoractiontype=51 via lookup)
+- `f97747ca-2b6f-f111-ab0e-7ced8ddc4cc6` SYS-CREATE-NOTIF (executoractiontype=50 via lookup)
 
-**1. Phase A done. Producer is now functional.** All 5 active Daily Briefing channels query the right entities with the right filters. Channels 6 + 7 explicitly deferred — Ch.7 design captured for future implementation.
+**1 sprk_analysisactiontype row CREATED**:
+- `6fb58650-2e6f-f111-ab0e-70a8a590c51c` "50 - Create Notification" (executor=50). The registry already had "51 - Query Dataverse" (`f9dd8bf5-4865-f111-ab0c-7ced8ddc4a05`).
 
-**2. Architectural patterns established (apply to any future producer fixes):**
-   - **"My" filter (interim)**: `ownerid eq-userid` (BFF rewrites at runtime per `QueryDataverseNodeExecutor.cs:187-195`). Phase C will design richer "My" resolver (team membership, regarding, etc.).
-   - **Option C (matter-owner OR record-owner)**: when source entity has `sprk_RegardingMatter` lookup (sprk_event, sprk_communication) OR direct matter lookup (sprk_document), use outer-link + `entityname="m"` cross-entity OR pattern.
-   - **Date-range OR**: when a record has multiple date fields (sprk_duedate, sprk_finalduedate, sprk_responseduedate), OR the range conditions together inside the AND filter.
-   - **Two-level sort**: primary by stricter/canonical date, tiebreaker by secondary date.
-   - **entityLogicalName must match `<entity name=>`**: BFF builds entitySet URL from `sprk_configjson.entityLogicalName`. Patching fetchXml without entityLogicalName fix = URL/entity mismatch error.
-   - **Stale parameters block** (`{{timeWindow}}`, `templateParameters.dueWithinDays`, etc.) — BFF only supports `parameters.dueSoonDays` and `parameters.timeWindowHours`. Remove anything else.
+### Critical Context
 
-**3. Test data verification (still pending on user):**
-   - Set sprk_event records' owner to Ralph Schroeder for Ch.1/2/4 testing.
-   - For Ch.5 — emails owned by service principal won't surface unless owner is fixed OR we add `sprk_to` UPN match in Phase C.
-   - For Ch.3 — Ralph already owns most matters + docs, so existing data works.
-   - Verification: wait for next playbook tick (≤1h) OR invoke manually; check appnotification records by category.
+**Daily Briefing producer is STILL not creating notifications**, but we've eliminated 5 of 6 known bugs and pivoted to the correct architectural fix instead of a parallel-implementation bypass.
 
-**4. Architectural bugs still pending (Phase B):**
-   - **isread / toasttype mismatch** in `notificationService.ts:120` — reads `toasttype === 200000000` (which schema says is "Timed", not "Dismissed"). Line 299 writes `webApi.updateRecord('appnotification', id, {isread: true})` — `isread` may not even exist on appnotification schema. Need to verify field names and align read/write paths.
-   - **TTL = 3 days** (`CreateNotificationNodeExecutor.cs:489`, `ttlinseconds = 259200`) may be too short — accidental TTL purge on 2026-06-22 wiped 36 records the user expected. Proposed: 7 or 14 days.
+**The 6 bugs found in series** (each fix revealed the next):
 
-**5. Phase C (out of scope here, tracked):**
-   - R3 (`spaarke-platform-foundations-r3`) provides scheduler robustness + run-now admin endpoints
-   - "My" resolver design (richer than ownerid)
-   - Sync mechanism between repo JSON and deployed playbook configs (repo drift caused the original misdiagnosis)
+| # | Bug | Layer | Status |
+|---|---|---|---|
+| 1 | `sprk_isactive=false` on all 10 deployed nodes → ExecutionGraph filtered them out → totalNodes=0 | Data | ✅ Fixed via PATCH |
+| 2 | NodeType=AIAnalysis nodes had no ActionId → "AI node requires Action" error | Data + Arch | ✅ Fixed via PATCH (created SYS Actions + wired FKs) |
+| 3 | Start node configjson missing `__actionType` → fell to Control→Condition fallback → "Condition expression required" error | Data | ✅ Fixed via PATCH |
+| 4 | BFF `AnalysisActionService.GetActionAsync` SELECTs `sprk_actiontype` field that doesn't exist on entity → ALL Action lookups return 400 | Code | ✅ Fixed (uncommitted, deployed) |
+| 5 | Missing `sprk_analysisactiontype` registry row for executor=50 (CreateNotification) | Data | ✅ Fixed via CREATE |
+| 6 | `QueryDataverseNodeExecutor` / `CreateNotificationNodeExecutor` / `CreateTaskNodeExecutor` use `IHttpClientFactory.CreateClient("DataverseApi")` — **named client NEVER registered in DI** → returns default HttpClient with no BaseAddress + no auth handler → "invalid request URI" | Code (architectural) | ❌ NOT FIXED — this is the next refactor |
 
-### Recovery steps for next session
+**Audit found 4 ADDITIONAL services with the same antipattern** (different orphan names, all unregistered):
+- `EmailTemplateService` → `"Dataverse"` (2 sites)
+- `BulkRagIndexingJobHandler` → `"DataverseBatch"`
+- `SessionRestoreService` → `"DataverseETagCheck"`
+- `EmailAssociationService` → `"DataverseAssociation"`
 
-1. Read this entire Quick Recovery section
-2. Check branch: `git branch --show-current` should show `work/spaarke-daily-update-service-r2.2-patch-fix`
-3. Verify PR #413: `gh pr view 413 --json state,mergedAt` (may have been admin-merged)
-4. Spot-check live state of Ch.1–5 nodes: `mcp__dataverse__read_query SELECT sprk_playbooknodeid, sprk_name, sprk_configjson FROM sprk_playbooknode WHERE sprk_playbooknodeid IN (...)`
-5. Next concrete action: Phase B design (see notes/phase-b-design.md if created)
+Plus `"DataversePolling"` (EmailServicesModule:50) is registered-but-bare. So **7 services total** have this defect class.
+
+**The architectural alignment**: The codebase already has the correct pattern: `Spaarke.Dataverse.IGenericEntityService` (shared library, registered via `GraphModule.cs:71` as composite forwarding). Used correctly by 20+ services including `PlaybookSchedulerService` itself (line 217 calls `entityService.RetrieveMultipleAsync(query, ct)`). It handles BaseAddress + TokenCredential + Bearer auth + token refresh automatically. The runtime impl is `DataverseServiceClientImpl` which supports `FetchExpression` (the SDK type for FetchXml).
+
+**Method shapes the 3 node executors need**:
+```csharp
+Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct);  // for fetchXml queries
+Task<Guid> CreateAsync(Entity entity, CancellationToken ct);  // for appnotification + task creation
+```
+
+**User's explicit principle (load-bearing for any future decision)**: "We MUST always take the correct technical approach not the fastest/least effort approach." Earlier I made the mistake of recommending a parallel BFF endpoint (bypass). User correctly rejected that as architectural drift. Confirmed approach: refactor the broken executors to use the existing shared library — slower but architecturally aligned.
 
 ---
 
 ## Full State (Detailed)
 
-### R2.2 final state (unchanged from prior checkpoint)
+### Session arc (chronological)
 
-| Artifact | State |
-|---|---|
-| PR #405 (R2.2 main) | ✅ MERGED (`ec05765ed`) |
-| PR #410 (R2.2 hotfix) | ✅ MERGED (`e584d296c`) |
-| PR #413 (patch script fix) | 🟡 OPEN — pending admin-merge |
-| BFF deploy | ✅ LIVE (46.07 MB, /healthz green) |
-| `sprk_dailyupdate` code page | ✅ LIVE |
-| `sprk_spaarkeai` code page | ✅ LIVE |
+1. Resumed from prior session (Phase A + Phase B already shipped: Channels 1–5 fetchXml patches live, TTL=7d live, bulk-dismiss fix live).
+2. User reported Daily Briefing showing zero items despite having qualifying events as owner.
+3. Diagnosed producer pipeline through cascading bugs (the 6 above).
+4. Briefly fell back to "bypass" recommendation after frustration; user correctly pushed back on architectural shortcuts.
+5. Identified `Spaarke.Dataverse.IGenericEntityService` as the canonical shared pattern.
+6. Audit confirmed 7 services across BFF use the broken named-client antipattern.
+7. About to start refactor; user requested /context-handoff first.
 
-### Phase A live channel state (post-resume)
+### Key code paths to know
 
-All 5 channel nodes patched LIVE. Next playbook tick exercises them.
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs:168` — `ExecuteAppOnlyInternalAsync`, app-only entry, currently has DBG-DAILY markers
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs:635` — `ExecuteNodeBasedModeAsync` (batched parallel)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs:885` — `ExecuteNodeAsync` (per-node dispatch, executor lookup, Validate, ExecuteAsync)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs:1023` — `isStartNode` early-return passthrough check
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs:1067` — `if (node.ActionId != Guid.Empty)` Action-FK branch
+- `src/server/api/Sprk.Bff.Api/Services/Ai/ExecutionGraph.cs:?` — constructor filters `nodes.Where(n => n.IsActive)`
+- `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs:33` — the SELECT fix (uncommitted)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/DataverseHttpServiceBase.cs` — pattern used by AnalysisActionService etc. (constructor sets BaseAddress + headers, EnsureAuthenticatedAsync attaches Bearer)
+- `src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs` — **canonical Dataverse access interface; refactor target**
+- `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs` — runtime impl (handles FetchExpression)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/GraphModule.cs:71` — `IGenericEntityService` registration (composite forwarding to `IDataverseService`)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` — node executor registrations (need to add `IGenericEntityService` dep when refactoring)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs` — **reference implementation** — the ONE node executor that correctly uses `IGenericEntityService`. Mirror this pattern when refactoring the 3 broken ones.
 
-### Decisions Made (this session, after resume)
+### Resumption protocol (do this on /compact resume)
 
-- **2026-06-22**: Channel-by-channel patches via reusable `Patch-PlaybookQueryFetchXml.ps1` script (extension of the field-fix-only `Patch-NotificationPlaybookDueDate.ps1`). Operates one node at a time so each channel is reviewed + applied independently.
-- **2026-06-22**: For each channel, "My" filter stays as `ownerid eq-userid` (interim) — Phase C will design richer resolver. User confirmed.
-- **2026-06-22**: For sprk_event and sprk_communication, use per-type regarding lookup (`sprk_RegardingMatter`) with outer-link + cross-entity OR pattern (Option C). User clarified that Spaarke has per-entity-type regarding lookups + a unified resolver, NOT a polymorphic regardingobjectid.
-- **2026-06-22**: For sprk_document (Ch.3) — direct sprk_matter lookup is the model (no per-type regarding fields). Option C still applies via outer link + OR.
-- **2026-06-22**: Channel 4 fetchXml type filter set to {Action, Deadline, Meeting, Milestone, Reminder} — user opted for broader event coverage than just Meeting.
-- **2026-06-22**: Channel 5 ownership filter known to miss inbound emails owned by service principal. Documented as interim limitation; Phase C resolves via `sprk_to` UPN match or post-receive ownership-assignment flow.
-- **2026-06-22**: Channels 6+7 deferred. Channel 7 design captured in `notes/channel-7-work-assignments-design.md` for future implementation (requires creating a new sprk_playbooknode record, not just patching).
+1. **Read this Quick Recovery section** (you are reading it now)
+2. **Check uncommitted state**: `git status --short` — should show 2 modified files (`AnalysisActionService.cs`, `PlaybookOrchestrationService.cs`). If clean, the changes got committed or reverted; investigate before proceeding.
+3. **Confirm branch**: `git branch --show-current` — should be `master` (we did NOT branch off; uncommitted changes are on master).
+4. **Decide on commit strategy**: 
+    - Option A: branch off + commit before refactor (cleaner history)
+    - Option B: stash, do refactor on master, commit everything together
+    - Recommend Option A.
+5. **Read `UpdateRecordNodeExecutor.cs`** (the reference implementation) to internalize the correct pattern.
+6. **Refactor in this order**:
+   - `QueryDataverseNodeExecutor` — uses `RetrieveMultipleAsync(FetchExpression)` — the most critical for Daily Briefing
+   - `CreateNotificationNodeExecutor` — uses `CreateAsync(Entity)` — also critical for Daily Briefing
+   - `CreateTaskNodeExecutor` — uses `CreateAsync(Entity)` — same pattern
+7. **Update DI** in `AnalysisServicesModule.cs` — these executors are registered as singletons; need to verify they can take `IGenericEntityService` dep (which may be scoped — confirm).
+8. **Build + zipdeploy** (use stop → kudu zipdeploy → start cycle to bypass file locks).
+9. **Force-tick** (NULL `sprk_lastrundate` on 5 playbooks + restart). Verify `appnotification` records appear for Ralph in spaarkedev1.
+10. **If green**: revert diag logging from orchestrator + redeploy clean. Commit + PR.
+11. **Follow-up backlog**: 4 other services with same antipattern — same refactor pattern.
 
-### MCP visibility limitation (unchanged)
+### Verification queries
 
-MCP service principal sees only 4 of (presumably 36+) appnotification records. Don't trust MCP appnotification counts as definitive — verify with user-side queries.
+- App Insights for orchestrator behavior: `traces | where timestamp > ago(15m) | where message contains "DBG-DAILY" or message contains "Playbook" | order by timestamp`
+- Appnotifications: `appnotifications?$filter=createdon ge {ISO-timestamp}&$select=title,createdon,ttlinseconds,partitionid&$orderby=createdon desc&$top=30`
+- Playbook last-run dates: `sprk_analysisplaybooks?$filter=sprk_playbooktype eq 2 and statecode eq 0&$select=sprk_name,sprk_lastrundate`
 
-### Repo paths
+### Deferred (do NOT lose sight of)
 
-- This file: `projects/spaarke-daily-update-service-r2/current-task.md`
-- Ch.7 design notes: `projects/spaarke-daily-update-service-r2/notes/channel-7-work-assignments-design.md`
-- Producer patch script (NEW): `scripts/Patch-PlaybookQueryFetchXml.ps1`
-- Original due-date patch script: `scripts/Patch-NotificationPlaybookDueDate.ps1` (PR #413)
-- BFF query executor: `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/QueryDataverseNodeExecutor.cs`
-- BFF notification creator: `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs`
-- Client notification service: `src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts` (Phase B target)
+- Channel 6 (Matter/Project Activity) and Channel 7 (Work Assignments) — design captured in `notes/channel-7-work-assignments-design.md`.
+- The 4 other services with broken named-client pattern — should be refactored in same wave to prevent future bug reports.
+- "DataversePolling" bare registration in `EmailServicesModule.cs:50` — needs proper config or migration to shared lib.
+- Decision: should `_sprk_actionid_value` always be required on every node (eliminate the structural-NodeType fallback)? Discussed; user agreed it would be cleaner. R3 / R4 work item.
+- R3 PR #415 still pending merge — DOES NOT fix this bug class (R3's `PlaybookSchedulerJob` calls the same broken `ExecuteAppOnlyAsync` path). Our refactor benefits R3 too.
 
 ---
 
-*Updated 2026-06-22 — Phase A complete; ready for commit + Phase B.*
+*Checkpoint written 2026-06-23 18:30 UTC. Ready for /compact + resume.*

@@ -171,9 +171,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         ChannelWriter<PlaybookStreamEvent> writer,
         CancellationToken cancellationToken)
     {
+        _logger.LogWarning("[DBG-DAILY] AppOnlyInternal ENTRY runId={RunId} playbookId={PlaybookId}", context.RunId, request.PlaybookId);
         try
         {
             var nodes = await _nodeService.GetNodesAsync(request.PlaybookId, cancellationToken);
+            _logger.LogWarning("[DBG-DAILY] AppOnlyInternal GetNodesAsync returned count={Count} for playbook={PlaybookId}", nodes.Length, request.PlaybookId);
 
             if (nodes.Length == 0)
             {
@@ -192,8 +194,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             _logger.LogInformation(
                 "App-only mode: Playbook {PlaybookId} has {NodeCount} nodes — using node-based execution",
                 request.PlaybookId, nodes.Length);
+            _logger.LogWarning("[DBG-DAILY] AppOnlyInternal nodes=[{Names}] entering NodeBasedMode for playbook={PlaybookId}",
+                string.Join(",", nodes.Select(n => $"{n.Name}(nt={n.NodeType})")), request.PlaybookId);
 
             await ExecuteNodeBasedModeAsync(context, nodes, writer, cancellationToken);
+            _logger.LogWarning("[DBG-DAILY] AppOnlyInternal ExecuteNodeBasedModeAsync returned for playbook={PlaybookId}", request.PlaybookId);
         }
         catch (OperationCanceledException)
         {
@@ -638,11 +643,13 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         ChannelWriter<PlaybookStreamEvent> writer,
         CancellationToken cancellationToken)
     {
+        _logger.LogWarning("[DBG-DAILY] NodeBased ENTRY runId={RunId} playbookId={PlaybookId} nodeCount={Count}", context.RunId, context.PlaybookId, nodes.Length);
         context.MarkRunning();
 
         // Build execution graph
         var graph = new ExecutionGraph(nodes);
         var totalNodes = graph.NodeCount;
+        _logger.LogWarning("[DBG-DAILY] NodeBased graph built totalNodes={TotalNodes} for playbook={PlaybookId}", totalNodes, context.PlaybookId);
 
         _logger.LogDebug(
             "Built execution graph for playbook {PlaybookId}: {NodeCount} active nodes",
@@ -654,6 +661,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
         // Get execution batches for parallel processing
         var batches = graph.GetExecutionBatches();
+        _logger.LogWarning("[DBG-DAILY] NodeBased batches={BatchCount} for playbook={PlaybookId}", batches.Count, context.PlaybookId);
 
         _logger.LogDebug(
             "Execution batches for playbook {PlaybookId}: {BatchCount} batches",
@@ -667,6 +675,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         foreach (var batch in batches)
         {
             batchNumber++;
+            _logger.LogWarning("[DBG-DAILY] NodeBased batch={N}/{Total} nodes=[{Names}] playbook={PlaybookId}",
+                batchNumber, batches.Count, string.Join(",", batch.Select(n => n.Name)), context.PlaybookId);
 
             if (context.CancellationToken.IsCancellationRequested)
             {
@@ -879,6 +889,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         ChannelWriter<PlaybookStreamEvent> writer,
         CancellationToken cancellationToken)
     {
+        _logger.LogWarning("[DBG-DAILY] ExecuteNodeAsync ENTRY node={Name} nodeType={Type} runId={RunId} playbookId={PlaybookId}",
+            node.Name, node.NodeType, runContext.RunId, runContext.PlaybookId);
         _logger.LogDebug("Executing node {NodeId}: {NodeName}", node.Id, node.Name);
 
         // Write start event
@@ -1116,6 +1128,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             // Get executor for action type
             var executor = _executorRegistry.GetExecutor(actionType);
+            _logger.LogWarning("[DBG-DAILY] ExecuteNodeAsync EXECUTOR LOOKUP node={Name} actionType={ActionType} found={Found}",
+                node.Name, actionType, executor != null);
             if (executor == null)
             {
                 var errorMsg = $"No executor registered for action type '{actionType}'";
@@ -1216,8 +1230,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             }
 
             // Execute the node
+            _logger.LogWarning("[DBG-DAILY] ExecuteNodeAsync CALLING executor for node={Name} actionType={ActionType}", node.Name, actionType);
             _logger.LogDebug("Calling executor for node {NodeName}", node.Name);
             var output = await executor.ExecuteAsync(nodeContext, runContext.CancellationToken);
+            _logger.LogWarning("[DBG-DAILY] ExecuteNodeAsync EXECUTOR RETURNED node={Name} success={Success} hasError={HasError}",
+                node.Name, output.Success, !string.IsNullOrEmpty(output.ErrorMessage));
 
             // Store output for downstream nodes
             runContext.StoreNodeOutput(output);
