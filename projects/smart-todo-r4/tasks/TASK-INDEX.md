@@ -1,11 +1,24 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-18 (Wave E ✅ deployed via PR #394; **R4-105 UAT-harness framework + consumer ✅ shipped in spaarke-prototype**)
-> **Branch**: `work/smart-todo-r4-wave2`
-> **Total Tasks**: 38 (was 34; +102/103/104 Wave E from UAT round 2; +105 UAT-tooling harness consumer — see [e-widget-app-parity-audit-2026-06-18.md](../notes/e-widget-app-parity-audit-2026-06-18.md))
-> **Status**: 🔲 2 not-started · 🔄 1 in-progress (092 awaiting UAT sign-off) · ✅ 35 complete · ❌ 0 blocked
-> **Active wave**: **Wave E ✅ deployed** (102 + 103 + 104 live on spaarkedev1 since 2026-06-18 21:25 UTC). **R4-105 UAT-harness framework ✅** built in `c:/code_files/spaarke-prototype/feature/uat-harness-framework` — sub-second visual iteration enabler for all future UAT cycles. Remaining: 092 (Wave D+E deploy session, awaiting UAT round 3 sign-off), 093 (UI test suite — superseded by iterative UAT), 098 (project wrap-up, HELD until UAT acceptance).
+> **Last Updated**: 2026-06-23 (PR #406 merged at squash commit `80f70a1d4`; closeout wave (110-117) added)
+> **Branch**: `work/smart-todo-r4-uat4-fixes` → MERGED to master
+> **Total Tasks**: 46 (was 38; +110-117 closeout wave from UAT rounds 4-13 retrospective)
+> **Status**: 🔲 8 not-started (closeout 110-117) · 🔄 0 in-progress · ✅ 35 complete (legacy) + 092→pending closeout-flip · ❌ 0 blocked
+> **Active wave**: **Closeout Wave 14** — 8 tasks (110-117) to close R4 properly: structural layout fix (110), widget Code Page modal removal (111), PCF CREATE-mode bridge (112), form-script audit (113), vitest wiring (114), SpeDocumentViewer cleanup (115), R4-092 flip (116), R4-098 wrap-up (117). R5 design backlog already captured in `projects/smart-todo-r5/design.md`.
+
+## Closeout Wave (110-117) — Execution Order
+
+Sequential where dependencies dictate; otherwise parallel-safe:
+
+1. **R4-110** — Structural Workspace height-chain audit + fix (FOUNDATION — informs others)
+2. **R4-111** — Remove widget "Expand to Code Page modal" path (parallel with 110)
+3. **R4-112** — PCF CREATE-mode bridge (FU-1) (parallel)
+4. **R4-113** — Form-script audit: register or delete (NEW-1) (parallel)
+5. **R4-114** — Wire vitest for SmartTodo (FU-4) (parallel)
+6. **R4-115** — SpeDocumentViewer stale bundle cleanup (FU-6) (parallel)
+7. **R4-116** — R4-092 final deploy notes + flip to ✅ (serial after 110-115)
+8. **R4-117** — R4-098 wrap-up + lessons-learned (serial after 116)
 
 ---
 
