@@ -315,17 +315,24 @@ public class RetryAndIdempotencyTests
             "each tick produces a unique ScheduledFireUtc — no deduplication of distinct ticks");
     }
 
+    // CI runners can be 3-5x slower than local; multiply tight timeouts to
+    // avoid flake without changing per-test call sites or weakening intent.
+    // GitHub Actions sets CI=true; local dev runs unscaled.
+    private static readonly bool _isCi =
+        string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
+
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout, string? because = null)
     {
+        var effectiveTimeout = _isCi ? TimeSpan.FromTicks(timeout.Ticks * 5) : timeout;
         var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < timeout)
+        while (sw.Elapsed < effectiveTimeout)
         {
             if (predicate()) return;
             await Task.Delay(50);
         }
         if (!predicate())
         {
-            throw new TimeoutException($"Predicate did not become true within {timeout}{(because is null ? "" : " — " + because)}");
+            throw new TimeoutException($"Predicate did not become true within {effectiveTimeout}{(because is null ? "" : " — " + because)}");
         }
     }
 }
