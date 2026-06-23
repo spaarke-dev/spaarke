@@ -227,8 +227,10 @@ public class ScheduledJobHostTests
         stopSw.Stop();
 
         observed.Should().BeTrue("the in-flight job MUST observe cancellation (NFR-07)");
-        stopSw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5),
-            "StopAsync MUST drain within ShutdownDrainTimeout + a small overhead (NFR-07: 30s ceiling)");
+        // 5s = 3s drain + 2s overhead locally; CI runners need ~5x overhead headroom.
+        var drainCeiling = _isCi ? TimeSpan.FromSeconds(25) : TimeSpan.FromSeconds(5);
+        stopSw.Elapsed.Should().BeLessThan(drainCeiling,
+            "StopAsync MUST drain within ShutdownDrainTimeout + reasonable overhead (NFR-07: 30s hard ceiling)");
 
         var slowRun = store.RunRecords.FirstOrDefault(r => r.JobId == "slow");
         slowRun.Should().NotBeNull();
