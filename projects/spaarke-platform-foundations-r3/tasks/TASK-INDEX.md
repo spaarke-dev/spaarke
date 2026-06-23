@@ -60,7 +60,7 @@ Status legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ❌ block
 | 065 | Canvas-server mapping drift integration test | P7.1 | ✅ | 042 | **O** | true | FULL |
 | 066 | Author `.claude/patterns/ai/node-executor-authoring.md` | P7.1 | ✅ | 041 | — main-only | false | FULL |
 | 070 | Create `sprk_userentityassociation` entity + indexes | P7.5 | ✅ | 010 | **P** | true | FULL |
-| 071 | Provision Service Bus topic `sprk-membership-changes` | P7.5 | ❌ blocked-operator | 010 | **P** | true | FULL |
+| 071 | Provision Service Bus topic `sprk-membership-changes` | P7.5 | ✅ | 010 | **P** | true | FULL |
 | 072 | `MembershipChangedEvent` payload contract | P7.5 | ✅ | 070, 071 | — | true | STANDARD | Wave 20 (2026-06-22): pure code-only contract definition (3 src + 1 test); 9/9 tests pass; publish 44.88 MB (-1.33 vs baseline). NOTE: topic-deploy task 071 still blocked-operator — Azure topic `sprk-membership-changes` does not yet exist. Publisher wiring deferred to tasks 081-083 once topic is provisioned. |
 | 073 | Bicep deploy + topic/subscription smoke test | P7.5 | 🔲 | 071, 072 | — | true | STANDARD |
 | 080 | P-event-1 — Event-source endpoint inventory | P8 | ✅ | 070, 071, 072 | **Q** main-only | false | STANDARD |

@@ -45,6 +45,48 @@ Per task constraints (CLAUDE.md §10 + spec.md NFR-01 + general infra-as-code hy
 
 ---
 
+## ✅ RESOLVED 2026-06-23 — Option A taken; deploy succeeded
+
+**Decision**: Owner approved Option A (upgrade dev `spaarke-servicebus-dev` Basic→Standard) based on cross-project analysis showing R3 + Insights Engine + future cross-cutting events all need topic support; consolidating to one Standard namespace is cleaner than multiple namespaces or deferring Phase 2 work.
+
+**Actions taken**:
+
+1. **Namespace upgrade** (2026-06-23):
+   ```bash
+   az servicebus namespace update \
+     --resource-group SharePointEmbedded \
+     --name spaarke-servicebus-dev \
+     --set sku.name=Standard sku.tier=Standard
+   ```
+   Result: Basic → Standard, in-place, all 7 existing queues preserved (`document-events`, `office-indexing`, `office-jobs`, `office-profile`, `office-upload-finalization`, `sdap-communication`, `sdap-jobs`). Active SB traffic on `sdap-jobs` continued through the upgrade without disruption.
+
+2. **Topic + subscription + RBAC deploy** (2026-06-23):
+   ```bash
+   az deployment group create \
+     --resource-group SharePointEmbedded \
+     --template-file infrastructure/bicep/modules/membership-topic.bicep \
+     --parameters serviceBusNamespaceName=spaarke-servicebus-dev \
+                  bffPrincipalId=9fd47efb-7962-492b-ac44-e5ccd0268ebb
+   ```
+   Result: ✅ `provisioningState=Succeeded`. 4 resources created.
+
+**Verified post-deploy**:
+- Topic `sprk-membership-changes` — Active, 1024 MB, P14D TTL
+- Subscription `recon-junction-updater` — Active, 10 max delivery, PT5M lock
+- BFF MI (`9fd47efb-7962-492b-ac44-e5ccd0268ebb`) → `Azure Service Bus Data Sender` on topic
+- BFF MI → `Azure Service Bus Data Receiver` on subscription
+
+**Status of task 071**: ✅ COMPLETE for dev (was ❌ `blocked-operator`).
+
+**Next gates**:
+- Task 073 (topic/subscription smoke test) — ready to run against dev
+- BFF deploy — still paused per team coordination (user directive 2026-06-22)
+- UAT/staging/prod — separate deploys; their SB namespaces (Standard already) can take the topic Bicep directly
+
+---
+
+## Original blocker analysis (preserved for historical record)
+
 ## ⚠️ BLOCKER DISCOVERED 2026-06-22 (deploy attempt)
 
 A `what-if` + `create` deploy was attempted against the dev environment on **2026-06-22** and **failed** with:
