@@ -439,7 +439,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             };
             query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, recipientId);
             query.Criteria.AddCondition("sprk_category", ConditionOperator.Equal, category);
-            query.Criteria.AddCondition("regardingobjectid", ConditionOperator.Equal, regardingId);
+            query.Criteria.AddCondition("sprk_regardingid", ConditionOperator.Equal, regardingId.ToString());
             query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
 
             var result = await _entityService.RetrieveMultipleAsync(query, cancellationToken);
@@ -528,10 +528,14 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             entity["data"] = JsonSerializer.Serialize(dataObject);
         }
 
-        // Add regarding object if specified
+        // Add regarding info if specified. appnotification is NOT an activity entity
+        // (no polymorphic regardingobjectid lookup), so we store regarding as two text
+        // fields: sprk_regardingid (GUID string) + sprk_regardingtype (entity logical name).
+        // These are also used in CheckForDuplicateNotificationAsync for idempotency.
         if (regardingId.HasValue && !string.IsNullOrWhiteSpace(regardingType))
         {
-            entity["regardingobjectid"] = new EntityReference(regardingType, regardingId.Value);
+            entity["sprk_regardingid"] = regardingId.Value.ToString();
+            entity["sprk_regardingtype"] = regardingType;
         }
 
         // Add AI metadata (playbook run info)
