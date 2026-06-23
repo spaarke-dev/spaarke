@@ -571,7 +571,21 @@ public static class ChatEndpoints
             var dispatcher = await agentFactory.CreatePlaybookDispatcherAsync(tenantId, cancellationToken);
             var dispatchResult = await dispatcher.DispatchAsync(request.Message, session.HostContext, cancellationToken);
 
-            if (dispatchResult is { Matched: true, OutputType: not OutputType.Text })
+            // Task 048 (FR-14d) — the gate now also fires for non-Chat NodeDestination
+            // values (Workspace / Both / FormPrefill / SideEffect). The destination is
+            // populated by PlaybookDispatcher (task 047) from the matched playbook's
+            // DeliverOutput node's sprk_configjson; Workspace-bound playbooks like
+            // summarize-document-for-workspace have OutputType.Text (their content is
+            // text — only the destination surface differs), so routing solely on
+            // OutputType would never hand the dispatch to the handler. The Chat default
+            // path remains: when NodeDestination == Chat AND OutputType == Text, the
+            // handler is bypassed and standard streaming below runs unchanged.
+            var routesViaHandler =
+                dispatchResult is { Matched: true } &&
+                (dispatchResult.OutputType != OutputType.Text ||
+                 dispatchResult.NodeDestination != NodeDestination.Chat);
+
+            if (routesViaHandler)
             {
                 var outputHandler = agentFactory.CreatePlaybookOutputHandler();
                 var handled = await outputHandler.HandleOutputAsync(
