@@ -152,15 +152,16 @@ public class ChatSessionSerializationTests
     }
 
     [Fact]
-    public void ChatSessionFile_HasExactlySixFields_PerDesignMdSection44()
+    public void ChatSessionFile_HasOriginalSixFields_PerDesignMdSection44()
     {
-        // Reflection-based regression guard: design.md §4.4 binds the shape to exactly
-        // six fields. If somebody adds a seventh field (or removes one), this test breaks
-        // — forcing them to update design.md §4.4 and spec NFR-02 first.
-        var properties = typeof(ChatSessionFile).GetProperties();
-        properties.Should().HaveCount(6, "design.md §4.4 binds ChatSessionFile to six fields");
-
-        var names = properties.Select(p => p.Name).ToHashSet();
+        // Reflection-based regression guard: design.md §4.4 (R5) bound the original shape
+        // to six fields. The 6-Tier Memory Subsystem (chat-routing-redesign-r1, task 071)
+        // additively extended the record with 8 enriched fields per
+        // stateful-chat-architecture.md §11.2. The original six are still required —
+        // dropping any one of them is a breaking change to the persisted Cosmos shape.
+        // This test does NOT pin total count to 6 anymore (extension is intentional), but
+        // it still guards the R5 binding shape.
+        var names = typeof(ChatSessionFile).GetProperties().Select(p => p.Name).ToHashSet();
         names.Should().Contain(new[]
         {
             nameof(ChatSessionFile.FileId),
@@ -169,7 +170,29 @@ public class ChatSessionSerializationTests
             nameof(ChatSessionFile.SizeBytes),
             nameof(ChatSessionFile.SearchDocumentIdsCsv),
             nameof(ChatSessionFile.UploadedAt),
-        });
+        }, "design.md §4.4 (R5) binds these six fields verbatim — they MUST survive");
+    }
+
+    [Fact]
+    public void ChatSessionFile_HasEightEnrichedFields_PerArchitectureSection112()
+    {
+        // Reflection-based regression guard: stateful-chat-architecture.md §11.2
+        // (chat-routing-redesign-r1) binds the 6-Tier Memory Subsystem enrichment shape
+        // to exactly these 8 additive fields. Renaming or removing any one of them is a
+        // breaking change to the persisted Cosmos shape and to the LayeredContextCardBuilder
+        // + recall-tool contracts.
+        var names = typeof(ChatSessionFile).GetProperties().Select(p => p.Name).ToHashSet();
+        names.Should().Contain(new[]
+        {
+            nameof(ChatSessionFile.SummaryText),
+            nameof(ChatSessionFile.ClassifiedDocType),
+            nameof(ChatSessionFile.ClassifiedConfidence),
+            nameof(ChatSessionFile.Sections),
+            nameof(ChatSessionFile.TableMetadata),
+            nameof(ChatSessionFile.Citations),
+            nameof(ChatSessionFile.PageCount),
+            nameof(ChatSessionFile.Language),
+        }, "stateful-chat-architecture.md §11.2 binds these eight enriched fields");
     }
 
     // === Wire-compat: pre-R5 JSON deserializes ===
