@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Jobs;
@@ -19,7 +20,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// Baseline DI count before this module: 89 (per ADR-010 tracking comment in CLAUDE.md).
 /// This module adds non-framework singleton/scoped registrations (ADR-010: ≤15 unconditional):
 ///
-/// UNCONDITIONAL (always registered when AddAiModule is invoked) — 10 total:
+/// UNCONDITIONAL (always registered when AddAiModule is invoked) — 15 total:
 ///   1. AddKeyedSingleton&lt;IChatClient&gt;("raw")            — ADR-010 (task 071) — Raw Azure OpenAI client (pre-function-invocation) for compound intent detection
 ///   2. AddChatClient&lt;IChatClient&gt;                       — ADR-010 (AIPL-050) — Azure OpenAI IChatClient bridge (UseFunctionInvocation pipeline)
 ///   3. AddSingleton&lt;LlamaParseClient&gt;                  — ADR-010 (AIPL-012)
@@ -31,6 +32,10 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   9. AddScoped&lt;IChatContextProvider, PlaybookChatContextProvider&gt; — ADR-010 (AIPL-051) — Scoped: resolves Dataverse context per request
 ///  10. AddScoped&lt;ChatContextMappingService&gt;             — ADR-010 (AIPL-053) — Scoped: context mapping resolution (Redis + Dataverse)
 ///  11. AddScoped&lt;PendingPlanManager&gt;                    — ADR-010 (task 071) — Scoped: pending plan Redis storage (30-min TTL, plan:pending key)
+///  12. AddSingleton&lt;PlaybookIndexInputValidator&gt;        — ADR-010 (chat-routing-redesign-r1 task 036) — FR-12 validation gate
+///  13. AddSingleton&lt;IPlaybookEmbeddingHashCalculator, PlaybookEmbeddingHashCalculator&gt; — ADR-010 (chat-routing-redesign-r1 task 034) — FR-13 canonical hash
+///  14. AddScoped&lt;IJobHandler, PlaybookIndexDriftDetectionJob&gt; — ADR-010 (chat-routing-redesign-r1 task 034) — FR-13 nightly drift-detection job
+///  15. AddSingleton&lt;IRecentlyDiscussedTracker, RecentlyDiscussedTracker&gt; — ADR-010 (chat-routing-redesign-r1 task 091 MVP) — Redis-backed per-session recent-files cue (architecture §6.3 / §11.1)
 ///
 /// PROMOTED TO UNCONDITIONAL (registered by AnalysisServicesModule.AddUnconditionalChatAndNotificationServices —
 /// task 011 Phase 1b Tier 1, D-09 §2 B4/B5/L5, 2026-06-01):
@@ -277,6 +282,19 @@ public static class AiModule
         // ADR-032 P1/P2/P3 rather than wrapping this line in a feature flag.
         services.AddScoped<IJobHandler, PlaybookIndexDriftDetectionJob>();
 
+        // IRecentlyDiscussedTracker — chat-routing-redesign-r1 task 091 (MVP-cut).
+        // Redis-backed (via IDistributedCache) per-session recent-files cue layer; read by
+        // future T2 manifest builder + prompt assembly to surface "you were just discussing X"
+        // cues. Written unconditionally by RecallSessionFileHandler on every successful recall
+        // (architecture §6.3 / §11.1). Singleton: stateless, IDistributedCache is singleton,
+        // TimeProvider injected.
+        // ADR-010: concrete class, interface kept as the consumer (RecallSessionFileHandler)
+        // injects optionally so unit tests can mock. Both registered for ergonomic DI.
+        // ADR-032: UNCONDITIONAL — memory is always on in MVP; no Null-Object kill switch.
+        // If a future kill switch is needed, apply ADR-032 Null-Object pattern rather than
+        // wrapping this registration in a feature flag (per CLAUDE.md §10 F.1).
+        services.AddSingleton<IRecentlyDiscussedTracker, RecentlyDiscussedTracker>();
+
         // PlaybookIndexingBackgroundService — hosted service (ADR-001 mandate, no Azure Functions).
         // Processes playbook embedding indexing requests from a bounded Channel<string>.
         // Factory-instantiates PlaybookIndexingService internally (ADR-010: no new DI registration
@@ -296,10 +314,11 @@ public static class AiModule
 // =============================================================================
 // DI REGISTRATION COUNT AUDIT — AiModule.cs (AIPU-075, 2026-05-16;
 //                                            updated task 011 Phase 1b Tier 1, 2026-06-01;
-//                                            updated chat-routing-redesign-r1 task 034, 2026-06-22)
+//                                            updated chat-routing-redesign-r1 task 034, 2026-06-22;
+//                                            updated chat-routing-redesign-r1 task 091 MVP, 2026-06-23)
 // ADR-010 Limit: 15 non-framework registrations per module
 // =============================================================================
-// UNCONDITIONAL REGISTRATIONS — 14 / 15 (5 promoted out — see Promoted block below)
+// UNCONDITIONAL REGISTRATIONS — 15 / 15 (5 promoted out — see Promoted block below)
 // -----------------------------------------------------------------------------
 //  1. AddKeyedSingleton<IChatClient>("raw")                — raw OpenAI client (task 071)
 //  2. AddChatClient<IChatClient>                           — OpenAI pipeline client (AIPL-050)
@@ -315,6 +334,7 @@ public static class AiModule
 // 12. AddSingleton<PlaybookIndexInputValidator>            — FR-12 validation gate (chat-routing-redesign-r1 task 036)
 // 13. AddSingleton<IPlaybookEmbeddingHashCalculator, ...>  — FR-13 canonical hash calculator (chat-routing-redesign-r1 task 034)
 // 14. AddScoped<IJobHandler, PlaybookIndexDriftDetectionJob> — FR-13 nightly drift-detection job (chat-routing-redesign-r1 task 034)
+// 15. AddSingleton<IRecentlyDiscussedTracker, RecentlyDiscussedTracker> — per-session recent-files cue layer (chat-routing-redesign-r1 task 091 MVP)
 // -----------------------------------------------------------------------------
 // PROMOTED TO UNCONDITIONAL (in AnalysisServicesModule.AddUnconditionalChatAndNotificationServices)
 //   — D-09 §2 B4/B5/L5, task 011 Phase 1b Tier 1, 2026-06-01

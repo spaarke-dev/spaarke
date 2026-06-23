@@ -351,7 +351,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 088 | `PromoteToMatterMemoryHandler` (T2 → T3 pending-approval queue) | 🔲📝 | FULL | true | 4-H | 080 | `bff-api`, `services`, `handlers` |
 | 089 | `GetUserPreferencesHandler` (T4 read-only) | 🔲📝 | FULL | true | 4-H | 080 | `bff-api`, `services`, `handlers`, `dataverse` |
 | 090 | `GetOrgTemplatesHandler` (T4 read-only) | 🔲📝 | FULL | true | 4-H | 080 | `bff-api`, `services`, `handlers`, `dataverse` |
-| **091 (NEW)** | **DI registration for 8 new tool handlers in `AiModule.cs`** (CRIT-4 fix) | 🔲📝 | STANDARD | false | 4-I | 083,084,085,086,087,088,089,090 | `bff-api`, `di`, `config` |
+| **091 (NEW)** | **DI registration for 8 new tool handlers in `AiModule.cs`** (CRIT-4 fix) | ✅ | STANDARD | false | 4-I | 083,084,085,086,087,088,089,090 | `bff-api`, `di`, `config` — MVP-cut scope (peers 083/084/086-090 deferred per Q5b): canonical `IRecentlyDiscussedTracker` (Services/Ai/Memory/) + Redis-backed `RecentlyDiscussedTracker` impl (24h sliding TTL, MaxEntries=20, ADR-015 safe logs, dedup, newest-first); registered Singleton in `AiModule.cs` (count 14→15); replaces task 085's `IRecentlyDiscussedTrackerLike` shim with canonical interface + async rename Mark→MarkAsync; 7 tracker unit tests + 1 integration smoke test (AddDistributedMemoryCache — no Redis dep); 46/46 handler+tracker pass 70ms; 11/11 integration pass |
 | 092 | Update `Seed-TypedHandlers.ps1` to register 8 handlers as `sprk_analysistool` rows | 🔲📝 | STANDARD | false | 4-J | 091 | `dataverse`, `scripts`, `deploy` |
 
 ### Phase 4e — Promotion workflow + Q8 conflict check (all task IDs cascaded by +1)

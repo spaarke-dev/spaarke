@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -214,11 +215,12 @@ public sealed class RecallSessionFileHandler : IToolHandler
     private readonly ILogger<RecallSessionFileHandler> _logger;
     private readonly IContextEventEmitter? _contextEventEmitter;
 
-    // task 091 — IRecentlyDiscussedTracker is NOT yet defined in code as of task 085;
-    // when task 091 introduces the interface + DI registration, switch this to a typed
-    // dependency and remove the defensive null-safe call site. Until then we accept the
-    // dependency optionally so this task lands green per the POML notes.
-    private readonly IRecentlyDiscussedTrackerLike? _recentlyDiscussedTracker;
+    // task 091 (MVP) — canonical IRecentlyDiscussedTracker landed in
+    // Services/Ai/Memory/IRecentlyDiscussedTracker.cs with a Redis-backed implementation
+    // registered as Singleton in AiModule.cs. The dependency remains OPTIONAL so unit tests
+    // can construct the handler without supplying a tracker (DI supplies a real instance in
+    // production; tests can also inject Mock<IRecentlyDiscussedTracker> explicitly).
+    private readonly IRecentlyDiscussedTracker? _recentlyDiscussedTracker;
 
     public RecallSessionFileHandler(
         IRagService ragService,
@@ -226,7 +228,7 @@ public sealed class RecallSessionFileHandler : IToolHandler
         TimeProvider timeProvider,
         ILogger<RecallSessionFileHandler> logger,
         IContextEventEmitter? contextEventEmitter = null,
-        IRecentlyDiscussedTrackerLike? recentlyDiscussedTracker = null)
+        IRecentlyDiscussedTracker? recentlyDiscussedTracker = null)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
@@ -500,12 +502,19 @@ public sealed class RecallSessionFileHandler : IToolHandler
                     new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = _timeProvider.GetUtcNow() });
             }
 
-            // Mark recently-discussed on any successful recall except not_found. Null-safe per
-            // task 091 defensive pattern — when the registration lands (task 091), this becomes
-            // unconditional.
-            if (payload.TruncationReason != TruncationReasonNotFound)
+            // Mark recently-discussed on any successful recall except not_found. The tracker
+            // dependency is OPTIONAL on the constructor (so unit tests can omit it). In
+            // production AiModule.cs unconditionally registers IRecentlyDiscussedTracker as
+            // Singleton, so DI always supplies a real instance. Per task 091 (MVP), the
+            // canonical interface is async (MarkAsync) — we await here. The tracker swallows
+            // Redis transients internally, so this await NEVER throws back into the recall
+            // pipeline (architecture §6.3 / §11.1 UX-cue layer).
+            if (_recentlyDiscussedTracker is not null
+                && payload.TruncationReason != TruncationReasonNotFound)
             {
-                _recentlyDiscussedTracker?.Mark(sessionIdString, args.FileId);
+                await _recentlyDiscussedTracker
+                    .MarkAsync(sessionIdString, args.FileId, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             stopwatch.Stop();
@@ -1034,22 +1043,4 @@ public sealed class RecallSessionFileHandler : IToolHandler
         [property: JsonPropertyName("paragraph")] int? Paragraph,
         [property: JsonPropertyName("section")] string? Section,
         [property: JsonPropertyName("text")] string Text);
-}
-
-/// <summary>
-/// Defensive-shim interface for task 091's <c>IRecentlyDiscussedTracker</c>. Task 091 owns
-/// the canonical interface definition + DI registration; until then this handler injects
-/// the optional dependency through a structural shape so the source compiles AND the test
-/// suite can mock it. When task 091 lands, switch this dependency to the real
-/// <c>IRecentlyDiscussedTracker</c> from <c>Services/Ai/Memory</c> (or wherever 091 places
-/// it) and delete this local shim.
-/// </summary>
-/// <remarks>
-/// Internal so the public API surface area of the handler is unchanged. Task 091 will
-/// replace this with the real interface; the rename is a single-line edit.
-/// </remarks>
-public interface IRecentlyDiscussedTrackerLike
-{
-    /// <summary>Marks <paramref name="fileId"/> as recently-discussed in <paramref name="sessionId"/>.</summary>
-    void Mark(string sessionId, string fileId);
 }

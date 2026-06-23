@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Handlers;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
 using Xunit;
@@ -30,7 +31,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 ///         architecture §5.2.1)</item>
 ///   <item>scope=<c>full_text</c> truncation → returns <c>truncation_reason: "exceeded_8K"</c></item>
 ///   <item><c>fileId</c> not_found → structured payload (not exception)</item>
-///   <item><c>IRecentlyDiscussedTrackerLike.Mark</c> called once per successful recall</item>
+///   <item><c>IRecentlyDiscussedTracker.MarkAsync</c> called once per successful recall</item>
 ///   <item><c>IContextEventEmitter.ToolCallCompleted</c> invoked with tier-1 safe payload only
 ///         (no content, citation text, query strings, summary text)</item>
 ///   <item><c>requireCitations: true</c> with zero citations → <c>Error = "NO_CITATIONS_AVAILABLE"</c></item>
@@ -40,7 +41,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 /// Design note: <c>ChatSessionManager</c> is a concrete class with a public-virtual
 /// <c>GetSessionAsync</c>; we mock it directly via Moq with a stub constructor injecting
 /// null-object collaborators. <c>IRagService</c> + <c>IContextEventEmitter</c> +
-/// <c>IRecentlyDiscussedTrackerLike</c> are mocked normally.
+/// <c>IRecentlyDiscussedTracker</c> are mocked normally.
 /// </para>
 /// </remarks>
 [Trait("status", "new")]
@@ -54,7 +55,7 @@ public sealed class RecallSessionFileHandlerTests
 
     private readonly Mock<IRagService> _ragService = new();
     private readonly Mock<IContextEventEmitter> _contextEventEmitter = new();
-    private readonly Mock<IRecentlyDiscussedTrackerLike> _recentlyDiscussedTracker = new();
+    private readonly Mock<IRecentlyDiscussedTracker> _recentlyDiscussedTracker = new();
 
     private RecallSessionFileHandler CreateHandler(ChatSession? session)
     {
@@ -421,7 +422,7 @@ public sealed class RecallSessionFileHandlerTests
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // IRecentlyDiscussedTracker.Mark called once per successful recall
+    // IRecentlyDiscussedTracker.MarkAsync called once per successful recall
     // ════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -440,7 +441,10 @@ public sealed class RecallSessionFileHandlerTests
         await handler.ExecuteChatAsync(ctx, BuildRecallTool(), CancellationToken.None);
 
         _recentlyDiscussedTracker.Verify(
-            t => t.Mark(chatSessionId.ToString("N"), DefaultFileId),
+            t => t.MarkAsync(
+                chatSessionId.ToString("N"),
+                DefaultFileId,
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -460,7 +464,10 @@ public sealed class RecallSessionFileHandlerTests
         await handler.ExecuteChatAsync(ctx, BuildRecallTool(), CancellationToken.None);
 
         _recentlyDiscussedTracker.Verify(
-            t => t.Mark(It.IsAny<string>(), It.IsAny<string>()),
+            t => t.MarkAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
