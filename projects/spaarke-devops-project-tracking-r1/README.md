@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-06-23
 >
-> **Status**: Ready for Implementation
+> **Status**: ✅ **Complete** (Phase 3 backfill + Phase 5 UI views deferred to user per `notes/lessons-learned.md`)
 
 ## Overview
 
@@ -23,10 +23,10 @@ Extends GitHub Project #2 ("Spaarke Core") with new fields, a `Type=Project` opt
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Planning (artifacts scaffolded; tasks pending) |
-| **Progress** | 0% (pre-implementation) |
-| **Target Date** | TBD |
-| **Completed Date** | — |
+| **Phase** | Complete — Phases 1, 2, 4, 6 + wrap-up landed; Phase 3+5 deferred to user |
+| **Progress** | 31/38 tasks structurally complete; 9 skills + 9 hooks shipped; docs extended; portfolio infrastructure usable |
+| **Target Date** | 2026-06-23 |
+| **Completed Date** | 2026-06-23 |
 | **Owner** | spaarke-dev |
 
 ## Problem Statement

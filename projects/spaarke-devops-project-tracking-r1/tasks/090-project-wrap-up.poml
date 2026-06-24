@@ -1,9 +1,11 @@
 <task id="DEVOPS-090" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Project wrap-up — graduation criteria audit + lessons-learned + archive</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>wrap-up</phase>
     <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>wrap-up, graduation, lessons-learned, archive</tags>
     <dependencies>053</dependencies>
     <parallel-group>none</parallel-group>

@@ -1,9 +1,11 @@
 <task id="DEVOPS-053" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Phase 6 verify gate — all doc extensions land cleanly</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>6</phase>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>verify, phase-gate, docs-audit</tags>
     <dependencies>050, 051, 052</dependencies>
     <parallel-group>none</parallel-group>

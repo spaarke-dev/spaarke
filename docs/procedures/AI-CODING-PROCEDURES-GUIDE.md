@@ -523,3 +523,131 @@ Or pre-approve common tools in `.claude/settings.json` `permissions.allow` list.
 ---
 
 *Created during ai-procedure-refactoring-r2. Maintained as a living document — update when new skills or procedures are added.*
+
+
+---
+
+## Portfolio Scenarios (added 2026-06-23 by spaarke-devops-project-tracking-r1 · FR-30)
+
+The following 7 scenarios use the 9 `/devops-*` skills + hook automation. Each follows the existing **"what to say / what happens automatically / what to check"** pattern.
+
+### Scenario: Capture an idea before it's a real project
+
+**What to say**: "Capture this idea — add shared dashboard for portfolio stakeholders"
+
+**What happens automatically**:
+- `/devops-idea-create` runs with the summary
+- A GitHub Issue is created with `Type=Idea`, label `backlog`
+- The Issue lands on Project #2's backlog view
+- **No local folder, worktree, or branch is created**
+
+**What to check**:
+- `gh issue list --label backlog --state open --limit 5` shows your Idea at the top
+- The Project #2 board's backlog view shows the Idea
+- `projects/` directory is unchanged
+
+---
+
+### Scenario: Promote ideas into a project (with packaging)
+
+**What to say**: "Promote idea #157 to a project under Epic #422" *(1 → 1, Path A)*
+**Or**: "Package ideas #157, #158, #159 into one project under Epic #422" *(N → 1, Path B)*
+
+**What happens automatically**:
+- Path A: `/devops-idea-promote --to-project #157 --epic #422` flips Issue #157's Type to `Project`, sets Parent issue Epic #422, swaps label `backlog` → `project`. Number preserved.
+- Path B: `/devops-idea-promote --package #157 #158 #159 --epic #422` creates a new Project Issue with the 3 Ideas as sub-issues (Ideas remain open per D-20).
+
+**What to check**:
+- Path A: `gh issue view 157 --json labels,number` shows `project` label.
+- Path B: new Project Issue's body includes "Source Ideas: #157, #158, #159"; sub-issues panel shows count 3.
+
+---
+
+### Scenario: Update a project's status
+
+**What to say**: "Sync my project's portfolio status" (or just continue normal work — the hooks fire automatically)
+
+**What happens automatically**:
+- During normal work (`/task-execute`, `/context-handoff`, `/worktree-sync`, etc.): hooks call `/devops-project-sync` after each operation.
+- Per FR-20 (HIGHEST VALUE): `/context-handoff` always syncs at end — so every 3 task steps, the board refreshes.
+- Fields updated: `Task Count`, `Tasks Completed`, `Project Status`, `Worktree Path`.
+
+**What to check**:
+- `gh issue view <#N> --json title,body` — body shows current Task Count + Tasks Completed.
+- Project Status field reflects current state (In Progress / On Hold / Completed candidate).
+
+---
+
+### Scenario: Close (complete or cancel) a project
+
+**What to say**: "Archive my completed project" (after merge) or "Cancel this project"
+
+**What happens automatically**:
+- `/merge-to-master` post-merge hook adds a "Merged via PR #M" comment to the Project Issue
+- If all POML tasks complete AND PR merged → prompt "Archive project? [y/N]" (per F3 — explicit gate, never auto-archives)
+- On Y: `/devops-project-archive --status Completed --pr-number #M` runs:
+  1. Sets `Project Status = Completed`
+  2. Closes Issue with `Status=Done`
+  3. **Deletes the local git worktree** (per D-18; refuses if dirty unless `--force`)
+  4. Retains `projects/{name}/` folder with new `.archived` marker file
+  5. Preserves the remote branch (NFR-09)
+
+**What to check**:
+- `git worktree list` does NOT include the archived worktree
+- `projects/{name}/.archived` exists with date + final status + PR ref
+- `gh issue view <#N>` shows state=closed, comments include archive note
+
+---
+
+### Scenario: See what's running across all projects
+
+**What to say**: "Show me the portfolio status"
+
+**What happens automatically**:
+- `/devops-portfolio-status` queries Project #2 + groups by Epic
+- Prints concise terminal dashboard in <30 seconds (per Success Criterion 7):
+
+```
+Spaarke Portfolio — 2026-06-23
+Epic                              | Total | In Prog | Planned | Hold | Done | Cancel
+----------------------------------|-------|---------|---------|------|------|-------
+AI Platform & Chat            #421 |    8  |    3    |    2    |  1   |  2   |   0
+Insights Engine               #422 |    4  |    2    |    1    |  0   |  1   |   0
+...
+Totals: 30 projects (12 in progress, 8 planned, 3 on hold, 7 done, 0 cancelled)
+```
+
+**What to check**:
+- Output is human-readable in <30 seconds (UX target)
+- Counts match expectations from your knowledge of active work
+
+---
+
+### Scenario: Package multiple ideas into one project
+
+**What to say**: "Package ideas #157, #158, #159 into one project under Epic #422"
+
+(Same as Scenario 2 — Path B. Detailed there.)
+
+**Why use this scenario**: when multiple loosely-related Ideas all converge on one engineering effort, packaging into a single Project Issue keeps the portfolio cleaner than 3 separate Project Issues. The N source Ideas remain visible as sub-issues for narrative context.
+
+---
+
+### Scenario: I'm a stakeholder — where do I look?
+
+**What to say**: "Generate a stakeholder snapshot" (or asked of the engineering owner)
+
+**What happens automatically**:
+- `/devops-portfolio-status --snapshot` writes `docs/portfolio/snapshot-{YYYY-MM-DD}.md` — an Epic-by-Epic narrative (NOT raw field dump per D-10)
+- The markdown reads like a briefing: "AI Platform & Chat (Epic #421) — 3 projects in progress: chat routing redesign 60% complete, capability router 40% complete, Foundry grounding 20% complete..."
+
+**What to check**:
+- File exists at `docs/portfolio/snapshot-{date}.md`
+- Content has zero raw GitHub field IDs leaking (`PVT*` prefixes)
+- Each Epic gets a paragraph; Projects under each Epic listed with brief status
+
+**For ongoing stakeholder visibility**: the [Project #2 Portfolio Roadmap view](https://github.com/users/spaarke-dev/projects/2) is the live equivalent — answers the same questions in <30 seconds without generating a snapshot.
+
+---
+
+*Portfolio Scenarios section added 2026-06-23 by spaarke-devops-project-tracking-r1 / FR-30. See also: [HOW-TO-INITIATE-NEW-PROJECT.md § Portfolio Integration](../guides/HOW-TO-INITIATE-NEW-PROJECT.md#portfolio-integration-added-2026-06-23-by-spaarke-devops-project-tracking-r1--fr-29).*

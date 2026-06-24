@@ -1,9 +1,11 @@
 <task id="DEVOPS-052" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Update root CLAUDE.md §17 Pointers + .claude/CHANGELOG.md</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>6</phase>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>documentation, claudemd, changelog, additive-only</tags>
     <dependencies>050, 051</dependencies>
     <parallel-group>none</parallel-group>

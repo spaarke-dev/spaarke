@@ -1,9 +1,11 @@
 <task id="DEVOPS-051" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Extend AI-CODING-PROCEDURES-GUIDE.md with 7 portfolio scenarios</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>6</phase>
     <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>documentation, ai-coding-procedures, additive-only</tags>
     <dependencies>019, 042</dependencies>
     <parallel-group>P6-docs</parallel-group>

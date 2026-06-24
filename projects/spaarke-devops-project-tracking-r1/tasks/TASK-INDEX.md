@@ -1,8 +1,8 @@
 # Task Index — Spaarke DevOps Project Tracking (r1)
 
 > **Last Updated**: 2026-06-23
-> **Total Tasks**: 38 (26 complete · 12 pending)
-> **Status**: 🔄 Phase 1 ✅ · Phase 2 ✅ · Phase 4 ✅ (9 hooks, all skills reference /devops-*) · Phase 3+5+6 + wrap-up pending
+> **Total Tasks**: 38 (31 structurally complete · 6 deferred to user · 1 spec-deferred)
+> **Status**: ✅ **GRADUATED** — Phases 1, 2, 4, 6 + wrap-up complete. Phase 3 (backfill) and Phase 5 (UI views) deferred per `notes/lessons-learned.md`. Skills + docs ready for use as-of-now.
 
 ## Status Legend
 
@@ -115,10 +115,10 @@
 
 | # | Task | Effort | Dependencies | Parallel | Status |
 |---|------|--------|--------------|----------|--------|
-| 050 | Extend `docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md` | 2h | 019, 042 | P6-docs | 🔲 |
-| 051 | Extend `docs/procedures/AI-CODING-PROCEDURES-GUIDE.md` | 2h | 019, 042 | P6-docs | 🔲 |
-| 052 | Update root `CLAUDE.md` §17 Pointers + `.claude/CHANGELOG.md` | 1h | 050, 051 | none | 🔲 |
-| 053 | **Phase 6 verify gate** — all doc extensions land cleanly | 1h | 050, 051, 052 | none | 🔲 |
+| 050 | Extend `docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md` | 2h | 019, 042 | P6-docs | ✅ |
+| 051 | Extend `docs/procedures/AI-CODING-PROCEDURES-GUIDE.md` | 2h | 019, 042 | P6-docs | ✅ |
+| 052 | Update root `CLAUDE.md` §17 Pointers + `.claude/CHANGELOG.md` | 1h | 050, 051 | none | ✅ |
+| 053 | **Phase 6 verify gate** — all doc extensions land cleanly | 1h | 050, 051, 052 | none | ✅ |
 
 **Phase 6 Total**: ~6 hours · Tasks 050+051 parallel-safe (different files); 052 must follow them (touches root CLAUDE.md)
 
@@ -128,7 +128,7 @@
 
 | # | Task | Effort | Dependencies | Parallel | Status |
 |---|------|--------|--------------|----------|--------|
-| 090 | Project wrap-up — graduation criteria audit + lessons-learned + ready for merge | 2h | 053 | none | 🔲 |
+| 090 | Project wrap-up — graduation criteria audit + lessons-learned + ready for merge | 2h | 053 | none | ✅ |
 
 ---
 
