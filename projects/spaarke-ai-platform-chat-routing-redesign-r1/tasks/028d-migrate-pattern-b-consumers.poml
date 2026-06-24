@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028d" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Migrate 2 Pattern B consumers to IConsumerRoutingService</title>
+    <phase>1R: sprk_playbookconsumer Routing Table</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>028b</dependencies>
+    <blocks>028e</blocks>
+    <tags>bff-api, services, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api`; modifies 2 BFF services in `Services/Ai/` boundary; replaces the 2 Pattern B execution-path consts flagged in task 027 exit gate evidence; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>1-M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Migrate the 2 Pattern B BFF consumers from hardcoded playbook lookups to `IConsumerRoutingService.ResolveAsync` calls per spec FR-1R-05. The 2 consumers are `SessionSummarizeOrchestrator` (chat-summarize) and `AppOnlyAnalysisService` (email-analysis — the latter still contains the 2 const stable-IDs flagged in task 027 exit gate evidence as Pattern B execution-path consts). Each service receives `IConsumerRoutingService` via constructor injection (Scoped lifetime). One integration test per service confirms identical behavior post-migration vs the Phase 1 baseline. Final grep proves zero hardcoded playbook GUIDs remain in these 2 services.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat-routing layer + Phase 1 stable-code migration history + the 2026-06-22 task 027 exit-gate evidence trail (Pattern B execution-path consts at `AppOnlyAnalysisService.cs:46,1068`).</role>
+
+  <goal>
+    Both Pattern B consumers (`SessionSummarizeOrchestrator`, `AppOnlyAnalysisService`) resolve their playbook target via `IConsumerRoutingService.ResolveAsync` from the `sprk_playbookconsumer` Dataverse table seeded by 028b. `SessionSummarizeOrchestrator` uses the `chat-summarize` consumer type (FR-26 / FR-30 invariants preserved per task 015 evidence). `AppOnlyAnalysisService` uses the `email-analysis` consumer type and the 2 const stable-IDs flagged in task 027 (at `AppOnlyAnalysisService.cs:46,1068`) are removed. 2 integration tests (one per service) pass against the migrated codepath. Final `Grep` for hardcoded playbook GUIDs in these 2 files returns zero.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §"Phase 1R" FR-1R-05. Pattern B consumers were the secondary group identified in the §1.7 Stable-ID migration — they previously held the playbook lookup as a hardcoded constant (GUID literal or string code) rather than reading from `WorkspaceOptions.*PlaybookId`. Task 027 exit-gate evidence (`notes/handoffs/027-phase-1-exit-gate-evidence.md`) confirmed the 2 remaining `const Guid.Parse(...)` declarations at `AppOnlyAnalysisService.cs:46,1068` are the canonical Pattern B execution-path consts. Phase 1 design intentionally left these in place (task 020 design decision) pending the FR-1R routing infrastructure. With `IConsumerRoutingService` available (task 028a) and seed records in place (task 028b), this task removes them. `SessionSummarizeOrchestrator` is FR-26 / FR-30 critical path (chat-summarize first per Phase 1 task 015) — its behavior must remain identical to the Phase 1 baseline. `AppOnlyAnalysisService` is the email-analysis app-only execution path used by the Outlook ribbon Email Analysis playbook.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Routing/IConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Routing/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnly/AppOnlyAnalysisService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/WorkspaceOptions.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestratorTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnly/AppOnlyAnalysisServiceTests.cs</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/027-phase-1-exit-gate-evidence.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-1R-05">Both Pattern B consumers migrate to `IConsumerRoutingService.ResolveAsync`; final grep returns zero hardcoded playbook GUIDs in these 2 services.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary; no CRUD-code violations.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
+    <constraint source="ADR-010">`IConsumerRoutingService` injected via ctor; no `IServiceProvider.GetService&lt;T&gt;()` in endpoint signatures.</constraint>
+    <constraint source="ADR-014">`ResolveAsync` honors 5-min TTL per-tenant cache from task 028a — consumers MUST NOT add a second cache layer.</constraint>
+    <constraint source="project">`SessionSummarizeOrchestrator` FR-26 / FR-30 invariants preserved per Phase 1 task 015 evidence — chat-summarize routing behavior unchanged.</constraint>
+    <constraint source="project">`AppOnlyAnalysisService` removes the 2 const stable-IDs at `:46` and `:1068` flagged by task 027 exit-gate evidence — these are the canonical Pattern B execution-path consts.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — add/update one integration test per migrated consumer; existing Phase 1 tests remain unchanged or are extended in place.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IConsumerRoutingService.cs` from task 028a output to confirm the final method signature + DI registration lifetime (Scoped). Read `notes/handoffs/027-phase-1-exit-gate-evidence.md` to confirm the 2 const sites at `AppOnlyAnalysisService.cs:46,1068`.</step>
+    <step order="2">Read `SessionSummarizeOrchestrator.cs` end-to-end; identify the current hardcoded `chat-summarize` lookup mechanism (whether typed-options `WorkspaceOptions.ChatSummarizePlaybookCode` style or string literal). Confirm via Grep across `WorkspaceOptions.cs`.</step>
+    <step order="3">Migrate `SessionSummarizeOrchestrator`: inject `IConsumerRoutingService` via ctor; replace the existing chat-summarize lookup with `await _consumerRouting.ResolveAsync("chat-summarize", ct: ct)`; preserve FR-26 / FR-30 invariants (signature unchanged; routing behavior identical to Phase 1 task 015 baseline). Update existing tests + add one integration test asserting identical behavior pre/post migration.</step>
+    <step order="4">Read `AppOnlyAnalysisService.cs:46` and `AppOnlyAnalysisService.cs:1068` to confirm the 2 const Guid declarations. Note the call sites in the file that consume each const.</step>
+    <step order="5">Migrate `AppOnlyAnalysisService`: inject `IConsumerRoutingService` via ctor; replace the 2 const Guid declarations + their call sites with `await _consumerRouting.ResolveAsync("email-analysis", ct: ct)`. Confirm the routing context (if any tenant-or-environment selection logic existed) is handled by the routing table's `sprk_environment` column rather than C# branches. Add one integration test asserting identical behavior to the Phase 1 baseline.</step>
+    <step order="6">Wire DI: confirm each service registration in its module file (e.g., `Services/Ai/AiModule.cs` or per-service module) takes the `IConsumerRoutingService` dependency cleanly; ensure no asymmetric-registration anti-pattern per CLAUDE.md §10 / `bff-extensions.md` §F.1.</step>
+    <step order="7">Run the targeted test suites: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~SessionSummarizeOrchestrator|FullyQualifiedName~AppOnlyAnalysisService"`. Confirm both new integration tests pass + existing tests pass.</step>
+    <step order="8">`Grep` over `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs` and `src/server/api/Sprk.Bff.Api/Services/Ai/AppOnly/AppOnlyAnalysisService.cs` for `Guid.Parse("` and inline GUID literals (regex `\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}`). Expect zero hits.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed publish size; record absolute size + delta vs current baseline (~45.65 MB) per ADR-029 / CLAUDE.md §10.</step>
+    <step order="10">9.5 quality gates — invoke `code-review` skill + `adr-check` skill. Resolve any findings before marking task complete.</step>
+    <step order="11">Write `notes/handoffs/028d-pattern-b-migration-evidence.md` with: per-service diff summary, integration test pass/fail counts, grep evidence (zero hardcoded GUIDs), publish-size delta, and verification that the 2 task-027-flagged const sites are removed.</step>
+    <step order="12">Update TASK-INDEX.md: task 028d → ✅; current-task.md → ready for 028e (after 028c also lands).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">IConsumerRoutingService.cs, 2 consumer files, existing tests, task 027 evidence</tool>
+    <tool name="Grep">Enumerate hardcoded playbook GUIDs pre + post migration</tool>
+    <tool name="Edit">Ctor injection + ResolveAsync call replacement + const removal + test updates</tool>
+    <tool name="Write">notes/handoffs/028d-pattern-b-migration-evidence.md + new integration tests</tool>
+    <tool name="Bash">dotnet build / test / publish; measure publish-size delta</tool>
+    <tool name="Skill">code-review + adr-check at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs (IConsumerRoutingService injection + ResolveAsync call)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AppOnly/AppOnlyAnalysisService.cs (IConsumerRoutingService injection + ResolveAsync call; 2 const stable-IDs removed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestratorTests.cs (post-migration integration test)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnly/AppOnlyAnalysisServiceTests.cs (post-migration integration test)</output>
+    <output type="docs">notes/handoffs/028d-pattern-b-migration-evidence.md (diff summary, test counts, grep evidence, publish delta, const-removal verification)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SessionSummarizeOrchestrator` resolves playbook via `_consumerRouting.ResolveAsync("chat-summarize")`; FR-26 / FR-30 invariants preserved.</criterion>
+    <criterion testable="true">`AppOnlyAnalysisService` resolves playbook via `_consumerRouting.ResolveAsync("email-analysis")`; 2 const stable-IDs at `:46` and `:1068` (per task 027 evidence) removed.</criterion>
+    <criterion testable="true">2 integration tests (one per service) pass; existing tests pass unchanged.</criterion>
+    <criterion testable="true">Grep over `SessionSummarizeOrchestrator.cs` and `AppOnlyAnalysisService.cs` for hardcoded playbook GUIDs returns zero hits.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01 ceiling (≤60 MB).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with 028c — separate consumer files. The 2 const sites at `AppOnlyAnalysisService.cs:46,1068` were intentionally preserved by Phase 1 task 020 design (documented in task 027 exit-gate evidence) precisely because Phase 1R was the planned removal vehicle. Removing them closes the only remaining hardcoded-GUID gap in the BFF AI execution paths. The `chat-summarize` migration is also the FR-05 lowest-blast-radius consumer per the original Phase 1 prioritization — preserving its behavior verbatim is non-negotiable.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028c" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Migrate 4 Pattern A consumers to IConsumerRoutingService</title>
+    <phase>1R: sprk_playbookconsumer Routing Table</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>028b</dependencies>
+    <blocks>028e</blocks>
+    <tags>bff-api, services, refactoring, NFR-07</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api`; modifies 4 BFF services in `Services/Ai/` boundary; NFR-07 pre-fill flow invariants are binding (signatures, 45s timeout, `useAiPrefill` + `$choices` contract); FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>1-M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Migrate 4 Pattern A BFF consumers from `WorkspaceOptions.*PlaybookId` env-var reads to `IConsumerRoutingService.ResolveAsync` calls per spec FR-1R-05. The 4 consumers are `MatterPreFillService`, `ProjectPreFillService`, `WorkspaceAiService`, and `WorkspaceFileEndpoints`. NFR-07 is binding for the two pre-fill services: signatures unchanged, 45s timeout preserved, `useAiPrefill` + `$choices` contract unchanged. `WorkspaceAiService` must preserve graceful-degrade fallback. `WorkspaceFileEndpoints` must preserve FR-04 fail-fast on missing playbook AND now passes `mimeType` via `RoutingContext` so the `sprk_matchconditions` JSON predicate can route by content type. Each service receives `IConsumerRoutingService` via constructor injection (Scoped lifetime). One integration test per service confirms identical behavior post-migration vs the Phase 1 baseline. Final grep proves zero remaining `WorkspaceOptions.*PlaybookId` reads in `Services/` (the deprecation telemetry call site wired by 028e is the only exception).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat-routing layer + Phase 1 stable-code migration history + NFR-07 pre-fill flow invariants.</role>
+
+  <goal>
+    All 4 Pattern A consumers (`MatterPreFillService`, `ProjectPreFillService`, `WorkspaceAiService`, `WorkspaceFileEndpoints`) resolve their playbook target via `IConsumerRoutingService.ResolveAsync(consumerType, [consumerCode], [context])` from the `sprk_playbookconsumer` Dataverse table seeded by 028b. NFR-07 signatures + 45s pre-fill timeout + `useAiPrefill` / `$choices` contract preserved verbatim for the two pre-fill services. 4 integration tests (one per service) pass against the migrated codepath and confirm identical behavior to the Phase 1 baseline. Final `Grep` over `src/server/api/Sprk.Bff.Api/Services/` for `WorkspaceOptions.MatterPreFillPlaybookId`, `WorkspaceOptions.ProjectPreFillPlaybookId`, `WorkspaceOptions.AiSummaryPlaybookId`, `WorkspaceOptions.SummarizePlaybookId` returns zero hits (one expected hit per name lands in 028e's deprecation telemetry site).
+  </goal>
+
+  <context>
+    <background>
+      Per spec §"Phase 1R" FR-1R-05 + the 2026-06-24 UAT-2 failure that motivated this phase. Phase 1 migrated callers to resolve playbooks by stable CODE (chat-summarize, matter-pre-fill, etc.) — but the binding `code → playbookid GUID` was still configured via `Workspace__*PlaybookId` environment variables. Phase 1R replaces that env-var binding with the `sprk_playbookconsumer` Dataverse table (FR-1R-01) queried through the `IConsumerRoutingService` (built in task 028a) and seeded by `Seed-PlaybookConsumers.ps1` (task 028b). This task migrates the 4 "Pattern A" consumers (those that previously read typed-options `WorkspaceOptions.*PlaybookId` directly). Two of them (`MatterPreFillService`, `ProjectPreFillService`) are NFR-07 critical paths — pre-fill UX must remain identical (signature, 45s timeout, `useAiPrefill` flag, `$choices` shape) per Phase 1 task 018 evidence. `WorkspaceAiService` ships AI summary tiles with graceful-degrade fallback if no playbook configured (UI tile still renders) — that behavior must be preserved. `WorkspaceFileEndpoints` (FR-04 fail-fast) is the canonical consumer that uses the `RoutingContext.MimeType` match key from FR-1R-04, demonstrating context-aware routing for the `sprk_matchconditions` JSON predicate.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Routing/IConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Routing/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/MatterPreFillService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/ProjectPreFillService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceAiService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/WorkspaceFileEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/WorkspaceOptions.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/MatterPreFillServiceTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/ProjectPreFillServiceTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/WorkspaceAiServiceTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Endpoints/WorkspaceFileEndpointsTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-1R-05">All 4 Pattern A consumers migrate to `IConsumerRoutingService.ResolveAsync`; final grep returns zero `WorkspaceOptions.*PlaybookId` reads in `Services/` except the deprecation telemetry call site (wired by 028e).</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary; no CRUD-code violations.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
+    <constraint source="ADR-010">`IConsumerRoutingService` injected via ctor; no `IServiceProvider.GetService&lt;T&gt;()` in endpoint signatures.</constraint>
+    <constraint source="ADR-014">`ResolveAsync` honors 5-min TTL per-tenant cache from task 028a — consumers MUST NOT add a second cache layer.</constraint>
+    <constraint source="project">NFR-07 pre-fill flow contracts preserved — signatures, 45s timeout, `useAiPrefill` / `$choices` unchanged.</constraint>
+    <constraint source="project">`WorkspaceAiService` graceful-degrade fallback preserved — UI tile still renders when no playbook is configured (per Phase 1 task 018 evidence).</constraint>
+    <constraint source="project">`WorkspaceFileEndpoints` fail-fast (FR-04) preserved AND now passes `RoutingContext.MimeType = file.ContentType` so `sprk_matchconditions` can route by MIME.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — add/update one integration test per migrated consumer; existing Phase 1 tests remain unchanged or are extended in place.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IConsumerRoutingService.cs` from task 028a output to confirm the final method signature, `RoutingContext` shape, and DI registration lifetime (Scoped). Read `WorkspaceOptions.cs` to confirm the four `*PlaybookId` properties slated for deprecation.</step>
+    <step order="2">Read `MatterPreFillService.cs` end-to-end; identify every read of `WorkspaceOptions.MatterPreFillPlaybookId`. Note the NFR-07 contract surface (method signatures, 45s timeout, `useAiPrefill` + `$choices` flow).</step>
+    <step order="3">Migrate `MatterPreFillService`: inject `IConsumerRoutingService` via ctor; replace `_workspaceOptions.MatterPreFillPlaybookId` with `await _consumerRouting.ResolveAsync("matter-pre-fill", ct: ct)`; preserve every NFR-07 invariant verbatim. Update existing tests + add one integration test asserting identical behavior pre/post migration (use Phase 1 task 018 test as baseline).</step>
+    <step order="4">Migrate `ProjectPreFillService`: same pattern as Step 3 — inject `IConsumerRoutingService`; replace `_workspaceOptions.ProjectPreFillPlaybookId` with `await _consumerRouting.ResolveAsync("project-pre-fill", ct: ct)`; preserve NFR-07. Add integration test.</step>
+    <step order="5">Migrate `WorkspaceAiService`: inject `IConsumerRoutingService`; replace `_workspaceOptions.AiSummaryPlaybookId` with `await _consumerRouting.ResolveAsync("ai-summary", ct: ct)`; preserve graceful-degrade fallback — if `ResolveAsync` returns `null`, the AI summary tile must still render with the existing "no summary configured" placeholder. Add integration test asserting null-return path.</step>
+    <step order="6">Migrate `WorkspaceFileEndpoints`: inject `IConsumerRoutingService` (via minimal-API parameter or service-locator-by-ctor pattern per ADR-010); replace `_workspaceOptions.SummarizePlaybookId` with `await consumerRouting.ResolveAsync("summarize-file", consumerCode: "default", context: new RoutingContext { MimeType = file.ContentType }, ct: ct)`; preserve FR-04 fail-fast (404 ProblemDetails) when `ResolveAsync` returns `null`. Add integration test with two MIME types to exercise the `mimeType` match-condition.</step>
+    <step order="7">Wire DI: confirm each service registration in `Services/Workspace/WorkspaceModule.cs` (or equivalent module file) takes the `IConsumerRoutingService` dependency cleanly; ensure no asymmetric-registration anti-pattern per CLAUDE.md §10 / `bff-extensions.md` §F.1.</step>
+    <step order="8">Run the targeted test suites: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Workspace"`. Confirm all 4 new integration tests pass + existing tests pass (cumulative test count &gt; 20 expected across the 4 services).</step>
+    <step order="9">`Grep` over `src/server/api/Sprk.Bff.Api/Services/` for `WorkspaceOptions.MatterPreFillPlaybookId`, `WorkspaceOptions.ProjectPreFillPlaybookId`, `WorkspaceOptions.AiSummaryPlaybookId`, `WorkspaceOptions.SummarizePlaybookId`. Expect zero hits (the deprecation telemetry call site in 028e is allowed but does not exist yet at this task's completion).</step>
+    <step order="10">Run `dotnet build src/server/api/Sprk.Bff.Api/` then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed publish size; record absolute size + delta vs current baseline (~45.65 MB) per ADR-029 / CLAUDE.md §10. Expect minor delta only (consumers swap one read for one call).</step>
+    <step order="11">9.5 quality gates — invoke `code-review` skill + `adr-check` skill. Resolve any findings before marking task complete.</step>
+    <step order="12">Write `notes/handoffs/028c-pattern-a-migration-evidence.md` with: per-service diff summary, integration test pass/fail counts, grep evidence (zero hits), publish-size delta, and the NFR-07 invariant verification checklist for the two pre-fill services.</step>
+    <step order="13">Update TASK-INDEX.md: task 028c → ✅; current-task.md → ready for 028e (after 028d also lands).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">IConsumerRoutingService.cs, WorkspaceOptions.cs, 4 consumer files, existing tests</tool>
+    <tool name="Grep">Enumerate `WorkspaceOptions.*PlaybookId` reads pre + post migration</tool>
+    <tool name="Edit">Ctor injection + ResolveAsync call replacement + DI registration tweaks + test updates</tool>
+    <tool name="Write">notes/handoffs/028c-pattern-a-migration-evidence.md + new integration tests</tool>
+    <tool name="Bash">dotnet build / test / publish; measure publish-size delta</tool>
+    <tool name="Skill">code-review + adr-check at Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/MatterPreFillService.cs (IConsumerRoutingService injection + ResolveAsync call)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/ProjectPreFillService.cs (IConsumerRoutingService injection + ResolveAsync call)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceAiService.cs (IConsumerRoutingService injection + ResolveAsync call; graceful-degrade preserved)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/WorkspaceFileEndpoints.cs (IConsumerRoutingService injection + ResolveAsync with RoutingContext.MimeType)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/MatterPreFillServiceTests.cs (post-migration integration test)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/ProjectPreFillServiceTests.cs (post-migration integration test)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/WorkspaceAiServiceTests.cs (post-migration integration test + null-return graceful-degrade)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Endpoints/WorkspaceFileEndpointsTests.cs (post-migration integration test + mimeType routing)</output>
+    <output type="docs">notes/handoffs/028c-pattern-a-migration-evidence.md (diff summary, test counts, grep evidence, publish delta, NFR-07 checklist)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`MatterPreFillService` resolves playbook via `_consumerRouting.ResolveAsync("matter-pre-fill")`; NFR-07 invariants preserved (signature, 45s timeout, `useAiPrefill`, `$choices`).</criterion>
+    <criterion testable="true">`ProjectPreFillService` resolves playbook via `_consumerRouting.ResolveAsync("project-pre-fill")`; NFR-07 invariants preserved.</criterion>
+    <criterion testable="true">`WorkspaceAiService` resolves playbook via `_consumerRouting.ResolveAsync("ai-summary")`; graceful-degrade fallback preserved (UI tile renders even when null returned).</criterion>
+    <criterion testable="true">`WorkspaceFileEndpoints` resolves playbook via `_consumerRouting.ResolveAsync("summarize-file", consumerCode: "default", context: { MimeType })`; FR-04 fail-fast preserved.</criterion>
+    <criterion testable="true">4 integration tests (one per service) pass; cumulative Workspace test count &gt; 20.</criterion>
+    <criterion testable="true">Grep over `src/server/api/Sprk.Bff.Api/Services/` for `WorkspaceOptions.MatterPreFillPlaybookId|ProjectPreFillPlaybookId|AiSummaryPlaybookId|SummarizePlaybookId` returns zero hits.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01 ceiling (≤60 MB).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with 028d — separate consumer files. The two pre-fill services are NFR-07 critical paths; do NOT change their method signatures even slightly. The `WorkspaceAiService` graceful-degrade is the canonical example of "soft-fail" routing — a null return from `ResolveAsync` must NOT propagate as an exception. The `WorkspaceFileEndpoints` integration test is also the first end-to-end validation of FR-1R-04 `sprk_matchconditions` MIME routing; consider seeding 2 test routing records (PDF + DOCX) for this test in the test fixture.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

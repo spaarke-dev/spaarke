@@ -11,11 +11,11 @@
 |-------|-------|
 | **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
-| **Branch state** | `312385f2f` (W0 batch 2: 12 new POMLs). Two commits ahead of origin/master `8579d6536`. **Working tree clean.** Ready to push. |
-| **Phase status** | Phase 0/1/2-partial/3/4-MVP ✅ shipped to bff-dev. **Phase 5R spec + TASK-INDEX + 12 new POMLs locked in. Ready for W1 parallel execution.** |
+| **Branch state** | After Phase 1R POML commit: 5 commits ahead of origin/master `8579d6536`. **Working tree clean.** Pushing now. |
+| **Phase status** | Phase 0/1/2-partial/3/4-MVP ✅ shipped to bff-dev. **Phase 5R + Phase 1R spec + TASK-INDEX + 18 new POMLs locked in. Ready for W1 parallel execution.** |
 | **Deployed state** | BFF master deployed; SpaarkeAi Code Page master deployed; Dataverse `RECALL-SESSION-FILE` row seeded; `Workspace__MatterPreFillPlaybookId` env var set |
-| **Open decision** | User asked about `sprk_playbookconsumer` table — discussed earlier this session but NOT yet folded into Phase 5R scope. Recommendation: add as Phase 1R retroactive (~5-7 tasks). Awaiting user decision before authoring more. |
-| **Next Action** | **(a) Await user decision on `sprk_playbookconsumer` scope; (b) Push branch + begin W1 parallel: R6 task 095 + Phase 7 task 144/145 baselines + 110a library modal fix.** All three are no-risk parallel candidates per the W1 plan. |
+| **Owner action pending** | Owner creates `sprk_playbookconsumer` table per FR-1R-01 (8 columns + alternate key + audit + change-tracking). Task 028 is a HARD GATE that verifies the table contract; downstream Phase 1R tasks (028a–028e) block until 028 passes. |
+| **Next Action** | **W1 parallel: R6 task 095 + Phase 7 task 144/145 baselines + 110a library modal fix.** Phase 1R waits on owner table creation; once 028 gate passes, 028a–028e can start. |
 
 ### Critical context (3-sentence version)
 
@@ -173,9 +173,12 @@ User did UAT today and exposed that the chat-routing-redesign-r1 project's **def
 | App Service config | `Workspace__MatterPreFillPlaybookId=2d660cad-...` set on bff-dev |
 | **`272dcce47`** | **W0 batch 1**: Phase 5+7 revised scope amendment in `spec.md` (FR-46 through FR-59); `TASK-INDEX.md` Phase 5 wave section revised (5-A through 5-F); 12 new task rows; Phase Summary + Materialization Plan + Audit History updated. |
 | **`312385f2f`** | **W0 batch 2**: 12 new POML task files authored by 4 parallel sub-agents (UX 3 + Intent 2 + Composition 4 + Migration 3). All valid XML; task-id/filename match verified; FR mappings verified. |
+| `a20eef3eb` | Checkpoint: W0 complete |
+| **`3d342e9f9`** | **Phase 1R spec + index**: `sprk_playbookconsumer` routing table FR-1R-01..08; 6 new task rows (028, 028a–028e); audit history entry. |
+| **(pending)** | **Phase 1R POMLs**: 6 new POML task files authored by 2 parallel sub-agents (Foundation 3 + Migration 3). All valid XML. |
 | `f5a5568c7` | Pre-compaction checkpoint write to `current-task.md` |
 
-**Working tree is currently clean.** Branch is 2 commits ahead of origin/master `8579d6536`; ready to push.
+**Working tree is currently clean.** Branch is 5 commits ahead of origin/master `8579d6536` after this commit; pushing now.
 
 ---
 

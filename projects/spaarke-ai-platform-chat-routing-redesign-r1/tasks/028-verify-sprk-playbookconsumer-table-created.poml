@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>HARD GATE — verify sprk_playbookconsumer table created per FR-1R-01</title>
+    <phase>1R: sprk_playbookconsumer Routing Table</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>027</dependencies>
+    <blocks>028a</blocks>
+    <tags>dataverse, verification, gate</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Verification gate only — no code changes; owner-driven Dataverse schema, BFF just confirms shape matches FR-1R-01.</rigor-reason>
+    <parallel-group>1-K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    HARD GATE for Phase 1R. The owner is creating the `sprk_playbookconsumer` Dataverse table per FR-1R-01. This task does NOT create the table — it ONLY verifies that what the owner created matches the spec's 8-column contract + alternate key + audit + change-tracking + Organization ownership. If any field is missing or misconfigured, file a P1 blocker note and stop; the owner must fix the table before Phase 1R can proceed.
+  </prompt>
+
+  <role>SPAARKE platform Dataverse verifier. Reads schema via Dataverse MCP `describe`; reports mismatches; does NOT modify schema.</role>
+
+  <goal>
+    Dataverse `describe sprk_playbookconsumer` confirms the 8-column contract (FR-1R-01 table), alternate key `ak_consumertype_code_env`, audit enabled, change tracking enabled, ownership = Organization. Evidence file written to `notes/handoffs/028-table-verification-evidence.md` with the describe output + checklist.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §"Phase 1R" FR-1R-01. The §1.7 Stable-ID migration (Phase 1) ships consumers that resolve playbooks BY ID — but `which playbook ID maps to which consumer code` still lives in `Workspace__*PlaybookId` env vars. UAT-2 failure on 2026-06-24 (Matter pre-fill broken because env var was set under legacy key) is the failure mode Phase 1R prevents. The new `sprk_playbookconsumer` table replaces env-var-based routing with a Dataverse-backed table queried by the BFF `IConsumerRoutingService` (task 028a). This task is the binding gate that downstream tasks (028a through 028e) block on.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-1R-01">8 columns with exact types/requirements/defaults per spec table; alternate key `ak_consumertype_code_env`; audit + change-tracking enabled; Organization ownership.</constraint>
+    <constraint source="project">Owner-driven action — BFF MUST NOT attempt to create or modify the table. Verification only.</constraint>
+    <constraint source="project">If verification fails, file P1 blocker note + stop; downstream tasks 028a–028e block until table is correct.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md §"Phase 1R" FR-1R-01 table to confirm the binding 8-column contract (name, consumertype, consumercode, playbookid lookup, priority, matchconditions, enabled, environment).</step>
+    <step order="2">Invoke Dataverse MCP `describe sprk_playbookconsumer` against the Dev environment.</step>
+    <step order="3">Build a checklist comparing actual vs spec for each of the 8 columns (type, required flag, default value); record each mismatch (if any) verbatim.</step>
+    <step order="4">Verify alternate key `ak_consumertype_code_env` = (`sprk_consumertype` + `sprk_consumercode` + `sprk_environment`).</step>
+    <step order="5">Verify audit enabled, change tracking enabled, ownership = Organization.</step>
+    <step order="6">If any mismatch: write `notes/handoffs/028-table-verification-evidence.md` with status=BLOCKED, the mismatch list, and the recommended fix (column-by-column); STOP — do NOT proceed to 028a.</step>
+    <step order="7">If all checks pass: write `notes/handoffs/028-table-verification-evidence.md` with status=GO, the describe output (redact tenant IDs), and the checklist confirmation.</step>
+    <step order="8">Update TASK-INDEX.md: task 028 → ✅ (or 🛑 if BLOCKED); current-task.md → ready for 028a (or escalation).</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__describe">Read sprk_playbookconsumer table schema</tool>
+    <tool name="Write">Evidence file `notes/handoffs/028-table-verification-evidence.md`</tool>
+    <tool name="Edit">TASK-INDEX.md status update</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/028-table-verification-evidence.md (describe output + checklist + GO/BLOCKED status)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dataverse describe matches all 8 columns in FR-1R-01 (type + required + default).</criterion>
+    <criterion testable="true">Alternate key `ak_consumertype_code_env` present.</criterion>
+    <criterion testable="true">Audit enabled + change tracking enabled + ownership = Organization.</criterion>
+    <criterion testable="true">Evidence file `notes/handoffs/028-table-verification-evidence.md` exists with explicit GO or BLOCKED verdict.</criterion>
+    <criterion testable="true">If BLOCKED: P1 mismatch list + recommended owner fix; downstream tasks 028a–028e remain pending.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Owner-only action — do NOT attempt schema creation. The whole Phase 1R wave is gated on this verification because the BFF cache + change-tracking subscriber in 028a depend on the change-tracking event firing on this table.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol — verification gate; no code-review / adr-check needed.</protocol>
+  </execution>
+</task>
