@@ -1,8 +1,8 @@
 # Task Index — Spaarke DevOps Project Tracking (r1)
 
 > **Last Updated**: 2026-06-23
-> **Total Tasks**: 38 (31 structurally complete · 6 deferred to user · 1 spec-deferred)
-> **Status**: ✅ **GRADUATED** — Phases 1, 2, 4, 6 + wrap-up complete. Phase 3 (backfill) and Phase 5 (UI views) deferred per `notes/lessons-learned.md`. Skills + docs ready for use as-of-now.
+> **Total Tasks**: 38 (34 complete · 3 UI-deferred · 1 spec-deferred)
+> **Status**: ✅ **GRADUATED + BACKFILLED** — Phases 1, 2, 3, 4, 6 + wrap-up complete. 12 Epics + 13 Projects live on Project #2 with sub-issue rollup. Phase 5 (3 view-configuration tasks) deferred to GitHub UI — `createProjectV2View` mutation does not exist in API.
 
 ## Status Legend
 
