@@ -554,10 +554,13 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
 
         foreach (var (varName, output) in context.PreviousOutputs)
         {
+            // 2026-06-24 (bug #10 fix): use TemplateEngine.ConvertJsonElement so Handlebars
+            // can navigate nested paths like {{varName.output.count}}. See full rationale on
+            // the matching change in ConditionNodeExecutor.BuildTemplateContext.
             templateContext[varName] = new
             {
                 output = output.StructuredData.HasValue
-                    ? JsonSerializer.Deserialize<object>(output.StructuredData.Value.GetRawText())
+                    ? TemplateEngine.ConvertJsonElement(output.StructuredData.Value)
                     : null,
                 text = output.TextContent,
                 success = output.Success
