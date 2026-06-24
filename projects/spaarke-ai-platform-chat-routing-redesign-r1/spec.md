@@ -73,6 +73,52 @@ These 5 lock-ins keep post-MVP work additive (~2-3 weeks for deferred features) 
 
 Full deferred-feature inventory + post-MVP roadmap: see [`plan.md`](plan.md) §"Post-MVP Roadmap".
 
+### Phase 1R — `sprk_playbookconsumer` Routing Table (Owner decision 2026-06-24)
+
+The §1.7 Stable-ID migration (Phase 1) ships consumers that resolve playbooks BY ID — but the binding *which playbook ID maps to which consumer code* still lives in `Workspace__*PlaybookId` environment variables (set via `az webapp config appsettings set`). The 2026-06-24 UAT-2 failure (Matter pre-fill broken because `Workspace__MatterPreFillPlaybookId` was set under the legacy key on bff-dev) is the exact failure mode this anti-pattern produces. **Phase 1R replaces env-var-based consumer→playbook routing with a Dataverse-backed `sprk_playbookconsumer` table.** Phase 1R is binding and adds 8 FRs (FR-1R-01 through FR-1R-08). All existing Phase 1 FRs remain valid; this is additive.
+
+#### `sprk_playbookconsumer` table contract (FR-1R-01)
+
+| # | Column | Type | Required | Default | Purpose |
+|---|---|---|---|---|---|
+| 1 | `sprk_name` | Single Line Text (250) | Yes | (auto) | Display name `{consumertype}/{consumercode} → {playbookcode}`. |
+| 2 | `sprk_consumertype` | Single Line Text (64) | **Yes** | — | Stable consumer code (`matter-pre-fill`, `project-pre-fill`, `ai-summary`, `summarize-file`, `chat-summarize`, `email-analysis`, ...). Lowercase + hyphens; no spaces. |
+| 3 | `sprk_consumercode` | Single Line Text (64) | No | `default` | Sub-discriminator within a consumer type. |
+| 4 | `sprk_playbookid` | Lookup → `sprk_analysisplaybook` | **Yes** | — | Target playbook. |
+| 5 | `sprk_priority` | Whole Number (0–1000) | Yes | `500` | Lower wins on tie; admin-override headroom. |
+| 6 | `sprk_matchconditions` | Multiple Lines of Text (4000) | No | `null` | JSON predicate (see FR-1R-04 schema). `null`/`{}` = always match. |
+| 7 | `sprk_enabled` | Two Options (Yes/No) | Yes | `Yes` | Soft-disable preserves audit trail. |
+| 8 | `sprk_environment` | Single Line Text (16) | Yes | `*` | Env scope (`dev`/`test`/`prod`/`*`). |
+
+**Alternate key**: `ak_consumertype_code_env` = (`sprk_consumertype` + `sprk_consumercode` + `sprk_environment`).
+**Ownership**: Organization. **Audit + change tracking**: Enabled (BFF cache invalidates on change-tracking notification).
+
+#### Functional Requirements (Phase 1R)
+
+1. **FR-1R-01**: `sprk_playbookconsumer` table created in Dev → Test → Prod with the 8-column contract above. — **Acceptance**: Dataverse describe matches the contract; alternate key present; audit + change-tracking enabled.
+2. **FR-1R-02**: New BFF service `IConsumerRoutingService` (in `Services/Ai/Routing/`) — `Task<Guid?> ResolveAsync(string consumerType, string? consumerCode = "default", IRoutingContext? context = null, CancellationToken ct = default)`. Returns the matching `sprk_analysisplaybook` PK GUID (`sprk_analysisplaybookid` — the system PK; not the legacy `sprk_playbookid` custom field). 5-min TTL per-tenant cache per ADR-014. Cache invalidates on `sprk_playbookconsumer` change-tracking event (existing change-tracking subscriber pattern). — **Acceptance**: interface registered via DI per ADR-010; cache hit telemetry; cache invalidates within 30s of Dataverse update.
+3. **FR-1R-03**: Resolution algorithm — query records WHERE `sprk_enabled=true AND sprk_consumertype=@type AND sprk_consumercode IN (@code, 'default') AND sprk_environment IN (@env, '*')`. Apply `sprk_matchconditions` JSON predicate against `IRoutingContext`. Order by `sprk_priority asc`, then more specific `consumercode` over `default`, then more specific `environment` over `*`. Return first match's `sprk_playbookid` lookup target ID. — **Acceptance**: unit test for each tiebreak path; integration test confirms env-specific override wins over `*`.
+4. **FR-1R-04**: `sprk_matchconditions` JSON schema — flat key-value map; ALL keys must match; value-match: string = equality; array = in-list (OR). `null` or `{}` = always match. Documented at `architecture/playbookconsumer-matchconditions.schema.json`. Match keys initially supported: `mimeType` (← `attachmentMetadata.contentType`), `documentType` (← `manifest.documentType` when classification available; Phase 4 future). — **Acceptance**: schema doc landed; unit tests cover null/empty/string/array/multi-key cases.
+5. **FR-1R-05**: Migrate 6 BFF consumers from env-var reads to `IConsumerRoutingService.ResolveAsync`:
+   - `MatterPreFillService` (was `Workspace__MatterPreFillPlaybookId` → `ResolveAsync("matter-pre-fill")`)
+   - `ProjectPreFillService` (was `Workspace__ProjectPreFillPlaybookId` → `ResolveAsync("project-pre-fill")`)
+   - `WorkspaceAiService` (was `Workspace__AiSummaryPlaybookId` → `ResolveAsync("ai-summary")`)
+   - `WorkspaceFileEndpoints` (was `Workspace__SummarizePlaybookId` → `ResolveAsync("summarize-file", consumerCode:..., context: { mimeType })`)
+   - `SessionSummarizeOrchestrator` (was hardcoded `chat-summarize` lookup → `ResolveAsync("chat-summarize")`)
+   - `AppOnlyAnalysisService` (was hardcoded email-analysis GUID at `AppOnlyAnalysisService.cs:46,1068` → `ResolveAsync("email-analysis")`)
+   — **Acceptance**: grep `Workspace__.*PlaybookId` in `src/server/api/Sprk.Bff.Api/Services/` returns zero hits except the deprecation telemetry call site; integration test per consumer confirms identical behavior.
+6. **FR-1R-06**: Env vars `Workspace__MatterPreFillPlaybookId`, `Workspace__ProjectPreFillPlaybookId`, `Workspace__AiSummaryPlaybookId`, `Workspace__SummarizePlaybookId` deprecated with telemetry warning when read — `WorkspaceOptionsValidator` (new) emits `WARN: Workspace__*PlaybookId env vars are deprecated; configure via sprk_playbookconsumer Dataverse table` on startup IF any are non-null. Activity tag `routing.envvar_fallback_used=true` for any read. — **Acceptance**: startup log shows warning when env var set; KQL dashboard query documented; runtime path also tagged.
+7. **FR-1R-07**: New PowerShell script `scripts/dataverse/Seed-PlaybookConsumers.ps1` seeds the 6 initial routing records using the current production GUIDs from existing env vars. Idempotent (UPSERT by alternate key). — **Acceptance**: script seeds 6 records on empty table; rerun is no-op; script documented in `scripts/README.md`.
+8. **FR-1R-08**: Phase 1R exit gate — grep zero `Workspace__.*PlaybookId` reads in `Services/`; 6 consumer integration tests green; cache hit ratio >70% measured during stabilization. — **Acceptance**: exit gate checklist in `notes/handoffs/`.
+
+#### Out of scope (1R-OOS)
+
+- ❌ PCF rule-builder for editing `sprk_matchconditions` (defer; admin uses raw JSON in Power Apps form during Phase 1R)
+- ❌ Migration of remaining hardcoded playbook references discovered in Phase 6 (specialized playbook authoring — separate scope)
+- ❌ Cross-tenant routing rules (single-tenant scope per existing project boundary)
+
+#### Phase 1R wave structure → see [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md#phase-1r---sprk_playbookconsumer-routing-table-revised-2026-06-24)
+
 ### Phase 5+7 Revised Scope (Owner decision 2026-06-24 — post-MVP UAT)
 
 The 2026-06-22 MVP cut shipped infrastructure but deferred the user-visible routing convergence and output composition behavior the project was originally designed to deliver. UAT on 2026-06-24 confirmed the gap: the `/summarize` slash + NL flows still produce different routing (slash → chat sibling; NL → "document not in session"), and Workspace tabs open blank because output is rendered to chat. **The owner authorized re-opening Phase 5+7 with a revised, more sophisticated scope** that converges slash + NL behind LLM-in-the-loop intent detection and replaces the brittle schema-aware widget model with multi-node Output composition. This subsection is binding for the remainder of the project and supersedes "Phase 5 — WP2 file-aware classification" MVP entries above and the Phase 7 entries in `plan.md` §1.7. **All other frozen spec content (Phase 0–4, NFR-A1–A7, WP3/WP4 destination wiring) is unchanged.**

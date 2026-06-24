@@ -46,6 +46,7 @@ Task IDs use **10-gap convention** (001, 010, 020, 030, ...) leaving 9 slots per
 |---|---|---|---|---|---|
 | **0** | §1.7 Pattern C Cleanup + R6 readiness check | 000–004 | 5 | ~1–2 days | First. 000 is hard prereq gate. |
 | **1** | §1.7 Stable Codes Migration | 010–027 | 18 | ~1.5 weeks | Chat-summarize first (FR-05); WorkspaceOptions extended FIRST to enable parallel-safe migrations |
+| **1R** | `sprk_playbookconsumer` Routing Table (REVISED 2026-06-24) | 028, 028a–028e | 6 | ~3–4 days | Replaces `Workspace__*PlaybookId` env vars with Dataverse routing; owner creates the table, BFF builds service + migrates 6 consumers |
 | **2** | WP1.5 Index Governance | 030–040 | 11 | ~1 week | Dataverse schema first; UX + drift job parallel |
 | **3** | WP3 Destination Metadata Wiring | 045–055 | 11 | ~3–4 days | Additive; mostly parallel; can begin during Phase 2 (wave 3-A prereq is 1-J) |
 | **4** | WP5 6-Tier Memory Subsystem | 060–105 | 42 total / **12 MVP-active** (30 deferred ⏭️ — see banner) | ~1 week MVP (vs ~3-4 weeks original) | MVP cut 2026-06-22; substrate lock-ins preserved |
@@ -257,6 +258,29 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 026 | Deploy Phase 1 to bff-dev environment | ⏭️ DEFERRED | STANDARD | true | 1-I | 023,024 | `deploy`, `azure`, `bff-api` — **DEFERRED 2026-06-22 per owner**: deploy held until later managed window. Code/tests verified locally — Phase 1 work is solid in code regardless of when bff-dev catches up. Task 027 exit gate uses LOCAL test suite (task 025) instead of deployed smoke tests. |
 | 027 | Phase 1 exit gate — verify zero hardcoded GUIDs/names in `Services/Ai/` via grep | ✅ | MINIMAL | true | 1-J | 025,026 | `verification` — GO; strict `Guid.Parse(...)` returns 0; 10/10 tests pass 186ms; 2 const stable-IDs in `AppOnlyAnalysisService` are Pattern B execution-path consts (task 020 design); evidence: `notes/handoffs/027-phase-1-exit-gate-evidence.md` |
 
+## Phase 1R — `sprk_playbookconsumer` Routing Table (REVISED 2026-06-24)
+
+> **REVISED 2026-06-24** (owner decision — see [`spec.md` § Phase 1R](../spec.md#phase-1r--sprk_playbookconsumer-routing-table-owner-decision-2026-06-24)). The §1.7 Stable-ID migration ships consumers that resolve playbooks BY ID — but the binding *which playbook ID maps to which consumer code* still lives in `Workspace__*PlaybookId` env vars. UAT-2 failure on 2026-06-24 (Matter pre-fill broken because env var was set under legacy key on bff-dev) is the exact failure mode this anti-pattern produces. Phase 1R replaces env-var-based consumer→playbook routing with a Dataverse-backed `sprk_playbookconsumer` table. Owner creates the table; BFF builds the routing service + migrates 6 consumers.
+>
+> **Wave structure** (1-K through 1-N):
+> - **1-K** Foundation: 028 (gate: verify table created by owner), 028a (IConsumerRoutingService interface + impl + DI + cache)
+> - **1-L** Seed: 028b (Seed-PlaybookConsumers.ps1 + seed 6 records using current env-var GUIDs)
+> - **1-M** Consumer migrations (parallel-safe after 028a+028b): 028c (Pattern A — 4 Workspace__ consumers), 028d (Pattern B — chat-summarize + email-analysis)
+> - **1-N** Close: 028e (env-var deprecation telemetry + Phase 1R exit gate)
+>
+> **Active tasks** (6): 028, 028a, 028b, 028c, 028d, 028e
+>
+> **Dependency on owner**: 028 (verify table created) is a HARD GATE — downstream tasks block until the `sprk_playbookconsumer` table exists in Dev Dataverse with the 8-column contract from spec FR-1R-01. Owner-driven action; BFF tasks parallel to other project work until then.
+
+| ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
+|---|---|---|---|---|---|---|---|
+| 028 | **NEW (1R)**: HARD GATE — verify owner has created `sprk_playbookconsumer` table per spec FR-1R-01 (8 columns, alternate key, audit + change tracking) | 🔲📄 | MINIMAL | true | 1-K | 027 | `dataverse`, `verification`, `gate` |
+| 028a | **NEW (1R)**: `IConsumerRoutingService` interface + impl + DI + 5-min TTL cache + change-tracking invalidation — FR-1R-02, FR-1R-03, FR-1R-04 | 🔲📄 | FULL | false | 1-K | 028 | `bff-api`, `services`, `ai`, `routing`, `ADR-010`, `ADR-014` |
+| 028b | **NEW (1R)**: `Seed-PlaybookConsumers.ps1` + seed 6 initial records using current env-var GUIDs (idempotent UPSERT) — FR-1R-07 | 🔲📄 | STANDARD | false | 1-L | 028a | `dataverse`, `scripts`, `data`, `seed` |
+| 028c | **NEW (1R)**: Migrate 4 Pattern A consumers to `IConsumerRoutingService.ResolveAsync` (`MatterPreFillService`, `ProjectPreFillService`, `WorkspaceAiService`, `WorkspaceFileEndpoints`) — FR-1R-05 | 🔲📄 | FULL | true | 1-M | 028b | `bff-api`, `services`, `refactoring`, `NFR-07` |
+| 028d | **NEW (1R)**: Migrate 2 Pattern B consumers to `IConsumerRoutingService.ResolveAsync` (`SessionSummarizeOrchestrator`, `AppOnlyAnalysisService`) — FR-1R-05 | 🔲📄 | FULL | true | 1-M | 028b | `bff-api`, `services`, `refactoring` |
+| 028e | **NEW (1R)**: Env-var deprecation telemetry (`WorkspaceOptionsValidator` warn on startup; Activity tag on runtime fallback read) + Phase 1R exit gate (grep zero `Workspace__.*PlaybookId` in `Services/`) — FR-1R-06 + FR-1R-08 | 🔲📄 | STANDARD | true | 1-N | 028c,028d | `bff-api`, `telemetry`, `verification`, `ADR-015` |
+
 ## Phase 2 — WP1.5 Index Governance
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
@@ -461,6 +485,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 |---|---|---|
 | **0** | 000, 001, 002, 003, 004 (5/5) | — |
 | **1** | 010, 011, 012, 013, 014, 015, 016, 017, 018, 019, 020, 021, 022, 023, 024, 025, 026, 027 (18/18) | — |
+| **1R** | — | 028, 028a, 028b, 028c, 028d, 028e (6 new — POML stubs queued for authoring in W0 follow-up commit) |
 | **2** | 030–040 (11/11) | — |
 | **3** | 045–055 (11/11) | — |
 | **4** | 060–105 (42/42) | — |
@@ -482,6 +507,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 2026-06-21 | Main session (post-generation validation) | **CRIT-8 fix**: Wave 3-B (tasks 048, 049, 050, 051) demoted from `parallel-safe: true` → `false` per task-create Step 3.8 file-overlap auto-demotion rule (all 4 edit `PlaybookOutputHandler.cs` switch). All 120 POML files materialized (113 generated by 6 parallel agents A–F + 7 pre-existing exemplars). |
 | 2026-06-22 | Main session (MVP scope cut) | Owner decision Q5a/Q5b: Phase 4 (42 → 12 active) + Phase 5 (10 → 6 active); substrate lock-ins (tasks 078, 080, lock-in spec artifacts) preserved to keep post-MVP work additive. Reasoning + cuts documented in `spec.md` § MVP Scope Cut. |
 | 2026-06-24 | Main session (Phase 5R revision post-UAT) | UAT exposed that the 2026-06-22 MVP cut deferred the user-visible routing convergence the project was designed to deliver (slash/NL parity, multi-node Output composition, chat link-button confirmation UX). Owner authorized Phase 5R revision: re-opened with FR-46 through FR-59 binding; ~13 new active tasks; permanently dropped 111/113/114/118 (replaced by 5R hybrid LLM design). Phase 7 sequence unchanged but Phase 7 task 141/142 now depends on Phase 5R slash/NL parity in production. R6 task 095, Phase 7 task 144 (publish-size baseline), Phase 7 task 145 (Insights regression baseline) approved to run in parallel during Phase 5R. Authoritative spec section: `spec.md` § Phase 5+7 Revised Scope. |
+| 2026-06-24 | Main session (Phase 1R retroactive addition) | UAT-2 failure (Matter pre-fill broken because `Workspace__MatterPreFillPlaybookId` was set under the legacy key on bff-dev) exposed that the §1.7 stable-ID work was incomplete — consumers resolve playbooks BY ID, but the consumer→playbook BINDING still lives in env vars. Owner authorized Phase 1R: new `sprk_playbookconsumer` Dataverse table (8 columns, alternate key, audit + change-tracking enabled) + `IConsumerRoutingService` + migrate 6 consumers + env-var deprecation telemetry. FR-1R-01 through FR-1R-08 binding. 6 new tasks (028, 028a-028e) inserted between Phase 1 exit gate (027) and Phase 2 schema verification (030). Owner creates the table; BFF tasks block on 028 gate. Authoritative spec section: `spec.md` § Phase 1R. |
 
 ---
 
