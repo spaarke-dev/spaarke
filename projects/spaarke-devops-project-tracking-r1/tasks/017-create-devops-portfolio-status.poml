@@ -1,9 +1,11 @@
 <task id="DEVOPS-017" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Create /devops-portfolio-status skill (dashboard + snapshot)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <estimated-effort>2.5 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>skill-creation, devops, portfolio-status, dashboard, snapshot</tags>
     <dependencies>010</dependencies>
     <parallel-group>none</parallel-group>

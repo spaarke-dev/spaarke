@@ -1,9 +1,11 @@
 <task id="DEVOPS-018" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Create /devops-project-archive skill (worktree delete + folder retain)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <estimated-effort>2.5 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>skill-creation, devops, project-archive, worktree-delete</tags>
     <dependencies>010, 016</dependencies>
     <parallel-group>none</parallel-group>

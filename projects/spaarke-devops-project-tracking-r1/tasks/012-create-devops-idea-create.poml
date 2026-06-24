@@ -1,9 +1,11 @@
 <task id="DEVOPS-012" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Create /devops-idea-create skill</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <estimated-effort>1.5 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>skill-creation, devops, idea, capture, gh-cli</tags>
     <dependencies>010</dependencies>
     <parallel-group>none</parallel-group>

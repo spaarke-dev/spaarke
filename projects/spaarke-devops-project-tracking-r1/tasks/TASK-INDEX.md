@@ -1,8 +1,8 @@
 # Task Index — Spaarke DevOps Project Tracking (r1)
 
 > **Last Updated**: 2026-06-23
-> **Total Tasks**: 38 (6 complete · 32 pending)
-> **Status**: 🔄 Phase 1 ✅ (foundation schema + 12 Epics landed) · Phase 2 next (skill authoring)
+> **Total Tasks**: 38 (16 complete · 22 pending)
+> **Status**: 🔄 Phase 1 ✅ · Phase 2 ✅ (9 /devops-* skills + verify gate) · Phase 3 next (active backfill)
 
 ## Status Legend
 
@@ -49,16 +49,16 @@
 
 | # | Task | Effort | Dependencies | Parallel | Status |
 |---|------|--------|--------------|----------|--------|
-| 010 | Create `/devops-portfolio-setup` (codifies Phase 1) | 3h | 008 | none | 🔲 |
-| 011 | Create `/devops-epic-create` | 2h | 010 | none | 🔲 |
-| 012 | Create `/devops-idea-create` | 1.5h | 010 | none | 🔲 |
-| 013 | Create `/devops-idea-promote` (Path A + Path B) | 3h | 010, 012 | none | 🔲 |
-| 014 | Create `/devops-project-start` — **THE BLESSED HANDOFF** | 5h | 010, 013 | none | 🔲 |
-| 015 | Create `/devops-project-register` (inverse of 014) | 3h | 010, 014 | none | 🔲 |
-| 016 | Create `/devops-project-sync` (idempotent + partial-success) | 3h | 010, 015 | none | 🔲 |
-| 017 | Create `/devops-portfolio-status` (dashboard + snapshot) | 2.5h | 010 | none | 🔲 |
-| 018 | Create `/devops-project-archive` (worktree delete + folder retain) | 2.5h | 010, 016 | none | 🔲 |
-| 019 | **Phase 2 verify gate** — 9 skills smoke-tested end-to-end | 2h | 010-018 | none | 🔲 |
+| 010 | Create `/devops-portfolio-setup` (codifies Phase 1) | 3h | 008 | none | ✅ |
+| 011 | Create `/devops-epic-create` | 2h | 010 | none | ✅ |
+| 012 | Create `/devops-idea-create` | 1.5h | 010 | none | ✅ |
+| 013 | Create `/devops-idea-promote` (Path A + Path B) | 3h | 010, 012 | none | ✅ |
+| 014 | Create `/devops-project-start` — **THE BLESSED HANDOFF** | 5h | 010, 013 | none | ✅ |
+| 015 | Create `/devops-project-register` (inverse of 014) | 3h | 010, 014 | none | ✅ |
+| 016 | Create `/devops-project-sync` (idempotent + partial-success) | 3h | 010, 015 | none | ✅ |
+| 017 | Create `/devops-portfolio-status` (dashboard + snapshot) | 2.5h | 010 | none | ✅ |
+| 018 | Create `/devops-project-archive` (worktree delete + folder retain) | 2.5h | 010, 016 | none | ✅ |
+| 019 | **Phase 2 verify gate** — 9 skills smoke-tested end-to-end | 2h | 010-018 | none | ✅ |
 
 **Phase 2 Total**: ~27.5 hours · Sequential only (Sub-Agent Write Boundary)
 

@@ -1,9 +1,11 @@
 <task id="DEVOPS-016" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Create /devops-project-sync skill (idempotent + partial-success)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>skill-creation, devops, project-sync, idempotent, gh-cli</tags>
     <dependencies>010, 015</dependencies>
     <parallel-group>none</parallel-group>
