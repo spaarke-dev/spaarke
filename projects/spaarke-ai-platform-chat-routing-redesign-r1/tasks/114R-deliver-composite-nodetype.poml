@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114R" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>NodeType.DeliverComposite extension to PlaybookExecutionEngine</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>113R</dependencies>
+    <blocks>114a,114b,114c,118R</blocks>
+    <tags>bff-api, services, ai, playbook-engine</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api` + `ai` + `playbook-engine`; modifies `PlaybookExecutionEngine.cs` + `NodeType` enum (load-bearing AI orchestration); backward-compat invariant; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add new enum value `NodeType.DeliverComposite` (ordinal append; do NOT renumber existing values — preserve `AIAnalysis = 100_000_000`, `Output = 100_000_001`, etc.) and extend `PlaybookExecutionEngine` to handle composite Output nodes. A composite node accepts N upstream Action node outputs keyed by `sectionName` (declared in `sprk_configjson` per the existing Output Node convention) and composes them per consumer destination (workspace widget / form prefill / chat). Existing single-action Output Node behavior MUST remain unchanged when only one upstream is wired — this is the backward-compat invariant (FR-52).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in the JPS playbook execution engine + multi-node DAG orchestration.</role>
+
+  <goal>
+    `NodeType.DeliverComposite` enum value added at the end of the existing enum (preserving ordinals); `PlaybookExecutionEngine` resolves composite nodes by gathering N upstream Action outputs keyed by declared `sectionName`, emits per-section results to downstream consumers. Unit test executes a composite node with 3 Action upstreams and asserts the SSE event sequence shows 3 `section_data` events keyed by section name. Single-upstream Output Node test (legacy) continues to pass unchanged.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-52 + Phase 5R "Multi-node Output composition" cluster. The current Output Node model couples schema declaration with the Action (schema-on-action) AND a schema-aware widget, creating 5 coordination points to keep in sync. Composite Output collapses this to 2 (section name + section state) by routing N Action outputs into ONE composite Output Node keyed by section name. This task lands the engine surface only — per-section SSE (114a), widget rework (114b), ADR (114c), and the per-playbook migration (118R) follow.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookExecutionEngineTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-52">Single-upstream Output Node behavior unchanged (backward-compat invariant).</constraint>
+    <constraint source="spec FR-52">Composite node MUST emit one section per upstream Action keyed by declared `sectionName`.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary; no CRUD-code violations.</constraint>
+    <constraint source="ADR-015">No file content in telemetry; metadata-only orchestration logs.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
+    <constraint source="ADR-033">Streaming preservation — Path 3 chat-summarize streaming behavior unchanged.</constraint>
+    <constraint source="project">Backward-compat invariant: existing schema-position playbooks continue to work via `FieldDelta` until migrated by 118R.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification — extending existing `PlaybookExecutionEngine` (NFR-A5 wire-not-build); NO new orchestrator class introduced.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `INodeExecutor.cs` lines 59-80 — confirm current `NodeType` enum shape (`AIAnalysis = 100_000_000`, `Output = 100_000_001`, control flow values). Append new value `DeliverComposite = 100_000_00X` at the END (next available ordinal).</step>
+    <step order="2">Read `PlaybookExecutionEngine.cs` — locate the existing `Output` node handler. Understand how upstream Action outputs are currently collected, composed, and dispatched to consumers (widget / chat / form-prefill).</step>
+    <step order="3">Read `NodeService.cs` to confirm how nodes are resolved by type at runtime; identify the dispatch switch / map that needs the new composite branch.</step>
+    <step order="4">Design the composite handler: gather all upstream Action outputs from the current execution context; read `sprk_configjson` to extract the `sectionName` declared per upstream wire; build a `Dictionary&lt;string, SectionResult&gt;` keyed by section name.</step>
+    <step order="5">Implement the composite node executor: emit per-section results as they complete (ordering by completion, NOT by declaration) — wire to the streaming surface that 114a will formalize. For this task, internal output API only; SSE wire-up lands in 114a.</step>
+    <step order="6">Add backward-compat guard: if the Output node has only one upstream Action wired AND `NodeType == Output` (not `DeliverComposite`), preserve today's behavior unchanged. Composite logic ONLY runs on `NodeType.DeliverComposite`.</step>
+    <step order="7">Grep all `NodeType` switch / pattern-match sites; add `DeliverComposite` handling where appropriate (or document why a site does not need the new case — e.g., scope validation paths inherit from `Output`).</step>
+    <step order="8">Add a new unit test in `PlaybookExecutionEngineTests.cs`: build a composite-node playbook fixture with 3 mock Action upstreams emitting `sectionName=A`, `sectionName=B`, `sectionName=C`; execute; assert 3 section results returned keyed by name; assert no schema-position coupling.</step>
+    <step order="9">Add a second test asserting backward-compat: a single-action Output Node (legacy `NodeType.Output`, ONE upstream) emits identical output to today (snapshot the existing test output).</step>
+    <step order="10">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Existing playbook engine tests pass unmodified; both new tests pass.</step>
+    <step order="11">Measure BFF publish size; report delta vs current baseline (~45.65 MB) in `notes/handoffs/114R-bff-publish-delta.md`. Threshold: ≥+5 MB → escalate per CLAUDE.md §10.</step>
+    <step order="12">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="13">Update TASK-INDEX.md: 114R → ✅; current-task.md → ready for 114a.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookExecutionEngine.cs, INodeExecutor.cs, NodeService.cs, existing tests</tool>
+    <tool name="Grep">Enumerate `NodeType` switch / pattern-match sites</tool>
+    <tool name="Edit">Enum append; composite node executor; backward-compat guard; new unit tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs (enum appended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs (composite handler)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs (dispatch branch)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookExecutionEngineTests.cs (2 new tests)</output>
+    <output type="docs">notes/handoffs/114R-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`NodeType.DeliverComposite` enum value appended; existing ordinals unchanged.</criterion>
+    <criterion testable="true">Composite node executor gathers N upstream Action outputs keyed by declared `sectionName`.</criterion>
+    <criterion testable="true">Unit test executes composite node with 3 Action upstreams and asserts 3 section results keyed by name (per FR-52 acceptance).</criterion>
+    <criterion testable="true">Backward-compat: legacy single-action `NodeType.Output` node test passes unchanged.</criterion>
+    <criterion testable="true">All existing `PlaybookExecutionEngine` tests pass without modification.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01 ceiling (≤60 MB compressed).</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-C anchor task — THE BIG ONE of Phase 5R. This task lands the engine surface only; per-section SSE wire-up (114a) consumes the per-section output API introduced here. Tasks 114a → 114b → 114c → 118R depend on this in sequence (114b is FE-only parallel-safe after 114a contract locks). Use enum APPEND (do NOT renumber) to preserve binary compat for any persisted ordinal references. SSE event names (`section_started`, `section_data`, `section_completed`) are formalized in 114a — this task may emit them internally but the contract is owned by 114a.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

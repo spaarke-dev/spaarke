@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="117b" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>FE renders top-N link buttons + Open Library Modal link</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>117a,110a</dependencies>
+    <blocks>117</blocks>
+    <tags>frontend, react, fluent-ui-v9</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Front-end + UX + integration with the SSE contract from 117a; user-facing chat surface; FULL per task-execute Step 0.5 (e2e UI test required; visual regression).</rigor-reason>
+    <parallel-group>5-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Subscribe to the `playbook_options` SSE event (contract from 117a) in `ConversationPane` / chat message renderer and render the top-N candidates as inline Fluent UI v9 `Button appearance="primary"` link buttons. On click, POST to `/api/ai/playbook-dispatch/execute` with `{ playbookId, sessionAttachmentIds, originalMessage, sessionId }`. Render an "Open Library Modal" link alongside (FR-51) that opens the existing Library modal pre-filtered by `sessionAttachmentTypes` when classification is available, otherwise unfiltered. E2E UI test confirms 3 buttons render and a click triggers the execution path.
+  </prompt>
+
+  <role>SPAARKE front-end developer. Expert in React 18, Fluent UI v9, SSE consumption, and the SpaarkeAi ConversationPane chat surface.</role>
+
+  <goal>
+    When the BFF emits `playbook_options`, the chat surface renders the top-N candidates as inline primary buttons (one per candidate, labeled by `displayName`) plus an "Open Library Modal" link. Clicking a button executes the chosen playbook with the same session attachments; clicking the link opens the existing Library modal (pre-filtered when classification data is available). E2E test asserts 3 buttons render and click triggers execution.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-50 + FR-51. The 117a SSE contract delivers `{ candidates: [{ playbookId, playbookCode, displayName, confidence, reason }], libraryModalCta: true, sessionAttachmentIds: string[] }`. The FE renders one Fluent UI v9 `Button appearance="primary"` per candidate (label = `displayName`) inline within the chat message bubble. The "Open Library Modal" link is rendered alongside (when `libraryModalCta` is true); click opens the existing Library modal — pre-filtered by `sessionAttachmentTypes` when the upstream classification is available, otherwise unfiltered. The execution endpoint `POST /api/ai/playbook-dispatch/execute` already exists from earlier waves; the FE forwards `{ playbookId, sessionAttachmentIds, originalMessage, sessionId }`. Depends on 110a so the Library modal opens cleanly.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ (ConversationPane + chat message renderer)</file>
+      <file>src/solutions/SpaarkeAi/src/components/library/ (existing Library modal — opened by the link)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/ (shared chat UI primitives)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-50">Inline Fluent UI v9 `Button appearance="primary"` per candidate; click → `POST /api/ai/playbook-dispatch/execute` with `{ playbookId, sessionAttachmentIds, originalMessage, sessionId }`.</constraint>
+    <constraint source="spec FR-51">"Open Library Modal" link rendered alongside top-N; click opens existing Library modal pre-filtered by `sessionAttachmentTypes` when classification available, else unfiltered.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 only; no v8 imports; `Button appearance="primary"`.</constraint>
+    <constraint source="ADR-015">SSE payload is tier-1 safe (per 117a); FE MUST NOT log payload contents that could re-leak (e.g. no `console.log(event.data)` in production builds).</constraint>
+    <constraint source="project">Use `npm install --legacy-peer-deps --no-audit --no-fund` for any Vite solutions touched.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `ConversationPane` + the chat message renderer in `src/solutions/SpaarkeAi/src/components/conversation/`; locate the SSE event subscription hook.</step>
+    <step order="2">Add a TypeScript type matching the 117a SSE payload shape: `{ candidates: PlaybookCandidate[]; libraryModalCta: boolean; sessionAttachmentIds: string[] }`.</step>
+    <step order="3">Add a subscription for the `playbook_options` event name; on receipt, attach the payload to the corresponding chat message in component state.</step>
+    <step order="4">Render top-N candidates as inline Fluent UI v9 `Button appearance="primary"` (label = `displayName`); stack horizontally within the message bubble with appropriate spacing.</step>
+    <step order="5">Wire click handler: `POST /api/ai/playbook-dispatch/execute` with `{ playbookId, sessionAttachmentIds, originalMessage, sessionId }`; disable buttons + show inline spinner while in-flight; surface error toast on failure.</step>
+    <step order="6">Render "Open Library Modal" link alongside the buttons when `libraryModalCta` is true; click opens the existing Library modal. When upstream classification provides `sessionAttachmentTypes` (e.g. derived from `sessionAttachmentIds`), pass as the modal's initial filter; otherwise open unfiltered.</step>
+    <step order="7">Add an E2E UI test: dispatch a synthetic `playbook_options` event with 3 candidates → assert 3 buttons render with correct labels → click button 1 → assert POST fired with the expected payload shape.</step>
+    <step order="8">Add a second E2E test: click "Open Library Modal" link → assert existing modal opens (depends on 110a fix) → assert pre-filter applied when `sessionAttachmentTypes` is present.</step>
+    <step order="9">Lint + typecheck + run touched solution's test suite.</step>
+    <step order="10">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="11">Update TASK-INDEX.md: 117b → ✅; unblocks 117 (telemetry).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">ConversationPane + Library modal + shared chat primitives</tool>
+    <tool name="Edit">SSE subscription + buttons + link + E2E tests</tool>
+    <tool name="Bash">npm install + lint + typecheck + test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ (playbook_options subscription + buttons + link)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/ (if a shared primitive is added)</output>
+    <output type="test">E2E UI tests: 3-button render + click + Library modal link</output>
+    <output type="docs">notes/handoffs/117b-fe-link-buttons-ux.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FE subscribes to `playbook_options` SSE event and stores payload on the corresponding chat message.</criterion>
+    <criterion testable="true">Top-N candidates render as inline Fluent UI v9 `Button appearance="primary"` with `displayName` labels.</criterion>
+    <criterion testable="true">Click on a button POSTs to `/api/ai/playbook-dispatch/execute` with `{ playbookId, sessionAttachmentIds, originalMessage, sessionId }` (verified by E2E test).</criterion>
+    <criterion testable="true">"Open Library Modal" link renders alongside buttons when `libraryModalCta` is true; click opens the existing modal pre-filtered when classification available.</criterion>
+    <criterion testable="true">E2E UI test passes: 3 buttons render + click triggers execution path.</criterion>
+    <criterion testable="true">No Fluent v8 imports introduced; ADR-021 respected; no payload contents logged.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-D parallel-safe FE work after 117a + 110a land. Keep the link-buttons inline within the chat bubble (do not introduce a new card surface). 117 (telemetry) follows.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

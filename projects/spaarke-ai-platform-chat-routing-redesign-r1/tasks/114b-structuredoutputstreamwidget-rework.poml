@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114b" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>StructuredOutputStreamWidget rework to section-name-keyed</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>114a</dependencies>
+    <blocks>114c,118R</blocks>
+    <tags>frontend, react, widget</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `frontend` + `widget`; load-bearing UI surface for composite playbook rendering; backward-compat path for unmigrated playbooks; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Rework `StructuredOutputStreamWidget` to listen by section name (not schema position). The widget hydrates an internal `sections: Record&lt;string, SectionState&gt;` map keyed by section name and renders sections in completion order. Drop the schema-position coupling (and the schema-on-action coupling that necessitated it) — the coordination point count falls from 5 (schema-on-action + schema-aware widget) to 2 (section name + section state). Backward-compat: detect event type at runtime (`FieldDelta` vs `section_data`); when the SSE stream emits `FieldDelta` only (unmigrated playbook), render via the legacy path unchanged.
+  </prompt>
+
+  <role>SPAARKE FE developer. Expert in `@spaarke/ai-widgets` workspace widget patterns + SSE consumer state management.</role>
+
+  <goal>
+    `StructuredOutputStreamWidget.tsx` hydrates `sections: Record&lt;string, SectionState&gt;` from `section_started` / `section_data` / `section_completed` events keyed by section name. Widget unit test driven by `section_data` events keyed by name asserts correct rendering. Backward-compat test confirms widget falls back to the legacy `FieldDelta` rendering path when only `FieldDelta` events are present on the stream (unmigrated playbook scenario). UI regression test (smoke) for an unmigrated playbook surface passes unchanged.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-54 + Phase 5R "Multi-node Output composition" cluster. The current `StructuredOutputStreamWidget` is schema-position-keyed — tightly coupled to the schema-on-action declaration pattern. This rework consumes the section-name-keyed SSE contract finalized in 114a, dropping 3 of the 5 coordination points. The widget retains the citation-bearing trust model (NFR-A3) and surface contract; only its internal state shape changes.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/StructuredOutputStreamWidget.test.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/StructuredOutputStreamWidget.integration.dispatchSummarizeOnly.test.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-54">Widget MUST listen by section name (not schema position); coordination points drop from 5 to 2.</constraint>
+    <constraint source="spec FR-54">Backward compat for unmigrated playbooks — `FieldDelta`-only streams render via legacy path (verified by UI regression test).</constraint>
+    <constraint source="ADR-021">Fluent UI v9 only; no Fluent v8 imports; no MUI; honor design tokens.</constraint>
+    <constraint source="project">Backward-compat invariant: existing schema-position playbooks continue to work via `FieldDelta` until migrated by 118R.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification — extending existing widget (NFR-A5 wire-not-build); NO new widget class introduced.</constraint>
+    <constraint source="CLAUDE.md §17">SpaarkeAi dashboard + widget model — widget remains a workspace widget in `@spaarke/ai-widgets`; do NOT break the WorkspaceWidgetRegistry contract.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `StructuredOutputStreamWidget.tsx` end-to-end; document the current schema-position-keyed state shape and SSE event handlers.</step>
+    <step order="2">Read 114a's SSE contract definitions (`section_started` / `section_data` / `section_completed` payload shapes); confirm payload types are exported from a shared types module.</step>
+    <step order="3">Design the new state shape: `sections: Record&lt;string, SectionState&gt;` where `SectionState = { name, status: 'pending'|'streaming'|'complete', contentDelta: string, finalContent?: string, startedAt, completedAt }`.</step>
+    <step order="4">Implement the new SSE event handlers: on `section_started` → init `sections[sectionName]`; on `section_data` → append `contentDelta`; on `section_completed` → set status `complete` and `finalContent`.</step>
+    <step order="5">Add event-type detection at the SSE entry point: if the FIRST event observed is `FieldDelta` (or stream signals no composite node — e.g., absence of `section_started` after N ms), route to the legacy renderer. If the first observed event is `section_started`, route to the new renderer.</step>
+    <step order="6">Render sections in COMPLETION order (not declaration order) — matches 114a's SSE ordering invariant. Use a stable list keyed by section name with completion timestamp as sort key.</step>
+    <step order="7">Preserve all existing widget contract surface (props, registry entry, citation rendering). Do NOT change props shape — the rework is internal to the widget body.</step>
+    <step order="8">Add a new widget unit test: feed mocked `section_started` / `section_data` / `section_completed` events for 3 sections keyed by name; assert all 3 render with correct ordering by completion.</step>
+    <step order="9">Add a backward-compat unit test: feed `FieldDelta`-only events (legacy playbook); assert widget falls back to legacy renderer and renders identically to today's snapshot.</step>
+    <step order="10">Run `npm run build:prod` + `npm test` in `src/client/shared/Spaarke.AI.Widgets/`. Existing widget tests pass unmodified; both new tests pass.</step>
+    <step order="11">Verify Fluent UI v9 conformance (no v8 imports introduced); verify WorkspaceWidgetRegistry entry unchanged.</step>
+    <step order="12">code-review + adr-check (Step 9.5 quality gates) — explicit ADR-021 Fluent v9 check.</step>
+    <step order="13">Update TASK-INDEX.md: 114b → ✅; current-task.md → ready for 114c.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">StructuredOutputStreamWidget.tsx + existing tests + 114a payload types</tool>
+    <tool name="Grep">Schema-position references in widget body; v8 import check</tool>
+    <tool name="Edit">State shape rework, new SSE handlers, backward-compat detection, new tests</tool>
+    <tool name="Bash">npm run build:prod, npm test in widgets package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx (state shape + handlers reworked)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/types/ (SectionState type)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/StructuredOutputStreamWidget.test.tsx (2 new tests)</output>
+    <output type="docs">notes/handoffs/114b-widget-rework.md (coordination-point reduction evidence: 5 → 2)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Widget hydrates `sections: Record&lt;string, SectionState&gt;` from section-name-keyed SSE events.</criterion>
+    <criterion testable="true">Widget renders sections in COMPLETION order (not declaration order) — verified by unit test.</criterion>
+    <criterion testable="true">Backward-compat: widget falls back to legacy `FieldDelta` renderer when stream emits `FieldDelta` only (verified by unit test).</criterion>
+    <criterion testable="true">Coordination point count drops from 5 to 2 — documented in handoff with before/after evidence.</criterion>
+    <criterion testable="true">Fluent UI v9 conformance preserved (no v8 imports introduced).</criterion>
+    <criterion testable="true">All existing widget tests pass without modification; WorkspaceWidgetRegistry entry unchanged.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-C, depends on 114a (SSE contract LOCKED). Parallel-safe: true — once 114a merges, this task can run in parallel with 114c (114c is doc-only). The internal state-shape rework is the entire deliverable; surface contract (props, registry entry) is preserved exactly. Use NFR-A5 wire-not-build justification — NO new widget; the existing widget grows section-name-keyed support and a backward-compat fallback.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

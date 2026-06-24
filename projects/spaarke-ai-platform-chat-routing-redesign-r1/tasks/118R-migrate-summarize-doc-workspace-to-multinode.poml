@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="118R" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Migrate summarize-document-for-workspace@v1 to multi-node composition</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>114b,114c</dependencies>
+    <blocks>116,118a,118b</blocks>
+    <tags>dataverse, data, migration, playbook</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production-bound playbook migration (NFR-02); Dataverse data update + playbook node graph rewrite + end-to-end integration test against bff-dev; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single Dataverse data mutation against `summarize-document-for-workspace@v1` node graph; serial with task 116 (cleanup); chat sibling stays single-action and is NOT touched.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Migrate the `summarize-document-for-workspace@v1` playbook node graph in Dataverse from the current single-action Output schema to N Action nodes (one per output section) + 1 `DeliverComposite` Output Node per FR-52 / FR-58. Section assignment uses the playbook's existing output schema sections (parties+direction, definition, exclusions, term+survival, permittedUse, remedies, redFlags — or whatever the current production schema declares). Chat sibling `summarize-document-for-chat@v1` STAYS single-action — do NOT migrate; verify regression remains green. Migration is via Dataverse update (`scripts/Deploy-Playbook.ps1` or MCP `update_record` on `sprk_playbooknode`/`sprk_configjson`) — rewrite the Output Node `sprk_configjson` to `DeliverComposite` and add the new Action nodes wired by `sectionName`. Validate end-to-end against bff-dev: NDA upload → vector match → top-N → user clicks → playbook executes via DeliverComposite path → workspace widget renders per section via `section_data` events.
+  </prompt>
+
+  <role>SPAARKE platform Dataverse + playbook engineer. Expert in `sprk_playbook` / `sprk_playbooknode` node graphs, `PlaybookExecutionEngine` Output Node semantics, and FR-52 multi-node composition.</role>
+
+  <goal>
+    `summarize-document-for-workspace@v1` node graph in Dataverse is rewritten so its single legacy Output Node becomes N Action nodes (one per output section) feeding 1 `DeliverComposite` Output Node keyed by `sectionName`. End-to-end run against bff-dev produces correct per-section streaming (`section_started`, `section_data`, `section_completed` events keyed by section name, NOT schema position) and the workspace widget renders identical output (post-migration schema observable from existing widget MATCHES pre-migration). Chat sibling `summarize-document-for-chat@v1` is untouched and its regression test (FR-26 enriched fields + FR-30 `FieldDelta` streaming) remains green. Playbook lookup cache (ADR-014) invalidated after the data update.
+  </goal>
+
+  <context>
+    <background>
+      Phase 5R revised scope (spec.md §"Phase 5+7 Revised Scope" FR-58). FR-52 introduces `NodeType.DeliverComposite` in `PlaybookExecutionEngine` (built in tasks 114b/114c). This task is the proof-point migration: rewrite the production-bound `summarize-document-for-workspace@v1` to use composition. The chat sibling stays single-action because per-section streaming offers no benefit for the chat surface — chat continues to emit `FieldDelta` events (FR-53 backward-compat invariant). Migration is Dataverse-data only (no `.cs` changes); the engine support landed in 114b/114c.
+    </background>
+    <relevant-files>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>infra/dataverse/playbooks/summarize-document-for-workspace-v1.json</file>
+      <file>infra/dataverse/playbooks/summarize-document-for-chat-v1.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecution/PlaybookExecutionEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookLookupService.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/SummarizeDocumentE2ETests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary; no CRUD-code violations.</constraint>
+    <constraint source="ADR-014">Playbook lookup cache (5-min TTL, tenant-scoped) MUST be invalidated post-migration; verify next request sees the new node graph.</constraint>
+    <constraint source="ADR-015">Telemetry tier-1 safe — log playbook ID + node count + section names; NEVER section content.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect ~0 MB delta (data-only change).</constraint>
+    <constraint source="project">Chat sibling `summarize-document-for-chat@v1` MUST stay single-action — do NOT migrate; verify regression test.</constraint>
+    <constraint source="project">Production-bound playbook preservation (NFR-02) — 6 output sections preserved in name and semantics; output schema observable from existing widget MUST match post-migration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-multinode-output-composition.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing `summarize-document-for-workspace@v1` node graph in Dataverse (via MCP `read_query` against `sprk_playbook` + `sprk_playbooknode` joined by parent) — capture current Output Node `sprk_configjson` + the section names declared in its output schema. Snapshot to `notes/handoffs/118R-pre-migration-snapshot.json` for rollback.</step>
+    <step order="2">Read the chat sibling `summarize-document-for-chat@v1` node graph; confirm it is structurally distinct (single-action Output) and document baseline. This is the regression target — it MUST be untouched by this migration.</step>
+    <step order="3">Inspect the FR-52 `DeliverComposite` node contract from tasks 114b/114c (read `PlaybookExecutionEngine.cs` + the new `DeliverCompositeOutputNode` impl). Confirm the `sectionName`-keyed wiring schema and required `sprk_configjson` shape.</step>
+    <step order="4">Design the new node graph for `summarize-document-for-workspace@v1`: one Action node per output section (preserving the section names from step 1) feeding one `DeliverComposite` Output Node. Each Action node's prompt template extracts ONE section from the document; the composite node assembles them keyed by `sectionName`.</step>
+    <step order="5">Author the migration JSON at `infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json` capturing the new node graph; preserve `sprk_playbookid` (immutable opaque ID) and `sprk_playbookcode = summarize-document-for-workspace@v1` (slug unchanged).</step>
+    <step order="6">Apply the migration via `Deploy-Playbook.ps1` (or MCP `update_record`/`delete_record`+`create_record` per script semantics) against the DEV environment. Idempotent; do NOT delete the playbook record itself — rewrite its child nodes only.</step>
+    <step order="7">Invalidate the `PlaybookLookupService` cache (ADR-014) — call the cache-flush endpoint or restart the BFF dev instance. Verify next request sees the new node graph via telemetry (node count + section names).</step>
+    <step order="8">Add or update integration test `SummarizeDocumentE2ETests.MultinodeWorkspace_NDA_RendersAllSections`: upload NDA via `POST /api/chat/document-upload` → trigger vector match → simulate user click on top-N candidate → assert SSE event sequence shows N `section_started` + N `section_completed` events keyed by section name (NOT schema position).</step>
+    <step order="9">Verify chat sibling regression: run existing `SummarizeDocumentE2ETests.ChatSibling_NDA_StreamsFieldDelta` test — must remain green; assert FR-26 enriched fields (`PrecomputedSummary`, `Manifest`, `ClassifiedDocType`, `ClassifiedConfidence`, `Sections`) preserved and FR-30 `FieldDelta` events still flow.</step>
+    <step order="10">Workspace widget render verification: run the workspace UI flow against bff-dev; visually confirm the migrated playbook produces the same 6-section render as pre-migration (NFR-02 production-bound preservation).</step>
+    <step order="11">Measure BFF publish size; report delta vs current baseline (~45.65 MB) — expect ~0 MB (data-only change).</step>
+    <step order="12">code-review + adr-check (Step 9.5 quality gates). Verify telemetry tier-1 audit shows no leaked section content.</step>
+    <step order="13">Update TASK-INDEX.md: task 118R → ✅; current-task.md → ready for 118a + 118b (parallel).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing playbook JSON + Deploy-Playbook.ps1 + DeliverComposite engine impl</tool>
+    <tool name="mcp__dataverse__read_query">Snapshot pre-migration node graph</tool>
+    <tool name="mcp__dataverse__update_record">Migrate Output Node + add Action nodes</tool>
+    <tool name="Edit">New migration JSON + integration test</tool>
+    <tool name="Bash">Deploy-Playbook.ps1 / dotnet test / publish measurement</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json</output>
+    <output type="data">notes/handoffs/118R-pre-migration-snapshot.json</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/SummarizeDocumentE2ETests.cs (multinode case added)</output>
+    <output type="docs">notes/handoffs/118R-migration-verification.md (section count + widget render parity evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`summarize-document-for-workspace@v1` node graph rewritten in Dataverse to N Action nodes + 1 `DeliverComposite` Output Node; section names preserved.</criterion>
+    <criterion testable="true">End-to-end NDA test against bff-dev produces N `section_started` + N `section_completed` SSE events keyed by section name (NOT schema position).</criterion>
+    <criterion testable="true">Workspace widget render parity vs pre-migration (NFR-02 — same 6 sections, same semantics).</criterion>
+    <criterion testable="true">Chat sibling `summarize-document-for-chat@v1` regression remains green (FR-26 enriched fields + FR-30 `FieldDelta` streaming preserved).</criterion>
+    <criterion testable="true">Playbook lookup cache invalidated post-migration; next request sees new node graph.</criterion>
+    <criterion testable="true">Telemetry tier-1 audit shows playbook ID + node count + section names logged; no section content leaked.</criterion>
+    <criterion testable="true">BFF publish-size delta ~0 MB (data-only); within NFR-01 cumulative cap.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-E proof point for FR-52 multi-node composition. Depends on 114b (engine `DeliverComposite` support) + 114c (per-section SSE streaming). Chat sibling is intentionally NOT migrated — FR-53 backward-compat invariant keeps `FieldDelta` streaming for unmigrated playbooks. Rollback path: re-apply `notes/handoffs/118R-pre-migration-snapshot.json` via `Deploy-Playbook.ps1` if widget render parity fails. After this lands, task 116 (dict removal) and tasks 118a/118b (session continuity + memory round-trip) can proceed in parallel.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

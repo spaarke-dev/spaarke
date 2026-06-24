@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="113R" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Confidence-based top-N selector + no-auto-execute invariant</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>111R</dependencies>
+    <blocks>117a,114R</blocks>
+    <tags>bff-api, services, routing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api` + routing decision tree wired into `PlaybookDispatcher`; FR-48 no-auto-execute invariant is binding; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement `IPlaybookCandidateSelector` + `PlaybookCandidateSelector` in `Services/Ai/Chat/` per FR-47 + FR-48. Wraps Phase B vector match output (task 112) + optional LLM rerank (task 111R). Decision tree uses constants `confidenceThreshold = 0.85`, `secondaryThreshold = 0.80`, `confidenceDeltaMargin = 0.05` defined in `RoutingOptions` (typed options per ADR-018). FR-48 invariant: result is ALWAYS surfaced as candidates — NEVER auto-execute even on a high-confidence single match. Wire into `PlaybookDispatcher.DispatchAsync` so the file-aware path emits `playbook_options` for FE confirmation.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat-routing decision logic, ADR-018 typed options, and Spaarke FR-48 user-confirmation invariant.</role>
+
+  <goal>
+    A new `IPlaybookCandidateSelector.SelectAsync(userMessage, attachmentMetadata, vectorMatches, ct)` returning `IReadOnlyList&lt;PlaybookCandidate&gt;` (top-3 above secondaryThreshold). Decision tree implements (a) confident vector-only path (no LLM call) and (b) ambiguous rerank path (1 LLM call via 111R). `PlaybookDispatcher.DispatchAsync` is updated so the file-aware branch returns candidates for FE confirmation — never auto-executes. Unit tests cover all branches; integration test for `playbook_options` SSE shape lands in 117a/117b.
+  </goal>
+
+  <context>
+    <background>
+      Phase 5R revised scope (spec.md §"Phase 5+7 Revised Scope"). FR-46 hybrid reranker lives in 111R; this task is the orchestrator. FR-47 defines top-N rules. FR-48 is the user-confirmation invariant: no path through `DispatchAsync` (slash or NL) may auto-execute when files are attached — both must emit `playbook_options`. The selector is the decision point.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IIntentRerankerService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/RoutingOptions.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">New service stays in `Services/Ai/Chat/` boundary; no CRUD-code violations; no `IServiceProvider.GetService&lt;T&gt;()` in endpoint signatures.</constraint>
+    <constraint source="ADR-015">LLM input limited to metadata-only (no file text content); telemetry tier-1 safe (deterministic IDs + short previews only).</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — add new unit tests; integration test added in 117a/117b.</constraint>
+    <constraint source="FR-48">DispatchAsync file-aware path NEVER auto-executes; always returns candidates for FE confirmation. Slash + NL paths produce identical confirmation behavior.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read 111R outputs (`IIntentRerankerService` interface + `RerankerResult` DTO) and existing `PlaybookDispatcher.cs` Phase B vector match wiring. Confirm shape of vector-match output (ordered list with embedding scores).</step>
+    <step order="2">Add constants to `RoutingOptions` (typed options per ADR-018): `ConfidenceThreshold = 0.85`, `SecondaryThreshold = 0.80`, `ConfidenceDeltaMargin = 0.05`. Bind to `Routing` config section; add DataAnnotations `[Range(0,1)]` validation.</step>
+    <step order="3">Design `IPlaybookCandidateSelector` interface: `Task&lt;CandidateSelectionResult&gt; SelectAsync(string userMessage, IReadOnlyList&lt;AttachmentMetadata&gt; attachments, IReadOnlyList&lt;VectorMatch&gt; vectorMatches, CancellationToken ct)`. Result includes `Candidates`, `RerankInvoked`, `Reason`.</step>
+    <step order="4">Implement decision tree in `PlaybookCandidateSelector`:
+      (a) IF top-1 score &gt;= ConfidenceThreshold AND (top-2 score is null OR (top-1 - top-2) &gt; ConfidenceDeltaMargin) → return top-3 above SecondaryThreshold; do NOT invoke reranker.
+      (b) ELSE → invoke `IIntentRerankerService.RerankAsync` with top-5; reranker returns top-3 of top-5.
+      (c) IF fewer than 3 candidates above SecondaryThreshold → return whatever matches (could be 0, 1, or 2).
+    </step>
+    <step order="5">Register `IPlaybookCandidateSelector` in `AiServicesModule` unconditionally (CLAUDE.md §10 F.1 asymmetric-registration prevention).</step>
+    <step order="6">Wire into `PlaybookDispatcher.DispatchAsync` file-aware branch: replace any direct vector-match-only dispatch logic with `_selector.SelectAsync(...)`. The dispatcher returns candidates for FE rendering — NEVER auto-executes a single high-confidence match (FR-48). Slash path and NL path both flow through the same selector.</step>
+    <step order="7">Add unit tests `PlaybookCandidateSelectorTests` covering each FR-47 branch:
+      (a) High-confidence single (top-1=0.95, top-2=0.70) → top-3 returned, no rerank invoked.
+      (b) High-confidence but close (top-1=0.90, top-2=0.88) → rerank invoked.
+      (c) Low confidence (top-1=0.78) → rerank invoked.
+      (d) Fewer than 3 above 0.80 → return whatever matches.
+      (e) Empty vector matches → empty result.
+    </step>
+    <step order="8">Add `PlaybookDispatcherTests` case asserting FR-48 invariant: file-aware path with single high-confidence match returns candidates (does NOT execute the playbook). Mock `IPlaybookExecutionEngine` and verify `ExecuteAsync` is NOT called from `DispatchAsync` file-aware branch.</step>
+    <step order="9">Grep `Services/Ai/Chat/` for any remaining auto-execute path on the file-aware branch; confirm only the FE-triggered `/execute` endpoint (117a/117b) calls `PlaybookExecutionEngine.ExecuteAsync` for file-aware dispatches.</step>
+    <step order="10">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. All tests pass.</step>
+    <step order="11">Measure BFF publish size; report compressed delta vs ~45.65 MB baseline; expect &lt;1 MB delta. code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="12">Update TASK-INDEX.md: task 113R → ✅; current-task.md → ready for 117a.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">IIntentRerankerService, PlaybookDispatcher, RoutingOptions</tool>
+    <tool name="Grep">Auto-execute path scan in file-aware branch</tool>
+    <tool name="Edit">New selector service, DI registration, dispatcher rewire, unit tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IPlaybookCandidateSelector.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookCandidateSelector.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (file-aware branch rewired)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/RoutingOptions.cs (constants added)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookCandidateSelectorTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookDispatcherTests.cs (FR-48 invariant case)</output>
+    <output type="docs">notes/handoffs/113R-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IPlaybookCandidateSelector.SelectAsync` returns top-3 above 0.80; rerank fires only on ambiguous cases per FR-46.</criterion>
+    <criterion testable="true">Unit test covers each FR-47 branch (high-confidence single; high-confidence close; low confidence; fewer than 3; empty).</criterion>
+    <criterion testable="true">FR-48 invariant: `PlaybookDispatcher.DispatchAsync` file-aware path NEVER calls `PlaybookExecutionEngine.ExecuteAsync` directly; verified by mock-call assertion.</criterion>
+    <criterion testable="true">Constants live in `RoutingOptions` typed options (ADR-018); DataAnnotations validation applied.</criterion>
+    <criterion testable="true">Selector registered unconditionally in `AiServicesModule` (no asymmetric registration).</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-B blocker for 117a (SSE event contract) + 114R (composite output). FR-48 is the load-bearing invariant: slash + NL parity test from task 115 must remain green AND both paths must now emit `playbook_options` instead of auto-executing. Integration test for SSE shape lands in 117a/117b — this task validates the BFF decision layer only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

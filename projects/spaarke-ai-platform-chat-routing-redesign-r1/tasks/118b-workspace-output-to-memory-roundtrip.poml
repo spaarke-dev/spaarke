@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="118b" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Workspace output → AI memory round-trip handler (get_workspace_tab_content)</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>118R</dependencies>
+    <blocks>119</blocks>
+    <tags>bff-api, services, handlers, T2, architecture-binding</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api` + new `IToolHandler` impl wired into chat agent; T2 round-trip is binding to architecture §6.5 / §11.1; FR-57 architecture-binding invariant; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New isolated handler file in `Services/Ai/Chat/ToolHandlers/` + DI registration + Seed-TypedHandlers row; parallel with 118a (test-only).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a new read-only tool handler `GetWorkspaceTabContentHandler : IToolHandler` in `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlers/` per FR-57. Handler reuses the existing Pillar 6b workspace state plumbing (`WorkspaceStateService.GetTabAsync` — see architecture §6.5) to return the COMPOSED widget state (sections + values), NOT raw streaming chunks. Register in DI per ADR-010 (unconditional registration; no asymmetric Tier-1.5 anti-pattern). Add a row in `scripts/Seed-TypedHandlers.ps1` `$RowFiles` hashtable for `GET-WORKSPACE-TAB-CONTENT` toolcode following the precedent from task 092 / `RECALL-SESSION-FILE`. Integration test: run `summarize-document-for-workspace` against bff-dev → ask "make the summary shorter" → agent reads tab content via `get_workspace_tab_content` → subsequent turn reflects the modified content target.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `IToolHandler` pattern, R6 Pillar 6b workspace state plumbing, ADR-010 DI registration, and FR-57 T2 round-trip semantics.</role>
+
+  <goal>
+    `GetWorkspaceTabContentHandler` lives at `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlers/GetWorkspaceTabContentHandler.cs` implementing `IToolHandler.ExecuteChatAsync(ChatInvocationContext, AnalysisTool, CancellationToken)` per R6 Pillar 2 contract. Handler is read-only — calls `WorkspaceStateService.GetTabAsync(tabId)` and returns the COMPOSED widget state (the section-name-keyed map per FR-54), NOT raw `section_data` streaming chunks. Registered unconditionally in `AiServicesModule` (or the existing handler-registration module per ADR-010). `Seed-TypedHandlers.ps1` has a new row entry for `GET-WORKSPACE-TAB-CONTENT` mirroring the task-092 precedent (`RECALL-SESSION-FILE`). Integration test verifies end-to-end T2 round-trip: workspace tab content is reachable from a subsequent chat turn via the new handler.
+  </goal>
+
+  <context>
+    <background>
+      Phase 5R revised scope (spec.md §"Phase 5+7 Revised Scope" FR-57). Architecture §6.5 (Workspace state read/write) and §11.1 (R6 carry-forward — `WorkspaceStateService` + Pillar 6b handlers are already built; DO NOT REBUILD). FR-57 closes the T2 memory loop: workspace output becomes AI-readable memory on subsequent turns. Existing handler `get_workspace_tab_state` (referenced in architecture §6.5 / §8 tool inventory) returns hot tab metadata; the new `get_workspace_tab_content` returns the composed widget state (sections + values). Per NFR-A1 (T2 explicit promotion), this is a read-only handler — no new state storage; pure projection over existing Pillar 6b storage.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlers/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlers/UpdateWorkspaceTabHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Workspace/WorkspaceStateService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/DependencyInjection/AiServicesModule.cs</file>
+      <file>scripts/Seed-TypedHandlers.ps1</file>
+      <file>infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json (NEW)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">DI registration via `AiServicesModule` (or existing handler-registration module); unconditional `services.AddSingleton&lt;IToolHandler, GetWorkspaceTabContentHandler&gt;()` (no `if (flag)` block — avoids Tier-1.5 anti-pattern per CLAUDE.md §10 F.1).</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary; no CRUD-code violations.</constraint>
+    <constraint source="ADR-015">Telemetry tier-1 safe — log tabId + handler invocation; NEVER tab content. Handler is read-only — no T3/T4 promotion bypass.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB); expect &lt;1 MB delta.</constraint>
+    <constraint source="architecture binding">[arch §11.1] T2 round-trip via `get_workspace_tab_content` reuses Pillar 6b workspace state plumbing — do NOT add new state storage.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — add unit test for handler + integration test for round-trip; existing tests unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-multinode-output-composition.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read architecture/stateful-chat-architecture.md §6.5 (workspace state read/write) and §11.1 (R6 carry-forward — DO NOT REBUILD `WorkspaceStateService`). Confirm `GetTabAsync` returns the composed widget state we need.</step>
+    <step order="2">Read existing handler `UpdateWorkspaceTabHandler.cs` (referenced in arch §6.5) as the structural precedent for `IToolHandler` impls; mirror its constructor injection + `ExecuteChatAsync` shape.</step>
+    <step order="3">Read `WorkspaceStateService.GetTabAsync` signature — confirm it returns the FR-54 section-name-keyed `sections: Record&lt;string, SectionState&gt;` shape (composed widget state, NOT raw streaming chunks).</step>
+    <step order="4">Author `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlers/GetWorkspaceTabContentHandler.cs`. Implements `IToolHandler` with `ToolCode = "GET-WORKSPACE-TAB-CONTENT"`. Constructor: `IWorkspaceStateService workspaceStateService, ILogger&lt;GetWorkspaceTabContentHandler&gt; logger`. `ExecuteChatAsync` reads `tabId` from `tool.Parameters`, calls `workspaceStateService.GetTabAsync(tabId)`, projects to a tier-1-safe response shape `{ tabId, widgetType, sections: {sectionName: composedValue} }` — NO raw chunks.</step>
+    <step order="5">Register in DI: add `services.AddSingleton&lt;IToolHandler, GetWorkspaceTabContentHandler&gt;()` to `AiServicesModule` (or the canonical handler-registration module). Verify unconditional registration (no `if (flag)` block — CLAUDE.md §10 F.1).</step>
+    <step order="6">Author `infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json` with `sprk_handlerclass = "GetWorkspaceTabContentHandler"`, `sprk_toolcode = "GET-WORKSPACE-TAB-CONTENT"`, `sprk_invocationcontextmask = Chat`, `sprk_parameterschema` declaring `tabId: string (required)`, `sprk_requiredcapability = null` (always-on per arch §8.2).</step>
+    <step order="7">Add a row entry in `scripts/Seed-TypedHandlers.ps1` `$RowFiles` hashtable following the task-092 precedent — mirror the `RECALL-SESSION-FILE` row entry pattern (toolcode key, JSON file path value). Idempotent upsert via alternate key on `sprk_handlerclass`.</step>
+    <step order="8">Add unit test `GetWorkspaceTabContentHandlerTests` in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ToolHandlers/`: (a) valid tabId → returns composed widget state; (b) unknown tabId → empty / not-found result; (c) verifies `WorkspaceStateService.GetTabAsync` invoked once with correct tabId; (d) verifies NO raw chunks in response (tier-1 audit).</step>
+    <step order="9">Add integration test `WorkspaceMemoryRoundTripTests.SummarizeThenAskShorter_AgentReadsTabContent` in `tests/integration/`. Flow: upload NDA → run `summarize-document-for-workspace` (migrated per 118R) → assert workspace tab populated → user message "make the summary shorter" → assert agent invokes `get_workspace_tab_content` (visible in tool-trace) → subsequent turn response reflects the modified content target (not just generic shortening).</step>
+    <step order="10">Run `Seed-TypedHandlers.ps1` against DEV; verify the new `sprk_analysistool` row exists; restart BFF dev; verify chat agent tool registry exposes `get_workspace_tab_content`.</step>
+    <step order="11">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/`. All tests pass.</step>
+    <step order="12">Measure BFF publish size; report delta vs ~45.65 MB baseline; expect &lt;1 MB delta. code-review + adr-check (Step 9.5 quality gates) — verify no asymmetric registration, no T3/T4 promotion bypass, no `IServiceProvider.GetService&lt;T&gt;` in endpoint signatures.</step>
+    <step order="13">Update TASK-INDEX.md: task 118b → ✅; current-task.md → ready for 119 (Phase 5R exit gate).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">UpdateWorkspaceTabHandler, WorkspaceStateService, Seed-TypedHandlers.ps1, task 092 row JSON</tool>
+    <tool name="Edit">New handler, DI registration, new sprk_analysistool row JSON, seed script row addition, unit + integration tests</tool>
+    <tool name="Bash">dotnet build / test / publish; Seed-TypedHandlers.ps1 against DEV</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlers/GetWorkspaceTabContentHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/DependencyInjection/AiServicesModule.cs (unconditional DI registration)</output>
+    <output type="data">infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json</output>
+    <output type="data">scripts/Seed-TypedHandlers.ps1 (new row entry)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ToolHandlers/GetWorkspaceTabContentHandlerTests.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/WorkspaceMemoryRoundTripTests.cs</output>
+    <output type="docs">notes/handoffs/118b-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GetWorkspaceTabContentHandler` implements `IToolHandler` and is read-only; calls `WorkspaceStateService.GetTabAsync` only.</criterion>
+    <criterion testable="true">Handler returns composed widget state (sections + values), NOT raw streaming chunks.</criterion>
+    <criterion testable="true">DI registration is unconditional in `AiServicesModule` (no `if (flag)` block — passes static-scan recipe per CLAUDE.md §10 F.1).</criterion>
+    <criterion testable="true">`Seed-TypedHandlers.ps1` `$RowFiles` hashtable extended with `GET-WORKSPACE-TAB-CONTENT` row; idempotent upsert.</criterion>
+    <criterion testable="true">`sprk_analysistool` row present in DEV Dataverse after seed run; chat tool registry exposes `get_workspace_tab_content`.</criterion>
+    <criterion testable="true">Unit test covers happy path + unknown tabId + tier-1 audit (no raw chunks in response).</criterion>
+    <criterion testable="true">Integration test `SummarizeThenAskShorter_AgentReadsTabContent` passes — subsequent turn reflects modified content target.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-F handler addition. Depends on 118R (migrated playbook so the workspace tab actually has composed state). Pattern precedent: task 092 wired 8 R6 handlers into the same seed script — mirror that approach exactly for the row entry. The handler is read-only by design — promotion to T3/T4 cross-session memory remains gated by R6 task 094/095 approval UX (NFR-A1 explicit promotion). Architecture §11.1 is binding: do NOT rebuild `WorkspaceStateService`; reuse it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

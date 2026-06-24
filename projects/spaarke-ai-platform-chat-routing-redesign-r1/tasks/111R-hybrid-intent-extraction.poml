@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="111R" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Hybrid intent reranker (gpt-4o-mini structured output)</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>110,112</dependencies>
+    <blocks>113R,117a</blocks>
+    <tags>bff-api, services, ai, azure-openai, ADR-015</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api` + `ai` + `ADR-015`; new BFF service in `Services/Ai/Chat/`; LLM invocation with tier-1 governance; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement `IIntentRerankerService` + `IntentRerankerService` in `Services/Ai/Chat/` per FR-46. The reranker uses Azure OpenAI gpt-4o-mini with structured output (`json_schema`) constrained to select top-3 of top-5 vector candidates. LLM input is metadata-only: `(userMessage, attachmentMetadata[filename, contentType, textLength], top-5 candidate {playbookId, playbookCode, displayName, embeddingScore, jpsMatchingMetadata})` — NO file text content (ADR-015 tier-1). Returns `RerankerResult { candidates: [...], rerankInvoked: bool, reason: string }`. Caller decision (when to invoke) lives in task 113R.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in Azure OpenAI structured-output (`json_schema`), Spaarke chat-routing, and ADR-015 tier-1 data governance.</role>
+
+  <goal>
+    A new `IIntentRerankerService.RerankAsync(userMessage, attachmentMetadata, top5Candidates, ct)` returning `RerankerResult` with the LLM-selected top-3 of top-5, an `rerankInvoked = true` flag, and a short `reason` string. Implementation uses `IAzureOpenAIClient` + gpt-4o-mini + strict `json_schema` response format. Unit tests cover: happy path (top-3 returned), schema-violation defensive fallback (returns top-3 by embedding score with `rerankInvoked = false`), empty candidates, ADR-015 input contract.
+  </goal>
+
+  <context>
+    <background>
+      Phase 5R revised scope (spec.md §"Phase 5+7 Revised Scope"). Vector match (task 112) is primary. The reranker fires only when 113R decides ambiguity exists. FR-46 limits LLM input to metadata-only: filename, contentType, textLength, candidate metadata. NO file text content. Telemetry tag `llmRerankInvoked` is emitted by 117. ~800ms p95 ceiling.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAzureOpenAIClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatMessageAttachment.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">New service stays in `Services/Ai/Chat/` boundary; no CRUD-code violations; no `IServiceProvider.GetService&lt;T&gt;()` in endpoint signatures.</constraint>
+    <constraint source="ADR-015">LLM input limited to metadata-only (no file text content); telemetry tier-1 safe (deterministic IDs + short previews only).</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — add new unit tests; integration test added in 117a/117b.</constraint>
+    <constraint source="FR-46">Reranker uses gpt-4o-mini with `json_schema` structured output; selects top-3 of top-5; p95 ≤ 800ms.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing `PlaybookDispatcher.cs` + `IAzureOpenAIClient` to understand the AI-facade invocation pattern + DI registration conventions in `Services/Ai/Chat/`.</step>
+    <step order="2">Design `IIntentRerankerService` interface: `Task&lt;RerankerResult&gt; RerankAsync(string userMessage, IReadOnlyList&lt;AttachmentMetadata&gt; attachments, IReadOnlyList&lt;PlaybookCandidate&gt; top5, CancellationToken ct)`. Define DTOs `AttachmentMetadata`, `PlaybookCandidate`, `RerankerResult` in same folder.</step>
+    <step order="3">Define the `json_schema` for structured output: `{ candidates: [{ playbookId: string, playbookCode: string, displayName: string, confidence: number, reason: string }] }` with `minItems: 1, maxItems: 3, additionalProperties: false`. Constants live in `IntentRerankerSchema.cs`.</step>
+    <step order="4">Implement `IntentRerankerService` — build the gpt-4o-mini chat request with the prompt template (metadata-only system prompt: "Given userMessage, attachment metadata, and 5 candidate playbooks with embedding scores, select the 3 best matches…"), pass `response_format = json_schema` referencing IntentRerankerSchema, invoke `IAzureOpenAIClient`, parse + validate response.</step>
+    <step order="5">Defensive parsing: if LLM response fails schema validation OR throws, log warning and return top-3 by embedding score with `rerankInvoked = false, reason = "fallback: schema-validation-failed"`. No throw to caller.</step>
+    <step order="6">Register `IIntentRerankerService` in `AiServicesModule` (existing DI module). Verify no asymmetric registration (CLAUDE.md §10 F.1) — service registers unconditionally.</step>
+    <step order="7">Add unit tests `IntentRerankerServiceTests`: (a) happy path returns top-3 from mock LLM; (b) schema-violation fallback returns top-3 by score; (c) empty candidates → empty result, no LLM call; (d) ADR-015 contract test verifies prompt body contains NO file text content (grep mock for known textContent fixture).</step>
+    <step order="8">Grep `Services/` for accidental file-text-content leakage into reranker (any reference to `ChatMessageAttachment.textContent` in the new files MUST not flow into the LLM prompt — only `textLength` integer is permitted).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. All tests pass.</step>
+    <step order="10">Measure BFF publish size (`dotnet publish -c Release -o deploy/api-publish/`); report compressed delta vs ~45.65 MB baseline; expect &lt;1 MB delta.</step>
+    <step order="11">code-review + adr-check (Step 9.5 quality gates). adr-check MUST confirm ADR-013 boundary + ADR-015 tier-1 input contract.</step>
+    <step order="12">Update TASK-INDEX.md: task 111R → ✅; current-task.md → ready for 113R.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookDispatcher, IAzureOpenAIClient, ChatMessageAttachment</tool>
+    <tool name="Grep">file-text-content leakage scan; call-site enumeration</tool>
+    <tool name="Edit">New service files, DI registration, unit tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IIntentRerankerService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IntentRerankerService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IntentRerankerSchema.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/RerankerDtos.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/IntentRerankerServiceTests.cs</output>
+    <output type="docs">notes/handoffs/111R-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IIntentRerankerService.RerankAsync` returns `RerankerResult` with 1-3 candidates from gpt-4o-mini structured output.</criterion>
+    <criterion testable="true">Unit test verifies LLM prompt contains NO file text content; only filename, contentType, textLength integer.</criterion>
+    <criterion testable="true">Schema-violation fallback returns top-3 by embedding score with `rerankInvoked = false`.</criterion>
+    <criterion testable="true">Service registered unconditionally in `AiServicesModule` (no asymmetric registration).</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01 (~60 MB ceiling).</criterion>
+    <criterion testable="true">code-review + adr-check exit 0; ADR-013 boundary + ADR-015 tier-1 confirmed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-B blocker for 113R + 117a. Reranker invocation decision lives in 113R (this task only implements the service). Telemetry tag `llmRerankInvoked` is wired in 117 (not here). p95 ≤ 800ms verified later in integration test (117b).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>
