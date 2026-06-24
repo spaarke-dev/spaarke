@@ -287,7 +287,7 @@ public sealed class CapabilityRouterSoftSlashTests
         var result = router.RouteSync(
             userMessage: "hello there",
             activePlaybookName: null,
-            commandIntent: commandIntent);
+            intentHint: commandIntent);
 
         result.IsConfident.Should().BeFalse(
             because: "Layer 0.5 must fall through when the synthetic capability is not in the manifest, " +
@@ -304,7 +304,7 @@ public sealed class CapabilityRouterSoftSlashTests
         var result = router.RouteSync(
             userMessage: "hello there",
             activePlaybookName: null,
-            commandIntent: "summarize");
+            intentHint: "summarize");
 
         result.IsConfident.Should().BeFalse(
             because: "Layer 0.5 must fall through when the synthetic capability has no tools, " +
