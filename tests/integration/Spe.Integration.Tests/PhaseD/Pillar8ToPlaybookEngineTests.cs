@@ -385,10 +385,44 @@ public sealed class Pillar8ToPlaybookEngineTests
         IReadOnlyList<CapabilityManifestEntry>? manifestEntries = null)
     {
         var manifest = new CapabilityManifest(NullLogger<CapabilityManifest>.Instance);
-        // Default manifest: a single unrelated capability so Layer 1 has something to
-        // score against when the pre-pass doesn't match (mirrors task 082 pattern).
+        // Default manifest: the 4 synthetic soft-slash capabilities (required by
+        // Hotfix #4's empty-manifest guard at TryClassifySoftSlash:487) + a single
+        // unrelated capability so Layer 1 has something to score against when the
+        // pre-pass doesn't match (mirrors task 082 pattern).
         manifest.Refresh(manifestEntries ?? new[]
         {
+            new CapabilityManifestEntry(
+                CapabilityName: CapabilityRouter.SoftSlashSummarizeCapabilityName,
+                Description: "Soft-slash summarize",
+                KeywordHints: Array.Empty<string>(),
+                PlaybookId: null,
+                ToolNames: new[] { "invoke_playbook" },
+                IsEnabled: true,
+                TenantRestrictions: Array.Empty<string>()),
+            new CapabilityManifestEntry(
+                CapabilityName: CapabilityRouter.SoftSlashDraftCapabilityName,
+                Description: "Soft-slash draft",
+                KeywordHints: Array.Empty<string>(),
+                PlaybookId: null,
+                ToolNames: new[] { "invoke_playbook" },
+                IsEnabled: true,
+                TenantRestrictions: Array.Empty<string>()),
+            new CapabilityManifestEntry(
+                CapabilityName: CapabilityRouter.SoftSlashExtractEntitiesCapabilityName,
+                Description: "Soft-slash extract entities",
+                KeywordHints: Array.Empty<string>(),
+                PlaybookId: null,
+                ToolNames: new[] { "invoke_handler" },
+                IsEnabled: true,
+                TenantRestrictions: Array.Empty<string>()),
+            new CapabilityManifestEntry(
+                CapabilityName: CapabilityRouter.SoftSlashAnalyzeCapabilityName,
+                Description: "Soft-slash analyze",
+                KeywordHints: Array.Empty<string>(),
+                PlaybookId: null,
+                ToolNames: new[] { "invoke_playbook" },
+                IsEnabled: true,
+                TenantRestrictions: Array.Empty<string>()),
             new CapabilityManifestEntry(
                 CapabilityName: "legal_research",
                 Description: "Legal research and case law lookup",
