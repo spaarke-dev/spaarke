@@ -1,7 +1,7 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-24 (by context-handoff after design conversation + R6 hotfix merge)
-> **Recovery**: READ "Quick Recovery" section FIRST. Critical context: this session pivoted from "Phase 4 MVP complete" to "Phase 5+7 redesign + execution" after user UAT revealed deferred work IS the actual project.
+> **Last Updated**: 2026-06-24 (W0 commits landed: 272dcce47 spec/index revision + 312385f2f 12 new POML files)
+> **Recovery**: READ "Quick Recovery" section FIRST. W0 (revise spec + author POMLs) ✅ COMPLETE. Awaiting: (a) user decision on `sprk_playbookconsumer` scope inclusion, (b) W1 parallel work green-light.
 
 ---
 
@@ -11,10 +11,11 @@
 |-------|-------|
 | **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
-| **Master state** | `8579d6536` (PR #401 R6 hotfixes merged TODAY). Local HEAD = origin/work = origin/master. **Working tree clean.** |
-| **Phase status** | Phase 0/1/2-partial/3/4-MVP ✅ shipped to bff-dev. **Phase 5+7 REVISED scope agreed with user; ready to execute.** |
+| **Branch state** | `312385f2f` (W0 batch 2: 12 new POMLs). Two commits ahead of origin/master `8579d6536`. **Working tree clean.** Ready to push. |
+| **Phase status** | Phase 0/1/2-partial/3/4-MVP ✅ shipped to bff-dev. **Phase 5R spec + TASK-INDEX + 12 new POMLs locked in. Ready for W1 parallel execution.** |
 | **Deployed state** | BFF master deployed; SpaarkeAi Code Page master deployed; Dataverse `RECALL-SESSION-FILE` row seeded; `Workspace__MatterPreFillPlaybookId` env var set |
-| **Next Action (CRITICAL)** | **W0 work: update `spec.md` + `tasks/TASK-INDEX.md` + author new POML files for the REVISED Phase 5 scope.** See "Revised Phase 5 Scope" section below for exact deliverables. THEN run W1 parallel work (R6 task 095 + Phase 7 baselines + Library modal `toLowerCase` fix). |
+| **Open decision** | User asked about `sprk_playbookconsumer` table — discussed earlier this session but NOT yet folded into Phase 5R scope. Recommendation: add as Phase 1R retroactive (~5-7 tasks). Awaiting user decision before authoring more. |
+| **Next Action** | **(a) Await user decision on `sprk_playbookconsumer` scope; (b) Push branch + begin W1 parallel: R6 task 095 + Phase 7 task 144/145 baselines + 110a library modal fix.** All three are no-risk parallel candidates per the W1 plan. |
 
 ### Critical context (3-sentence version)
 
@@ -170,8 +171,11 @@ User did UAT today and exposed that the chat-routing-redesign-r1 project's **def
 | Various during BFF redeploy | None — script changes were transient |
 | `8579d6536` | PR #401 R6 hotfixes merge (CapabilityRouter.cs, SprkChatAgentFactory.cs, ToolHandlerToAIFunctionAdapter.cs, ConditionNodeExecutor.cs, ConversationPane.tsx, etc.) |
 | App Service config | `Workspace__MatterPreFillPlaybookId=2d660cad-...` set on bff-dev |
+| **`272dcce47`** | **W0 batch 1**: Phase 5+7 revised scope amendment in `spec.md` (FR-46 through FR-59); `TASK-INDEX.md` Phase 5 wave section revised (5-A through 5-F); 12 new task rows; Phase Summary + Materialization Plan + Audit History updated. |
+| **`312385f2f`** | **W0 batch 2**: 12 new POML task files authored by 4 parallel sub-agents (UX 3 + Intent 2 + Composition 4 + Migration 3). All valid XML; task-id/filename match verified; FR mappings verified. |
+| `f5a5568c7` | Pre-compaction checkpoint write to `current-task.md` |
 
-**Working tree is currently clean.** All changes committed and pushed.
+**Working tree is currently clean.** Branch is 2 commits ahead of origin/master `8579d6536`; ready to push.
 
 ---
 
