@@ -16,13 +16,16 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Capabilities;
 /// </summary>
 public sealed class CapabilityRouterSoftSlashTests
 {
-    private static CapabilityManifestEntry MakeEntry(string name, string[] keywordHints) =>
+    private static CapabilityManifestEntry MakeEntry(
+        string name,
+        string[] keywordHints,
+        string[]? toolNames = null) =>
         new(
             CapabilityName: name,
             Description: $"Description for {name}",
             KeywordHints: keywordHints,
             PlaybookId: null,
-            ToolNames: [],
+            ToolNames: toolNames ?? [],
             IsEnabled: true,
             TenantRestrictions: []);
 
@@ -32,7 +35,56 @@ public sealed class CapabilityRouterSoftSlashTests
         // Seed an unrelated baseline capability so Layer 1 has something to score against
         // when the pre-pass doesn't match — ensures Layer 0.5 is the only short-circuit path
         // for soft-slash test cases.
+        //
+        // R6 hotfix 2026-06-21 (UAT #4): also seed the 4 synthetic soft-slash capabilities
+        // with non-empty ToolNames. The Layer 0.5 pre-pass now guards against shorting to
+        // a synthetic capability that isn't in the manifest (or has no tools) — without
+        // this seed, the soft-slash tests would now fall through to Layer 1 instead of
+        // returning Confident, defeating their purpose. The empty-manifest fall-through
+        // behavior is exercised separately by RouteSync_SoftSlashCapabilityMissing_FallsThrough.
+        manifest.Refresh(new[]
+        {
+            MakeEntry("legal_research", ["case law", "court", "precedent"]),
+            MakeEntry(CapabilityRouter.SoftSlashSummarizeCapabilityName, [], ["invoke_playbook"]),
+            MakeEntry(CapabilityRouter.SoftSlashDraftCapabilityName, [], ["invoke_playbook"]),
+            MakeEntry(CapabilityRouter.SoftSlashExtractEntitiesCapabilityName, [], ["invoke_handler_extract_entities"]),
+            MakeEntry(CapabilityRouter.SoftSlashAnalyzeCapabilityName, [], ["invoke_playbook"]),
+        });
+
+        var opts = Options.Create(new CapabilityRouterOptions());
+        return new CapabilityRouter(manifest, opts, NullLogger<CapabilityRouter>.Instance);
+    }
+
+    /// <summary>
+    /// Build a router whose manifest does NOT contain the synthetic soft-slash capabilities.
+    /// Simulates production when the <c>sprk_aicapability</c> table is not provisioned
+    /// (the R6 UAT environment state — see hotfix #4, 2026-06-21).
+    /// </summary>
+    private static CapabilityRouter BuildRouterWithoutSoftSlashCapabilities()
+    {
+        var manifest = new CapabilityManifest(NullLogger<CapabilityManifest>.Instance);
+        // Only seed an unrelated capability so Layer 1 has SOMETHING to score against
+        // (otherwise Layer 1 returns Uncertain on empty manifest). The synthetic
+        // soft-slash capabilities are intentionally absent.
         manifest.Refresh(new[] { MakeEntry("legal_research", ["case law", "court", "precedent"]) });
+
+        var opts = Options.Create(new CapabilityRouterOptions());
+        return new CapabilityRouter(manifest, opts, NullLogger<CapabilityRouter>.Instance);
+    }
+
+    /// <summary>
+    /// Build a router whose manifest contains the synthetic capability but with EMPTY ToolNames.
+    /// Simulates a misconfigured row in the manifest.
+    /// </summary>
+    private static CapabilityRouter BuildRouterWithEmptyToolNamesSoftSlash()
+    {
+        var manifest = new CapabilityManifest(NullLogger<CapabilityManifest>.Instance);
+        manifest.Refresh(new[]
+        {
+            MakeEntry("legal_research", ["case law", "court", "precedent"]),
+            // Synthetic capability is present but has no tools — should fall through.
+            MakeEntry(CapabilityRouter.SoftSlashSummarizeCapabilityName, []),
+        });
 
         var opts = Options.Create(new CapabilityRouterOptions());
         return new CapabilityRouter(manifest, opts, NullLogger<CapabilityRouter>.Instance);
@@ -201,5 +253,63 @@ public sealed class CapabilityRouterSoftSlashTests
             because: "Q6 closed vocabulary at exactly 4 soft slashes");
         CapabilityRouter.SoftSlashIntentToCapabilityName.Keys
             .Should().BeEquivalentTo(new[] { "summarize", "draft", "extract-entities", "analyze" });
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // R6 hotfix 2026-06-21 (UAT #4) — empty-manifest guard
+    //
+    // Bug observed in UAT (2026-06-19): /summarize slash produced a chat-only
+    // response with NO Workspace tab, while NL "summarize" DID open the tab.
+    //
+    // Root cause: Layer 0.5 returned Confident for /summarize pointing at the
+    // synthetic capability `invoke_playbook_summarize`, but the
+    // `sprk_aicapability` table was not provisioned in UAT. Downstream filtering
+    // found no tools → LLM had no `invoke_playbook` tool to call → conversational
+    // response only. NL "summarize" worked because it fell through to Layer 3 (
+    // Hotfix #3 emptied GeneralSupersetFallbackTools, triggering the "empty
+    // allowed set → full tool set" rescue).
+    //
+    // The guard added in TryClassifySoftSlash makes the slash path behave the
+    // same as the NL path: when the synthetic capability is missing OR has empty
+    // ToolNames, fall through so the downstream rescue can deliver tools.
+    // Same defensive pattern as Hotfix #3.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("summarize")]
+    [InlineData("draft")]
+    [InlineData("extract-entities")]
+    [InlineData("analyze")]
+    public void RouteSync_SoftSlashCapabilityMissingFromManifest_FallsThrough(string commandIntent)
+    {
+        var router = BuildRouterWithoutSoftSlashCapabilities();
+
+        var result = router.RouteSync(
+            userMessage: "hello there",
+            activePlaybookName: null,
+            intentHint: commandIntent);
+
+        result.IsConfident.Should().BeFalse(
+            because: "Layer 0.5 must fall through when the synthetic capability is not in the manifest, " +
+                     "so downstream layers can deliver a working tool set via the Layer 3 fallback rescue " +
+                     "(R6 UAT hotfix #4, 2026-06-21).");
+        result.SelectedCapabilities.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RouteSync_SoftSlashCapabilityHasEmptyToolNames_FallsThrough()
+    {
+        var router = BuildRouterWithEmptyToolNamesSoftSlash();
+
+        var result = router.RouteSync(
+            userMessage: "hello there",
+            activePlaybookName: null,
+            intentHint: "summarize");
+
+        result.IsConfident.Should().BeFalse(
+            because: "Layer 0.5 must fall through when the synthetic capability has no tools, " +
+                     "so the LLM ends up with at least the Layer 3 fallback tool set " +
+                     "(R6 UAT hotfix #4, 2026-06-21).");
+        result.SelectedCapabilities.Should().BeEmpty();
     }
 }

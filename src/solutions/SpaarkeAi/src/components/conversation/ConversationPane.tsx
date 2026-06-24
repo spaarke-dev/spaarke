@@ -106,6 +106,9 @@ import { HistoryMenu } from "./HistoryOverlay";
 // /documents promotion + /summarize SSE streaming + PaneEventBus bridging.
 // See notes/task-036-design-2026-06-05.md for design rationale.
 import { matchIntent } from "./intentMatcher";
+// R6 closeout (Pillar 8 / task 097): /new-session needs to POST /api/ai/chat/sessions
+// and return the new session id so HardSlashExecutor.execNewSession can complete.
+import { buildBffApiUrl } from "@spaarke/auth";
 // R6 task 080 / D-D-01 (Pillar 8 foundation): CommandRouter parser is wired
 // into the send-message boundary so downstream Phase D tasks (081 hard-slash
 // executor, 082 soft-slash agent routing, 083 reference resolver) can fan out.
@@ -834,7 +837,19 @@ export function ConversationPane(): React.JSX.Element {
   // Subscribe to workspace channel — listen for selection_changed events from
   // workspace widgets. usePaneEvent is stable: the handler ref is kept current
   // internally without tearing down the subscription on each render.
+  // R6 closeout (Pillar 8 / task 097c): track the currently-focused workspace
+  // tab id via PaneEventBus `tab_change` events. The HardSlashExecutor's
+  // `/pin` command reads this via `getFocusedTabId` to know which tab to pin.
+  // A ref (not state) avoids re-rendering ConversationPane on every tab focus
+  // change — only the synchronous callback consumes the value.
+  const focusedTabIdRef = React.useRef<string | null>(null);
+
   usePaneEvent("workspace", (event: WorkspacePaneEvent): void => {
+    if (event.type === "tab_change") {
+      focusedTabIdRef.current = event.tabId ?? null;
+      return;
+    }
+
     if (event.type !== "selection_changed") return;
 
     if (event.selectedText == null || event.selectedText.length === 0) {
@@ -885,6 +900,15 @@ export function ConversationPane(): React.JSX.Element {
   // the panel's onClose flips it off. Lives alongside `pendingInjection` because
   // both are local UI affordances dispatched by HardSlashExecutor.
   const [helpPanelOpen, setHelpPanelOpen] = React.useState<boolean>(false);
+
+  // R6 hotfix 2026-06-19 (UAT) — SprkChat remount key. `/clear` increments this,
+  // which forces SprkChat to unmount + remount and wipes its internal message
+  // list. This was previously a TODO stub on `clearLocalConversation` that
+  // shipped uncovered; the BFF DELETE session call still fires (it clears the
+  // server-side cache) but the UI message list was not being cleared, producing
+  // the "conversation didn't clear after /clear" UAT bug. The remount pattern
+  // is pragmatic (no new SprkChat API surface) and surgical to /clear.
+  const [sprkChatRemountKey, setSprkChatRemountKey] = React.useState<number>(0);
 
   // ── R5 task 036 / P2-CLOSEOUT-05: held-files + promoted-chip tracking ─────
   //
@@ -1322,22 +1346,50 @@ export function ConversationPane(): React.JSX.Element {
       paneEventBus,
       setHelpOpen: setHelpPanelOpen,
       clearLocalConversation: () => {
-        // TODO(task 084): hook to SprkChat's internal message-list clear when
-        // a shared-lib API exists. Today: rely on `/new-session` flow path.
+        // R6 hotfix 2026-06-19 (UAT): increment the SprkChat key to force a
+        // remount + state reset. Replaces the prior TODO no-op. The BFF
+        // session DELETE called by the executor handles server-side state;
+        // this handles client-side.
+        setSprkChatRemountKey((k) => k + 1);
       },
       createNewSession: async (): Promise<string | null> => {
-        // TODO(task 084): wire to proper session-reset machinery. The current
-        // useAiSession surface doesn't expose a typed reset; the BFF POST to
-        // /api/ai/chat/sessions is the source of truth.
-        return null;
+        // R6 closeout (Pillar 8 / task 097): POST /api/ai/chat/sessions with an
+        // empty body to mint a fresh session. Body fields (DocumentId, PlaybookId,
+        // HostContext) are all optional per ChatCreateSessionRequest. After the
+        // BFF returns the new session id we push it into AiSessionProvider via
+        // setChatSessionId — the remounted SprkChat sees the new id as its
+        // sessionId prop and continues with it (no second create round-trip).
+        try {
+          const url = buildBffApiUrl(bffBaseUrl, "/api/ai/chat/sessions");
+          const response = await authenticatedFetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          if (!response.ok) return null;
+          const json = (await response.json()) as { sessionId?: string };
+          const newId =
+            typeof json?.sessionId === "string" && json.sessionId.length > 0
+              ? json.sessionId
+              : null;
+          if (newId !== null) {
+            setChatSessionId(newId);
+          }
+          return newId;
+        } catch {
+          return null;
+        }
       },
       getConversationHistory: (): HardSlashConversationMessage[] => [],
-      getFocusedTabId: (): string | null => null,
+      // R6 closeout (Pillar 8 / task 097c): return the most-recently-focused
+      // workspace tab id tracked by the usePaneEvent('workspace', tab_change)
+      // subscription above. Returns null if no tab has been focused yet.
+      getFocusedTabId: (): string | null => focusedTabIdRef.current,
       activeMatterId: entityContext?.matterId ?? null,
       downloadBlob: defaultDownloadBlob,
       telemetry: defaultTelemetrySink,
     }),
-    [bffBaseUrl, authenticatedFetch, chatSessionId, entityContext, paneEventBus]
+    [bffBaseUrl, authenticatedFetch, chatSessionId, entityContext, paneEventBus, setChatSessionId]
   );
 
   const referenceResolverContext = React.useMemo<ResolverContext>(
@@ -1994,6 +2046,7 @@ export function ConversationPane(): React.JSX.Element {
           */}
           <div className={mergeClasses(styles.sprkChatFlex)}>
             <SprkChat
+              key={sprkChatRemountKey}
               apiBaseUrl={bffBaseUrl}
               authenticatedFetch={authenticatedFetch}
               getAccessToken={getAccessToken}
