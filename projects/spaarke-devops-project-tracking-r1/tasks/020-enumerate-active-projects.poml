@@ -1,9 +1,11 @@
 <task id="DEVOPS-020" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Enumerate active/in-flight projects for backfill</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>3</phase>
     <estimated-effort>1.5 hours</estimated-effort>
+    <actual-effort>~15 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>backfill, enumeration, audit</tags>
     <dependencies>019</dependencies>
     <parallel-group>none</parallel-group>

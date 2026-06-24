@@ -1,9 +1,11 @@
 <task id="DEVOPS-021" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Backfill active projects via /devops-project-register</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>3</phase>
     <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>~15 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>backfill, devops-project-register, rate-limit</tags>
     <dependencies>020</dependencies>
     <parallel-group>none</parallel-group>

@@ -68,9 +68,9 @@
 
 | # | Task | Effort | Dependencies | Parallel | Status |
 |---|------|--------|--------------|----------|--------|
-| 020 | Enumerate active/in-flight projects per F6 | 1.5h | 019 | none | 🔲 |
-| 021 | Backfill active projects via `/devops-project-register` | 3h | 020 | none | 🔲 |
-| 022 | **Phase 3 verify gate** — backfill complete | 1h | 021 | none | 🔲 |
+| 020 | Enumerate active/in-flight projects per F6 | 1.5h | 019 | none | ✅ |
+| 021 | Backfill active projects via `/devops-project-register` | 3h | 020 | none | ✅ |
+| 022 | **Phase 3 verify gate** — backfill complete | 1h | 021 | none | ✅ |
 
 **Phase 3 Total**: ~5.5 hours · Sequential (rate-limit hygiene per NFR-05)
 
