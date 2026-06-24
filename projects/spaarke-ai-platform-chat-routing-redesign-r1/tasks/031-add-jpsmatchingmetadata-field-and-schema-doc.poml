@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Add sprk_jpsmatchingmetadata (MultilineText) + document JSON schema</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032,033,037</blocks>
+    <tags>dataverse, solution, fields, schema, documentation</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema addition to production-bound entity + JSON-schema documentation file (no .cs/.tsx code change)</rigor-reason>
+    <parallel-group>2-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same entity (`sprk_analysisplaybook`) as task 030; Dataverse PUBLISH ALL is global; must run AFTER 030</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add the 5th additive field `sprk_jpsmatchingmetadata` (MultilineText / Memo, format Text, max length 4000 chars) to `sprk_analysisplaybook` per spec FR-08 + FR-09. The field carries JSON content following the documented schema: `{documentTypes: string[], intents: string[], triggerPhrases: string[], preferredOver: string[], outputDestination: enum, scopeHints: string[], exclusionHints: string[]}`. Persist the JSON schema as a reference doc in `projects/.../architecture/` for client + deploy-script validation reuse.
+  </prompt>
+
+  <role>SPAARKE Dataverse schema engineer + JSON schema author. Expert in Memo attributes + JSON schema dialect.</role>
+
+  <goal>
+    `sprk_jpsmatchingmetadata` field exists on `sprk_analysisplaybook` as a MultilineText (Memo) attribute. JSON schema reference doc lives at `projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/jpsmatchingmetadata-schema.json` (Draft 2020-12). Solution export contains the new field. Schema doc is consumable by both `Deploy-Playbook.ps1` validation (task 052) and `PlaybookEmbeddingService` extension (task 032).
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-08 / FR-09 + design §1.4 ("`sprk_jpsmatchingmetadata` schema" subsection). This field is the highest-leverage routing-quality improvement per the design: structured JPS metadata feeds the embedding input AND becomes a structured pre-filter at routing time (tasks 032 + WP2 Phase B). Sequential after task 030 (same entity; PUBLISH ALL global).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-08: 5th field of 5 additive tracking fields on `sprk_analysisplaybook`.</constraint>
+    <constraint source="spec">FR-09: JSON schema must include all 7 documented properties (`documentTypes`, `intents`, `triggerPhrases`, `preferredOver`, `outputDestination`, `scopeHints`, `exclusionHints`).</constraint>
+    <constraint source="spec">`outputDestination` enum must align with `NodeDestination` values: `chat`, `workspace`, `both`, `form-prefill`, `side-effect` (post-FR-14a 'both' addition).</constraint>
+    <constraint source="project">Field type confirmation: assume MultilineText (Plain) with JSON content (per design.md §6 Open Questions). Confirmed.</constraint>
+    <constraint source="project">Schema doc location: `projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/jpsmatchingmetadata-schema.json` — reused by tasks 032 + 052.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-002-no-heavy-plugins.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify task 030 ✅ completed (4 prior fields published). Sequential prereq.</step>
+    <step order="2">Create `sprk_jpsmatchingmetadata` as MemoAttributeMetadata (format = Text, max length = 4000, nullable).</step>
+    <step order="3">Add to solution; PublishAllXml.</step>
+    <step order="4">Author JSON schema document at `projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/jpsmatchingmetadata-schema.json` (Draft 2020-12):
+      - 7 properties per spec FR-09
+      - `documentTypes` / `intents` / `triggerPhrases` / `preferredOver` / `scopeHints` / `exclusionHints` as `array of string`
+      - `outputDestination` as enum of `"chat" | "workspace" | "both" | "form-prefill" | "side-effect"`
+      - All optional (additive philosophy)</step>
+    <step order="5">Verify the field is editable in Power Apps form designer.</step>
+    <step order="6">Export the solution ZIP to confirm the field is present.</step>
+    <step order="7">Update TASK-INDEX.md: task 031 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">PowerShell + Web API requests via dataverse-create-schema</tool>
+    <tool name="Skill">dataverse-create-schema</tool>
+    <tool name="Write">JSON schema document</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_analysisplaybook.sprk_jpsmatchingmetadata (Memo, max 4000)</output>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/jpsmatchingmetadata-schema.json — Draft 2020-12 schema</output>
+    <output type="docs">notes/handoffs/031-schema-additions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dataverse describe of `sprk_analysisplaybook` shows `sprk_jpsmatchingmetadata` Memo field.</criterion>
+    <criterion testable="true">JSON schema doc exists at `projects/.../architecture/jpsmatchingmetadata-schema.json` with all 7 properties.</criterion>
+    <criterion testable="true">JSON schema validates the example payload from design.md §1.4 (NDA example).</criterion>
+    <criterion testable="true">`outputDestination` enum includes all 5 destination values (chat/workspace/both/form-prefill/side-effect).</criterion>
+    <criterion testable="true">Solution export ZIP contains the new field definition.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Schema doc is intentionally placed in `projects/.../architecture/` rather than `docs/architecture/` to scope it to project lifecycle (this is a project artifact; promotion to `docs/architecture/` happens at project wrap-up if useful long-term).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

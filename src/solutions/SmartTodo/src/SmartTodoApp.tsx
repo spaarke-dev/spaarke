@@ -135,6 +135,17 @@ function SmartTodoLayout(): React.ReactElement {
     settingsOpenerRef.current?.();
   }, []);
 
+  // UAT 2026-06-21 round 8: capture the inner SmartToDo's refetch so the
+  // Header's Refresh button can actually trigger a re-fetch. The
+  // TodoContext.refetch is a no-op placeholder (see TodoContext.tsx — was
+  // never wired to a real data source); the real data lives in SmartToDo's
+  // internal `useTodoItems` hook. SmartToDo exposes its refetch via
+  // `onRefetchReady`; we capture it in a ref + use it in `handleRefresh`.
+  const innerRefetchRef = React.useRef<(() => void) | null>(null);
+  const handleInnerRefetchReady = React.useCallback((fn: () => void) => {
+    innerRefetchRef.current = fn;
+  }, []);
+
   // ── R4 task 030 — Header state (App-level, per task brief) ───────────────
   //
   // `searchQuery` is owned here so future tasks (031 facets, 033 list view)
@@ -365,9 +376,16 @@ function SmartTodoLayout(): React.ReactElement {
     [actionHandlers],
   );
 
-  // Refresh → re-query todos via the existing context refetch (task 022).
+  // Refresh — UAT 2026-06-21 round 8: route to the inner SmartToDo's real
+  // refetch (captured via onRefetchReady). Fall back to the TodoContext
+  // refetch only if the inner one hasn't reported in yet (defensive — would
+  // never happen in normal mount order).
   const handleRefresh = React.useCallback(() => {
-    refetch();
+    if (innerRefetchRef.current) {
+      innerRefetchRef.current();
+    } else {
+      refetch();
+    }
   }, [refetch]);
 
   // R4-104 (Wave E-3) — The consolidated Header's primary add path is the
@@ -437,6 +455,7 @@ function SmartTodoLayout(): React.ReactElement {
           // that's still anchored inside SmartToDo.
           hideHeader
           onSettingsOpenerReady={handleSettingsOpenerReady}
+          onRefetchReady={handleInnerRefetchReady}
           // UAT 2026-06-19 — single-source-of-truth for orientation.
           // Without this prop, SmartToDo's internal useUserPreferences
           // instance held its own copy that didn't react to Header toggle

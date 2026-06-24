@@ -16,7 +16,7 @@
 //   084 composition.integration.test.ts. What this file verifies is the
 //   complementary BFF chain:
 //
-//     ChatSendMessageRequest.CommandIntent
+//     ChatSendMessageRequest.IntentHint
 //       → CapabilityRouter Layer 0.5 soft-slash pre-pass
 //       → synthetic invoke_playbook_<intent> capability resolved
 //       → SelectedPlaybookId propagated when manifest binds the playbook
@@ -29,15 +29,15 @@
 //
 // Coverage map (tests in this file):
 //   • Pillar8_SoftSlashSummarize_RoutesToInvokePlaybookSummarize — happy path.
-//     commandIntent="summarize" → Layer 0.5 short-circuit → synthetic capability;
+//     intentHint="summarize" → Layer 0.5 short-circuit → synthetic capability;
 //     NFR-01 preserved (NL keyword fall-through unchanged).
 //   • Pillar8_SoftSlashWithMatchingManifestPlaybook_PropagatesPlaybookId —
 //     when the manifest binds a synthetic capability to a Dataverse playbook GUID,
 //     the result's SelectedPlaybookId is populated (Pillar 4 → 5 FR-30 dedup seam).
-//   • Pillar8_NullCommandIntent_FallsThroughToLayer1KeywordPath — NFR-11 binding:
-//     null commandIntent → Layer 1 keyword scoring runs unchanged. Natural-language
+//   • Pillar8_NullIntentHint_FallsThroughToLayer1KeywordPath — NFR-11 binding:
+//     null intentHint → Layer 1 keyword scoring runs unchanged. Natural-language
 //     "summarize this document" still routes via keyword path.
-//   • Pillar8_UnrecognizedCommandIntent_FallsThroughToLayer1 — defensive: stray
+//   • Pillar8_UnrecognizedIntentHint_FallsThroughToLayer1 — defensive: stray
 //     intent values (typos, wrong case, hard-slash names) do NOT short-circuit.
 //   • Pillar8_VoiceMemoryPriorityOverSoftSlash — Layer 0 (voice memory) takes
 //     priority over Layer 0.5 (soft slash) when both fire. Pillar 7 invariant.
@@ -45,7 +45,7 @@
 //     vocabulary integrity at the cross-pillar boundary.
 //   • Pillar8_Adr015_NoUserContentInDecisionMadeEvents — ADR-015 BINDING:
 //     emitted context.decision_made events carry ONLY config identifiers, never
-//     user message text. The frontend-supplied commandIntent is a closed-
+//     user message text. The frontend-supplied intentHint is a closed-
 //     vocabulary identifier (Tier-1 safe).
 //
 // Why these scenarios (and not a full E2E with mocked LLM + Cosmos + Redis)?
@@ -59,7 +59,7 @@
 //
 // Why this lives in Spe.Integration.Tests (not unit tests):
 //   The router is exercised with the SAME options + manifest + context emitter
-//   it sees in production DI. A regression in the binding (e.g., commandIntent
+//   it sees in production DI. A regression in the binding (e.g., intentHint
 //   wired to the wrong parameter, voice-memory and soft-slash order flipped)
 //   would surface here, not in a per-component unit test that mocks the router.
 
@@ -83,7 +83,7 @@ public sealed class Pillar8ToPlaybookEngineTests
     // TEST 1 — Pillar 8 happy path: soft slash → Layer 0.5 → synthetic capability
     // ════════════════════════════════════════════════════════════════════════════════
     //
-    // Scenario: production ChatEndpoints forwards `commandIntent="summarize"` to the
+    // Scenario: production ChatEndpoints forwards `intentHint="summarize"` to the
     // CapabilityRouter (Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs:493). The router's
     // Layer 0.5 pre-pass MUST short-circuit to the synthetic
     // invoke_playbook_summarize capability with confidence=1.0, Layer=1.
@@ -91,7 +91,7 @@ public sealed class Pillar8ToPlaybookEngineTests
     // Cross-pillar boundary exercised: the production seam between the chat endpoint
     // (Pillar 8 wire surface) and the router (Pillar 3 entry point — generic
     // invoke_playbook routing). A regression where ChatEndpoints forwards
-    // commandIntent to the wrong overload or where the router's Layer 0.5 dictionary
+    // intentHint to the wrong overload or where the router's Layer 0.5 dictionary
     // is misordered would surface here.
 
     [Fact]
@@ -100,14 +100,14 @@ public sealed class Pillar8ToPlaybookEngineTests
         var captureEmitter = new CapturingContextEventEmitter();
         var router = BuildRouter(eventEmitter: captureEmitter);
 
-        // Mirrors the production ChatEndpoints call path with commandIntent forwarding.
+        // Mirrors the production ChatEndpoints call path with intentHint forwarding.
         var result = router.RouteSync(
             userMessage: "/summarize #engagement-letter.docx",
             activePlaybookName: null,
-            commandIntent: "summarize");
+            intentHint: "summarize");
 
         result.IsConfident.Should().BeTrue(
-            because: "Layer 0.5 produces a Confident result on recognised commandIntent (FR-50)");
+            because: "Layer 0.5 produces a Confident result on recognised intentHint (FR-50)");
         result.SelectedCapabilities.Should().ContainSingle()
             .Which.Should().Be(CapabilityRouter.SoftSlashSummarizeCapabilityName,
                 because: "Q6 closed vocabulary maps 'summarize' → invoke_playbook_summarize");
@@ -174,12 +174,12 @@ public sealed class Pillar8ToPlaybookEngineTests
             Options.Create(new CapabilityRouterOptions()),
             NullLogger<CapabilityRouter>.Instance);
 
-        // NL fall-through path (commandIntent=null → Layer 0.5 skips → Layer 1
+        // NL fall-through path (intentHint=null → Layer 0.5 skips → Layer 1
         // keyword classifier sees the manifest-bound capability).
         var result = router.RouteSync(
             userMessage: "summarize this document please",
             activePlaybookName: null,
-            commandIntent: null);
+            intentHint: null);
 
         result.IsConfident.Should().BeTrue(
             because: "Layer 1 keyword classifier matches 'summarize' against the manifest hint");
@@ -190,37 +190,37 @@ public sealed class Pillar8ToPlaybookEngineTests
     }
 
     // ════════════════════════════════════════════════════════════════════════════════
-    // TEST 3 — NFR-11 binding: null commandIntent → Layer 1 keyword path preserved
+    // TEST 3 — NFR-11 binding: null intentHint → Layer 1 keyword path preserved
     // ════════════════════════════════════════════════════════════════════════════════
     //
-    // Scenario: production ChatEndpoints sends commandIntent=null for natural-language
+    // Scenario: production ChatEndpoints sends intentHint=null for natural-language
     // turns (the common path; the frontend SoftSlashRouter only decorates explicit
     // soft-slash inputs). NFR-11 binds the Layer 1 keyword classifier to handle
     // the NL path unchanged.
     //
-    // This test verifies that with no manifest match AND no commandIntent, the
+    // This test verifies that with no manifest match AND no intentHint, the
     // router returns Uncertain (the Layer 1 fall-through signal). A regression where
     // Layer 0.5 short-circuits on null would surface here as an unexpected Confident
     // result.
 
     [Fact]
-    public void Pillar8_NullCommandIntent_FallsThroughToLayer1KeywordPath()
+    public void Pillar8_NullIntentHint_FallsThroughToLayer1KeywordPath()
     {
         var router = BuildRouter();
 
-        // No commandIntent + message has no manifest keyword match → Uncertain.
+        // No intentHint + message has no manifest keyword match → Uncertain.
         var result = router.RouteSync(
             userMessage: "please help me with this task",
             activePlaybookName: null,
-            commandIntent: null);
+            intentHint: null);
 
         result.IsConfident.Should().BeFalse(
-            because: "NFR-11: null commandIntent must fall through to Layer 1; no keyword match → Uncertain");
+            because: "NFR-11: null intentHint must fall through to Layer 1; no keyword match → Uncertain");
         result.SelectedCapabilities.Should().BeEmpty();
     }
 
     // ════════════════════════════════════════════════════════════════════════════════
-    // TEST 4 — Defensive: stray commandIntent values fall through to Layer 1
+    // TEST 4 — Defensive: stray intentHint values fall through to Layer 1
     // ════════════════════════════════════════════════════════════════════════════════
     //
     // Scenario: the frontend SoftSlashRouter emits exactly the Q6 closed vocabulary
@@ -237,17 +237,17 @@ public sealed class Pillar8ToPlaybookEngineTests
     [InlineData("translate")]          // outside Q6 vocabulary
     [InlineData("clear")]              // hard-slash name (should never be sent as soft-slash intent)
     [InlineData("invoke_playbook")]    // capability name leaked as intent (wire-protocol bug)
-    public void Pillar8_UnrecognizedCommandIntent_FallsThroughToLayer1(string intent)
+    public void Pillar8_UnrecognizedIntentHint_FallsThroughToLayer1(string intent)
     {
         var router = BuildRouter();
 
         var result = router.RouteSync(
             userMessage: "please help me with this task",
             activePlaybookName: null,
-            commandIntent: intent);
+            intentHint: intent);
 
         result.IsConfident.Should().BeFalse(
-            because: "unrecognised commandIntent must fall through to Layer 1 — NFR-11 defensive binding");
+            because: "unrecognised intentHint must fall through to Layer 1 — NFR-11 defensive binding");
         result.SelectedCapabilities.Should().BeEmpty();
     }
 
@@ -256,7 +256,7 @@ public sealed class Pillar8ToPlaybookEngineTests
     // ════════════════════════════════════════════════════════════════════════════════
     //
     // Scenario: a message matches BOTH the voice-memory regex (e.g., "remember to
-    // summarize concisely") AND has commandIntent="summarize" set. The pre-pass
+    // summarize concisely") AND has intentHint="summarize" set. The pre-pass
     // order is intentional:
     //
     //   Layer 0 (voice memory)  →  Layer 0.5 (soft slash)  →  Layer 1 (keyword)
@@ -277,7 +277,7 @@ public sealed class Pillar8ToPlaybookEngineTests
         var result = router.RouteSync(
             userMessage: "remember to summarize concisely going forward",
             activePlaybookName: null,
-            commandIntent: "summarize");
+            intentHint: "summarize");
 
         result.IsConfident.Should().BeTrue();
         result.SelectedCapabilities.Should().ContainSingle()
@@ -309,14 +309,14 @@ public sealed class Pillar8ToPlaybookEngineTests
     [InlineData("extract-entities", CapabilityRouter.SoftSlashExtractEntitiesCapabilityName)]
     [InlineData("analyze", CapabilityRouter.SoftSlashAnalyzeCapabilityName)]
     public void Pillar8_AllFourSoftSlashIntents_RoundTripThroughRouter(
-        string commandIntent, string expectedCapability)
+        string intentHint, string expectedCapability)
     {
         var router = BuildRouter();
 
         var result = router.RouteSync(
             userMessage: "the user's message body is irrelevant to the pre-pass",
             activePlaybookName: null,
-            commandIntent: commandIntent);
+            intentHint: intentHint);
 
         result.IsConfident.Should().BeTrue();
         result.SelectedCapabilities.Should().ContainSingle()
@@ -350,7 +350,7 @@ public sealed class Pillar8ToPlaybookEngineTests
         var result = router.RouteSync(
             userMessage: sensitiveMessage,
             activePlaybookName: null,
-            commandIntent: "summarize");
+            intentHint: "summarize");
 
         result.IsConfident.Should().BeTrue();
 
@@ -426,6 +426,16 @@ public sealed class Pillar8ToPlaybookEngineTests
         public void KnowledgeRetrieved(string knowledgeSourceId, double relevanceScore, int resultCount, Guid? sessionId, string? tenantId) { }
         public void PlaybookNodeExecuting(Guid playbookId, Guid nodeId, string nodeType, Guid? sessionId, string? tenantId) { }
         public void PlaybookNodeCompleted(Guid playbookId, Guid nodeId, string decision, long durationMs, Guid? sessionId, string? tenantId) { }
+
+        // chat-routing-redesign-r1 task 074 — Upload-pipeline context.upload_* events (no-op stubs;
+        // this test only audits routing decisions, not upload telemetry).
+        public void UploadStarted(Guid? sessionId, string fileId, string contentType, long fileSizeBytes, string? tenantId) { }
+        public void UploadClassified(Guid? sessionId, string fileId, string documentType, double confidence, long durationMs, string? tenantId) { }
+        public void UploadSummarized(Guid? sessionId, string fileId, int summaryCharCount, long durationMs, string? tenantId) { }
+        public void UploadManifestExtracted(Guid? sessionId, string fileId, int sectionCount, int tableCount, int pageCount, long durationMs, string? tenantId) { }
+        public void UploadIndexed(Guid? sessionId, string fileId, int chunkCount, long durationMs, string? tenantId) { }
+        public void UploadPersisted(Guid? sessionId, string fileId, long durationMs, string? tenantId) { }
+        public void UploadCompleted(Guid? sessionId, string fileId, long totalDurationMs, string? tenantId) { }
 
         public sealed record DecisionEvent(
             string Layer,

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="148" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Final adr-check pass across project surface (/adr-check)</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>144,145</dependencies>
+    <blocks>146</blocks>
+    <tags>quality-gate</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Quality-gate task; invokes adr-check skill; runs BEFORE UAT per CRIT-7 fix; STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>7-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run `/adr-check` (`.claude/skills/adr-check/SKILL.md`) across the project's full code surface validating compliance with all applicable ADRs: ADR-001, ADR-008, ADR-010, ADR-013, ADR-014, ADR-015, ADR-018, ADR-019, ADR-029, ADR-030 v2, ADR-032, ADR-033. Critical violations MUST be fixed before task 146 begins.
+  </prompt>
+
+  <role>SPAARKE platform ADR-compliance reviewer. Applies the canonical adr-check skill methodology.</role>
+
+  <goal>
+    `/adr-check` skill invoked; full project surface validated against the 12 applicable ADRs; violations categorized; critical violations fixed in-line; minor violations logged for R7 backlog. Report at `notes/handoffs/148-adr-check.md` confirms exit-0 readiness for UAT.
+  </goal>
+
+  <context>
+    <background>
+      Per CRIT-7 fix + spec Technical Constraints. ADR-check runs BEFORE UAT to validate architectural compliance. Especially important: ADR-030 v2 `memory` channel binding (this project amended the ADR), ADR-033 streaming preservation (Path 3 extension), ADR-029 publish-size discipline (WP4 deletion).
+    </background>
+    <relevant-files>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/adr/</file>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/solutions/SpaarkeAi/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Critical violations BLOCK task 146.</constraint>
+    <constraint source="ADR-030 v2">Memory channel binding — this project amended ADR-030; verify all memory-domain events dispatch via `memory` channel, NOT namespaced inside `workspace.*`.</constraint>
+    <constraint source="ADR-033">Streaming preservation — no edits to `IncrementalJsonParser` or `StreamStructuredCompletionAsync`.</constraint>
+    <constraint source="ADR-029">Publish-size discipline — no `<PublishTrimmed>` or `<PublishAot>` introduced.</constraint>
+    <constraint source="ADR-013">Facade boundary — chat-routing code does NOT inject `IOpenAiClient` / `IPlaybookService` directly.</constraint>
+    <constraint source="ADR-015">Tier-1 logging safety — no user content / file content / recall results in telemetry.</constraint>
+    <constraint source="ADR-032">Symmetric DI registration — no asymmetric anti-pattern.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/adr/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke the `adr-check` skill via the Skill tool against the project's branch diff vs master.</step>
+    <step order="2">Capture per-ADR findings; categorize critical / major / minor.</step>
+    <step order="3">Fix all CRITICAL violations in-line if scope is bounded; escalate if not.</step>
+    <step order="4">Discuss MAJOR violations with owner; either fix or document accepted risk.</step>
+    <step order="5">Log MINOR violations to R7 backlog.</step>
+    <step order="6">Special-case checks (mandatory): (a) ADR-030 v2 `memory` channel — grep `PaneEventTypes.ts` for `memory` channel union; verify dispatch sites use `memory.*` not `workspace.memory.*`; (b) ADR-033 — grep `StreamStructuredCompletionAsync` + `IncrementalJsonParser` for unintended edits; (c) ADR-029 — grep `.csproj` for `PublishTrimmed` / `PublishAot` (must be FALSE or ABSENT); (d) ADR-013 — grep chat-routing code for `IOpenAiClient` / `IPlaybookService` direct injection (zero hits).</step>
+    <step order="7">Author report at `notes/handoffs/148-adr-check.md` with per-ADR compliance + special-case verification.</step>
+    <step order="8">Update TASK-INDEX.md: task 148 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">adr-check</tool>
+    <tool name="Grep">Special-case ADR verifications</tool>
+    <tool name="Edit">Apply critical-violation fixes</tool>
+    <tool name="Write">notes/handoffs/148-adr-check.md + R7 backlog append</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/148-adr-check.md — adr-check report</output>
+    <output type="docs">notes/r7-backlog.md — appended minor violations</output>
+    <output type="code">Critical-violation fixes applied in-line where scope permitted</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">adr-check skill invoked + report generated.</criterion>
+    <criterion testable="true">Zero CRITICAL violations remain unfixed.</criterion>
+    <criterion testable="true">ADR-030 v2 memory channel binding verified.</criterion>
+    <criterion testable="true">ADR-033 streaming preservation verified.</criterion>
+    <criterion testable="true">ADR-029 publish-size discipline verified.</criterion>
+    <criterion testable="true">ADR-013 facade boundary verified.</criterion>
+    <criterion testable="true">Exit-0 readiness for UAT confirmed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 147 (code-review) — different skills, different findings. Both gate task 146 entry. The 4 special-case verifications are project-specific binding constraints; do not skip.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol; sub-skill adr-check invoked.</protocol>
+  </execution>
+</task>

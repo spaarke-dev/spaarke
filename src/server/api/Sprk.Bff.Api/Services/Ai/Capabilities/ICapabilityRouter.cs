@@ -22,16 +22,18 @@ public interface ICapabilityRouter
     /// </summary>
     /// <param name="userMessage">The user turn text.</param>
     /// <param name="activePlaybookName">Optional active playbook name for bias.</param>
-    /// <param name="commandIntent">
-    /// R6 Pillar 8 / task 082 / FR-50: Optional closed-vocabulary soft-slash hint
-    /// emitted by the frontend `SoftSlashRouter.decorateBody()`. When non-null AND
-    /// recognised (one of: "summarize", "draft", "extract-entities", "analyze"),
-    /// a Layer-0.5 deterministic pre-pass short-circuits to a Confident result
-    /// selecting the synthetic capability for that intent.
+    /// <param name="intentHint">
+    /// Optional closed-vocabulary soft-slash hint emitted by the frontend
+    /// `SoftSlashRouter.decorateBody()`. When non-null AND recognised (one of:
+    /// "summarize", "draft", "extract-entities", "analyze"), a Layer-0.5
+    /// deterministic pre-pass short-circuits to a Confident result selecting
+    /// the synthetic capability for that intent.
     /// Default null preserves backward compatibility — pre-R6 callers (tests +
     /// legacy code paths) skip the pre-pass entirely.
+    /// Wire-format field renamed `commandIntent` → `intentHint` per
+    /// chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
     /// </param>
-    CapabilityRoutingResult RouteSync(string userMessage, string? activePlaybookName, string? commandIntent = null);
+    CapabilityRoutingResult RouteSync(string userMessage, string? activePlaybookName, string? intentHint = null);
 
     /// <summary>
     /// Full three-tier async routing: Layer 1 → Layer 2 (if uncertain) → Layer 3 fallback.
@@ -41,15 +43,16 @@ public interface ICapabilityRouter
     /// <param name="userMessage">The user turn text.</param>
     /// <param name="activePlaybookName">Optional active playbook name for bias.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <param name="commandIntent">
-    /// R6 Pillar 8 / task 082 / FR-50: Optional soft-slash hint; see <see cref="RouteSync"/>.
-    /// Default null preserves backward compatibility.
+    /// <param name="intentHint">
+    /// Optional soft-slash hint; see <see cref="RouteSync"/>. Default null preserves
+    /// backward compatibility. Wire-format field renamed `commandIntent` → `intentHint`
+    /// per chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
     /// </param>
     Task<CapabilityRoutingResult> RouteAsync(
         string userMessage,
         string? activePlaybookName,
         CancellationToken ct = default,
-        string? commandIntent = null);
+        string? intentHint = null);
 
     /// <summary>
     /// Layer 3: synchronous broad superset fallback (AIPU2-014).

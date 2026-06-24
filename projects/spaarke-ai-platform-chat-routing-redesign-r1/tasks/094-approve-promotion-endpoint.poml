@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="094" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>POST /api/memory/promotions/{id}/approve endpoint</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4e)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>092</dependencies>
+    <blocks>096,097</blocks>
+    <tags>bff-api, endpoints, ADR-001, ADR-019</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'endpoints'; new public-facing endpoint surface; ADR-001 + ADR-008 + ADR-019 binding</rigor-reason>
+    <parallel-group>4-K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the `POST /api/memory/promotions/{id}/approve` Minimal API endpoint per architecture §6.4 + spec FR-32. Tenant-scoped (ADR-008). On call: invokes `IMatterMemoryPromotionService.ApproveAsync(id, ct)` (task 093); on success returns 200 with `{ promotionId, factId, status: "approved" }`; on `not_found` returns 404 ProblemDetails per ADR-019; on `already_resolved` returns 409 ProblemDetails. Event dispatch (`memory.promotion_resolved` + `memory.fact_promoted`) is emitted by `MatterMemoryPromotionService` and is task 097 work — this task only adds the endpoint + plumbing.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in Minimal API + Spaarke Auth v2 endpoint filters + ProblemDetails error shape.</role>
+
+  <goal>
+    Endpoint `POST /api/memory/promotions/{id}/approve` mapped via a new file `src/server/api/Sprk.Bff.Api/Api/Memory/MemoryPromotionEndpoints.cs` (or extended into an existing memory-endpoints group if one is already present). Tenant scoping enforced via endpoint filter per ADR-008. ProblemDetails 404 + 409 shapes per ADR-019. Integration test asserts: 200 on happy path, 404 ProblemDetails on missing promotion, 409 ProblemDetails on already-resolved, cross-tenant attempt returns 404 (defense in depth). BFF publish-size delta reported.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.4 (promote-to-matter flow — Accept branch posts to this endpoint), spec FR-32 (canonical endpoint). The frontend ContextPane subscriber (task 098) calls this endpoint when the user clicks Accept on the approval notification. Service-side logic (Cosmos write, T3 append, ETag) lives in `MatterMemoryPromotionService` (task 093) — this task just exposes the HTTP surface.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs (from task 093)</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API `MapPost`. No Controllers.</constraint>
+    <constraint source="ADR-008">Tenant scoping via endpoint filter; tenant id from JWT claim. Cross-tenant request returns 404 (defense-in-depth — do not leak existence).</constraint>
+    <constraint source="ADR-010">Inject `IMatterMemoryPromotionService` directly. No `IServiceProvider.GetService&lt;T&gt;()`.</constraint>
+    <constraint source="ADR-013">Endpoint lives in `Api/Memory/`. Service is BFF-internal memory plumbing. Endpoint does not cross PublicContracts boundary (no CRUD code consumes; this IS the AI-side endpoint).</constraint>
+    <constraint source="ADR-015">Telemetry: endpoint + promotionId + tenantId + decision (`approved` | `not_found` | `already_resolved`) + durationMs ONLY. NEVER fact text.</constraint>
+    <constraint source="ADR-019">404 + 409 returns ProblemDetails shape; type URI documents the error.</constraint>
+    <constraint source="ADR-029">≤+0.1 MB delta.</constraint>
+    <constraint source="bff-extensions">Placement justification: memory promotion endpoints are chat-internal but exposed for the ContextPane UI. Document choice in PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §6.4 + ADR-001 + ADR-008 + ADR-019.</step>
+    <step order="2">Decide endpoint file location: search for an existing `MemoryEndpoints.cs` / `Api/Memory/` group. If absent, author `src/server/api/Sprk.Bff.Api/Api/Memory/MemoryPromotionEndpoints.cs` with a single static `MapEndpoints` method (`endpoint-definition.md` pattern).</step>
+    <step order="3">Map `POST /api/memory/promotions/{id}/approve`:
+      - Endpoint filter: `RequireAuthorization` + tenant-scoping filter
+      - Handler: inject `IMatterMemoryPromotionService` + tenant context; call `ApproveAsync(id, ct)`; map result → 200 / 404 ProblemDetails / 409 ProblemDetails.
+    </step>
+    <step order="4">Wire the mapping into `Program.cs` (add `app.MapMemoryPromotionEndpoints()` after other AI endpoint groups).</step>
+    <step order="5">Author integration test at `tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Memory/MemoryPromotionApproveEndpointTests.cs`:
+      - 200 on happy path (mock service returns approved)
+      - 404 ProblemDetails on missing promotion
+      - 409 ProblemDetails on already-resolved
+      - Cross-tenant request returns 404
+      - Unauthorized (no JWT) returns 401
+    </step>
+    <step order="6">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="7">Measure BFF publish-size delta; write `notes/handoffs/094-bff-publish-delta.md`.</step>
+    <step order="8">Run code-review + adr-check (Step 9.5 FULL rigor).</step>
+    <step order="9">Update TASK-INDEX.md: 094 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing endpoint files, Program.cs</tool>
+    <tool name="Write">MemoryPromotionEndpoints.cs + integration test</tool>
+    <tool name="Edit">Program.cs (map registration)</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Memory/MemoryPromotionEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (endpoint registration)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Memory/MemoryPromotionApproveEndpointTests.cs</output>
+    <output type="docs">notes/handoffs/094-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Endpoint `POST /api/memory/promotions/{id}/approve` mapped via Minimal API (no Controllers).</criterion>
+    <criterion testable="true">Tenant filter applied; cross-tenant returns 404.</criterion>
+    <criterion testable="true">404 + 409 returns ProblemDetails shape per ADR-019.</criterion>
+    <criterion testable="true">Integration tests pass (200/404/409/cross-tenant/unauthorized matrix).</criterion>
+    <criterion testable="true">Telemetry payload contains no fact text.</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Endpoint is the HTTP edge; service (task 093) is the brain. Event dispatch (task 097) hooks into the service success path, not the endpoint. Keep this endpoint thin per ADR-001.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

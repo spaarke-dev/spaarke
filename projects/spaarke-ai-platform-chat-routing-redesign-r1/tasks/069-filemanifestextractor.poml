@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>FileManifestExtractor — sections / tables / pageCount / language (NEW)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4b)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>064</dependencies>
+    <blocks>070,073</blocks>
+    <tags>bff-api, services, ADR-010</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF service; modifies code surface; ADR-010 + ADR-029 binding</rigor-reason>
+    <parallel-group>4-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NEW file — no overlap with peer 4-B tasks</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author `FileManifestExtractor` (NEW) — deterministic regex/heuristic-based extractor for `{ sections[], tables[], pageCount, language }` from uploaded file text content per architecture §4.4 + §6.1. NO LLM call (50ms budget per architecture §6.1). Pure C# heuristics: detect section headings (`^\d+\.\s+\w` / `^[A-Z][A-Z ]{4,}` / `^Section \d`), detect tables (rows of pipe-delimited / tab-delimited text), count pages from form-feed `\f` characters (PDF.js extraction convention) OR fallback to estimated `chars / 3000`, detect language via existing detector if present (`Microsoft.Recognizers.Text` or simple heuristics — skip if unavailable, return "en").
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in deterministic text-processing extraction.</role>
+
+  <goal>
+    `FileManifestExtractor.cs` exists with `IFileManifestExtractor` interface + `ExtractAsync(string textContent, string fileName, string contentType, CancellationToken ct) → FileManifest`. Result shape per architecture §6.1: `{ Sections: List&lt;SectionInfo&gt;, Tables: List&lt;TableInfo&gt;, PageCount: int, Language: string, ExtractedChars: int, ExtractedTokens: int }`. Stateless service. Target ≤50ms for a 50-page document.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §4.4 + §6.1. Third parallel enrichment service (alongside 067 classification + 068 summarization). Pure deterministic — no LLM cost. Output feeds `get_file_manifest` tool (task 084) and the layered context card (076). PDF text content arriving from frontend (per architecture §6.1 client-side text extraction) typically has form-feed `\f` page delimiters from PDF.js; use these for pageCount.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Chat/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Concrete-class injection — no `IServiceProvider`. Constructor minimal: probably just `ILogger`.</constraint>
+    <constraint source="ADR-013">Service lives in `Services/Ai/Sessions/` — within AI module.</constraint>
+    <constraint source="ADR-015">Tier-1 logging: fileId, sessionId, durationMs, section count, table count, pageCount. NEVER textContent or section heading content.</constraint>
+    <constraint source="ADR-029">Per-task publish size measurement. NO new NuGet dependency unless absolutely necessary (e.g., language detection should fall back to "en" rather than adding a package).</constraint>
+    <constraint source="architecture §6.1">Target latency ~50ms — heuristic-only, no LLM call.</constraint>
+    <constraint source="project">No new external API. No Azure Document Intelligence. Pure C# heuristics only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read peer services in `Services/Ai/Sessions/` for style.</step>
+    <step order="2">Define `IFileManifestExtractor` + `FileManifest` record + sub-records (`SectionInfo { string Name, int StartCharOffset, int EndCharOffset, int? StartPage, int? EndPage }`, `TableInfo { string Name, int StartCharOffset, int? Page }`).</step>
+    <step order="3">Implement extractor:
+      - Section detection regex: `^\d+\.\s+[A-Z]`, `^[A-Z][A-Z ]{4,}$`, `^Section \d+`, `^Article [IVX]+`
+      - Table detection: 3+ consecutive lines with `|` or tab delimiters; or markdown-table headers
+      - PageCount: count `\f` characters; fallback `Math.Max(1, textContent.Length / 3000)`
+      - Language: simple heuristic ("if mostly ASCII letters → 'en'"); future-extensible
+      - ExtractedTokens: estimate `chars / 4` (rough)</step>
+    <step order="4">Author unit test stub in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/FileManifestExtractorTests.cs` — fixture with synthetic text covering all heuristics.</step>
+    <step order="5">Performance test: benchmark on synthetic 50-page document; assert &lt;100ms.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`.</step>
+    <step order="7">Measure BFF publish size.</step>
+    <step order="8">code-review + adr-check.</step>
+    <step order="9">Update TASK-INDEX.md: 069 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Peer services + Models/Chat</tool>
+    <tool name="Write">Extractor + interface + records + tests</tool>
+    <tool name="Bash">dotnet build / test / publish + benchmark</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/FileManifestExtractor.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/IFileManifestExtractor.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Chat/FileManifest.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/FileManifestExtractorTests.cs (NEW)</output>
+    <output type="docs">notes/handoffs/069-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`FileManifestExtractor.cs` exists, stateless, no LLM call.</criterion>
+    <criterion testable="true">Returns `FileManifest` per architecture §6.1 shape.</criterion>
+    <criterion testable="true">Performance test exits &lt;100ms on synthetic 50-page input.</criterion>
+    <criterion testable="true">No log statement carries textContent or section heading content.</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.3 MB (no LLM client overhead).</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Language detection is intentionally simple — defer Microsoft.Recognizers.Text or similar to a follow-up if real localization needs emerge. Per CLAUDE.md "No new external API surface" — keep dependencies minimal.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

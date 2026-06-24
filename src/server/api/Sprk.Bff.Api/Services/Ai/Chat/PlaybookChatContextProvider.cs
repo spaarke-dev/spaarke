@@ -81,6 +81,58 @@ public class PlaybookChatContextProvider : IChatContextProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>FR-27 single-pipeline contract (chat-routing-redesign-r1, task 078 MVP audit, 2026-06-23)</b>:
+    /// this method is the single per-turn system-prompt composition seam for chat. There is
+    /// exactly one composition flow: persona/action resolution → knowledge scope enrichment
+    /// → entity enrichment → matter-memory append (FR-45) → document-summary load → return
+    /// <see cref="ChatContext"/>. The chat factory (<see cref="SprkChatAgentFactory"/>)
+    /// then appends suffix blocks (Active Capabilities, Session Files manifest, formatting
+    /// directive, Workspace State) onto the returned <c>SystemPrompt</c> under the shared
+    /// <see cref="IPromptBudgetTracker"/>. NO other component composes the per-turn prompt
+    /// — there is no parallel composer in <see cref="SprkChatAgentFactory"/>, no early-return
+    /// path that bypasses this method, and no production caller of
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Memory.IMemoryCompositionService.ComposeAsync"/>
+    /// today. Future wave 4-E tasks (076 layered context cards, 077 trust-frame injector,
+    /// 079 composition target) will plug into this method at the documented insertion points
+    /// below — they MUST NOT introduce a second composition seam in
+    /// <see cref="SprkChatAgentFactory"/>.
+    /// </para>
+    /// <para>
+    /// <b>FR-45 binding invariant</b>: this method MUST call
+    /// <see cref="IMatterMemoryService.ToSystemPromptFragmentAsync"/> via the
+    /// <see cref="AppendMatterMemoryAsync"/> helper for both the generic (no-playbook) and
+    /// playbook paths. As of architecture §11.1 the invocation was at line 627; after the
+    /// task-078 MVP XML-doc additions on 2026-06-23 the invocation site shifted to
+    /// <see cref="AppendMatterMemoryAsync"/>'s try-block (currently ~line 679, line number
+    /// is NOT load-bearing — the test asserts the call exists, not its position). Do NOT
+    /// regress this wiring — task 080 (binding regression test) enforces it.
+    /// </para>
+    /// <para>
+    /// <b>Future plug-in points (deferred — MVP Q5b cut)</b>:
+    /// <list type="bullet">
+    /// <item><description>
+    /// <b>Trust-frame instruction injection (task 077)</b>: will plug in here AFTER persona
+    /// resolution and BEFORE knowledge-scope enrichment (i.e., between the persona prompt
+    /// assignment and <see cref="EnrichSystemPrompt"/>). Belongs to the static-prefix tier
+    /// per architecture §6.2 (cacheable across turns within a session).
+    /// </description></item>
+    /// <item><description>
+    /// <b>Layered context cards (task 076)</b>: will plug in here AFTER knowledge-scope
+    /// enrichment and BEFORE entity enrichment (i.e., between <see cref="EnrichSystemPrompt"/>
+    /// and <see cref="AppendEntityEnrichment"/>). Also belongs to the static-prefix tier.
+    /// </description></item>
+    /// <item><description>
+    /// <b>Dynamic suffix via <see cref="IMemoryCompositionService.ComposeAsync"/> (task 079)</b>:
+    /// will plug in here AFTER all static-prefix layers and AFTER matter-memory append, before
+    /// the final <c>ChatContext</c> return. The composer's 4-layer output (recent-verbatim,
+    /// compressed-mid, retrieved-old, pinned) joins the system prompt as the per-turn dynamic
+    /// suffix. Pinned-tier FR-42 invariant is owned by the composer itself.
+    /// </description></item>
+    /// </list>
+    /// </para>
+    /// </remarks>
     public async Task<ChatContext> GetContextAsync(
         string documentId,
         string tenantId,

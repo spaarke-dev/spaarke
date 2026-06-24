@@ -117,8 +117,9 @@ import { parse as parseCommandIntent } from "./CommandRouter";
 // R6 Phase D Wave D-G1 — Pillar 8 Command Router wired via the new
 // onDecorateOutboundBody seam in SprkChat (ADR-012 context-agnostic prop).
 // Hard slashes (081) dispatch client-side + cancel the BFF send by returning null.
-// Soft slashes (082) decorate the outbound body with `commandIntent` for
-// CapabilityRouter Layer 0.5 strong-intent routing.
+// Soft slashes (082) decorate the outbound body with `intentHint` for
+// CapabilityRouter Layer 0.5 strong-intent routing. (Wire field renamed
+// `commandIntent` → `intentHint` per FR-07 / task 022, 2026-06-22.)
 // References (083) resolve `#scope` / `@<entity>` / `#<filename>` at parse time
 // and attach `resolvedReferences` to the body. NFR-11 binding: natural-language
 // input (no slash, no references) passes through unchanged.
@@ -1136,13 +1137,13 @@ export function ConversationPane(): React.JSX.Element {
       // behavior branch here. Downstream Phase D tasks (081 hard-slash
       // executor, 082 soft-slash agent routing, 083 reference resolver)
       // will read this Intent and dispatch. NFR-11 binding: when the user
-      // typed natural language (no slash), `commandIntent.command === null`
+      // typed natural language (no slash), the parsed intent's `command === null`
       // and the existing R5-task-036 matcher + SprkChat send funnel runs
       // UNCHANGED. See projects/.../CLAUDE.md §Pillar 8 + spec FR-48.
       // void-cast suppresses the "declared but never read" lint until tasks
       // 081/082/083 wire branching behavior to this value.
-      const commandIntent = parseCommandIntent(messageText);
-      void commandIntent;
+      const parsedIntent = parseCommandIntent(messageText);
+      void parsedIntent;
 
       const readyChips = attachmentChips.filter(c => c.status === "ready");
       const intent = matchIntent(messageText, readyChips.length > 0, undefined);
@@ -1302,7 +1303,7 @@ export function ConversationPane(): React.JSX.Element {
   // runs INSIDE SprkChat's handleSend, between body construction and stream
   // start (see ISprkChatProps.onDecorateOutboundBody JSDoc). Hard slashes
   // return null → cancel the BFF send. Soft slashes decorate the body with
-  // `commandIntent` for CapabilityRouter Layer 0.5. References attach
+  // `intentHint` for CapabilityRouter Layer 0.5. References attach
   // `resolvedReferences` to the body so the BFF prompt builder can use them.
   // Natural-language input (no slash, no refs) passes through unchanged
   // (NFR-11 backward compat).

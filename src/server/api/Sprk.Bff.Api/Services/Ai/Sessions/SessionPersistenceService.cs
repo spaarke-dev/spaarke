@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Sessions;
 
@@ -40,18 +43,21 @@ public class SessionPersistenceService : ISessionPersistenceService
     private readonly CosmosClient _cosmosClient;
     private readonly string _databaseName;
     private readonly ILogger<SessionPersistenceService> _logger;
+    private readonly IContextEventEmitter _contextEventEmitter;
 
     public SessionPersistenceService(
         IDistributedCache cache,
         CosmosClient cosmosClient,
         IConfiguration configuration,
-        ILogger<SessionPersistenceService> logger)
+        ILogger<SessionPersistenceService> logger,
+        IContextEventEmitter contextEventEmitter)
     {
         _cache = cache;
         _cosmosClient = cosmosClient;
         _databaseName = configuration["CosmosPersistence:DatabaseName"]
             ?? throw new InvalidOperationException("CosmosPersistence:DatabaseName is not configured.");
         _logger = logger;
+        _contextEventEmitter = contextEventEmitter ?? throw new ArgumentNullException(nameof(contextEventEmitter));
     }
 
     // =========================================================================
@@ -246,6 +252,192 @@ public class SessionPersistenceService : ISessionPersistenceService
         _ = UpsertToCosmosAsync(session, CancellationToken.None);
 
         return true;
+    }
+
+    // =========================================================================
+    // UpdateUploadedFilesAsync (chat-routing-redesign-r1 task 072 — architecture §6.1 + §7.1)
+    // =========================================================================
+    //
+    // PLACEMENT JUSTIFICATION (CLAUDE.md §10 BFF Hygiene + ADR-013):
+    //   - In-process extension of the existing AI session persistence pipeline.
+    //   - NO new DI feature module — registration handled by existing AiPersistenceModule
+    //     via the ISessionPersistenceService interface (ADR-010).
+    //   - NO new service, NO new NuGet packages, NO new Cosmos container / doc-type.
+    //     Architecture §7.1 explicitly reuses the existing `sessions` container.
+    //   - Reuses the same Redis-hot + Cosmos-warm write-through pattern as SaveTabsAsync (D-06).
+    //   - Additive Cosmos schema change (StoredSession.UploadedFiles) — backwards
+    //     compatible with older documents (ADR-015 partition key /tenantId unchanged).
+    //
+    // STRATEGY: REPLACE (not merge).
+    //   The upload-pipeline orchestrator (SessionFileEnrichmentService, task 066) returns
+    //   the complete enriched-state snapshot for the session's uploaded files. Replacing the
+    //   collection wholesale is simpler than per-FileId merge and avoids stale-data risk
+    //   (e.g., a file deleted upstream lingering in storage). See architecture §6.1.
+    //
+    // ETAG / OPTIMISTIC CONCURRENCY:
+    //   The peer SaveTabsAsync precedent does NOT use ETag (fire-and-forget UpsertItemAsync
+    //   without IfMatchEtag). Matching that precedent: this method swallows Cosmos write
+    //   failures at Warning level rather than surfacing concurrency exceptions to the caller.
+    //   The session-document write rate is low (one write per uploaded file's enrichment
+    //   completion) so last-writer-wins is acceptable per architecture §6.1.
+
+    /// <inheritdoc/>
+    public async Task<bool> UpdateUploadedFilesAsync(
+        string sessionId,
+        string tenantId,
+        IReadOnlyList<ChatSessionFile> enrichedFiles,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(enrichedFiles);
+
+        var stopwatch = Stopwatch.StartNew();
+
+        // Load existing session: try Redis first, fall back to Cosmos. Mirrors SaveTabsAsync.
+        var session = await LoadFromRedisAsync(tenantId, sessionId, cancellationToken)
+            ?? await LoadFromCosmosAsync(tenantId, sessionId, cancellationToken);
+
+        if (session is null)
+        {
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "SessionPersistenceService.UpdateUploadedFilesAsync: session {SessionId} not found (tenant={TenantId}) — durationMs={DurationMs}",
+                sessionId, tenantId, stopwatch.ElapsedMilliseconds);
+            return false;
+        }
+
+        // REPLACE strategy (per architecture §6.1) — wholesale swap of the manifest with the
+        // orchestrator's complete enrichment snapshot.
+        session.UploadedFiles = MapToStored(enrichedFiles);
+        session.LastActivity = DateTimeOffset.UtcNow;
+
+        // Write-through (D-06): Redis hot tier first, then Cosmos warm tier (fire-and-forget).
+        await WriteToRedisAsync(tenantId, sessionId, session, cancellationToken);
+        _ = UpsertToCosmosAsync(session, CancellationToken.None);
+
+        stopwatch.Stop();
+
+        // ADR-015 Tier-1 logging: sessionId + fileCount + durationMs ONLY.
+        // NEVER log per-file SummaryText / ClassifiedDocType / Sections content / FileName.
+        _logger.LogInformation(
+            "SessionPersistenceService.UpdateUploadedFilesAsync: persisted manifest for session {SessionId} (tenant={TenantId}, fileCount={FileCount}, durationMs={DurationMs})",
+            sessionId, tenantId, enrichedFiles.Count, stopwatch.ElapsedMilliseconds);
+
+        // chat-routing-redesign-r1 task 074 — emit context.upload_persisted (manifest write-through done).
+        // ADR-015 Tier 1 SAFE: durationMs + IDs only. The fileId field is the MOST RECENT enriched
+        // file (or empty if the manifest is empty — should not happen in practice but defensive).
+        // The per-file emission contract is "one event per pipeline" — bulk persists carry the last
+        // file as the representative anchor. Future per-file granular events can be added by
+        // emitting inside the orchestrator's per-file enrichment loop.
+        var sessionGuid = Guid.TryParse(sessionId, out var parsedSessionGuid) ? parsedSessionGuid : (Guid?)null;
+        var representativeFileId = enrichedFiles.Count > 0 ? enrichedFiles[enrichedFiles.Count - 1].FileId : string.Empty;
+        _contextEventEmitter.UploadPersisted(
+            sessionId: sessionGuid,
+            fileId: representativeFileId,
+            durationMs: stopwatch.ElapsedMilliseconds,
+            tenantId: tenantId);
+
+        return true;
+    }
+
+    // =========================================================================
+    // Private helpers — ChatSessionFile <-> StoredUploadedFile bridge (task 072)
+    // =========================================================================
+    //
+    // ChatSessionFile (Models.Ai.Chat) uses PascalCase + no JsonPropertyName attributes.
+    // StoredUploadedFile (Services.Ai.Sessions) uses camelCase via [JsonPropertyName].
+    // These mappers bridge the two shapes. Kept private + focused: no generic mapper because
+    // the property surface is small + stable + auditable.
+
+    internal static List<StoredUploadedFile> MapToStored(IReadOnlyList<ChatSessionFile> files)
+    {
+        var result = new List<StoredUploadedFile>(files.Count);
+        foreach (var file in files)
+        {
+            result.Add(new StoredUploadedFile
+            {
+                FileId = file.FileId,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                SizeBytes = file.SizeBytes,
+                SearchDocumentIdsCsv = file.SearchDocumentIdsCsv,
+                UploadedAt = file.UploadedAt,
+                SummaryText = file.SummaryText,
+                ClassifiedDocType = file.ClassifiedDocType,
+                ClassifiedConfidence = file.ClassifiedConfidence,
+                Sections = file.Sections
+                    .Select(s => new StoredSectionInfo
+                    {
+                        Name = s.Name,
+                        StartCharOffset = s.StartCharOffset,
+                        EndCharOffset = s.EndCharOffset,
+                        StartPage = s.StartPage,
+                        EndPage = s.EndPage
+                    })
+                    .ToList(),
+                TableMetadata = file.TableMetadata
+                    .Select(t => new StoredTableInfo
+                    {
+                        Name = t.Name,
+                        StartCharOffset = t.StartCharOffset,
+                        Page = t.Page
+                    })
+                    .ToList(),
+                Citations = file.Citations
+                    .Select(c => new StoredCitationReference
+                    {
+                        SourceId = c.SourceId,
+                        Quote = c.Quote,
+                        Page = c.Page
+                    })
+                    .ToList(),
+                PageCount = file.PageCount,
+                Language = file.Language
+            });
+        }
+        return result;
+    }
+
+    internal static List<ChatSessionFile> MapFromStored(IReadOnlyList<StoredUploadedFile> stored)
+    {
+        var result = new List<ChatSessionFile>(stored.Count);
+        foreach (var s in stored)
+        {
+            result.Add(new ChatSessionFile(
+                FileId: s.FileId,
+                FileName: s.FileName,
+                ContentType: s.ContentType,
+                SizeBytes: s.SizeBytes,
+                SearchDocumentIdsCsv: s.SearchDocumentIdsCsv,
+                UploadedAt: s.UploadedAt)
+            {
+                SummaryText = s.SummaryText,
+                ClassifiedDocType = s.ClassifiedDocType,
+                ClassifiedConfidence = s.ClassifiedConfidence,
+                Sections = s.Sections
+                    .Select(x => new SectionInfo(
+                        Name: x.Name,
+                        StartCharOffset: x.StartCharOffset,
+                        EndCharOffset: x.EndCharOffset,
+                        StartPage: x.StartPage,
+                        EndPage: x.EndPage))
+                    .ToList(),
+                TableMetadata = s.TableMetadata
+                    .Select(x => new TableInfo(
+                        Name: x.Name,
+                        StartCharOffset: x.StartCharOffset,
+                        Page: x.Page))
+                    .ToList(),
+                Citations = s.Citations
+                    .Select(x => new CitationReference(
+                        SourceId: x.SourceId,
+                        Quote: x.Quote,
+                        Page: x.Page))
+                    .ToList(),
+                PageCount = s.PageCount,
+                Language = s.Language
+            });
+        }
+        return result;
     }
 
     // =========================================================================

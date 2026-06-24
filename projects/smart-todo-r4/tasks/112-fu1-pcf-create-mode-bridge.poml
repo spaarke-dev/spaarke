@@ -1,0 +1,56 @@
+<task id="R4-112" project="smart-todo-r4">
+  <metadata>
+    <title>FU-1 — RegardingResolver PCF CREATE-mode bridge</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>D path (regarding resolver) — completing originally-scoped R4 work</workstream>
+    <status>not-started</status>
+    <estimated-effort>2-3 hrs</estimated-effort>
+    <tags>pcf, regarding-resolver, create-mode, form-script</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>(none — independent of widget work)</dependencies>
+    <relevant-files>
+      <file>src/client/pcf/RegardingResolver/RegardingResolverApp.tsx (handleSelectRecord)</file>
+      <file>src/client/webresources/js/sprk_todo_regarding_presave.js (OnSave handler that reads window.__sprk_regarding_pending__)</file>
+      <file>projects/smart-todo-r4/notes/c-dirty-check-bind-instructions.md (similar pattern reference)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+The RegardingResolver virtual PCF writes 5 fields to sprk_todo when a user picks a regarding record: `sprk_regardingrecordtype`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`, plus the entity-specific lookup (e.g., `sprk_regardingmatter`). On UPDATE mode, the PCF calls `Xrm.WebApi.updateRecord` directly and it works. On CREATE mode (formType === 1), the record doesn't exist yet — that call fails — and the 5 fields stay empty after save.
+
+The companion OnSave handler `sprk_todo_regarding_presave.js` already exists (R4-051) and reads from `window.__sprk_regarding_pending__` to stage the 5 fields into the form's pending-attribute buffer. The PCF side of the contract was deferred.
+
+This task: implement the PCF side. In `RegardingResolverApp.tsx handleSelectRecord` (or wherever the resolver completes), populate `window.__sprk_regarding_pending__` with the payload sketched in `notes/d-form-bind-instructions.md`.
+  </prompt>
+
+  <role>Frontend / PCF developer.</role>
+
+  <goal>
+1. Implement `window.__sprk_regarding_pending__` population in RegardingResolverApp on selection.
+2. Verify on CREATE-mode form: pick a regarding record → save → all 5 fields populated on the created sprk_todo.
+3. Verify UPDATE mode still works (unchanged path).
+4. Audit any other creation paths (CreateTodoWizard, quick-add — currently they don't surface a regarding picker; if they do later, the pattern is documented).
+  </goal>
+
+  <constraints>
+    <constraint source="R4-051 instructions doc">`notes/c-dirty-check-bind-instructions.md` and `notes/d-form-bind-instructions.md` document the contract. Follow the existing OnSave handler's expectations.</constraint>
+    <constraint source="ADR-024 polymorphic-resolver">The 5 fields must be set atomically. PolymorphicResolverService is the single source of truth for the field-write logic. PCF should call into it (not duplicate the logic).</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check + read the bind-instructions notes.</step>
+    <step order="1">Locate `RegardingResolverApp.tsx handleSelectRecord` (or the resolver's selection-complete callback).</step>
+    <step order="2">Add the `window.__sprk_regarding_pending__` population: { hostEntity, entityType, entitySet, navProp, recordId, recordName, recordUrl }.</step>
+    <step order="3">Verify the OnSave handler picks it up correctly (read the handler's `pending` consumption).</step>
+    <step order="4">Build + deploy PCF (npm run build:prod + solution import).</step>
+    <step order="5">Manual test: open NEW To Do form → pick regarding record → save → query created record via MCP, verify all 5 fields populated.</step>
+    <step order="6">Test UPDATE mode: open existing record → change regarding → save → verify fields update.</step>
+    <step order="7">Commit + PR.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Creating a NEW sprk_todo with a regarding picker selection → all 5 regarding fields populated post-save.</criterion>
+    <criterion testable="true">UPDATE mode still works (no regression).</criterion>
+    <criterion testable="true">window.__sprk_regarding_pending__ cleared after the OnSave handler consumes it (no stale state across forms).</criterion>
+  </acceptance-criteria>
+</task>

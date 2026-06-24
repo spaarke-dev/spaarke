@@ -17,12 +17,10 @@
     "AiToolAgent/**",
     "AISummaryPanel/**",
     "DocumentRelationshipViewer/**",
-    "DrillThroughWorkspace/**",
     "EmailProcessingMonitor/**",
     "SourceDocumentViewer/**",
     "ThemeEnforcer/**",
     "UniversalDatasetGrid/**",
-    "UniversalQuickCreate/**",
     "VisualHost/**"
   ]
 }

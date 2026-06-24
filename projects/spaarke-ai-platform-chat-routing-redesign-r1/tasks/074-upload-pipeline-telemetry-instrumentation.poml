@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Telemetry instrumentation for upload pipeline (ADR-015 tier-1 safe)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4b)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>072</dependencies>
+    <blocks>076,077,078,079</blocks>
+    <tags>bff-api, telemetry, ADR-015</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Telemetry layer; tags include `bff-api`; ADR-015 binding — Tier 1 SAFE only</rigor-reason>
+    <parallel-group>4-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NEW telemetry sites; no file overlap with peer 4-D task 073 (integration test — separate concern)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add ADR-015 tier-1-SAFE telemetry to the upload pipeline: `context.upload_started`, `context.upload_classified`, `context.upload_summarized`, `context.upload_manifest_extracted`, `context.upload_indexed`, `context.upload_persisted`, `context.upload_completed`. Each event carries deterministic IDs + lengths + durationMs ONLY — NEVER file content, summary text, classification label text body, or recall results.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `IContextEventEmitter` + App Insights telemetry + ADR-015 tier-1 governance.</role>
+
+  <goal>
+    7 new context.* events emitted at each upload-pipeline stage. Each event carries: sessionId, fileId, contentType, durationMs, fileSizeBytes (where applicable). Payloads strictly tier-1 SAFE per ADR-015. Telemetry captured in App Insights via existing `IContextEventEmitter` interface. UI consumers (ExecutionTraceWidget) can surface the event stream for transparency.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §4.1 T6 + §7.1 audit container + ADR-015. Tier 6 audit captures upload pipeline progression. The events feed:
+      - Cosmos `audit` container (via `AuditLogService` — existing)
+      - App Insights telemetry (existing emitter)
+      - ExecutionTraceWidget (UI surface for transparency — out of scope here)
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/IContextEventEmitter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/AuditLogService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionFileEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/FileClassificationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/FileSummarizationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/FileManifestExtractor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">CRITICAL: tier-1 SAFE only. Events carry deterministic IDs + lengths + durationMs. NEVER textContent, summary text, classification label text body, recall results.</constraint>
+    <constraint source="architecture P7">All telemetry / context.* events carry: tier, operation, tenantId, sessionId, durationMs. They do NOT carry: user message text, file contents, recall results, memory facts.</constraint>
+    <constraint source="ADR-029">Per-task publish-size measurement.</constraint>
+    <constraint source="project">7 event types are additive — do NOT modify existing event schemas.</constraint>
+    <constraint source="project">Test update obligation — extend integration test (073) or add unit-level capture test to assert each event fires + payload tier-1 audit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IContextEventEmitter.cs` and `AuditLogService.cs` to identify existing event emission pattern + payload type.</step>
+    <step order="2">Determine event-type naming convention (e.g., `context.upload_started` literal string OR an enum member; align with existing).</step>
+    <step order="3">Define 7 new event types (or extend the existing event enum / discriminator):
+      - `context.upload_started` (sessionId, fileId, contentType, fileSizeBytes)
+      - `context.upload_classified` (sessionId, fileId, documentType, confidence, durationMs)
+      - `context.upload_summarized` (sessionId, fileId, summaryCharCount, durationMs)
+      - `context.upload_manifest_extracted` (sessionId, fileId, sectionCount, tableCount, pageCount, durationMs)
+      - `context.upload_indexed` (sessionId, fileId, chunkCount, durationMs)
+      - `context.upload_persisted` (sessionId, fileId, durationMs)
+      - `context.upload_completed` (sessionId, fileId, totalDurationMs)</step>
+    <step order="4">Add emission calls at each stage in 5 services:
+      - `ChatDocumentEndpoints.UploadDocumentAsync` → emit `upload_started` and `upload_completed`
+      - `FileClassificationService.ClassifyAsync` → emit `upload_classified`
+      - `FileSummarizationService.SummarizeAsync` → emit `upload_summarized`
+      - `FileManifestExtractor.ExtractAsync` → emit `upload_manifest_extracted`
+      - `RagService.IndexAsync` call site (in `SessionFileEnrichmentService` or endpoint) → emit `upload_indexed`
+      - `SessionPersistenceService.UpdateUploadedFilesAsync` → emit `upload_persisted`</step>
+    <step order="5">Add capture / assertion in test extending 073: each event fires; each payload is tier-1 SAFE.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`.</step>
+    <step order="7">Measure BFF publish size.</step>
+    <step order="8">code-review + adr-check.</step>
+    <step order="9">Update TASK-INDEX.md: 074 → ✅; wave 4-D complete → 4-E may proceed.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">IContextEventEmitter + AuditLogService + the 5 enriched services</tool>
+    <tool name="Edit">Add emission calls at each stage</tool>
+    <tool name="Write">Telemetry capture test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+    <tool name="Grep">Locate existing context.* event patterns</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/*.cs (emission calls added)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Audit/IContextEventEmitter.cs (event types extended, if applicable)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/UploadPipeline/UploadPipelineTelemetryTests.cs (NEW)</output>
+    <output type="docs">notes/handoffs/074-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">7 new context.* event types defined.</criterion>
+    <criterion testable="true">Emission call at each of the 7 stages.</criterion>
+    <criterion testable="true">Tier-1 audit: each payload contains zero textContent, summary text, classification label text body fields.</criterion>
+    <criterion testable="true">Test captures + asserts each event fires.</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.3 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The ExecutionTraceWidget UI consumer is out of scope here; this task is BFF-side emission only. UI consumer task is downstream (Phase 4 final integration / out of this scope agent's task list).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

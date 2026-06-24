@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Backfill sprk_playbookcode on 6 production-bound playbooks (Dataverse data update)</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>015</blocks>
+    <tags>dataverse, data, migration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse data update (not schema); sequentially required because all 6 updates target the same entity; STANDARD per Step 0.5 — not a code change but production-data write</rigor-reason>
+    <parallel-group>1-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same Dataverse entity (`sprk_analysisplaybook`); serialized to avoid optimistic concurrency conflicts and to keep the 6-update audit trail in one batch.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Backfill the `sprk_playbookcode` alternate-key column on the 6 production-bound playbooks per spec §1.5 + §1.7.3 codes table. Use the `Update-Playbook.ps1` script or Dataverse MCP `update_record` tool. Do NOT modify any other field — name, GUID, output schema must remain unchanged per NFR-02. After backfill, verify each playbook resolves via `GET /api/ai/playbooks/by-code/{code}`.
+  </prompt>
+
+  <role>SPAARKE Dataverse data-migration specialist. Expert in PAC CLI + Dataverse Web API + MCP tools for record updates.</role>
+
+  <goal>
+    The 6 production-bound playbooks each have a populated `sprk_playbookcode` matching spec §1.7.3 codes table:
+    1. `summarize-document-for-chat@v1` → `sprk_playbookcode = "summarize-document-chat"`
+    2. `summarize-document-for-workspace@v1` → `"summarize-document-workspace"`
+    3. `"Summarize New File(s)"` → `"summarize-new-files"`
+    4. `"Document Profile"` → `"document-profile"`
+    5. `"Create New Matter Pre-Fill"` → `"create-matter-prefill"`
+    6. `"Create New Project Pre-Fill"` → `"create-project-prefill"`
+    Verification via `GET /api/ai/playbooks/by-code/{code}` returns 200 for each.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §1.5 + §1.7.3 + NFR-02. `sprk_playbookcode` already exists as `NVARCHAR(10)` alternate key per Dataverse describe (see CLAUDE.md project-specific MUSTs). This task only POPULATES it on the 6 production-bound playbooks — no schema change, no playbook output/name change. Without this backfill, task 015 (`SessionSummarizeOrchestrator` migration) cannot resolve `summarize-document-chat` and the entire wave 1-D blocks.
+    </background>
+    <relevant-files>
+      <file>scripts/Update-Playbook.ps1</file>
+      <file>docs/data-model/sprk_analysisplaybook.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Dataverse data writes go through Web API / SDK / MCP; no direct SQL.</constraint>
+    <constraint source="ADR-015">No PII or memory content in update payload — these are administrative code values only.</constraint>
+    <constraint source="spec">NFR-02 binding: production-bound playbook NAME, GUID, output schema unchanged. ONLY `sprk_playbookcode` is written.</constraint>
+    <constraint source="project">Verify `sprk_playbookcode` is empty (or wrong) on each of the 6 BEFORE writing; do not blindly overwrite if a different value is already in place.</constraint>
+    <constraint source="project">Run against DEV environment first; document evidence; ONLY after Phase 1 deploy (task 026) run against higher environments via separate operator action.</constraint>
+    <constraint source="project">Code value must be tenant-scoped uniqueness if multiple tenants share Dataverse — confirm via the unresolved-questions item in spec.md "Tenant scope confirmation".</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-002-dataverse-data-access.md</file>
+      <file>docs/data-model/sprk_analysisplaybook.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Use Dataverse MCP `read_query` (or PAC CLI) to fetch the 6 production-bound playbooks by name. Record their `sprk_analysisplaybookid` GUIDs + current `sprk_playbookcode` values.</step>
+    <step order="2">If any of the 6 already has a non-empty `sprk_playbookcode` that differs from the spec §1.7.3 target — STOP, document in `notes/debug/014-playbookcode-conflict.md`, escalate to owner.</step>
+    <step order="3">Resolve the unresolved-question on tenant-uniqueness — query rows in current tenant to confirm none of the 6 target codes already used by a different playbook. Document in handoff note.</step>
+    <step order="4">Build the update payload — 6 records, each `{ sprk_analysisplaybookid: &lt;GUID&gt;, sprk_playbookcode: &lt;code&gt; }`.</step>
+    <step order="5">Execute updates via Dataverse MCP `update_record` (one call per playbook) or `Update-Playbook.ps1`. Capture response evidence.</step>
+    <step order="6">Verify each update via `read_query`: `SELECT sprk_name, sprk_playbookcode FROM sprk_analysisplaybook WHERE sprk_analysisplaybookid IN (...)`.</step>
+    <step order="7">Verify via API: `curl -H "Authorization: Bearer $TOKEN" "$BFF_URL/api/ai/playbooks/by-code/summarize-document-chat"` (and other 5 codes); each returns 200.</step>
+    <step order="8">Write handoff note `notes/handoffs/014-playbookcode-backfill-evidence.md` with: pre-state, post-state, verification results, environment.</step>
+    <step order="9">Update TASK-INDEX.md: task 014 → ✅. current-task.md → ready for task 015.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Update-Playbook.ps1 + sprk_analysisplaybook data model doc</tool>
+    <tool name="Bash">PAC CLI or curl to verify API resolution</tool>
+    <tool name="Write">Handoff note + (if conflict) debug note</tool>
+    <tool name="Edit">Update TASK-INDEX.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">sprk_analysisplaybook records 1–6 have populated sprk_playbookcode per spec §1.7.3</output>
+    <output type="docs">notes/handoffs/014-playbookcode-backfill-evidence.md — pre/post values + API verification</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 production-bound playbooks have non-empty `sprk_playbookcode` matching spec §1.7.3 codes table.</criterion>
+    <criterion testable="true">No playbook NAME, GUID, or output schema modified (verified via `read_query` diff of name + JPS fields pre/post).</criterion>
+    <criterion testable="true">`GET /api/ai/playbooks/by-code/summarize-document-chat` returns 200.</criterion>
+    <criterion testable="true">`GET /api/ai/playbooks/by-code/summarize-document-workspace` returns 200.</criterion>
+    <criterion testable="true">`GET /api/ai/playbooks/by-code/summarize-new-files` returns 200.</criterion>
+    <criterion testable="true">`GET /api/ai/playbooks/by-code/document-profile` returns 200.</criterion>
+    <criterion testable="true">`GET /api/ai/playbooks/by-code/create-matter-prefill` returns 200.</criterion>
+    <criterion testable="true">`GET /api/ai/playbooks/by-code/create-project-prefill` returns 200.</criterion>
+    <criterion testable="true">Handoff note documents pre + post state + environment.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DEV environment ONLY in this task. Higher-environment promotion is owned by Phase 1 deploy (task 026) — DO NOT run against staging/prod from this task. If tenant-uniqueness check fails (code collision), pivot to documenting the conflict and stop — do NOT invent a workaround.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — Dataverse data update with verification gates; code-review skipped at Step 9.5 (no code change).</protocol>
+  </execution>
+</task>

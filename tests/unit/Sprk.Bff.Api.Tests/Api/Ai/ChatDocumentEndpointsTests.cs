@@ -373,6 +373,13 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(_ =>
             Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>());
 
+        // chat-routing-redesign-r1 task 074 — IContextEventEmitter is now a required
+        // parameter of UploadDocumentAsync (emits context.upload_started / _indexed / _completed).
+        // Register a Loose Moq stub for the fixture. Per-emission assertions live in
+        // UploadPipelineTelemetryTests.cs.
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter>(_ =>
+            Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter>());
+
         builder.WebHost.UseTestServer();
         _app = builder.Build();
 

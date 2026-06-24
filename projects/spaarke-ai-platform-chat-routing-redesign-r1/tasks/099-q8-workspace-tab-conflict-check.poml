@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="099" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>FR-35 Q8 conflict check — refuse agent workspace edit when lastUserEditAt > agent's last read</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4e)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>098</dependencies>
+    <blocks>100</blocks>
+    <tags>bff-api, services, concurrency</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'concurrency'; modifies hot-path workspace write handler; binding invariant (Q8 user-wins); FR-35 acceptance test required</rigor-reason>
+    <parallel-group>4-N</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify the FR-35 Q8 user-wins conflict-check semantic per architecture §6.5 — the agent's `update_workspace_tab` write MUST be refused with structured `{ success: false, conflictReason: string }` when the stored `tab.lastUserEditAt` is strictly later than the agent's `expectedLastUserEditAt` parameter (the agent's view of the tab when last read). Existing `UpdateWorkspaceTabHandler.cs` (R6 Pillar 6b — shipped) already implements this "USER WINS" check; this task is a VERIFICATION + concurrency hardening + FR-35 regression test addition. If the existing handler does not yet honor the spec's `{success: false, conflictReason}` shape (spec FR-35 v2 wording vs the existing `stale_read` payload), ALIGN the response payload + add explicit FR-35 test coverage.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in concurrency semantics + R6 Pillar 6b workspace state contract.</role>
+
+  <goal>
+    `UpdateWorkspaceTabHandler` (existing) verified to refuse stale agent writes per the FR-35 v2 contract: refusal response shape matches `{ success: false, conflictReason: string }` AND/OR the existing structured `stale_read` payload is unified into the FR-35 spec shape (whichever is closer to design intent — confirm with /code-review). New regression test at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/UpdateWorkspaceTabHandlerFr35Tests.cs` simulates: agent reads tab at T0; user edits at T1; agent attempts write at T2 with `expectedLastUserEditAt = T0`; handler refuses with conflict response; agent re-reads and retries successfully. Tier-1-safe telemetry preserved.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.5 (workspace state read/write with Q8 conflict check), spec FR-35 v2. The existing `UpdateWorkspaceTabHandler.cs` from R6 task 055 implements the conflict check (verified in the existing handler — lines 26-44 + the conflict-refused counter). The FR-35 spec phrasing uses `{ success: false, conflictReason }`; the existing handler uses a structured `stale_read` payload. Task scope: VERIFY the semantics match, RECONCILE the payload shape if the spec demands `conflictReason`, and ADD an explicit FR-35 regression test.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/UpdateWorkspaceTabHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceStateService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Workspace/WorkspaceTab.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint.</constraint>
+    <constraint source="ADR-010">No new DI registrations expected.</constraint>
+    <constraint source="ADR-013">Handler is BFF-internal; injects `IWorkspaceStateService` directly (already in place).</constraint>
+    <constraint source="ADR-015">Telemetry: `workspace.conflict_refused` counter + decision discriminator (`applied` | `refused_stale_read`) + tabId + tenantId + sessionId. NEVER widget content. Preserve existing tier-1 instrumentation.</constraint>
+    <constraint source="ADR-029">≤+0.0 MB delta (verification + small test additions).</constraint>
+    <constraint source="architecture">§6.5 — refusal returns structured response; agent re-reads + retries. Q8 user-wins is a binding invariant.</constraint>
+    <constraint source="spec">FR-35 v2 — response shape `{ success: false, conflictReason: string }` is the contract; align if needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §6.5 + spec FR-35 v2 + the existing `UpdateWorkspaceTabHandler.cs` XML comments (Q8 conflict-resolution).</step>
+    <step order="2">Inspect the existing refusal payload shape (look for `StatusStaleRead` constant + the `stale_read` structured response). Compare to spec FR-35 v2 `{ success: false, conflictReason }`.</step>
+    <step order="3">DECISION:
+      (a) If the existing `stale_read` payload semantically equals FR-35 contract (and the agent persona text references `stale_read` accurately) — preserve as-is; document mapping in PR description; do NOT churn.
+      (b) If spec FR-35 demands `{ success: false, conflictReason }` literally — add the FR-35 fields to the payload (additive, no removal of `stale_read` discriminator) so both shapes are present. Coordinate with task 098 + agent persona docs.
+    </step>
+    <step order="4">Author FR-35 regression test at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/UpdateWorkspaceTabHandlerFr35Tests.cs`:
+      - Arrange: tab with `lastUserEditAt = T1`; agent supplies `expectedLastUserEditAt = T0` (T0 &lt; T1).
+      - Act: invoke handler.
+      - Assert: returns refusal with `success: false` (or equivalent), `conflictReason` (or `stale_read` discriminator), `currentTimestamp = T1`; no mutation to the tab; `workspace.conflict_refused` counter incremented by 1.
+      - Then: agent re-reads tab (now sees `lastUserEditAt = T1`); supplies `expectedLastUserEditAt = T1`; new attempt succeeds.
+    </step>
+    <step order="5">Add unit test for the user-tab-never-edited path: `tab.lastUserEditAt = null`; agent supplies `expectedLastUserEditAt = null` → applied.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="7">Measure BFF publish-size delta; write `notes/handoffs/099-bff-publish-delta.md`.</step>
+    <step order="8">Run code-review + adr-check (Step 9.5 FULL).</step>
+    <step order="9">Update TASK-INDEX.md: 099 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">UpdateWorkspaceTabHandler.cs, WorkspaceStateService.cs, WorkspaceTab.cs</tool>
+    <tool name="Grep">Search for `lastUserEditAt`, `conflictReason`, `stale_read` consumers</tool>
+    <tool name="Edit">Align payload shape if needed; preserve existing telemetry counter</tool>
+    <tool name="Write">FR-35 regression tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/UpdateWorkspaceTabHandler.cs (payload shape alignment if needed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/UpdateWorkspaceTabHandlerFr35Tests.cs</output>
+    <output type="docs">notes/handoffs/099-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-35 regression test passes — stale write refused; re-read + retry succeeds.</criterion>
+    <criterion testable="true">`workspace.conflict_refused` counter increments on refusal.</criterion>
+    <criterion testable="true">Refusal response carries either `{ success: false, conflictReason }` or the existing `stale_read` discriminator (decision documented in PR per Step 3 decision tree).</criterion>
+    <criterion testable="true">Handler does NOT mutate the tab on refusal — verified via `WorkspaceStateService` state assertion.</criterion>
+    <criterion testable="true">Tier-1 telemetry preserved (no widget content in logs).</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.0 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The existing handler ALREADY implements Q8 user-wins per its XML comments + counter. The likely outcome of Step 3 is option (a) "preserve as-is" — but the regression test is mandatory per FR-35. If reconciliation reveals a spec drift, document in `notes/debug/099-fr35-payload-decision.md` before touching the handler.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

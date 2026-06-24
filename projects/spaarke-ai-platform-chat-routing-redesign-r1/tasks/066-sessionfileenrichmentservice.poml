@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>SessionFileEnrichmentService — upload-time enrichment orchestrator (NEW)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4b)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>064</dependencies>
+    <blocks>070,072,073,074</blocks>
+    <tags>bff-api, services, ADR-010, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .cs file; new BFF service; tags include `bff-api`; ADR-010 + ADR-013 + ADR-029 binding</rigor-reason>
+    <parallel-group>4-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NEW file (`SessionFileEnrichmentService.cs`) — no overlap with peer 4-B tasks 067, 068, 069 (each authors a different NEW file)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author the new `SessionFileEnrichmentService` under `src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/` (or appropriate location — verify via grep for existing peer services like `SessionPersistenceService`). The service orchestrates upload-time enrichment per architecture/stateful-chat-architecture.md §4.4 + §6.1: parallel invocation of `FileClassificationService` (067) + `FileSummarizationService` (068) + `FileManifestExtractor` (069), then persistence of the enriched `ChatSessionFile` via `SessionPersistenceService.UpdateUploadedFilesAsync` (072). Concrete-class injection per ADR-010 — do NOT use `IServiceProvider.GetService&lt;T&gt;()`. Method signature: `Task&lt;EnrichedChatSessionFile&gt; EnrichAsync(string sessionId, string fileId, string fileName, string contentType, string textContent, CancellationToken ct)`.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `Services/Ai/Sessions/` layer + async parallel orchestration + ADR-010 DI minimalism.</role>
+
+  <goal>
+    `SessionFileEnrichmentService.cs` exists with the orchestrator class + `ISessionFileEnrichmentService` interface. Service composes the 3 enrichment services in parallel (`Task.WhenAll`), assembles an `EnrichedChatSessionFile` record (or equivalent shape per task 071's `ChatSession.UploadedFiles` shape), and returns it. Constructor takes `IFileClassificationService`, `IFileSummarizationService`, `IFileManifestExtractor` via concrete-typed injection. Build passes. Unit-test stub authored.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §4.4 (New components introduced) + §6.1 (Upload pipeline data flow). The 4 enrichment services (066, 067, 068, 069) are authored in parallel in wave 4-B; their DI registration is task 070. The output shape is consumed by 071 (`ChatSession.UploadedFiles` extension) and persisted by 072 (`SessionPersistenceService.UpdateUploadedFilesAsync`). Target performance: 4 parallel paths complete ≤4s for a 50-page PDF (task 073 enforces).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Chat/ChatSession.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Modules/AiModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — inject `IFileClassificationService`, `IFileSummarizationService`, `IFileManifestExtractor` via concrete-typed constructor parameters. NO `IServiceProvider.GetService&lt;T&gt;()`.</constraint>
+    <constraint source="ADR-013">Service lives in `Services/Ai/Sessions/` — within the AI module. CRUD code consuming this orchestrator MUST go through `Services/Ai/PublicContracts/` facade (out of scope here — orchestrator is INSIDE the AI module).</constraint>
+    <constraint source="ADR-015">Tier-1 logging: log fileId, sessionId, durationMs ONLY. NEVER log textContent, summary text, classification result.</constraint>
+    <constraint source="ADR-029">Per-task publish-size measurement; report delta. New service should add &lt;0.5 MB.</constraint>
+    <constraint source="architecture §6.1">Parallel paths: classification + summarization + manifest extraction MUST run via `Task.WhenAll` (architecture target: total ≤4s for 50-page PDF).</constraint>
+    <constraint source="project">Test update obligation per CLAUDE.md §10 — author unit test stub in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/` for orchestration logic.</constraint>
+    <constraint source="bff-extensions.md">Placement justification: lives in `Services/Ai/Sessions/` because it composes session-level state. State this rationale in PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `SessionPersistenceService.cs` and other peer services in `Services/Ai/Sessions/` to align style + constructor patterns + logging conventions.</step>
+    <step order="2">Read `ChatSession.cs` model to align with `ChatSessionFile` / `UploadedFiles[]` shape (note: task 071 extends this shape; design `EnrichedChatSessionFile` return type compatible with that extension).</step>
+    <step order="3">Define `ISessionFileEnrichmentService` interface + `EnrichAsync` signature.</step>
+    <step order="4">Implement `SessionFileEnrichmentService` class:
+      - Constructor takes the 3 enrichment services + `ILogger&lt;SessionFileEnrichmentService&gt;`
+      - `EnrichAsync` invokes `Task.WhenAll` over classification + summarization + manifest extraction
+      - Assembles result + returns
+      - Logs sessionId, fileId, durationMs ONLY (tier-1 safe per ADR-015)</step>
+    <step order="5">Define `EnrichedChatSessionFile` record (or place in `Models/Chat/` if reused — coordinate shape with task 071's extension).</step>
+    <step order="6">Author unit test stub in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionFileEnrichmentServiceTests.cs` — fixture mocks for 3 enrichment services; assert `Task.WhenAll` parallel invocation + result composition + tier-1 logging.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` — must pass. DI registration occurs in task 070; this task does NOT touch `AiModule.cs`.</step>
+    <step order="8">Run unit tests for the new file.</step>
+    <step order="9">Measure BFF publish size; report delta to notes/handoffs/066-bff-publish-delta.md.</step>
+    <step order="10">Run code-review + adr-check (FULL Step 9.5 gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 066 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">SessionPersistenceService.cs + ChatSession.cs + peer services</tool>
+    <tool name="Write">SessionFileEnrichmentService.cs + interface + test stub</tool>
+    <tool name="Bash">dotnet build / dotnet test / dotnet publish</tool>
+    <tool name="Grep">Existing parallel-orchestration patterns in Services/Ai/</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionFileEnrichmentService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/ISessionFileEnrichmentService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Chat/EnrichedChatSessionFile.cs (NEW, if not part of task 071)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionFileEnrichmentServiceTests.cs (NEW)</output>
+    <output type="docs">notes/handoffs/066-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SessionFileEnrichmentService.cs` exists; class implements `ISessionFileEnrichmentService`.</criterion>
+    <criterion testable="true">Constructor takes 3 enrichment services via concrete-typed parameters (no `IServiceProvider`).</criterion>
+    <criterion testable="true">`EnrichAsync` invokes `Task.WhenAll` over the 3 enrichment paths.</criterion>
+    <criterion testable="true">No log statement carries fileText / summary text / classification result string (grep audit).</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` exits 0.</criterion>
+    <criterion testable="true">Unit test stub authored + passes.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.5 MB; cumulative ≤60 MB ceiling per ADR-029 / NFR-01.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DI registration is task 070 (wave 4-B' — sequential after this wave). Do NOT register this service in `AiModule.cs` in this task. The coordinator role across 066/067/068/069 is the architecture doc — each task authors its NEW file independently, parallel-safe.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

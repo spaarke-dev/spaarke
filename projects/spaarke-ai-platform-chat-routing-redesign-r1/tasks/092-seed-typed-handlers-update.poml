@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="092" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Update Seed-TypedHandlers.ps1 to register 8 handlers as sprk_analysistool rows</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>091</dependencies>
+    <blocks>093</blocks>
+    <tags>dataverse, scripts, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modifies deployment script + Dataverse seed data; no `.cs` modifications; STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>4-J</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single sequential task — modifies the shared seed script and applies it sequentially to the dev environment. Prereq for Phase 4e (tasks 093+).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update `scripts/Seed-TypedHandlers.ps1` to register the 8 new tool handlers from tasks 083–090 as `sprk_analysistool` Dataverse rows so they are auto-discoverable by the BFF chat agent. Each handler corresponds to a `sprk_analysistool` row with `sprk_handlerclass` matching the C# class name (e.g., `"ListSessionFilesHandler"`), parameter schema populated from `infra/dataverse/sprk_analysistool-*-row.json` files authored by tasks 083–090, and `sprk_requiredcapability = null` (always-on per architecture §8.2). Apply the updated script to the dev environment and verify the 8 rows exist + the BFF resolves them at chat-startup.
+  </prompt>
+
+  <role>SPAARKE platform DevOps developer. Expert in PAC CLI + Dataverse seed scripts + `sprk_analysistool` row schema.</role>
+
+  <goal>
+    `scripts/Seed-TypedHandlers.ps1` extended to upsert 8 `sprk_analysistool` rows (one per handler) using the JSON files staged at `infra/dataverse/sprk_analysistool-*-row.json`. Script idempotent (uses Web API upsert via alternate key on `sprk_handlerclass`). Run against dev environment; verify all 8 rows present via `pac data list`. Restart BFF dev instance; verify chat agent surfaces all 8 tools (via `/api/ai/chat/playbooks` or equivalent tool-listing endpoint).
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §11.3 (8 new tool handlers registered as `sprk_analysistool` rows; seeded via `Seed-TypedHandlers.ps1`). The handlers auto-register in C# via `AddToolHandlersFromAssembly`, but the chat agent gates tool exposure on the `sprk_analysistool` Dataverse row (R6 Pillar 2 contract). Existing handlers (e.g., `ManagePinnedContextHandler`, `UpdateWorkspaceTabHandler`) follow this pattern — mirror it.
+    </background>
+    <relevant-files>
+      <file>scripts/Seed-TypedHandlers.ps1</file>
+      <file>infra/dataverse/sprk_analysistool-update-workspace-tab-row.json</file>
+      <file>infra/dataverse/sprk_analysistool-list-session-files-row.json (from task 083)</file>
+      <file>infra/dataverse/sprk_analysistool-get-file-manifest-row.json (from task 084)</file>
+      <file>infra/dataverse/sprk_analysistool-recall-session-file-row.json (from task 085)</file>
+      <file>infra/dataverse/sprk_analysistool-write-session-memory-row.json (from task 086)</file>
+      <file>infra/dataverse/sprk_analysistool-retrieve-matter-memory-row.json (from task 087)</file>
+      <file>infra/dataverse/sprk_analysistool-promote-to-matter-memory-row.json (from task 088)</file>
+      <file>infra/dataverse/sprk_analysistool-get-user-preferences-row.json (from task 089)</file>
+      <file>infra/dataverse/sprk_analysistool-get-org-templates-row.json (from task 090)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="architecture">§8.2 — `sprk_requiredcapability = null` for all 8 (always-on when the relevant context is present); routing semantics are enforced inside the handler, not by capability gating.</constraint>
+    <constraint source="architecture">§11.3 — handlers ARE registered as `sprk_analysistool` rows per the R6 Pillar 2 contract.</constraint>
+    <constraint source="project">Idempotent upsert via alternate key on `sprk_handlerclass`; no destructive deletes.</constraint>
+    <constraint source="project">Apply to DEV environment only at this task; production seeding deferred to task 104 deploy.</constraint>
+    <constraint source="CLAUDE.md">Use Web API patterns or PAC CLI via Service Principal; do NOT commit credentials.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `scripts/Seed-TypedHandlers.ps1` to understand the existing seed-row enumeration + Web API upsert pattern.</step>
+    <step order="2">Confirm each of the 8 `infra/dataverse/sprk_analysistool-*-row.json` files exists with the `sprk_handlerclass` matching the C# class name + parameter schema.</step>
+    <step order="3">Add (or extend) the script's seed-row list to include the 8 new handler rows; ensure upsert is idempotent via alternate key on `sprk_handlerclass`.</step>
+    <step order="4">Validate JSON shapes locally: each row has `sprk_name`, `sprk_handlerclass`, `sprk_invocationcontextmask` (Chat), `sprk_parameterschema` (JSON Schema of tool parameters), `sprk_requiredcapability = null`.</step>
+    <step order="5">Run the updated script against the DEV Dataverse environment using PAC CLI / Service Principal (do NOT commit credentials).</step>
+    <step order="6">Verify via `pac data list` (or Web API GET) that all 8 `sprk_analysistool` rows exist and have the expected `sprk_handlerclass` values.</step>
+    <step order="7">Restart the BFF dev instance (or rebuild + redeploy via `bff-deploy` skill in test mode); query the chat agent tool registry endpoint and assert all 8 tools surface.</step>
+    <step order="8">Run code-review + adr-check on the script changes.</step>
+    <step order="9">Update TASK-INDEX.md: 092 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Seed-TypedHandlers.ps1, existing row JSON files</tool>
+    <tool name="Edit">Extend Seed-TypedHandlers.ps1</tool>
+    <tool name="Bash">Run PowerShell script against dev environment; verify rows</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Seed-TypedHandlers.ps1 (extended)</output>
+    <output type="docs">notes/handoffs/092-dev-seed-verification.md (list of 8 sprk_analysistool IDs created)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 8 `sprk_analysistool` rows present in DEV Dataverse (verified via `pac data list` or Web API GET).</criterion>
+    <criterion testable="true">Each row has `sprk_requiredcapability = null` (always-on per architecture §8.2).</criterion>
+    <criterion testable="true">Script is idempotent — running twice does NOT create duplicates.</criterion>
+    <criterion testable="true">BFF dev chat-tool listing endpoint surfaces all 8 tools.</criterion>
+    <criterion testable="true">No secrets / connection strings committed to the script.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequential by design: tasks 083–090 author the row-JSON files; task 091 wires DI; THIS task wires them into the seed script + applies to dev. Production seeding happens at task 104 deploy. If `Seed-TypedHandlers.ps1` does not yet exist at the canonical path, audit `scripts/` for a similar handler-seeding script (the R6 pattern may have named it differently) before authoring new. Confirm with /script-aware before creating new.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol. Coordinate with /dataverse-deploy or /dataverse-mcp-usage for environment access.</protocol>
+  </execution>
+</task>

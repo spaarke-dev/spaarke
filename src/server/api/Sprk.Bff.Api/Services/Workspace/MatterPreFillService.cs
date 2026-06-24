@@ -34,14 +34,23 @@ public sealed class MatterPreFillService
 {
     private readonly SpeFileStore _speFileStore;
     private readonly ITextExtractor _textExtractor;
+    private readonly IPlaybookLookupService _playbookLookup;
     private readonly IWorkspacePrefillAi? _prefillAi;
     private readonly WorkspaceOptions _workspaceOptions;
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<MatterPreFillService> _logger;
 
-    // Default: "Create New Matter Pre-Fill" playbook (Extract Matter Fields — ACT-008, gpt-4o)
-    private static readonly Guid DefaultPreFillPlaybookId =
-        Guid.Parse("2d660cad-d418-f111-8343-7ced8d1dc988");
+    // FR-05 stable-ID resolution (chat-routing-redesign-r1 task 016 / Pattern A):
+    // The prior hardcoded "Create New Matter Pre-Fill" playbook GUID
+    // (2d660cad-d418-f111-8343-7ced8d1dc988) has been removed. The playbook is now
+    // resolved at runtime by looking up WorkspaceOptions.MatterPreFillPlaybookId
+    // (typed-options per ADR-018) through IPlaybookLookupService.GetByIdAsync,
+    // which queries the sprk_playbookid alternate key on sprk_analysisplaybook
+    // (Q&A 2026-06-22 Q1) with 1-hour caching (ADR-014). NFR-07 BINDING preserved:
+    // pre-fill flow signature, 45s timeout, useAiPrefill consumer contract, and
+    // $choices output shape are unchanged — only the internal playbook-ID lookup
+    // mechanism has been migrated. Mirrors the SessionSummarizeOrchestrator
+    // pattern landed by task 015 (commit c3f65e975).
 
     // Supported MIME types for the pre-fill endpoint
     private static readonly HashSet<string> AllowedExtensions =
@@ -67,6 +76,7 @@ public sealed class MatterPreFillService
     public MatterPreFillService(
         SpeFileStore speFileStore,
         ITextExtractor textExtractor,
+        IPlaybookLookupService playbookLookup,
         IOptions<WorkspaceOptions> workspaceOptions,
         IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<MatterPreFillService> logger,
@@ -74,6 +84,7 @@ public sealed class MatterPreFillService
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
+        _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _workspaceOptions = (workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions))).Value;
         _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -294,11 +305,45 @@ public sealed class MatterPreFillService
             documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
         }
 
-        // Resolve playbook ID from configuration (allows per-environment override)
-        var playbookIdStr = _workspaceOptions.PreFillPlaybookId;
-        var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
-            ? parsed
-            : DefaultPreFillPlaybookId;
+        // FR-05 stable-ID resolution (chat-routing-redesign-r1 task 016 / Pattern A):
+        // Resolve the matter pre-fill playbook GUID at runtime via the stable-ID alternate
+        // key (sprk_playbookid) per Q&A 2026-06-22 Q1, replacing the prior hardcoded
+        // 2d660cad-d418-f111-8343-7ced8d1dc988 GUID + the legacy PreFillPlaybookId option
+        // fallback. The lookup service caches results for 1 hour (ADR-014); per-environment
+        // values come from WorkspaceOptions.MatterPreFillPlaybookId (pre-seated by task 013).
+        // Fail-fast on missing config — no hardcoded fallback at this Pattern A consumer
+        // (mirrors SessionSummarizeOrchestrator task-015 / commit c3f65e975). NFR-07 BINDING
+        // preserved: the 45s timeout below, useAiPrefill consumer contract, and $choices
+        // output schema are unchanged — only the internal lookup mechanism has been migrated.
+        var configuredPlaybookId = _workspaceOptions.MatterPreFillPlaybookId;
+        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        {
+            _logger.LogError(
+                "Workspace:MatterPreFillPlaybookId is not configured. Cannot resolve matter " +
+                "pre-fill playbook. RequestId={RequestId}. Configure the per-environment GUID " +
+                "(mirrors sprk_analysisplaybookid PK) for the 'Create New Matter Pre-Fill' row.",
+                requestId);
+            return PreFillResponse.Empty(
+                "CONFIG_MISSING: Workspace:MatterPreFillPlaybookId is not configured");
+        }
+
+        Guid playbookId;
+        try
+        {
+            var playbook = await _playbookLookup
+                .GetByIdAsync(configuredPlaybookId, cancellationToken)
+                .ConfigureAwait(false);
+            playbookId = playbook.Id;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to resolve matter pre-fill playbook by stable ID '{StableId}'. " +
+                "RequestId={RequestId}",
+                configuredPlaybookId, requestId);
+            return PreFillResponse.Empty(
+                $"PLAYBOOK_LOOKUP_FAILED: {ex.Message}");
+        }
 
         _logger.LogInformation(
             "Invoking playbook for matter field extraction. PlaybookId={PlaybookId}, " +

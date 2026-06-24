@@ -1,0 +1,55 @@
+<task id="R4-116" project="smart-todo-r4">
+  <metadata>
+    <title>R4-092 — Final deploy notes + flip to ✅</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>project-tracking</workstream>
+    <status>not-started</status>
+    <estimated-effort>30 min</estimated-effort>
+    <tags>deploy, project-tracking, closeout</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-110 + R4-111 + R4-112 + R4-113 + R4-114 + R4-115 (all post-merge fixes done)</dependencies>
+    <relevant-files>
+      <file>projects/smart-todo-r4/tasks/092-deploy-all-affected-solutions.poml</file>
+      <file>projects/smart-todo-r4/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+R4-092 has been "in progress" through 13 UAT rounds + PR #406 merge + this closeout round. Time to close it.
+
+This task:
+1. Add a final "Deploy session 2026-06-23 (PR #406 merge)" block to the 092 POML notes capturing:
+   - Squash commit `80f70a1d4` on master
+   - All 4 deployed web resources with their final modifiedon timestamps
+   - List of UAT rounds 4-13 issues + resolutions (one-liner each)
+   - List of R4 closeout tasks (110-115) + their resolutions
+2. Flip 092 status from 🔄 in-progress to ✅ complete.
+3. Update TASK-INDEX.md status line.
+  </prompt>
+
+  <role>Project tracker.</role>
+
+  <goal>
+1. Final deploy notes block in 092 POML.
+2. TASK-INDEX status updated.
+3. R4 ready for the wrap-up task (R4-117 / R4-098).
+  </goal>
+
+  <constraints>
+    <constraint source="this is documentation only">No code changes. Pure tracking update.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check.</step>
+    <step order="1">Read current `092-deploy-all-affected-solutions.poml` to find the last deploy-session block.</step>
+    <step order="2">Append "Deploy session 2026-06-23" block with the data above.</step>
+    <step order="3">Flip status to ✅ in the POML metadata.</step>
+    <step order="4">Update TASK-INDEX.md status line.</step>
+    <step order="5">Commit + PR.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">R4-092 status = ✅ in both POML and TASK-INDEX.</criterion>
+    <criterion testable="true">092 notes include PR #406 merge details + closeout-task summary.</criterion>
+  </acceptance-criteria>
+</task>

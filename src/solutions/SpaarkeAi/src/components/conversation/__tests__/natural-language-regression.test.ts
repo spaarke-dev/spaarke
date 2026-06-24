@@ -25,7 +25,7 @@
  *   (a) `Intent.command === null` (parser passthrough)
  *   (b) `Intent.references === []` (no reference tokens)
  *   (c) `Intent.isHardSlash === false` AND `Intent.isSoftSlash === false`
- *   (d) `decorateBody(intent, body)` returns a body with NO `commandIntent`
+ *   (d) `decorateBody(intent, body)` returns a body with NO `intentHint`
  *       field set (NFR-11 passthrough invariant — Layer 1 keyword path runs
  *       unchanged on the BFF)
  *   (e) `decorateBody` does NOT mutate the input body (purity invariant)
@@ -156,21 +156,21 @@ describe('Pillar 8 NFR-11 — toCommandIntent returns null for natural language'
 });
 
 // ---------------------------------------------------------------------------
-// (c) + (d) Decoration is a no-op: body has NO commandIntent (NFR-11 passthrough)
+// (c) + (d) Decoration is a no-op: body has NO intentHint (NFR-11 passthrough)
 // ---------------------------------------------------------------------------
 
-describe('Pillar 8 NFR-11 — decorateBody is a no-op for natural language (no commandIntent)', () => {
+describe('Pillar 8 NFR-11 — decorateBody is a no-op for natural language (no intentHint)', () => {
   test.each(NATURAL_LANGUAGE_CASES)(
-    '"$input" ($description) → decorated body has NO commandIntent field',
+    '"$input" ($description) → decorated body has NO intentHint field',
     ({ input }) => {
       const intent = parse(input);
       const body: DecoratedChatBody = { message: input, documentId: 'doc-baseline-1' };
       const decorated = decorateBody(intent, body);
 
-      // NFR-11 binding contract: when commandIntent is absent, the BFF
+      // NFR-11 binding contract: when intentHint is absent, the BFF
       // CapabilityRouter Layer 1 keyword path runs UNCHANGED.
-      expect(decorated.commandIntent).toBeUndefined();
-      expect('commandIntent' in decorated).toBe(false);
+      expect(decorated.intentHint).toBeUndefined();
+      expect('intentHint' in decorated).toBe(false);
     }
   );
 
@@ -216,7 +216,7 @@ describe('Pillar 8 NFR-11 — decorateBody is pure (no input mutation)', () => {
 
       // Mutation check
       expect(body).toEqual(snapshot);
-      expect('commandIntent' in body).toBe(false);
+      expect('intentHint' in body).toBe(false);
     }
   );
 
@@ -270,7 +270,7 @@ describe('Pillar 8 NFR-01 — conversational primacy preserved (refinement + fol
       // Inert decoration — body unchanged
       const body: DecoratedChatBody = { message: input };
       const decorated = decorateBody(intent, body);
-      expect('commandIntent' in decorated).toBe(false);
+      expect('intentHint' in decorated).toBe(false);
       expect(decorated.message).toBe(input);
 
       // ConversationPane.tsx (Wave D-G1) guards reference resolution behind
@@ -306,29 +306,29 @@ describe('Pillar 8 NFR-01 — conversational primacy preserved (refinement + fol
 /**
  * Anchor test: this is NOT one of the 4 NFR-11 inputs. It exists to confirm
  * the test machinery is wired correctly — if `decorateBody` were silently
- * dropping `commandIntent` for ALL inputs (false-negative trap), this test
+ * dropping `intentHint` for ALL inputs (false-negative trap), this test
  * would catch it. The 4 NFR-11 inputs above only assert the negative
- * (commandIntent absent); without a positive anchor a stub of `decorateBody`
+ * (intentHint absent); without a positive anchor a stub of `decorateBody`
  * could pass them trivially.
  */
 describe('Pillar 8 NFR-11 — positive anchor (suite integrity)', () => {
-  test('actual soft slash "/summarize" DOES get decorated with commandIntent', () => {
+  test('actual soft slash "/summarize" DOES get decorated with intentHint', () => {
     const intent = parse('/summarize');
     const body: DecoratedChatBody = { message: '/summarize' };
     const decorated = decorateBody(intent, body);
 
     expect(intent.isSoftSlash).toBe(true);
     expect(intent.command).toBe('/summarize');
-    expect(decorated.commandIntent).toBe('summarize');
+    expect(decorated.intentHint).toBe('summarize');
   });
 
-  test('actual hard slash "/clear" does NOT get commandIntent (different code path, but same NFR-11 absence)', () => {
+  test('actual hard slash "/clear" does NOT get intentHint (different code path, but same NFR-11 absence)', () => {
     const intent = parse('/clear');
     const body: DecoratedChatBody = { message: '/clear' };
     const decorated = decorateBody(intent, body);
 
     expect(intent.isHardSlash).toBe(true);
-    expect('commandIntent' in decorated).toBe(false);
+    expect('intentHint' in decorated).toBe(false);
   });
 });
 

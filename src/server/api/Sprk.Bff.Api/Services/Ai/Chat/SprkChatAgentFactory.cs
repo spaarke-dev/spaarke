@@ -161,14 +161,16 @@ public class SprkChatAgentFactory
     /// omit the parameter behave exactly as before.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <param name="commandIntent">
-    /// R6 Pillar 8 / task 082 / FR-50: Optional closed-vocabulary soft-slash hint
-    /// emitted by the frontend `SoftSlashRouter.decorateBody()`. When non-null AND
-    /// recognised (one of: "summarize", "draft", "extract-entities", "analyze"),
+    /// <param name="intentHint">
+    /// Optional closed-vocabulary soft-slash hint emitted by the frontend
+    /// `SoftSlashRouter.decorateBody()`. When non-null AND recognised (one of:
+    /// "summarize", "draft", "extract-entities", "analyze"),
     /// CapabilityRouter Layer 0.5 short-circuits to a Confident result selecting
     /// the synthetic capability for that intent — biasing the LLM toward the
     /// matching playbook / handler on FIRST try. Default null preserves backward
     /// compatibility — pre-R6 callers (tests + legacy paths) skip the pre-pass.
+    /// Wire-format field renamed `commandIntent` → `intentHint` per
+    /// chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
     /// </param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -188,7 +190,7 @@ public class SprkChatAgentFactory
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         CancellationToken cancellationToken = default,
-        string? commandIntent = null)
+        string? intentHint = null)
     {
         _logger.LogInformation(
             "Creating SprkChatAgent for session={SessionId}, document={DocumentId}, playbook={PlaybookId}, tenant={TenantId}",
@@ -451,14 +453,15 @@ public class SprkChatAgentFactory
                     ? context.PlaybookId.Value.ToString("N")
                     : null;
 
-                // R6 Pillar 8 / task 082 / FR-50: pass the soft-slash `commandIntent`
+                // R6 Pillar 8 / task 082 / FR-50: pass the soft-slash `intentHint`
                 // (when supplied by the frontend `SoftSlashRouter`) so Layer 0.5 can
                 // short-circuit to the deterministic capability for the four soft
                 // slashes. Null in the common path (natural language, hard slashes,
                 // unrecognised slashes) preserves NFR-11 backward compat — Layer 1
-                // keyword scoring runs unchanged.
+                // keyword scoring runs unchanged. Wire-format field renamed from
+                // `commandIntent` per chat-routing-redesign-r1 FR-07 / task 022.
                 routingResult = await _capabilityRouter
-                    .RouteAsync(latestUserMessage, activePlaybookName, cancellationToken, commandIntent)
+                    .RouteAsync(latestUserMessage, activePlaybookName, cancellationToken, intentHint)
                     .ConfigureAwait(false);
 
                 _logger.LogInformation(
