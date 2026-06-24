@@ -1,8 +1,8 @@
 # Task Index — Spaarke DevOps Project Tracking (r1)
 
 > **Last Updated**: 2026-06-23
-> **Total Tasks**: 38 (16 complete · 22 pending)
-> **Status**: 🔄 Phase 1 ✅ · Phase 2 ✅ (9 /devops-* skills + verify gate) · Phase 3 next (active backfill)
+> **Total Tasks**: 38 (26 complete · 12 pending)
+> **Status**: 🔄 Phase 1 ✅ · Phase 2 ✅ · Phase 4 ✅ (9 hooks, all skills reference /devops-*) · Phase 3+5+6 + wrap-up pending
 
 ## Status Legend
 
@@ -82,16 +82,16 @@
 
 | # | Task | Effort | Dependencies | Parallel | Status |
 |---|------|--------|--------------|----------|--------|
-| 030 | Hook `/design-to-spec` (FR-16) — post-spec sync + Status=In Progress | 1h | 019, 016 | none | 🔲 |
-| 031 | Hook `/project-pipeline` (FR-17) — register-or-sync at start | 1h | 019, 015, 016 | none | 🔲 |
-| 032 | Hook `/task-create` (FR-18) — set Task Count | 0.5h | 019, 016 | none | 🔲 |
-| 033 | Hook `/task-execute` (FR-19) — increment Tasks Completed | 1h | 019, 016 | none | 🔲 |
-| 034 | Hook `/context-handoff` (FR-20) — **HIGHEST VALUE**: always sync | 1h | 019, 016 | none | 🔲 |
-| 035 | Hook `/worktree-setup` (FR-21) — link-or-prompt register | 0.5h | 019, 015 | none | 🔲 |
-| 036 | Hook `/worktree-sync` (FR-22) — end-of-sync sync | 0.5h | 019, 016 | none | 🔲 |
-| 037 | Hook `/repo-cleanup` (FR-23) — archive-candidate prompt | 1h | 019, 018 | none | 🔲 |
-| 038 | Hook `/merge-to-master` (FR-24) — PR comment + conditional archive prompt | 1h | 019, 016, 018 | none | 🔲 |
-| 039 | **Phase 4 verify gate** — 9 hooks active + no regressions | 2h | 030-038 | none | 🔲 |
+| 030 | Hook `/design-to-spec` (FR-16) — post-spec sync + Status=In Progress | 1h | 019, 016 | none | ✅ |
+| 031 | Hook `/project-pipeline` (FR-17) — register-or-sync at start | 1h | 019, 015, 016 | none | ✅ |
+| 032 | Hook `/task-create` (FR-18) — set Task Count | 0.5h | 019, 016 | none | ✅ |
+| 033 | Hook `/task-execute` (FR-19) — increment Tasks Completed | 1h | 019, 016 | none | ✅ |
+| 034 | Hook `/context-handoff` (FR-20) — **HIGHEST VALUE**: always sync | 1h | 019, 016 | none | ✅ |
+| 035 | Hook `/worktree-setup` (FR-21) — link-or-prompt register | 0.5h | 019, 015 | none | ✅ |
+| 036 | Hook `/worktree-sync` (FR-22) — end-of-sync sync | 0.5h | 019, 016 | none | ✅ |
+| 037 | Hook `/repo-cleanup` (FR-23) — archive-candidate prompt | 1h | 019, 018 | none | ✅ |
+| 038 | Hook `/merge-to-master` (FR-24) — PR comment + conditional archive prompt | 1h | 019, 016, 018 | none | ✅ |
+| 039 | **Phase 4 verify gate** — 9 hooks active + no regressions | 2h | 030-038 | none | ✅ |
 
 **Phase 4 Total**: ~9.5 hours · Sequential only
 

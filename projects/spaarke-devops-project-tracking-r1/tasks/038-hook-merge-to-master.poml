@@ -1,9 +1,11 @@
 <task id="DEVOPS-038" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Inject PR-comment-and-conditional-archive hook into /merge-to-master</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>4</phase>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>hook-injection, merge-to-master, additive-only</tags>
     <dependencies>019, 016, 018</dependencies>
     <parallel-group>none</parallel-group>

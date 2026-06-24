@@ -1,9 +1,11 @@
 <task id="DEVOPS-031" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Inject portfolio-register-or-sync hook into /project-pipeline</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>4</phase>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>hook-injection, project-pipeline, additive-only</tags>
     <dependencies>019, 015, 016</dependencies>
     <parallel-group>none</parallel-group>

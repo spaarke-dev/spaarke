@@ -1,9 +1,11 @@
 <task id="DEVOPS-032" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Inject Task Count hook into /task-create</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>4</phase>
     <estimated-effort>0.5 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>hook-injection, task-create, additive-only</tags>
     <dependencies>019, 016</dependencies>
     <parallel-group>none</parallel-group>

@@ -1,9 +1,11 @@
 <task id="DEVOPS-037" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Inject archive-candidate-prompt hook into /repo-cleanup</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>4</phase>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>hook-injection, repo-cleanup, additive-only</tags>
     <dependencies>019, 018</dependencies>
     <parallel-group>none</parallel-group>

@@ -1,9 +1,11 @@
 <task id="DEVOPS-030" project="Spaarke DevOps Project Tracking r1">
   <metadata>
     <title>Inject portfolio-sync hook into /design-to-spec</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>4</phase>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
     <tags>hook-injection, design-to-spec, additive-only</tags>
     <dependencies>019, 016</dependencies>
     <parallel-group>none</parallel-group>
