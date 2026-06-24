@@ -73,6 +73,86 @@ These 5 lock-ins keep post-MVP work additive (~2-3 weeks for deferred features) 
 
 Full deferred-feature inventory + post-MVP roadmap: see [`plan.md`](plan.md) §"Post-MVP Roadmap".
 
+### Phase 5+7 Revised Scope (Owner decision 2026-06-24 — post-MVP UAT)
+
+The 2026-06-22 MVP cut shipped infrastructure but deferred the user-visible routing convergence and output composition behavior the project was originally designed to deliver. UAT on 2026-06-24 confirmed the gap: the `/summarize` slash + NL flows still produce different routing (slash → chat sibling; NL → "document not in session"), and Workspace tabs open blank because output is rendered to chat. **The owner authorized re-opening Phase 5+7 with a revised, more sophisticated scope** that converges slash + NL behind LLM-in-the-loop intent detection and replaces the brittle schema-aware widget model with multi-node Output composition. This subsection is binding for the remainder of the project and supersedes "Phase 5 — WP2 file-aware classification" MVP entries above and the Phase 7 entries in `plan.md` §1.7. **All other frozen spec content (Phase 0–4, NFR-A1–A7, WP3/WP4 destination wiring) is unchanged.**
+
+#### Owner-confirmed UX flow (Phase 5R)
+
+```
+1. User uploads file(s) → persists in T2 (ChatSession.UploadedFiles[])
+2. User types  /summarize  OR  "summarize this document"  OR  any natural language
+3. BFF: vector-match against playbook-embeddings (~150ms; existing Phase B)
+   - IF top-1 confidence ≥ 0.85 → return top 3 (or all ≥ 0.80)
+   - ELSE (ambiguous) → LLM (gpt-4o-mini, structured output) picks best 3 from top 5
+     (+~500-800ms; total worst-case ~1s — owner-accepted budget)
+4. Chat (Assistant pane): "Which playbook would you like me to use?"
+   - Inline link buttons for top-N candidates (always show — never auto-execute)
+   - + "Open Library Modal" link (existing Library modal; needs bug fix)
+5. User clicks link button → playbook executes against the SAME session attachments
+6. Output via Output Node config → workspace widget renders per-section
+   (multi-node composition; section_name-keyed streaming; not schema-position-keyed)
+7. Subsequent turns: agent can read both the uploaded file AND the workspace output
+   via T2 round-trip; session attachments retained across turns (no per-turn drop)
+```
+
+#### Functional Requirements (Phase 5R — additive; numbered FR-46 through FR-59)
+
+**Intent + matching (5R-A)**
+
+46. **FR-46**: Hybrid intent detection — vector match against playbook-embeddings is PRIMARY (existing Phase B); LLM reranker (gpt-4o-mini, structured output) fires ONLY when top-1 score below confidence threshold OR multiple candidates within `confidenceDeltaMargin` of top-1. LLM input is constrained to `(userMessage, attachmentMetadata[filename, contentType, textLength], top-5 candidate {playbookId, playbookCode, displayName, embeddingScore, jpsMatchingMetadata}) ` — NO file text content (ADR-015). — **Acceptance**: telemetry shows `llmRerankInvoked` count; all-clear vector-match case shows 0 LLM calls; ambiguous case shows exactly 1 LLM call ≤800ms.
+47. **FR-47**: Confidence-based top-N return — `confidenceThreshold = 0.85`, `confidenceDeltaMargin = 0.05`, `secondaryThreshold = 0.80`. Return top 3 candidates above secondaryThreshold; if fewer than 3 match, return whatever matches; if more than 3 match secondaryThreshold, top 3 by score. — **Acceptance**: unit test for each branch; integration test confirms FE receives the right payload shape.
+48. **FR-48**: User confirmation always shown — `PlaybookDispatcher.DispatchAsync` (file-aware path from FR-15) NEVER auto-executes; always emits `playbook_options` SSE event with top-N. Slash and NL paths produce identical confirmation behavior. — **Acceptance**: integration test confirms /summarize + "summarize this document" both emit `playbook_options` (no execution); FR-20 slash/NL parity test from task 115 remains green.
+
+**Chat link-buttons UX (5R-B)**
+
+49. **FR-49**: SSE event `playbook_options` carrying `{ candidates: [{ playbookId, playbookCode, displayName, confidence, reason }], libraryModalCta: true, sessionAttachmentIds: string[] }`. ADR-015 tier-1 safe: NO user message text, NO file content, NO candidate descriptions beyond displayName. — **Acceptance**: SSE event shape locked via integration test; tier-1 audit reviewer verifies no leaked content.
+50. **FR-50**: Frontend renders `playbook_options` as inline chat-message link buttons (Fluent UI v9 `Button appearance="primary"` per option); click → `POST /api/ai/playbook-dispatch/execute` with `{ playbookId, sessionAttachmentIds, originalMessage, sessionId }`. — **Acceptance**: e2e UI test renders 3 buttons, click triggers execution path; visual regression preserved.
+51. **FR-51**: "Open Library Modal" link always rendered alongside top-N buttons; click opens existing Library modal pre-filtered by `sessionAttachmentTypes` (when classification is available; otherwise unfiltered). — **Acceptance**: link click opens existing modal at expected filtered state.
+
+**Multi-node Output composition (5R-C — THE BIG ONE)**
+
+52. **FR-52**: New `NodeType.DeliverComposite` extension to `PlaybookExecutionEngine` — Output Node accepts N upstream Action node outputs keyed by `sectionName`; composes per consumer destination (workspace widget / form prefill / chat). Existing single-action Output Node behavior unchanged when only one upstream is wired. — **Acceptance**: engine unit test executes composite node with 3 action upstreams; SSE event sequence shows 3 `section_data` events keyed by section name.
+53. **FR-53**: Per-section SSE streaming — events `section_started`, `section_data` (incremental), `section_completed` keyed by section name (NOT schema position). Backward-compat: existing schema-position playbooks continue to emit `FieldDelta` until migrated per FR-58. — **Acceptance**: streaming integration test confirms section events ordered by completion (not declaration); legacy `FieldDelta` continues for unmigrated playbooks.
+54. **FR-54**: `StructuredOutputStreamWidget` rework — listens by section name, not schema position; widget hydrates a `sections: Record<string, SectionState>` map. Coordination point count drops from 5 (current: schema-on-action + schema-aware widget) to 2 (section name + section state). — **Acceptance**: widget unit test driven by `section_data` events keyed by name; UI regression test confirms backward compat for unmigrated playbooks.
+55. **FR-55**: ADR for multi-node Output composition pattern — authored at `.claude/adr/ADR-NNN-multinode-output-composition.md` and `docs/adr/ADR-NNN-multinode-output-composition.md`. Captures: (a) the 5-coordination-point frailty being replaced; (b) section-name-keyed routing rationale; (c) migration path (per-playbook incremental); (d) when to NOT use composite (e.g., chat sibling stays single-action). — **Acceptance**: ADR landed; `.claude/adr/INDEX.md` updated; `.claude/CHANGELOG.md` entry.
+
+**Session continuity + memory round-trip (5R-D)**
+
+56. **FR-56**: `ChatSession.UploadedFiles[]` invariant — files persist across multi-turn conversation without per-turn drop; no implicit eviction inside the active session TTL. — **Acceptance**: integration test uploads file, sends 5 chat turns, asserts `ChatSession.UploadedFiles.Count` unchanged; FR-26 enriched fields preserved.
+57. **FR-57**: Workspace output → AI memory — when a playbook writes to a Workspace tab, the tab content (rendered widget state, NOT raw streaming chunks) is accessible to subsequent chat turns via T2. New tool handler `get_workspace_tab_content` (read-only; reuses existing Pillar 6b `get_workspace_tab_state` plumbing) returns the composed widget state. — **Acceptance**: integration test runs `summarize-document-for-workspace`, then asks "make the summary shorter"; agent reads tab content via `get_workspace_tab_content`; subsequent turn shows modified content target.
+
+**Migration + cleanups (5R-E)**
+
+58. **FR-58**: Migrate `summarize-document-for-workspace@v1` to multi-node composition (proof point); chat sibling `summarize-document-for-chat@v1` STAYS single-action (no benefit from composition for chat). Migration is a Dataverse-data update (per architecture §11 migration path) — playbook node graph rewritten to N Action → 1 DeliverComposite Output. — **Acceptance**: migrated playbook executes end-to-end against bff-dev; section streaming produces correct widget render; chat sibling regression remains green.
+59. **FR-59**: Library modal `Cannot read properties of null (reading 'toLowerCase')` bug fix — defensive null guard in search-filter normalization; root-cause analysis in handoff doc. — **Acceptance**: e2e regression for Library modal open + search + filter passes; no console errors.
+
+#### Phase 5R FRs that SUPERSEDE Phase 5 MVP
+
+| Original FR | Original status | 5R replacement | Reason |
+|---|---|---|---|
+| FR-16 (Phase A fingerprint <50ms) | MVP-deferred | Subsumed into FR-46 hybrid path | No standalone fingerprint stage; vector match IS phase A |
+| FR-18 (Phase C reconciliation) | MVP-deferred | Replaced by FR-46 LLM rerank + FR-47 top-N return | Reconciliation logic was over-engineered; LLM rerank is simpler |
+| FR-19 (decider dispatch budget) | MVP-deferred | Folded into FR-46 acceptance criteria (~1s worst case) | Budget moves with new design |
+| Phase 5 task 118 (load test) | MVP-deferred | Replaced by `Phase5RoutingTelemetry` (FR-117 existing) + production traffic signals | Load test was infrastructure-only; signal comes from production |
+
+#### Phase 7R (revised — unchanged from original plan, dependency on Phase 5R)
+
+Phase 7 sequence stays as originally scoped — `CapabilityRouter` retirement, FE slash dict deletion, dedup test, baselines, full UAT, code review, ADR check, wrap-up. Phase 7 task 141/142 atomic deletion sequence now MUST wait until Phase 5R routing is in production (slash + NL parity verified end-to-end) — same dependency rule as original spec.
+
+#### Out of scope (5R-OOS — owner-confirmed 2026-06-24)
+
+- ❌ Card-style UI for playbook options (user wants link buttons only)
+- ❌ Draft document playbook + WorkingDocument widget (defer to R7+)
+- ❌ Edit-summary capability (defer; "next-next round")
+- ❌ Cross-session matter memory beyond what R6 task 095 already wires
+- ❌ Specialized playbook authoring beyond `summarize-document-for-workspace@v1` migration
+- ❌ Backwards-compat for schema-position playbooks beyond the migration window (will deprecate after FR-58 lands)
+
+#### Architectural principles preserved (NFR-A1 through NFR-A7 binding)
+
+All 7 architectural principles continue to bind. FR-46 LLM rerank input limited to metadata-only per NFR-A7 (ADR-015 tier-1). FR-57 workspace→memory round-trip via T2 explicit promotion per NFR-A1. FR-52 multi-node composition preserves R6 wire-not-build principle per NFR-A5 (extends `PlaybookExecutionEngine`; does not replace it). FR-54 widget rework continues citation-bearing trust model per NFR-A3.
+
 ## Scope
 
 ### In Scope
