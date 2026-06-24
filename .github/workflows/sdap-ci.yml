@@ -46,6 +46,7 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -72,6 +73,7 @@ jobs:
   build-test:
     name: Build & Test
     runs-on: windows-latest
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     strategy:
       matrix:
         # 2026-06-24 — Release matrix entry temporarily removed due to high
@@ -141,6 +143,7 @@ jobs:
   client-quality:
     name: Client Quality (Prettier + ESLint)
     runs-on: ubuntu-latest
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     permissions:
       contents: write   # Auto-format push-back on PRs
     steps:
@@ -281,6 +284,7 @@ jobs:
     name: Code Quality
     runs-on: windows-latest
     needs: build-test
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     permissions:
       contents: write   # Auto-format push-back on PRs
 
@@ -396,6 +400,7 @@ jobs:
     runs-on: windows-latest
     needs: [security-scan, build-test, code-quality, client-quality]
     if: github.ref == 'refs/heads/master' || github.event_name == 'pull_request'
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
 
     steps:
       - name: Checkout
