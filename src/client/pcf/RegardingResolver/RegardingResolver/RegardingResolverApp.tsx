@@ -7,14 +7,32 @@
  *   │  Record Type:  [ Matter  ▼ ]      [ Select Record 🔍 ]                │
  *   │                                                                        │
  *   │  ✅ Smith v. Jones (Matter)                  [ Open ]  [ ✕ Clear ]   │
- *   │                                                                        │
- *   │                                              v1.0.0                    │
  *   └────────────────────────────────────────────────────────────────────────┘
  *
  * When read-only (FR-24), the dropdown / Select Record / Clear are hidden;
  * only the selected target's clickable link is rendered.
  *
- * The component:
+ * # HOST-only usage (binding contract — R4-112 clarification 2026-06-24)
+ *
+ * Bind this PCF ONLY to entities that HOST the polymorphic regarding fields
+ * (`sprk_regardingrecordtype` lookup + `sprk_regardingrecordid` / `name` /
+ * `url` text fields + the 11 `sprk_Regarding<X>` entity-specific lookups).
+ *
+ * Currently host entities: `sprk_todo`, `sprk_communication` (FR-22).
+ *
+ * Do NOT bind to target entities (the things a To Do can be regarding):
+ * `sprk_matter`, `sprk_project`, `sprk_event`, `sprk_invoice`,
+ * `sprk_workassignment`, `sprk_budget`, `sprk_analysis`,
+ * `sprk_organization`, `contact`, `sprk_document`. These entities do NOT
+ * have the resolver fields, so a save will fail with HTTP 400
+ * "Error identified in Payload provided by the user for Entity:''".
+ *
+ * If the desired UX is "from a target record, see/create related To Dos",
+ * use the inverse direction: a To Do subgrid on the target form (1:N
+ * relationship via the `sprk_Regarding<X>` lookup).
+ *
+ * # Behavior
+ *
  *  - Renders the 11-entity picker (via TODO_REGARDING_CATALOG)
  *  - Calls `applyRegardingSelection` from the local handler on selection.
  *    That handler wraps `applyResolverFields` (ADR-024 / FR-21) — there is
@@ -24,6 +42,11 @@
  *  - Auto-seeds the picker on mount from the bound `regardingRecordType`
  *    lookup if it's already populated (mirrors AssociationResolver's
  *    "auto-detect existing parent" pattern).
+ *  - On CREATE-mode forms (formType===1, no host record id), publishes the
+ *    selection payload on `window.__sprk_regarding_pending__` so the
+ *    companion OnSave handler (`sprk_todo_regarding_presave.js`) can stage
+ *    the 4 companion fields into the form's pending-attribute buffer for
+ *    the INSERT transaction.
  */
 
 import * as React from 'react';
@@ -120,7 +143,7 @@ const useStyles = makeStyles({
 function getXrm():
   | {
       Utility?: {
-        lookupObjects: (opts: unknown) => Promise<Array<{ id: string; name: string; entityType?: string }>>;
+        lookupObjects: (opts: unknown) => Promise<{ id: string; name: string; entityType?: string }[]>;
         getGlobalContext?: () => unknown;
       };
       Navigation?: { openForm: (opts: unknown) => void };
@@ -184,7 +207,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   const hostEntity = (context.parameters.entity?.raw ?? '').trim();
 
   // Allowed regarding targets (subset of TODO_REGARDING_CATALOG).
-  const catalog = React.useMemo<ReadonlyArray<ITodoRegardingTargetCatalogEntry>>(
+  const catalog = React.useMemo<readonly ITodoRegardingTargetCatalogEntry[]>(
     () => resolveAllowedCatalog(context.parameters.regardingTargets?.raw),
     [context.parameters.regardingTargets?.raw]
   );

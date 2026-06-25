@@ -1,0 +1,80 @@
+<task id="R4-118" project="smart-todo-r4">
+  <metadata>
+    <title>NEW (2026-06-24) — Deploy sprk_wizard_commands.js + audit "Create To Do" ribbon coverage</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>tech-debt hygiene + ribbon coverage</workstream>
+    <status>not-started</status>
+    <estimated-effort>1-2 hrs</estimated-effort>
+    <tags>web-resource, ribbon, deploy, no-shims, audit</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>(none — independent of widget + resolver work)</dependencies>
+    <relevant-files>
+      <file>src/client/webresources/js/sprk_wizard_commands.js (committed, NEVER DEPLOYED to spaarkedev1)</file>
+      <file>src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml (lines 48 + 145 — Matter "Create To Do" button + command)</file>
+      <file>src/solutions/spaarke_insights/Entities/sprk_Precedent/ (sibling entity — TBD if needs same button)</file>
+      <file>scripts/Deploy-WizardCommandsJs.ps1 (existing deploy script)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+**Issue discovered during R4-110 UAT**: spaarkedev1 returns HTTP 404 on `GET /webresources/sprk_wizard_commands.js`. The Matter form's "Create To Do" command bar button is defined (RibbonDiff.xml lines 48 + 145) and points to JS function `Spaarke.Commands.Wizards.openCreateTodoWizard` in this web resource. The JS file was committed to source (v1.0.0+) but the web resource was never created in Dataverse — so clicking the button does nothing.
+
+Classic "no shims" violation per durable feedback: source-committed ≠ deployed-and-wired.
+
+This task: (a) deploy the JS web resource from master, (b) audit which parent entities have "Create To Do" ribbon buttons defined vs missing, (c) decide whether to extend ribbon coverage to other parent entities (Project, Event, Invoice, WorkAssignment, Communication) in R4 closeout OR defer to R5.
+
+**Audit findings (2026-06-24, read-only)**:
+- `src/solutions/spaarke_insights/Entities/` contains RibbonDiff.xml for: SystemUser, sprk_Matter, sprk_Precedent (only 3 entities customized).
+- Only `sprk_Matter` has a CreateTodo button defined.
+- JS handlers exist for: openCreateMatterWizard, openCreateProjectWizard, openCreateEventWizard, openCreateTodoWizard (4 handlers, no orphans).
+- Project, Event, Invoice, WorkAssignment, Communication have NO custom ribbons in `spaarke_insights` — adding "Create To Do" to them = creating new RibbonDiff entries (likely in a NEW dedicated entity-ribbon solution per `/ribbon-edit` skill's "small dedicated solution" rule).
+  </prompt>
+
+  <role>Dataverse admin (deploy) + frontend developer (ribbon XML if extending).</role>
+
+  <goal>
+1. **Verify source on master matches worktree** (`src/client/webresources/js/sprk_wizard_commands.js` should be identical — no edits needed in worktree).
+2. **Deploy the JS web resource to spaarkedev1 from master** using `scripts/Deploy-WizardCommandsJs.ps1`.
+3. **Smoke-test**: open a Matter record, click "Create To Do" command bar button, verify the CreateTodoWizard Code Page opens with Matter context (entityType=sprk_matter, entityId=&lt;matter-guid&gt;).
+4. **Decide ribbon-coverage scope with user**: do other parent entities (Project, Event, Invoice, WorkAssignment, Communication) need "Create To Do" buttons in R4 closeout, OR defer to R5? See "Decision matrix" below.
+5. If extending in R4: use `/ribbon-edit` skill — create a dedicated `MatterRibbons`-style solution per entity (NOT add to existing `spaarke_insights`), add CustomAction + CommandDefinition + LocLabels per the Matter pattern.
+6. Audit: any orphan ribbon commands referencing missing JS handlers? (Spec verified 2026-06-24: no orphans currently — all 4 openCreate*Wizard handlers exist.)
+  </goal>
+
+  <decision-matrix>
+  **Ribbon coverage scope decision (needs user input at Step 4)**:
+
+  | Option | Effort | Trade-off |
+  |---|---|---|
+  | A. Matter only (R4 closeout); defer others to R5 | 30 min deploy + 15 min UAT | Ships fast; users get "Create To Do" on Matter immediately. Other parents (Project, Event, Invoice, WorkAssignment, Communication) remain without the button — they'd use the kanban + parent-form subgrid path instead. |
+  | B. Add to all 5 other parent entities in R4 closeout | 2-3 hrs (5 new RibbonDiffs + 5 deploys) | Comprehensive UX; "Create To Do" everywhere. Risk: each new ribbon solution = solution lifecycle overhead. |
+  | C. Hybrid: add to Project + Event (highest user value) in R4; defer Invoice/WorkAssignment/Communication to R5 | 1-1.5 hrs | Balanced. |
+
+  **Recommended: A** (ship fast, validate Matter pattern works end-to-end, expand in R5 once contract is proven).
+  </decision-matrix>
+
+  <constraints>
+    <constraint source="user feedback feedback_no-shims-clean-up-dead-code">Source-committed ≠ deployed-and-wired. This task closes that gap for sprk_wizard_commands.js.</constraint>
+    <constraint source="spaarkedev1-deploy-discipline">Deploy from master only. This worktree does audit + POML updates; main repo handles the deploy.</constraint>
+    <constraint source=".claude/skills/ribbon-edit/SKILL.md">If extending ribbon coverage: NEVER add to SpaarkeCore or any large solution. Use a small dedicated entity-ribbon solution per entity. Validate all Alt attributes + ModernImage attributes on Button/FlyoutAnchor elements before import.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check + verify src/client/webresources/js/sprk_wizard_commands.js identical to master (git diff origin/master should show no changes).</step>
+    <step order="1">Switch to main repo worktree (or coordinate with whoever handles deploys from master).</step>
+    <step order="2">Run `scripts/Deploy-WizardCommandsJs.ps1` from master against spaarkedev1.</step>
+    <step order="3">Smoke-test: open Matter record → click "Create To Do" → wizard opens with entityType=sprk_matter context. Verify no 404 in console.</step>
+    <step order="4">**Ask user**: option A (Matter only) vs B (all 5) vs C (Project + Event added). Default recommendation: A.</step>
+    <step order="5a (if option A)">Skip ribbon work. Document scope decision in current-task.md.</step>
+    <step order="5b (if option B or C)">For each chosen entity: create dedicated solution via Power Apps maker portal (e.g., ProjectRibbons), add only the entity (metadata-only), export, edit RibbonDiff.xml to add CreateTodo button (clone Matter pattern), re-import via /ribbon-edit skill.</step>
+    <step order="6">Commit RibbonDiff additions (if any) to source. Deploy from master.</step>
+    <step order="7">Update R4-117 wrap-up doc with "no shims found this round: sprk_wizard_commands.js (deployed); sprk_todo_dirty_check.js (deleted in R4-113)".</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GET https://spaarkedev1.crm.dynamics.com/webresources/sprk_wizard_commands.js` returns 200 (was 404).</criterion>
+    <criterion testable="true">Matter form "Create To Do" command bar button opens the CreateTodoWizard Code Page with Matter context payload.</criterion>
+    <criterion testable="true">No orphan ribbon commands remain (all CommandDefinition.JavaScriptFunction references resolve to existing functions in the deployed JS web resource).</criterion>
+    <criterion testable="true">Scope decision (A/B/C) documented + committed to source where applicable.</criterion>
+  </acceptance-criteria>
+</task>
