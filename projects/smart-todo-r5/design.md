@@ -166,6 +166,36 @@ R4 UAT 5-6 burned multiple deploy rounds because the spaarke-prototype harness m
 
 ---
 
+## R-9 — Ribbon expansion: "Create To Do" on all parent entities (deferred from R4-118)
+
+**Surface**: parent record main forms (Project, Event, Invoice, WorkAssignment, Communication) — currently missing the command bar button. Matter has it but uses a generic OOB icon.
+
+**Background**: R4-118 (2026-06-25) deployed the underlying infrastructure (sprk_wizard_commands.js + 2 icon SVGs) but the ribbon-XML expansion was deferred for time/complexity. The R4 Matter button works today with the OOB `/_imgs/ribbon/newrecord32.png` icon. The new MS-To-Do-style icons (sprk_ToDoCheckmark16.svg + 32.svg, blue #0078D4 + white check) are deployed and ready to reference.
+
+**Scope**:
+1. Update `src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml` lines 48-50 to reference `$webresource:sprk_ToDoCheckmark32.svg` + `sprk_ToDoCheckmark16.svg` + add `ModernImage="$webresource:sprk_ToDoCheckmark32.svg"`. Re-deploy `spaarke_insights` solution.
+2. Create 5 NEW dedicated entity-ribbon solutions (per `/ribbon-edit` skill convention — small dedicated solution per entity, NOT added to spaarke_insights or SpaarkeCore):
+   - `ProjectRibbons` → sprk_project + RibbonDiff with CreateTodo button → `Spaarke.Commands.Wizards.openCreateTodoWizard`
+   - `EventRibbons` → sprk_event + RibbonDiff with CreateTodo button
+   - `InvoiceRibbons` → sprk_invoice + RibbonDiff with CreateTodo button
+   - `WorkAssignmentRibbons` → sprk_workassignment + RibbonDiff with CreateTodo button
+   - `CommunicationRibbons` → sprk_communication + RibbonDiff with CreateTodo button
+3. Each solution cloned from the Matter pattern (CustomAction + CommandDefinition + LocLabels). JS handler is shared — all 6 entities call the same `openCreateTodoWizard(primaryControl)` function which extracts entity context via `getEntityContext(primaryControl)`.
+4. Smoke-test each: open record → click "Create To Do" → wizard opens with correct entity context (entityType + entityId visible in wizard's regarding field).
+
+**Effort**: 2-3 hrs. Each solution needs maker portal creation step (5 min × 5) OR programmatic XML scaffold (15-30 min × 5 with risk of XSD validation errors per entity).
+
+**Why R5 / not R4 closeout**: Infrastructure (JS + icons) is shipped and Matter button works today. This is a polish/expansion item, not a fix. The user kanban + parent-form subgrid path (alternative entry point for creating To Dos from parent records) is functional today.
+
+**References**:
+- `projects/smart-todo-r4/tasks/118-deploy-wizard-commands-js.poml` (R4 work this expands)
+- `src/client/webresources/js/sprk_wizard_commands.js:221` (openCreateTodoWizard handler — already deployed)
+- `src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml` lines 48 + 145 (Matter template to clone)
+- `src/client/assets/icons/sprk_ToDoCheckmark16.svg` + `32.svg` (deployed icons to reference)
+- `.claude/skills/ribbon-edit/SKILL.md` (deploy workflow)
+
+---
+
 ## Out-of-scope candidates (mention only — defer to R6+)
 
 - Mobile / responsive (< 768px viewport, touch-drag for kanban, sheet modals)
