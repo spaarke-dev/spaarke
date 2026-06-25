@@ -3,7 +3,7 @@
   <metadata>
     <title>StructuredOutputStreamWidget rework to section-name-keyed</title>
     <phase>5: WP2 File-Aware Classification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>7</estimated-hours>
     <dependencies>114a</dependencies>
     <blocks>114c,118R</blocks>
