@@ -24,7 +24,7 @@
 
 | ID | Title | Status | Dependencies | Blocks | Parallel | Rigor |
 |----|-------|--------|--------------|--------|----------|-------|
-| 001 | Project setup + investigate sprk_playbookconsumer dispatch path | 🔲 | none | 002, 030 | — | STANDARD |
+| 001 | Project setup + investigate sprk_playbookconsumer dispatch path | ✅ | none | 002, 030 | — | STANDARD |
 | 002 | Add ExecutorActionType 141 = EntityNameValidator to INodeExecutor enum | 🔲 | 001 | 003, 007 | Group A | FULL |
 | 003 | Author EntityNameValidatorNodeExecutor.cs + xUnit tests | 🔲 | 002 | 007 | Group A | FULL |
 | 004 | Author EntityNameValidatorForm.tsx PlaybookBuilder property panel | 🔲 | 002 | 007 | Group A | FULL |

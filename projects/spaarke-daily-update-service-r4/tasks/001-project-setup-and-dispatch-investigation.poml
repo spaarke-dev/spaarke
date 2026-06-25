@@ -3,7 +3,9 @@
   <metadata>
     <title>Project setup + investigate sprk_playbookconsumer dispatch path</title>
     <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Decision Path A.5 recorded at notes/decisions/030-dispatch-path.md citing IConsumerRoutingService.cs:39, ConsumerTypes.cs:40, AnalysisOrchestrationService.cs:702/707/714/723, DailyBriefingEndpoints.cs:189/214/267 (well over the 3 file:line refs required by AC). MCP smoke deferred to task 030 with handoff note at notes/debug/001-mcp-smoke-deferred.md. Major finding: pure Path A using existing ExecutePlaybookAsync is structurally precluded by document-centric assumption; Path A.5 hybrid (ConsumerRoutingService routing + new non-document playbook execution method) is the recommended approach. Task 030 surveys IPlaybookService to finalize new-method placement.</completion-notes>
     <estimated-hours>3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002, 030</blocks>

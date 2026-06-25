@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (project just scaffolded) |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Run `/task-execute projects/spaarke-daily-update-service-r4/tasks/001-project-setup-and-dispatch-investigation.poml` to start PR 1 |
+| **Task** | 002 - Add ExecutorActionType 141 = EntityNameValidator to INodeExecutor enum |
+| **Step** | not-started |
+| **Status** | not-started |
+| **Next Action** | Run `/task-execute projects/spaarke-daily-update-service-r4/tasks/002-add-actiontype-141-entityname-validator-enum.poml` |
 
 ### Files Modified This Session
 - `projects/spaarke-daily-update-service-r4/README.md` - Created - Project overview + graduation criteria
