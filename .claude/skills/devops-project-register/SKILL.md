@@ -22,7 +22,7 @@ last-reviewed: 2026-06-23
 
 ## Purpose
 
-Inverse direction of `/devops-project-start`. For an *existing* worktree/folder without a Project Issue, create the Project Issue and populate fields from local state (Worktree Path, Project Folder, Task Count, Tasks Completed, Project Status).
+Inverse direction of `/devops-project-start`. For an *existing* worktree/folder without a Project Issue, create the Project Issue and populate fields from local state (Worktree Path, Project Folder, Task Count, Tasks Completed, Status).
 
 Phase 3 backfill of `spaarke-devops-project-tracking-r1` calls this skill for each active worktree (~20–30 projects).
 
@@ -56,7 +56,7 @@ Query: is there already a Project Issue for this folder? Check via:
 
 If found, report no-op + return Issue URL.
 
-### Step 3: Compute Project Status heuristic
+### Step 3: Compute Status heuristic
 
 ```
 IF tasks_completed == task_count AND task_count > 0:
@@ -133,7 +133,7 @@ gh project item-add 2 --owner spaarke-dev --url <url> --format json
 # - Project Folder = projects/<name>
 # - Task Count = <count>
 # - Tasks Completed = <completed>
-# - Project Status = <heuristic from Step 3>
+# - Status = <heuristic from Step 3>
 # - Start Date = <folder-creation date from Step 1, as YYYY-MM-DD>
 
 # Set Parent issue = Epic #E (use REST API sub_issues endpoint with -F integer flag for typed parameter)
@@ -169,7 +169,7 @@ Project registered: #N at <url>
   Worktree Path: <path>
   Task Count: <count>
   Tasks Completed: <completed>
-  Project Status: <status>
+  Status: <status>
   Parent Epic: #E
 ```
 
@@ -186,7 +186,7 @@ Project registered: #N at <url>
 | Folder doesn't exist | Wrong path | Provide correct `--from-folder` |
 | `--epic <#E>` missing | D-12 enforcement | Provide `--epic`; re-run |
 | Folder already registered | Re-run after success | Idempotent — reports current state, returns Issue URL |
-| Cannot compute Project Status | Worktree missing, no PR, no commits | Falls back to `Planned`; user can manually adjust |
+| Cannot compute Status | Worktree missing, no PR, no commits | Falls back to `Planned`; user can manually adjust |
 | `spec.md` absent | Brand-new folder | Skill registers with placeholder summary; user runs `/design-to-spec` later |
 | Task Count != ls *.poml | Stale POMLs in tasks/ | Skill counts files; user can re-sync via `/devops-project-sync` |
 

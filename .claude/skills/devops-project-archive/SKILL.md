@@ -1,5 +1,5 @@
 ---
-description: Archive a completed or cancelled project — set Project Status, capture counts, close Issue, DELETE worktree, retain folder + .archived marker. DESTRUCTIVE. Per FR-14 + D-18 + NFR-09 of spaarke-devops-project-tracking-r1.
+description: Archive a completed or cancelled project — set Status, capture counts, close Issue, DELETE worktree, retain folder + .archived marker. DESTRUCTIVE. Per FR-14 + D-18 + NFR-09 of spaarke-devops-project-tracking-r1.
 tags: [devops, project-archive, destructive, worktree-delete, gh-cli, git]
 techStack: [gh-cli, graphql, git, python]
 appliesTo: ["/devops-project-archive", "archive project", "close project"]
@@ -30,7 +30,7 @@ The `projects/{name}/` folder is RETAINED with a new `.archived` marker file per
 ## Purpose
 
 Close out a project cleanly:
-1. Set `Project Status` field (Completed or Cancelled)
+1. Set `Status` field (Completed or Cancelled)
 2. Capture final `Task Count` / `Tasks Completed` values (via `/devops-project-sync`)
 3. Close the GitHub Issue with appropriate state (`Status=Done` or label `cancelled`)
 4. Delete the local git worktree via `git worktree remove`
@@ -99,7 +99,7 @@ Invoke `/devops-project-sync` to capture latest field values (Task Count, Tasks 
 
 ### Step 5: Update Issue fields + close
 
-- Set `Project Status` field to `Completed` or `Cancelled` (per --status)
+- Set `Status` field to `Completed` or `Cancelled` (per --status)
 - **Set `Closed Date` field** (field ID: `PVTF_lAHODW0Pv84BEgWuzhWYfL4`, type DATE):
   - If `--pr-number #M` provided: use the PR's merge date (`gh pr view #M --json mergedAt --jq .mergedAt`, take the date prefix YYYY-MM-DD). This is the truest "actual end".
   - Else: use today's date.
@@ -139,7 +139,7 @@ Per NFR-09 — folder + `.archived` survive; worktree gone; remote branch preser
 
 ```
 Archived project: projects/{name}/
-  Issue #N closed (Project Status=Completed)
+  Issue #N closed (Status=Completed)
   Worktree c:/code_files/spaarke-wt-{slug} removed
   .archived marker written
   Remote branch work/{slug} preserved on origin
@@ -149,7 +149,7 @@ Archived project: projects/{name}/
 
 - Worktree deleted (irreversible without re-clone)
 - `projects/{name}/.archived` marker file
-- Issue #N closed with Project Status=Completed or Cancelled
+- Issue #N closed with Status=Completed or Cancelled
 - 1 line confirmation
 
 ## Failure Modes

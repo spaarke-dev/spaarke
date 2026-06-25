@@ -42,7 +42,7 @@ query {
           content { ... on Issue { number title url } }
           fieldValues(first: 30) {
             nodes {
-              # Extract: Type, Project Type, Project Status, Parent issue, Task Count, Tasks Completed
+              # Extract: Type, Project Type, Status, Parent issue, Task Count, Tasks Completed
             }
           }
         }
