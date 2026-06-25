@@ -435,7 +435,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 114b | **NEW (5R)**: `StructuredOutputStreamWidget` rework — section-name-keyed renderer; backward compat for unmigrated playbooks — FR-54 | 🔲📄 | FULL | true | 5-C | 114a | `frontend`, `react`, `widget` |
 | 114c | **NEW (5R)**: ADR for multi-node Output composition pattern (`.claude/adr/` + `docs/adr/` + INDEX + CHANGELOG) — FR-55 | 🔲📄 | STANDARD | false | 5-C | 114b | `documentation`, `adr`, `main-session-only` |
 | 115 | Integrate `commandIntent` (intentHint) as vector-query bias in Phase B composition — FR-20 | ✅ | FULL | true | 5-B | 112 | `bff-api`, `services` |
-| 116 | Remove `SoftSlashIntentToCapabilityName` dict (FE + BE) — FR-20 (cleanup) | 🔲📝 | FULL | true | 5-E | 115,118R | `bff-api`, `frontend`, `refactoring` |
+| 116 | Remove `SoftSlashIntentToCapabilityName` dict (FE + BE) — FR-20 (cleanup) | ✅ | FULL | true | 5-E | 115,118R | `bff-api`, `frontend`, `refactoring` |
 | 117 | Routing telemetry instrumentation (ADR-015 tier-1 safe) — FR-117 baseline + new FR-46/47/48 telemetry tags | 🔲📝 | STANDARD | true | 5-F | 117b | `bff-api`, `telemetry`, `ADR-015` |
 | 117a | **NEW (5R)**: `playbook_options` SSE event contract — payload `{candidates[], libraryModalCta, sessionAttachmentIds, rerankInvoked, rerankReason}` tier-1 safe — FR-49 | ✅ | FULL | false | 5-D | 113R | `bff-api`, `streaming`, `contract`, `ADR-015` |
 | 117b | **NEW (5R)**: FE renders top-N as inline chat link buttons + "Open Library Modal" link; click → execute playbook with same session attachments — FR-50 + FR-51 | 🔲📄 | FULL | true | 5-D | 117a,110a | `frontend`, `react`, `fluent-ui-v9` |

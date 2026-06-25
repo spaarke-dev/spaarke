@@ -2657,18 +2657,16 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// </param>
 /// <param name="IntentHint">
 /// Optional closed-vocabulary soft-slash hint emitted by the frontend
-/// `SoftSlashRouter.decorateBody()`. When non-null and recognised (one of:
-/// "summarize", "draft", "extract-entities", "analyze"), the BFF `CapabilityRouter`
-/// Layer 0.5 pre-pass short-circuits to a Confident result selecting the synthetic
-/// capability for that intent. Default null preserves backwards compatibility — clients
-/// that omit the field route via the existing Layer 1 keyword path (NFR-11).
+/// `SoftSlashRouter.decorateBody()` (`summarize` / `draft` / `extract-entities`
+/// / `analyze`). As of Phase 5R task 116 / FR-20 the BFF `CapabilityRouter`
+/// IGNORES this hint (the dict-based Layer 0.5 pre-pass was removed); the same
+/// hint biases the PlaybookDispatcher Phase B per-file vector query (task 115)
+/// so slash + natural-language flows converge on the SAME path. Default null
+/// preserves backwards compatibility.
 /// ADR-015 audit: this is a closed-vocabulary identifier, NEVER raw user message text.
 ///
 /// Wire-format field: <c>intentHint</c> (renamed from <c>commandIntent</c> per
-/// chat-routing-redesign-r1 FR-07 / task 022). Phase 5 task 115 will additionally
-/// wire this field as a vector-query bias parameter to Phase B classification; this
-/// task only renames the field — semantics remain pass-through to `CapabilityRouter`
-/// Layer 0.5.
+/// chat-routing-redesign-r1 FR-07 / task 022).
 /// </param>
 public record ChatSendMessageRequest(
     string Message,

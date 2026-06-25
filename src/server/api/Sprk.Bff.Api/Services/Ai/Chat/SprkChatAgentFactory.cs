@@ -163,14 +163,13 @@ public class SprkChatAgentFactory
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="intentHint">
     /// Optional closed-vocabulary soft-slash hint emitted by the frontend
-    /// `SoftSlashRouter.decorateBody()`. When non-null AND recognised (one of:
-    /// "summarize", "draft", "extract-entities", "analyze"),
-    /// CapabilityRouter Layer 0.5 short-circuits to a Confident result selecting
-    /// the synthetic capability for that intent — biasing the LLM toward the
-    /// matching playbook / handler on FIRST try. Default null preserves backward
-    /// compatibility — pre-R6 callers (tests + legacy paths) skip the pre-pass.
-    /// Wire-format field renamed `commandIntent` → `intentHint` per
-    /// chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
+    /// `SoftSlashRouter.decorateBody()` (`summarize` / `draft` /
+    /// `extract-entities` / `analyze`). Threaded into `CapabilityRouter.RouteAsync`
+    /// for interface stability but as of Phase 5R task 116 / FR-20 the router
+    /// itself IGNORES the hint — the dict-based Layer 0.5 short-circuit has
+    /// been removed. The same hint biases the PlaybookDispatcher Phase B
+    /// vector query downstream (task 115), where the slash + natural-language
+    /// flows converge. Default null preserves backward compatibility.
     /// </param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -453,13 +452,14 @@ public class SprkChatAgentFactory
                     ? context.PlaybookId.Value.ToString("N")
                     : null;
 
-                // R6 Pillar 8 / task 082 / FR-50: pass the soft-slash `intentHint`
-                // (when supplied by the frontend `SoftSlashRouter`) so Layer 0.5 can
-                // short-circuit to the deterministic capability for the four soft
-                // slashes. Null in the common path (natural language, hard slashes,
-                // unrecognised slashes) preserves NFR-11 backward compat — Layer 1
-                // keyword scoring runs unchanged. Wire-format field renamed from
-                // `commandIntent` per chat-routing-redesign-r1 FR-07 / task 022.
+                // Phase 5R task 116 / FR-20: the soft-slash `intentHint` is still
+                // threaded through to `CapabilityRouter.RouteAsync` for interface
+                // stability, but the router now IGNORES it (the dict-based Layer 0.5
+                // pre-pass was removed). The same hint biases the PlaybookDispatcher
+                // Phase B vector query downstream (task 115), so the slash + natural-
+                // language flows converge on the same path. Null in the common path
+                // (NL, hard slashes, unrecognised slashes) preserves NFR-11 backward
+                // compat — Layer 1 keyword scoring still runs unchanged for NL.
                 routingResult = await _capabilityRouter
                     .RouteAsync(latestUserMessage, activePlaybookName, cancellationToken, intentHint)
                     .ConfigureAwait(false);

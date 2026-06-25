@@ -24,14 +24,13 @@ public interface ICapabilityRouter
     /// <param name="activePlaybookName">Optional active playbook name for bias.</param>
     /// <param name="intentHint">
     /// Optional closed-vocabulary soft-slash hint emitted by the frontend
-    /// `SoftSlashRouter.decorateBody()`. When non-null AND recognised (one of:
-    /// "summarize", "draft", "extract-entities", "analyze"), a Layer-0.5
-    /// deterministic pre-pass short-circuits to a Confident result selecting
-    /// the synthetic capability for that intent.
-    /// Default null preserves backward compatibility — pre-R6 callers (tests +
-    /// legacy code paths) skip the pre-pass entirely.
-    /// Wire-format field renamed `commandIntent` → `intentHint` per
-    /// chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
+    /// `SoftSlashRouter.decorateBody()` (`summarize` / `draft` /
+    /// `extract-entities` / `analyze`). Retained for interface stability but
+    /// IGNORED by the router as of Phase 5R task 116 / FR-20: the dict-based
+    /// Layer 0.5 pre-pass has been removed because the same hint now biases
+    /// the PlaybookDispatcher Phase B vector query (task 115) — slash and
+    /// natural-language flows converge on the SAME path.
+    /// Default null preserves backward compatibility for tests + legacy callers.
     /// </param>
     CapabilityRoutingResult RouteSync(string userMessage, string? activePlaybookName, string? intentHint = null);
 
@@ -44,9 +43,9 @@ public interface ICapabilityRouter
     /// <param name="activePlaybookName">Optional active playbook name for bias.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="intentHint">
-    /// Optional soft-slash hint; see <see cref="RouteSync"/>. Default null preserves
-    /// backward compatibility. Wire-format field renamed `commandIntent` → `intentHint`
-    /// per chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
+    /// Optional soft-slash hint; see <see cref="RouteSync"/>. Retained for interface
+    /// stability but IGNORED by the router (Phase 5R task 116 / FR-20). The same
+    /// hint biases the PlaybookDispatcher Phase B vector query downstream.
     /// </param>
     Task<CapabilityRoutingResult> RouteAsync(
         string userMessage,
