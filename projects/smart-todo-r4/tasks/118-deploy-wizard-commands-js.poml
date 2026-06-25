@@ -1,10 +1,21 @@
 <task id="R4-118" project="smart-todo-r4">
   <metadata>
-    <title>NEW (2026-06-24) — Deploy sprk_wizard_commands.js + audit "Create To Do" ribbon coverage</title>
+    <title>NEW (2026-06-24) — Deploy sprk_wizard_commands.js + audit "Create To Do" ribbon coverage (PARTIAL — ribbon expansion deferred to R5)</title>
     <phase>Closeout (UAT round 14)</phase>
     <workstream>tech-debt hygiene + ribbon coverage</workstream>
-    <status>not-started</status>
-    <estimated-effort>3-5 hrs (was 1-2; expanded per user 2026-06-24 to option B — all 6 parent entities + icon)</estimated-effort>
+    <status>partial-completion — JS + icons deployed; Matter icon swap + 5 new entity ribbons deferred to R5 (user decision 2026-06-25)</status>
+    <completion-2026-06-25>
+      Done this session (master @ 5b7a62812):
+      - sprk_wizard_commands.js deployed via Deploy-WizardCommandsJs.ps1 (UPDATE on webresourceid e03039e0-d523-f111-88b5-7c1e520aa4df + published). Matter "Create To Do" button now functional (with current generic OOB icon).
+      - sprk_ToDoCheckmark16.svg + sprk_ToDoCheckmark32.svg created on spaarkedev1 (webresourceids be028483-9370-f111-ab0e-7ced8ddc4a05 + e5de459a-9370-f111-ab0e-7ced8ddc4cc6). Ready for future ribbon references.
+
+      Deferred to R5 (per user 2026-06-25 — complexity/time):
+      - Matter ribbon icon swap (update src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml lines 48-50 to use $webresource:sprk_ToDoCheckmark32.svg + redeploy spaarke_insights solution)
+      - 5 new entity ribbons (Project, Event, Invoice, WorkAssignment, Communication) — each needs dedicated solution per /ribbon-edit skill; cloning the Matter pattern. Estimated 2-3 hrs.
+
+      User UAT verification: open a Matter record → click "Create To Do" command bar button → wizard should now open with Matter context (entityType=sprk_matter, entityId=&lt;matter-guid&gt;) — no more 404.
+    </completion-2026-06-25>
+    <estimated-effort>1-2 hrs of original scope COMPLETED; remaining 2-3 hrs (ribbon expansion) deferred to R5</estimated-effort>
     <tags>web-resource, ribbon, deploy, no-shims, audit</tags>
     <parallel-safe>true</parallel-safe>
     <dependencies>(none — independent of widget + resolver work)</dependencies>
