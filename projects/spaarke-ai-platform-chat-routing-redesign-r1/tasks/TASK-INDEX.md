@@ -190,7 +190,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | **7-C** | 142 | 7-B ✅ | Remove `SoftSlashRouter.SOFT_SLASH_TO_INTENT` dict from frontend (single agent) |
 | **7-D** | 143 ✅ | 7-C ✅ | Q20 binding test — FR-24 dedup semantics preserved (10/10 tests pass; sanity-check confirms gate has teeth — 6 positive tests fail when dedup disabled) |
 | **7-E** | 144 ✅, 145 ✅ | 7-D ✅ | BFF publish-size net reduction + Insights regression suite (parallel verifications) |
-| **7-F** | 147, 148 | 7-E ✅ | **Final code-review + adr-check (parallel — BEFORE UAT)** — CRIT-7 fix |
+| **7-F** | 147 ✅, 148 ✅ | 7-E ✅ | **Final code-review + adr-check (parallel — BEFORE UAT)** — CRIT-7 fix (148 ✅ 2026-06-25 — 12/12 ADRs PASS, 6/6 special-case PASS, 0 CRITICAL, 1 MINOR backlog; 147 ✅ 2026-06-25 — Tier-1/2/3 review, 0 CRITICAL, 3 MAJOR (1 fixed in-line + 2 deferred), 6 MINOR (1 fixed in-line + 5 R7), exit-0 PASS for UAT) |
 | **7-G** | 146 | 7-F ✅ | Full UAT regression — T-001 through T-009 (after quality gates validate the build) |
 | **7-H** | 150 | 7-G ✅ | **Project wrap-up (mandatory)** — synthesize lessons-learned; R7 backlog; status flips |
 
@@ -472,8 +472,8 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 143 | Q20 binding test — CapabilityRouter dedup semantics preserved through new dispatcher | ✅ | STANDARD | false | 7-D | 142 | `testing`, `regression`, `binding-invariant` |
 | 144 | BFF publish-size net reduction verification (expect NET REDUCTION from WP4 deletion) | ✅ | MINIMAL | true | 7-E | 143 | `verification`, `ADR-029`, `NFR-01` |
 | 145 | Insights Engine regression suite — verify all binding-NEGATIVE components unchanged | ✅ | STANDARD | true | 7-E | 143 | `testing`, `regression`, `architecture-binding` |
-| 147 | Final code-review pass across project surface (`/code-review`) | 🔲📝 | STANDARD | true | 7-F | 144,145 | `quality-gate` |
-| 148 | Final adr-check pass across project surface (`/adr-check`) | 🔲📝 | STANDARD | true | 7-F | 144,145 | `quality-gate` |
+| 147 | Final code-review pass across project surface (`/code-review`) | ✅ | STANDARD | true | 7-F | 144,145 | `quality-gate` |
+| 148 | Final adr-check pass across project surface (`/adr-check`) | ✅ | STANDARD | true | 7-F | 144,145 | `quality-gate` |
 | 146 | Full UAT regression — T-001 through T-009 from spec.md Success Criteria — **AFTER quality gates** | 🔲📝 | STANDARD | false | 7-G | 147,148 | `testing`, `e2e-test`, `uat` |
 | 150 | **Project Wrap-up (mandatory)** — synthesize lessons-learned + R7 backlog + status flips | 🔲📝 | FULL | false | 7-H | 146 | `wrap-up`, `documentation`, `lessons-learned` |
 

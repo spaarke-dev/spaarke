@@ -142,12 +142,24 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
 
     /// <summary>
     /// Returns the stable prefix from cache when the playbook context matches,
-    /// or builds and caches a fresh one. Cache key varies per playbook so each
-    /// playbook context produces its own cached prefix.
+    /// or builds and caches a fresh one. Cache key varies per playbook AND per tenant
+    /// so each tenant's prefix (which embeds a `Data isolation` notice with the
+    /// `TenantId`) does NOT leak across tenants in the shared singleton cache.
     /// </summary>
+    /// <remarks>
+    /// Task 147 code-review fix (chat-routing-redesign-r1, 2026-06-25):
+    /// previously the cache key was only `ActivePlaybookName ?? "_default_"`. Because
+    /// the persona section embeds <see cref="OrchestratorPromptContext.TenantId"/>
+    /// verbatim via <see cref="AppendStandingInstructions"/>, the FIRST tenant's
+    /// TenantId would persist in the cached string and leak into every subsequent
+    /// tenant's system prompt — a tenant-isolation violation. Adding TenantId to the
+    /// cache key keeps prefixes per-tenant (and per-playbook).
+    /// </remarks>
     private (string Prefix, bool CacheHit) GetOrBuildPrefix(OrchestratorPromptContext context)
     {
-        var cacheKey = context.ActivePlaybookName ?? NoPlaybookCacheKey;
+        var playbookKey = context.ActivePlaybookName ?? NoPlaybookCacheKey;
+        var tenantKey = string.IsNullOrWhiteSpace(context.TenantId) ? NoPlaybookCacheKey : context.TenantId;
+        var cacheKey = $"{tenantKey}|{playbookKey}";
 
         if (_prefixCache.Get(cacheKey) is string cached)
             return (cached, true);

@@ -166,12 +166,13 @@ public sealed class IntentRerankerService : IIntentRerankerService
         }
         catch (OperationCanceledException)
         {
-            // The CALLER may have cancelled too — distinguish via timeoutCts.
-            // Either way, the FR-46 contract is to graceful-degrade, not throw.
+            // The CALLER may have cancelled too — either case graceful-degrades to the
+            // same `timeout-graceful-degrade` reason per FR-46. The conditional that
+            // previously distinguished the two cases collapsed to a single value during
+            // the FR-46 wording sweep; the inline ternary was retained as dead code and
+            // simplified during task 147 code review (2026-06-25).
             sw.Stop();
-            var reason = timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested
-                ? "timeout-graceful-degrade"
-                : "timeout-graceful-degrade";
+            const string reason = "timeout-graceful-degrade";
             _logger.LogWarning(
                 "IntentRerankerService: rerank timed out after {LatencyMs}ms (budget={BudgetMs}ms, " +
                 "candidateCount={CandidateCount}) — falling back to top-3-by-confidence",
