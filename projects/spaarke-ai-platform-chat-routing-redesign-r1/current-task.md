@@ -14,8 +14,10 @@
 | **Branch state** | After Phase 1R POML commit: 5 commits ahead of origin/master `8579d6536`. **Working tree clean.** Pushing now. |
 | **Phase status** | Phase 0/1/2-partial/3/4-MVP ✅ shipped to bff-dev. **Phase 5R + Phase 1R spec + TASK-INDEX + 18 new POMLs locked in. Ready for W1 parallel execution.** |
 | **Deployed state** | BFF master deployed; SpaarkeAi Code Page master deployed; Dataverse `RECALL-SESSION-FILE` row seeded; `Workspace__MatterPreFillPlaybookId` env var set |
-| **Owner action pending** | Owner creates `sprk_playbookconsumer` table per FR-1R-01 (8 columns + alternate key + audit + change-tracking). Task 028 is a HARD GATE that verifies the table contract; downstream Phase 1R tasks (028a–028e) block until 028 passes. |
-| **Next Action** | **W1 parallel: R6 task 095 + Phase 7 task 144/145 baselines + 110a library modal fix.** Phase 1R waits on owner table creation; once 028 gate passes, 028a–028e can start. |
+| **Active Task** | **028a — `IConsumerRoutingService` impl** ✅ DONE 2026-06-24 — 5 files, 39 tests pass, 0 MB publish delta |
+| **Next Task** | **028b — `Seed-PlaybookConsumers.ps1`** (STANDARD rigor; UPSERT remaining 4 records using current env-var GUIDs) — UNBLOCKED |
+| **Owner action pending** | Optional: set `sprk_environment = '*'` explicitly on the 2 existing seed records (null/empty handled defensively by 028a). |
+| **Next Action** | Begin 028b execution. After 028b lands: 028c+028d in parallel, then 028e exit gate. |
 
 ### Critical context (3-sentence version)
 
