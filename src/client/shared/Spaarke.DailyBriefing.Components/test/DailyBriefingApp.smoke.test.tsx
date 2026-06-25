@@ -283,9 +283,7 @@ describe('DailyBriefingApp (smoke)', () => {
     //   3. "Keep on briefing for 7 more days"      (CalendarAddRegular)
     expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /remove from briefing/i })).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: /keep on briefing for 7 more days/i })
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /keep on briefing for 7 more days/i })).toBeInTheDocument();
 
     // ADR-024 regression-free: existing "Add to To Do" button still renders.
     expect(screen.getByRole('button', { name: /add to to do/i })).toBeInTheDocument();

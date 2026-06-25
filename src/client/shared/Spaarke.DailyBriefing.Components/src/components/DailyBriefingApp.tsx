@@ -170,13 +170,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // We compose toast dispatch + optimistic-removal local state below (see the
   // `handleCheck` / `handleRemove` / `handleKeep` callbacks). The existing
   // `markAsRead` is preserved for ADR-024 ("Add to To Do" auto-mark-read).
-  const {
-    markAsRead,
-    markChecked,
-    markRemoved,
-    extendTtl,
-    refresh: actionsRefresh,
-  } = useBriefingActions(webApi);
+  const { markAsRead, markChecked, markRemoved, extendTtl, refresh: actionsRefresh } = useBriefingActions(webApi);
 
   // R3 task 031 — optimistic-UI ledger for the 3 new per-item actions.
   //
