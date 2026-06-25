@@ -1,7 +1,10 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -85,8 +88,33 @@ public sealed class PlaybookDispatcher
     private readonly IChatClient _executionClient;
     private readonly INodeService _nodeService;
     private readonly IDistributedCache _cache;
+    private readonly IMemoryCache _memoryCache;
     private readonly ILogger _logger;
     private readonly string _tenantId;
+
+    /// <summary>
+    /// Lazy-initialised default <see cref="IMemoryCache"/> for Phase B per-file
+    /// candidate caching when callers do not supply one. Mirrors the precedent set
+    /// by <see cref="PublicContracts.ConsumerRoutingService"/> and
+    /// <see cref="PlaybookLookupService"/>: an in-process 5-min TTL cache for
+    /// query-result memoisation (ADR-014). Single shared instance avoids each
+    /// per-tenant dispatcher allocating its own bag.
+    /// </summary>
+    private static readonly Lazy<IMemoryCache> DefaultMemoryCache =
+        new(() => new MemoryCache(new MemoryCacheOptions()));
+
+    /// <summary>
+    /// Phase B per-file top-K cache TTL (chat-routing-redesign-r1 FR-17 v2, ADR-014).
+    /// </summary>
+    private static readonly TimeSpan PhaseBCacheTtl = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Maximum number of characters of <see cref="ChatMessageAttachment.TextContent"/>
+    /// included in the per-file query for the manifest-absent vector path. Long enough
+    /// to bias the embedder toward the file's content, short enough to keep total
+    /// embed-input under text-embedding-3-large's 8K-token ceiling.
+    /// </summary>
+    private const int PhaseBTextPrefixCharLimit = 2_000;
 
     /// <summary>
     /// Initializes a new instance of <see cref="PlaybookDispatcher"/>.
@@ -123,7 +151,8 @@ public sealed class PlaybookDispatcher
         INodeService nodeService,
         IDistributedCache cache,
         string tenantId,
-        ILogger<PlaybookDispatcher> logger)
+        ILogger<PlaybookDispatcher> logger,
+        IMemoryCache? memoryCache = null)
     {
         _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
         _executionClient = executionClient ?? throw new ArgumentNullException(nameof(executionClient));
@@ -131,6 +160,7 @@ public sealed class PlaybookDispatcher
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _memoryCache = memoryCache ?? DefaultMemoryCache.Value;
     }
 
     /// <summary>
@@ -318,6 +348,342 @@ public sealed class PlaybookDispatcher
             AiConcurrencyLimiter.Release();
         }
     }
+
+    #region Phase B — Per-file Vector Match (FR-17 v2 / task 112)
+
+    /// <summary>
+    /// Per-file Hybrid C Phase B classifier (chat-routing-redesign-r1 FR-17 v2, task 112).
+    /// Performs a per-attachment vector match against the <c>playbook-embeddings</c>
+    /// index in parallel, returning the top-K candidate playbooks for each file
+    /// independently. The caller (task 113R top-N selector) reconciles cross-file
+    /// disagreements.
+    /// </summary>
+    /// <param name="userMessage">The user's natural-language turn message. Composed
+    /// into the per-file query for the manifest-absent path so the embedding picks
+    /// up user intent in addition to file content.</param>
+    /// <param name="attachments">Per-turn attachment list (must be non-empty — empty
+    /// or null returns an empty result array).</param>
+    /// <param name="sessionFiles">
+    /// Optional matching <see cref="ChatSessionFile"/> entries (one per attachment,
+    /// aligned by index OR by <c>FileId</c>). When an entry's
+    /// <see cref="ChatSessionFile.ClassifiedDocType"/> is non-null, that file uses
+    /// the <b>manifest-present</b> path: a structured <c>documentTypes</c> pre-filter
+    /// against <c>playbook-embeddings</c>. When the entry is null or the doc-type is
+    /// null, the file falls through to the <b>manifest-absent</b> path: a per-file
+    /// composed query <c>"{userMessage} | Document: {filename} | Type hint: {contentType} | Content: {textPrefix}"</c>.
+    /// MVP scope: Phase 4b classification is deferred so the manifest-absent path is
+    /// the production path; the manifest-present path is forward-compat scaffolding.
+    /// </param>
+    /// <param name="topK">Per-file top-K (defaults to 5). The caller picks final N.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Array of per-file results, ordered to match <paramref name="attachments"/>.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Caching (ADR-014)</b>: results are memoised in <see cref="IMemoryCache"/>
+    /// with a 5-min absolute TTL. Cache key is tenant-scoped:
+    /// <c>$"phaseb:{_tenantId}:mfpresent:{hash(message)}:{classifiedDocType}"</c>
+    /// for the manifest-present path and
+    /// <c>$"phaseb:{_tenantId}:mfabsent:{hash(message|filename|contentType|prefix)}"</c>
+    /// for the manifest-absent path. Hash is SHA-256 over UTF-8 bytes (deterministic
+    /// across processes) — first 32 hex chars only (collision-safe within tenant scope
+    /// and over a 5-min window).
+    /// </para>
+    /// <para>
+    /// <b>Telemetry (ADR-015 tier 1)</b>: per-file latency, total latency, file count,
+    /// manifest-present flag, and per-file top-K count are logged at Information level.
+    /// Query text, file content, embedding values, and classifier confidence are NEVER
+    /// logged.
+    /// </para>
+    /// <para>
+    /// <b>Performance budgets (FR-17 v2)</b>: manifest-present path p95 ≤100ms (filter
+    /// overhead only — single embedding call + pre-filtered search); manifest-absent
+    /// path ≤300ms for 3 files (parallel fan-out — bounded by slowest embedding+search).
+    /// Total dispatch budget remains 2s per FR-19 (<see cref="TotalTimeout"/>).
+    /// </para>
+    /// </remarks>
+    public async Task<PhaseBPerFileResult[]> RunPhaseBVectorMatchAsync(
+        string userMessage,
+        IReadOnlyList<ChatMessageAttachment> attachments,
+        IReadOnlyList<ChatSessionFile?>? sessionFiles = null,
+        int topK = 5,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userMessage, nameof(userMessage));
+        ArgumentNullException.ThrowIfNull(attachments);
+
+        if (attachments.Count == 0)
+        {
+            return Array.Empty<PhaseBPerFileResult>();
+        }
+
+        var totalStopwatch = Stopwatch.StartNew();
+
+        // Pair each attachment with its matching session-file entry (by index — the
+        // attachments are turn-scoped and arrive in caller-supplied order; session
+        // files are the corresponding upload manifest entries).
+        var pairings = new List<(ChatMessageAttachment Attachment, ChatSessionFile? SessionFile)>(attachments.Count);
+        for (var i = 0; i < attachments.Count; i++)
+        {
+            var sessionFile = sessionFiles is not null && i < sessionFiles.Count
+                ? sessionFiles[i]
+                : null;
+            pairings.Add((attachments[i], sessionFile));
+        }
+
+        // Parallel fan-out per ADR-016 (no per-file semaphore — the AI concurrency
+        // limiter on DispatchAsync is the upstream bound; Phase B is invoked under
+        // that umbrella by the caller in task 113R).
+        var manifestPresentCount = 0;
+        var tasks = pairings.Select(async pair =>
+        {
+            var fileStopwatch = Stopwatch.StartNew();
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(pair.SessionFile?.ClassifiedDocType))
+                {
+                    Interlocked.Increment(ref manifestPresentCount);
+                    var candidates = await RunPhaseBManifestPresentAsync(
+                        userMessage,
+                        pair.SessionFile.ClassifiedDocType,
+                        topK,
+                        cancellationToken);
+                    fileStopwatch.Stop();
+                    return new PhaseBPerFileResult(
+                        FileId: pair.SessionFile.FileId,
+                        Filename: pair.Attachment.Filename,
+                        ManifestPresent: true,
+                        Candidates: candidates,
+                        LatencyMs: fileStopwatch.ElapsedMilliseconds);
+                }
+                else
+                {
+                    var candidates = await RunPhaseBManifestAbsentAsync(
+                        userMessage,
+                        pair.Attachment,
+                        topK,
+                        cancellationToken);
+                    fileStopwatch.Stop();
+                    return new PhaseBPerFileResult(
+                        FileId: pair.SessionFile?.FileId,
+                        Filename: pair.Attachment.Filename,
+                        ManifestPresent: false,
+                        Candidates: candidates,
+                        LatencyMs: fileStopwatch.ElapsedMilliseconds);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Per-file failure must not poison the whole fan-out; log + return
+                // an empty-candidates entry so the caller (113R) can decide on
+                // graceful degradation.
+                fileStopwatch.Stop();
+                _logger.LogWarning(ex,
+                    "PlaybookDispatcher Phase B: per-file vector match failed " +
+                    "(fileId={FileId}, contentType={ContentType}, elapsedMs={ElapsedMs})",
+                    pair.SessionFile?.FileId ?? "(no-manifest)",
+                    pair.Attachment.ContentType,
+                    fileStopwatch.ElapsedMilliseconds);
+                return new PhaseBPerFileResult(
+                    FileId: pair.SessionFile?.FileId,
+                    Filename: pair.Attachment.Filename,
+                    ManifestPresent: pair.SessionFile?.ClassifiedDocType is not null,
+                    Candidates: Array.Empty<PlaybookSearchResult>(),
+                    LatencyMs: fileStopwatch.ElapsedMilliseconds);
+            }
+        });
+
+        var results = await Task.WhenAll(tasks);
+
+        totalStopwatch.Stop();
+
+        // ADR-015 tier-1 telemetry: counts + latency only. No query content, file
+        // content, embedding values, or classifier confidence ever leaves the process
+        // via the log pipeline.
+        var perFileLatencies = string.Join(",", results.Select(r => r.LatencyMs));
+        var topKCount = results.Sum(r => r.Candidates.Count);
+        _logger.LogInformation(
+            "PlaybookDispatcher Phase B: filesCount={FilesCount} manifestPresent={ManifestPresent} " +
+            "perFileLatencyMs=[{PerFileLatencyMs}] totalLatencyMs={TotalLatencyMs} topKCount={TopKCount}",
+            results.Length,
+            manifestPresentCount > 0,
+            perFileLatencies,
+            totalStopwatch.ElapsedMilliseconds,
+            topKCount);
+
+        return results;
+    }
+
+    /// <summary>
+    /// Manifest-present per-file path: classified doc type drives a structured pre-filter
+    /// (<c>documentTypes/any(t: search.in(t, 'NDA'))</c>) on the playbook-embeddings index.
+    /// Per FR-17 v2 budget ≤100ms (single embed + filtered search; no extra LLM call).
+    /// Results are cached for 5 min on <c>(tenantId, classifiedDocType, normalizedMessage)</c>.
+    /// </summary>
+    private async Task<IReadOnlyList<PlaybookSearchResult>> RunPhaseBManifestPresentAsync(
+        string userMessage,
+        string classifiedDocType,
+        int topK,
+        CancellationToken cancellationToken)
+    {
+        // Cache key includes a normalised hash of the user message so semantically
+        // identical queries hit the same entry; classified doc type is the structural
+        // discriminator.
+        var normalizedMessage = NormalizeForCacheKey(userMessage);
+        var messageHash = Sha256HexPrefix(normalizedMessage);
+        var classifiedHash = EscapeForCacheKey(classifiedDocType);
+        var cacheKey = $"phaseb:{_tenantId}:mfpresent:{messageHash}:{classifiedHash}";
+
+        if (_memoryCache.TryGetValue<IReadOnlyList<PlaybookSearchResult>>(cacheKey, out var cached) &&
+            cached is not null)
+        {
+            return cached;
+        }
+
+        var candidates = await _embeddingService.SearchPlaybooksAsync(
+            query: userMessage,
+            recordTypeFilter: null,
+            documentTypeFilter: classifiedDocType,
+            topK: topK,
+            cancellationToken: cancellationToken);
+
+        var snapshot = (IReadOnlyList<PlaybookSearchResult>)candidates;
+        _memoryCache.Set(cacheKey, snapshot, PhaseBCacheTtl);
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Manifest-absent per-file path: per-file query composition + vector search.
+    /// Composes <c>"{userMessage} | Document: {filename} | Type hint: {contentType} | Content: {textPrefix}"</c>
+    /// and embeds it as a single query against the unfiltered playbook-embeddings index.
+    /// Per FR-17 v2 budget ≤300ms for 3 files (parallel fan-out — bounded by slowest
+    /// embed + search). Results cached 5 min on <c>(tenantId, normalizedQueryText)</c>.
+    /// </summary>
+    private async Task<IReadOnlyList<PlaybookSearchResult>> RunPhaseBManifestAbsentAsync(
+        string userMessage,
+        ChatMessageAttachment attachment,
+        int topK,
+        CancellationToken cancellationToken)
+    {
+        var textPrefix = attachment.TextContent.Length > PhaseBTextPrefixCharLimit
+            ? attachment.TextContent[..PhaseBTextPrefixCharLimit]
+            : attachment.TextContent;
+
+        // FR-17 v2 query composition — order is stable for cache-key determinism.
+        var query = $"{userMessage} | Document: {attachment.Filename} | Type hint: {attachment.ContentType} | Content: {textPrefix}";
+
+        var normalizedQuery = NormalizeForCacheKey(query);
+        var cacheKey = $"phaseb:{_tenantId}:mfabsent:{Sha256HexPrefix(normalizedQuery)}";
+
+        if (_memoryCache.TryGetValue<IReadOnlyList<PlaybookSearchResult>>(cacheKey, out var cached) &&
+            cached is not null)
+        {
+            return cached;
+        }
+
+        var candidates = await _embeddingService.SearchPlaybooksAsync(
+            query: query,
+            recordTypeFilter: null,
+            documentTypeFilter: null,
+            topK: topK,
+            cancellationToken: cancellationToken);
+
+        var snapshot = (IReadOnlyList<PlaybookSearchResult>)candidates;
+        _memoryCache.Set(cacheKey, snapshot, PhaseBCacheTtl);
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Lower-cases + collapses runs of whitespace so semantically-identical messages
+    /// produce the same cache key. Deliberately not trimming punctuation: chat
+    /// messages with slightly different punctuation are NOT cache-equivalent (the
+    /// embedder will produce slightly different vectors).
+    /// </summary>
+    private static string NormalizeForCacheKey(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        var lowered = s.Trim().ToLowerInvariant();
+        // Collapse internal whitespace runs to a single space without LINQ
+        // allocations.
+        var sb = new StringBuilder(lowered.Length);
+        var lastWasSpace = false;
+        foreach (var c in lowered)
+        {
+            if (char.IsWhiteSpace(c))
+            {
+                if (!lastWasSpace)
+                {
+                    sb.Append(' ');
+                    lastWasSpace = true;
+                }
+            }
+            else
+            {
+                sb.Append(c);
+                lastWasSpace = false;
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// SHA-256 hex truncated to 32 chars — deterministic across processes (vs
+    /// <see cref="string.GetHashCode()"/>) and collision-safe within the tenant-scoped,
+    /// 5-min-TTL cache window the dispatcher operates in. ADR-015 compliant: input
+    /// content is hashed away before contributing to the (potentially logged) cache
+    /// key — only the hash prefix is observable.
+    /// </summary>
+    private static string Sha256HexPrefix(string input)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input ?? string.Empty));
+        return Convert.ToHexString(bytes)[..32].ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Sanitises a classifier doc-type label for inclusion in a cache key — strips
+    /// whitespace and colons so the <c>"a:b:c"</c> key structure stays unambiguous.
+    /// </summary>
+    private static string EscapeForCacheKey(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        return s.Trim().Replace(':', '_').Replace(' ', '_').ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Per-file Phase B result (chat-routing-redesign-r1 task 112). Carries the
+    /// top-K vector-match candidates plus per-file telemetry. The caller
+    /// (task 113R top-N selector) reconciles N per-file lists into the final
+    /// dispatch decision.
+    /// </summary>
+    /// <param name="FileId">
+    /// Stable session-scoped file ID when the caller provided a matching
+    /// <see cref="ChatSessionFile"/>; null when no session-file entry was supplied
+    /// (e.g. transient turn-only attachments without an upload manifest).
+    /// </param>
+    /// <param name="Filename">
+    /// Display filename (from <see cref="ChatMessageAttachment.Filename"/>) for the
+    /// chat link-buttons UX in task 5-C.
+    /// </param>
+    /// <param name="ManifestPresent">
+    /// <c>true</c> when the per-file path used the manifest-present structured
+    /// pre-filter (Phase 4b classifier output drove the route); <c>false</c> for
+    /// the manifest-absent parallel vector path (MVP production path while Phase 4b
+    /// is deferred). Surfaced for telemetry and 113R reconciliation logic.
+    /// </param>
+    /// <param name="Candidates">
+    /// Ordered top-K candidates (highest score first). May be empty when the search
+    /// returned no matches (e.g. manifest-present filter narrowed to zero playbooks
+    /// before Phase 4b backfill, OR per-file failure trapped by the fan-out
+    /// catch-all).
+    /// </param>
+    /// <param name="LatencyMs">Per-file path latency in milliseconds.</param>
+    public sealed record PhaseBPerFileResult(
+        string? FileId,
+        string Filename,
+        bool ManifestPresent,
+        IReadOnlyList<PlaybookSearchResult> Candidates,
+        long LatencyMs);
+
+    #endregion
 
     #region Stage 2 — LLM Refinement
 

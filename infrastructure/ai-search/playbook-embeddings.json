@@ -78,6 +78,16 @@
       "analyzer": "keyword"
     },
     {
+      "name": "documentTypes",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true,
+      "retrievable": true,
+      "analyzer": "keyword"
+    },
+    {
       "name": "contentVector3072",
       "type": "Collection(Edm.Single)",
       "searchable": true,
