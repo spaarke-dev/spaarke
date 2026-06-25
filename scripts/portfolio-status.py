@@ -64,8 +64,8 @@ def main():
       }
     }
     '''
-    result = subprocess.run(['gh', 'api', 'graphql', '-f', f'query={query}'], capture_output=True, text=True, check=True)
-    nodes = json.loads(result.stdout)['data']['node']['items']['nodes']
+    result = subprocess.run(['gh', 'api', 'graphql', '-f', f'query={query}'], capture_output=True, check=True)
+    nodes = json.loads(result.stdout.decode('utf-8'))['data']['node']['items']['nodes']
 
     # Parse items
     epics = {}
@@ -110,14 +110,15 @@ def main():
         try:
             subs = json.loads(subprocess.run(
                 ['gh', 'api', f'repos/spaarke-dev/spaarke/issues/{epic_num}/sub_issues'],
-                capture_output=True, text=True, check=True
-            ).stdout)
+                capture_output=True, check=True
+            ).stdout.decode('utf-8'))
             for sub in subs:
                 if sub['title'].startswith('[Project]:'):
                     epic_to_projects[epic_num].append(sub['number'])
                     project_to_epic[sub['number']] = epic_num
-        except Exception:
-            pass
+        except Exception as e:
+            # Surface errors so silent failures don't masquerade as "no children"
+            sys.stderr.write(f'  warn: Epic #{epic_num} sub-issues query failed: {e}\n')
 
     # Filter
     if args.status:
