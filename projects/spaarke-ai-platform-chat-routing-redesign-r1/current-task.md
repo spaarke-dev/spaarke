@@ -1,7 +1,7 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-25 (Task 115 `intentHint` vector-query bias complete — `PlaybookDispatcher.RunPhaseBVectorMatchAsync` + `DispatchAsync` accept optional `intentHint`; per-file query prefixed with `"Intent: {intentHint} | "` on both manifest-present + manifest-absent paths; cache key segmented by intent; ADR-015 tier-1 telemetry adds `intentHintProvided` boolean only; 12 new unit tests; BFF compressed 47.91 MB, NFR-01 ✅, FR-20 invariant verified)
-> **Recovery**: READ "Quick Recovery" section FIRST. Tasks 112 + 113R + 115 ✅ shipped on `work/spaarke-ai-platform-chat-routing-redesign-r1`. Next active tasks: 111R (LLM hybrid reranker — will consume `PlaybookCandidateSelection.RerankRecommended` flag), 116 (remove `SoftSlashIntentToCapabilityName` dict — now safe per FR-20 bias-side preservation), 117a (`playbook_options` SSE event).
+> **Last Updated**: 2026-06-25 (Task 111R hybrid intent reranker complete — `IIntentRerankerService` + `IntentRerankerService` + `IntentRerankerOptions` shipped with 12 unit tests; FR-46 ~800ms timeout + graceful-degrade verified; FR-48 no-auto-execute invariant verified; ADR-015 tier-1 input contract — metadata-only LLM input — verified; BFF compressed 46.31 MB, NFR-01 ✅. Earlier same-day: Task 115 `intentHint` vector-query bias complete.)
+> **Recovery**: READ "Quick Recovery" section FIRST. Tasks 112 + 113R + 115 + 111R ✅ shipped on `work/spaarke-ai-platform-chat-routing-redesign-r1`. Next active tasks: 116 (remove `SoftSlashIntentToCapabilityName` dict — now safe per FR-20 bias-side preservation), 117a (`playbook_options` SSE event), and a future orchestrator task to wire 113R→111R (when `PlaybookCandidateSelection.RerankRecommended=true`, call `IIntentRerankerService.RerankAsync` and forward the reranked top-3 to the SSE rendering layer).
 
 ---
 

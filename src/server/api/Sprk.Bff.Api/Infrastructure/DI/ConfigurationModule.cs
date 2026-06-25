@@ -133,6 +133,18 @@ public static class ConfigurationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // IntentReranker options (chat-routing-redesign-r1 task 111R / FR-46) —
+        // hybrid LLM intent reranker tuning knobs (model deployment, FR-46 timeout
+        // budget, sampling temperature). All properties have spec-defined defaults
+        // so binding succeeds when the "IntentReranker" section is absent.
+        // ValidateOnStart fails fast on misconfigured ranges (e.g., negative timeout
+        // or out-of-range temperature) at app start rather than at first rerank call.
+        services
+            .AddOptions<IntentRerankerOptions>()
+            .Bind(configuration.GetSection(IntentRerankerOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();

@@ -16,12 +16,13 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   2. AddSingleton&lt;AiLatencyTelemetry&gt;            — AIPU2-066: AI latency telemetry meter
 ///   3. AddScoped&lt;AiLatencyTracker&gt;                  — AIPU2-066: per-request latency stopwatch
 ///   4. AddSingleton&lt;IPlaybookCandidateSelector, PlaybookCandidateSelector&gt; — chat-routing-redesign-r1 task 113R / FR-47 + FR-48 top-N selector
+///   5. AddScoped&lt;IIntentRerankerService, IntentRerankerService&gt;             — chat-routing-redesign-r1 task 111R / FR-46 hybrid LLM intent reranker
 ///
 /// Planned registrations (future AIPU2 tasks):
 ///   - SprkChatAgentFactory          — Extended factory (replaces AiModule registration in R2)
 ///   - ChatOrchestrationService      — Three-pane experience orchestration (router + event bus)
 ///
-/// DI count: 4 unconditional (ADR-010 compliant, well within ≤15 limit).
+/// DI count: 5 unconditional (ADR-010 compliant, well within ≤15 limit).
 ///
 /// Prerequisites (must already be registered before calling AddAiChatModule):
 ///   - <c>IConfiguration</c>   — registered by the host
@@ -75,6 +76,26 @@ public static class AiChatModule
         // is correct — the selector holds no per-request state and depends only on
         // IOptions + ILogger.
         services.AddSingleton<IPlaybookCandidateSelector, PlaybookCandidateSelector>();
+
+        // chat-routing-redesign-r1 task 111R (FR-46):
+        // Hybrid LLM intent reranker. Receives a top-5 candidate list from 113R
+        // when ambiguity is detected (PlaybookCandidateSelection.RerankRecommended)
+        // and uses Azure OpenAI gpt-4o-mini with structured output to return a
+        // reranked top-3. Tier-1 ADR-015 input contract (metadata only — never
+        // file content). FR-46 budget enforced via internal CancellationTokenSource
+        // (default 800ms); graceful-degrade on timeout / parse error / LLM error.
+        // Scoped lifetime: the service composes a per-request cancellation token
+        // and resolves IOptions snapshot per invocation; scoping isolates request
+        // state cleanly when callers add per-request middleware in the future.
+        // ADR-010 interface justification: required test seam — the IChatClient
+        // dependency is heavyweight to construct in tests, so the rerank service
+        // is mocked at the IIntentRerankerService boundary by downstream
+        // orchestrator tests. Single concrete implementation; no asymmetric
+        // registration risk (CLAUDE.md §10 F.1) — registers unconditionally.
+        // ADR-032: UNCONDITIONAL — rerank is always enabled. A future kill switch
+        // would apply Null-Object (P1/P2/P3) rather than wrapping this line in a
+        // feature flag.
+        services.AddScoped<IIntentRerankerService, IntentRerankerService>();
 
         return services;
     }
