@@ -843,6 +843,91 @@ public sealed class PlaybookDispatcher
 
     #endregion
 
+    #region Direct Playbook Execution (FR-50 — /playbook-dispatch/execute endpoint)
+
+    /// <summary>
+    /// Builds a <see cref="DispatchResult"/> for a specific playbook that has already been
+    /// chosen by the user via the FR-49 <c>playbook_options</c> link-button flow. This
+    /// path is taken by the <c>/api/ai/playbook-dispatch/execute</c> endpoint (FR-50)
+    /// after the user clicks a candidate — it bypasses Stage 1 vector match and Stage 2
+    /// LLM refinement entirely.
+    /// </summary>
+    /// <param name="playbookId">
+    /// Stable Dataverse PK of the playbook (sprk_aiplaybook GUID, string form). MUST
+    /// match a real playbook — invalid values yield a no-match result.
+    /// </param>
+    /// <param name="playbookName">
+    /// Display name of the playbook (used to populate <see cref="DispatchResult.PlaybookName"/>).
+    /// Resolved by the caller via <c>IPlaybookLookupService</c> before invoking.
+    /// </param>
+    /// <param name="extractedParameters">
+    /// Optional parameter dictionary surfaced to the output handler. Empty by default —
+    /// FR-50 link-button click does not extract parameters; the caller may supply session-
+    /// scoped context (e.g. session attachment IDs) if needed by the output handler.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// A populated <see cref="DispatchResult"/> with <c>Matched=true</c> and enriched
+    /// <c>OutputType</c> / <c>NodeDestination</c> / <c>WidgetType</c> from the playbook's
+    /// primary DeliverOutput node. <see cref="DispatchResult.NoMatch"/> when the
+    /// playbookId can't be parsed or the playbook has no nodes.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>FR-48 invariant</b>: this method is only called AFTER the user has clicked a
+    /// candidate from the FR-49 <c>playbook_options</c> event. There is no auto-execute;
+    /// the user click IS the execution authorization.
+    /// </para>
+    /// <para>
+    /// <b>ADR-014 caching</b>: piggy-backs on the same per-playbook output-node-metadata
+    /// cache used by <see cref="DispatchAsync"/>. No additional cache key is introduced.
+    /// </para>
+    /// <para>
+    /// <b>ADR-015 telemetry</b>: logs ONLY <c>playbookId</c> (a deterministic GUID),
+    /// matched-flag, and dispatch outcome. Never logs originalMessage or any user content.
+    /// </para>
+    /// </remarks>
+    public async Task<DispatchResult> BuildDispatchResultForPlaybookAsync(
+        string playbookId,
+        string playbookName,
+        IReadOnlyDictionary<string, string>? extractedParameters,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(playbookId, nameof(playbookId));
+        ArgumentException.ThrowIfNullOrWhiteSpace(playbookName, nameof(playbookName));
+
+        var stopwatch = Stopwatch.StartNew();
+
+        var (outputType, requiresConfirmation, targetPage, nodeDestination, widgetType) =
+            await GetOutputNodeMetadataAsync(playbookId, cancellationToken);
+
+        stopwatch.Stop();
+        _logger.LogInformation(
+            "PlaybookDispatcher: direct-dispatch built for FR-50 user-selected playbook — " +
+            "playbookId={PlaybookId}, outputType={OutputType}, destination={Destination}, " +
+            "widgetType={WidgetType}, elapsedMs={ElapsedMs}",
+            playbookId, outputType, nodeDestination, widgetType ?? "(none)",
+            stopwatch.ElapsedMilliseconds);
+
+        var parameters = extractedParameters is null
+            ? new Dictionary<string, string>()
+            : new Dictionary<string, string>(extractedParameters);
+
+        return new DispatchResult(
+            Matched: true,
+            PlaybookId: playbookId,
+            PlaybookName: playbookName,
+            Confidence: 1.0,  // User-selected — no model confidence applies.
+            OutputType: outputType,
+            RequiresConfirmation: requiresConfirmation,
+            ExtractedParameters: parameters,
+            TargetPage: targetPage,
+            NodeDestination: nodeDestination,
+            WidgetType: widgetType);
+    }
+
+    #endregion
+
     #region Result Building
 
     /// <summary>
