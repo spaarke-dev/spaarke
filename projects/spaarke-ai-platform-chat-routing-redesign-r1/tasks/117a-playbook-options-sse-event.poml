@@ -3,7 +3,7 @@
   <metadata>
     <title>playbook_options SSE event contract + emission</title>
     <phase>5: WP2 File-Aware Classification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>113R</dependencies>
     <blocks>117b</blocks>

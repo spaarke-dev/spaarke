@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -17,12 +18,13 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   3. AddScoped&lt;AiLatencyTracker&gt;                  — AIPU2-066: per-request latency stopwatch
 ///   4. AddSingleton&lt;IPlaybookCandidateSelector, PlaybookCandidateSelector&gt; — chat-routing-redesign-r1 task 113R / FR-47 + FR-48 top-N selector
 ///   5. AddScoped&lt;IIntentRerankerService, IntentRerankerService&gt;             — chat-routing-redesign-r1 task 111R / FR-46 hybrid LLM intent reranker
+///   6. AddScoped&lt;PlaybookOptionsEventBuilder&gt;                              — chat-routing-redesign-r1 task 117a / FR-49 playbook_options SSE payload builder
 ///
 /// Planned registrations (future AIPU2 tasks):
 ///   - SprkChatAgentFactory          — Extended factory (replaces AiModule registration in R2)
 ///   - ChatOrchestrationService      — Three-pane experience orchestration (router + event bus)
 ///
-/// DI count: 5 unconditional (ADR-010 compliant, well within ≤15 limit).
+/// DI count: 6 unconditional (ADR-010 compliant, well within ≤15 limit).
 ///
 /// Prerequisites (must already be registered before calling AddAiChatModule):
 ///   - <c>IConfiguration</c>   — registered by the host
@@ -96,6 +98,24 @@ public static class AiChatModule
         // would apply Null-Object (P1/P2/P3) rather than wrapping this line in a
         // feature flag.
         services.AddScoped<IIntentRerankerService, IntentRerankerService>();
+
+        // chat-routing-redesign-r1 task 117a (FR-49):
+        // PlaybookOptionsEventBuilder — projects the 113R selector + 111R reranker outputs
+        // into the locked playbook_options SSE wire shape (FR-49 five-field candidate
+        // record + libraryModalCta + sessionAttachmentIds + rerank flags). Composition
+        // service over the selector + reranker; no LLM call directly. Scoped lifetime
+        // mirrors the reranker's scope so they share request lifetime. Concrete-only
+        // registration per ADR-010: a single implementation with no test seam required at
+        // the BUILDER boundary — tests mock the selector + reranker dependencies. Test
+        // boundary lives below, not at this layer.
+        // ADR-013: stays in Services/Ai/Chat/ internal orchestration boundary. NOT part
+        // of Services/Ai/PublicContracts/. CRUD code MUST NOT inject this.
+        // ADR-015 tier-1: builder + emitted event surface ONLY deterministic IDs, counts,
+        // admin-facing display names, and controlled-vocabulary reason tags.
+        // ADR-032: UNCONDITIONAL — there is no kill switch on the SSE event shape itself.
+        // The future orchestrator that calls BuildAsync() may be feature-gated; the
+        // projection layer is not.
+        services.AddScoped<PlaybookOptionsEventBuilder>();
 
         return services;
     }
