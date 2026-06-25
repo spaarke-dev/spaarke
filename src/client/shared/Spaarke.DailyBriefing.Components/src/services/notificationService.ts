@@ -61,6 +61,11 @@ const NOTIFICATION_SELECT = [
   'toasttype',
   'createdon',
   'sprk_briefingstate',
+  // R3 FR-6 follow-up: surface ttlinseconds so the "Keep 7 more days" action
+  // can write `current + 604800` additively. NotificationService writes 604800
+  // explicitly post-task-010; pre-rollout rows may be undefined (fall back to
+  // 0 on Keep → write 604800).
+  'ttlinseconds',
 ].join(',');
 
 /**
@@ -157,6 +162,12 @@ function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
     aiConfidence: customData?.aiConfidence,
     createdOn: (entity['createdon'] as string) ?? new Date().toISOString(),
     dueDate: customData?.dueDate ?? null,
+    // R3 FR-6 follow-up: pass through the row's ttlinseconds so the UI's
+    // "Keep 7 more days" action can compute current + 604800 additively.
+    // Undefined for pre-rollout rows (no producer-side write); UI coerces
+    // to 0 in that case so the action writes an explicit 604800.
+    ttlinseconds:
+      typeof entity['ttlinseconds'] === 'number' ? (entity['ttlinseconds'] as number) : undefined,
   };
 }
 

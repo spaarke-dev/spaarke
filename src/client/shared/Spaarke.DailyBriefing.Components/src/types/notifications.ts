@@ -272,6 +272,16 @@ export interface NotificationItem {
    * matter-activity, events).
    */
   dueDate: string | null;
+  /**
+   * R3 FR-6: current Dataverse `appnotification.ttlinseconds` value, surfaced
+   * so the "Keep 7 more days" action can compute `newTtl = current + 604800`
+   * additively (rather than writing a flat 604800 which would shorten TTL
+   * for items already extended). Undefined for pre-rollout existing rows
+   * with no stored TTL (those fall back to tenant default 14d at Dataverse);
+   * on Keep, we coerce to 0 → write 604800 (7d explicit). New rows after
+   * task 010 ships always have ttlinseconds=604800 written by the producer.
+   */
+  ttlinseconds?: number;
 }
 
 // ---------------------------------------------------------------------------

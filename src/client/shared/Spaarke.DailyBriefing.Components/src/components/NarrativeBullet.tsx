@@ -284,13 +284,16 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   // bullet's lead item; the per-row Sub-list owns its own (future) controls.
   const primaryItemId = itemIds[0] ?? '';
 
-  // `currentTtlSeconds` is sourced from the corresponding NotificationItem
-  // when supplied. NotificationItem does not currently surface `ttlinseconds`
-  // (the column is not in `NOTIFICATION_SELECT` — see notificationService.ts);
-  // until task 020's service-layer owner re-selects + propagates it, we pass
-  // `0` so the service computes `newTtl = 0 + 604800` (= 7 days from now).
-  // This matches the spec FR-6 invariant for items without a stored TTL.
-  const primaryItemTtlSeconds = 0;
+  // R3 FR-6: `currentTtlSeconds` is sourced from the corresponding
+  // NotificationItem. The service-layer FR-6 follow-up adds `ttlinseconds`
+  // to NOTIFICATION_SELECT + toNotificationItem mapping so items carry their
+  // current TTL. Coalesce to 0 for pre-rollout rows with no stored TTL
+  // (those fall back to tenant default 14d at Dataverse; Keep writes an
+  // explicit 604800 = 7d, which may shorten them — acceptable per spec
+  // for the legacy-row edge case; post-task-010 producer-written rows have
+  // explicit ttlinseconds = 604800 so Keep correctly extends to 1209600).
+  const primaryItemTtlSeconds =
+    items?.find(item => item.id === primaryItemId)?.ttlinseconds ?? 0;
 
   const handleCheck = () => {
     if (!primaryItemId) return;

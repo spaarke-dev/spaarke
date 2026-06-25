@@ -149,6 +149,34 @@ describe('toNotificationItem (via fetchNotifications) — FR-3 read-state deriva
     }
   });
 
+  it('FR-6 follow-up: surfaces ttlinseconds from entity to NotificationItem', async () => {
+    const webApi = makeWebApi();
+    (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(
+      makeMultiResult([makeEntity({ sprk_briefingstate: 0, ttlinseconds: 604800 })])
+    );
+
+    const result = await fetchNotifications(webApi);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data[0].ttlinseconds).toBe(604800);
+    }
+  });
+
+  it('FR-6 follow-up: ttlinseconds is undefined when entity has none (pre-rollout row)', async () => {
+    const webApi = makeWebApi();
+    const entity = makeEntity({ sprk_briefingstate: 0 });
+    delete (entity as Record<string, unknown>).ttlinseconds;
+    (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(makeMultiResult([entity]));
+
+    const result = await fetchNotifications(webApi);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data[0].ttlinseconds).toBeUndefined();
+    }
+  });
+
   it('FR-7 invariant: does NOT derive isRead from toasttype (toasttype=200000000 alone is Unread)', async () => {
     const webApi = makeWebApi();
     // toasttype=200000000 (Microsoft "Timed") + sprk_briefingstate=0 (Unread)
@@ -200,6 +228,16 @@ describe('fetchNotifications — FR-3 AC-3b server-side filter', () => {
     const [, query] = (webApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
     expect(query).toContain('$select=');
     expect(query).toContain('sprk_briefingstate');
+  });
+
+  it('FR-6 follow-up: selects ttlinseconds column', async () => {
+    const webApi = makeWebApi();
+    (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(makeMultiResult([]));
+
+    await fetchNotifications(webApi);
+
+    const [, query] = (webApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
+    expect(query).toContain('ttlinseconds');
   });
 
   it('FR-7 invariant: does NOT filter on `toasttype` (no toasttype ne 200000000 predicate)', async () => {

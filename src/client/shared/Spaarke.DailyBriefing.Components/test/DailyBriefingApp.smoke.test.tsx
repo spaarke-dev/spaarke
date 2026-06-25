@@ -104,6 +104,8 @@ const fakeChannels: ChannelFetchResult[] = [
           isAiGenerated: false,
           createdOn: new Date().toISOString(),
           dueDate: null,
+          // R3 FR-6 follow-up: post-task-010 producer writes ttlinseconds=604800
+          ttlinseconds: 604800,
         },
         {
           // sprk_briefingstate = 1 (Checked) → isRead: true
@@ -120,6 +122,8 @@ const fakeChannels: ChannelFetchResult[] = [
           isAiGenerated: false,
           createdOn: new Date().toISOString(),
           dueDate: null,
+          // R3 FR-6 follow-up: pre-rollout row with no stored TTL (undefined)
+          ttlinseconds: undefined,
         },
       ],
       unreadCount: 1,
