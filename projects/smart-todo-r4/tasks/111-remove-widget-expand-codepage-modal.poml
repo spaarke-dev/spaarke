@@ -3,7 +3,8 @@
     <title>Remove widget "Expand to Code Page modal" path — only modal from widget is the record modal</title>
     <phase>Closeout (UAT round 14)</phase>
     <workstream>widget UX simplification</workstream>
-    <status>not-started</status>
+    <status>closed-no-action</status>
+    <closure-reason>2026-06-24 — User opted to leave widget Expand path in place. F-7 (inner-modal sizing) and F-8 (Save&Close routing) deferred to R5 backlog instead. See R5 design.md.</closure-reason>
     <estimated-effort>1-2 hrs</estimated-effort>
     <tags>widget, modal, simplify, ux</tags>
     <parallel-safe>true</parallel-safe>

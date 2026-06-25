@@ -224,16 +224,9 @@ export const SmartTodoModal: React.FC<SmartTodoModalProps> = ({
   const handleIframeLoad = React.useCallback(() => {
     setIframeLoading(false);
 
-    // UAT 2026-06-22 round 9 — PARENT-SIDE Save&Close interceptor.
+    // PARENT-SIDE Save&Close interceptor (R4-113 history: see commit log).
     //
-    // Originally we shipped a form-script (sprk_todo_dirty_check.js v1.1.0)
-    // that monkey-patched `Xrm.Page.ui.close` from inside the iframe via the
-    // form's OnLoad handler. Console verification confirmed the script was
-    // NEVER REGISTERED on the form designer's OnLoad event — so the patch
-    // never applied and Save & Close still cascade-navigated the parent.
-    //
-    // This block does the same monkey-patch but from the PARENT side. The
-    // iframe loads same-origin Dataverse content (both URLs are
+    // The iframe loads same-origin Dataverse content (both URLs are
     // *.dynamics.com / same host), so we can reach into
     // `iframeNode.contentWindow.Xrm` directly. The patch:
     //   - Replaces `formContext.ui.close` and `Xrm.Page.ui.close` with a
@@ -318,26 +311,11 @@ export const SmartTodoModal: React.FC<SmartTodoModalProps> = ({
     }
   }, [iframeSrc, onClose]);
 
-  // ── UAT 2026-06-21 round 8 — Save & Close interceptor protocol.
-  //
-  // The iframe-side form script `sprk_todo_dirty_check.js` (v1.1.0)
-  // monkey-patches `formContext.ui.close` and `Xrm.Page.ui.close` so the
-  // OOB "Save & Close" button posts a `sprk_todo_form_close_intent`
-  // message to us instead of navigating the iframe's parent. We dismiss
-  // the modal on receipt. This preserves the OOB command bar UX (user
-  // still clicks the same Save & Close button) while keeping the parent
-  // page (Code Page modal / embedded Code Page / SpaarkeAi) intact —
-  // closing only the SmartTodoModal layer.
-  React.useEffect(() => {
-    const handler = (event: MessageEvent) => {
-      const data = event?.data;
-      if (data && typeof data === 'object' && (data as { type?: unknown }).type === 'sprk_todo_form_close_intent') {
-        onClose();
-      }
-    };
-    window.addEventListener('message', handler, false);
-    return () => window.removeEventListener('message', handler, false);
-  }, [onClose]);
+  // (R4-113 cleanup, 2026-06-24): removed legacy `sprk_todo_form_close_intent`
+  // postMessage handler — the form-side script that posted that message was
+  // deleted as part of R4-113 ("no shims, complete or delete"). The
+  // parent-side ui.close monkey-patch above is the sole Save & Close
+  // interceptor now.
 
   // ── Navigation handler ──────────────────────────────────────────────────
   // Shell guarantees `direction` is 'prev' | 'next' and is only invoked when
