@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-daily-update-service-r3">
+  <metadata>
+    <title>Manual UAT in spaarkedev1: verify 7 ACs + bell-panel decoupling</title>
+    <phase>Phase 5: UAT</phase>
+    <status>not-started</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>001, 010, 020, 030, 031</dependencies>
+    <blocks>090</blocks>
+    <tags>uat, manual-test, e2e-test, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Manual verification task; no source-code changes; checklist-style</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify all 7 spec ACs in spaarkedev1 by manual UAT against a test user with unread `appnotification` rows. Cover the widget populates with unread notifications (AC-3a/b/c), each of 3 new actions writes the correct Dataverse field (AC-4/5/6), and the bell-panel decoupling invariant holds (AC-7a/b). Document findings in `notes/uat-{date}.md`. Any failure unblocks fix tasks before task 090 wrap-up.
+  </prompt>
+
+  <role>SPAARKE QA / UAT tester with access to spaarkedev1 + Power Apps + Dataverse query tools.</role>
+
+  <goal>All 7 ACs (AC-3a, AC-3b, AC-3c, AC-4, AC-5, AC-6, AC-7a, AC-7b) verified pass with evidence captured. Findings written to `notes/uat-{date}.md`.</goal>
+
+  <context>
+    <background>
+      Tasks 001 (schema deploy), 010 (BFF fix), 020 (widget service), 030 (hook), 031 (UI) are all complete. The R3 changeset is deployed to spaarkedev1. UAT is the final verification before wrap-up. Per spec Success Criteria #3–7: each AC has a specific verification method.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r3/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST verify each of 7 ACs with explicit pass/fail + evidence (screenshot, Dataverse query result, console log)</constraint>
+    <constraint source="spec">MUST verify bell-panel decoupling separately (AC-7a + AC-7b are critical invariants)</constraint>
+    <constraint source="project">Any AC failure → file an issue + add a fix task before task 090 wrap-up</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r3/design.md</file>
+      <file>projects/spaarke-daily-update-service-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up: log into spaarkedev1 as a test user with ≥1 unread `appnotification` row (create some via the playbook engine or directly if needed)</step>
+    <step order="2">AC-3a: Open the Daily Briefing widget. Verify it renders unread notifications (NOT the EmptyState). Screenshot. Record pass/fail in `notes/uat-{date}.md`</step>
+    <step order="3">AC-3b: Use Dataverse query tool to set one notification's `sprk_briefingstate = 2` (Removed). Refresh the widget. Verify that notification is NOT shown. Screenshot. Record</step>
+    <step order="4">AC-3c: Identify an existing pre-rollout notification with `sprk_briefingstate = null`. Refresh widget. Verify it renders as Unread. Screenshot. Record</step>
+    <step order="5">AC-4 (Check): Click the Check button on an unread notification. Verify (a) widget renders item as read immediately (optimistic), (b) success toast appears, (c) Dataverse query shows `sprk_briefingstate = 1` for that row. Screenshot + query result. Record</step>
+    <step order="6">AC-5 (Remove): Click the Remove button on a notification. Verify (a) item disappears from widget, (b) success toast appears, (c) Dataverse query shows `sprk_briefingstate = 2`, (d) the underlying notification row STILL exists (not deleted). Screenshot + query. Record</step>
+    <step order="7">AC-6 (Keep +7d): Query the notification's current `ttlinseconds`. Click the Keep button. Verify (a) success toast shows new expiry date, (b) Dataverse query shows `ttlinseconds` increased by exactly 604800. Screenshot + query before/after. Record</step>
+    <step order="8">AC-7a (bell-panel decoupling): Open native bell panel. Dismiss a notification there. Refresh Daily Briefing widget. Verify the dismissed notification STILL appears in the widget (item not removed). Screenshot. Record</step>
+    <step order="9">AC-7b (bell-panel decoupling): In the widget, click Check on a notification. Open native bell panel. Verify the notification STILL appears in the bell (item not removed from bell). Screenshot. Record</step>
+    <step order="10">Regression check (ADR-024): Click the existing "Add to To Do" button (4th in row) on a notification with a `regardingId`. Verify the To-Do creation flow works as before (no regression). Record</step>
+    <step order="11">Dark-mode check (ADR-021): Toggle dark mode. Verify all 3 new buttons + icons render correctly (no missing tokens, correct contrast). Screenshot. Record</step>
+    <step order="12">Summary: write `notes/uat-{date}.md` listing each AC pass/fail with linked evidence (screenshots in `notes/uat-evidence/`)</step>
+    <step order="13">If any AC fails: file a fix task (e.g., `041-fix-{slug}.poml`) and update TASK-INDEX.md. Do NOT proceed to task 090 until all ACs pass</step>
+    <step order="14">If all pass: update TASK-INDEX.md: change task 040 status from 🔲 to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Test in spaarkedev1 environment</tool>
+    <tool name="dataverse-mcp">Query `appnotification` rows to verify field writes</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/spaarke-daily-update-service-r3/notes/uat-{date}.md (AC pass/fail record)</output>
+    <output type="notes">projects/spaarke-daily-update-service-r3/notes/uat-evidence/ (screenshots + query results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC-3a, AC-3b, AC-3c all marked pass with evidence</criterion>
+    <criterion testable="true">AC-4, AC-5, AC-6 all marked pass with both UI evidence AND Dataverse query result</criterion>
+    <criterion testable="true">AC-7a, AC-7b both marked pass with screenshots showing bell + widget independent</criterion>
+    <criterion testable="true">No regression in existing "Add to To Do" (ADR-024)</criterion>
+    <criterion testable="true">Dark mode renders correctly (ADR-021)</criterion>
+    <criterion testable="true">UAT findings document written; all ACs traceable to evidence</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequential — BLOCKED BY all implementation tasks (001, 010, 020, 030, 031). All code must be merged + schema deployed before UAT begins.
+
+    If R3 is being UAT'd before PR #451 merges to master, deployments are local-branch / spaarkedev1 only. That's fine — spaarkedev1 is the canonical test environment.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

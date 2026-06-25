@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-daily-update-service-r3">
+  <metadata>
+    <title>Widget service layer: read-state swap + 3 new action functions + Removed filter + jest tests</title>
+    <phase>Phase 3: Widget Service Layer</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>030, 040</blocks>
+    <tags>frontend, typescript, react, dataverse, testing, unit-test, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Service layer refactor + new exported functions consumed by hook (030) and UI (031); core read-state logic; quality gates at Step 9.5 required</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Switch the Daily Briefing widget's read-state derivation from `toasttype` to `sprk_briefingstate`. Update the entity type to include the new field. Add the server-side filter excluding Removed items. Replace the existing read-marker writes (`markNotificationRead`, `markAllNotificationsRead`) to write `{ sprk_briefingstate: 1 }`. Add 3 NEW exported functions: `markBriefingRemoved`, `extendBriefingTtl`, and (if not already named) `markBriefingChecked`. Sweep + update existing jest tests for stale `toasttype: 200000000` literals. Add jest tests for the 3 new functions. This is the foundational consumer-layer change that tasks 030 + 031 wire into the hook + UI.
+  </prompt>
+
+  <role>SPAARKE frontend platform developer. Expert in TypeScript, React, Power Apps `Xrm.WebApi`, and the `@spaarke/daily-briefing-components` package (R2 deliverable).</role>
+
+  <goal>`notificationService.ts` derives `isRead` from `(entity['sprk_briefingstate'] as number ?? 0) === 1`. `fetchNotifications` filter excludes Removed items. 3 new action functions exported. All jest tests pass (existing updated + 3 new).</goal>
+
+  <context>
+    <background>
+      Per spec FR-3, FR-4, FR-5, FR-6: the widget's read-state has been semantically coupled to `toasttype` (display behavior, "Timed" = `200000000`), causing every notification to render as pre-read. This task switches the read-state field to a new custom `sprk_briefingstate` option-set (added by task 001) and adds 3 user actions. All actions write directly to Dataverse via `Xrm.WebApi.updateRecord` per the existing single-record-update pattern at `notificationService.ts:270-276`. No new BFF endpoints (DATA-ACCESS-DECISION-CRITERIA.md applies — host-context Xrm.WebApi is correct for widget actions).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/notificationService.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">All changes confined to `@spaarke/daily-briefing-components` package boundary</constraint>
+    <constraint source="spec">MUST treat null `sprk_briefingstate` on read as Unread (null-coalesce: `?? 0`) — backward compat for pre-rollout existing rows</constraint>
+    <constraint source="spec">MUST include server-side filter `(sprk_briefingstate ne 2 or sprk_briefingstate eq null)` in `fetchNotifications` to exclude Removed items without filtering nulls</constraint>
+    <constraint source="spec">MUST NOT remove or change producer's `toasttype = 200000000` writes (no producer-side code changes)</constraint>
+    <constraint source="spec">MUST NOT add new BFF endpoints — use `webApi.updateRecord('appnotification', id, …)` directly</constraint>
+    <constraint source="spec">3 new function signatures: `markBriefingChecked(id)`, `markBriefingRemoved(id)`, `extendBriefingTtl(id, currentTtlSeconds)` (literal `addSeconds = 604800` inside)</constraint>
+    <constraint source="DATA-ACCESS-DECISION-CRITERIA.md">Host-context `Xrm.WebApi.updateRecord` is correct for widget actions (not BFF)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>projects/spaarke-daily-update-service-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r3/design.md</file>
+      <file>projects/spaarke-daily-update-service-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts`; add `sprk_briefingstate?: number` to the entity type</step>
+    <step order="2">Read `src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts`; add `sprk_briefingstate` to `NOTIFICATION_SELECT`</step>
+    <step order="3">Change `toNotificationItem` `isRead` derivation from `(entity['toasttype'] as number) === 200000000` to `(entity['sprk_briefingstate'] as number ?? 0) === 1`</step>
+    <step order="4">Add server-side filter `(sprk_briefingstate ne 2 or sprk_briefingstate eq null)` to `fetchNotifications`; ensure correct AND-joining when other filters apply (e.g., `unreadOnly`)</step>
+    <step order="5">Replace `markNotificationRead(id)` body: change `webApi.updateRecord('appnotification', id, { toasttype: 200000000 })` to `webApi.updateRecord('appnotification', id, { sprk_briefingstate: 1 })`. Consider renaming to `markBriefingChecked` per spec naming (or alias the new name to the existing export to avoid breaking consumers — choose the cleaner approach with rationale in notes)</step>
+    <step order="6">Replace `markAllNotificationsRead` body similarly: write `{ sprk_briefingstate: 1 }`</step>
+    <step order="7">Add `markBriefingRemoved(id)`: writes `{ sprk_briefingstate: 2 }` via `webApi.updateRecord`, with the same `tryCatch` shape as `markNotificationRead`</step>
+    <step order="8">Add `extendBriefingTtl(id, currentTtlSeconds)`: compute `newTtl = currentTtlSeconds + 604800`; write `{ ttlinseconds: newTtl }`; return the new TTL value for toast display</step>
+    <step order="9">Sweep `test/notificationService.test.ts` for `toasttype: 200000000` literals or `toasttype === 200000000` assertions; replace with `sprk_briefingstate: 1` / `sprk_briefingstate === 1`</step>
+    <step order="10">Add jest tests for each new function: success path (correct payload key + value sent to `webApi.updateRecord`) + error path (rejected promise surfaces as exception)</step>
+    <step order="11">Add jest test for null-coalesce: `toNotificationItem({ sprk_briefingstate: undefined })` returns `isRead = false`</step>
+    <step order="12">Add jest test for filter: `fetchNotifications` query includes `(sprk_briefingstate ne 2 or sprk_briefingstate eq null)` in `$filter`</step>
+    <step order="13">Run `npm run build` + `npm test` in `src/client/shared/Spaarke.DailyBriefing.Components/` — all must pass</step>
+    <step order="14">Update TASK-INDEX.md: change task 020 status from 🔲 to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test TypeScript widget package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts (entity type extended)</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts (read-state swap + 3 new functions + filter)</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/notificationService.test.ts (existing updated + 3 new tests + null-coalesce + filter)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`toNotificationItem` derives `isRead` from `sprk_briefingstate`, not `toasttype` (verified by jest test) — FR-3 AC-3a</criterion>
+    <criterion testable="true">`fetchNotifications` query string includes filter excluding Removed items (verified by jest test) — FR-3 AC-3b</criterion>
+    <criterion testable="true">`toNotificationItem({ sprk_briefingstate: undefined })` returns `isRead = false` (verified by jest test) — FR-3 AC-3c</criterion>
+    <criterion testable="true">`markBriefingChecked` (or aliased existing function) writes `{ sprk_briefingstate: 1 }` (verified by jest test) — FR-4 AC-4</criterion>
+    <criterion testable="true">`markBriefingRemoved` writes `{ sprk_briefingstate: 2 }` (verified by jest test) — FR-5 AC-5</criterion>
+    <criterion testable="true">`extendBriefingTtl(id, current)` writes `{ ttlinseconds: current + 604800 }` (verified by jest test) — FR-6 AC-6</criterion>
+    <criterion testable="true">`npm test` in widget package passes</criterion>
+    <criterion testable="true">No references to `toasttype` for state read or write remain in widget service code (FR-7 invariant)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 001 (schema) and task 010 (BFF). Run as Wave 1 concurrent agent.
+
+    Naming decision: `markNotificationRead` already exists. Two options: (a) rename to `markBriefingChecked` + update consumers; (b) keep the existing name + add `markBriefingChecked` as alias. Recommend (a) — it's cleaner and aligns with spec naming + the new "Checked" state semantic. Consumers are in tasks 030/031 which haven't been modified yet. Document the rename in commit notes.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist. FULL rigor — run code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

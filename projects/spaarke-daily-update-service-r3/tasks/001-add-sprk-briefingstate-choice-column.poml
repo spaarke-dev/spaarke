@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-daily-update-service-r3">
+  <metadata>
+    <title>Add `sprk_briefingstate` Choice column to `appnotification` + deploy to spaarkedev1</title>
+    <phase>Phase 1: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>040</blocks>
+    <tags>dataverse, schema, solution, operator</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema change only; operator-driven; no source-tree code changes</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the `sprk_briefingstate` Choice (option-set) column on the OOB `appnotification` table with values `Unread = 0` (default), `Checked = 1`, `Removed = 2`. Deploy it to spaarkedev1 via a Spaarke solution. Verify the column is queryable and that newly-created rows surface `sprk_briefingstate = 0` without explicit producer writes. This unblocks UAT in task 040; widget code in tasks 020/030/031 can proceed in parallel.
+  </prompt>
+
+  <role>SPAARKE Dataverse operator. Expert in Choice column creation, solution layering, and CORE-entity additive schema changes per ADR-027.</role>
+
+  <goal>`sprk_briefingstate` Choice column exists on `appnotification` in spaarkedev1; OData `$select=sprk_briefingstate` returns 200; new rows show value `0` without producer-side writes; solution artifact retained for future env promotion.</goal>
+
+  <context>
+    <background>
+      Per spec FR-1: the widget needs a Daily-Briefing-scoped read-state field that is NOT `toasttype` (which is canonically "Timed" toast-display behavior per Microsoft Learn). `appnotification` lacks `statecode`/`statuscode` (owner-verified). A custom Choice column is the canonical Spaarke approach for adding state to a CORE Microsoft-owned table per ADR-027. Default value `0 = Unread` lets the widget render existing rows correctly without a backfill (FR-3 AC-3c handles null = Unread anyway).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r3/design.md</file>
+      <file>projects/spaarke-daily-update-service-r3/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-027">CORE schema additive change permitted; flag in deployment notes for correct solution-import order</constraint>
+    <constraint source="spec">MUST be Choice (option-set), NOT Boolean — 3 discrete states required</constraint>
+    <constraint source="spec">MUST default to `0` (Unread) at the Dataverse-schema level — producer code must NOT write this field</constraint>
+    <constraint source="spec">Field name MUST be `sprk_briefingstate` (lowercase, no underscore variants)</constraint>
+    <constraint source="project">Use existing Spaarke core solution (matches pattern for prior custom columns on OOB tables); confirm at deploy time</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/spaarke-daily-update-service-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke `dataverse-create-schema` skill to author the column. Column spec: logical name `sprk_briefingstate`, display name "Briefing State", type Choice, values Unread=0 (default) / Checked=1 / Removed=2, parent table `appnotification`.</step>
+    <step order="2">Add the column to the appropriate Spaarke core solution (consult solution layering convention in `dataverse-deploy` skill).</step>
+    <step order="3">Export the solution; import to spaarkedev1.</step>
+    <step order="4">Verify in Power Apps maker portal that the column is present on `appnotification`.</step>
+    <step order="5">Verify via OData query: `https://{env}/api/data/v9.2/appnotifications?$select=sprk_briefingstate&amp;$top=1` returns 200 (not 400 with "column doesn't exist").</step>
+    <step order="6">Verify default propagation: create a test `appnotification` row WITHOUT writing `sprk_briefingstate` and confirm the row surfaces `sprk_briefingstate = 0`.</step>
+    <step order="7">If maker portal doesn't accept per-column default for Choice columns on a Microsoft-owned table, document the fallback in task notes (widget null-coalesce covers AC-3c regardless — see spec Risk R5).</step>
+    <step order="8">Record solution version + import timestamp in `notes/schema-deployment.md`.</step>
+    <step order="9">Update TASK-INDEX.md: change task 001 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution export/import</tool>
+    <tool name="curl">OData verification query</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">appnotification.sprk_briefingstate Choice column (Unread/Checked/Removed)</output>
+    <output type="solution">Spaarke core solution updated with the new column</output>
+    <output type="notes">projects/spaarke-daily-update-service-r3/notes/schema-deployment.md (solution version + import record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Power Apps maker portal shows `sprk_briefingstate` Choice column on `appnotification` in spaarkedev1</criterion>
+    <criterion testable="true">OData `$select=sprk_briefingstate` returns 200 (not 400)</criterion>
+    <criterion testable="true">New `appnotification` rows created WITHOUT explicit `sprk_briefingstate` write surface value `0` (or document fallback per Risk R5)</criterion>
+    <criterion testable="true">Solution version + import timestamp recorded in `notes/schema-deployment.md`</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is parallel-safe with tasks 010 (BFF fix) and 020 (widget service code) — no shared files. Run all three concurrently in Wave 1.
+
+    The schema deploy is operationally needed for UAT (task 040) but NOT for code work in tasks 020/030/031 (jest tests mock the Dataverse layer; widget code references the field name string).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

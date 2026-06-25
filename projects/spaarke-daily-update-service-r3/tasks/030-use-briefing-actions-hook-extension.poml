@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-daily-update-service-r3">
+  <metadata>
+    <title>Extend `useBriefingActions` hook with 3 new handlers + jest tests</title>
+    <phase>Phase 4a: Widget Hook Layer</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>031, 040</blocks>
+    <tags>frontend, typescript, react, hook, testing, unit-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Hook extension consumed by UI; optimistic-update + toast plumbing is load-bearing; quality gates at Step 9.5 required</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend `useBriefingActions` hook with 3 new handler functions that wrap the new service-layer actions from task 020 (`markBriefingChecked`, `markBriefingRemoved`, `extendBriefingTtl`). Each handler performs an optimistic UI update via the existing local-state mechanism, invokes the service function, and shows a success/error toast via the existing `useToastController` pattern. Mirror the shape of the existing `handleAddToTodo` pattern at `DailyBriefingApp.tsx:238-287`. Add jest tests covering success + error paths for each new handler.
+  </prompt>
+
+  <role>SPAARKE frontend platform developer. Expert in React hooks, optimistic UI patterns, and the existing `useBriefingActions` + `useToastController` shape.</role>
+
+  <goal>`useBriefingActions` returns an object with 3 new exported handlers alongside existing ones. Each handler performs optimistic update → service call → toast. Jest tests pass for both success and error paths.</goal>
+
+  <context>
+    <background>
+      Per spec FR-4, FR-5, FR-6: each of the 3 new per-item actions needs a hook-layer handler that orchestrates: (1) optimistic local-state update, (2) service-layer call, (3) success/error toast. Existing `handleAddToTodo` in `DailyBriefingApp.tsx:238-287` is the canonical pattern. The hook extension keeps the UI layer (task 031) thin — buttons just call the handler. Public-contract backward compatibility: existing exported handlers must not change signature.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingActions.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingActions.test.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">All changes confined to `@spaarke/daily-briefing-components`</constraint>
+    <constraint source="spec">MUST perform optimistic UI update on all 3 new actions (UX consistency with existing actions)</constraint>
+    <constraint source="spec">MUST show success or error toast via existing `useToastController` pattern</constraint>
+    <constraint source="spec">MUST NOT change existing handler signatures (public-contract backward compatibility)</constraint>
+    <constraint source="spec">Handler names: `markChecked(id)`, `markRemoved(id)`, `extendTtl(id, currentTtlSeconds)` (per spec MUST Rules naming)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>projects/spaarke-daily-update-service-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r3/design.md</file>
+      <file>projects/spaarke-daily-update-service-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `useBriefingActions.ts` to understand its current exported shape (return type, state management, existing handlers)</step>
+    <step order="2">Read `DailyBriefingApp.tsx:238-287` for the `handleAddToTodo` reference pattern (optimistic update + service call + toast)</step>
+    <step order="3">Add `markChecked(id)` handler: optimistic update (mark item as read in local state) → call `markBriefingChecked(id)` from service → on success, show "Marked as read." toast; on error, revert optimistic update + show error toast</step>
+    <step order="4">Add `markRemoved(id)` handler: optimistic update (remove item from local list) → call `markBriefingRemoved(id)` → on success, show "Removed from briefing." toast; on error, revert + show error toast</step>
+    <step order="5">Add `extendTtl(id, currentTtlSeconds)` handler: optimistic update (update item's displayed expiry to `currentTtlSeconds + 604800` if shown) → call `extendBriefingTtl(id, currentTtlSeconds)` → on success, show "Extended for 7 more days (new expiry: {date})." toast where `{date}` is computed from `createdon + newTtl`; on error, revert + show error toast</step>
+    <step order="6">Export the 3 new handlers from the hook return alongside existing ones; ensure type is non-breaking (extend, don't replace)</step>
+    <step order="7">Add jest tests in `useBriefingActions.test.ts`: for each new handler, verify (a) optimistic update applies, (b) service function is called with correct args, (c) success toast shown on resolve, (d) error toast shown + optimistic update reverted on reject</step>
+    <step order="8">Run `npm test` in widget package — all must pass</step>
+    <step order="9">Update TASK-INDEX.md: change task 030 status from 🔲 to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test TypeScript widget package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingActions.ts (3 new handlers)</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingActions.test.ts (6 new tests — 3 handlers × success + error)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`useBriefingActions` exports `markChecked`, `markRemoved`, `extendTtl` alongside existing handlers</criterion>
+    <criterion testable="true">Existing handler signatures unchanged (verified by TypeScript compile of consumers)</criterion>
+    <criterion testable="true">Each new handler performs optimistic update + service call + toast (verified by jest)</criterion>
+    <criterion testable="true">Error path reverts optimistic update + shows error toast (verified by jest)</criterion>
+    <criterion testable="true">`npm test` passes</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequential dependency: BLOCKED BY task 020 (needs new service functions). BLOCKS task 031 (UI binds to these handlers).
+
+    Toast copy is a minor decision deferred to UAT — placeholder copy provided in spec.md "Unresolved Questions". Use the placeholder; tune during UAT if owner requests changes.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist. FULL rigor — run code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

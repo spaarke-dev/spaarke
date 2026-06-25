@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-daily-update-service-r3">
+  <metadata>
+    <title>BFF fix: `NotificationService.cs` `ttlindays` → `ttlinseconds` + unit test + §10 verification</title>
+    <phase>Phase 2: BFF Producer Fix</phase>
+    <status>not-started</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>040</blocks>
+    <tags>bff-api, api, csharp, defect-fix, testing, unit-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF-touching task per CLAUDE.md §10 — quality gates at task-execute Step 9.5 mandatory; publish-size + CVE verification required</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Fix the producer-side TTL defect in `src/server/api/Sprk.Bff.Api/Services/NotificationService.cs:106`. Replace `entity["ttlindays"] = 7` (non-existent column on `appnotification`) with `entity["ttlinseconds"] = 604800` (canonical writable field per Microsoft Learn). This brings `NotificationService` into alignment with `CreateNotificationNodeExecutor.cs:488-490` which already writes the canonical field. Update the corresponding xUnit test to assert the new payload key. Per CLAUDE.md §10 BFF Hygiene: verify publish-size delta ≤ +0.1 MB and no new HIGH-severity CVE.
+  </prompt>
+
+  <role>SPAARKE BFF developer. Expert in .NET 8 Minimal API, Dataverse Web API entity construction, and §10 BFF Hygiene verification protocol.</role>
+
+  <goal>`NotificationService.CreateNotificationAsync` writes `ttlinseconds = 604800` instead of `ttlindays = 7`. Matching unit test passes. BFF publish-size delta ≤ +0.1 MB recorded in task notes. No new HIGH-severity CVE.</goal>
+
+  <context>
+    <background>
+      Per spec FR-2 / D2: `NotificationService.cs:106` writes a non-existent field name (`ttlindays`); Microsoft Learn confirms `ttlinseconds` is the canonical OOB column on `appnotification`. The write silently fails for that field; notifications fall back to the tenant-default 14-day TTL. Asymmetric with `CreateNotificationNodeExecutor.cs:490` which correctly writes `ttlinseconds = 604800`. This is a 1-line fix in an existing service — no new components, interfaces, DI registrations, or NuGet packages. CLAUDE.md §10 Placement Justification: minimal scope, satisfied trivially.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/NotificationServiceTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API; no new endpoints; existing service file modification only</constraint>
+    <constraint source="CLAUDE.md §10">BFF-touching task requires publish-size ≤ +0.1 MB delta + CVE scan + test update obligation</constraint>
+    <constraint source="spec">MUST replace `entity["ttlindays"] = 7` with `entity["ttlinseconds"] = 604800` (literal 7 calendar days in seconds)</constraint>
+    <constraint source="spec">MUST update or add an xUnit test asserting the payload key is `ttlinseconds` (FR-2 AC-2)</constraint>
+    <constraint source="bff-extensions.md §F">Test update obligation: modifying `Services/NotificationService.cs` requires matching test update in `tests/unit/Sprk.Bff.Api.Tests/`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r3/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/server/api/Sprk.Bff.Api/Services/NotificationService.cs` around line 100-115 to locate the `entity["ttlindays"] = 7` write</step>
+    <step order="2">Cross-reference `CreateNotificationNodeExecutor.cs:488-490` for the canonical `ttlinseconds = 604800` pattern</step>
+    <step order="3">Replace `entity["ttlindays"] = 7` with `entity["ttlinseconds"] = 604800` (literal 7 days * 86400)</step>
+    <step order="4">Locate or create the matching xUnit test in `tests/unit/Sprk.Bff.Api.Tests/Services/NotificationServiceTests.cs`. Verify the test asserts the payload key is `ttlinseconds` and the value is `604800`</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` — must pass without warnings introduced</step>
+    <step order="6">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — all tests must pass, including the new/updated NotificationService test</step>
+    <step order="7">CLAUDE.md §10 verification (publish-size): run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed size; compute delta vs 45.65 MB baseline; expect ≤ +0.01 MB; record in `notes/bff-size-check.md`</step>
+    <step order="8">CLAUDE.md §10 verification (CVE): run `dotnet list package --vulnerable --include-transitive` from the BFF project; confirm no new HIGH-severity entries; record in `notes/bff-cve-check.md`</step>
+    <step order="9">Update TASK-INDEX.md: change task 010 status from 🔲 to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/NotificationService.cs (1-line fix)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/NotificationServiceTests.cs (updated or new test)</output>
+    <output type="notes">projects/spaarke-daily-update-service-r3/notes/bff-size-check.md (publish-size record)</output>
+    <output type="notes">projects/spaarke-daily-update-service-r3/notes/bff-cve-check.md (CVE record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`NotificationService.cs` writes `entity["ttlinseconds"] = 604800` and contains no occurrences of `ttlindays`</criterion>
+    <criterion testable="true">xUnit test in `NotificationServiceTests.cs` asserts payload contains key `ttlinseconds` with value `604800`</criterion>
+    <criterion testable="true">`dotnet test tests/unit/Sprk.Bff.Api.Tests/` passes</criterion>
+    <criterion testable="true">BFF publish-size delta ≤ +0.1 MB, recorded in `notes/bff-size-check.md` (per CLAUDE.md §10 NFR-01)</criterion>
+    <criterion testable="true">No new HIGH-severity CVE, recorded in `notes/bff-cve-check.md`</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 001 (Dataverse schema) and task 020 (widget service code). Run as Wave 1 concurrent agent.
+
+    This is the only BFF-touching task in R3. Quality gates (code-review + adr-check at task-execute Step 9.5) are MANDATORY for this task per FULL rigor.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist. FULL rigor — run code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>
