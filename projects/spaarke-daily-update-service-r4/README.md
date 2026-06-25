@@ -1,5 +1,7 @@
 # Spaarke Daily Update Service R4
 
+> **Portfolio**: [Project #454](https://github.com/spaarke-dev/spaarke/issues/454) · Parent Epic: [#421 AI Platform & Chat](https://github.com/spaarke-dev/spaarke/issues/421) · [Portfolio Board](https://github.com/users/spaarke-dev/projects/2)
+
 > **Last Updated**: 2026-06-25
 >
 > **Status**: In Progress
