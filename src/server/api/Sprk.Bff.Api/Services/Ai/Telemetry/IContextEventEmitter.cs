@@ -62,9 +62,8 @@ public interface IContextEventEmitter
     void ToolCallCompleted(string toolName, Guid decisionId, Guid? sessionId, string? tenantId, string outcome, long durationMs);
 
     /// <summary>
-    /// Emits <c>context.knowledge_retrieved</c>. Called by
-    /// <see cref="Capabilities.CapabilityRouter"/> Layer 2 RAG path (and any other
-    /// knowledge-retrieval emission site) for each retrieved result.
+    /// Emits <c>context.knowledge_retrieved</c>. Called by any knowledge-retrieval
+    /// emission site for each retrieved result.
     /// </summary>
     /// <param name="knowledgeSourceId">Deterministic identifier of the source (e.g., chunk ID, document ID).</param>
     /// <param name="relevanceScore">Search relevance score (0.0..1.0 typical).</param>
@@ -97,9 +96,8 @@ public interface IContextEventEmitter
     void PlaybookNodeCompleted(Guid playbookId, Guid nodeId, string decision, long durationMs, Guid? sessionId, string? tenantId);
 
     /// <summary>
-    /// Emits <c>context.decision_made</c>. Called by
-    /// <see cref="Capabilities.CapabilityRouter"/> at Layer 1 / Layer 2 / Layer 3 decision
-    /// points.
+    /// Emits <c>context.decision_made</c>. Called by routing decision points throughout
+    /// the chat / playbook pipeline.
     /// </summary>
     /// <param name="layer">Layer enum-like short string ("layer1", "layer2", "layer3").</param>
     /// <param name="decision">Decision enum-like short string ("confident", "uncertain", "fallback", "rate_limited", "timeout").</param>

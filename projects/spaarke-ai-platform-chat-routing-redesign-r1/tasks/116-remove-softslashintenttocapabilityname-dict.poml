@@ -3,7 +3,7 @@
   <metadata>
     <title>Remove SoftSlashIntentToCapabilityName dict (FE + BE)</title>
     <phase>5: WP2 File-Aware Classification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>115</dependencies>
     <blocks>117,118</blocks>

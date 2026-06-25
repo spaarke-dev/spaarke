@@ -142,6 +142,43 @@ export interface WorkspacePaneEvent {
    *                              the widget can finalise its rendering or show a terminal state
    *                              (R5 D2-06 / spec NFR-09).
    *
+   * ── Phase 5R Wave 5-C composite section events (FR-54 / task 114a + 114b) ──
+   *
+   * The three discriminants below carry per-section streaming for the composite
+   * Output Node pattern (NodeType.DeliverComposite, FR-52 / task 114R). Section
+   * events are keyed by section NAME (not schema position) — coordination point
+   * count drops from 5 (schema-on-action + schema-aware widget) to 2 (section
+   * name + section state).
+   *
+   * Backward-compat invariant (FR-54): widgets that receive `FieldDelta` events
+   * (unmigrated schema-position playbooks) continue to render via the legacy
+   * `streaming_started` / `field_delta` / `streaming_complete` path UNCHANGED.
+   * A single widget instance MAY receive EITHER set of events but never both
+   * for the same stream — the BFF emits one or the other based on whether the
+   * playbook contains a `NodeType.DeliverComposite` node (per task 114a guard).
+   *
+   * - `section_started`        — a composite section has begun streaming; carries
+   *                              `sectionName`, `streamId`, optional `displayLabel`,
+   *                              `sectionIndex`, `totalSections`. Subscribers create
+   *                              section state in 'streaming' status.
+   * - `section_data`           — incremental delta for an in-flight section; carries
+   *                              `streamId`, `sectionName`, `contentDelta` (text
+   *                              fragment to append) or `structuredData` (merge into
+   *                              section state). Subscribers append text and/or
+   *                              merge structured data per section.
+   * - `section_completed`      — a composite section finished streaming; carries
+   *                              `streamId`, `sectionName`, optional `finalContent`
+   *                              (replaces accumulated text), `finalStructuredData`
+   *                              (replaces structured data), `citations` (NFR-A3
+   *                              trust model). Subscribers mark section 'completed'.
+   *
+   * ADR-015 BINDING: section events carry the Action's structured output text/data
+   * (already allowed per existing FieldDelta contract). No file binaries.
+   * ADR-021: widget consuming these uses Fluent v9 semantic tokens — dark-mode safe.
+   * ADR-030 additive-types rule: unknown event types ignored by existing subscribers
+   * (workspace channel) — no breakage to FieldDelta consumers when these events
+   * appear alongside.
+   *
    * ── R6 Pillar 6c reverse-flow events (FR-38 / D-C-13 / task 060) ──────────
    *
    * The four discriminants below complete the Pillar 6c tri-directional model:
@@ -201,6 +238,9 @@ export interface WorkspacePaneEvent {
     | 'streaming_started'
     | 'field_delta'
     | 'streaming_complete'
+    | 'section_started'
+    | 'section_data'
+    | 'section_completed'
     | 'user_selection'
     | 'tab_edited'
     | 'tab_focused'
@@ -362,6 +402,147 @@ export interface WorkspacePaneEvent {
    * Required when `type === 'streaming_complete'`.
    */
   completionStatus?: 'complete' | 'declined' | 'empty';
+
+  // ── Phase 5R Wave 5-C section-keyed streaming fields (FR-54) ──────────────
+  //
+  // Carried by the three section discriminants: `section_started`,
+  // `section_data`, `section_completed`. All fields are optional on the base
+  // type so existing subscribers (which never touch them) remain type-safe.
+  // Subscribers handling section events MUST narrow on `event.type` before
+  // accessing.
+  //
+  // Added by Phase 5R Wave 5-C task 114b (FE consumer half) mirroring the BFF
+  // contract finalised by task 114a (CompositeOutputPayload / CompositeSectionResult
+  // from DeliverCompositeNodeExecutor). Reuses `streamId` from the streaming
+  // block above so a section stream and a legacy FieldDelta stream can be
+  // disambiguated by the same correlation field.
+  //
+  // ADR-015 BINDING: section name + display label are configuration metadata
+  // (Tier 1 safe). Content text + structured data carry the Action's structured
+  // output — same Tier-3 status as the existing FieldDelta contract; NOT raw
+  // user message content. NO file binaries on any section discriminant.
+
+  /**
+   * Stable section identifier for the composite output pattern. Required on all
+   * three section discriminants (`section_started`, `section_data`,
+   * `section_completed`).
+   *
+   * Format: short, deterministic, lowercase-camelCase-or-snake_case key declared
+   * by the playbook author on the composite Output Node's `sections[*].sectionName`
+   * config (e.g. `'summary'`, `'keyTerms'`, `'actionItems'`). Stable across the
+   * full lifecycle of a single composite output — section_started → section_data
+   * (N) → section_completed all share the same `sectionName` value.
+   *
+   * Subscribers (StructuredOutputStreamWidget per task 114b) use this as the
+   * map key in `sections: Record<sectionName, SectionState>`. The key choice
+   * makes the renderer schema-position-agnostic — coordination point count drops
+   * from 5 (schema-on-action + schema-aware widget) to 2 (section name + state).
+   *
+   * ADR-015 binding: section names are configuration identifiers (Tier 1 safe).
+   */
+  sectionName?: string;
+
+  /**
+   * Human-readable label for the section's header in the renderer. Optional on
+   * `section_started`. When absent, subscribers may humanize `sectionName` for
+   * display (e.g. camelCase → "Camel Case"). Subscribers SHOULD prefer this
+   * field over deriving from `sectionName` because the playbook author may have
+   * chosen a different on-screen label.
+   *
+   * ADR-015 binding: display labels are configuration metadata (Tier 1 safe).
+   */
+  displayLabel?: string;
+
+  /**
+   * Zero-based index of this section within the composite playbook's declared
+   * `sections[]` array. Optional on `section_started`. Subscribers MAY use this
+   * to render sections in declaration order; however, per FR-53 the SSE emit
+   * order is COMPLETION order (B may complete before A even if A was declared
+   * first), so the renderer should treat `sectionIndex` as a stable sort hint
+   * rather than the canonical display order.
+   *
+   * ADR-015 binding: numeric index metadata (Tier 1 safe).
+   */
+  sectionIndex?: number;
+
+  /**
+   * Total number of sections declared on the composite playbook. Optional on
+   * `section_started`. Subscribers MAY render progress indicators (e.g. "2 of
+   * 3 sections complete") using this; absent for unmigrated playbooks (which
+   * don't emit `section_*` events anyway).
+   *
+   * ADR-015 binding: numeric count metadata (Tier 1 safe).
+   */
+  totalSections?: number;
+
+  /**
+   * Incremental text content fragment to APPEND to the section's accumulated
+   * text. Optional on `section_data`. When present, subscribers concatenate
+   * onto `SectionState.accumulatedText`. When absent and `structuredData` is
+   * present, only the structured data merges.
+   *
+   * Distinct from `fieldContent` on the legacy FieldDelta path: `contentDelta`
+   * is keyed by section NAME not field path, and applies to an entire section's
+   * text body (the Action's `TextContent` output).
+   *
+   * ADR-015 binding: text content carries Action structured output (Tier 3
+   * allowed, same status as FieldDelta). NOT raw user message content.
+   */
+  contentDelta?: string;
+
+  /**
+   * Structured data payload from the Action's `StructuredData` output. Optional
+   * on `section_data` and `section_completed`. When present, subscribers MERGE
+   * (replace shallow) onto `SectionState.structuredData`. The widget renders
+   * this per the section's display contract (e.g. labeled key-value blocks,
+   * bulleted lists, etc.).
+   *
+   * Typed `unknown` (NOT `any`) — subscribers narrow before use. The BFF mirror
+   * is `CompositeSectionResult.StructuredData` (JsonElement?), so on the wire
+   * this can be any JSON-serializable value. Widget renderers SHOULD treat this
+   * defensively (e.g. typeof-check before render).
+   *
+   * ADR-015 binding: structured data carries Action structured output (Tier 3
+   * allowed). NOT a free-form vector for raw user content.
+   */
+  structuredData?: unknown;
+
+  /**
+   * Final accumulated text for the section, emitted with `section_completed`.
+   * Optional. When present, REPLACES `SectionState.accumulatedText` entirely
+   * (subscribers SHOULD prefer this over the accumulated delta sum, because
+   * the server may have applied final post-processing). When absent,
+   * subscribers retain the accumulated `contentDelta` sum.
+   *
+   * ADR-015 binding: same Tier-3 status as `contentDelta`.
+   */
+  finalContent?: string;
+
+  /**
+   * Final structured data for the section, emitted with `section_completed`.
+   * Optional. When present, REPLACES `SectionState.structuredData` entirely.
+   * When absent, subscribers retain merged-data state from preceding
+   * `section_data` events.
+   *
+   * ADR-015 binding: same Tier-3 status as `structuredData`.
+   */
+  finalStructuredData?: unknown;
+
+  /**
+   * Optional citation list for the section, per NFR-A3 trust model. Each
+   * citation is a deterministic identifier referencing a source document
+   * passage. Optional on `section_completed`. Subscribers render these below
+   * the section content per the existing citation-rendering convention.
+   *
+   * Typed loosely (array of opaque records) — the citation shape is owned by
+   * the BFF `Citation`/`CitedSource` contract; subscribers cross-reference IDs
+   * against their own state when needed.
+   *
+   * ADR-015 binding: citation IDs are deterministic identifiers (Tier 1 safe).
+   * Citation BODIES (passage text) are NOT carried on this event; subscribers
+   * resolve them via the BFF passage-retrieval path.
+   */
+  citations?: ReadonlyArray<Record<string, unknown>>;
 
   // ── R6 Pillar 6c reverse-flow fields ──────────────────────────────────────
   //

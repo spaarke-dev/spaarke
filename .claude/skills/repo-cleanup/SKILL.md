@@ -520,3 +520,24 @@ Proceed with cleanup? (y/n)
 | Pre-merge check fails because skill flags legitimate WIP files | Skill ran on a branch mid-development | Pre-merge check should only run when branch is "ready to merge" — not mid-development. Operator should know which mode to invoke. |
 | Cleanup report shows "0 issues" but project clearly has cruft | Skill's required_directories list is out of date — cruft is in dirs the skill doesn't audit | The required_directories list is the skill's audit scope. If a new directory category emerges in the repo, add it to the list. |
 | 215 inbound references — high blast radius for any restructure | This is hub #4 | Refinements must be ADDITIVE ONLY (the constraint applied throughout Wave 2b). No section renames or removals; only stamp updates, frontmatter normalization, and inline data corrections (like the ai-knowledge path fix). |
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 037 · FR-23)
+
+**Mid-skill** (after archive-candidate detection): for each archive candidate (merged + no recent activity), enumerate and prompt per project:
+
+```
+Archive candidate detected: projects/{name}/
+  Last commit: {date}
+  PR status: merged (#M)
+  Worktree exists: yes
+
+Archive this project? [y/N]
+```
+
+On explicit `y` (default N — destructive): invoke `/devops-project-archive --status Completed --pr-number #M`. This removes the worktree per D-18, retains `projects/{name}/` folder + `.archived` marker.
+
+Confirmation prompt is MANDATORY per safety contract — do NOT auto-archive.
+
+See: [`.claude/skills/devops-project-archive/SKILL.md`](../devops-project-archive/SKILL.md).

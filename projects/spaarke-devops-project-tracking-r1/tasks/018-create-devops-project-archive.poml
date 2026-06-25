@@ -1,0 +1,73 @@
+<task id="DEVOPS-018" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Create /devops-project-archive skill (worktree delete + folder retain)</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <estimated-effort>2.5 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>skill-creation, devops, project-archive, worktree-delete</tags>
+    <dependencies>010, 016</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Author `/devops-project-archive` skill per FR-14 + D-18. Sets `Project Status=Completed` or `Cancelled`; captures final `Task Count` / `Tasks Completed`; closes the Issue with `Status=Done` (Completed) or label `cancelled` (Cancelled); **deletes the local git worktree** (`git worktree remove`); **retains the `projects/{name}/` folder** with a new `.archived` marker file containing archive date + final status + closing PR reference.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill author with respect for destructive-action semantics. Worktree deletion is irreversible (uncommitted work is lost). The skill MUST prompt to confirm before deleting.</role>
+
+  <goal>
+After invocation: worktree at `c:/code_files/spaarke-wt-{slug}-r1` is removed (`git worktree list` confirms). `projects/{name}/` retains all files plus `.archived` marker. Project Issue closed with correct Status/label.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-07">Spaarke skill convention</constraint>
+    <constraint source="spec FR-14 + D-18">Delete worktree; keep folder + write `.archived` marker</constraint>
+    <constraint source="NFR-09">Branch history preserved on remote (do NOT delete remote branch)</constraint>
+    <constraint source="safety">MUST prompt user to confirm worktree removal (destructive)</constraint>
+    <constraint source="safety">MUST refuse to archive if worktree has uncommitted changes; require `--force` flag with explicit ack</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>.claude/skills/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 010, 016 ✅.</step>
+    <step order="1" name="Author SKILL.md frontmatter + Prerequisites + Purpose">Standard + explicit destructive-warning section.</step>
+    <step order="2" name="Author Steps">(a) Validate `--status Completed|Cancelled` flag. (b) Read project portfolio block from local README. (c) Check worktree uncommitted-changes state via `git status -s`; if dirty, refuse unless `--force` + ack. (d) Final field sync via `/devops-project-sync` (capture latest counts). (e) Set `Project Status` field. (f) Close Issue with appropriate status/label. (g) Add closing PR # to Issue body if `--pr-number` flag provided or auto-detect from `gh pr list --head &lt;branch&gt;`. (h) Run `git worktree remove c:/code_files/spaarke-wt-{slug}-r1` (after confirm prompt). (i) Write `projects/{name}/.archived` marker file with date + final status + PR ref. (j) Emit summary.</step>
+    <step order="3" name="Author Failure Modes">Worktree dirty (refuse), no Issue found, `--force` missing on dirty, partial archive (Issue closed but worktree intact due to error — must recover gracefully).</step>
+    <step order="4" name="Update INDEX.md">Add row marking as DESTRUCTIVE.</step>
+    <step order="5" name="Smoke test">Create throwaway project (clone of an existing real project to a throwaway worktree); archive it; verify worktree gone, folder + .archived present, Issue closed.</step>
+    <step order="6" name="Dirty-worktree smoke test">Make uncommitted change in throwaway worktree; attempt archive without `--force`; confirm skill refuses with clear message.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/* files</tool>
+    <tool name="Write">New SKILL.md</tool>
+    <tool name="gh">Issue close + comment</tool>
+    <tool name="git">Worktree remove</tool>
+  </tools>
+
+  <outputs>
+    <output type="skill">.claude/skills/devops-project-archive/SKILL.md</output>
+    <output type="config">.claude/skills/INDEX.md (one new row marked DESTRUCTIVE)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase2-project-archive-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SKILL.md exists with NFR-07 sections + destructive-warning</criterion>
+    <criterion testable="true">Smoke test: worktree removed; folder + `.archived` present; Issue closed</criterion>
+    <criterion testable="true">Dirty-worktree refuses without `--force` flag</criterion>
+    <criterion testable="true">Confirm prompt fires before destructive operation</criterion>
+    <criterion testable="true">INDEX.md updated</criterion>
+  </acceptance-criteria>
+</task>

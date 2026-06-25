@@ -910,6 +910,13 @@ export function ConversationPane(): React.JSX.Element {
   // is pragmatic (no new SprkChat API surface) and surgical to /clear.
   const [sprkChatRemountKey, setSprkChatRemountKey] = React.useState<number>(0);
 
+  // chat-routing-redesign-r1 task 117b — track the user's most recent outbound
+  // message text so the playbook_options click handler can forward it to the
+  // dispatcher endpoint as `originalMessage`. Captured in `handleBeforeSendMessage`
+  // (synchronous BEFORE-send hook). Ref (not state) — never rendered.
+  // ADR-015: never logged.
+  const lastSentMessageRef = React.useRef<string>('');
+
   // ── R5 task 036 / P2-CLOSEOUT-05: held-files + promoted-chip tracking ─────
   //
   // `heldFilesRef` maps chip id → original `File` for chips that have reached
@@ -1139,6 +1146,12 @@ export function ConversationPane(): React.JSX.Element {
    */
   const handleBeforeSendMessage = React.useCallback(
     (messageText: string): void => {
+      // chat-routing-redesign-r1 task 117b — capture the most recent outbound
+      // message text so the playbook_options click handler can forward it as
+      // `originalMessage` when the user picks a candidate.
+      // ADR-015: kept in a ref (never rendered, never logged).
+      lastSentMessageRef.current = messageText;
+
       // ── R5 task 036 / P2-CLOSEOUT-05: deterministic intent dispatch ─────
       //
       // BEFORE the multi-file interjection block (existing task 020 logic):
@@ -1455,6 +1468,205 @@ export function ConversationPane(): React.JSX.Element {
       return decorated;
     },
     [hardSlashContext, referenceResolverContext]
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // chat-routing-redesign-r1 task 117b — playbook_options chat-side handlers
+  // (FR-50 + FR-51). On a `playbook_options` SSE event the host (this
+  // component) appends a structured Assistant chat message containing the
+  // top-N candidates. SprkChatMessageRenderer renders inline link buttons +
+  // an Open Library link. Click handlers below dispatch the chosen playbook
+  // execution and Library modal launch.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * onPlaybookOptions — fired by SprkChat for each `playbook_options` SSE event.
+   * Synthesizes an Assistant chat message via the existing `injectLocalMessage`
+   * mechanism (R5 task 020 contract). The message carries
+   * `metadata.responseType='playbook_options'` so `SprkChatMessageRenderer`
+   * renders the candidates as inline link buttons (FR-50) + "Open Library" link (FR-51).
+   *
+   * ADR-015: payload is tier-1 safe by BFF construction (controlled-vocabulary
+   * reasons, admin display names, opaque IDs only). The handler MUST NOT log
+   * the payload — only structural counts.
+   */
+  const handlePlaybookOptions = React.useCallback(
+    (payload: {
+      candidates: Array<{
+        playbookId: string;
+        playbookCode: string;
+        displayName: string;
+        confidence: number;
+        reason: string;
+      }>;
+      libraryModalCta: boolean;
+      sessionAttachmentIds: string[];
+      rerankInvoked: boolean;
+      rerankReason?: string | null;
+    }): void => {
+      // ADR-015 telemetry: emit ONLY counts + boolean signals — never payload contents.
+      console.log(
+        '[ConversationPane] playbook_options received — candidates:%d libraryModalCta:%s rerankInvoked:%s',
+        payload.candidates.length,
+        payload.libraryModalCta,
+        payload.rerankInvoked,
+      );
+
+      setPendingInjection({
+        role: 'Assistant',
+        // `content` carries a tiny fallback text in case the renderer falls back
+        // to markdown (defensive — should never happen). Tier-1 safe.
+        content: payload.candidates.length > 0
+          ? 'Which playbook would you like me to use?'
+          : "I couldn't find a confident match for your files.",
+        timestamp: new Date().toISOString(),
+        metadata: {
+          responseType: 'playbook_options',
+          data: {
+            candidates: payload.candidates,
+            libraryModalCta: payload.libraryModalCta,
+            sessionAttachmentIds: payload.sessionAttachmentIds,
+            rerankInvoked: payload.rerankInvoked,
+            rerankReason: payload.rerankReason ?? null,
+          },
+        },
+      });
+    },
+    []
+  );
+
+  /**
+   * onSelectPlaybook — user clicked a candidate playbook link button (FR-50).
+   *
+   * POSTs to `/api/ai/playbook-dispatch/execute` with `{ playbookId,
+   * sessionAttachmentIds, originalMessage, sessionId }`. The orchestrator runs
+   * the chosen playbook against the same session context.
+   *
+   * NOTE: as of task 117b shipping, the orchestrator emit point for
+   * `playbook_options` is NOT yet wired (the 117a builder is registered in DI
+   * but not yet invoked from `ChatEndpoints`), and the `/playbook-dispatch/execute`
+   * endpoint is NOT yet implemented in the BFF. This handler will hit a 404
+   * until both arrive. We surface a console error + a brief inline confirmation
+   * so failure is visible during development.
+   *
+   * ADR-028: uses `authenticatedFetch` from `useAuth()` — never raw fetch +
+   * Authorization header. ADR-015: payload is tier-1 (opaque IDs); we DO carry
+   * `originalMessage` because the dispatcher needs it for routing — that's
+   * exempted user content sent server-side, NOT logged.
+   */
+  const handleSelectPlaybook = React.useCallback(
+    (playbookId: string, sessionAttachmentIds: string[]): void => {
+      // Fire-and-forget; the chat thread reflects the outcome via the next
+      // assistant turn (when the orchestrator runs the chosen playbook).
+      void (async () => {
+        try {
+          // Use buildBffApiUrl-style concatenation; the dispatch endpoint name
+          // is per spec FR-50 even though it is not yet implemented on the BFF.
+          const url = `${bffBaseUrl.replace(/\/$/, '')}/api/ai/playbook-dispatch/execute`;
+          const response = await authenticatedFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              playbookId,
+              sessionAttachmentIds,
+              originalMessage: lastSentMessageRef.current,
+              sessionId: chatSessionId ?? null,
+            }),
+          });
+          if (!response.ok) {
+            console.error(
+              '[ConversationPane] playbook-dispatch failed — status:%d',
+              response.status,
+            );
+            setPendingInjection({
+              role: 'Assistant',
+              content:
+                response.status === 404
+                  ? "I'm not able to run that playbook yet — the dispatcher endpoint is still being wired up."
+                  : 'I couldn\'t start that playbook. Please try again.',
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } catch (err) {
+          // Network / auth failures — log structurally only, never include the error message
+          // verbatim because some error objects can leak headers or URLs.
+          console.error('[ConversationPane] playbook-dispatch threw:', err instanceof Error ? err.name : 'unknown');
+        }
+      })();
+    },
+    [authenticatedFetch, bffBaseUrl, chatSessionId]
+  );
+
+  /**
+   * onOpenLibraryModal — user clicked the "Open Library" link (FR-51).
+   *
+   * Opens the `sprk_playbooklibrary` Code Page via Xrm.Navigation.navigateTo
+   * (target: 2 modal). When `sessionAttachmentIds` are present we pass them
+   * through the `data` envelope so the Library can pre-filter by attachment
+   * classification (when available upstream).
+   *
+   * ADR-021 + ADR-028: dialog launch follows the existing
+   * `SemanticSearchCriteriaTool.launchSemanticSearch` pattern (proven Xrm
+   * frame-walk + navigateTo with target:2, percent-sized modal).
+   */
+  const handleOpenLibraryModal = React.useCallback(
+    (sessionAttachmentIds: string[]): void => {
+      // Resolve Xrm.Navigation via frame walk (handles iframe nesting in MDA).
+      let nav: { navigateTo?: (...args: unknown[]) => Promise<unknown> } | null = null;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const w = window as any;
+        const xrm = w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm ?? null;
+        nav = xrm?.Navigation ?? null;
+      } catch {
+        nav = null;
+      }
+
+      if (!nav?.navigateTo) {
+        console.warn(
+          '[ConversationPane] Open Library: Xrm.Navigation unavailable — running outside Dataverse host.',
+        );
+        return;
+      }
+
+      // Build the `data` query string. The Library Code Page accepts
+      // `sessionAttachmentIds` as a comma-separated opt-in pre-filter; when
+      // absent the modal opens unfiltered (per FR-51).
+      const parts: string[] = [];
+      if (sessionAttachmentIds.length > 0) {
+        parts.push(
+          `sessionAttachmentIds=${encodeURIComponent(sessionAttachmentIds.join(','))}`,
+        );
+      }
+      const data = parts.join('&');
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (nav.navigateTo as any)(
+          {
+            pageType: 'webresource',
+            webresourceName: 'sprk_playbooklibrary',
+            data,
+          },
+          {
+            target: 2,
+            width: { value: 85, unit: '%' },
+            height: { value: 85, unit: '%' },
+            title: 'Playbook Library',
+          },
+        ).catch?.((err: unknown) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const code = (err as any)?.errorCode;
+          // errorCode 2 = user-cancelled (modal closed); ignore.
+          if (code !== 2) {
+            console.warn('[ConversationPane] Open Library: navigateTo error:', code ?? 'unknown');
+          }
+        });
+      } catch (err) {
+        console.warn('[ConversationPane] Open Library: navigateTo threw synchronously:', err instanceof Error ? err.name : 'unknown');
+      }
+    },
+    []
   );
 
   /**
@@ -2064,6 +2276,10 @@ export function ConversationPane(): React.JSX.Element {
               onLocalMessageInjected={handleLocalMessageInjected}
               onBeforeSendMessage={handleBeforeSendMessage}
               onDecorateOutboundBody={handleDecorateOutboundBody}
+              // chat-routing-redesign-r1 task 117b (FR-49 + FR-50 + FR-51)
+              onPlaybookOptions={handlePlaybookOptions}
+              onSelectPlaybook={handleSelectPlaybook}
+              onOpenLibraryModal={handleOpenLibraryModal}
             />
             {/*
               R6 task 085 / D-D-06 (Pillar 8 `/help` UI affordance) — a

@@ -140,8 +140,6 @@ public static class EndpointMappingExtensions
         app.MapPromptLibraryEndpoints();
         // AIPU2-036: Feedback — per-response thumbs up/down submit + aggregation by playbook/capability
         app.MapFeedbackEndpoints();
-        // AI Capabilities: webhook-triggered manifest refresh (AIPU2-011)
-        app.MapCapabilityEndpoints();
         app.MapChatEndpoints();
 
         // R5 task 014 (D2-04) — direct entry point for the chat-driven Summarize vertical

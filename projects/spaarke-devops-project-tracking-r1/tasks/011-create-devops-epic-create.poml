@@ -1,0 +1,69 @@
+<task id="DEVOPS-011" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Create /devops-epic-create skill</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>skill-creation, devops, epic, gh-cli</tags>
+    <dependencies>010</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Author `/devops-epic-create` skill per FR-07. Takes title + objectives/focus + scope. Creates an Epic Issue on Project #2 with `Type=Epic`, label `epic`, populated description fields. Uses the `epic.yml` issue template structure from task 004.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill author. Reuses idempotent-mutation patterns from task 010.</role>
+
+  <goal>
+`.claude/skills/devops-epic-create/SKILL.md` exists. One invocation creates one Epic visible on Project #2 with all FR-04 epic-template fields populated; sub-issues panel ready to accept Projects.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-07">Spaarke skill convention (frontmatter + Prerequisites + Purpose + Steps + Failure-Modes)</constraint>
+    <constraint source="spec FR-07">Auto-applies label `epic` and `Type=Epic` field value</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+    <constraint source="convention">Skill accepts CLI-style flags: `--title`, `--objectives`, `--scope`, `--success-criteria`, `--timeframe`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>.claude/skills/worktree-setup/SKILL.md</file>
+      <file>.claude/skills/INDEX.md</file>
+      <file>.github/ISSUE_TEMPLATE/epic.yml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm task 010 ✅. Load `.github/ISSUE_TEMPLATE/epic.yml` to get expected body field structure.</step>
+    <step order="1" name="Author SKILL.md">Frontmatter + Prerequisites + Purpose + Steps + Failure-Modes per NFR-07. Steps: validate flags → compose body from template fields → `gh issue create` → add to Project #2 → set `Type=Epic` via GraphQL mutation → emit Issue URL.</step>
+    <step order="2" name="Idempotency handling">If an Epic with this exact title exists, prompt user to choose (skip / edit / continue with duplicate). Document the prompt in Steps section.</step>
+    <step order="3" name="Update INDEX.md">Add row for `devops-epic-create`.</step>
+    <step order="4" name="Smoke test">Create + delete a throwaway Epic. Confirm: Issue exists with `Type=Epic`, label `epic`, body fields populated; sub-issues panel ready.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/* files</tool>
+    <tool name="Write">New SKILL.md</tool>
+    <tool name="gh">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="skill">.claude/skills/devops-epic-create/SKILL.md</output>
+    <output type="config">.claude/skills/INDEX.md (one new row)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase2-epic-create-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SKILL.md exists with all NFR-07 sections</criterion>
+    <criterion testable="true">Smoke test creates one Epic with `Type=Epic`, label `epic`, body populated</criterion>
+    <criterion testable="true">Skill handles duplicate-title prompt gracefully</criterion>
+    <criterion testable="true">INDEX.md updated</criterion>
+  </acceptance-criteria>
+</task>

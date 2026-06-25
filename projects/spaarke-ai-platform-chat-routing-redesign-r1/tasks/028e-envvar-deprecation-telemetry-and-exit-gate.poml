@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028e" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Env-var deprecation telemetry + Phase 1R exit gate</title>
+    <phase>1R: sprk_playbookconsumer Routing Table</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>028c,028d</dependencies>
+    <blocks>030</blocks>
+    <tags>bff-api, telemetry, verification, ADR-015</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Telemetry instrumentation + exit-gate verification; no consumer behavior changes; STANDARD per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>1-N</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wire the env-var deprecation telemetry (FR-1R-06) and verify the Phase 1R exit gate (FR-1R-08). Telemetry consists of two parts: (1) a new `WorkspaceOptionsValidator : IValidateOptions&lt;WorkspaceOptions&gt;` that emits a startup `WARN: Workspace__*PlaybookId env vars are deprecated; configure via sprk_playbookconsumer Dataverse table` when any of the four legacy `*PlaybookId` env vars is non-null; (2) runtime `Activity` tag `routing.envvar_fallback_used=true` + log warning if any remaining fallback path actually reads one. ADR-015 tier-1: log only the env-var key NAME, never the GUID value. Exit gate: grep `Workspace__.*PlaybookId` in `Services/` returns zero hits except the deprecation telemetry call site; all 6 consumer integration tests (4 from 028c + 2 from 028d) green; cache hit ratio &gt;70% measured during stabilization (target metric, not gate-blocking on first measurement).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `IValidateOptions&lt;T&gt;` startup validation, `System.Diagnostics.Activity` tagging, ADR-015 tier-1 logging hygiene, and Phase 1R exit-gate verification.</role>
+
+  <goal>
+    `WorkspaceOptionsValidator` emits a startup WARN listing only the populated env-var KEY names (no GUID values per ADR-015) when any of `MatterPreFillPlaybookId`, `ProjectPreFillPlaybookId`, `AiSummaryPlaybookId`, `SummarizePlaybookId` are non-null/non-empty. Any runtime fallback read of these properties (if any path remains after 028c/028d) tags `Activity` with `routing.envvar_fallback_used=true` and logs the same tier-1-safe warning. KQL dashboard query for both signals documented at `notes/handoffs/028e-deprecation-telemetry-kql.md`. Phase 1R exit gate checklist at `notes/handoffs/028e-phase-1r-exit-gate.md` with: grep evidence (zero `Workspace__.*PlaybookId` reads in `Services/` except telemetry site), all 6 consumer integration tests green, cache hit ratio measurement + KQL query.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §"Phase 1R" FR-1R-06 + FR-1R-08. With consumers migrated by 028c (4 Pattern A) and 028d (2 Pattern B), the `Workspace__*PlaybookId` env vars are no longer the routing source of truth — `sprk_playbookconsumer` Dataverse records are. The deprecation telemetry is the early-warning system: if any operator still sets one of these env vars on Test or Prod, the startup WARN immediately surfaces the deprecation. The Activity-tag runtime signal catches any residual fallback read path that escaped the migration grep. ADR-015 tier-1 is binding: this telemetry must NEVER log the GUID value or any user-identifying context — only the env-var key name. The exit gate confirms Phase 1R goals are met before Phase 2 (WP1.5 Index Governance) begins. The cache hit ratio &gt;70% target is a stabilization metric, not a gate-blocker on first measurement: it represents the steady-state expected once the 5-min TTL cache from task 028a is warm across the 6 consumer types.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/WorkspaceOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/WorkspaceOptionsValidator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Routing/IConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Routing/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Configuration/WorkspaceOptionsValidatorTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-1R-06">Startup WARN + runtime Activity tag for any read of the 4 deprecated env vars; log only the env-var KEY name.</constraint>
+    <constraint source="spec FR-1R-08">Exit gate: zero `Workspace__.*PlaybookId` reads in `Services/` except telemetry site; all 6 consumer integration tests green; cache hit ratio measurement reported.</constraint>
+    <constraint source="ADR-015">Telemetry tier-1 safe: log env-var KEY name only; never log GUID value or user-identifying data.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary or `Configuration/`; no CRUD-code violations.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect minor delta only (a small validator class).</constraint>
+    <constraint source="project">Cache hit ratio &gt;70% target is a stabilization metric, not gate-blocking on first measurement.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — add unit tests for `WorkspaceOptionsValidator` covering all 4 env-var keys + the "no env vars set" baseline.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `WorkspaceOptions.cs` to confirm the 4 deprecated `*PlaybookId` property names. Read `Program.cs` to identify the `IValidateOptions` registration location and any existing validators to follow the pattern.</step>
+    <step order="2">Create (or extend if one exists) `WorkspaceOptionsValidator : IValidateOptions&lt;WorkspaceOptions&gt;` in `Configuration/`. The `Validate` method MUST iterate the 4 properties and, for each one that is non-null and non-empty, append its KEY NAME (`Workspace__MatterPreFillPlaybookId`, etc.) to a list. If the list is non-empty, log a single `WARN: Workspace__*PlaybookId env vars are deprecated; configure via sprk_playbookconsumer Dataverse table. Populated keys: [list]` then return `ValidateOptionsResult.Success` (deprecation does NOT fail startup). Never include the GUID value (ADR-015).</step>
+    <step order="3">Register the validator in `Program.cs` via `services.AddSingleton&lt;IValidateOptions&lt;WorkspaceOptions&gt;, WorkspaceOptionsValidator&gt;()`. Confirm it fires at startup by adding a unit test that constructs the validator with mocked options + an `ILogger` capture and asserts the WARN message contains the expected key names.</step>
+    <step order="4">Runtime fallback telemetry: identify any remaining read of `WorkspaceOptions.*PlaybookId` in `Services/` (expect zero from 028c/028d migrations — verify). If any exists as a documented fallback path, wrap it to emit `Activity.Current?.AddTag("routing.envvar_fallback_used", "true")` + `_logger.LogWarning("Workspace__{Key} env var fallback used; configure via sprk_playbookconsumer", keyName)` — KEY name only, not the value.</step>
+    <step order="5">Write KQL dashboard query doc at `notes/handoffs/028e-deprecation-telemetry-kql.md` with: (a) startup WARN query (filter `traces` by message prefix); (b) Activity tag query (filter `dependencies` or `customEvents` by tag `routing.envvar_fallback_used`); (c) cache hit ratio query (filter `customMetrics` from task 028a's routing telemetry; numerator = cache hits, denominator = total ResolveAsync invocations, period = trailing 15 min).</step>
+    <step order="6">Phase 1R exit gate verification — `Grep` `Workspace__.*PlaybookId` in `src/server/api/Sprk.Bff.Api/Services/`. Expect zero hits except the runtime fallback telemetry site (if any). Document the grep evidence verbatim.</step>
+    <step order="7">Run the full Phase 1R integration test suite: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Workspace|FullyQualifiedName~SessionSummarizeOrchestrator|FullyQualifiedName~AppOnlyAnalysisService|FullyQualifiedName~ConsumerRouting"`. All 6 consumer integration tests (4 from 028c + 2 from 028d) must be green; the new `WorkspaceOptionsValidator` tests must also pass.</step>
+    <step order="8">Measure cache hit ratio against the `IConsumerRoutingService` from task 028a — run the KQL query from Step 5 over a representative window (or via the in-process test harness if KQL is not available in Dev). Report the measurement verbatim; do NOT fail the gate on a single low reading — note as a stabilization metric per the constraint.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed publish size; record absolute size + delta vs current baseline (~45.65 MB) per ADR-029 / CLAUDE.md §10.</step>
+    <step order="10">Write `notes/handoffs/028e-phase-1r-exit-gate.md` with the exit gate checklist: (a) grep evidence (zero `Workspace__.*PlaybookId` reads in `Services/` except telemetry site), (b) 6 consumer integration tests green (cite test names + pass times), (c) cache hit ratio measurement + KQL query reference, (d) publish-size delta, (e) GO verdict + Phase 2 readiness statement. Update TASK-INDEX.md: task 028e → ✅; Phase 1R closed; current-task.md → ready for task 030 (Phase 2 start).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">WorkspaceOptions.cs, Program.cs, IConsumerRoutingService.cs, existing validator pattern</tool>
+    <tool name="Grep">Final `Workspace__.*PlaybookId` reads in `Services/`</tool>
+    <tool name="Edit">New WorkspaceOptionsValidator + DI registration + any fallback-path telemetry wrap</tool>
+    <tool name="Write">notes/handoffs/028e-deprecation-telemetry-kql.md + notes/handoffs/028e-phase-1r-exit-gate.md + new validator tests</tool>
+    <tool name="Bash">dotnet build / test / publish; measure publish-size delta</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/WorkspaceOptionsValidator.cs (new or extended; emits ADR-015 tier-1-safe deprecation WARN)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (IValidateOptions registration line)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Configuration/WorkspaceOptionsValidatorTests.cs (covers all 4 keys + baseline; asserts no GUID value in log output)</output>
+    <output type="docs">notes/handoffs/028e-deprecation-telemetry-kql.md (3 KQL queries: startup WARN, Activity tag, cache hit ratio)</output>
+    <output type="docs">notes/handoffs/028e-phase-1r-exit-gate.md (exit gate checklist + GO verdict + Phase 2 readiness)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WorkspaceOptionsValidator` emits startup WARN when any of the 4 deprecated env vars is set; logs KEY name only (never GUID value per ADR-015).</criterion>
+    <criterion testable="true">Runtime fallback reads (if any) tag `Activity` with `routing.envvar_fallback_used=true` + log tier-1-safe warning.</criterion>
+    <criterion testable="true">KQL dashboard queries documented at `notes/handoffs/028e-deprecation-telemetry-kql.md` (3 queries).</criterion>
+    <criterion testable="true">Grep over `src/server/api/Sprk.Bff.Api/Services/` for `Workspace__.*PlaybookId` returns zero hits except the deprecation telemetry call site.</criterion>
+    <criterion testable="true">All 6 consumer integration tests (4 from 028c + 2 from 028d) green; new validator tests green.</criterion>
+    <criterion testable="true">Cache hit ratio measurement reported (not gate-blocking on first reading; stabilization metric).</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01 ceiling (≤60 MB).</criterion>
+    <criterion testable="true">Exit gate evidence file at `notes/handoffs/028e-phase-1r-exit-gate.md` with GO verdict + Phase 2 readiness statement.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 1R closing task. After this lands, the project transitions to Phase 2 (WP1.5 Index Governance, task 030). The cache hit ratio target (&gt;70%) is intentionally framed as stabilization rather than a hard gate — initial warm-up will naturally show a lower ratio. If the first reading is below 50%, file a stabilization note for follow-up but DO NOT block Phase 2; the routing layer is correctness-complete regardless of cache warmth. ADR-015 tier-1 hygiene is the most consequential constraint in this task: a test that captures the log output MUST assert the GUID value never appears in any emitted message.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol</protocol>
+  </execution>
+</task>

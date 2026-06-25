@@ -32,7 +32,7 @@ public static class AnalysisServicesModule
         // R6 Pillar 6c (FR-37 / task 063) — IContextEventEmitter for context.* execution-trace
         // events (tool_call_started/completed, knowledge_retrieved, playbook_node_executing/completed,
         // decision_made). Registered unconditionally at the top of the module like R5SummarizeTelemetry
-        // so emission sites in CapabilityRouter / PlaybookOrchestrationService / ToolHandlerToAIFunctionAdapter
+        // so emission sites in PlaybookOrchestrationService / ToolHandlerToAIFunctionAdapter
         // can resolve it regardless of feature flags. ADR-015 binding: the implementation is structurally
         // constrained to deterministic IDs only — see ContextEventEmitter.cs class header.
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter,
@@ -859,6 +859,11 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverOutputNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverToIndexNodeExecutor>();
+        // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node executor.
+        // ActionType.DeliverComposite (= 42) paired with NodeType.DeliverComposite (= 100_000_004).
+        // Existing DeliverOutputNodeExecutor for ActionType.DeliverOutput is UNCHANGED
+        // (backward-compat invariant — single-action Output Node behavior preserved).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverCompositeNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.ConditionNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AiAnalysisNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();

@@ -1,0 +1,57 @@
+<task id="DEVOPS-042" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Phase 5 verify gate — Portfolio Roadmap usable + polish complete</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>verify, phase-gate, ux-test</tags>
+    <dependencies>040, 041</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Verify Phase 5 polish complete per Success Criterion 7 (Portfolio Roadmap usable in <30 seconds) + Success Criterion 10 (README pointer blocks complete). Note: optional FR-27 (auto-comment Action) and FR-28 (scheduled sync) are deferred per F5 default; NOT required for Phase 5 completion. Document the deferral decision.
+  </prompt>
+
+  <role>UX tester representing a non-implementer stakeholder. You time yourself answering "what's running?" using only the Portfolio Roadmap view.</role>
+
+  <goal>
+Success Criterion 7 met: a non-implementer can answer in <30 seconds: "What Epics are active? How many projects in each? Rough portfolio status?" from a single GitHub page.
+  </goal>
+
+  <constraints>
+    <constraint source="spec Success Criterion 7">UX target is &lt;30 second answer time</constraint>
+    <constraint source="spec F5">FR-27 + FR-28 deferred by default unless drift visible</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 040, 041 ✅.</step>
+    <step order="1" name="UX time-trial">Open Portfolio Roadmap view. Time how long it takes to answer: "What Epics are active?" + "How many projects in each?" + "Rough portfolio status?". Target: &lt;30s.</step>
+    <step order="2" name="Pointer block audit">Re-run pointer block grep; confirm zero ACTIVE-project failures (Success Criterion 10).</step>
+    <step order="3" name="FR-27 + FR-28 decision">Document: NOT shipped in r1 per F5 default. If drift visible: file a follow-up project to revisit.</step>
+    <step order="4" name="Report">Write `notes/phase5-verify-report.md` with UX time + deferral decision. Recommend GO/NO-GO for Phase 6.</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Portfolio Roadmap view</tool>
+    <tool name="Grep">Pointer block audit</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-devops-project-tracking-r1/notes/phase5-verify-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UX time-trial: &lt;30 second answer</criterion>
+    <criterion testable="true">SC#10: pointer block audit clean</criterion>
+    <criterion testable="true">FR-27/FR-28 deferral documented</criterion>
+    <criterion testable="true">Phase 5 verify report written with GO recommendation</criterion>
+  </acceptance-criteria>
+</task>

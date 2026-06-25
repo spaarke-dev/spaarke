@@ -1,10 +1,11 @@
 <task id="R4-113" project="smart-todo-r4">
   <metadata>
-    <title>NEW-1 — Form-script audit: register sprk_todo_dirty_check.js OR delete it (no shims)</title>
+    <title>NEW-1 — DELETE sprk_todo_dirty_check.js (user decision 2026-06-24 — "no shims")</title>
     <phase>Closeout (UAT round 14)</phase>
     <workstream>tech-debt hygiene</workstream>
     <status>not-started</status>
-    <estimated-effort>1-2 hrs</estimated-effort>
+    <decision>DELETE (per user 2026-06-24). Parent-side `Xrm.Page.ui.close` workaround in SmartTodoModal.tsx keeps save/close working; no dirty-check feature was ever live in production.</decision>
+    <estimated-effort>1 hr (was 1-2; decision already made)</estimated-effort>
     <tags>form-script, audit, cleanup, no-shims</tags>
     <parallel-safe>true</parallel-safe>
     <dependencies>(none)</dependencies>

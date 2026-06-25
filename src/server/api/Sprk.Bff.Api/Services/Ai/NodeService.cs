@@ -978,6 +978,9 @@ public class NodeService : INodeService
     {
         "aiAnalysis" or "aiCompletion" or "aiEmbedding" => NodeType.AIAnalysis,
         "deliverOutput" or "deliverToIndex" => NodeType.Output,
+        // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery is a SEPARATE NodeType so
+        // legacy "deliverOutput" → NodeType.Output dispatch is UNCHANGED.
+        "deliverComposite" => NodeType.DeliverComposite,
         "condition" or "parallel" or "wait" or "start" => NodeType.Control,
         // "lookupUserMembership" is a data-ops Workflow node — invokes
         // IMembershipResolverService in-process (R3 P5 / task 042; pairs with
@@ -999,6 +1002,9 @@ public class NodeService : INodeService
         "aiEmbedding" => ActionType.AiEmbedding,
         "deliverOutput" => ActionType.DeliverOutput,
         "deliverToIndex" => ActionType.DeliverToIndex,
+        // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery — pairs with
+        // DeliverCompositeNodeExecutor (registered in AnalysisServicesModule.cs).
+        "deliverComposite" => ActionType.DeliverComposite,
         "condition" => ActionType.Condition,
         "parallel" => ActionType.Parallel,
         "wait" => ActionType.Wait,

@@ -106,6 +106,13 @@ builder.Services.AddGraphModule(builder.Configuration);
 // Document Intelligence, Analysis, Playbook, Builder, RAG, and Record Matching services
 builder.Services.AddAnalysisServicesModule(builder.Configuration);
 
+// Consumer→playbook routing (Phase 1R per chat-routing-redesign-r1 spec FR-1R-02).
+// Replaces Workspace__*PlaybookId env vars with Dataverse-backed `sprk_playbookconsumer`
+// routing table. Registered UNCONDITIONALLY: routing is always-on (no kill-switch); on
+// Dataverse error the impl returns null and the caller falls back to typed-options env
+// var during the FR-1R-06 deprecation window. See Infrastructure/DI/RoutingModule.cs.
+builder.Services.AddRoutingModule();
+
 // Spaarke Insights Engine — Zone A extraction post-processing primitives per SPEC §3.5.
 // Phase 1: D-P10 confidence-threshold gating + per-field Observation emission
 // (admin-tunable per D-63 via IOptionsMonitor on ConfidenceThresholdOptions).
@@ -135,9 +142,6 @@ builder.Services.AddInsightsFacadeModule();
 
 // AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
 builder.Services.AddAiSafetyModule(builder.Configuration);
-
-// AI Platform R2: multi-provider capabilities (search, summarization, citations)
-builder.Services.AddAiCapabilitiesModule(builder.Configuration);
 
 // AI Platform R2: Cosmos DB persistence (sessions, prompts, audit, memory, feedback)
 builder.Services.AddAiPersistenceModule(builder.Configuration);

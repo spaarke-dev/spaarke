@@ -3,7 +3,7 @@
   <metadata>
     <title>Phase B — vector match with manifest documentType pre-filter (Hybrid C primary)</title>
     <phase>5: WP2 File-Aware Classification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>111</dependencies>
     <blocks>113</blocks>

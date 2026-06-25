@@ -152,17 +152,18 @@ contexts. Patterns support a single leading `*.` wildcard subdomain.
 
 The iframe-side listener is **NOT** part of this component — it is implemented
 separately as a Dataverse JS Web Resource registered on the embedded form.
-For the SmartTodo To Do main form, the canonical implementation is:
 
-**File**: `src/client/webresources/js/sprk_todo_dirty_check.js`
-**Namespace**: `Spaarke.SmartTodo.DirtyCheck`
-**OnLoad entry point**: `Spaarke.SmartTodo.DirtyCheck.onLoad`
-**Form bind**: see [`projects/smart-todo-r4/notes/c-dirty-check-bind-instructions.md`](../../../../../../../projects/smart-todo-r4/notes/c-dirty-check-bind-instructions.md)
-**Tests**: `__tests__/iframeDirtyCheckScript.test.ts` (21 jest tests — origin allow-list, round-trip, idempotency, graceful fallback)
+**Status (2026-06-24, smart-todo-r4 R4-113)**: no current consumer ships a
+form-side responder. The original `sprk_todo_dirty_check.js` v1.1.0 script
+was deployed to Dataverse but never registered on the To Do form designer's
+OnLoad event, so it never ran. Per the "no shims, complete or delete" rule
+the script + its test + its bind-instructions doc were removed in R4-113.
+The parent-side dirty-check protocol (types + `dirtyCheckTargetWindow` prop)
+remains in this shared lib as **available infrastructure** — future consumers
+that want true cross-frame dirty-checking can implement a form-side handler
+matching the contract below.
 
-Minimal handler shape (the production script extends this with origin
-allow-list validation, idempotent listener install, and cached
-formContext refresh on each OnLoad):
+Minimal handler shape future consumers should implement:
 
 ```ts
 // Inside the iframe (e.g. the SmartTodo form-script web resource):

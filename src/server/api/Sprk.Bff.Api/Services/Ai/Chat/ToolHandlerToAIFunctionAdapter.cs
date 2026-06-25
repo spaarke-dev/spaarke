@@ -301,9 +301,8 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// allowed. Existing Dataverse <c>sprk_name</c> values follow the
     /// human-readable convention "SYS-Display Name With Spaces". Sending those
     /// raw produces a 400 from Azure OpenAI at tool-list build time, breaking
-    /// any chat turn that exposes a multi-tool list (e.g., soft-slash routes
-    /// through CapabilityRouter Layer 0.5). We sanitise here so the LLM sees
-    /// a regex-safe identifier while the original display name remains in
+    /// any chat turn that exposes a multi-tool list. We sanitise here so the LLM
+    /// sees a regex-safe identifier while the original display name remains in
     /// <c>_tool.Name</c> for telemetry / logging / Description.
     /// </remarks>
     public override string Name => SanitiseToolName(_tool.Name);

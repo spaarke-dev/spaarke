@@ -256,9 +256,11 @@ function Associate-NtoN {
 # Node type mapping
 # ---------------------------------------------------------------------------
 $NodeTypeMap = @{
-    'AIAnalysis' = 100000000
-    'Output'     = 100000001
-    'Control'    = 100000002
+    'AIAnalysis'        = 100000000
+    'Output'            = 100000001
+    'Control'           = 100000002
+    'Workflow'          = 100000003
+    'DeliverComposite'  = 100000004  # chat-routing-redesign-r1 FR-52 — multi-section composite output (ADR-037)
 }
 
 # ===========================================================================
