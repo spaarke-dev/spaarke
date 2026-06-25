@@ -22,6 +22,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Telemetry;
 using Spaarke.Dataverse;
 using Xunit;
@@ -384,6 +385,13 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
     public Mock<INodeService> NodeServiceMock { get; } = new();
     public Mock<IPlaybookLookupService> PlaybookLookupMock { get; } = new();
+
+    // chat-routing-redesign-r1 task 028d (FR-1R-05) — orchestrator now consults
+    // IConsumerRoutingService first; default stub returns null so the fixture falls back to
+    // the FR-05 typed-options + IPlaybookLookupService path (preserves prior fixture intent
+    // verbatim — tests targeting the FR-1R-05 happy path live in SessionSummarizeOrchestratorTests).
+    public Mock<IConsumerRoutingService> ConsumerRoutingMock { get; } = new();
+
     public R5SummarizeTelemetry Telemetry { get; } = new();
 
     // R6 task 025 (D-A-17) — the chat-summarize streaming pipeline moved from
@@ -476,6 +484,12 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
             o.ChatSummarizePlaybookId = ConfiguredChatSummarizePlaybookId;
         });
 
+        // chat-routing-redesign-r1 task 028d (FR-1R-05) — orchestrator now consults
+        // IConsumerRoutingService first. Default fixture stub returns null so the fixture
+        // exercises the FR-05 typed-options fallback path (preserves the prior fixture
+        // intent verbatim). FR-1R-05 happy-path coverage lives in SessionSummarizeOrchestratorTests.
+        builder.Services.AddSingleton(ConsumerRoutingMock.Object);
+
         // Orchestrator itself — concrete (ADR-010); registered Scoped to mirror prod.
         builder.Services.AddScoped<SessionSummarizeOrchestrator>();
 
@@ -514,6 +528,7 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         EntityServiceMock.Reset();
         NodeServiceMock.Reset();
         PlaybookLookupMock.Reset();
+        ConsumerRoutingMock.Reset();
         ConfigureDefaults();
     }
 
@@ -553,6 +568,19 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
             .ReturnsAsync(BuildActionEntity(
                 systemPrompt: "You are the R5 Summarize-for-Chat assistant.",
                 outputSchemaJson: """{"type":"object","additionalProperties":false,"required":["tldr"],"properties":{"tldr":{"type":"array","items":{"type":"string"}}}}"""));
+
+        // chat-routing-redesign-r1 task 028d (FR-1R-05) — IConsumerRoutingService default:
+        // returns null so the fixture exercises the FR-05 fallback path (preserves the
+        // pre-028d fixture surface verbatim). Tests targeting the FR-1R-05 routing-table
+        // happy path live in SessionSummarizeOrchestratorTests.
+        ConsumerRoutingMock
+            .Setup(c => c.ResolveAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
 
         // chat-routing-redesign-r1 task 015 (FR-05) — IPlaybookLookupService default: the
         // orchestrator calls GetByIdAsync(configuredId) and forwards the response's Id (Guid)
