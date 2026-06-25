@@ -49,6 +49,7 @@
     <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
     <constraint source="ADR-010">`IConsumerRoutingService` injected via ctor; no `IServiceProvider.GetService&lt;T&gt;()` in endpoint signatures.</constraint>
     <constraint source="ADR-014">`ResolveAsync` honors 5-min TTL per-tenant cache from task 028a — consumers MUST NOT add a second cache layer.</constraint>
+    <constraint source="hardening (code-review S-5)">Use the `ConsumerTypes` constants from `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs` — NEVER pass literal strings. `MatterPreFillService` calls `ResolveAsync(ConsumerTypes.MatterPreFill)`; `ProjectPreFillService` uses `ConsumerTypes.ProjectPreFill`; `WorkspaceAiService` uses `ConsumerTypes.AiSummary`; `WorkspaceFileEndpoints` uses `ConsumerTypes.SummarizeFile`. Compile-time typo defense per the 2026-06-24 code-review S-5 recommendation.</constraint>
     <constraint source="project">NFR-07 pre-fill flow contracts preserved — signatures, 45s timeout, `useAiPrefill` / `$choices` unchanged.</constraint>
     <constraint source="project">`WorkspaceAiService` graceful-degrade fallback preserved — UI tile still renders when no playbook is configured (per Phase 1 task 018 evidence).</constraint>
     <constraint source="project">`WorkspaceFileEndpoints` fail-fast (FR-04) preserved AND now passes `RoutingContext.MimeType = file.ContentType` so `sprk_matchconditions` can route by MIME.</constraint>

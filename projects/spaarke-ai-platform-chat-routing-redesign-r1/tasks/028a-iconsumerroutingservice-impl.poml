@@ -38,6 +38,12 @@
     </relevant-files>
   </context>
 
+  <justification>
+    <existing>Today, all 6 BFF consumers (`MatterPreFillService`, `ProjectPreFillService`, `WorkspaceAiService`, `WorkspaceFileEndpoints`, `SessionSummarizeOrchestrator`, `AppOnlyAnalysisService`) resolve their target playbook by reading a `WorkspaceOptions.*PlaybookId` typed-option that maps to a `Workspace__*PlaybookId` environment variable on the App Service. Grep `Workspace__.*PlaybookId` in `src/server/api/Sprk.Bff.Api/Services/` returns 6 hits across the 6 consumer files. There is no existing component that performs Dataverse-backed consumer→playbook routing.</existing>
+    <extension>No — the env-var pattern cannot be extended to support: (1) admin-editable routing without redeploys, (2) sub-discriminator codes (`summarize-file/patent` vs `summarize-file/nda`), (3) compositional match conditions (JSON predicate against per-request context), (4) per-environment overrides, (5) auditability via Dataverse audit trail. Each of these is a binding FR-1R-02..04 requirement that env vars cannot satisfy without re-implementing a routing engine outside `IOptions`.</extension>
+    <cost-of-doing-nothing>The 2026-06-24 UAT-2 failure (Matter pre-fill silently broken because `Workspace__MatterPreFillPlaybookId` was set under the legacy `Workspace__PreFillPlaybookId` key on bff-dev) is the concrete failure mode that recurs every time the BFF app-settings drift from the consumer code's typed-options key. Without `IConsumerRoutingService`, every consumer migration in Phase 1 (already shipped) is one renamed env-var key away from a silent prod outage. Concrete behaviors that fail without this: (a) FR-1R-05 6-consumer migration cannot proceed (no service to inject), (b) FR-1R-06 env-var deprecation telemetry has nothing to fall back to, (c) FR-1R-08 grep-zero-`Workspace__*PlaybookId` exit gate is unachievable.</cost-of-doing-nothing>
+  </justification>
+
   <constraints>
     <constraint source="ADR-010">DI minimalism — no `IServiceProvider.GetService&lt;T&gt;()` in endpoint signatures; concrete-class registration via AiModule.cs.</constraint>
     <constraint source="ADR-013">Stays in `Services/Ai/Routing/` boundary; expose via `Services/Ai/PublicContracts/` only if CRUD code needs to consume it.</constraint>

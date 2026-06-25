@@ -46,6 +46,7 @@
     <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
     <constraint source="ADR-010">`IConsumerRoutingService` injected via ctor; no `IServiceProvider.GetService&lt;T&gt;()` in endpoint signatures.</constraint>
     <constraint source="ADR-014">`ResolveAsync` honors 5-min TTL per-tenant cache from task 028a — consumers MUST NOT add a second cache layer.</constraint>
+    <constraint source="hardening (code-review S-5)">Use the `ConsumerTypes` constants from `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs` — NEVER pass literal strings. `SessionSummarizeOrchestrator` calls `ResolveAsync(ConsumerTypes.ChatSummarize)`; `AppOnlyAnalysisService` uses `ConsumerTypes.EmailAnalysis`. Compile-time typo defense per the 2026-06-24 code-review S-5 recommendation.</constraint>
     <constraint source="project">`SessionSummarizeOrchestrator` FR-26 / FR-30 invariants preserved per Phase 1 task 015 evidence — chat-summarize routing behavior unchanged.</constraint>
     <constraint source="project">`AppOnlyAnalysisService` removes the 2 const stable-IDs at `:46` and `:1068` flagged by task 027 exit-gate evidence — these are the canonical Pattern B execution-path consts.</constraint>
     <constraint source="project">Test update obligation (CLAUDE.md §10) — add/update one integration test per migrated consumer; existing Phase 1 tests remain unchanged or are extended in place.</constraint>
