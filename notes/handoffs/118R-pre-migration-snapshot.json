@@ -1,0 +1,115 @@
+{
+  "$comment": "118R pre-migration snapshot for summarize-document-for-workspace@v1 — captured 2026-06-25 against spaarkedev1 (DEV) via Dataverse MCP read_query before any node-graph mutation. This is the rollback artifact: re-applying the inverse of section 'forward-migration' below recovers the snapshot state. See notes/handoffs/118R-migration-evidence.md for the rollback recipe.",
+
+  "snapshot": {
+    "capturedAt": "2026-06-25T00:00:00Z",
+    "capturedBy": "task-execute / 118R agent",
+    "environment": "spaarkedev1 (DEV)",
+    "tool": "mcp__dataverse__read_query",
+
+    "playbook": {
+      "sprk_analysisplaybookid": "302e6da6-f363-f111-ab0c-7ced8ddc4cc6",
+      "sprk_name": "summarize-document-for-workspace@v1",
+      "sprk_playbookid": "302e6da6-f363-f111-ab0c-7ced8ddc4cc6",
+      "sprk_playbookcode": null,
+      "$comment-playbookcode": "Null today. Phase 1 backfill never reached this row (task 014 in Phase 1 only backfilled six other production-bound playbooks). The vector-match path uses sprk_jpsmatchingmetadata / embeddings — not the slug. NOT required for 118R."
+    },
+
+    "nodes": [
+      {
+        "sprk_playbooknodeid": "e35cbcd3-026c-f111-ab0e-7ced8ddc4a05",
+        "sprk_name": "summarize",
+        "sprk_nodetype": 100000000,
+        "sprk_nodetypename": "AI Analysis",
+        "sprk_executionorder": 1,
+        "sprk_outputvariable": "output_3d6564a1-f363-f111-ab0c-7ced8ddc4a05",
+        "sprk_configjson": "{\"__canvasNodeId\":\"3d6564a1-f363-f111-ab0c-7ced8ddc4a05\",\"__actionType\":0}",
+        "$comment-sprk_actionid": "Links to SUM-CHAT@v1 (sprk_analysisaction id eeb05bfd-1260-f111-ab0b-70a8a59455f4). Full action FK lookup omitted from this snapshot — the canonical record is the action row itself, not this node's FK projection. See referencedAction below."
+      }
+    ],
+
+    "referencedAction": {
+      "sprk_analysisactionid": "eeb05bfd-1260-f111-ab0b-70a8a59455f4",
+      "sprk_actioncode": "SUM-CHAT@v1",
+      "sprk_name": "Summarize Document for Chat",
+      "outputSchemaSections": ["tldr", "summary", "keywords", "entities"],
+      "$comment-outputSchema": "These FOUR top-level fields are the sectionName candidates for the migrated composite node. Order is load-bearing per task 006 spike: tldr -> summary -> keywords -> entities (Azure OpenAI Structured Outputs streams in declaration order). 118R preserves this order in the migrated composite's sections[] array."
+    },
+
+    "chatSiblingBaseline": {
+      "sprk_analysisplaybookid": "44285d15-1360-f111-ab0b-70a8a59455f4",
+      "sprk_name": "summarize-document-for-chat@v1",
+      "$comment": "Chat sibling is NOT migrated by 118R (FR-58 / ADR-037). Baseline captured to demonstrate the pre-migration structural distinction. Chat sibling MUST remain single-action."
+    }
+  },
+
+  "schemaGapBlocker": {
+    "title": "Dataverse sprk_nodetype choice column does NOT include DeliverComposite (100000004)",
+    "discoveredVia": "mcp__dataverse__describe('tables/sprk_playbooknode')",
+    "currentChoiceOptions": [
+      { "value": 100000000, "label": "AI Analysis" },
+      { "value": 100000001, "label": "Output" },
+      { "value": 100000002, "label": "Control" },
+      { "value": 100000003, "label": "Workflow" }
+    ],
+    "missing": [{ "value": 100000004, "label": "Deliver Composite (FR-52 / 114R)" }],
+    "impact": "Until the option-set is extended with value 100000004, ANY POST/PATCH against sprk_playbooknode that sets sprk_nodetype=100000004 will be rejected by Dataverse with a choice-value-not-valid error. The C# engine + executor (DeliverCompositeNodeExecutor, NodeType.DeliverComposite) ARE in place from task 114R; the gap is purely on the Dataverse metadata side.",
+    "remediation": "Add the choice option via Dataverse metadata API (PATCH https://{org}.crm.dynamics.com/api/data/v9.2/EntityDefinitions(LogicalName='sprk_playbooknode')/Attributes(LogicalName='sprk_nodetype')) — out of 118R scope; tracked as a follow-up below. This is NOT 'data migration' work; it is a Dataverse schema-metadata change requiring the dataverse-create-schema skill."
+  },
+
+  "forward-migration": {
+    "$comment": "When the schema gap above is resolved, the deployment file infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json is the authoritative target state. Apply via scripts/Deploy-Playbook.ps1 -DefinitionFile <file> -Force (Force is required because the playbook already exists; idempotent skip-by-name would otherwise no-op).",
+    "deploymentFile": "infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json",
+    "intendedFinalState": {
+      "playbookRow": "UNCHANGED — sprk_analysisplaybookid 302e6da6-... preserved (immutable opaque ID); sprk_name 'summarize-document-for-workspace@v1' preserved (slug unchanged so vector match still routes here).",
+      "nodes": [
+        {
+          "name": "extract-tldr",
+          "nodeType": "AIAnalysis",
+          "actionCode": "SUM-CHAT@v1",
+          "outputVariable": "tldrSection",
+          "sectionName": "tldr"
+        },
+        {
+          "name": "extract-summary",
+          "nodeType": "AIAnalysis",
+          "actionCode": "SUM-CHAT@v1",
+          "outputVariable": "summarySection",
+          "sectionName": "summary"
+        },
+        {
+          "name": "extract-keywords",
+          "nodeType": "AIAnalysis",
+          "actionCode": "SUM-CHAT@v1",
+          "outputVariable": "keywordsSection",
+          "sectionName": "keywords"
+        },
+        {
+          "name": "extract-entities",
+          "nodeType": "AIAnalysis",
+          "actionCode": "SUM-CHAT@v1",
+          "outputVariable": "entitiesSection",
+          "sectionName": "entities"
+        },
+        {
+          "name": "deliverComposite",
+          "nodeType": "DeliverComposite",
+          "actionType": 42,
+          "outputVariable": "composite",
+          "$comment": "NEW node type — requires Dataverse choice add (100000004)"
+        }
+      ],
+      "$comment-action-reuse": "All four Action nodes reference the SAME existing SUM-CHAT@v1 action — outputSchema is intrinsic to the action; the playbook just invokes it four times. Per-section prompt focus is achieved via per-node configJson template parameters (styleFrom: 'extract-tldr-only' etc.) — the action's JPS prompt branches on the focus hint. NO new sprk_analysisaction rows are created. This preserves NFR-02 (production-bound playbook preservation): the output shape that StructuredOutputStreamWidget consumes is unchanged."
+    }
+  },
+
+  "rollback": {
+    "$comment": "If the post-migration state is rejected or causes regression, restore via:",
+    "steps": [
+      "Re-set the original single node 'summarize' (sprk_playbooknodeid e35cbcd3-026c-f111-ab0e-7ced8ddc4a05) to statecode=0 statuscode=1 via MCP update_record (it should remain Active and untouched anyway — see ADR-037 deactivation pattern below).",
+      "Delete the new Action nodes via MCP delete_record (extract-tldr / extract-summary / extract-keywords / extract-entities) — capture their GUIDs from the post-migration evidence note before deleting.",
+      "Delete the new DeliverComposite node via MCP delete_record.",
+      "Optional: re-run scripts/Deploy-Playbook.ps1 -DefinitionFile src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/summarize-document-for-workspace.playbook.json -Force to re-apply the legacy single-node state from the source-of-truth JSON."
+    ]
+  }
+}
