@@ -1,0 +1,64 @@
+<task id="DEVOPS-040" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Configure 6 portfolio views on Project #2</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>portfolio-views, github-project, configuration</tags>
+    <dependencies>022, 039</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Configure the 6 portfolio views on GitHub Project #2 per FR-25: **Portfolio Roadmap** (Roadmap layout by Start Date/Target Date, filter `Type IN (Epic, Project)`), **Epics overview** (Table, `Type=Epic`), **Active projects** (Table, `Type=Project AND Project Status=In Progress`), **Project backlog** (Table, `Type=Project AND Project Status=Planned`), **On hold/Cancelled** (Table, `Project Status IN (On Hold, Cancelled)`), **By type tag** (Board grouped by `Project Type`, `Type=Project`). The 7th existing default Issue-level work view is preserved unchanged.
+  </prompt>
+
+  <role>GitHub Projects v2 power user. View filters use GitHub's Project filter syntax. You configure via the UI primarily (filter syntax is UI-driven), then document the filter strings precisely so they can be recreated.</role>
+
+  <goal>
+6 portfolio views exist on Project #2 with the specified filters. Portfolio Roadmap renders all Epics + Projects on a timeline.
+  </goal>
+
+  <constraints>
+    <constraint source="spec FR-25">7th existing default Issue-level view preserved</constraint>
+    <constraint source="spec D-10">Stakeholder audience — views should be readable without context</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 022, 039 ✅. Open Project #2 in browser.</step>
+    <step order="1" name="Capture baseline views">List existing views — confirm count and names. Preserve the 7th default Issue-level work view.</step>
+    <step order="2" name="Create Portfolio Roadmap">Add Roadmap layout view. Filter: `Type IN (Epic, Project)`. Configure horizon (Start Date → Target Date axis).</step>
+    <step order="3" name="Create Epics overview">Add Table view. Filter: `Type=Epic`. Columns: Title, Sub-issues progress, Projected timeframe.</step>
+    <step order="4" name="Create Active projects">Add Table view. Filter: `Type=Project AND Project Status=In Progress`. Columns: Title, Parent issue, Worktree Path, Task Count, Tasks Completed, Project Status.</step>
+    <step order="5" name="Create Project backlog">Add Table view. Filter: `Type=Project AND Project Status=Planned`. Columns: Title, Parent issue, Project Type, Summary.</step>
+    <step order="6" name="Create On hold/Cancelled">Add Table view. Filter: `Project Status IN (On Hold, Cancelled)`. Columns: Title, Status reason, last activity.</step>
+    <step order="7" name="Create By type tag">Add Board view grouped by `Project Type`. Filter: `Type=Project`.</step>
+    <step order="8" name="Document filter strings">Save `notes/phase5-view-configuration.md` with exact filter strings per view. This enables reproducibility on a new Project board.</step>
+    <step order="9" name="Verify">Each view loads without error; Portfolio Roadmap renders timeline.</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">GitHub Project #2 UI</tool>
+    <tool name="gh">Verification queries</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">6 portfolio views on Project #2</output>
+    <output type="docs">projects/spaarke-devops-project-tracking-r1/notes/phase5-view-configuration.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">6 portfolio views exist on Project #2</criterion>
+    <criterion testable="true">Each view filter matches FR-25 exact specification</criterion>
+    <criterion testable="true">7th default Issue-level work view preserved</criterion>
+    <criterion testable="true">Portfolio Roadmap renders without errors</criterion>
+    <criterion testable="true">Filter strings documented</criterion>
+  </acceptance-criteria>
+</task>

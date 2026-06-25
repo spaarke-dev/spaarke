@@ -968,3 +968,18 @@ Pipeline successful when:
 ---
 
 *For Claude Code: This is the recommended entry point for new projects with existing spec.md. Provides streamlined UX with human-in-loop confirmation.*
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 031 · FR-17)
+
+**At start of skill** (after Step 1 spec validation, before resource discovery): check `projects/{name}/README.md` for `> **Portfolio**:` pointer block.
+
+- **If pointer block ABSENT**: prompt "Register this project on the portfolio? [Y/n]" → on Y, invoke `/devops-project-register` (will prompt for `--epic`).
+- **If pointer block PRESENT**: silently invoke `/devops-project-sync`.
+
+Hook is silent on success (single ✅ line). Failures degrade to ⚠️ warn; do NOT block pipeline progression (NFR-03).
+
+Register prompt fires at most ONCE per project — subsequent runs always sync silently.
+
+See: [`.claude/skills/devops-project-register/SKILL.md`](../devops-project-register/SKILL.md), [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md).

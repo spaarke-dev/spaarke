@@ -3,8 +3,19 @@
     <title>FU-6 — SpeDocumentViewer stale bundle verification + cleanup</title>
     <phase>Closeout (UAT round 14)</phase>
     <workstream>tech-debt hygiene</workstream>
-    <status>not-started</status>
-    <estimated-effort>1-2 hrs</estimated-effort>
+    <status>partial — source confirmed REMOVED by pcf-orphan-cleanup-r1; orphan deployed v1.0.16 still needs Dataverse cleanup from master</status>
+    <verification-2026-06-25>
+      Worktree audit confirms: `src/client/pcf/SpeDocumentViewer/` directory does NOT exist. The only remaining references in the repo are:
+      - `projects/pcf-orphan-cleanup-r1/backups-2026-06-22/baseline-SpaarkeSpeDocumentViewer-pre-cleanup-2026-06-22.zip` (backup ZIP from the cleanup project)
+      - `projects/file-preview-dialog-with-auth-enhancements/tasks/060-migrate-spe-document-viewer-pcf-auth.poml` (planning doc, pre-cleanup)
+      - `projects/x-document-checkout-viewer/PROPOSED-SpeDocumentViewer-DesignSpec.md` (proposed design)
+      Functional source: ZERO files. The pcf-orphan-cleanup-r1 project removed the PCF entirely (per backup naming "pre-cleanup").
+
+      `sprk_todoflag` grep on remaining source = ONLY comments noting "no longer using" + 2 regression-guard assertions (`expect.not.toHaveProperty('sprk_todoflag')`) per R4-094 grep-sweep-result.md §1-2. Zero functional writes.
+
+      Owed to master: delete the orphan SpeDocumentViewer web resource(s) + bundle.js v1.0.16 from spaarkedev1 Dataverse (MCP delete_record on webresource entity). Coordinate with pcf-orphan-cleanup-r1 owner who handled the source cleanup.
+    </verification-2026-06-25>
+    <estimated-effort>30 min (was 1-2 hrs; source-side already done by sibling project; only Dataverse cleanup remains)</estimated-effort>
     <tags>cleanup, legacy, stale-bundle, sprk_todoflag</tags>
     <parallel-safe>true</parallel-safe>
     <dependencies>(none)</dependencies>

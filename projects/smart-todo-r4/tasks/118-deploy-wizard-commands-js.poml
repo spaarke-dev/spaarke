@@ -1,0 +1,93 @@
+<task id="R4-118" project="smart-todo-r4">
+  <metadata>
+    <title>NEW (2026-06-24) — Deploy sprk_wizard_commands.js + audit "Create To Do" ribbon coverage</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>tech-debt hygiene + ribbon coverage</workstream>
+    <status>not-started</status>
+    <estimated-effort>3-5 hrs (was 1-2; expanded per user 2026-06-24 to option B — all 6 parent entities + icon)</estimated-effort>
+    <tags>web-resource, ribbon, deploy, no-shims, audit</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>(none — independent of widget + resolver work)</dependencies>
+    <relevant-files>
+      <file>src/client/webresources/js/sprk_wizard_commands.js (committed, NEVER DEPLOYED to spaarkedev1)</file>
+      <file>src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml (lines 48 + 145 — Matter "Create To Do" button + command)</file>
+      <file>src/solutions/spaarke_insights/Entities/sprk_Precedent/ (sibling entity — TBD if needs same button)</file>
+      <file>scripts/Deploy-WizardCommandsJs.ps1 (existing deploy script)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+**Issue discovered during R4-110 UAT**: spaarkedev1 returns HTTP 404 on `GET /webresources/sprk_wizard_commands.js`. The Matter form's "Create To Do" command bar button is defined (RibbonDiff.xml lines 48 + 145) and points to JS function `Spaarke.Commands.Wizards.openCreateTodoWizard` in this web resource. The JS file was committed to source (v1.0.0+) but the web resource was never created in Dataverse — so clicking the button does nothing.
+
+Classic "no shims" violation per durable feedback: source-committed ≠ deployed-and-wired.
+
+This task: (a) deploy the JS web resource from master, (b) audit which parent entities have "Create To Do" ribbon buttons defined vs missing, (c) decide whether to extend ribbon coverage to other parent entities (Project, Event, Invoice, WorkAssignment, Communication) in R4 closeout OR defer to R5.
+
+**Audit findings (2026-06-24, read-only)**:
+- `src/solutions/spaarke_insights/Entities/` contains RibbonDiff.xml for: SystemUser, sprk_Matter, sprk_Precedent (only 3 entities customized).
+- Only `sprk_Matter` has a CreateTodo button defined.
+- JS handlers exist for: openCreateMatterWizard, openCreateProjectWizard, openCreateEventWizard, openCreateTodoWizard (4 handlers, no orphans).
+- Project, Event, Invoice, WorkAssignment, Communication have NO custom ribbons in `spaarke_insights` — adding "Create To Do" to them = creating new RibbonDiff entries (likely in a NEW dedicated entity-ribbon solution per `/ribbon-edit` skill's "small dedicated solution" rule).
+  </prompt>
+
+  <role>Dataverse admin (deploy) + frontend developer (ribbon XML if extending).</role>
+
+  <goal>
+1. **Create checkmark icon assets**: `sprk_ToDoCheckmark16.svg` + `sprk_ToDoCheckmark32.svg` in `src/client/assets/icons/` (or user supplies Microsoft To Do branded asset).
+2. **Verify source on master matches worktree** for `sprk_wizard_commands.js` (should be identical — no edits needed).
+3. **Verify JS handlers exist** for all 5 new entity buttons. AUDITED 2026-06-24: `openCreateMatterWizard`, `openCreateProjectWizard`, `openCreateEventWizard`, `openCreateTodoWizard` exist; **`openCreate{Invoice,WorkAssignment,Communication}Wizard` likely missing — must add to `sprk_wizard_commands.js`**. Each new handler is ~5 lines (clone `openCreateTodoWizard` pattern at line 221).
+4. **Update Matter RibbonDiff.xml** to use the new icon ($webresource:sprk_ToDoCheckmark32.svg) instead of `/_imgs/ribbon/newrecord32.png`. NOT a deployment-critical change — bundled with the new entity additions.
+5. **Create 5 new entity-ribbon solutions** (one per: sprk_project, sprk_event, sprk_invoice, sprk_workassignment, sprk_communication). Per /ribbon-edit skill rules: dedicated small solution per entity, contains only the entity metadata. NOT added to spaarke_insights.
+6. **Add CustomAction + CommandDefinition + LocLabels** for each entity's "Create To Do" button via /ribbon-edit skill workflow (export → edit customizations.xml → re-import). Clone the Matter pattern (RibbonDiff.xml lines 48 + 145).
+7. **Deploy icon web resources first** (icons must exist before ribbon import per ribbon-edit skill).
+8. **Deploy sprk_wizard_commands.js** (with any new handlers added) via `scripts/Deploy-WizardCommandsJs.ps1` from master.
+9. **Deploy each entity ribbon solution** from master, smoke-test each.
+10. **Smoke-test all 6 entities**: open record → click "Create To Do" → wizard opens with correct entity context (entityType + entityId).
+  </goal>
+
+  <scope-decision>
+  **DECIDED 2026-06-24 (user)**: **Option B — add "Create To Do" button to ALL 5 other parent entities** (Project, Event, Invoice, WorkAssignment, Communication) in addition to existing Matter button.
+
+  **Icon spec**: Use the Microsoft To Do blue checkmark icon if available; otherwise a generic check-circle SVG (`fill="currentColor"` for theme adaptation per ribbon-edit skill). The OOB `/_imgs/ribbon/newrecord32.png` currently used by Matter is generic — replace it across all 6 entities (Matter + 5 new) for a unified MS-To-Do-style identity.
+
+  Icon implementation options:
+   1. **Generic check-circle SVG** (recommended): create `sprk_ToDoCheckmark16.svg` + `sprk_ToDoCheckmark32.svg` web resources with `viewBox="0 0 20 20"`, `fill="currentColor"`, simple circle + checkmark path. Theme-adaptive (light/dark mode). Zero brand-licensing concerns.
+   2. **Microsoft To Do blue check** (if user provides asset): same web resource names, but with explicit blue brand color (#0078D4 or similar) — loses dark-mode adaptation. Only if user supplies the SVG.
+
+  Defaulting to option 1 unless user supplies a branded asset.
+  </scope-decision>
+
+  <constraints>
+    <constraint source="user feedback feedback_no-shims-clean-up-dead-code">Source-committed ≠ deployed-and-wired. This task closes that gap for sprk_wizard_commands.js.</constraint>
+    <constraint source="spaarkedev1-deploy-discipline">Deploy from master only. This worktree does audit + POML updates; main repo handles the deploy.</constraint>
+    <constraint source=".claude/skills/ribbon-edit/SKILL.md">If extending ribbon coverage: NEVER add to SpaarkeCore or any large solution. Use a small dedicated entity-ribbon solution per entity. Validate all Alt attributes + ModernImage attributes on Button/FlyoutAnchor elements before import.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check + verify src/client/webresources/js/sprk_wizard_commands.js identical to master.</step>
+    <step order="1">**Icon assets**: create `src/client/assets/icons/sprk_ToDoCheckmark16.svg` + `sprk_ToDoCheckmark32.svg` (check-circle pattern, `fill="currentColor"`, `viewBox="0 0 20 20"`). Skip if user supplies branded MS To Do asset.</step>
+    <step order="2">**Add missing JS handlers** to `sprk_wizard_commands.js`: `openCreateInvoiceWizard`, `openCreateWorkAssignmentWizard`, `openCreateCommunicationWizard` — clone `openCreateTodoWizard` pattern at line 221. Note: these handlers should launch the appropriate wizard for each parent entity creation — NOT the CreateTodoWizard. **CLARIFY WITH USER**: should each entity launch its OWN create-wizard (e.g., Invoice button → CreateInvoiceWizard), OR launch the CreateTodoWizard with the parent context (Invoice button → CreateTodoWizard with regarding=invoice)? Reading R4-118 carefully: the request is "create a To Do FROM the parent record" — so all 6 buttons launch CreateTodoWizard. Only `openCreateTodoWizard` is needed; the existing handlers (CreateMatterWizard, CreateProjectWizard, CreateEventWizard) are SEPARATE features. So no new handlers required.</step>
+    <step order="3">**Update Matter RibbonDiff.xml** (`src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml` lines 48+) to use `$webresource:sprk_ToDoCheckmark32.svg` icon. Bundled with the entity additions deploy.</step>
+    <step order="4">**For each of 5 new entities** (sprk_project, sprk_event, sprk_invoice, sprk_workassignment, sprk_communication): use `/ribbon-edit` skill workflow:
+       a. Create dedicated solution via Power Apps maker portal (e.g., `ProjectRibbons`, publisher: Spaarke).
+       b. Add only the entity metadata (no forms/views).
+       c. Export via `pac solution export`.
+       d. Edit `customizations.xml` to add `CustomAction` + `CommandDefinition` + `LocLabels` per Matter pattern (clone `sprk.Wizard.Matter.CreateTodo.*` IDs, rename entity prefix).
+       e. Reference `Spaarke.Commands.Wizards.openCreateTodoWizard` JS function (same handler for all 6).
+       f. Re-import via `pac solution import --publish-changes`.
+    </step>
+    <step order="5">**Deploy icon web resources first** from master (icons must exist before ribbons reference them).</step>
+    <step order="6">**Deploy `sprk_wizard_commands.js`** from master via `scripts/Deploy-WizardCommandsJs.ps1`.</step>
+    <step order="7">**Deploy each entity ribbon solution** from master, in any order.</step>
+    <step order="8">**Smoke-test 6 entities** (Matter, Project, Event, Invoice, WorkAssignment, Communication): open record → click "Create To Do" with check-circle icon → wizard opens with correct entity context.</step>
+    <step order="9">Update R4-117 wrap-up doc with "no shims fixed this round: sprk_wizard_commands.js deployed (R4-118); sprk_todo_dirty_check.js deleted (R4-113)".</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GET https://spaarkedev1.crm.dynamics.com/webresources/sprk_wizard_commands.js` returns 200 (was 404).</criterion>
+    <criterion testable="true">All 6 parent entity records (Matter, Project, Event, Invoice, WorkAssignment, Communication) show "Create To Do" command bar button with check-circle icon.</criterion>
+    <criterion testable="true">Clicking "Create To Do" from each entity opens CreateTodoWizard with correct entity context (entityType + entityId visible in wizard's regarding field).</criterion>
+    <criterion testable="true">Wizard save creates sprk_todo with correct regarding populated (single-entity polymorphic lookup set, 4 resolver fields populated per ADR-024).</criterion>
+    <criterion testable="true">No orphan ribbon commands remain (all CommandDefinition.JavaScriptFunction references resolve).</criterion>
+  </acceptance-criteria>
+</task>

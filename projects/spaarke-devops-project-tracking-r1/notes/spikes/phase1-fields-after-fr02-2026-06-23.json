@@ -1,0 +1,105 @@
+{
+  "fields": [
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HNnc", "name": "Title", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HNng", "name": "Assignees", "type": "ProjectV2Field" },
+    {
+      "id": "PVTSSF_lAHODW0Pv84BEgWuzg2HNnk",
+      "name": "Status",
+      "options": [
+        { "id": "f75ad846", "name": "Todo" },
+        { "id": "47fc9ee4", "name": "In Progress" },
+        { "id": "98236657", "name": "Done" }
+      ],
+      "type": "ProjectV2SingleSelectField"
+    },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HNno", "name": "Labels", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HNns", "name": "Linked pull requests", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HNnw", "name": "Milestone", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HNn0", "name": "Repository", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HNn4", "name": "Reviewers", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HNn8", "name": "Parent issue", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HNoA", "name": "Sub-issues progress", "type": "ProjectV2Field" },
+    {
+      "id": "PVTSSF_lAHODW0Pv84BEgWuzg2HOQw",
+      "name": "Type",
+      "options": [
+        { "id": "2a98fa3c", "name": "Idea" },
+        { "id": "47842682", "name": "Epic" },
+        { "id": "d0ee9af3", "name": "Story" },
+        { "id": "82398e01", "name": "Task" },
+        { "id": "ca2544b4", "name": "Bug" },
+        { "id": "eea0ded6", "name": "Spike" },
+        { "id": "2708f496", "name": "Project" }
+      ],
+      "type": "ProjectV2SingleSelectField"
+    },
+    {
+      "id": "PVTSSF_lAHODW0Pv84BEgWuzg2HOdw",
+      "name": "Priority",
+      "options": [
+        { "id": "f8d67d77", "name": "P0 - Critical" },
+        { "id": "a714af0d", "name": "P1 - High" },
+        { "id": "82daa004", "name": "P2 - Medium" },
+        { "id": "88b7ab16", "name": "P3 - Low" }
+      ],
+      "type": "ProjectV2SingleSelectField"
+    },
+    { "id": "PVTIF_lAHODW0Pv84BEgWuzg2HOt0", "name": "Sprint", "type": "ProjectV2IterationField" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HO2I", "name": "Start Date", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HO5I", "name": "Target Date", "type": "ProjectV2Field" },
+    {
+      "id": "PVTSSF_lAHODW0Pv84BEgWuzg2HPAc",
+      "name": "Area",
+      "options": [
+        { "id": "24e13d30", "name": "Matter" },
+        { "id": "83bb9d72", "name": "UI/UX" },
+        { "id": "a54e0cfb", "name": "Tooling" },
+        { "id": "ac9e8e6e", "name": "Documentation" },
+        { "id": "00b92f2c", "name": "Components" },
+        { "id": "8dc97d11", "name": "Document" },
+        { "id": "da856866", "name": "Invoice" },
+        { "id": "bc253e0b", "name": "AI" },
+        { "id": "032f75d3", "name": "Project" },
+        { "id": "149fb69b", "name": "Event" },
+        { "id": "1fda2cb6", "name": "Workflow" }
+      ],
+      "type": "ProjectV2SingleSelectField"
+    },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzg2HPC4", "name": "Release", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzhNvUlM", "name": "Created", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzhNvUlg", "name": "Updated", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzhNvUlw", "name": "Closed", "type": "ProjectV2Field" },
+    {
+      "id": "PVTSSF_lAHODW0Pv84BEgWuzhWPlKQ",
+      "name": "Project Type",
+      "options": [
+        { "id": "07bf70fd", "name": "Module" },
+        { "id": "5074ee2d", "name": "UI" },
+        { "id": "e7e019fa", "name": "Infrastructure" },
+        { "id": "7c088a12", "name": "Cleanup" },
+        { "id": "a4ae9f10", "name": "Data" },
+        { "id": "58a487bb", "name": "Process" },
+        { "id": "339f64ef", "name": "AI" },
+        { "id": "49524af1", "name": "Mixed" }
+      ],
+      "type": "ProjectV2SingleSelectField"
+    },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzhWPlKU", "name": "Worktree Path", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzhWPlLQ", "name": "Project Folder", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzhWPlLU", "name": "Task Count", "type": "ProjectV2Field" },
+    { "id": "PVTF_lAHODW0Pv84BEgWuzhWPlLY", "name": "Tasks Completed", "type": "ProjectV2Field" },
+    {
+      "id": "PVTSSF_lAHODW0Pv84BEgWuzhWPlLc",
+      "name": "Project Status",
+      "options": [
+        { "id": "7cb5fba6", "name": "Planned" },
+        { "id": "70a2088a", "name": "In Progress" },
+        { "id": "ce5d8e15", "name": "On Hold" },
+        { "id": "73bfd3a7", "name": "Completed" },
+        { "id": "a07c6443", "name": "Cancelled" }
+      ],
+      "type": "ProjectV2SingleSelectField"
+    }
+  ],
+  "totalCount": 26
+}

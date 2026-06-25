@@ -1103,3 +1103,21 @@ If user says yes, invoke the `merge-to-master` skill in Single Merge mode for th
 ---
 
 *This skill ensures Claude Code maintains recoverable state across all context boundaries.*
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 033 · FR-19)
+
+**At Step 9.6** (after Step 9.5 Quality Gates, before Step 10 status update): invoke `/devops-project-sync` to increment the `Tasks Completed` field on the Project Issue (each task completion = +1).
+
+**Conditional promotion prompt**: after sync, if `Tasks Completed == Task Count` (all POMLs complete), prompt:
+
+```
+✅ All tasks complete. Promote Project Status to "Completed candidate"? [Y/n]
+```
+
+On Y: set `Project Status = Completed` (does NOT auto-archive per F3; user runs `/devops-project-archive` explicitly when ready).
+
+Hook silent on per-task completion. Failure to increment degrades to ⚠️ warn; does NOT block task-execute Step 10.
+
+See: [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md), [`.claude/skills/devops-project-archive/SKILL.md`](../devops-project-archive/SKILL.md).
