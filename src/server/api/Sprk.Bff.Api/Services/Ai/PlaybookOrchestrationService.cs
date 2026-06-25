@@ -1116,6 +1116,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     NodeType.Output => ActionType.DeliverOutput,
                     NodeType.Control => ActionType.Condition,
                     NodeType.Workflow => ActionType.CreateTask,
+                    // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node maps to a
+                    // SEPARATE ActionType so the legacy Output → DeliverOutput dispatch is
+                    // UNCHANGED (backward-compat invariant). The DeliverCompositeNodeExecutor
+                    // is the only executor for DeliverComposite.
+                    NodeType.DeliverComposite => ActionType.DeliverComposite,
                     _ => ActionType.DeliverOutput
                 };
                 action = new AnalysisAction

@@ -3,7 +3,7 @@
   <metadata>
     <title>NodeType.DeliverComposite extension to PlaybookExecutionEngine</title>
     <phase>5: WP2 File-Aware Classification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>113R</dependencies>
     <blocks>114a,114b,114c,118R</blocks>
