@@ -105,10 +105,17 @@ if (-not $DryRun) {
     }
     Write-Host '       OpenAI API key acquired from Key Vault.' -ForegroundColor Green
 
-    # AI Search admin key (admin key required for index operations)
-    $searchAdminKey = az search admin-key show --resource-group spe-infrastructure-westus2 --service-name $SearchServiceName --query primaryKey -o tsv 2>$null
+    # AI Search admin key — primary path: read from Key Vault (the BFF's
+    # canonical source, matching App Setting AiSearch__ApiKeySecretName).
+    # Fallback path: legacy `az search admin-key show` (requires direct ARM
+    # access to the AI Search resource — fails when the resource is in a
+    # cross-subscription RG the operator's session can't list).
+    $searchAdminKey = az keyvault secret show --vault-name spaarke-spekvcert --name ai-search-key --query value -o tsv 2>$null
     if (-not $searchAdminKey) {
-        Write-Error "Failed to get AI Search admin key."
+        $searchAdminKey = az search admin-key show --resource-group spe-infrastructure-westus2 --service-name $SearchServiceName --query primaryKey -o tsv 2>$null
+    }
+    if (-not $searchAdminKey) {
+        Write-Error "Failed to get AI Search admin key (tried Key Vault 'spaarke-spekvcert/AzureAISearchApiKey' and 'az search admin-key show')."
         exit 1
     }
     Write-Host '       AI Search admin key acquired.' -ForegroundColor Green
