@@ -371,11 +371,17 @@ export const useSmartTodoWidgetStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     flex: '1 1 auto',
-    // UAT 2026-06-22 round 9 (REVERT round 8): restoring the defensive
-    // 400px floor so the kanban renders even when the parent section's
-    // calc(100vh-200px) height supplies less than expected. minHeight 0
-    // exposed a collapse bug when the parent chain wasn't reliable.
-    minHeight: '400px',
+    // R4-110 (2026-06-23) — chain audit cleanup: removed the defensive
+    // 400px pixel floor restored in round 9. The kanban no longer needs a
+    // pixel floor because rounds 11/12 + R4-110's chain-robustness fix at
+    // WorkspaceTabManagerComponent.content guarantee determinate height
+    // propagates through the chain (parent SectionPanel stretches via the
+    // grid row's `alignItems: stretch`, supplying real height — never 0).
+    //
+    // Per `.claude/patterns/ui/embedded-widget-sizing.md` constraint:
+    // "No `minHeight: 400px` (or any pixel floor) on the scrollable body
+    // to 'guarantee' rendering. Pixel floors mask broken chains."
+    minHeight: 0,
     minWidth: 0,
   },
 

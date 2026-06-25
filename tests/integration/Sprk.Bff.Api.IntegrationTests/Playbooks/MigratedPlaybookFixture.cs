@@ -68,7 +68,11 @@ public sealed class MigratedPlaybookFixture
 
     private readonly Mock<IMembershipResolverService> _resolverMock = new(MockBehavior.Strict);
     private readonly StubDataverseHandler _stubHandler = new();
-    private readonly IHttpClientFactory _httpClientFactory;
+    // R2.3 (2026-06-23): production refactored from IHttpClientFactory.CreateClient("DataverseApi") (orphan)
+    // to Spaarke.Dataverse.IGenericEntityService. The StubHttpMessageHandler-based capture is no longer
+    // invoked by the executors — tests that assert on CapturedNotifications / CapturedQueries need a
+    // rewrite to assert against the entity-service mock. Tracked under BFF Dataverse HTTP unification.
+    private readonly Mock<Spaarke.Dataverse.IGenericEntityService> _entityServiceMock = new();
     private readonly TemplateEngine _templateEngine;
     private readonly IServiceScopeFactory _scopeFactory;
 
@@ -89,15 +93,19 @@ public sealed class MigratedPlaybookFixture
         // is wired incorrectly the filter would be empty and the query would return tenant-wide.
         _templateEngine = new TemplateEngine(NullLogger<TemplateEngine>.Instance);
 
-        // HttpClient backed by the stub handler — both QueryDataverse and CreateNotification
-        // executors resolve the named "DataverseApi" client via IHttpClientFactory.
-        var httpClient = new HttpClient(_stubHandler)
-        {
-            BaseAddress = new Uri("https://test.crm.dynamics.com/api/data/v9.2/")
-        };
-        var httpFactoryMock = new Mock<IHttpClientFactory>();
-        httpFactoryMock.Setup(f => f.CreateClient("DataverseApi")).Returns(httpClient);
-        _httpClientFactory = httpFactoryMock.Object;
+        // R2.3: executors now use IGenericEntityService. Default stubs return empty results /
+        // fresh GUIDs so the orchestration paths execute without NREs. The StubHttpMessageHandler
+        // is retained but no longer invoked — capture-based assertions in derived tests will
+        // need rewriting to use the entity-service mock.
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.FetchExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Microsoft.Xrm.Sdk.Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Guid.NewGuid());
 
         // Scope factory wired so LookupUserMembershipNodeExecutor can resolve the
         // (Scoped) IMembershipResolverService from the (Singleton) executor.
@@ -210,11 +218,11 @@ public sealed class MigratedPlaybookFixture
             NullLogger<LookupUserMembershipNodeExecutor>.Instance);
         var queryExecutor = new QueryDataverseNodeExecutor(
             _templateEngine,
-            _httpClientFactory,
+            _entityServiceMock.Object,
             NullLogger<QueryDataverseNodeExecutor>.Instance);
         var notifyExecutor = new CreateNotificationNodeExecutor(
             _templateEngine,
-            _httpClientFactory,
+            _entityServiceMock.Object,
             NullLogger<CreateNotificationNodeExecutor>.Instance);
 
         // Topologically order the nodes by the dependsOn graph (the JSON files are already

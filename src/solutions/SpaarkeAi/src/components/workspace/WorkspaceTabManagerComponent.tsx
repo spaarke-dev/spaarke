@@ -180,7 +180,18 @@ const useStyles = makeStyles({
   // Assistant pane chat scroll is intentionally NOT touched (visible bar is
   // part of its UX); the Context pane is owned by sibling task 106 — this
   // change is surgically scoped to the WorkspacePane content wrapper.
+  //
+  // R4-110 (2026-06-23) — chain robustness: added `display: flex,
+  // flexDirection: column, minHeight: 0`. Without these, the wrapper is
+  // implicitly `display: block`, which IGNORES any `flex: 1` declared on
+  // child widget roots. Widgets had to self-anchor via `height: 100%`
+  // (the round 11 rescue) — a trap for future widget authors. With this
+  // change, the widget chain is FORGIVING: a widget root can use either
+  // `flex: 1` or `height: 100%` and the chain propagates correctly.
   content: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
     flex: 1,
     overflowY: "auto",
     overflowX: "hidden",
