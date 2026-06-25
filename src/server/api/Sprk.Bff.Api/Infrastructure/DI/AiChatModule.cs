@@ -13,12 +13,15 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///
 /// UNCONDITIONAL registrations:
 ///   1. AddSingleton&lt;ISprkAgent, DirectOpenAiAgent&gt;  — AIPU2-008: R2 provider-agnostic agent boundary (FR-701/FR-702)
+///   2. AddSingleton&lt;AiLatencyTelemetry&gt;            — AIPU2-066: AI latency telemetry meter
+///   3. AddScoped&lt;AiLatencyTracker&gt;                  — AIPU2-066: per-request latency stopwatch
+///   4. AddSingleton&lt;IPlaybookCandidateSelector, PlaybookCandidateSelector&gt; — chat-routing-redesign-r1 task 113R / FR-47 + FR-48 top-N selector
 ///
 /// Planned registrations (future AIPU2 tasks):
-///   2. SprkChatAgentFactory         — Extended factory (replaces AiModule registration in R2)
-///   3. ChatOrchestrationService     — Three-pane experience orchestration (router + event bus)
+///   - SprkChatAgentFactory          — Extended factory (replaces AiModule registration in R2)
+///   - ChatOrchestrationService      — Three-pane experience orchestration (router + event bus)
 ///
-/// DI count: 1 unconditional (ADR-010 compliant, well within ≤15 limit).
+/// DI count: 4 unconditional (ADR-010 compliant, well within ≤15 limit).
 ///
 /// Prerequisites (must already be registered before calling AddAiChatModule):
 ///   - <c>IConfiguration</c>   — registered by the host
@@ -61,6 +64,17 @@ public static class AiChatModule
         // Wraps AiLatencyTelemetry with per-request state (model, routing layer, elapsed times).
         // Injected into ChatEndpoints streaming path to record TTFT / TBT / TTLT / token counts.
         services.AddScoped<AiLatencyTracker>();
+
+        // chat-routing-redesign-r1 task 113R (FR-47 + FR-48):
+        // Top-N file-aware playbook candidate selector. Pure in-memory aggregator
+        // over PlaybookDispatcher.RunPhaseBVectorMatchAsync output (task 112). FR-48
+        // invariant: NEVER auto-executes — always returns candidates for downstream
+        // `playbook_options` SSE rendering (task 117a). The interface justification
+        // (per ADR-010): there is a sole DI injection target plus multiple test
+        // mocks; concrete + interface keeps the test seam clean. Singleton lifetime
+        // is correct — the selector holds no per-request state and depends only on
+        // IOptions + ILogger.
+        services.AddSingleton<IPlaybookCandidateSelector, PlaybookCandidateSelector>();
 
         return services;
     }

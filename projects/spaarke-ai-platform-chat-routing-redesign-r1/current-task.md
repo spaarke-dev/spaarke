@@ -1,7 +1,7 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-25 (Task 112 Phase B vector match complete — manifest-present + manifest-absent paths shipped with 11 unit tests; BFF compressed 44.94 MB, NFR-01 ✅)
-> **Recovery**: READ "Quick Recovery" section FIRST. Task 112 ✅ shipped on `work/spaarke-ai-platform-chat-routing-redesign-r1`. Next active task: 113R (top-N selector — depends on 111R).
+> **Last Updated**: 2026-06-25 (Task 113R confidence-based top-N selector complete — `IPlaybookCandidateSelector` + `PlaybookCandidateSelector` + `PlaybookSelectorOptions` shipped with 14 unit tests; BFF compressed 47.89 MB, NFR-01 ✅, FR-47 + FR-48 invariants verified)
+> **Recovery**: READ "Quick Recovery" section FIRST. Tasks 112 + 113R ✅ shipped on `work/spaarke-ai-platform-chat-routing-redesign-r1`. Next active tasks: 111R (LLM hybrid reranker — will consume `PlaybookCandidateSelection.RerankRecommended` flag), 115 (commandIntent vector-query bias), 117a (`playbook_options` SSE event).
 
 ---
 

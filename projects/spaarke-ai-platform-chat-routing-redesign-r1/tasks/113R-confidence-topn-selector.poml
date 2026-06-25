@@ -3,7 +3,7 @@
   <metadata>
     <title>Confidence-based top-N selector + no-auto-execute invariant</title>
     <phase>5: WP2 File-Aware Classification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>111R</dependencies>
     <blocks>117a,114R</blocks>

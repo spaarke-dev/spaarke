@@ -121,6 +121,18 @@ public static class ConfigurationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // PlaybookSelector options (chat-routing-redesign-r1 task 113R / FR-47) —
+        // confidence thresholds + delta margin + max-N for the file-aware top-N
+        // candidate selector. All properties have spec-defined defaults so binding
+        // succeeds when the "PlaybookSelector" section is absent. ValidateOnStart
+        // is wired so misconfigured ranges (e.g., ConfidenceThreshold > 1.0 from
+        // env-var typo) fail fast at app start rather than at first selection call.
+        services
+            .AddOptions<PlaybookSelectorOptions>()
+            .Bind(configuration.GetSection(PlaybookSelectorOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
