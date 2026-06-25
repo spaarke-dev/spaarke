@@ -1,0 +1,58 @@
+<task id="DEVOPS-036" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Inject end-of-sync hook into /worktree-sync</title>
+    <status>completed</status>
+    <phase>4</phase>
+    <estimated-effort>0.5 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>hook-injection, worktree-sync, additive-only</tags>
+    <dependencies>019, 016</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Inject hook into `.claude/skills/worktree-sync/SKILL.md` per FR-22. At end of sync, call `/devops-project-sync`. Additive only.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill modifier. Single-line addition.</role>
+
+  <goal>
+`/worktree-sync` end-of-output includes a successful sync confirmation line.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-03">Additive only; silent on success; degrade-to-warn on failure</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/worktree-sync/SKILL.md</file>
+      <file>.claude/skills/devops-project-sync/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 016, 019 ✅.</step>
+    <step order="1" name="Add hook Step">Final step: invoke `/devops-project-sync`.</step>
+    <step order="2" name="Smoke test">Run worktree-sync; confirm sync line in output.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/worktree-sync/SKILL.md</tool>
+    <tool name="Skill">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.claude/skills/worktree-sync/SKILL.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">worktree-sync SKILL.md references `/devops-project-sync` in final Step</criterion>
+    <criterion testable="true">Smoke test: sync line present in worktree-sync output</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,76 @@
+<task id="DEVOPS-019" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Phase 2 verify gate — all 9 /devops-* skills smoke-tested</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>verify, phase-gate, smoke-test, end-to-end</tags>
+    <dependencies>010, 011, 012, 013, 014, 015, 016, 017, 018</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Verify Phase 2 end-to-end: all 9 `/devops-*` skills exist, are listed in `.claude/skills/INDEX.md`, and pass a combined end-to-end smoke test:
+
+1. Capture Idea via `/devops-idea-create`
+2. Promote (Path A) via `/devops-idea-promote --to-project --epic #E`
+3. Start via `/devops-project-start --from-issue #N` → folder + worktree + design.md
+4. Sync via `/devops-project-sync` (verify idempotent on second call)
+5. Inspect via `/devops-portfolio-status` (terminal + `--snapshot`)
+6. Archive via `/devops-project-archive --status Cancelled` (test cleanup)
+
+This is the gate before Phase 3 backfill begins.
+  </prompt>
+
+  <role>Integration tester. You exercise the skills in realistic sequence and clean up after yourself.</role>
+
+  <goal>
+All 9 skills verified individually + one end-to-end happy path verified. No leftover smoke-test artifacts in the portfolio.
+  </goal>
+
+  <constraints>
+    <constraint source="spec Success Criterion 3">`ls .claude/skills/devops-* | wc -l` returns 9</constraint>
+    <constraint source="spec Success Criterion 5">`/devops-project-sync` dry-run after clean sync produces zero proposed mutations</constraint>
+    <constraint source="quality-gate">Any failure blocks Phase 3</constraint>
+    <constraint source="cleanup">All smoke-test Issues/folders/worktrees MUST be archived/deleted at end</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 010-018 all ✅.</step>
+    <step order="1" name="Per-skill SKILL.md presence">`ls .claude/skills/devops-* | wc -l` returns 9. Each SKILL.md has frontmatter + Prerequisites + Purpose + Steps + Failure-Modes per NFR-07.</step>
+    <step order="2" name="INDEX.md completeness">Each of 9 skills is listed in `.claude/skills/INDEX.md`.</step>
+    <step order="3" name="End-to-end happy path">Execute the 6-step sequence in the prompt above with a throwaway project. Capture each command's output. Confirm: Issue created → promoted → folder/worktree exist → fields synced → snapshot generated → archived (worktree removed, folder + .archived present).</step>
+    <step order="4" name="Idempotency verification">Run `/devops-project-sync --dry-run` on a freshly-synced state. Confirm zero proposed mutations.</step>
+    <step order="5" name="Cleanup audit">`git worktree list` should not contain any throwaway worktrees. `gh project item-list 2 --owner spaarke-dev` should not contain smoke-test Issues.</step>
+    <step order="6" name="Report">Write `notes/phase2-verify-report.md` with per-skill pass/fail + end-to-end timing + cleanup audit. Recommend GO/NO-GO for Phase 3.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">Invoke each /devops-* skill</tool>
+    <tool name="gh">Verification queries</tool>
+    <tool name="git">Worktree state checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-devops-project-tracking-r1/notes/phase2-verify-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">9 SKILL.md files exist with all NFR-07 sections</criterion>
+    <criterion testable="true">9 rows in INDEX.md (one per skill)</criterion>
+    <criterion testable="true">End-to-end happy path completes with no errors</criterion>
+    <criterion testable="true">`/devops-project-sync --dry-run` after clean sync = zero mutations</criterion>
+    <criterion testable="true">All smoke-test artifacts cleaned up</criterion>
+    <criterion testable="true">Phase 2 verify report written with GO recommendation</criterion>
+  </acceptance-criteria>
+</task>

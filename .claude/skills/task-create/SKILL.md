@@ -764,3 +764,15 @@ Before completing task-create, verify:
 - [ ] Each task has `<parallel-group>` and `<parallel-safe>` in metadata
 - [ ] TASK-INDEX.md includes "Parallel Execution Groups" section
 - [ ] No tasks in same parallel group modify the same files
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 032 · FR-18)
+
+**At end of skill** (after all task POMLs scaffolded): invoke `/devops-project-sync` to set the `Task Count` field on the Project Issue.
+
+`Task Count = ls projects/{name}/tasks/*.poml | wc -l` (computed by /devops-project-sync from local state).
+
+Silent on success. Hook is a no-op if `projects/{name}/README.md` lacks the portfolio pointer block (project not registered).
+
+See: [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md).

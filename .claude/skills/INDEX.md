@@ -83,6 +83,15 @@
 | [prototype-harness-setup](prototype-harness-setup/SKILL.md) | Scaffold a Mode 2 production component harness in `spaarke-prototype` for sub-second visual iteration on a worktree component | No | `/prototype-harness-setup`, "set up prototype harness", "create UAT harness", "stand up local dev for X widget", "iterate on UI visually" |
 | [prototype-harness-extend](prototype-harness-extend/SKILL.md) | Add a new Dataverse entity factory + preset to `spaarke-prototype/_infra/seed/` for harness consumption | No | `/prototype-harness-extend`, "add entity to prototype seed", "create factory for sprk_X", "extend the harness with X entity" |
 | [prototype-experiment-init](prototype-experiment-init/SKILL.md) | Scaffold a Mode 1 standalone UX experiment for greenfield design work (no production code yet) | No | `/prototype-experiment-init`, "start UX experiment", "design new prototype for X", "greenfield design for Y" |
+| [devops-portfolio-setup](devops-portfolio-setup/SKILL.md) | One-shot idempotent bootstrap of Project #2 portfolio schema (Type=Project, 6 fields, 7 labels, 3 issue templates). Snapshot → mutate → reconcile pattern. | No | `/devops-portfolio-setup`, "bootstrap portfolio", "setup portfolio schema" |
+| [devops-epic-create](devops-epic-create/SKILL.md) | Create an Epic Issue on Project #2 with Type=Epic + label epic + populated fields | No | `/devops-epic-create`, "create epic", "new portfolio epic" |
+| [devops-idea-create](devops-idea-create/SKILL.md) | Capture idea as GitHub Issue (Type=Idea, label backlog). NO local folder/worktree side-effects. | No | `/devops-idea-create`, "capture idea", "add to backlog" |
+| [devops-idea-promote](devops-idea-promote/SKILL.md) | Promote Ideas → Project. Path A (1→1: flip type+labels) or Path B (N→1: package as sub-issues). | No | `/devops-idea-promote`, "promote idea", "package ideas" |
+| [devops-project-start](devops-project-start/SKILL.md) | **THE BLESSED HANDOFF** — Issue → folder + worktree + design.md skeleton + field round-trip. The one canonical bridge from portfolio to local. | No | `/devops-project-start`, "start project from issue", "blessed handoff" |
+| [devops-project-register](devops-project-register/SKILL.md) | Inverse of project-start — existing worktree → Project Issue + fields. Used for Phase 3 backfill. | No | `/devops-project-register`, "register project", "backfill on portfolio" |
+| [devops-project-sync](devops-project-sync/SKILL.md) | Workhorse — re-read local state + idempotently update Issue fields. Called by 5 hook tasks. | No | `/devops-project-sync`, "sync portfolio", "update project fields" |
+| [devops-portfolio-status](devops-portfolio-status/SKILL.md) | Portfolio dashboard (terminal); `--snapshot` writes stakeholder narrative to docs/portfolio/ | No | `/devops-portfolio-status`, "portfolio dashboard", "what's running" |
+| [devops-project-archive](devops-project-archive/SKILL.md) | **DESTRUCTIVE** — set Project Status, close Issue, **DELETE worktree**, retain folder + .archived marker | No | `/devops-project-archive`, "archive project", "close project" |
 
 ## Skill Categories
 

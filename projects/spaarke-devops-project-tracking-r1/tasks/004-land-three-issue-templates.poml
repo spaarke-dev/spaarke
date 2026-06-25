@@ -1,0 +1,81 @@
+<task id="DEVOPS-004" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Land 3 issue templates (epic.yml, project.yml, idea.yml)</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~15 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <notes>UI smoke test deferred — templates only appear in New Issue picker once merged to default branch.</notes>
+    <tags>github-templates, foundation, yaml-form</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>P1-schema</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Create 3 issue templates at `.github/ISSUE_TEMPLATE/{epic,project,idea}.yml` with structured form-style body fields per FR-04. Each template must be parseable by the `/devops-*` skills landing in Phase 2 (skills will read submitted Issue body and extract field values). After this lands, the GitHub "New issue" picker shows the 3 templates alongside any existing ones.
+  </prompt>
+
+  <role>
+DevOps engineer who has authored GitHub Issue form templates before. You understand the YAML schema (`name`, `description`, `title`, `labels`, `body` with `id`/`type`/`attributes`/`validations`).
+  </role>
+
+  <goal>
+3 YAML files committed under `.github/ISSUE_TEMPLATE/`. Each opens correctly from the GitHub "New issue" picker. Submitting each creates an Issue with the expected body structure parseable by skill heuristics.
+  </goal>
+
+  <constraints>
+    <constraint source="FR-04">Epic template fields: title, objectives/focus, scope, success criteria, projected timeframe</constraint>
+    <constraint source="FR-04">Project template fields: title, project folder slug, worktree slug, proposed `Project Type`, parent Epic reference, summary, projected Start/Target Date</constraint>
+    <constraint source="FR-04">Idea template fields: title, summary, why-it-matters, tentative Epic, originating source</constraint>
+    <constraint source="convention">Each template MUST set `labels:` to the corresponding label from task 003 (e.g., epic.yml → `[epic]`)</constraint>
+    <constraint source="convention">Use `type: dropdown` for `Project Type` field with the 8 options from FR-02; use `type: input` for slugs; `type: textarea` for narrative fields</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="GitHub Issue form schema" location="https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-githubs-form-schema">
+        YAML at top of file with `name`, `description`, `title` (prefix), `labels`, `body` (list of form fields). Each body field has `type` (`input`, `textarea`, `dropdown`, `checkboxes`, `markdown`), `id`, `attributes` (`label`, `description`, `placeholder`, `options` for dropdown), and optional `validations` (`required: true`).
+      </pattern>
+      <pattern name="parseable body" location="design.md §6">
+        Each form field becomes a markdown section in the submitted Issue body keyed by the field label. Skills parse via header-based regex. Keep labels stable and unique within a template.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Read FR-04 in spec.md. Check `.github/ISSUE_TEMPLATE/` for existing templates — preserve any that exist.</step>
+    <step order="1" name="Author epic.yml">Create `.github/ISSUE_TEMPLATE/epic.yml`. Required fields per FR-04. Set `labels: [epic]`. Title prefix `[Epic]: `.</step>
+    <step order="2" name="Author project.yml">Create `.github/ISSUE_TEMPLATE/project.yml`. Required fields per FR-04 including the `Project Type` dropdown with 8 options. Title prefix `[Project]: `. Set `labels: [project]`.</step>
+    <step order="3" name="Author idea.yml">Create `.github/ISSUE_TEMPLATE/idea.yml`. Required fields per FR-04. Title prefix `[Idea]: `. Set `labels: [backlog]`.</step>
+    <step order="4" name="Validate YAML">Run `gh actions cache list 2>&1 | grep -q . ; actionlint .github/ISSUE_TEMPLATE/*.yml` OR use `yamllint .github/ISSUE_TEMPLATE/*.yml`. Confirm zero schema errors.</step>
+    <step order="5" name="Smoke test from UI">Open https://github.com/spaarke-dev/spaarke/issues/new/choose. Confirm the 3 templates appear. Submit a test Issue from each (mark as throwaway in title); confirm body structure parses cleanly.</step>
+    <step order="6" name="Close smoke-test Issues">Delete or close the 3 smoke-test Issues created in step 5 (do not pollute the portfolio).</step>
+    <step order="7" name="Document">Record template field IDs in `notes/phase1-issue-template-fields.md` (needed by Phase 2 skill parsers).</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI for smoke-test Issue create/close</tool>
+    <tool name="yamllint">YAML schema validation (or actionlint)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/ISSUE_TEMPLATE/epic.yml</output>
+    <output type="config">.github/ISSUE_TEMPLATE/project.yml</output>
+    <output type="config">.github/ISSUE_TEMPLATE/idea.yml</output>
+    <output type="notes">projects/spaarke-devops-project-tracking-r1/notes/phase1-issue-template-fields.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 3 YAML files exist under `.github/ISSUE_TEMPLATE/` and pass YAML lint</criterion>
+    <criterion testable="true">GitHub "New issue" UI shows the 3 templates</criterion>
+    <criterion testable="true">Submitting each template creates an Issue with all FR-04 fields as parseable sections</criterion>
+    <criterion testable="true">Each template applies the correct default label (epic/project/backlog)</criterion>
+    <criterion testable="true">Smoke-test Issues cleaned up</criterion>
+  </acceptance-criteria>
+</task>

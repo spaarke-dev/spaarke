@@ -1,0 +1,61 @@
+<task id="DEVOPS-022" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Phase 3 verify gate — Active backfill complete</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~15 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>verify, phase-gate, backfill-audit</tags>
+    <dependencies>021</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Verify Phase 3 backfill complete per spec Success Criterion 4: every active/in-flight worktree (per F6) has a matching `Type=Project` Issue with all 6 new fields populated. Gate before Phase 4 hook injection.
+  </prompt>
+
+  <role>QA engineer verifying enumeration alignment + spot-check field correctness across the backfill cohort.</role>
+
+  <goal>
+Phase 3 verify report confirms count match between enumeration (task 020) and Project #2 Active view + spot-check field correctness.
+  </goal>
+
+  <constraints>
+    <constraint source="spec Success Criterion 4">All active projects backfilled</constraint>
+    <constraint source="spec Success Criterion 10">`grep -L "> \*\*Portfolio\*\*" projects/*/README.md` returns no ACTIVE projects (pointer block present)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/backfill-enumeration-{date}.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/backfill-results-{date}.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm task 021 ✅.</step>
+    <step order="1" name="Count verification">`gh project item-list 2 --owner spaarke-dev --format json | jq '[.items[] | select(."Type" == "Project")] | length'` matches enumeration ACTIVE count.</step>
+    <step order="2" name="Field spot-check">Pick 5 random backfilled Issues; verify all 6 new fields populated (none null/empty); Parent Epic matches enumeration.</step>
+    <step order="3" name="Pointer block audit">`grep -L "> \*\*Portfolio\*\*" projects/*/README.md` should return only INACTIVE projects (not active worktrees).</step>
+    <step order="4" name="Report">Write `notes/phase3-verify-report.md`. Recommend GO/NO-GO for Phase 4.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">Queries</tool>
+    <tool name="Grep">Pointer block audit</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-devops-project-tracking-r1/notes/phase3-verify-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Active view item count = enumeration ACTIVE count</criterion>
+    <criterion testable="true">5/5 spot-checked Issues have all 6 fields populated correctly</criterion>
+    <criterion testable="true">No ACTIVE project missing README pointer block</criterion>
+    <criterion testable="true">Phase 3 verify report written with GO recommendation</criterion>
+  </acceptance-criteria>
+</task>

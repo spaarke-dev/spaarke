@@ -420,3 +420,13 @@ Overall:        {✅ FULLY SYNCED | ⚠️ PARTIAL — see items above}
 ---
 
 *This skill guarantees worktree synchronization with verified state at every step — no stale refs, no silent failures, no "it should be up to date" assumptions.*
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 036 · FR-22)
+
+**At end of skill**: invoke `/devops-project-sync` to refresh portfolio fields after the worktree state changed.
+
+Silent on success. Failure degrades to ⚠️ warn.
+
+See: [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md).
