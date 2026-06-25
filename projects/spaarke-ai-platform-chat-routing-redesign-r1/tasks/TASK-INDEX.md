@@ -425,7 +425,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|
-| 110 | `PlaybookDispatcher.DispatchAsync` accepts `IReadOnlyList<ChatMessageAttachment>` (backward-compat null/empty) — FR-15 | 🔲📝 | FULL | true | 5-A | 105 | `bff-api`, `services`, `ai` |
+| 110 | `PlaybookDispatcher.DispatchAsync` accepts `IReadOnlyList<ChatMessageAttachment>` (backward-compat null/empty) — FR-15 | ✅ | FULL | true | 5-A | 105 | `bff-api`, `services`, `ai` |
 | 110a | **NEW (5R)**: Library modal `Cannot read properties of null (reading 'toLowerCase')` bug fix — FR-59 | ✅ | STANDARD | true | 5-A | 105 | `frontend`, `bug-fix` |
 | 111R | **REVISED (5R)**: Hybrid intent-extraction service — vector match primary; gpt-4o-mini reranker ONLY when ambiguous; structured-output (top-3 of top-5); metadata-only LLM input (ADR-015) — FR-46 | 🔲📄 | FULL | false | 5-B | 110,112 | `bff-api`, `services`, `ai`, `azure-openai`, `ADR-015` |
 | 112 | Phase B vector match using `sprk_jpsmatchingmetadata.documentTypes` pre-filter when classification available; per-file vector fallback otherwise — FR-17 (v2) | 🔲📝 | FULL | true | 5-A | 110 | `bff-api`, `services`, `ai`, `azure-openai` |

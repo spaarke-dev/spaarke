@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Nodes;
@@ -142,23 +143,49 @@ public sealed class PlaybookDispatcher
     /// the vector search by <c>recordType</c>.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="attachments">
+    /// Optional per-turn chat-message attachments (FR-15, Phase 5R Wave 5-A foundation).
+    /// When <c>null</c> or empty, dispatch behaves identically to the pre-FR-15 message-only
+    /// path (backward-compatibility invariant). Downstream tasks 111R/112/113R/114R will
+    /// extend this signature with the Hybrid C file-aware Phase A/B/C classification flow;
+    /// task 110 only carries the parameter so the wiring is in place ahead of those tasks.
+    /// </param>
     /// <returns>
     /// A <see cref="DispatchResult"/> with the matched playbook and extracted parameters,
     /// or <see cref="DispatchResult.NoMatch"/> if no playbook matches the user message.
     /// Returns null when the AI Search service is overloaded (ADR-016: 503 backpressure).
     /// </returns>
+    /// <remarks>
+    /// <b>Backward-compat invariant (FR-15)</b>: callers that do not pass <paramref name="attachments"/>
+    /// (or pass <c>null</c> / an empty list) MUST observe behavior identical to the pre-task-110
+    /// signature. This is enforced by the early-return guard at the top of the method body and
+    /// covered by <c>PlaybookDispatcherAttachmentsTests</c>.
+    /// </remarks>
     public async Task<DispatchResult?> DispatchAsync(
         string userMessage,
         ChatHostContext? hostContext,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<ChatMessageAttachment>? attachments = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userMessage, nameof(userMessage));
 
         var totalStopwatch = Stopwatch.StartNew();
 
+        // FR-15 backward-compat guard (task 110): when no attachments are present, this
+        // dispatcher behaves exactly as the pre-FR-15 message-only path. The variable below
+        // is the explicit no-attachments check; flagged for tasks 111R-114R which will
+        // branch above this point into the Hybrid C Phase A/B/C classification flow.
+        var hasAttachments = attachments is { Count: > 0 };
+
         _logger.LogDebug(
-            "PlaybookDispatcher: starting dispatch for message length={MessageLength}, entityType={EntityType}",
-            userMessage.Length, hostContext?.EntityType ?? "(none)");
+            "PlaybookDispatcher: starting dispatch for message length={MessageLength}, entityType={EntityType}, attachmentCount={AttachmentCount}",
+            userMessage.Length, hostContext?.EntityType ?? "(none)", attachments?.Count ?? 0);
+
+        // Phase 5R Wave 5-A entry point. Task 110 retains today's message-only behavior for
+        // all paths (with and without attachments). Tasks 111R-114R will branch on
+        // `hasAttachments` to invoke the file-aware classification pipeline; until then the
+        // attachments parameter is accepted for caller-readiness but does not alter dispatch.
+        _ = hasAttachments;
 
         // ADR-016: Acquire concurrency permit with total timeout as deadline.
         if (!await AiConcurrencyLimiter.WaitAsync(TotalTimeout, cancellationToken))

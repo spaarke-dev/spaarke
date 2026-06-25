@@ -569,7 +569,16 @@ public static class ChatEndpoints
             // PlaybookOutputHandler for typed output handling (dialog, navigation, download, insert).
             // Text output falls through to the standard streaming flow below.
             var dispatcher = await agentFactory.CreatePlaybookDispatcherAsync(tenantId, cancellationToken);
-            var dispatchResult = await dispatcher.DispatchAsync(request.Message, session.HostContext, cancellationToken);
+            // FR-15 (task 110): forward per-turn attachments to the dispatcher so the Phase 5R
+            // Wave 5-A pipeline (tasks 111R/112/113R/114R) can apply file-aware classification.
+            // For task 110 the dispatcher accepts but does not act on attachments — the parameter
+            // is wired here so downstream-task migrations don't require a second touch of this
+            // call site. Null when the user turn has no attachments (existing message-only path).
+            var dispatchResult = await dispatcher.DispatchAsync(
+                request.Message,
+                session.HostContext,
+                cancellationToken,
+                attachments: request.Attachments);
 
             // Task 048 (FR-14d) — the gate now also fires for non-Chat NodeDestination
             // values (Workspace / Both / FormPrefill / SideEffect). The destination is
