@@ -1,5 +1,60 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
+> **Last Updated**: 2026-06-25 (context-handoff after Phase 5R close; user said "yes proceed" to Phase 7 task 141 then interrupted for /context-handoff)
+
+---
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
+| **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
+| **Branch state** | **32 commits ahead of `origin/master` `8579d6536`**. Tip: `e9d28bc41` (Phase 5R exit gate). **Working tree CLEAN. All work pushed to origin.** |
+| **Phase status** | **Phase 1R ✅ CLOSED + Phase 5R ✅ CLOSED.** All 14 FRs (FR-46..FR-59) implemented; 201/201 tests pass; final publish 46.32 MB (13.68 MB NFR-01 headroom). |
+| **Active Task** | NONE — Phase 5R just closed (commit `e9d28bc41` 2026-06-25). |
+| **Next Action (explicit)** | **Launch task 141 (atomic CapabilityRouter retirement, FR-22) via `task-execute`**. POML: `projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/141-delete-capabilityrouter-implement-tool-filtering.poml`. **Sub-agent friendly** (10-file atomic deletion + per-playbook tool filtering replacement; well-bounded scope). Prerequisites (140 R6 PR verify) ✅ done at session start. |
+| **User's last words before interrupt** | "yes proceed" — explicit approval to launch task 141. |
+
+### Files Modified This Session (FINAL — Phase 5R close batch, all pushed)
+
+- `projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/119-phase-5r-exit-gate.md` (new) — FR-by-FR coverage + GO verdict
+- `projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md` (modified) — 119 row → ✅
+- `projects/spaarke-ai-platform-chat-routing-redesign-r1/current-task.md` (this checkpoint)
+- Committed as `e9d28bc41`; pushed.
+
+### Critical Context (3 sentences for next session)
+
+This session shipped both Phase 1R (Dataverse-backed consumer routing — 8 FRs) AND Phase 5R (chat routing convergence + multi-node composition — 14 FRs) end-to-end. 32 commits on `work/spaarke-ai-platform-chat-routing-redesign-r1` cover the foundation, implementation, integration tests, and exit-gate evidence; the worktree is clean and everything is pushed. **Phase 7 (CapabilityRouter retirement + project wrap-up) is ready to begin with task 141 — user just authorized "yes proceed" before requesting context-handoff.**
+
+### Two tracked production-smoke unblockers (do NOT block Phase 7 start; DO block Phase 7's 146 UAT step)
+
+1. **Dataverse `sprk_playbooknode.sprk_nodetype` choice option add: `100_000_004 → DeliverComposite`** via `dataverse-create-schema` skill. Unblocks 118R deploy of `infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json`.
+2. **BFF orchestrator wiring**: `PlaybookOptionsEventBuilder.BuildAsync` → SSE emit in `ChatEndpoints.cs` + new `/api/ai/playbook-dispatch/execute` endpoint (FR-49/50 production emission). Each is ~50-150 LOC.
+
+These should land BEFORE Phase 7 task 146 (UAT) so end-to-end smoke can fire. Phase 7 tasks 141, 143, 144, 145, 147, 148 don't depend on them.
+
+### Phase 7 sequence (per 119 exit-gate doc)
+
+1. **141** atomic CapabilityRouter deletion (10 files)
+2. **142** already done (FE SoftSlash dict removed in task 116)
+3. **143** Q20 dedup binding test
+4. **144 + 145** publish-size + Insights regression baselines (parallel-safe)
+5. **147 + 148** final code-review + adr-check sweep (parallel-safe)
+6. **(Track 1 follow-ups: schema gap + orchestrator wiring)** before 146
+7. **146** full UAT regression
+8. **150** project wrap-up + lessons-learned
+
+### Resume commands
+
+- `continue task` → reads this Quick Recovery + auto-launches task 141 via `task-execute`
+- `where was I?` → returns this Quick Recovery summary
+- `git log --oneline origin/master..HEAD` → see all 32 Phase 1R + Phase 5R commits
+
+---
+
+
+
 > **Last Updated**: 2026-06-25 (Task 118b ✅ — Wave 5-F workspace→memory T2 round-trip handler shipped. New READ-ONLY chat tool `get_workspace_tab_content(tabId, sectionName?)` via `GetWorkspaceTabContentHandler : IToolHandler` at `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GetWorkspaceTabContentHandler.cs`. Projects composed widget state (sections + values) from existing Pillar 6b plumbing (`IWorkspaceStateService.GetTabsAsync`) — NO new state storage; NO mutation; variant-aware projection for Summary | DocumentViewer | Dashboard | Table. Decoupled from `DeliverComposite` shape per POML constraint. Auto-discovered via `AddToolHandlersFromAssembly` (ADR-010) — ZERO new DI line, ZERO `if (flag)` block (CLAUDE.md §10 F.1 anti-pattern clear). New Dataverse seed row at `infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json` + `scripts/Seed-TypedHandlers.ps1` extended with `GET-WORKSPACE-TAB-CONTENT` entry. 15 new unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/GetWorkspaceTabContentHandlerTests.cs` cover: happy path, sectionName scoping, section_missing graceful status, not_found graceful status, read-only invariant (Upsert/Pin/Close never called), ADR-014 tenant forwarding + mismatch defense-in-depth, ADR-015 telemetry hygiene (widget body never in logs), variant-aware projection (Summary/Doc/Dashboard/Table), playbook-context rejection, cancellation, validation_failed. All 15 pass; sibling handler regression 51/51; full Services.Ai.Handlers test surface 645/645 ✅. **BFF publish 44.99 MB compressed** (delta -2.85 MB vs 47.84 MB baseline; environmental drift per established jitter pattern — handler adds <1 MB of bytecode; well under 60 MB NFR-01 ceiling). 17-warning count (down 1 from 18). Open follow-ups: (1) seed the new sprk_analysistool row to DEV via `scripts/Seed-TypedHandlers.ps1 -OnlyHandler GET-WORKSPACE-TAB-CONTENT` (deferred to main session); (2) end-to-end integration test deferred pending 118R Dataverse schema gap fix (`DeliverComposite (100000004)` choice option) so workspace tabs actually receive multi-node composite state. Earlier 2026-06-25: Task 118a ✅ — Wave 5-F session continuity verified: 5 new unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatSessionContinuityTests.cs` cover the per-turn lifecycle for `ChatSession.UploadedFiles[]` (FR-56). All 5 pass; 41-test regression run (Continuity + UploadedFiles + Manager + History) = 41/41 ✅. Verified codepath: `ChatHistoryManager.AddMessageAsync` uses record `with` syntax which preserves UploadedFiles; `ChatSessionManager.GetSessionAsync` Redis-HIT JSON roundtrip preserves all 14 ChatSessionFile fields (6 R5 + 8 enrichment); no production code path intentionally clears UploadedFiles during chat turns. Pivot from POML Step 4 (integration test) → Step 6 (unit test fallback) — `tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/` has no scaffold or fixture for chat-session integration testing; unit tests with callback-driven IDistributedCache mock provide integration-equivalent rigor for the FR-56 invariant. **No P1 bug found** — happy-path FR-56 invariant upheld (Redis warm within 24h sliding TTL, the dominant lifecycle pattern per architecture §6.1 / §7.4). **P2 cold-recovery gap surfaced** (not in 118a scope): `ChatSessionManager.MapChatSessionToStoredSession` + `MapStoredSessionToChatSession` (lines 324-396) drop `UploadedFiles` on the Cosmos cold-recovery path — `SessionPersistenceService.MapToStored`/`MapFromStored` already exists + works, just needs wiring. Filed in evidence note as Phase 6 hygiene follow-up; not blocking Phase 5R exit gate. **BFF publish 47.15 MB compressed** (test-only change; baseline 47.84 MB from 118R note; -0.69 MB jitter; well under 60 MB NFR-01 ceiling). **18-warning baseline preserved.** Files: NEW `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatSessionContinuityTests.cs` + NEW `notes/handoffs/118a-session-continuity-evidence.md`. MODIFIED `tasks/TASK-INDEX.md` (118a → ✅). Earlier this day: Task 118R partial — Wave 5-E `summarize-document-for-workspace@v1` multi-node migration **artifact authored + structurally verified**, but Dataverse application BLOCKED on schema gap. Findings: existing playbook in Dataverse (id `302e6da6-f363-f111-ab0c-7ced8ddc4cc6`) has ONE legacy `summarize` node referencing `SUM-CHAT@v1` (id `eeb05bfd-1260-f111-ab0b-70a8a59455f4`, 4-section outputSchema `tldr/summary/keywords/entities`). Authored `infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json` declaring 4 NEW Action nodes (each reusing `SUM-CHAT@v1` with per-node `templateParameters.focus` hint = section name) + 1 NEW `DeliverComposite` Output Node (sections array with `tldr/summary/keywords/entities`, `destination: workspace`, `widgetType: structured-output-stream`). **BLOCKER discovered**: Dataverse `sprk_playbooknode.sprk_nodetype` choice column ONLY includes {AI Analysis 100000000, Output 100000001, Control 100000002, Workflow 100000003}; `DeliverComposite (100000004)` NOT registered as choice — any `update_record`/`create_record` with 100000004 will be rejected. C# (114R) + executor (114R) + orchestrator emit (114a) + widget consumer (114b) all shipped + ready; gap is purely on Dataverse metadata side. Pivot from POML: instead of applying the migration, authored the deployment file as authoritative target state + wrote structural regression test + documented gap with remediation path. **Pre-migration snapshot**: `notes/handoffs/118R-pre-migration-snapshot.json`. **Evidence note**: `notes/handoffs/118R-migration-evidence.md`. **New integration test** `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/SummarizeWorkspaceMultinodeMigrationTests.cs` — 8 tests, all pass (asserts file shape: 4 Action + 1 Composite, section order canonical, every inputVariable resolves, all 4 Action nodes reuse SUM-CHAT@v1, chat sibling untouched per FR-58/ADR-037). Joint run 118R + 114R + 114a tests = 41/41 ✅. Regression run (workspace handler + dispatcher destination + playbook options builder) = 24/24 ✅. BFF publish 47.84 MB (-0.09 MB vs 47.93 MB baseline; data-only change; well under 60 MB NFR-01 ceiling). 18-warning baseline preserved. Open follow-ups: (1) add `DeliverComposite (100000004)` Dataverse choice option via `dataverse-create-schema`; (2) extend `Deploy-Playbook.ps1` to recognize `"DeliverComposite"` nodeType string; (3) apply migration in DEV; (4) end-to-end smoke (depends on orchestrator emit-point wiring). Earlier: 114b reworked FE widget for section-name-keyed SSE; 114a wired per-section streaming; 114R `NodeType.DeliverComposite`; 116 dead-code removal; 117a SSE event contract; 111R hybrid intent reranker; 115 `intentHint` vector-query bias.)
 > **Recovery**: READ "Quick Recovery" section FIRST. Tasks 112 + 113R + 115 + 111R + 117a + 116 + 114R + 117b + 114a + 114b + **118R (partial — artifact + tests; Dataverse application blocked)** shipped on `work/spaarke-ai-platform-chat-routing-redesign-r1`. Next active tasks: 114c (ADR; main session only because `.claude/` touch — likely in progress in parallel). 117 (telemetry, blocked-by 117b) now unblocked. **118R follow-up tasks** (schema-option add + Deploy-Playbook.ps1 extension + DEV application + end-to-end smoke) are out of 118R scope and waiting on the main session to schedule them. 118a (session continuity) + 118b (memory round-trip) can now begin in parallel (no longer blocked on 118R artifact existence).
 
