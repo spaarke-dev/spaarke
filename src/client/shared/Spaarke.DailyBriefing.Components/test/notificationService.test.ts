@@ -316,9 +316,7 @@ describe('markAllBriefingsChecked — FR-4 bulk', () => {
         makeEntity({ appnotificationid: 'n-2', sprk_briefingstate: 0 }),
       ])
     );
-    (webApi.updateRecord as jest.Mock)
-      .mockResolvedValueOnce({ id: 'n-1' })
-      .mockRejectedValueOnce(new Error('quota'));
+    (webApi.updateRecord as jest.Mock).mockResolvedValueOnce({ id: 'n-1' }).mockRejectedValueOnce(new Error('quota'));
 
     const result = await markAllBriefingsChecked(webApi);
 

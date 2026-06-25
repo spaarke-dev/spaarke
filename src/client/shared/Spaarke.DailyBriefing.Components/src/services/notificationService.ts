@@ -39,12 +39,7 @@ import type {
   ChannelGroup,
   ChannelFetchResult,
 } from '../types/notifications';
-import {
-  CHANNEL_REGISTRY,
-  tryCatch,
-  BRIEFING_STATE_CHECKED,
-  BRIEFING_STATE_REMOVED,
-} from '../types/notifications';
+import { CHANNEL_REGISTRY, tryCatch, BRIEFING_STATE_CHECKED, BRIEFING_STATE_REMOVED } from '../types/notifications';
 import type { IResult } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
