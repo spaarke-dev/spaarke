@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-24 (project initialization)
+> **Last Updated**: 2026-06-25 (task 031 completed)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,23 +13,24 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 020 - Widget service layer: read-state swap + 3 new action functions + Removed filter + jest tests |
-| **Step** | 14 of 14: ✅ COMPLETE — TASK-INDEX.md updated |
+| **Task** | 031 - Widget UI: 3 action buttons + props wiring + handler composition |
+| **Step** | 14 of 14: ✅ COMPLETE — TASK-INDEX.md updated, POML status → completed |
 | **Status** | completed |
-| **Next Action** | Task 030 (useBriefingActions hook extension) is now unblocked. Tasks 030 + 031 must remove transitional aliases from `notificationService.ts` + `services/index.ts` when they rewire consumers. |
+| **Next Action** | Task 040 (Manual UAT in spaarkedev1) is now unblocked. Operator-task — verifies 7 ACs against the deployed widget end-to-end. |
 
 ### Files Modified This Session
-- `projects/spaarke-daily-update-service-r3/design.md` — Created (initial commit)
-- `projects/spaarke-daily-update-service-r3/spec.md` — Created (initial commit)
-- `projects/spaarke-daily-update-service-r3/README.md` — Created (project init)
-- `projects/spaarke-daily-update-service-r3/plan.md` — Created (project init)
-- `projects/spaarke-daily-update-service-r3/CLAUDE.md` — Created (project init)
-- `projects/spaarke-daily-update-service-r3/current-task.md` — Created (project init)
-- `projects/spaarke-daily-update-service-r3/tasks/*.poml` — Created (project init)
-- `projects/spaarke-daily-update-service-r3/tasks/TASK-INDEX.md` — Created (project init)
+- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx` — Added 3 new props + 3 new icon buttons (CheckmarkRegular/DismissRegular/CalendarAddRegular) before "Add to To Do"
+- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx` — Plumbed 3 new optional props (onCheck/onRemove/onKeep) through to NarrativeBullet
+- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx` — Composed handleCheck/handleRemove/handleKeep around useBriefingActions hook handlers; added optimistic Set state + applied to channels memo; wired toasts via existing useToastController pattern
+- `src/client/shared/Spaarke.DailyBriefing.Components/test/DailyBriefingApp.smoke.test.tsx` — Renamed mock factory exports (markBriefingChecked/markAllBriefingsChecked + markBriefingRemoved + extendBriefingTtl); added 2nd fixture item with sprk_briefingstate Checked state; switched Response constructor to duck-typed shim (jsdom v30 has no Response global); added 3rd test asserting all 3 new buttons + ADR-024 regression-free for Add-to-To-Do
+- `projects/spaarke-daily-update-service-r3/tasks/TASK-INDEX.md` — Task 031 🔲 → ✅
+- `projects/spaarke-daily-update-service-r3/tasks/031-widget-ui-three-action-buttons.poml` — Status not-started → completed
 
 ### Critical Context
-R3 fixes a UAT-reported widget-empty-state defect by decoupling Daily Briefing read-state from `appnotification.toasttype` (which is display-behavior, not read state). Adds `sprk_briefingstate` Choice column + 3 new per-item actions (Check / Remove / Keep +7d). Also fixes a parallel BFF producer defect (`ttlindays` → `ttlinseconds`). 7 tasks across 5 phases; Wave 1 (001, 010, 020) is parallel-safe.
+R3 fixes a UAT-reported widget-empty-state defect by decoupling Daily Briefing read-state from `appnotification.toasttype` (which is display-behavior, not read state). Adds `sprk_briefingstate` Choice column + 3 new per-item actions (Check / Remove / Keep +7d). Also fixes a parallel BFF producer defect (`ttlindays` → `ttlinseconds`). Task 031 closes the widget UI surface: 3 owner-specified Fluent v9 icon buttons render per item (Check/Remove/Keep) ahead of the existing ADR-024 Add-to-To-Do button. Handlers compose hook handlers with optimistic-overlay state + toast dispatch. Build = baseline (5 pre-existing peer-dep TS errors, NONE new). Jest 80/80 passing.
+
+### Known Limitation (carry to UAT)
+`NotificationItem` does not surface `ttlinseconds`. The Keep handler passes `currentTtlSeconds = 0` so `extendBriefingTtl` computes `newTtl = 0 + 604800 = 7 days`. Adequate for current spec but future work may want to plumb actual TTL through `NOTIFICATION_SELECT` + `toNotificationItem` so the "+7" semantic is additive to any existing TTL.
 
 ---
 

@@ -3,7 +3,7 @@
   <metadata>
     <title>Widget UI: 3 action buttons in `NarrativeBullet` + props wiring + handler composition in `DailyBriefingApp`</title>
     <phase>Phase 4b: Widget UI Wiring</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>040</blocks>
