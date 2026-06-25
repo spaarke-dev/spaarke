@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Wire timeWindow preference to fetchNotifications createdon filter (FR-17a)</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>049</blocks>
+    <tags>pcf, react, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation modifying .ts service used by widget; touches query layer with downstream visibility impact</rigor-reason>
+    <parallel-group>E1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Edit `src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts` to include a `$filter` clause `createdon ge &lt;now - window&gt;` in `fetchNotifications`. Map the user setting (12h/24h/48h/7d) to ISO date computation. Watch for R3 PR #451 overlap on the same file — coordinate via notes/risks.md.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>`fetchNotifications` query string includes `$filter=createdon ge {iso}` where ISO timestamp = now minus configured window. Setting value drives the boundary. Default falls back to 24h if preference missing.</goal>
+  <context>
+    <background>R4 FR-17a requires the `timeWindow` preference to actually filter the notifications query rather than being a no-op UI control. R3 PR #451 may touch the same service file — see notes/risks.md.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/PreferencesDropdown.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Open `notificationService.ts`; locate `fetchNotifications` and identify current `$filter`/query construction</step>
+    <step order="2">Add a helper `computeTimeWindowIso(setting: TimeWindowSetting): string` mapping 12h/24h/48h/7d to ISO timestamps (now - delta)</step>
+    <step order="3">Append `createdon ge &lt;iso&gt;` to the `$filter` clause (compose with existing AND clauses correctly)</step>
+    <step order="4">Read `timeWindow` from passed-in preferences; default to 24h if missing/invalid</step>
+    <step order="5">Update or add Jest unit test confirming `$filter` contains correct ISO for each of the 4 setting values</step>
+    <step order="6">Run `npm test` for the daily-briefing-components workspace; ensure all tests pass</step>
+    <step order="7">Run `npm run build` to confirm TypeScript compiles cleanly</step>
+    <step order="8">Run `/conflict-check` against R3 PR #451 since notificationService.ts may be touched there</step>
+    <step order="9">Update TASK-INDEX.md ✅</step>
+    <step order="10">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/src/services/__tests__/notificationService.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Each `timeWindow` setting change produces visible difference in rendered content (FR-17a / AC-17a)</criterion>
+    <criterion testable="true">`fetchNotifications` query string contains `createdon ge` clause with ISO timestamp matching configured window</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>Render widget with timeWindow=12h preference set; verify only notifications created within last 12h appear</test>
+    <test>Toggle preference 24h → 7d; widget refetches and additional older items appear</test>
+    <test>Dark Mode Compliance: render PreferencesDropdown in dark theme; verify all semantic tokens used per ADR-021 (no raw hex)</test>
+    <test>Console Errors: no errors or warnings in browser console during fetch + toggle flow</test>
+  </ui-tests>
+  <notes>R3 PR #451 may modify notificationService.ts for read-state work. Use `conflict-check` skill before merge. Helper function `computeTimeWindowIso` is the seam — keep it pure for testability.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

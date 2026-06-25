@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Wire overflow menu callbacks in ActivityNotesSection + DailyBriefingApp</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>045</dependencies>
+    <blocks>049</blocks>
+    <tags>pcf, react, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation wiring across 2 component layers; ADR-024 path must not regress</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Wire callbacks from the overflow menu in NarrativeBullet up through ActivityNotesSection to DailyBriefingApp's existing handlers: Mark as read = R3 Check; Remove from briefing = R3 Remove; Keep on briefing for 7 more days = R3 Keep; Add to To Do = R2 useInlineTodoCreate per ADR-024; Dismiss + Open record are new. Reference handler pattern from `DailyBriefingApp.tsx` lines 238-287 (`handleAddToTodo`).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>All 6 overflow actions invoke the correct handler at DailyBriefingApp level. R3 actions (Check/Remove/Keep) behave identically to R3 (no regression). Add to To Do uses ADR-024 path unchanged. Dismiss + Open record are wired to new handlers.</goal>
+  <context>
+    <background>FR-18 wiring: task 045 produced a single `onAction(actionId)` callback. This task threads it through the component tree to handlers in DailyBriefingApp.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/DailyBriefingApp.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+    <constraint source="project">R3 Check/Remove/Keep handlers exist in DailyBriefingApp — REUSE them unchanged; do NOT duplicate logic</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Inspect DailyBriefingApp.tsx lines 238-287 (`handleAddToTodo`); inventory existing R3 handlers (Check/Remove/Keep) + their signatures</step>
+    <step order="2">In DailyBriefingApp, add new handlers `handleDismiss` and `handleOpenRecord` (Open record stub delegates to NarrativeBullet's link handler from task 047 — for now, accept the call and log; task 047 supplies the navigation)</step>
+    <step order="3">Add a single dispatch function `handleBulletAction(bulletId, actionId)` that switches on actionId and calls the right per-action handler</step>
+    <step order="4">Pass `handleBulletAction` down through ActivityNotesSection prop to NarrativeBullet's `onAction`</step>
+    <step order="5">Verify Add to To Do path still uses `useInlineTodoCreate` + `TODO_REGARDING_CATALOG` per ADR-024 (no regression)</step>
+    <step order="6">Add Jest tests: each of 6 actions invokes the correct handler; useInlineTodoCreate is called for Add to To Do; handlers receive correct bulletId</step>
+    <step order="7">Run `npm test`; ensure pass</step>
+    <step order="8">Run `npm run build`; verify TypeScript compiles</step>
+    <step order="9">Manual UAT: click each of 6 actions; verify behavior matches expectation (R3 actions unchanged + new ones fire)</step>
+    <step order="10">Update TASK-INDEX.md ✅</step>
+    <step order="11">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/DailyBriefingApp.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All 6 overflow actions invoke correct handler at DailyBriefingApp level</criterion>
+    <criterion testable="true">R3 actions (Check/Remove/Keep) behave identically to R3 — no regression (AC-18c regression coverage)</criterion>
+    <criterion testable="true">Add to To Do uses ADR-024 useInlineTodoCreate + TODO_REGARDING_CATALOG path unchanged (AC-18c)</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>Click "Mark as read" → R3 Check handler fires; widget visually updates</test>
+    <test>Click "Remove from briefing" → R3 Remove handler fires; row disappears</test>
+    <test>Click "Keep on briefing for 7 more days" → R3 Keep handler fires; TTL extended</test>
+    <test>Click "Add to To Do" → useInlineTodoCreate fires with correct regarding; ADR-024 path verified</test>
+    <test>Click "Dismiss" → handleDismiss fires</test>
+    <test>Click "Open record" → handleOpenRecord fires (delegates to navigate from task 047)</test>
+    <test>Dark Mode Compliance: all 6 actions trigger correctly in dark theme; ADR-021 semantic tokens used</test>
+    <test>Console Errors: no errors during any of 6 action clicks</test>
+  </ui-tests>
+  <notes>Sequential with task 045 (depends on its single-callback prop shape). HIGH OVERLAP RISK with R3 PR #451 (DailyBriefingApp.tsx + ActivityNotesSection.tsx + NarrativeBullet.tsx). Run conflict-check. Open record handler is intentionally minimal — task 047 supplies the Xrm.Navigation.navigateTo call. Justification: extension of existing R3 handlers (Check/Remove/Keep); 2 new handlers (Dismiss/Open record); cost-of-doing-nothing = no overflow menu functionality.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

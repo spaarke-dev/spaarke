@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Deploy BRIEF-NARRATE-TLDR + BRIEF-NARRATE-CHANNEL action rows</title>
+    <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>011</blocks>
+    <tags>jps, dataverse, deploy, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data deployment via MCP; no C# code change. JPS Action rows are data. Tags include ai because prompts must follow grounding constraints, but no .cs source touched.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Follow the `jps-action-create` skill. Author + deploy 2 `sprk_analysisaction` rows to spaarkedev1: `BRIEF-NARRATE-TLDR` and `BRIEF-NARRATE-CHANNEL`, both with `sprk_executoractiontype = 0` (AiAnalysis). JPS sprk_systemprompt MUST contain: instruction.role = "notification summarizer", instruction.constraints = ["use only entity names present in input"], temperature = 0, full output schema. ABSOLUTELY NO baked example names (no "Acme Corp", "Johnson &amp; Lee", "Davis v. Metro Transit", etc.). Validate via `jps-validate`. Verify both rows Active in spaarkedev1.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS Action-row author + AI prompt engineer; understands grounding constraints, temperature semantics, and the R3 UAT lessons on hallucination.</role>
+
+  <goal>Two `sprk_analysisaction` rows exist in spaarkedev1, both Active, both with grounded prompts containing the literal "use only entity names present in input" constraint, both with temperature 0, NEITHER containing any of the prohibited legal-genre example names. Canonical JSON sources committed. `jps-validate` passes for both.</goal>
+
+  <context>
+    <background>R4 FR-2 (lines 112-114) + FR-13 (lines 166-168) ship the grounded Action rows that the DAILY-BRIEFING-NARRATE playbook will compose. R3 UAT showed that the old hardcoded `/narrate` endpoint contained example names in the prompt ("Acme Corp engagement letter") which the LLM then mirrored into output even when user data was about a different firm — the textbook hallucination-via-example pattern. R4 eliminates this by JPS-deploying grounded prompts with explicit "use only names from input" constraint and zero baked examples. AC-2b explicitly forbids the example names. AC-13a audits for them post-deployment.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">All AI prompt content lives in JPS Action rows, not C# string literals. Replacing hardcoded prompt strings is a binding MUST per spec.</constraint>
+    <constraint source="spec MUST">MUST use temperature 0 in BRIEF-NARRATE-TLDR and BRIEF-NARRATE-CHANNEL Action JPS prompts; MUST add explicit grounding instruction ("use ONLY names from input"); MUST NOT bake legal-genre example names (Acme Corp, etc.) into JPS prompts.</constraint>
+    <constraint source="spec AC-2b">NO example names from old prompts (Acme Corp engagement letter, etc.) appear in sprk_systemprompt text.</constraint>
+    <constraint source="spec AC-13a">Audit of sprk_systemprompt for both Action rows confirms absence of "Acme Corp", "Johnson &amp; Lee", or any specific case/firm name as instructional examples.</constraint>
+    <constraint source="project">Upsert pattern (Owner Q&amp;A spec line 343) — idempotent deployment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="jps-action-create" location=".claude/skills/jps-action-create/SKILL.md">Author + validate + deploy AiAnalysis (ActionType 0) Action with JPS-compliant sprk_systemprompt.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read spec.md FR-2 (lines 112-114) + FR-13 (lines 166-168) + AC-2b + AC-13a.</step>
+    <step order="2">Invoke `jps-action-create` skill to scaffold the BRIEF-NARRATE-TLDR Action JSON. sprk_systemprompt: instruction.role = "notification summarizer"; instruction.constraints includes literal "use only entity names present in input"; temperature 0; output schema = TL;DR shape with totalNotificationCount + summary + keyTakeaways + topAction.</step>
+    <step order="3">Author the canonical JSON at `projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-tldr.action.json`. Verify NO baked example names: grep the JSON for "Acme", "Johnson", "Davis", "Metro Transit" — must return 0 hits.</step>
+    <step order="4">Repeat steps 2-3 for BRIEF-NARRATE-CHANNEL with output schema = per-channel narratives shape; canonical JSON at `projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-channel.action.json`.</step>
+    <step order="5">Run `jps-validate` against both JSON files — fix any errors.</step>
+    <step order="6">For each Action: check spaarkedev1 for an existing row via `mcp__dataverse__read_query` filtered to sprk_actioncode (idempotency check); upsert via `mcp__dataverse__create_record` or `mcp__dataverse__update_record`.</step>
+    <step order="7">Verify via `mcp__dataverse__read_query` SELECT … WHERE sprk_actioncode IN ('BRIEF-NARRATE-TLDR', 'BRIEF-NARRATE-CHANNEL') — returns 2 rows, both statecode Active.</step>
+    <step order="8">Audit deployed sprk_systemprompt text for prohibited names: grep response for "Acme", "Johnson", "Davis", "Metro Transit" — must be 0 hits in both rows.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅.</step>
+    <step order="10">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query / create_record / update_record for sprk_analysisaction upsert</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">spaarkedev1: 2 sprk_analysisaction rows (BRIEF-NARRATE-TLDR + BRIEF-NARRATE-CHANNEL), Active</output>
+    <output type="source">projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-tldr.action.json</output>
+    <output type="source">projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-channel.action.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both rows exist + Active in spaarkedev1 (AC-2a).</criterion>
+    <criterion testable="true">JPS systemprompt validates via jps-validate.</criterion>
+    <criterion testable="true">AC-2b: Neither sprk_systemprompt contains "Acme Corp", "Johnson &amp; Lee", "Davis", or "Metro Transit" (grep audit returns 0).</criterion>
+    <criterion testable="true">Both rows have sprk_executoractiontype = 0 (AiAnalysis); sprk_temperature = 0.</criterion>
+    <criterion testable="true">Both prompts contain literal grounding instruction "use only entity names present in input".</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-2 (lines 112-114), AC-2a + AC-2b (lines 113-114), FR-13 (lines 166-168), AC-13a (line 167), Owner Q&amp;A on upsert idempotency (line 343). The "0 baked example names" rule is the load-bearing fix that eliminates R3's hallucination root cause. Tasks 008 (smoke test) and PR 4 (UAT via /narrate dispatch) verify end-to-end groundedness; this task only ships the rows.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

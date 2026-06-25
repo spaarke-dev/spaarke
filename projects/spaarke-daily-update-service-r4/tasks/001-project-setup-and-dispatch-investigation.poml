@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Project setup + investigate sprk_playbookconsumer dispatch path</title>
+    <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 030</blocks>
+    <tags>bff-api, jps, research</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Research + discovery only; no code change. Reads spec, verifies MCP access, surveys existing sprk_playbookconsumer code, writes decision doc.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Read FR-12 + the Owner Q&amp;A on dispatch mechanism from spec.md, verify spaarkedev1 access via the Dataverse MCP, investigate the `sprk_playbookconsumer` entity built in chat-routing-redesign-r1 Phase 1R, and document whether the widget-as-consumer pattern can dispatch to `DAILY-BRIEFING-NARRATE`. Record the chosen dispatch path (Path A = sprk_playbookconsumer; Path B = direct AnalysisOrchestrationService with degenerate playbook) in `notes/decisions/030-dispatch-path.md`. Required before task 030 rewrites the wrapper.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook engine + BFF AI-orchestration researcher; able to read C# service code and map it to a Dataverse-data dispatch decision.</role>
+
+  <goal>A written decision document at `projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md` that names the chosen dispatch path (A or B), cites the code evidence for the choice, and lists the structured payload shape `DAILY-BRIEFING-NARRATE` will accept. MCP access to spaarkedev1 verified.</goal>
+
+  <context>
+    <background>R4 spec FR-12 (line 159-164) replaces the hardcoded `/narrate` endpoint with a JPS playbook dispatch. Owner Q&amp;A 2026-06-25 (spec line 340) directed: "Investigate sprk_playbookconsumer pattern (built in chat-routing-redesign-r1 Phase 1R) as the primary dispatch path. If unsuitable, fall back to direct AnalysisOrchestrationService invocation with a degenerate playbook." AC-12c requires the dispatch decision to be documented with rationale. Task 030 (PR 4) cannot rewrite the wrapper until this decision is made.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/plan.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">All AI work stays in BFF. /narrate dispatch must reuse existing AnalysisOrchestrationService pattern; no new AI endpoints beyond JPS-composed primitives.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — no code change in this task, so publish-size + CVE check is N/A; bff-extensions.md §A checklist applies prospectively to tasks 002/003 not this discovery task.</constraint>
+    <constraint source="project">Decision document MUST cite specific code evidence (file:line references) for both the sprk_playbookconsumer survey and the proposed payload shape. "Investigate without evidence" is not acceptable.</constraint>
+    <constraint source="spec AC-12c">Dispatch path documented in task notes — either sprk_playbookconsumer-mapped (preferred) or direct-invoke fallback (with rationale recorded).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape — request/response mapping; thin wrapper convention.</pattern>
+      <pattern name="dataverse-mcp-usage" location=".claude/skills/dataverse-mcp-usage/SKILL.md">MCP read_query / create_record patterns for spaarkedev1 verification.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read spec.md FR-12 (lines 159-164) + Owner Q&amp;A row on dispatch mechanism (line 340).</step>
+    <step order="2">Verify MCP access to spaarkedev1 by running `mcp__dataverse__read_query` against `sprk_analysisaction` filtered to 1 row; confirm result returns successfully.</step>
+    <step order="3">Survey `sprk_playbookconsumer` entity + service in the codebase: Grep for `sprk_playbookconsumer` and `PlaybookConsumer` across `src/server/api/Sprk.Bff.Api/`. Read service file(s) found. Identify the consumer-to-playbook mapping mechanism + the payload contract.</step>
+    <step order="4">Survey `DailyBriefingEndpoints.HandleNarrate` (current hardcoded implementation) to capture the request payload shape that the new playbook dispatch must accept.</step>
+    <step order="5">Survey `AnalysisOrchestrationService` to capture the direct-invoke signature (Path B fallback).</step>
+    <step order="6">Decide Path A (sprk_playbookconsumer) vs Path B (direct AnalysisOrchestrationService + degenerate playbook). Criteria: does sprk_playbookconsumer accept the daily-briefing payload shape without modification? Is the consumer→playbook mapping data-driven (no code change in BFF needed)?</step>
+    <step order="7">Create directory `projects/spaarke-daily-update-service-r4/notes/decisions/` if it does not exist. Author `030-dispatch-path.md` containing: (a) decision (A or B), (b) cited code evidence (file:line refs), (c) proposed structured payload, (d) impact on task 030 wrapper rewrite.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅.</step>
+    <step order="9">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query — verify spaarkedev1 access against sprk_analysisaction</tool>
+    <tool name="dotnet">N/A — no code change in this task</tool>
+    <tool name="grep">Survey sprk_playbookconsumer references across BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Decision document exists at `projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md` naming Path A or Path B.</criterion>
+    <criterion testable="true">Document cites at least 3 specific file:line references (sprk_playbookconsumer service, AnalysisOrchestrationService entry, DailyBriefingEndpoints.HandleNarrate current state).</criterion>
+    <criterion testable="true">MCP `read_query` against spaarkedev1 sprk_analysisaction returns a successful result during this task (smoke evidence in notes).</criterion>
+    <criterion testable="true">Document lists the structured payload shape DAILY-BRIEFING-NARRATE will accept and any impact this has on task 030.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-12 (line 159-164), Owner Q&amp;A on dispatch mechanism (line 340), AC-12c (line 164), Unresolved Question on sprk_playbookconsumer (line 369). Read each before starting. This is research-only; no source code changes. The decision document is the load-bearing artifact — task 030 in PR 4 reads it as the spec for its wrapper rewrite.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

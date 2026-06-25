@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Enrich CreateNotificationNodeExecutor.BuildNotificationEntity with viaMatter/regardingName/source</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>018</dependencies>
+    <blocks>021, 022, 023, 024, 025, 026, 028</blocks>
+    <tags>bff-api, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies load-bearing producer C# code (BuildNotificationEntity is hit by every notification playbook). Foundation for all PR 3 work — every downstream task either consumes or validates this enriched schema. Touches a BFF service file (CLAUDE.md §10 publish-size + CVE + test obligations apply).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Edit `BuildNotificationEntity` at `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs` lines 471-546. Extend the customData JSON shape to include: `regardingName`, `regardingEntityType`, `regardingId`, `viaMatter` (object: `id`, `name`, `memberships[]` — one entry per role), and `source` (object: `entityType`, `id`, `modifiedOn`, `owningUser`). When the source-record has no matter linkage, omit the `viaMatter` field entirely. When the source-record has multiple membership roles (owner + assignedAttorney, etc.), `viaMatter.memberships` is an array with one entry per role. Preserve the existing fields (`category`, `priority`, `actionUrl`, `dueDate`) and the idempotency check `CheckForDuplicateNotificationAsync`.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF NodeExecutor specialist — extends existing CreateNotificationNodeExecutor in a backward-compatible way per ADR-013 and CLAUDE.md §10.</role>
+
+  <goal>`BuildNotificationEntity` writes customData JSON containing the FR-6 enriched schema (existing 4 fields + 5 new fields conditionally). Backward compat preserved (widget's `parseNotificationData` still works). Idempotency preserved. Typical payload &lt;2KB, hard ceiling &lt;10KB. Build + tests pass. Publish-size delta documented.</goal>
+
+  <context>
+    <background>R4 spec FR-6 (line 134-136) defines the enriched customData schema needed for FR-10 (consumer narration uses these fields for grounded entity-name allow-list) and FR-7/8/9 (membership-scope playbooks need viaMatter so the widget can show "via Matter X"). The existing executor (lines 471-546) writes only category/priority/actionUrl/dueDate. AC-6a/b/c bind: enriched fields surface; backward compat; payload &lt;10KB. The TTL fix from R3 (`ttlinseconds = 604800`) lives at line 490 — MUST NOT be touched.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">BFF AI placement — extend existing NodeExecutor surface (CreateNotificationNodeExecutor). No new endpoint, no new service.</constraint>
+    <constraint source="ADR-034">Membership data sourced from upstream LookupUserMembership (ActionType 52) node output via the executor's input context — do NOT re-resolve here.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — measure publish-size delta + verify no new HIGH-severity CVE.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — publish-size + CVE per task. State placement decision: keeping enrichment inside CreateNotificationNodeExecutor (canonical NodeExecutor surface, no new types).</constraint>
+    <constraint source="project">customData stays backward-compatible (NFR-05); payload &lt;10KB ceiling (AC-6c); preserve idempotency check `CheckForDuplicateNotificationAsync`; preserve TTL fix at line 490 (`ttlinseconds = 604800`).</constraint>
+    <constraint source="FR-6">Omit `viaMatter` when source has no matter linkage. Multi-role: `viaMatter.memberships` is an array with one entry per role.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read spec FR-6 (line 134-136) + AC-6a/b/c carefully.</step>
+    <step order="2">Read `CreateNotificationNodeExecutor.cs` lines 471-546 (current `BuildNotificationEntity`). Note exact line of `ttlinseconds = 604800` (MUST preserve).</step>
+    <step order="3">Read input-context shape (LookupUserMembership output + upstream QueryDataverse output) to confirm where regardingName / regardingEntityType / matterId / memberships come from.</step>
+    <step order="4">Design the enriched customData object: keep existing 4 fields; add `regardingName` (string), `regardingEntityType` (string), `regardingId` (Guid string), `viaMatter` (nullable object with `id`, `name`, `memberships[]`), `source` (object with `entityType`, `id`, `modifiedOn`, `owningUser`).</step>
+    <step order="5">Implement: extract source-record metadata into an anonymous object (or named DTO); conditionally include `viaMatter` only when matter linkage exists; serialize memberships as array (one entry per role).</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/` — fix any compile errors.</step>
+    <step order="7">Run existing tests `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter FullyQualifiedName~CreateNotificationNodeExecutor` to confirm no regression. (New tests for enriched fields land in task 028.)</step>
+    <step order="8">Run publish-size check: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` — measure compressed output, record delta vs prior baseline per CLAUDE.md §10.</step>
+    <step order="9">Run CVE check: `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH severity.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: change task 020 status to ✅.</step>
+    <step order="11">Document deviations + publish-size delta in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">customData JSON written by BuildNotificationEntity contains regardingName, regardingEntityType, regardingId, viaMatter (when matter linkage present), source.</criterion>
+    <criterion testable="true">When source-record has no matter linkage, viaMatter field is omitted (not null).</criterion>
+    <criterion testable="true">When source-record has multiple membership roles, viaMatter.memberships is an array with one entry per role.</criterion>
+    <criterion testable="true">Existing fields category/priority/actionUrl/dueDate continue to be written.</criterion>
+    <criterion testable="true">TTL fix at line 490 (ttlinseconds = 604800) untouched.</criterion>
+    <criterion testable="true">Idempotency check CheckForDuplicateNotificationAsync still called.</criterion>
+    <criterion testable="true">dotnet build succeeds; existing tests pass.</criterion>
+    <criterion testable="true">Publish-size delta recorded; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-6 line 134-136; AC-6a/b/c (line 137-139). Hint: input context to BuildNotificationEntity already carries the upstream Query node's result row + membership context — just project the new fields. Hint: use `System.Text.Json` with appropriate naming policy (camelCase) to match widget's existing parseNotificationData. Hint: `viaMatter` omission via `JsonIgnoreCondition.WhenWritingNull` OR conditional dictionary build — pick whichever matches existing executor style. Task 021 (sprk_category dual-write) is a SEPARATE concern — do NOT do both in this task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

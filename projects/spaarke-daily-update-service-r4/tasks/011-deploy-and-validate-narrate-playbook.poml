@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Deploy + validate DAILY-BRIEFING-NARRATE playbook to spaarkedev1</title>
+    <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>005, 006, 007, 010</dependencies>
+    <blocks>017</blocks>
+    <tags>jps, dataverse, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse data deployment — no code change but creates production-shape row in spaarkedev1. Reuses canonical JSON authored in task 010; uses MCP create_record/upsert and the audit skill for verification.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Deploy the `sprk_analysisplaybook` row for `DAILY-BRIEFING-NARRATE` to spaarkedev1. Use the canonical JSON from task 010 (`projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json`) as the source-of-truth: set `sprk_configjson` from that file's configjson; set header fields exactly as authored. Use MCP `mcp__dataverse__create_record` (or upsert if the row already exists from a partial earlier attempt). After deployment, run the `jps-playbook-audit` skill against `BRIEF-NARRATE` to verify the deployed row matches the repo JSON; confirm the row is `statecode = 0` (Active).</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook deployer using Dataverse MCP for data-as-code deployment patterns.</role>
+
+  <goal>One `sprk_analysisplaybook` row exists in spaarkedev1 with `sprk_playbookcode = "BRIEF-NARRATE"`, Active, with `sprk_configjson` byte-equivalent (or semantically equivalent) to the repo JSON from task 010. `jps-playbook-audit` skill returns clean.</goal>
+
+  <context>
+    <background>R4 spec FR-4 (line 123) deploys the playbook. AC-4a (line 124) requires the row to be Active in spaarkedev1 + jps-playbook-audit to pass. This task is the data-layer half of the FR-4 pair (task 010 = author; this task = deploy). Dependencies 005/006/007 are the 3 Action rows deployed in PR 1 — required because the playbook's sprk_configjson references those action codes.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No code change. Playbook is data — deployed via MCP only.</constraint>
+    <constraint source="project">JSON file is source-of-truth — deploy from it, do NOT hand-edit `sprk_configjson` in Dataverse.</constraint>
+    <constraint source="project">Verify Action rows from PR 1 (BRIEF-NARRATE-TLDR, BRIEF-NARRATE-CHANNEL, BRIEF-VALIDATE-ENTITY-NAMES) exist + Active BEFORE deploying the playbook (referential integrity at JPS-runtime layer).</constraint>
+    <constraint source="spec AC-4a">Row exists + Active in spaarkedev1; jps-playbook-audit passes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-mcp-usage" location=".claude/skills/dataverse-mcp-usage/SKILL.md">MCP create_record / update_record for sprk_analysisplaybook deployment.</pattern>
+      <pattern name="jps-playbook-audit" location=".claude/skills/jps-playbook-audit/SKILL.md">Audit recipe: read deployed configjson + compare against repo source.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read the repo JSON `projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json`.</step>
+    <step order="2">Verify pre-conditions via MCP `read_query`: confirm `sprk_analysisaction` rows for `BRIEF-NARRATE-TLDR`, `BRIEF-NARRATE-CHANNEL`, `BRIEF-VALIDATE-ENTITY-NAMES` exist in spaarkedev1 and are Active.</step>
+    <step order="3">Check if `sprk_analysisplaybook` row with `sprk_playbookcode = "BRIEF-NARRATE"` already exists. If yes, capture the `sprk_analysisplaybookid` for upsert; if no, prepare create_record.</step>
+    <step order="4">Deploy: invoke `mcp__dataverse__create_record` (or `update_record` if upserting) with payload: sprk_playbookcode = "BRIEF-NARRATE", sprk_playbooktype = 0, sprk_playbookmode = 1, sprk_triggertype = 0, sprk_capabilities = 100000006, sprk_configjson = JSON-serialized configjson from repo file, statecode = 0 (Active), statuscode = 1 (Active default).</step>
+    <step order="5">Verify deployment: MCP `read_query` to fetch the deployed row + check sprk_configjson byte/semantic match with repo file.</step>
+    <step order="6">Run `jps-playbook-audit` skill against `BRIEF-NARRATE`. Confirm clean output.</step>
+    <step order="7">Capture evidence in `notes/deployments/011-narrate-playbook-deploy.md`: deployed row ID, audit output, sample read_query result.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to &#x2705;.</step>
+    <step order="9">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query (pre-check Action rows + post-deploy verify) / create_record or update_record (deploy playbook row)</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">1 sprk_analysisplaybook row deployed to spaarkedev1 (sprk_playbookcode = "BRIEF-NARRATE", Active)</output>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/deployments/011-narrate-playbook-deploy.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">MCP read_query returns 1 row for `sprk_playbookcode = "BRIEF-NARRATE"` with statecode = 0.</criterion>
+    <criterion testable="true">Deployed sprk_configjson semantically matches repo JSON from task 010.</criterion>
+    <criterion testable="true">`jps-playbook-audit` skill returns clean for `BRIEF-NARRATE`.</criterion>
+    <criterion testable="true">Deployment evidence captured in `notes/deployments/011-narrate-playbook-deploy.md`.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-4 (line 123), AC-4a (lines 124-125). Hint: dependencies 005/006/007 = the 3 Action rows deployed in PR 1. If any Action row pre-check fails, STOP — escalate to owner before deploying the playbook (referential integrity bug downstream). Hint: capture the deployed sprk_analysisplaybookid in deployment notes for task 017 smoke test reference.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Audit PB-020, PB-021 (need W1 membership migration)</title>
+    <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>015</blocks>
+    <tags>jps, playbook-audit, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit; documents current state ahead of W1 migration. The repo JSON for these playbooks will be EDITED by W1 tasks 022/023; this audit captures the pre-W1 baseline. Parallel-safe with sibling tasks 012, 014.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>For PB-020 (notification-tasks-due-soon) and PB-021 (notification-tasks-overdue) read the deployed `sprk_configjson` via MCP `read_query` and compare against the canonical repo JSON at `projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-{due-soon,overdue}.json`. Note: these playbooks are flagged in the spec as needing W1 expansion to membership-scope (FR-7) — repo JSON files will be edited by W1 tasks 022/023 to add a LookupUserMembership parallel branch. THIS task only documents the CURRENT state (pre-W1) for reconciliation baseline. Document deployed-vs-repo divergence + current ActionType 52 presence (or absence) in `notes/audit/013-pb-020-021.md`.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook auditor — pre-migration state capture.</role>
+
+  <goal>One audit report at `projects/spaarke-daily-update-service-r4/notes/audit/013-pb-020-021.md` listing — per playbook — (a) deployed-vs-repo divergence summary, (b) current ActionType 52 status (likely absent — these are the migration targets), (c) explicit note that task 015 should NOT redeploy from current repo JSON because W1 will edit it first.</goal>
+
+  <context>
+    <background>R4 spec FR-7 (line 142-143) migrates PB-020 + PB-021 to membership-scope. The repo JSON files will be edited by W1 tasks 022 (notification-tasks-due-soon) and 023 (notification-tasks-overdue) to add a `LookupUserMembership` parallel branch + FetchXml union. This audit task runs BEFORE that W1 migration — it captures the pre-W1 baseline so reconciliation in task 015 understands what was pre-existing vs what W1 will change. AC-5a (line 128) requires final state to match repo; W1 migration happens between this audit and W1.4 redeploy.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-overdue.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No code change. Audit reads only.</constraint>
+    <constraint source="project">DO NOT flag PB-020 / PB-021 for task 015 redeploy. W1 (PR 3) edits the repo JSON files first; W1 tasks redeploy as part of their own work. Task 015 explicitly skips PB-020/PB-021.</constraint>
+    <constraint source="spec FR-7">PB-020/PB-021 currently lack membership-scope; W1 adds it. Audit captures pre-W1 state.</constraint>
+    <constraint source="project">Parallel-safe with tasks 012, 014 (different playbook codes, different audit files).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="jps-playbook-audit" location=".claude/skills/jps-playbook-audit/SKILL.md">Read deployed configjson; capture baseline.</pattern>
+      <pattern name="dataverse-mcp-usage" location=".claude/skills/dataverse-mcp-usage/SKILL.md">MCP read_query for sprk_analysisplaybook.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read repo JSON for PB-020 + PB-021.</step>
+    <step order="2">MCP `read_query` for each playbook by sprk_playbookcode; capture sprk_configjson + statecode.</step>
+    <step order="3">For each, scan for ActionType 52 node — document presence (likely absent — that's why W1 is migrating them).</step>
+    <step order="4">Semantic diff deployed vs repo: document differences as baseline-snapshot.</step>
+    <step order="5">Create directory `projects/spaarke-daily-update-service-r4/notes/audit/` if needed. Author `013-pb-020-021.md` with: per-playbook section; explicit note "task 015 SKIPS these — W1 tasks 022/023 will edit repo JSON, W1 redeploys, then a final R4 verification confirms"; baseline state captured for forensic comparison.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to &#x2705;.</step>
+    <step order="7">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query — sprk_analysisplaybook for PB-020 / PB-021</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/audit/013-pb-020-021.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit report exists at `projects/spaarke-daily-update-service-r4/notes/audit/013-pb-020-021.md`.</criterion>
+    <criterion testable="true">Per-playbook section for PB-020 + PB-021 documents current deployed state, current ActionType 52 status, and current repo JSON state.</criterion>
+    <criterion testable="true">Report explicitly states that task 015 SKIPS PB-020/PB-021 (W1 owns the migration + redeploy).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-5 (line 127), FR-7 (line 142-143), AC-5a (line 128), AC-5b (line 129). Hint: the divergence will be substantive — that's expected. The point of this task is the baseline capture, not "fix the divergence" (W1 does that). Hint: if either playbook is missing from deployed state entirely, escalate — that's a worse defect than divergence.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

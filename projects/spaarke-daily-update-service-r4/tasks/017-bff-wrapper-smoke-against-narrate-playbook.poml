@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Smoke test BFF wrapper dispatch against DAILY-BRIEFING-NARRATE playbook</title>
+    <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>011, 016</dependencies>
+    <blocks>018</blocks>
+    <tags>bff-api, integration-test, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Throwaway integration test — exercises the deployed playbook end-to-end via direct service invocation (task 030 hasn't run yet; this smoke uses direct AnalysisOrchestrationService invocation per dispatch-decision doc from task 001). Captures a real response sample. No production wrapper changes here.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Author a throwaway integration test that invokes `AnalysisOrchestrationService` (or `sprk_playbookconsumer` based on the task 001 decision document — even though task 030 hasn't rewritten the production wrapper yet, this smoke proves the playbook is dispatchable by directly invoking the orchestration service). Pass `BRIEF-NARRATE` as the playbook code along with a hand-crafted `DailyBriefingNarrateRequest` payload (synthesized fixture, no real user data). Verify: (a) no 500 response, (b) response shape conforms to expected playbook output, (c) the parallel GenerateChannelNarratives branches and ValidateEntityNames Tool executed. Capture a sample response in `notes/smoke/017-narrate-playbook-smoke.md`. The test is throwaway; do not check it into the production test suite.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF + JPS integration tester — proves end-to-end dispatchability of newly deployed playbook before production wrapper rewrite in PR 4.</role>
+
+  <goal>One captured sample response from a real invocation of `BRIEF-NARRATE` via the orchestration service against spaarkedev1 (or local BFF pointed at spaarkedev1). Response demonstrates that the playbook is dispatchable + the node graph executes end-to-end. Sample recorded in `notes/smoke/017-narrate-playbook-smoke.md`.</goal>
+
+  <context>
+    <background>R4 spec FR-4 AC-4b (line 125-126) requires "BFF wrapper endpoint successfully dispatches narrate request to this playbook; receives valid response". The full production wrapper rewrite happens in task 030 (PR 4). This smoke is intermediate evidence — proves the PR 2 data deployment (playbook row + Action rows) is dispatchable before PR 3/PR 4 invest further. CLAUDE.md decisions log notes "the dispatch path was decided in task 001"; this smoke validates that decision empirically.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">All AI work stays in BFF. Smoke invokes existing service — no new endpoint added in this task.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — this is throwaway test code; do NOT commit production-shape code that would expand BFF surface. Smoke test is informational only. If a temporary test file is added, it lives in tests/ and is NOT added to the merged test suite.</constraint>
+    <constraint source="project">Use the dispatch path decided in task 001 (path A or B). If path A (sprk_playbookconsumer), invoke via that service; if path B (direct AnalysisOrchestrationService), invoke directly with degenerate playbook bypass.</constraint>
+    <constraint source="project">No real user data in fixtures — synthesize a payload.</constraint>
+    <constraint source="spec AC-4b">BFF wrapper endpoint successfully dispatches narrate request; receives valid response.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md</file>
+    </files>
+    <patterns>
+      <pattern name="testing.md" location=".claude/constraints/testing.md">xUnit integration test conventions in Sprk.Bff.Api.Tests.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files including the dispatch-path decision doc from task 001.</step>
+    <step order="2">Read existing `AnalysisOrchestrationService` invocation patterns to identify the entry-point signature for a code-level dispatch (Path B); if dispatch decision is Path A, read `sprk_playbookconsumer` service entry-point.</step>
+    <step order="3">Read existing `DailyBriefingNarrateRequest` shape to construct a valid hand-crafted payload (channels, notifications array, timezone, generated-as-of, etc.).</step>
+    <step order="4">Author a throwaway xUnit integration test that constructs the payload, invokes the orchestration entry-point with `BRIEF-NARRATE` playbook code, and asserts: no 500, response shape conforms to playbook output schema.</step>
+    <step order="5">Run the test against spaarkedev1 (or local BFF wired to spaarkedev1 OpenAI / Dataverse). Capture the actual response payload.</step>
+    <step order="6">Create directory `projects/spaarke-daily-update-service-r4/notes/smoke/` if needed. Author `017-narrate-playbook-smoke.md` containing: dispatch path used, fixture payload, captured response, verification of node-graph branches executing (e.g., presence of `channelNarratives` array, entity-name validation evidence), pass/fail.</step>
+    <step order="7">DELETE the throwaway test file (do NOT commit to production test suite). Document its non-commit in the smoke notes.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to &#x2705;.</step>
+    <step order="9">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run throwaway xUnit integration test</tool>
+    <tool name="mcp-dataverse">read_query — pre-flight verify BRIEF-NARRATE playbook is Active and reachable</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/smoke/017-narrate-playbook-smoke.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Smoke invocation against `BRIEF-NARRATE` returns a non-500 response.</criterion>
+    <criterion testable="true">Response payload contains expected shape (TL;DR + channelNarratives + generated timestamp per FR-12 contract).</criterion>
+    <criterion testable="true">Captured sample evidence in `notes/smoke/017-narrate-playbook-smoke.md`.</criterion>
+    <criterion testable="true">Throwaway test file is NOT committed to production tests/ directory; deletion documented.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-4 AC-4b (line 125-126), FR-12 (line 159-164), AC-12c (line 164). Hint: this is THROWAWAY smoke — the goal is to prove the playbook works end-to-end before PR 4 invests in the production wrapper rewrite. If the smoke fails (500, schema mismatch, missing node execution), STOP and escalate — PR 2 is broken and PR 3/PR 4 cannot proceed.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

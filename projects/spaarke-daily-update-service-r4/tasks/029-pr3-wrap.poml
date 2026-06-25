@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>PR 3 wrap — code-review + adr-check + publish-size + CVE + open PR</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>028</dependencies>
+    <blocks>030</blocks>
+    <tags>bff-api, devops</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>PR-wrap orchestration task. Runs code-review + adr-check + publish-size + CVE + conflict-check + opens draft PR. No code modifications — pure quality-gate + PR open. STANDARD rigor (no new file beyond commit + PR description).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Run `code-review` + `adr-check` skills on PR 3 touched files. Run `dotnet build src/server/api/Sprk.Bff.Api/` + publish-size check (record delta vs prior baseline per CLAUDE.md §10). Run `dotnet list package --vulnerable --include-transitive`. Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Run `/conflict-check` against R3 PR #451 and other active PRs per `notes/risks.md`. Commit changes. Open draft PR titled "feat(daily-briefing-r4/PR-3): W1 Producer — customData enrichment + stubs + membership-scope".</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. PR-wrap orchestrator running mandatory quality gates per CLAUDE.md §10 + project plan PR-graduation criteria.</role>
+
+  <goal>Draft PR opened for PR 3 with: all quality gates passed (code-review, adr-check, build, tests, publish-size, CVE), conflict-check clean against active PRs, descriptive PR body citing AC coverage, all PR-3 task statuses ✅ in TASK-INDEX.md.</goal>
+
+  <context>
+    <background>PR 3 of 5 in R4 plan — Workstream W1 Producer completes here. Touched files: CreateNotificationNodeExecutor.cs, LookupUserMembershipNodeExecutor.cs (or MembershipResolverService.cs), 4 playbook JSON files (PB-017/020/021/022), potentially 3 more JSON files from task 026 consolidation, 1 new test file. R3 PR #451 still open per `notes/risks.md` — conflict-check is mandatory.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/plan.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>projects/spaarke-daily-update-service-r4/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">All PR-3 AI work stayed in BFF — verify in code-review.</constraint>
+    <constraint source="ADR-029">Publish-size delta MUST be recorded; if total compressed publish &gt;55MB, escalate per CLAUDE.md §10 ("≥55 MB cumulative → architecture review").</constraint>
+    <constraint source="CLAUDE.md §10">Mandatory: publish-size + CVE per task — wrap re-verifies the cumulative state for PR 3.</constraint>
+    <constraint source="project">PR is DRAFT until owner reviews. Title format: `feat(daily-briefing-r4/PR-3): ...`. Body cites FR-6 through FR-11 and AC-6 through AC-11 with which task closed which AC.</constraint>
+    <constraint source="conflict-check">MUST run conflict-check against R3 PR #451 (R4 develops in parallel per spec line 305 + notes/risks.md). Other active PRs from `gh pr list --state open`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/plan.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Read plan.md PR-3 graduation criteria.</step>
+    <step order="2">Verify all PR-3 task statuses (020-028) are ✅ in TASK-INDEX.md. If any are still 🔲, STOP and report.</step>
+    <step order="3">Run `code-review` skill against the diff `git diff master...HEAD -- src/ tests/ projects/spaarke-daily-update-service/notes/playbooks/`. Address findings (or document deferrals).</step>
+    <step order="4">Run `adr-check` skill against the same diff. Address findings.</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` — confirm green.</step>
+    <step order="6">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm green.</step>
+    <step order="7">Run publish-size check: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed output. Record absolute size + delta vs prior baseline (post-Phase 5 Outcome A baseline ~45.65 MB per CLAUDE.md §10). If &gt;55MB cumulative or &gt;+5MB single-PR delta, escalate.</step>
+    <step order="8">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH CVE.</step>
+    <step order="9">Run `/conflict-check` skill against R3 PR #451 + `gh pr list --state open` results. Document overlaps in PR body.</step>
+    <step order="10">Stage + commit per `push-to-github` skill: commit message `feat(daily-briefing-r4/PR-3): W1 Producer — customData enrichment + stubs + membership-scope` with body listing closed FRs (FR-6 through FR-11) and ACs.</step>
+    <step order="11">Push branch.</step>
+    <step order="12">Open DRAFT PR via `gh pr create --draft --title "feat(daily-briefing-r4/PR-3): W1 Producer — customData enrichment + stubs + membership-scope" --body "$(cat ...)"`. Body cites FR-6 through FR-11 + closed ACs + publish-size delta + conflict-check result.</step>
+    <step order="13">Update `tasks/TASK-INDEX.md`: change task 029 status to ✅. Note PR URL.</step>
+    <step order="14">Document publish-size delta, CVE state, and any code-review deferrals in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET; vulnerability scan</tool>
+    <tool name="code-review">Quality gate</tool>
+    <tool name="adr-check">ADR compliance gate</tool>
+    <tool name="conflict-check">Active-PR overlap detection</tool>
+    <tool name="push-to-github">Commit + push</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Draft PR opened on GitHub</output>
+    <output type="documentation">PR URL captured in TASK-INDEX.md + notes/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All PR-3 tasks (020-028) are ✅ in TASK-INDEX.md.</criterion>
+    <criterion testable="true">code-review skill produced findings list with all addressed or deferred-with-rationale.</criterion>
+    <criterion testable="true">adr-check skill produced findings list with all addressed or deferred-with-rationale.</criterion>
+    <criterion testable="true">dotnet build + dotnet test both green.</criterion>
+    <criterion testable="true">Publish-size delta recorded; total &lt;55MB (else escalation note).</criterion>
+    <criterion testable="true">No new HIGH-severity CVE.</criterion>
+    <criterion testable="true">conflict-check run; overlap notes captured in PR body.</criterion>
+    <criterion testable="true">Draft PR opened with descriptive title + body citing FR-6 through FR-11 closed ACs.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec PR-3 ACs (all of FR-6 through FR-11). Hint: PR body template — Summary (3-5 bullets), Closed FRs/ACs (table), Publish-size delta (number), Conflict-check result, Test plan checklist. Hint: keep PR as DRAFT — owner promotes when satisfied. Hint: don't push --force; create a new commit if hook fails.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Evaluate sprk_playbookconsumer dispatch path; document decision (AC-12c)</title>
+    <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
+    <status>not-started</status>
+    <estimated-hours>2.5</estimated-hours>
+    <dependencies>001, 029</dependencies>
+    <blocks>031</blocks>
+    <tags>bff-api, ai, research</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Research + decision task; finalizes a design decision document with no code change. Sequential anchor for 031 which implements the chosen path.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Read task 001's decision doc draft at `notes/decisions/030-dispatch-path.md`. Inspect `sprk_playbookconsumer` entity + service implementation (originated in `work/spaarke-ai-platform-chat-routing-redesign-r1` Phase 1R). Determine whether the daily-briefing widget can be registered as a consumer that dispatches to `DAILY-BRIEFING-NARRATE` with structured payload. Finalize the decision in `notes/decisions/030-dispatch-path.md` with rationale per AC-12c.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. AI dispatch + playbook routing research; survey existing consumer dispatch infrastructure before committing to an implementation path.</role>
+  <goal>Decision document `notes/decisions/030-dispatch-path.md` finalized with: (a) selected path (A: consumer registration, or B: direct AnalysisOrchestrationService.RunPlaybookAsync with degenerate playbook), (b) concrete evidence from inspecting consumer service + entity, (c) implementation outline that task 031 will follow, (d) explicit AC-12c rationale.</goal>
+  <context>
+    <background>R3 UAT defect: /narrate hardcodes the LLM prompt inside the endpoint, which prevents prompt iteration without recompile and was identified as a hallucination contributor. R4 FR-12 requires /narrate to dispatch via the existing playbook engine. Path A (preferred) leverages `sprk_playbookconsumer` registration created in chat-routing-redesign-r1 Phase 1R, mapping the daily-briefing widget as a consumer keyed to playbook code `DAILY-BRIEFING-NARRATE`. Path B falls back to direct invocation of `AnalysisOrchestrationService.RunPlaybookAsync` with a degenerate playbook definition (no Dataverse query node). The dispatch path must be decided before implementation begins in task 031.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">BFF AI placement — /narrate is thin wrapper dispatching to existing playbook engine</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — publish-size + CVE per task; placement justification in PR description</constraint>
+    <constraint source="project">Response shape backward compat — existing widget parser must work unchanged (NFR-05)</constraint>
+    <constraint source="project">No hardcoded LLM prompt strings remain in DailyBriefingEndpoints.cs (FR-12)</constraint>
+    <constraint source="project">Decision must cite concrete evidence (file paths, code excerpts) — not speculation</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read `notes/decisions/030-dispatch-path.md` (draft from task 001) to load prior context</step>
+    <step order="2">Locate sprk_playbookconsumer entity definition (search Dataverse schema + projects/spaarke-ai-platform-chat-routing-redesign-r1)</step>
+    <step order="3">Inspect consumer dispatch service (likely under src/server/api/Sprk.Bff.Api/Services/Ai/) — capture API shape, payload model, response model</step>
+    <step order="4">Inspect AnalysisOrchestrationService.RunPlaybookAsync signature + degenerate-playbook capability</step>
+    <step order="5">Evaluate Path A: feasibility, integration touchpoints, response-shape preservation, Dataverse-registration requirements</step>
+    <step order="6">Evaluate Path B: degenerate-playbook construction, response-shape preservation, code complexity</step>
+    <step order="7">Select preferred path; document rationale citing AC-12c</step>
+    <step order="8">Outline implementation steps for task 031 (file edits, contract changes, response-mapping)</step>
+    <step order="9">Update TASK-INDEX.md ✅</step>
+    <step order="10">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">AC-12c: Decision doc finalized identifying selected dispatch path with concrete rationale</criterion>
+    <criterion testable="true">Decision references inspected consumer service + AnalysisOrchestrationService by file path</criterion>
+    <criterion testable="true">Implementation outline for task 031 is actionable (file edits enumerated)</criterion>
+  </acceptance-criteria>
+  <notes>This is a research+decision task — no code edits. Decision quality determines feasibility of task 031. If Path A is selected, verify the playbook consumer service is registered in DI in current BFF Program.cs. If Path B, document the degenerate-playbook shape explicitly.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

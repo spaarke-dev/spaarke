@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Run jps-scope-refresh + PR 1 smoke test</title>
+    <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>005, 006, 007</dependencies>
+    <blocks>009</blocks>
+    <tags>jps, deploy, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Smoke / integration verification; no code change. Runs jps-scope-refresh + a hand-built test playbook in spaarkedev1 + writes results doc.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on all 4 W0.1 Action rows existing in spaarkedev1; must run sequentially after tasks 005, 006, 007.</parallel-reason>
+  </metadata>
+
+  <prompt>Run the `jps-scope-refresh` skill to refresh PlaybookBuilder's scope catalog. Verify the PlaybookBuilder code page palette displays the new Action rows (SYS-LOOKUP-MEMBERSHIP, BRIEF-NARRATE-TLDR, BRIEF-NARRATE-CHANNEL, BRIEF-VALIDATE-ENTITY-NAMES). Author a hand-built test playbook (LookupUserMembership → QueryDataverse) in spaarkedev1 to smoke-test end-to-end ActionType 52 dispatch. Document smoke results in `notes/smoke/008-w0-1-smoke.md`.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS deployment verifier; can compose a minimal test playbook in PlaybookBuilder and trigger it manually to confirm end-to-end dispatch.</role>
+
+  <goal>jps-scope-refresh completes without error; PlaybookBuilder palette displays all 4 new Action rows; a hand-built test playbook (LookupUserMembership → QueryDataverse) executes end-to-end in spaarkedev1 returning a non-error result; smoke results documented at `notes/smoke/008-w0-1-smoke.md`.</goal>
+
+  <context>
+    <background>R4 spec.md MUST rule "MUST run `jps-scope-refresh` after W0 deployments complete" (spec line 231). AC-1 (line 110) explicitly requires "a hand-built test playbook with LookupUserMembership → QueryDataverse executes end-to-end in spaarkedev1" — this is the load-bearing PR 1 smoke test that confirms ActionType 52 is dispatch-able through the playbook engine after R3 shipped the C# code but never deployed the row.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec MUST">MUST run `jps-scope-refresh` after W0 deployments complete.</constraint>
+    <constraint source="spec AC-1">A hand-built test playbook with LookupUserMembership → QueryDataverse executes end-to-end in spaarkedev1.</constraint>
+    <constraint source="project">Smoke results MUST be documented in notes/smoke/008-w0-1-smoke.md with: (a) jps-scope-refresh output summary, (b) PlaybookBuilder palette screenshot or list of visible Actions, (c) test playbook composition and execution log, (d) pass/fail verdict.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/jps-scope-refresh/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="jps-scope-refresh" location=".claude/skills/jps-scope-refresh/SKILL.md">Refresh scope &amp; model catalog from Dataverse so PlaybookBuilder reflects latest Action rows.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Confirm tasks 005, 006, 007 are ✅ in TASK-INDEX (all 4 Action rows deployed).</step>
+    <step order="2">Invoke `jps-scope-refresh` skill — capture output summary.</step>
+    <step order="3">Open PlaybookBuilder code page in spaarkedev1; verify palette displays all 4 new entries: SYS-LOOKUP-MEMBERSHIP, BRIEF-NARRATE-TLDR, BRIEF-NARRATE-CHANNEL, BRIEF-VALIDATE-ENTITY-NAMES. Record screenshot or palette listing.</step>
+    <step order="4">In PlaybookBuilder, hand-build a minimal test playbook: Start → LookupUserMembership(entityType="sprk_matter", roles=["assignedAttorney"]) → QueryDataverse(matters from membership IDs). Save as a temporary playbook (clearly named `TEST-W0-1-SMOKE` so it can be deleted later).</step>
+    <step order="5">Execute the test playbook via the PlaybookBuilder Run/Test affordance against a current user identity that has at least one membership row in spaarkedev1. Capture the run output (success / failure / payload sample).</step>
+    <step order="6">Author `projects/spaarke-daily-update-service-r4/notes/smoke/008-w0-1-smoke.md` (create the directory if missing) containing: jps-scope-refresh summary, palette confirmation, test playbook composition (node graph), execution result, pass/fail verdict against AC-1.</step>
+    <step order="7">Delete the temporary TEST-W0-1-SMOKE playbook from spaarkedev1 to keep the environment clean.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅.</step>
+    <step order="9">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query / create_record for test playbook composition + cleanup</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/smoke/008-w0-1-smoke.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">jps-scope-refresh completes without error; output captured in smoke doc.</criterion>
+    <criterion testable="true">PlaybookBuilder palette displays all 4 new Action rows.</criterion>
+    <criterion testable="true">AC-1: Hand-built LookupUserMembership → QueryDataverse playbook executes end-to-end with non-error result in spaarkedev1.</criterion>
+    <criterion testable="true">Smoke results documented at notes/smoke/008-w0-1-smoke.md with all 4 sections.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: spec MUST run jps-scope-refresh (line 231), AC-1 hand-built test playbook clause (line 110). The smoke playbook is throwaway — delete after recording results. This task is the final gate before PR 1 wrap (task 009).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

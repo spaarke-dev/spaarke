@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Reconcile + redeploy divergent playbook configs from repo source-of-truth</title>
+    <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>012, 013, 014</dependencies>
+    <blocks>016</blocks>
+    <tags>jps, dataverse, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse deployment driven by audit reports. For divergent playbooks within scope (i.e., NOT the W1-owned ones), redeploys configjson from repo source-of-truth. No code change. Quality: verify final state via read_query.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>For each divergent playbook flagged by audits 012, 014 (NOT 013 — those are W1-owned), redeploy `sprk_configjson` from the canonical repo JSON via MCP `update_record`. Scope: PB-016/PB-018/PB-019 (audit 012) if any divergence, and PB-017/PB-022 (audit 014) ONLY if W1 already shipped a new repo JSON; if W1 has NOT yet shipped, PB-017/PB-022 are NO-OP for this task (W1 owns the redeploy). PB-020/PB-021 (audit 013) are NO-OP in this task — W1 task pair handles them. Verify final state of each redeployed playbook via `read_query` (sprk_configjson semantically matches repo). Document outcomes in `notes/deployments/015-reconcile.md`.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook reconciler — closes audit-vs-repo divergences via MCP redeploy.</role>
+
+  <goal>For each in-scope playbook flagged divergent by audits 012/014, the deployed `sprk_configjson` in spaarkedev1 semantically matches the repo JSON. Out-of-scope playbooks (W1-owned: PB-017/020/021/022 in the pre-W1 R4 window) explicitly NOT touched. Outcomes documented per playbook.</goal>
+
+  <context>
+    <background>R4 spec FR-5 (line 127) reconciles deployed-vs-repo. AC-5a (line 128) requires "All 7 playbook rows have sprk_configjson matching canonical repo source" — but that final state is achieved across PR 2 (this task for non-W1-owned) + PR 3 (W1 tasks for W1-owned). This task handles the PR 2 portion. The audit reports from tasks 012/013/014 drive what this task does or skips.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/audit/012-pb-016-018-019.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/audit/013-pb-020-021.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/audit/014-pb-017-022.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No code change. Pure data redeploy via MCP.</constraint>
+    <constraint source="project">Repo JSON = source-of-truth. Always deploy FROM repo TO Dataverse, never the reverse.</constraint>
+    <constraint source="project">EXPLICITLY SKIP PB-020 + PB-021 in this task (audit 013 owns them; W1 tasks 022/023 author + redeploy).</constraint>
+    <constraint source="project">EXPLICITLY SKIP PB-017 + PB-022 unless W1 has already shipped repo JSON (rare — typically W1 hasn't shipped yet in R4 sequencing). Default = NO-OP for these.</constraint>
+    <constraint source="spec AC-5a">All 7 playbook rows match canonical repo source. Final state is collective across PR 2 + PR 3.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-mcp-usage" location=".claude/skills/dataverse-mcp-usage/SKILL.md">MCP update_record + read_query for sprk_analysisplaybook reconciliation.</pattern>
+      <pattern name="jps-playbook-audit" location=".claude/skills/jps-playbook-audit/SKILL.md">Verification recipe after redeploy.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read audit reports 012, 013, 014.</step>
+    <step order="2">Build a redeploy list: for each playbook flagged "redeploy needed" by audit 012 — include. PB-020/PB-021 from audit 013 — exclude. PB-017/PB-022 from audit 014 — exclude unless audit shows W1 has shipped repo JSON.</step>
+    <step order="3">For each playbook on the redeploy list: read the canonical repo JSON; serialize its configjson section; MCP `update_record` against the deployed `sprk_analysisplaybook` row, setting sprk_configjson to the repo value. Preserve all other fields.</step>
+    <step order="4">For each redeployed playbook: MCP `read_query` to verify sprk_configjson semantically matches repo source.</step>
+    <step order="5">Create directory `projects/spaarke-daily-update-service-r4/notes/deployments/` if needed. Author `015-reconcile.md` documenting: per-playbook outcome (redeployed / no-op / skipped-W1), evidence of post-deploy match, list of any escalations.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to &#x2705;.</step>
+    <step order="7">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">update_record / read_query for sprk_analysisplaybook reconciliation</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">N sprk_analysisplaybook rows reconciled (N = count of in-scope divergent playbooks)</output>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/deployments/015-reconcile.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each playbook flagged "redeploy needed" by audit 012, deployed sprk_configjson semantically matches repo JSON post-task.</criterion>
+    <criterion testable="true">PB-020, PB-021 are explicitly NO-OP (skipped — W1 owns) and documented as such in notes.</criterion>
+    <criterion testable="true">PB-017, PB-022 are documented as NO-OP or properly handled depending on whether W1 has shipped repo JSON.</criterion>
+    <criterion testable="true">`notes/deployments/015-reconcile.md` exists with per-playbook outcome.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-5 (line 127), AC-5a (line 128), AC-5b (line 129). Hint: this task's "happy path" might be all NO-OPs if audit 012 finds no divergences for PB-016/PB-018/PB-019. That's a valid outcome — document it. Hint: NEVER hand-edit configjson in Dataverse — always deploy from repo JSON. CLAUDE.md decisions log 2026-06-25 makes this binding.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

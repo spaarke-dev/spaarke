@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Wire disabledChannels server-side $filter on sprk_category (FR-17c)</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>036, 040, 041</dependencies>
+    <blocks>049</blocks>
+    <tags>pcf, react, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation modifying query layer; server-side $filter affects what reaches /narrate — visibility-impacting</rigor-reason>
+    <parallel-group>E2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Edit `notificationService.ts` fetchNotifications query: add `$filter` clause `sprk_category not in (&lt;disabled set&gt;)` using the existing `sprk_category` custom column on `appnotification`. Disabled channels MUST NOT reach widget OR /narrate. Pre-requisite (PR 3 task 021) is producer dual-write of `sprk_category`.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>OData `$filter` excludes disabled-channel rows at query time. Confirmed via DevTools Network tab: response payload contains zero rows with disabled `sprk_category`. /narrate is never called with disabled-category items.</goal>
+  <context>
+    <background>FR-17c + owner Q&amp;A 2026-06-25: Dataverse OData does NOT support `$filter` on nested JSON (`customData.category`), so producer dual-writes `sprk_category` custom column. Consumer filters server-side on that column.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/PreferencesDropdown.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+    <constraint source="project">Use `sprk_category` custom column (NOT nested-JSON filter on `customData.category`); pre-requisite: producer dual-write per task 021</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Verify producer dual-write completed (task 021 status = ✅); query a sample `appnotification` row and confirm `sprk_category` populated</step>
+    <step order="2">Open `notificationService.ts`; locate `$filter` composition path (built in task 040)</step>
+    <step order="3">Add helper `buildDisabledChannelsFilter(disabled: string[])`: returns OData expression `sprk_category ne 'X' and sprk_category ne 'Y'` (no `not in` operator in OData v4 — use AND of `ne`)</step>
+    <step order="4">Compose with existing `$filter` (timeWindow + dueWithinDays already in place); skip clause when disabled is empty</step>
+    <step order="5">Read `disabledChannels` from preferences; default to `[]` if missing</step>
+    <step order="6">Add Jest test: disabledChannels=['email']; assert `$filter` string contains `sprk_category ne 'email'`</step>
+    <step order="7">Add Jest test: disabledChannels=[]; assert no `sprk_category` clause appears in query</step>
+    <step order="8">Run `npm test`; ensure all pass</step>
+    <step order="9">Run `npm run build` to verify TypeScript compiles</step>
+    <step order="10">Manually exercise widget: toggle a channel off → DevTools Network shows OData response excludes that channel; /narrate request body shows no items of that category</step>
+    <step order="11">Update TASK-INDEX.md ✅</step>
+    <step order="12">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/src/services/__tests__/notificationService.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Disabled channels do NOT reach widget OR /narrate — server-side filter at query level (FR-17c / AC-17c)</criterion>
+    <criterion testable="true">OData $filter string contains correct `sprk_category ne X` clauses per disabled set</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>Disable 'email' channel; verify no email notifications render in widget</test>
+    <test>Disable 'email'; intercept /narrate request body — verify zero email-category items in payload</test>
+    <test>Re-enable 'email'; verify items reappear after refetch</test>
+    <test>Dark Mode Compliance: render PreferencesDropdown with toggles in dark theme per ADR-021</test>
+    <test>Console Errors: no errors during toggle + refetch flow</test>
+  </ui-tests>
+  <notes>OData v4 has no `not in` — use AND of `ne`. Pre-requisite is task 021 (producer dual-write `sprk_category`). Owner Q&amp;A 2026-06-25 confirmed this column approach. R3 PR #451 file overlap — run conflict-check.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

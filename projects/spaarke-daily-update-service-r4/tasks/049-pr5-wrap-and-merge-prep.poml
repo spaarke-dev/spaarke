@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>PR 5 wrap — code-review + adr-check + ui-test + accessibility + open PR</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>042, 043, 044, 046, 047, 048</dependencies>
+    <blocks>090</blocks>
+    <tags>pcf, devops</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Wrap-only task; runs existing skills + opens PR; no new code surface authored here</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Run `code-review` + `adr-check` on PR 5 touched files. Run `ui-test` skill (task-execute Step 9.7) — verify all `&lt;ui-tests&gt;` from PR 5 tasks pass in browser. Run `npm test`. Run a11y audit per ADR-021 (axe DevTools or similar). Run grep `minConfidence\|AiConfidenceThreshold` returns 0. Run `/conflict-check` against R3 PR #451 — final check before merge. Commit. Open draft PR titled "feat(daily-briefing-r4/PR-5): W2 Consumer — UX redesign + 4 preferences wired + minConfidence removed + link modal".</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>Draft PR 5 opened with passing quality gates: code-review + adr-check + npm test + a11y audit + grep gate + conflict-check. PR body documents all FR-17a/b/c/d/e + FR-18 + FR-19 + FR-20 deliverables.</goal>
+  <context>
+    <background>Final wrap for PR 5. Quality gates run here are repository binding (per task-execute Step 9.5 + 9.7). Grep gate is the binding evidence for FR-17e/AC-17e. Conflict-check protects against R3 PR #451 merge collisions.</background>
+    <relevant-files>
+      <file>All PR 5 touched files (notificationService.ts, PreferencesDropdown.tsx, NarrativeBullet.tsx, ActivityNotesSection.tsx, DailyBriefingApp.tsx, LegalWorkspaceApp.tsx, types/notifications.ts, tests/)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+    <constraint source="project">PR opens as draft; reviewer (owner) flips to ready when satisfied</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run `code-review` skill on all PR 5 touched files</step>
+    <step order="2">Run `adr-check` skill — verify ADR-021 (Fluent v9 + dark mode) + ADR-024 (Add to To Do path preserved) compliance</step>
+    <step order="3">Run `npm test` across daily-briefing-components workspace; all tests MUST pass</step>
+    <step order="4">Run `npm run build` to confirm clean TypeScript compile</step>
+    <step order="5">Run `ui-test` skill (task-execute Step 9.7) — execute all PR 5 ui-tests in browser; verify pass</step>
+    <step order="6">Run accessibility audit (axe DevTools or `jest-axe`); verify zero violations on PreferencesDropdown, NarrativeBullet overflow menu, Toaster</step>
+    <step order="7">Run `grep -rn "minConfidence\|AiConfidenceThreshold" src/client/shared/Spaarke.DailyBriefing.Components/` — MUST return 0 results (FR-17e gate)</step>
+    <step order="8">Run `/conflict-check` skill against R3 PR #451 — confirm any merge conflicts known and resolvable</step>
+    <step order="9">Stage all PR 5 changes; commit with conventional-commits message ("feat(daily-briefing-r4/PR-5): W2 Consumer — UX redesign + 4 preferences wired + minConfidence removed + link modal")</step>
+    <step order="10">Push to origin; open draft PR via `gh pr create --draft --title "feat(daily-briefing-r4/PR-5): W2 Consumer — UX redesign + 4 preferences wired + minConfidence removed + link modal"`</step>
+    <step order="11">PR body summarizes: FR-17a/b/c/d wired; FR-17e removed; FR-18 overflow menu; FR-19 link modal + 403 toast; FR-20 count reconciliation; gates run + results</step>
+    <step order="12">Update TASK-INDEX.md ✅</step>
+    <step order="13">Document any deviations + the PR URL in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+    <tool name="gh">Open draft PR</tool>
+  </tools>
+  <outputs>
+    <output type="pr">Draft PR opened against work/spaarke-daily-update-service-r4</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">code-review + adr-check produce no blocking findings (or all findings resolved before PR opens)</criterion>
+    <criterion testable="true">npm test passes; npm run build clean; a11y audit shows zero violations on changed surfaces</criterion>
+    <criterion testable="true">grep "minConfidence\|AiConfidenceThreshold" returns 0 results (FR-17e / AC-17e binding gate)</criterion>
+    <criterion testable="true">conflict-check confirms R3 PR #451 collisions known + resolvable</criterion>
+    <criterion testable="true">Draft PR opened with required title format + body summary of all PR 5 FRs</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>All PR 5 task ui-tests (40–48) verified in browser via ui-test skill execution</test>
+    <test>Dark Mode Compliance: full widget render in dark theme across all changed surfaces per ADR-021</test>
+    <test>Console Errors: clean console across PR 5 happy-path UAT flows</test>
+  </ui-tests>
+  <notes>STANDARD rigor (wrap task — runs gates + opens PR; no new code surface). Grep gate at step 7 is the binding evidence for FR-17e/AC-17e. Conflict-check at step 8 is the binding R3-PR-#451 overlap mitigation. PR opens as draft; owner flips to ready.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Replace DailyBriefingEndpoints.HandleNarrate body with playbook dispatch wrapper</title>
+    <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
+    <status>not-started</status>
+    <estimated-hours>3.5</estimated-hours>
+    <dependencies>011, 030</dependencies>
+    <blocks>032</blocks>
+    <tags>bff-api, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies BFF endpoint .cs file; touches AI dispatch path; quality gates (code-review + adr-check) required at Step 9.5 per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Edit `src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs` HandleNarrate (~line 189). Replace inline LLM-prompt construction with a thin wrapper that invokes the playbook engine per task 030's decision path. Dispatch playbook code `BRIEF-NARRATE`. Pass through the existing `DailyBriefingNarrateRequest` payload. Response shape MUST be backward compat — existing widget parser unchanged. NO inline prompt strings remain.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF API + AI dispatch refactoring; replace inline LLM call with playbook engine invocation while preserving response contract.</role>
+  <goal>HandleNarrate no longer constructs LLM prompts inline. It dispatches via the playbook path selected in task 030, mapping to playbook code `BRIEF-NARRATE`. Response JSON shape (top-level fields: `tldr`, `channelNarratives`, `generatedUtc`) is preserved exactly. `dotnet build src/server/api/Sprk.Bff.Api/` succeeds.</goal>
+  <context>
+    <background>R3 UAT defect: HandleNarrate hardcodes the LLM prompt body inside the endpoint, blocking iteration without recompile and contributing to hallucination. R4 FR-12 requires /narrate to be a thin dispatch wrapper to the existing playbook engine. Task 030 finalized the dispatch path (A = consumer registration, B = direct RunPlaybookAsync with degenerate playbook). This task implements that decision.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">BFF AI placement — /narrate is thin wrapper dispatching to existing playbook engine</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — publish-size + CVE per task; placement justification in PR description</constraint>
+    <constraint source="project">Response shape backward compat — existing widget parser must work unchanged (NFR-05)</constraint>
+    <constraint source="project">No hardcoded LLM prompt strings remain in DailyBriefingEndpoints.cs (FR-12)</constraint>
+    <constraint source="CLAUDE.md §11">Component justification required — see notes for new-wrapper justification</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Load decision doc from task 030; confirm chosen dispatch path</step>
+    <step order="2">Read current HandleNarrate body in DailyBriefingEndpoints.cs (~line 189); identify all inline prompt-string locations</step>
+    <step order="3">Capture current response JSON shape (top-level fields + types) as the contract to preserve</step>
+    <step order="4">Implement dispatch wrapper per chosen path; inject required services via DI</step>
+    <step order="5">Map playbook engine response to existing DailyBriefingNarrateResponse shape (tldr / channelNarratives / generatedUtc)</step>
+    <step order="6">Remove all inline LLM prompt strings + supporting helpers no longer needed</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/`; resolve compile errors</step>
+    <step order="8">Verify publish-size delta vs prior baseline (CLAUDE.md §10 bullet 4)</step>
+    <step order="9">Run `dotnet list package --vulnerable --include-transitive` — no new HIGH CVE</step>
+    <step order="9.5">Run code-review + adr-check skills (FULL rigor quality gates)</step>
+    <step order="10">Update TASK-INDEX.md ✅</step>
+    <step order="11">Document deviations + placement justification in notes/</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">AC-12a: HandleNarrate contains no inline LLM prompt strings; dispatch wrapper only</criterion>
+    <criterion testable="true">AC-12b: /narrate response JSON shape unchanged from R3 (top-level: tldr, channelNarratives, generatedUtc)</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with no new warnings</criterion>
+    <criterion testable="true">Publish-size delta within CLAUDE.md §10 thresholds; ≤60 MB compressed ceiling preserved</criterion>
+  </acceptance-criteria>
+  <notes>**Component Justification (per CLAUDE.md §11)**: (1) Existing — HandleNarrate currently constructs prompts inline; AnalysisOrchestrationService.RunPlaybookAsync already exists. (2) Extension — Yes; this REPLACES existing implementation by routing through the playbook engine rather than introducing a new service. (3) Cost-of-doing-nothing — Hallucination persists because prompts cannot be iterated without recompile (concrete R3 UAT defect). Wrapper code is the minimal surface. Watch ADR-013 placement — dispatch logic stays in endpoint; orchestration stays in service.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

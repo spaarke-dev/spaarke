@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Audit deployed sprk_configjson for PB-016, PB-018, PB-019 (already-migrated playbooks)</title>
+    <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>015</blocks>
+    <tags>jps, playbook-audit, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit comparing deployed vs repo JSON. No code change; produces a divergence report consumed by task 015 (reconcile). Parallel-safe with sibling audit tasks 013, 014.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Follow the `jps-playbook-audit` skill. For each of PB-016 (notification-new-documents), PB-018 (notification-new-emails), and PB-019 (notification-new-events), read the deployed `sprk_configjson` from spaarkedev1 via MCP `read_query`. Compare against the canonical repo JSON at `projects/spaarke-daily-update-service/notes/playbooks/notification-new-{documents,emails,events}.json`. Confirm presence of a Node referencing ActionType 52 (`LookupUserMembership`) in each deployed config. Document any divergences (deployed vs repo) in `notes/audit/012-pb-016-018-019.md` for downstream consumption by task 015 (reconcile).</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook auditor — compares deployed Dataverse data against canonical repo source-of-truth JSON.</role>
+
+  <goal>One audit report at `projects/spaarke-daily-update-service-r4/notes/audit/012-pb-016-018-019.md` listing — per playbook — (a) deployed-vs-repo divergence summary (or "no divergence"), (b) confirmation of ActionType 52 LookupUserMembership node presence, (c) flag for task 015 if redeploy needed.</goal>
+
+  <context>
+    <background>R4 spec FR-5 (line 127) audits + reconciles `sprk_configjson` for the 7 existing notification playbooks. PB-016/PB-018/PB-019 are flagged in the spec as "verified to reference ActionType 52" — this task confirms that against actual deployed state. AC-5b (line 129) explicitly requires verification of the ActionType 52 node presence. The audit report drives task 015 reconciliation.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-emails.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-events.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No code change. Audit reads only.</constraint>
+    <constraint source="project">Repo JSON files = canonical source-of-truth (CLAUDE.md decisions log 2026-06-25). Deviations from deployed state become reconcile targets for task 015.</constraint>
+    <constraint source="spec AC-5b">Confirm PB-016/PB-018/PB-019 sprk_configjson contains a Node referencing ActionType 52 (LookupUserMembership).</constraint>
+    <constraint source="project">Parallel-safe with tasks 013, 014 (different playbook codes, different audit files — no file-overlap).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="jps-playbook-audit" location=".claude/skills/jps-playbook-audit/SKILL.md">Read deployed configjson → compare against repo source → report divergences.</pattern>
+      <pattern name="dataverse-mcp-usage" location=".claude/skills/dataverse-mcp-usage/SKILL.md">MCP read_query patterns for sprk_analysisplaybook by sprk_playbookcode.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read the 3 repo JSON files for PB-016, PB-018, PB-019.</step>
+    <step order="2">For each of PB-016 (notification-new-documents), PB-018 (notification-new-emails), PB-019 (notification-new-events): determine the `sprk_playbookcode` from the repo JSON header.</step>
+    <step order="3">MCP `read_query` for each `sprk_analysisplaybook` row by sprk_playbookcode, returning sprk_configjson + statecode.</step>
+    <step order="4">For each playbook, parse deployed sprk_configjson; locate any node where ExecutorActionType / actionTypeId / equivalent = 52. Confirm at least one such node exists.</step>
+    <step order="5">For each playbook, perform a semantic diff: deployed sprk_configjson vs repo sprk_configjson (node-by-node, action-code references, parameter bindings). Document divergences (or "no divergence").</step>
+    <step order="6">Create directory `projects/spaarke-daily-update-service-r4/notes/audit/` if needed. Author `012-pb-016-018-019.md` with: per-playbook section (PB-016, PB-018, PB-019); each section contains deployed state summary, repo state summary, divergence list, ActionType 52 node confirmation, "redeploy needed" flag for task 015.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to &#x2705;.</step>
+    <step order="8">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query — sprk_analysisplaybook fetch by sprk_playbookcode</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/audit/012-pb-016-018-019.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit report exists at `projects/spaarke-daily-update-service-r4/notes/audit/012-pb-016-018-019.md`.</criterion>
+    <criterion testable="true">Report contains a per-playbook section for PB-016, PB-018, PB-019.</criterion>
+    <criterion testable="true">Each section confirms (yes/no) presence of ActionType 52 LookupUserMembership node in deployed config.</criterion>
+    <criterion testable="true">Each section flags whether task 015 must redeploy this playbook (true/false).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-5 (line 127), AC-5b (line 129). Hint: if deployed configjson is byte-equivalent to repo JSON, "no divergence" is the legitimate answer. Hint: the spec says PB-016/PB-018/PB-019 are "verified to reference ActionType 52" — this task creates the empirical evidence backing that claim. If verification FAILS for any, escalate to owner — that's a deployment-gap defect worth surfacing.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Standardize enriched customData across all 7 notification playbooks</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022, 023, 024, 025</dependencies>
+    <blocks>028</blocks>
+    <tags>jps, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Sequential consolidation across the 4 PR-3 playbooks (PB-017/020/021/022) plus 3 already-membership-aware playbooks (PB-016/018/019). No new code, but must verify schema conformance + redeploy any divergent JSON. Cannot run in parallel with 022/023/024/025 because it depends on their completion.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>For all 7 deployed notification playbooks (PB-016 through PB-022), verify each `CreateNotification` node output conforms to the enriched customData schema defined in FR-6 (regardingName, regardingEntityType, regardingId, viaMatter, source). Where a playbook's `CreateNotification` node has inline parameter overrides, ensure the overrides include the new fields (or rely on the executor's enriched defaults from task 020). Update repo JSON + redeploy any divergent rows via MCP.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook auditor with knowledge of CreateNotificationNodeExecutor's parameter-override behavior.</role>
+
+  <goal>All 7 deployed `sprk_analysisplaybook` rows (PB-016..PB-022) emit `appnotification` rows whose customData conforms to the FR-6 enriched schema. Any divergent playbook JSON is updated + redeployed. AC-10 satisfied (test fixture in task 028 will assert schema conformance).</goal>
+
+  <context>
+    <background>R4 spec FR-10 (line 151) requires consistency: all 7 playbooks must emit the enriched customData schema, so the consumer (DAILY-BRIEFING-NARRATE / task 028 schema test) sees a uniform shape. After tasks 020 (executor enrichment) + 022/023/024/025 (4 playbooks migrated/implemented), this task closes the loop by verifying the 3 already-membership-aware playbooks (PB-016 documents, PB-018 emails, PB-019 events) also emit the enriched schema, plus re-verifying PB-017/020/021/022. Most playbooks rely on the executor's enriched defaults from task 020 — only divergence comes from playbook-level parameter overrides.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-emails.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-events.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-matter-activity.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-overdue.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-work-assignments.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Playbooks compose JPS primitives only. No new C# code.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — no C# changes here, but verify the executor changes from task 020 are correctly relied on.</constraint>
+    <constraint source="project">Repo JSON = source-of-truth. Deploy from repo, never edit deployed sprk_configjson directly.</constraint>
+    <constraint source="FR-10">Schema conformance is the criterion — implementation choice (inline overrides vs default-derived) is free.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Read FR-10 + AC-10. Re-read task 020 notes for the enriched-schema definition.</step>
+    <step order="2">Read all 7 repo JSON files. For each, locate the CreateNotification node and document whether it relies on executor defaults (no override) or has inline parameter overrides for customData fields.</step>
+    <step order="3">For each playbook with overrides: verify the overrides DO NOT shadow the new enriched fields (regardingName, regardingEntityType, regardingId, viaMatter, source). If they do, update the override to include the new fields.</step>
+    <step order="4">For each playbook with no overrides: confirm the executor's enriched defaults (task 020) will be applied at runtime — no change needed at the JSON level.</step>
+    <step order="5">Build a conformance matrix: 7 rows × {category, priority, actionUrl, dueDate, regardingName, regardingEntityType, regardingId, viaMatter, source} columns. Mark each cell as "executor-default", "explicit-override", or "missing-needs-fix".</step>
+    <step order="6">For any "missing-needs-fix" cells: update the repo JSON to either add the override OR remove the conflicting override (whichever is cleanest). Redeploy via `mcp__dataverse__update_record`.</step>
+    <step order="7">Run `jps-validate` on every modified file.</step>
+    <step order="8">Run `jps-playbook-audit` on the full 7-playbook set.</step>
+    <step order="9">Verify each deployed row matches its repo file via `mcp__dataverse__read_query`.</step>
+    <step order="10">Run `dotnet build src/server/api/Sprk.Bff.Api/`.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: change task 026 status to ✅.</step>
+    <step order="12">Document conformance matrix + any divergent fixes in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">update_record — redeploy divergent rows; read_query — verify all 7.</tool>
+    <tool name="jps-validate">Schema validation</tool>
+    <tool name="jps-playbook-audit">Audit against Action catalog</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Any updated JSON files in projects/spaarke-daily-update-service/notes/playbooks/</output>
+    <output type="data">Any redeployed sprk_analysisplaybook rows</output>
+    <output type="documentation">conformance matrix in projects/spaarke-daily-update-service-r4/notes/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Conformance matrix documents all 7 playbooks × 9 customData fields with explicit cell labels.</criterion>
+    <criterion testable="true">No playbook has a CreateNotification override that shadows or omits the enriched fields.</criterion>
+    <criterion testable="true">jps-validate passes on every modified file.</criterion>
+    <criterion testable="true">Deployed sprk_configjson matches repo file for every modified playbook.</criterion>
+    <criterion testable="true">Task 028 schema-conformance fixture (downstream) can rely on uniform output shape.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-10 line 151; AC-10 line 152. Hint: most playbooks will likely have no inline override and inherit the executor's enriched defaults automatically — this task may largely be a documentation pass with zero JSON changes. If so, the matrix + notes/ file are the deliverable. Hint: the "membership-aware" PB-016/018/019 have richer source data; PB-017/020/021/022 just got membership lookup added — so all 7 should now have the input context required to populate the enriched fields.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

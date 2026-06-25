@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Add customData schema-conformance xUnit fixture</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>not-started</status>
+    <estimated-hours>2.5</estimated-hours>
+    <dependencies>020, 021, 026, 027</dependencies>
+    <blocks>029</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New test file in tests/unit/Sprk.Bff.Api.Tests/. STANDARD rigor per task-execute decision tree (tests, new file creation). Validates AC-6a/b/c/d, AC-10, AC-11 via xUnit + mocked dependencies. Must run sequentially after tasks 020/021/026/027 because it depends on their behavior.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Add `CustomDataSchemaConformanceTests.cs` in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/`. Test fixtures cover all 7 playbook output shapes asserting: AC-6a (enriched fields present), AC-6b (backward compat — old + new shape parse), AC-6c (payload &lt;10KB), AC-6d (every produced notification has sprk_category populated), AC-10 (all 7 playbooks emit schema-conformant output), AC-11 (unmappable Contact triggers member_skipped event — mock ILogger). Mock `IMembershipResolverService` for the AC-11 case.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. xUnit test author following SPAARKE patterns (`.claude/patterns/testing/unit-test-structure.md`).</role>
+
+  <goal>`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CustomDataSchemaConformanceTests.cs` exists with passing fixtures covering AC-6a/b/c/d, AC-10, AC-11. Tests pass on `dotnet test`. Failure modes are clear (assertion messages name the violated AC).</goal>
+
+  <context>
+    <background>R4 spec FR-10 AC-10 explicitly requires "test fixture passes asserting customData schema conformance for fixtures from all 7 playbooks". This task lands that fixture plus extends it to cover AC-6a/b/c/d (enriched customData + sprk_category column + payload size) and AC-11 (member_skipped event). Mock the `IMembershipResolverService` to exercise both happy-path (SystemUser-mapped contact) and unmappable-contact (NULL azureactivedirectoryobjectid) cases. Use the existing test model `CreateNotificationNodeExecutorTests.cs` as a structural template.</background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/LookupUserMembershipNodeExecutorTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Tests live in tests/unit/Sprk.Bff.Api.Tests/. Mock all external boundaries (Dataverse client, ILogger, IMembershipResolverService).</constraint>
+    <constraint source="ADR-029">No publish-size impact (tests don't ship). CVE check applies to test project too.</constraint>
+    <constraint source="CLAUDE.md §10">Test obligation — tests for new BFF behavior land in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+    <constraint source="testing pattern">Follow `.claude/patterns/testing/unit-test-structure.md` — AAA naming, Theory+InlineData for parametrized cases, descriptive assertion messages.</constraint>
+    <constraint source="project">Assertion messages MUST name the AC being violated (e.g., "AC-6a: viaMatter missing from customData JSON"). Mock ILogger via Moq Verify pattern for AC-11.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Re-read AC-6a/b/c/d, AC-10, AC-11. Read the existing `CreateNotificationNodeExecutorTests.cs` for structural pattern.</step>
+    <step order="2">Author `CustomDataSchemaConformanceTests.cs`. Class with private helpers: `MakeExecutor(IMembershipResolverService? mockResolver = null, ILogger&lt;...&gt;? mockLogger = null)`, `MakeFixtureInput(string playbookCode, bool withMatterLinkage = true, int membershipRoleCount = 1)`, `ExtractCustomDataJson(Entity notification)`.</step>
+    <step order="3">Test 1 (AC-6a): For each of 7 playbook codes, assert `BuildNotificationEntity` output's customData JSON contains keys: category, priority, actionUrl, dueDate, regardingName, regardingEntityType, regardingId, viaMatter (when withMatterLinkage=true), source. Use Theory + InlineData per playbook.</step>
+    <step order="4">Test 2 (AC-6b backward compat): Round-trip the enriched customData through a JSON deserializer matching the widget's old shape contract — verify the existing 4 fields (category, priority, actionUrl, dueDate) still parse correctly. Then deserialize via the new shape — verify both.</step>
+    <step order="5">Test 3 (AC-6c): Serialize the enriched customData JSON to bytes; assert byte-length &lt; 10240 (10KB ceiling). Use a fixture with realistic multi-membership data to stress the upper bound.</step>
+    <step order="6">Test 4 (AC-6d): Assert produced Entity has `sprk_category` attribute set, and its value equals customData.category.</step>
+    <step order="7">Test 5 (AC-10): Loop over 7 playbook fixtures — assert all conform to schema. This is essentially Test 1 packaged as a single sanity-check that exercises all 7 codes.</step>
+    <step order="8">Test 6 (AC-11): Construct a fixture matter with a Contact member whose azureactivedirectoryobjectid is NULL. Mock IMembershipResolverService + ILogger via Moq. Invoke LookupUserMembershipNodeExecutor (or MembershipResolverService — whichever task 027 chose). Verify `mockLogger.Verify(...)` was called once with LogLevel.Warning + a state-formatter containing "member_skipped" + the 4 fields. Assert exact field values.</step>
+    <step order="9">Test 7 (AC-6a viaMatter omission): Fixture with no matter linkage — assert viaMatter key is absent from customData JSON (not present-as-null).</step>
+    <step order="10">Test 8 (AC-6a multi-role): Fixture with 2 memberships (owner + assignedAttorney) — assert viaMatter.memberships is array length 2 with both role entries.</step>
+    <step order="11">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter FullyQualifiedName~CustomDataSchemaConformanceTests` — fix failures.</step>
+    <step order="12">Run full suite `dotnet test tests/unit/Sprk.Bff.Api.Tests/` to confirm no regression elsewhere.</step>
+    <step order="13">Update `tasks/TASK-INDEX.md`: change task 028 status to ✅.</step>
+    <step order="14">Document any test gaps or skipped cases in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CustomDataSchemaConformanceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CustomDataSchemaConformanceTests.cs file exists with 8 test methods.</criterion>
+    <criterion testable="true">Tests cover AC-6a/b/c/d, AC-10, AC-11 with assertion messages naming the AC.</criterion>
+    <criterion testable="true">All tests pass on dotnet test.</criterion>
+    <criterion testable="true">Mock IMembershipResolverService used for AC-11 case; Moq Verify confirms member_skipped warning fires with the 4 required fields.</criterion>
+    <criterion testable="true">Test for AC-6c asserts payload &lt; 10KB with realistic multi-membership fixture.</criterion>
+    <criterion testable="true">Test for AC-6a viaMatter-omission scenario passes (viaMatter absent when no matter linkage).</criterion>
+    <criterion testable="true">dotnet test full suite still green (no regression).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-6 AC-6a-d (lines 137-140); FR-10 AC-10 (line 152); FR-11 AC-11 (line 155). Hint: use `Moq` (existing test project dep) for ILogger verification — `_loggerMock.Verify(l =&gt; l.Log(LogLevel.Warning, ...), Times.Once)`. Hint: byte-length test should use UTF-8 encoding (System.Text.Encoding.UTF8.GetByteCount). Hint: viaMatter-omission test verifies omission semantics chosen in task 020 (omit vs null) — if task 020 chose null, adjust assertion accordingly and document.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>
