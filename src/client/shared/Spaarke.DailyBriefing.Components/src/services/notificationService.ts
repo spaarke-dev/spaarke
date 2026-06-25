@@ -166,8 +166,7 @@ function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
     // "Keep 7 more days" action can compute current + 604800 additively.
     // Undefined for pre-rollout rows (no producer-side write); UI coerces
     // to 0 in that case so the action writes an explicit 604800.
-    ttlinseconds:
-      typeof entity['ttlinseconds'] === 'number' ? (entity['ttlinseconds'] as number) : undefined,
+    ttlinseconds: typeof entity['ttlinseconds'] === 'number' ? (entity['ttlinseconds'] as number) : undefined,
   };
 }
 

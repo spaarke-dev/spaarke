@@ -292,8 +292,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   // explicit 604800 = 7d, which may shorten them — acceptable per spec
   // for the legacy-row edge case; post-task-010 producer-written rows have
   // explicit ttlinseconds = 604800 so Keep correctly extends to 1209600).
-  const primaryItemTtlSeconds =
-    items?.find(item => item.id === primaryItemId)?.ttlinseconds ?? 0;
+  const primaryItemTtlSeconds = items?.find(item => item.id === primaryItemId)?.ttlinseconds ?? 0;
 
   const handleCheck = () => {
     if (!primaryItemId) return;
