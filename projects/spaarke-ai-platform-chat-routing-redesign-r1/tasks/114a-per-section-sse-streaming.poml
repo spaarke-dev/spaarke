@@ -3,7 +3,7 @@
   <metadata>
     <title>Per-section SSE streaming (section_started/data/completed)</title>
     <phase>5: WP2 File-Aware Classification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>114R</dependencies>
     <blocks>114b,114c,118R</blocks>
