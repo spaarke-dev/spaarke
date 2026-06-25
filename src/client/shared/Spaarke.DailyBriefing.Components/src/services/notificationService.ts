@@ -428,17 +428,8 @@ export async function extendBriefingTtl(
   }, 'BRIEFING_EXTEND_TTL_ERROR');
 }
 
-// ─── R3 task 020: transitional aliases (removed by tasks 030/031) ───────────
-// R3 renames `markNotificationRead` → `markBriefingChecked` and
-// `markAllNotificationsRead` → `markAllBriefingsChecked` to align with the
-// spec's "Checked" semantic and FR-7 bell-panel decoupling. The hook in
-// `useBriefingActions.ts` and the smoke test still import the old names;
-// tasks 030 (hook) and 031 (UI) will rewire to the canonical names + drop
-// these aliases. Keeping them here for ONE task cycle so this task's
-// rename does not break the build in unrelated files.
-
-/** @deprecated R3 task 020 — use `markBriefingChecked`. Removed by task 030. */
-export const markNotificationRead = markBriefingChecked;
-
-/** @deprecated R3 task 020 — use `markAllBriefingsChecked`. Removed by task 030. */
-export const markAllNotificationsRead = markAllBriefingsChecked;
+// R3 task 030 (2026-06-24): the transitional aliases `markNotificationRead` /
+// `markAllNotificationsRead` that briefly mirrored `markBriefingChecked` /
+// `markAllBriefingsChecked` (added by task 020) have been removed now that
+// `useBriefingActions.ts` (task 030) imports the canonical names directly.
+// The smoke test `DailyBriefingApp.smoke.test.tsx` is rewired by task 031.

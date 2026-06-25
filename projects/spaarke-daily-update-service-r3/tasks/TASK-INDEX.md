@@ -23,7 +23,7 @@
 | 1 | [001](001-add-sprk-briefingstate-choice-column.poml) | Add `sprk_briefingstate` Choice column + deploy | Phase 1: Schema | ✅ | 0.5 | dataverse, schema, operator | STANDARD |
 | 2 | [010](010-bff-fix-ttlinseconds-field-name.poml) | BFF fix: `ttlindays` → `ttlinseconds` + test + §10 verification | Phase 2: BFF Producer Fix | ✅ | 0.5 | bff-api, csharp, defect-fix | FULL |
 | 3 | [020](020-widget-service-layer-read-state-swap.poml) | Widget service: read-state swap + 3 new functions + filter + tests | Phase 3: Widget Service | ✅ | 2 | frontend, typescript, refactoring | FULL |
-| 4 | [030](030-use-briefing-actions-hook-extension.poml) | `useBriefingActions` hook: 3 new handlers + tests | Phase 4a: Widget Hook | 🔲 | 1 | frontend, react, hook | FULL |
+| 4 | [030](030-use-briefing-actions-hook-extension.poml) | `useBriefingActions` hook: 3 new handlers + tests | Phase 4a: Widget Hook | ✅ | 1 | frontend, react, hook | FULL |
 | 5 | [031](031-widget-ui-three-action-buttons.poml) | Widget UI: 3 action buttons + props wiring + handler composition | Phase 4b: Widget UI | 🔲 | 2 | frontend, react, fluent-ui | FULL |
 | 6 | [040](040-manual-uat-spaarkedev1.poml) | Manual UAT in spaarkedev1: verify 7 ACs | Phase 5: UAT | 🔲 | 0.5 | uat, manual-test | STANDARD |
 | 7 | [090](090-project-wrap-up.poml) | Wrap-up: lessons-learned + status + archive | Phase 5: Wrap-up | 🔲 | 1 | wrap-up, documentation | MINIMAL |
@@ -124,6 +124,7 @@ If any wave member fails, mark 🔄 (needs retry), report at wave end, then deci
 
 - 2026-06-24: Project initialized; 7 tasks generated; PR #451 (draft) opened.
 - 2026-06-24: Task 001 ✅ — `sprk_briefingstate` Choice (Unread=0/Checked=1/Removed=2) deployed to spaarkedev1 in `SpaarkeCore` solution via Web API. All 3 ACs verified including AC-6 default propagation (Dataverse DID honor default=0 for new rows — better than Risk R5 worst case). See `notes/schema-deployment.md`.
+- 2026-06-24: Task 030 ✅ — `useBriefingActions` extended with `markChecked` / `markRemoved` / `extendTtl` handlers (FR-4/5/6). Each orchestrates `onOptimistic` → service call → `onSuccess` OR (`onRevert` → `onError`) via a `BriefingActionOptions<TSuccess>` callback bag. Hook stays JSX-agnostic (toast JSX construction stays at UI layer per existing `handleAddToTodo` pattern). Transitional aliases `markNotificationRead` / `markAllNotificationsRead` removed from `notificationService.ts` + `services/index.ts`. 79/79 tests pass (10 new). Existing 5 pre-existing peer-dep build errors (@spaarke/ui-components, @spaarke/auth) confirmed baseline — none introduced. ADR-check + code-review = 0 violations / 0 warnings.
 
 ---
 
