@@ -574,11 +574,16 @@ public static class ChatEndpoints
             // For task 110 the dispatcher accepts but does not act on attachments — the parameter
             // is wired here so downstream-task migrations don't require a second touch of this
             // call site. Null when the user turn has no attachments (existing message-only path).
+            // FR-20 (task 115): also forward the soft-slash intentHint as a vector-query bias
+            // signal. Phase B uses it to prefix the per-file query; the pre-task-115 path is
+            // preserved when IntentHint is null/empty. Same field powers the existing
+            // CapabilityRouter Layer 0.5 short-circuit above — task 115 is bias-side only.
             var dispatchResult = await dispatcher.DispatchAsync(
                 request.Message,
                 session.HostContext,
                 cancellationToken,
-                attachments: request.Attachments);
+                attachments: request.Attachments,
+                intentHint: request.IntentHint);
 
             // Task 048 (FR-14d) — the gate now also fires for non-Chat NodeDestination
             // values (Workspace / Both / FormPrefill / SideEffect). The destination is

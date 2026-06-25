@@ -180,6 +180,17 @@ public sealed class PlaybookDispatcher
     /// extend this signature with the Hybrid C file-aware Phase A/B/C classification flow;
     /// task 110 only carries the parameter so the wiring is in place ahead of those tasks.
     /// </param>
+    /// <param name="intentHint">
+    /// Optional closed-vocabulary soft-slash intent hint (FR-20, task 115). When non-null
+    /// and non-whitespace, the Phase B per-file vector query is biased by prefixing the
+    /// composed query with <c>"Intent: {intentHint} | "</c>, shifting embedding-side
+    /// semantics toward the user's slash-derived intent. When <c>null</c>, empty, or
+    /// whitespace-only, behavior is identical to the pre-task-115 path (no bias). Wire-format
+    /// originates from <c>ChatSendMessageRequest.IntentHint</c> (renamed from
+    /// <c>commandIntent</c> per task 022). ADR-015 tier-1 note: the hint is a
+    /// closed-vocabulary enum value (e.g. "summarize"), not user content, but only
+    /// <c>intentHintProvided</c> (bool) is logged from this dispatcher to stay conservative.
+    /// </param>
     /// <returns>
     /// A <see cref="DispatchResult"/> with the matched playbook and extracted parameters,
     /// or <see cref="DispatchResult.NoMatch"/> if no playbook matches the user message.
@@ -190,12 +201,16 @@ public sealed class PlaybookDispatcher
     /// (or pass <c>null</c> / an empty list) MUST observe behavior identical to the pre-task-110
     /// signature. This is enforced by the early-return guard at the top of the method body and
     /// covered by <c>PlaybookDispatcherAttachmentsTests</c>.
+    /// <b>Intent-bias backward-compat (FR-20, task 115)</b>: callers that do not pass
+    /// <paramref name="intentHint"/> (or pass <c>null</c> / empty / whitespace) MUST observe
+    /// behavior identical to the pre-task-115 dispatch.
     /// </remarks>
     public async Task<DispatchResult?> DispatchAsync(
         string userMessage,
         ChatHostContext? hostContext,
         CancellationToken cancellationToken = default,
-        IReadOnlyList<ChatMessageAttachment>? attachments = null)
+        IReadOnlyList<ChatMessageAttachment>? attachments = null,
+        string? intentHint = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userMessage, nameof(userMessage));
 
@@ -216,6 +231,15 @@ public sealed class PlaybookDispatcher
         // `hasAttachments` to invoke the file-aware classification pipeline; until then the
         // attachments parameter is accepted for caller-readiness but does not alter dispatch.
         _ = hasAttachments;
+
+        // Phase 5R task 115 (FR-20): intentHint flows through DispatchAsync into Phase B
+        // per-file vector query composition (see RunPhaseBVectorMatchAsync). At this layer
+        // the parameter is accepted + observed for ADR-015 tier-1 telemetry (provided-flag
+        // only, never the value) and forwarded by downstream wiring (task 117a). The
+        // pre-task-115 Stage-1 single-query path below is unchanged.
+        var intentHintProvided = !string.IsNullOrWhiteSpace(intentHint);
+        _ = intentHintProvided;
+        _ = intentHint;
 
         // ADR-016: Acquire concurrency permit with total timeout as deadline.
         if (!await AiConcurrencyLimiter.WaitAsync(TotalTimeout, cancellationToken))
@@ -376,6 +400,15 @@ public sealed class PlaybookDispatcher
     /// </param>
     /// <param name="topK">Per-file top-K (defaults to 5). The caller picks final N.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="intentHint">
+    /// Optional closed-vocabulary soft-slash intent hint (FR-20, task 115). When non-null
+    /// and non-whitespace, the per-file query is prefixed with <c>"Intent: {intentHint} | "</c>
+    /// — biasing the embedding toward the slash-derived intent. Applied uniformly across
+    /// both manifest-present and manifest-absent paths so all per-file queries in the same
+    /// turn carry the same intent segment. When null/empty/whitespace, behavior is identical
+    /// to the pre-task-115 path (no bias). Same hint is included in the cache key so the
+    /// 5-min TTL cache (ADR-014) does not return stale results when intent shifts.
+    /// </param>
     /// <returns>Array of per-file results, ordered to match <paramref name="attachments"/>.</returns>
     /// <remarks>
     /// <para>
@@ -406,7 +439,8 @@ public sealed class PlaybookDispatcher
         IReadOnlyList<ChatMessageAttachment> attachments,
         IReadOnlyList<ChatSessionFile?>? sessionFiles = null,
         int topK = 5,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? intentHint = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userMessage, nameof(userMessage));
         ArgumentNullException.ThrowIfNull(attachments);
@@ -417,6 +451,14 @@ public sealed class PlaybookDispatcher
         }
 
         var totalStopwatch = Stopwatch.StartNew();
+
+        // FR-20 (task 115): normalise the intent hint once. Whitespace-only is treated as
+        // absent so callers' string handling can't accidentally introduce a no-op bias
+        // segment. The normalised value is passed verbatim into the query composition
+        // helpers and into the cache key, so identical-text + identical-intent queries
+        // continue to share cache entries; different intents bust the cache cleanly.
+        var normalizedIntentHint = string.IsNullOrWhiteSpace(intentHint) ? null : intentHint!.Trim();
+        var intentHintProvided = normalizedIntentHint is not null;
 
         // Pair each attachment with its matching session-file entry (by index — the
         // attachments are turn-scoped and arrive in caller-supplied order; session
@@ -446,6 +488,7 @@ public sealed class PlaybookDispatcher
                         userMessage,
                         pair.SessionFile.ClassifiedDocType,
                         topK,
+                        normalizedIntentHint,
                         cancellationToken);
                     fileStopwatch.Stop();
                     return new PhaseBPerFileResult(
@@ -461,6 +504,7 @@ public sealed class PlaybookDispatcher
                         userMessage,
                         pair.Attachment,
                         topK,
+                        normalizedIntentHint,
                         cancellationToken);
                     fileStopwatch.Stop();
                     return new PhaseBPerFileResult(
@@ -496,16 +540,20 @@ public sealed class PlaybookDispatcher
 
         totalStopwatch.Stop();
 
-        // ADR-015 tier-1 telemetry: counts + latency only. No query content, file
-        // content, embedding values, or classifier confidence ever leaves the process
-        // via the log pipeline.
+        // ADR-015 tier-1 telemetry: counts + latency + intentHintProvided flag only.
+        // No query content, file content, embedding values, classifier confidence, OR
+        // intent-hint value leaves the process via the log pipeline. The hint VALUE is
+        // a closed-vocabulary enum (e.g. "summarize") and arguably tier-1 safe, but we
+        // log only the bool to stay conservative per FR-20 / ADR-015.
         var perFileLatencies = string.Join(",", results.Select(r => r.LatencyMs));
         var topKCount = results.Sum(r => r.Candidates.Count);
         _logger.LogInformation(
             "PlaybookDispatcher Phase B: filesCount={FilesCount} manifestPresent={ManifestPresent} " +
-            "perFileLatencyMs=[{PerFileLatencyMs}] totalLatencyMs={TotalLatencyMs} topKCount={TopKCount}",
+            "intentHintProvided={IntentHintProvided} perFileLatencyMs=[{PerFileLatencyMs}] " +
+            "totalLatencyMs={TotalLatencyMs} topKCount={TopKCount}",
             results.Length,
             manifestPresentCount > 0,
+            intentHintProvided,
             perFileLatencies,
             totalStopwatch.ElapsedMilliseconds,
             topKCount);
@@ -517,21 +565,31 @@ public sealed class PlaybookDispatcher
     /// Manifest-present per-file path: classified doc type drives a structured pre-filter
     /// (<c>documentTypes/any(t: search.in(t, 'NDA'))</c>) on the playbook-embeddings index.
     /// Per FR-17 v2 budget ≤100ms (single embed + filtered search; no extra LLM call).
-    /// Results are cached for 5 min on <c>(tenantId, classifiedDocType, normalizedMessage)</c>.
+    /// Results are cached for 5 min on <c>(tenantId, classifiedDocType, normalizedMessage, intentHint)</c>.
     /// </summary>
+    /// <remarks>
+    /// FR-20 task 115: when <paramref name="intentHint"/> is non-null the embed query is
+    /// prefixed with <c>"Intent: {intentHint} | "</c> so the embedding picks up the slash
+    /// bias even on the structured-filter path. Cache key segments the entry by intent so
+    /// the same message with a different intent does NOT return the stale (no-bias) result.
+    /// </remarks>
     private async Task<IReadOnlyList<PlaybookSearchResult>> RunPhaseBManifestPresentAsync(
         string userMessage,
         string classifiedDocType,
         int topK,
+        string? intentHint,
         CancellationToken cancellationToken)
     {
         // Cache key includes a normalised hash of the user message so semantically
         // identical queries hit the same entry; classified doc type is the structural
-        // discriminator.
+        // discriminator; intent hint segments the entry so bias shifts bust the cache.
         var normalizedMessage = NormalizeForCacheKey(userMessage);
         var messageHash = Sha256HexPrefix(normalizedMessage);
         var classifiedHash = EscapeForCacheKey(classifiedDocType);
-        var cacheKey = $"phaseb:{_tenantId}:mfpresent:{messageHash}:{classifiedHash}";
+        var intentSegment = intentHint is null
+            ? "noint"
+            : EscapeForCacheKey(intentHint);
+        var cacheKey = $"phaseb:{_tenantId}:mfpresent:{messageHash}:{classifiedHash}:{intentSegment}";
 
         if (_memoryCache.TryGetValue<IReadOnlyList<PlaybookSearchResult>>(cacheKey, out var cached) &&
             cached is not null)
@@ -539,8 +597,14 @@ public sealed class PlaybookDispatcher
             return cached;
         }
 
+        // FR-20 task 115: intent bias is a query-composition prefix, not a separate routing
+        // layer. When the hint is absent, the query is unchanged from task 112's behavior.
+        var query = intentHint is null
+            ? userMessage
+            : $"Intent: {intentHint} | {userMessage}";
+
         var candidates = await _embeddingService.SearchPlaybooksAsync(
-            query: userMessage,
+            query: query,
             recordTypeFilter: null,
             documentTypeFilter: classifiedDocType,
             topK: topK,
@@ -553,23 +617,32 @@ public sealed class PlaybookDispatcher
 
     /// <summary>
     /// Manifest-absent per-file path: per-file query composition + vector search.
-    /// Composes <c>"{userMessage} | Document: {filename} | Type hint: {contentType} | Content: {textPrefix}"</c>
+    /// Composes <c>"[Intent: {intentHint} | ]{userMessage} | Document: {filename} | Type hint: {contentType} | Content: {textPrefix}"</c>
     /// and embeds it as a single query against the unfiltered playbook-embeddings index.
-    /// Per FR-17 v2 budget ≤300ms for 3 files (parallel fan-out — bounded by slowest
-    /// embed + search). Results cached 5 min on <c>(tenantId, normalizedQueryText)</c>.
+    /// The leading <c>Intent: …</c> segment is present iff <paramref name="intentHint"/>
+    /// is non-null (FR-20, task 115). Per FR-17 v2 budget ≤300ms for 3 files (parallel
+    /// fan-out — bounded by slowest embed + search). Results cached 5 min on
+    /// <c>(tenantId, normalizedQueryText)</c> — the intent hint is INSIDE the query
+    /// string, so the existing query-hash cache key already segments by intent without
+    /// a separate dimension.
     /// </summary>
     private async Task<IReadOnlyList<PlaybookSearchResult>> RunPhaseBManifestAbsentAsync(
         string userMessage,
         ChatMessageAttachment attachment,
         int topK,
+        string? intentHint,
         CancellationToken cancellationToken)
     {
         var textPrefix = attachment.TextContent.Length > PhaseBTextPrefixCharLimit
             ? attachment.TextContent[..PhaseBTextPrefixCharLimit]
             : attachment.TextContent;
 
-        // FR-17 v2 query composition — order is stable for cache-key determinism.
-        var query = $"{userMessage} | Document: {attachment.Filename} | Type hint: {attachment.ContentType} | Content: {textPrefix}";
+        // FR-17 v2 + FR-20 task 115 query composition — order is stable for cache-key
+        // determinism. When intentHint is absent, the leading "Intent: …" segment is
+        // omitted entirely, preserving task 112's pre-115 cache key + embed input.
+        var query = intentHint is null
+            ? $"{userMessage} | Document: {attachment.Filename} | Type hint: {attachment.ContentType} | Content: {textPrefix}"
+            : $"Intent: {intentHint} | {userMessage} | Document: {attachment.Filename} | Type hint: {attachment.ContentType} | Content: {textPrefix}";
 
         var normalizedQuery = NormalizeForCacheKey(query);
         var cacheKey = $"phaseb:{_tenantId}:mfabsent:{Sha256HexPrefix(normalizedQuery)}";
