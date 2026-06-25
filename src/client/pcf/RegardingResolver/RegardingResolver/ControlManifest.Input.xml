@@ -4,9 +4,9 @@
     <external-service-usage enabled="false">
     </external-service-usage>
     <!-- Bound lookup property — the resolver's "discriminator" field on the host entity (sprk_regardingrecordtype) -->
-    <property name="regardingRecordType" display-name-key="Regarding Record Type" description-key="Lookup to sprk_recordtype_ref — the resolver discriminator. Bind to the host entity's sprk_regardingrecordtype hidden lookup field." of-type="Lookup.Simple" usage="bound" required="true" />
+    <property name="regardingRecordType" display-name-key="Regarding Record Type" description-key="Lookup to sprk_recordtype_ref — the resolver discriminator. Bind to the host entity sprk_regardingrecordtype hidden lookup field." of-type="Lookup.Simple" usage="bound" required="true" />
     <!-- Host entity logical name (FR-22 — the only entity-specific configuration; no code branching) -->
-    <property name="entity" display-name-key="Host Entity" description-key="Dataverse logical name of the host entity (e.g., 'sprk_todo' or 'sprk_communication'). FR-22 reusability lever — set once per form, no entity-specific code branches in the PCF." of-type="SingleLine.Text" usage="input" required="true" />
+    <property name="entity" display-name-key="Host Entity" description-key="Dataverse logical name of the host entity (sprk_todo or sprk_communication). FR-22 reusability lever — set once per form, no entity-specific code branches in the PCF." of-type="SingleLine.Text" usage="input" required="true" />
     <!-- Optional override list of allowed regarding target entity types (comma-separated logical names). Defaults to the 11-entity TODO_REGARDING_TARGETS catalog. -->
     <property name="regardingTargets" display-name-key="Regarding Targets" description-key="Optional comma-separated list of allowed parent entity logical names. Defaults to: sprk_matter,sprk_project,sprk_event,sprk_communication,sprk_workassignment,sprk_invoice,sprk_budget,sprk_analysis,sprk_organization,contact,sprk_document" of-type="SingleLine.Text" usage="input" required="false" />
     <!-- Optional explicit read-only override (FR-24). Otherwise derived from context.mode.isControlDisabled. -->
