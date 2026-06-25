@@ -468,7 +468,7 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 |---|---|---|---|---|---|---|---|
 | 140 | Verify R6 PR #401 merged to master (HARD GATE) | ✅ | MINIMAL | false | 7-A | 132 + **PR #401 merged** | `coordination`, `verification` |
 | 141 | **Delete `CapabilityRouter` + 10 supporting files + implement per-playbook tool filtering replacement (FR-23)** — single agent, atomic commit | ✅ | FULL | false | 7-B | 140 | `bff-api`, `refactoring`, `legacy-removal` |
-| 142 | Remove `SoftSlashRouter.SOFT_SLASH_TO_INTENT` dict from frontend | 🔲📝 | STANDARD | false | 7-C | 141 | `frontend`, `refactoring`, `legacy-removal` |
+| 142 | Remove `SoftSlashRouter.SOFT_SLASH_TO_INTENT` dict from frontend — **subsumed by Phase 5R task 116** (dict already deleted; grep verified 0 active references, only stale provenance comments remain in `SoftSlashRouter.ts` which is fine per CLAUDE.md §10) | ✅ | STANDARD | false | 7-C | 141 | `frontend`, `refactoring`, `legacy-removal` |
 | 143 | Q20 binding test — CapabilityRouter dedup semantics preserved through new dispatcher | 🔲📝 | STANDARD | false | 7-D | 142 | `testing`, `regression`, `binding-invariant` |
 | 144 | BFF publish-size net reduction verification (expect NET REDUCTION from WP4 deletion) | 🔲📝 | MINIMAL | true | 7-E | 143 | `verification`, `ADR-029`, `NFR-01` |
 | 145 | Insights Engine regression suite — verify all binding-NEGATIVE components unchanged | 🔲📝 | STANDARD | true | 7-E | 143 | `testing`, `regression`, `architecture-binding` |
