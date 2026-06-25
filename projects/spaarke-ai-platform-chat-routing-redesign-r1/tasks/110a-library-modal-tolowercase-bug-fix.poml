@@ -3,7 +3,7 @@
   <metadata>
     <title>Library modal toLowerCase null bug fix</title>
     <phase>5: WP2 File-Aware Classification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>105</dependencies>
     <blocks>117b</blocks>

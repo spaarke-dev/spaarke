@@ -287,10 +287,19 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
             match = filteredPlaybooks.find(p => p.id === mappedPlaybookId);
           }
 
-          // Fallback: fuzzy name match
+          // Fallback: fuzzy name match.
+          //
+          // Defensive null guard (FR-59, task 110a): `p.name` is typed as `string`
+          // in `IPlaybook` but is populated from a nullable Dataverse column
+          // (`sprk_analysisplaybook.sprk_name`) via an unsafe cast in
+          // `playbookService.loadPlaybooks`. A single record with a null/missing
+          // `sprk_name` was crashing the Library modal with
+          // `Cannot read properties of null (reading 'toLowerCase')`. Guard each
+          // input independently so a single bad record does not abort the match
+          // loop for the remaining records.
           if (!match) {
-            const intentLower = intent.toLowerCase();
-            match = filteredPlaybooks.find(p => p.name.toLowerCase().includes(intentLower));
+            const intentLower = (intent ?? '').toLowerCase();
+            match = filteredPlaybooks.find(p => (p.name ?? '').toLowerCase().includes(intentLower));
           }
 
           if (match) {
