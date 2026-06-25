@@ -45,6 +45,7 @@ Optional:
 - `projects/{name}/tasks/TASK-INDEX.md` (compute Task Count + Tasks Completed)
 - Worktree state via `git worktree list` (path + branch)
 - Last commit date: `git log -1 --format=%cd --date=iso work/{name}` if the branch exists
+- **Folder-creation date** (used for Start Date): `git log --all --diff-filter=A --reverse --format=%cI -- projects/{name}/ | head -1` then take the YYYY-MM-DD prefix. This is more reliable than "first commit on branch" because already-merged branches show post-merge commits first.
 
 ### Step 2: Idempotency check
 
@@ -76,9 +77,26 @@ This matches the F6 active/in-flight definition + plays well with `/devops-proje
 
 ### Step 4: Compose Project Issue body
 
-Use `project.yml` template field structure:
+Body has two parts: (a) Quick Links table at the very top (above the DO-NOT-EDIT marker so syncs don't churn it), then (b) the sync-driven content.
 
 ```markdown
+### Quick Links
+
+| Project Surface | Link |
+|---|---|
+| Task Index (POML tasks) | [`tasks/TASK-INDEX.md`](https://github.com/spaarke-dev/spaarke/blob/master/projects/{slug}/tasks/TASK-INDEX.md) |
+| Project Folder | [`projects/{slug}/`](https://github.com/spaarke-dev/spaarke/tree/master/projects/{slug}/) |
+| Project README | [`README.md`](https://github.com/spaarke-dev/spaarke/blob/master/projects/{slug}/README.md) |
+| Plan | [`plan.md`](https://github.com/spaarke-dev/spaarke/blob/master/projects/{slug}/plan.md) |
+| Parent Epic | [Epic #{epic}](https://github.com/spaarke-dev/spaarke/issues/{epic}) |
+| Portfolio Board | [Project #2](https://github.com/users/spaarke-dev/projects/2) |
+
+> _Links resolve on master. If the project folder isn't on master yet, swap `master` for the feature branch name._
+
+---
+
+<!-- DO NOT EDIT — synced from README.md by /devops-project-sync -->
+
 ### Project Folder Slug
 {slug}
 
@@ -94,15 +112,11 @@ Use `project.yml` template field structure:
 ### Project Summary
 {first 2-3 lines from spec.md or README.md if available}
 
-### Projected Start Date
-(unknown — backfilled from existing worktree)
-
-### Projected Target Date
-(unknown — backfilled from existing worktree)
-
 ### Notes / Context
 Registered by /devops-project-register on {date}. Source: existing local worktree at {worktree_path}.
 ```
+
+Note: Start Date and Target Date are NOT in the body — they're set as Project #2 custom field values (Step 5), so they appear in the right-side panel + are filterable in views. Putting them only in the body would make them invisible to view filters.
 
 ### Step 5: Create Issue + add to Project + populate fields
 
@@ -112,7 +126,7 @@ gh issue create --title "[Project]: ${slug}" --body-file ... --label project
 gh project item-add 2 --owner spaarke-dev --url <url> --format json
 # Capture item_id
 
-# Set all 6 new fields via updateProjectV2ItemFieldValue mutations:
+# Set all 7 portfolio fields via updateProjectV2ItemFieldValue mutations:
 # - Type = Project
 # - Project Type = <project-type>
 # - Worktree Path = <worktree_path>
@@ -120,8 +134,9 @@ gh project item-add 2 --owner spaarke-dev --url <url> --format json
 # - Task Count = <count>
 # - Tasks Completed = <completed>
 # - Project Status = <heuristic from Step 3>
+# - Start Date = <folder-creation date from Step 1, as YYYY-MM-DD>
 
-# Set Parent issue = Epic #E
+# Set Parent issue = Epic #E (use REST API sub_issues endpoint with -F integer flag for typed parameter)
 ```
 
 ### Step 6: Write/update README pointer block
@@ -129,6 +144,23 @@ gh project item-add 2 --owner spaarke-dev --url <url> --format json
 If `projects/{name}/README.md` lacks the `> **Portfolio**:` pointer block, insert it at top.
 
 If the block exists but Issue # is wrong (e.g., a prior failed register), update it.
+
+### Step 6.5: Prompt for projected Target Date (optional)
+
+After Steps 1–6 complete, prompt the operator:
+
+```
+Project registered as #N (Start Date = {folder-creation-date}, Task Count = {N}).
+
+Set a projected Target Date for this project? (YYYY-MM-DD, or 'skip' to leave blank)
+> 
+```
+
+- If the operator enters a valid ISO date (YYYY-MM-DD), set the `Target Date` field via `updateProjectV2ItemFieldValue` with `value: { date: "..." }`.
+- If they enter `skip` or blank, leave Target Date null — they can set it later via the GitHub UI or by re-running this skill.
+- If their input doesn't parse as ISO date, reject and re-prompt once. Second invalid input = skip.
+
+**Why this is optional**: For backfill scenarios (registering an existing folder), the operator may not know the target yet — let them defer. For `/project-pipeline` invocations, the prompt fires after the WBS is generated so the operator has effort estimates to inform the projection.
 
 ### Step 7: Report
 

@@ -667,6 +667,61 @@ WHY create branch at this point:
 
 ---
 
+### Step 4.5: Prompt for projected Target Date (NEW — informed projection)
+
+**Action**:
+```
+IF projects/{name}/README.md has a portfolio pointer block (Project Issue exists):
+
+  COMPUTE summary the operator can use to make the projection:
+    - Task count from tasks/TASK-INDEX.md
+    - Phase count
+    - Estimated effort range (from plan.md "Timeline" / "Estimated Effort" fields)
+    - Critical path length if surfaced
+
+  PROMPT:
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ Plan summary:                                                   │
+    │   - {N} tasks across {M} phases                                 │
+    │   - Estimated effort: {range from plan.md}                      │
+    │   - Critical path: {summary if available}                       │
+    │                                                                 │
+    │ Set a projected Target Date for this project?                   │
+    │ Format: YYYY-MM-DD (e.g., 2026-08-15), or 'skip' to leave blank│
+    │ >                                                               │
+    └─────────────────────────────────────────────────────────────────┘
+
+  IF operator enters valid ISO date:
+    Set `Target Date` field on the Project Issue via
+    updateProjectV2ItemFieldValue with value: { date: "YYYY-MM-DD" }
+    REPORT: "✅ Target Date set to {date}. Drift will be tracked at archive."
+
+  ELIF operator enters 'skip' or blank:
+    REPORT: "Target Date left blank. Set later via GitHub UI or re-run /devops-project-register."
+
+  ELIF input fails to parse:
+    Re-prompt ONCE. Second invalid = treat as 'skip'.
+
+ELSE (no portfolio pointer block — project not registered):
+  SKIP this step. The /devops-project-register hook (Step 1.7) would have
+  already handled this via its own Target Date prompt.
+```
+
+**Why this step is here, not earlier**:
+
+| Lifecycle point | What's known | Projection quality |
+|---|---|---|
+| `/devops-idea-create` | Just a one-liner | Guess only |
+| `/devops-project-start` | Folder + design.md skeleton, no plan yet | Bad guess |
+| **End of `/project-pipeline`** | **Plan with WBS, task count, effort range, critical path** | **Informed projection** |
+
+By placing the prompt here, the operator commits to a Target Date that has actual context, not a blind guess. This is what makes drift (Closed Date − Target Date) a meaningful metric later.
+
+**Autonomous mode**: skip the prompt; Target Date remains blank until operator sets it manually.
+**Interactive mode**: prompt as documented.
+
+---
+
 ### Step 5: Execute Tasks (Auto-Start with Parallel Execution)
 
 **Action:**
