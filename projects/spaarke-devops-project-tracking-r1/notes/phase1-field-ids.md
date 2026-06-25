@@ -50,6 +50,12 @@
 ### Tasks Completed (NUMBER)
 - **Field ID**: `PVTF_lAHODW0Pv84BEgWuzhWPlLY`
 
+### Closed Date (DATE) — added 2026-06-25 as follow-up enhancement
+
+- **Field ID**: `PVTF_lAHODW0Pv84BEgWuzhWYfL4`
+- Set by `/devops-project-archive` to the PR merge date (or today if no PR).
+- Pairs with the pre-existing `Start Date` (auto-populated by `/devops-project-register` from folder-creation date) and `Target Date` (operator-set at end of `/project-pipeline`) to enable drift tracking: `drift = Closed Date − Target Date`.
+
 ### Project Status (SINGLE_SELECT)
 - **Field ID**: `PVTSSF_lAHODW0Pv84BEgWuzhWPlLc`
 - Options (5 per FR-02 + D-16):

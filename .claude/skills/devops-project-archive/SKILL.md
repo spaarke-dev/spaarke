@@ -100,10 +100,16 @@ Invoke `/devops-project-sync` to capture latest field values (Task Count, Tasks 
 ### Step 5: Update Issue fields + close
 
 - Set `Project Status` field to `Completed` or `Cancelled` (per --status)
-- Add comment to Issue: `Archived via /devops-project-archive on {date}. Closing PR: #M.`
+- **Set `Closed Date` field** (field ID: `PVTF_lAHODW0Pv84BEgWuzhWYfL4`, type DATE):
+  - If `--pr-number #M` provided: use the PR's merge date (`gh pr view #M --json mergedAt --jq .mergedAt`, take the date prefix YYYY-MM-DD). This is the truest "actual end".
+  - Else: use today's date.
+  - Mutation: `updateProjectV2ItemFieldValue` with `value: { date: "YYYY-MM-DD" }`.
+- Add comment to Issue: `Archived via /devops-project-archive on {date}. Closing PR: #M. Closed Date set to {merge-or-today}.`
 - For Completed: `gh project item-edit ... --status Done` (or analogous mutation)
 - For Cancelled: add label `cancelled`
 - Close Issue: `gh issue close <#N> --comment "..."`
+
+**Drift calculation note**: After this Step, both `Target Date` (set at project setup) and `Closed Date` (set here) are populated. A Project #2 view can compute drift = `Closed Date − Target Date` (positive = late, negative = early). Project status reports + `scripts/portfolio-status.py --show-drift` can surface this.
 
 ### Step 6: Delete worktree
 
