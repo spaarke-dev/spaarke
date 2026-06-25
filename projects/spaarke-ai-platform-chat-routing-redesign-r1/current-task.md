@@ -1,6 +1,6 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-25 (context-handoff after Phase 5R close; user said "yes proceed" to Phase 7 task 141 then interrupted for /context-handoff)
+> **Last Updated**: 2026-06-25 (Phase 7 Wave 7-B closed; task 141 ✅; commit `6d3ae58df` pushed)
 
 ---
 
@@ -10,11 +10,11 @@
 |-------|-------|
 | **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
-| **Branch state** | **32 commits ahead of `origin/master` `8579d6536`**. Tip: `e9d28bc41` (Phase 5R exit gate). **Working tree CLEAN. All work pushed to origin.** |
-| **Phase status** | **Phase 1R ✅ CLOSED + Phase 5R ✅ CLOSED.** All 14 FRs (FR-46..FR-59) implemented; 201/201 tests pass; final publish 46.32 MB (13.68 MB NFR-01 headroom). |
-| **Active Task** | NONE — Phase 5R just closed (commit `e9d28bc41` 2026-06-25). |
-| **Next Action (explicit)** | **Launch task 141 (atomic CapabilityRouter retirement, FR-22) via `task-execute`**. POML: `projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/141-delete-capabilityrouter-implement-tool-filtering.poml`. **Sub-agent friendly** (10-file atomic deletion + per-playbook tool filtering replacement; well-bounded scope). Prerequisites (140 R6 PR verify) ✅ done at session start. |
-| **User's last words before interrupt** | "yes proceed" — explicit approval to launch task 141. |
+| **Branch state** | **34 commits ahead of `origin/master` `8579d6536`**. Tip: `6d3ae58df` (task 141 atomic CapabilityRouter retirement). **Working tree CLEAN. All work pushed to origin.** |
+| **Phase status** | **Phase 1R ✅ + Phase 5R ✅ + Phase 7 Wave 7-B (task 141) ✅.** FR-22 + FR-23 + FR-24 all closed. 7,795/7,795 tests pass; net -6,891 LOC; BFF publish NET REDUCTION confirmed. |
+| **Active Task** | NONE — task 141 just closed (commit `6d3ae58df` 2026-06-25). |
+| **Next Action (explicit)** | **Task 142 is structurally complete** — `SOFT_SLASH_TO_INTENT` dict was already deleted by Phase 5R task 116 (verified by grep; only stale "we removed it" comments remain in `SoftSlashRouter.ts`, which is fine per CLAUDE.md §10). Two options: (A) flip 142 → ✅ in TASK-INDEX and proceed to task 143 (Q20 dedup binding test); (B) audit `SoftSlashRouter.ts` deeper to confirm no residual coupling and document subsumption. Recommend **option A**. |
+| **User's last words** | "continue" (after compact) — re-affirmed the explicit "yes proceed" for task 141 launch. Task 141 now closed. |
 
 ### Files Modified This Session (FINAL — Phase 5R close batch, all pushed)
 
